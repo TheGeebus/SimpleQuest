@@ -12,6 +12,7 @@ DerivedDataCache/
 *.user
 *.VC.db
 *.VC.opendb
+.vsconfig
 
 # JetBrains Rider
 .idea/

@@ -43,7 +43,7 @@ To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"`
 
 ### 1. Create a Quest asset
 
-Right-click in the Content Browser, select **Miscellaneous > Data Asset**, and choose `Quest` as the class. Open the asset and assign a unique **Quest ID**.
+Right-click in the Content Browser, select **Blueprint Class**, and choose `Quest` as the class. Open the asset and assign a unique **Quest ID**.
 
 ### 2. Add steps
 

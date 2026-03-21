@@ -90,6 +90,7 @@ UQuest (data asset)
                                              ends quest, or
                                              starts next quest
 ```
+Steps within a quest form a directed acyclic graph. The broader quest network supports cycles to enable replayability and conditional re-activation.
 
 ### UQuestManagerSubsystem
 

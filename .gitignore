@@ -1,0 +1,38 @@
+# Unreal Engine generated directories
+Binaries/
+Build/
+Intermediate/
+Saved/
+DerivedDataCache/
+
+# Visual Studio
+.vs/
+*.sln
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+
+# JetBrains Rider
+.idea/
+*.sln.DotSettings.user
+
+# Compiled object files
+*.obj
+*.pch
+
+# Unreal Engine generated project files
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Unreal Engine generated source files
+Plugins/SimpleQuest/Intermediate/
+Plugins/SimpleQuest/Binaries/
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

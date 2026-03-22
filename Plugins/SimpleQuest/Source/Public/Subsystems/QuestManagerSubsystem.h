@@ -9,6 +9,7 @@
 
 class UQuestReward;
 struct FQuestStartedEvent;
+struct FTryQuestStartEvent;
 struct FQuestRegistrationEvent;
 struct FQuestEnabledEvent;
 struct FQuestObjectiveTriggered;
@@ -121,7 +122,7 @@ public:
 	   * the events on the IQuestWatcherInterface class.
 	 */
 	void RegisterQuestWatcher(const FQuestRegistrationEvent& QuestWatcherRegistrationEvent);
-	void OnQuestStartedEvent(const FQuestStartedEvent& Event);
+	void OnTryQuestStartEvent(const FTryQuestStartEvent& Event);
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="RegisteredActorComponents")
 	TMap<TSoftClassPtr<UQuest>, FQuestGivers> QuestGiverMap;
@@ -161,7 +162,7 @@ protected:
 	UFUNCTION()
 	void OnQuestStepStartedEvent(UQuest* ActiveQuest, int32 StartedQuestStepID);
 	UFUNCTION()
-	void OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, UQuestReward* Reward);
+	void OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, bool bEndedQuest, UQuestReward* Reward);
 	void PublishQuestEndEvent(const UQuest* EndedQuest, bool bDidSucceed) const;
 	void SetQuestEnabled(FName LoadedQuestID, const TSubclassOf<UQuest>& LoadedQuestClass, bool bIsEnabled);
 	void ActivateQuestClass(const TSoftClassPtr<UQuest>& InQuestClass);

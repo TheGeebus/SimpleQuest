@@ -34,7 +34,7 @@ public:
 
 	template<typename EventType>
 	requires derived_from<FSignalEventBase, EventType>
-	void PublishTyped(UObject* ChannelObject, const FInstancedStruct& Event);
+	void PublishTyped(UObject* ChannelObject, const EventType& Event);
 	
 	template <typename EventType, typename ListenerType>
 	requires derived_from<FSignalEventBase, EventType>
@@ -53,7 +53,7 @@ private:
 
 template <typename EventType>
 requires derived_from<FSignalEventBase, EventType>
-void UQuestSignalSubsystem::PublishTyped(UObject* ChannelObject, const FInstancedStruct& Event)
+void UQuestSignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Event)
 {
 	if (bIsShuttingDown)
 	{
@@ -62,8 +62,8 @@ void UQuestSignalSubsystem::PublishTyped(UObject* ChannelObject, const FInstance
 	const FSignalEventChannelKey Channel = MakeKey(ChannelObject, EventType::StaticStruct());
 	if (auto* Delegate = NativeQuestEventChannels.Find(Channel))
 	{
-		FQuestEventMulticast DelegateCopy = *Delegate;	// Copy the delegate and event. Don't like doing this, but it prevents a race condition on PIE shutdown
-		FInstancedStruct EventCopy = Event;				// TODO: find a solution that doesn't depend on copying this struct
+		FQuestEventMulticast DelegateCopy = *Delegate;		// Copy the delegate and event. Don't like doing this, but it prevents a race condition on PIE shutdown
+		FInstancedStruct EventCopy = FInstancedStruct::Make<EventType>(Event);
 		DelegateCopy.Broadcast(EventCopy);
 	}
 }

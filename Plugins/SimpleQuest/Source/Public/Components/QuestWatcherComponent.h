@@ -10,6 +10,7 @@
 
 
 struct FQuestEndedEvent;
+struct FQuestStartedEvent;
 struct FQuestStepCompletedEvent;
 struct FQuestStepStartedEvent;
 struct FQuestEnabledEvent;
@@ -32,6 +33,8 @@ struct FWatchedQuestSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bDoWatchQuestEnabled = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bDoWatchQuestStart = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bDoWatchQuestStepStart = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bDoWatchQuestStepEnd = true;
@@ -48,12 +51,15 @@ public:
 	UQuestWatcherComponent();
 
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestActivated, const FName&, WatchedQuestID);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, const FName&, WatchedQuestID);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStepStarted, const FName&, WatchedQuestID, int32, StartedStepID);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestStepCompleted, const FName&, WatchedQuestID, int32, CompletedStepID, bool, bDidSucceed);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnQuestStepCompleted, const FName&, WatchedQuestID, int32, CompletedStepID, bool, bDidSucceed, bool, bEndedQuest);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, const FName&, WatchedQuestID, bool, bDidSucceed);
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestStarted OnQuestStarted;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestStepStarted OnQuestStepStarted;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
@@ -66,6 +72,7 @@ protected:
 
 //	virtual void WatchedQuestActivatedEvent_Implementation(UQuest* InWatchedQuest) override;
 	virtual void WatchedQuestActivatedEvent(const FQuestEnabledEvent& QuestEnabledEvent);
+	virtual void WatchedQuestStartedEvent(const FQuestStartedEvent& QuestStartedEvent);
 //	virtual void WatchedQuestStepStartedEvent_Implementation(UQuest* InWatchedQuest, int32 InStartedStepID) override;
 	virtual void WatchedQuestStepStartedEvent(const FQuestStepStartedEvent& QuestStepStartedEvent);
 //	virtual void WatchedStepCompletedEvent_Implementation(UQuest* InWatchedQuest, int32 InCompletedStepID, bool bDidSucceed) override;

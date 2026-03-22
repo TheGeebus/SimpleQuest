@@ -4,7 +4,7 @@
 #include "Components/QuestGiverComponent.h"
 #include "Quests/Quest.h"
 #include "Events/QuestRegistrationEvent.h"
-#include "Events/QuestStartedEvent.h"
+#include "Events/QuestTryStartEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Subsystems/QuestSignalSubsystem.h"
 
@@ -51,8 +51,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 void UQuestGiverComponent::RegisterForQuestClass(UClass* LoadedQuestClass)
 {
-	const FInstancedStruct Event = FInstancedStruct::Make<FQuestRegistrationEvent>(LoadedQuestClass->GetFName(), LoadedQuestClass, GetOwner());
-	QuestSignalSubsystem->PublishTyped<FQuestRegistrationEvent>(UQuestGiverInterface::StaticClass(), Event);
+	QuestSignalSubsystem->PublishTyped(UQuestGiverInterface::StaticClass(), FQuestRegistrationEvent(LoadedQuestClass->GetFName(), LoadedQuestClass, GetOwner()));
 }
 
 void UQuestGiverComponent::OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent)
@@ -70,8 +69,7 @@ void UQuestGiverComponent::StartQuest(UQuest* QuestToStart)
 		{
 			if (CheckQuestSignalSubsystem())
 			{
-				FInstancedStruct QuestStartedEvent = FInstancedStruct::Make<FQuestStartedEvent>(QuestClass->GetFName(), QuestClass);
-				QuestSignalSubsystem->PublishTyped<FQuestStartedEvent>(QuestClass, QuestStartedEvent);
+				QuestSignalSubsystem->PublishTyped(QuestClass, FTryQuestStartEvent(QuestClass->GetFName(), QuestClass));
 				UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::StartQuest : successfully started quest: %s"), *QuestClass->GetName());
 			}
 			else

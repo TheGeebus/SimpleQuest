@@ -17,6 +17,7 @@
 #include "Events/QuestStepCompletedEvent.h"
 #include "Events/QuestStepStartedEvent.h"
 #include "Events/QuestStartedEvent.h"
+#include "Events/QuestTryStartEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Interfaces/QuestTargetInterface.h"
 #include "Interfaces/QuestWatcherInterface.h"
@@ -115,26 +116,25 @@ void UQuestManagerSubsystem::RegisterQuestWatcher(const FQuestRegistrationEvent&
 	{
 		if (CompletedQuestClasses.Contains(QuestClass))
 		{
-			QuestSignalSubsystem->PublishTyped<FQuestEndedEvent>(QuestWatcherRegistrationEvent.OwningActor, FInstancedStruct::Make<FQuestEndedEvent>(QuestClass->GetFName(), QuestClass, CompletedQuestClasses[QuestClass]));
+			QuestSignalSubsystem->PublishTyped(QuestWatcherRegistrationEvent.OwningActor, FQuestEndedEvent(QuestClass->GetFName(), QuestClass, CompletedQuestClasses[QuestClass]));
 		}
 		if (LoadedQuestClasses.Contains(QuestClass))
 		{
-			QuestSignalSubsystem->PublishTyped<FQuestStartedEvent>(QuestWatcherRegistrationEvent.OwningActor, FInstancedStruct::Make<FQuestEndedEvent>(QuestClass->GetFName(), QuestClass, CompletedQuestClasses[QuestClass]));
+			QuestSignalSubsystem->PublishTyped(QuestWatcherRegistrationEvent.OwningActor, FQuestStartedEvent(QuestClass->GetFName(), QuestClass));
 			UQuest* Quest = FindLoadedQuestByClass(QuestClass);
 			if (!Quest->GetCurrentActiveSteps().IsEmpty())
 			{
 				for (const auto QuestStepID : Quest->GetCurrentActiveSteps())
 				{
-					QuestSignalSubsystem->PublishTyped<FQuestStepStartedEvent>(QuestClass, FInstancedStruct::Make<FQuestStepStartedEvent>(QuestClass->GetFName(), QuestClass, QuestStepID));
+					QuestSignalSubsystem->PublishTyped(QuestClass, FQuestStepStartedEvent(QuestClass->GetFName(), QuestClass, QuestStepID));
 				}
 			}
 		}
 	}
 }
 
-void UQuestManagerSubsystem::OnQuestStartedEvent(const FQuestStartedEvent& Event)
+void UQuestManagerSubsystem::OnTryQuestStartEvent(const FTryQuestStartEvent& Event)
 {
-	
 	StartQuest(Event.QuestClass.Get());
 }
 
@@ -211,17 +211,16 @@ void UQuestManagerSubsystem::OnQuestStepStartedEvent(UQuest* ActiveQuest, int32 
 {
 	if (QuestSignalSubsystem)
 	{
-		FInstancedStruct StepStartedEvent = FInstancedStruct::Make<FQuestStepStartedEvent>(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StartedQuestStepID);
-		QuestSignalSubsystem->PublishTyped<FQuestStepStartedEvent>(ActiveQuest->GetClass(), StepStartedEvent);
+		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepStartedEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StartedQuestStepID));
 	}
 }
 
-void UQuestManagerSubsystem::OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, UQuestReward* Reward)
+void UQuestManagerSubsystem::OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, bool bEndedQuest, UQuestReward* Reward)
 {
 	if (QuestSignalSubsystem)
 	{
-		QuestSignalSubsystem->PublishTyped<FQuestStepCompletedEvent>(ActiveQuest->GetClass(), FInstancedStruct::Make<FQuestStepCompletedEvent>(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), CompletedQuestStep, bDidSucceed));
-		QuestSignalSubsystem->PublishTyped<FQuestRewardEvent>(ActiveQuest->GetClass(), FInstancedStruct::Make<FQuestRewardEvent>(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), Reward));
+		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepCompletedEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), CompletedQuestStep, bDidSucceed, bEndedQuest, Reward));
+		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestRewardEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), Reward));
 	}
 }
 
@@ -229,7 +228,7 @@ void UQuestManagerSubsystem::PublishQuestEndEvent(const UQuest* EndedQuest, bool
 {
 	if (QuestSignalSubsystem)
 	{
-		QuestSignalSubsystem->PublishTyped<FQuestEndedEvent>(EndedQuest->GetClass(), FInstancedStruct::Make<FQuestEndedEvent>(EndedQuest->GetQuestID(), EndedQuest->GetClass(), bDidSucceed));
+		QuestSignalSubsystem->PublishTyped(EndedQuest->GetClass(), FQuestEndedEvent(EndedQuest->GetQuestID(), EndedQuest->GetClass(), bDidSucceed));
 	}
 }
 
@@ -239,8 +238,8 @@ void UQuestManagerSubsystem::SetQuestEnabled(const FName LoadedQuestID, const TS
 	{
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::SetQuestEnabled : publishing FQuestEnabledEvent for: %s"), *LoadedQuestClass->GetFName().ToString());
 
-		QuestSignalSubsystem->PublishTyped<FQuestEnabledEvent>(LoadedQuestClass, FInstancedStruct::Make<FQuestEnabledEvent>(LoadedQuestID, LoadedQuestClass, bIsEnabled));
-		QuestSignalSubsystem->SubscribeTyped<FQuestStartedEvent>(LoadedQuestClass, this, &UQuestManagerSubsystem::OnQuestStartedEvent);
+		QuestSignalSubsystem->PublishTyped(LoadedQuestClass, FQuestEnabledEvent(LoadedQuestID, LoadedQuestClass, bIsEnabled));
+		QuestSignalSubsystem->SubscribeTyped<FTryQuestStartEvent>(LoadedQuestClass, this, &UQuestManagerSubsystem::OnTryQuestStartEvent);
 	}
 }
 
@@ -305,7 +304,10 @@ bool UQuestManagerSubsystem::StartQuest_Implementation(const TSoftClassPtr<UQues
 	UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::StartQuest : Starting quest: %s"), *StartedQuest->GetName());
 	StartedQuestClasses.Add(StartedQuest->GetClass());
 	DeactivateQuestGivers(StartedQuest);
-	
+	if (QuestSignalSubsystem)
+	{
+		QuestSignalSubsystem->PublishTyped(StartedQuest->GetClass(), FQuestStartedEvent(StartedQuest->GetQuestID(), StartedQuest->GetClass()));
+	}
 	StartedQuest->OnUpdateQuestText.BindDynamic(this, &UQuestManagerSubsystem::UpdateQuestText); // redundant?
 	StartedQuest->StartQuestStep(0);
 	return true;
@@ -319,8 +321,7 @@ void UQuestManagerSubsystem::DeactivateQuestGivers(const UQuest* DeactivatedQues
 		if (QuestSignalSubsystem != nullptr)
 		{
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::DeactivateQuestGivers : publishing FQuestEnabledEvent for: %s"), *DeactivatedQuest->GetQuestID().ToString());
-			FInstancedStruct QuestEnabledEvent = FInstancedStruct::Make<FQuestEnabledEvent>(DeactivatedQuest->GetQuestID(), DeactivatedQuest->GetClass(), false);
-			QuestSignalSubsystem->PublishTyped<FQuestEnabledEvent>(DeactivatedQuest->GetClass(), QuestEnabledEvent);
+			QuestSignalSubsystem->PublishTyped(DeactivatedQuest->GetClass(), FQuestEnabledEvent(DeactivatedQuest->GetQuestID(), DeactivatedQuest->GetClass(), false));
 		}
 	}
 }
@@ -477,7 +478,7 @@ void UQuestManagerSubsystem::CompleteQuestline(UQuest* CompletedQuest, bool bDid
 {
 	if (QuestSignalSubsystem)
 	{
-		QuestSignalSubsystem->PublishTyped<FQuestlineEndedEvent>(CompletedQuest->GetClass(), FInstancedStruct::Make<FQuestlineEndedEvent>(CompletedQuest->GetQuestID(), CompletedQuest->GetClass(), bDidSucceed));
+		QuestSignalSubsystem->PublishTyped(CompletedQuest->GetClass(), FQuestlineEndedEvent(CompletedQuest->GetQuestID(), CompletedQuest->GetClass(), bDidSucceed));
 	}
 	if (OnQuestlineEnd.IsBound())
 	{
@@ -493,12 +494,12 @@ void UQuestManagerSubsystem::OnQuestTargetEnabledEvent(UQuest* InQuest, UObject*
 		if (bNewIsEnabled)
 		{
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::OnQuestTargetEnabledEvent : publishing quest step started event: %s"), *InQuest->GetQuestID().ToString());
-			QuestSignalSubsystem->PublishTyped<FQuestStepStartedEvent>(TargetObject, FInstancedStruct::Make<FQuestStepStartedEvent>(InQuest->GetQuestID(), InQuest->GetClass(), InStepID));
+			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepStartedEvent(InQuest->GetQuestID(), InQuest->GetClass(), InStepID));
 		}
 		else
 		{
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::OnQuestTargetEnabledEvent : publishing quest step ended event: %s"), *InQuest->GetQuestID().ToString());
-			QuestSignalSubsystem->PublishTyped<FQuestStepCompletedEvent>(TargetObject, FInstancedStruct::Make<FQuestStepCompletedEvent>(InQuest->GetQuestID(), InQuest->GetClass(), InStepID, true));
+			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepCompletedEvent(InQuest->GetQuestID(), InQuest->GetClass(), InStepID, true, false, nullptr));
 		}
 	}
 }

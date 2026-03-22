@@ -180,7 +180,7 @@ public:
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSetQuestTextVisibility, bool, bIsVisible, bool, bUseCounter);
 	DECLARE_DYNAMIC_DELEGATE_OneParam(FOnQueueCommsEvent, const FCommsEvent&, InCommsEvent);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestStepStarted, UQuest*, ActiveQuest, int32, CompletedStepID);
-	DECLARE_DYNAMIC_DELEGATE_FourParams(FOnQuestStepComplete, UQuest*, ActiveQuest, int32, CompletedStepID, bool, bDidSucceed, UQuestReward*, QuestReward);
+	DECLARE_DYNAMIC_DELEGATE_FiveParams(FOnQuestStepComplete, UQuest*, ActiveQuest, int32, CompletedStepID, bool, bDidSucceed, bool, bEndedQuest, UQuestReward*, QuestReward);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestComplete, UQuest*, CompletedQuest, bool, bDidSucceed);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestlineComplete, UQuest*, CompletedQuest, bool, bDidSucceed);
 	DECLARE_DELEGATE_FourParams(FOnObjectiveEnabled, UQuest*, UObject*, int32, bool);

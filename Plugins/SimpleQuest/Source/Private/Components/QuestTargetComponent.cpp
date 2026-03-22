@@ -63,8 +63,7 @@ void UQuestTargetComponent::GetTriggered()
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		const FInstancedStruct TriggeredEvent = FInstancedStruct::Make<FQuestObjectiveTriggered>(FName(), nullptr, GetOwner());
-		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), TriggeredEvent);
+		QuestSignalSubsystem->PublishTyped(UQuestTargetInterface::StaticClass(), FQuestObjectiveTriggered(FName(), nullptr, GetOwner()));
 	}
 }
 
@@ -72,8 +71,7 @@ void UQuestTargetComponent::GetKilled(AActor* KillerActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		FInstancedStruct KilledEvent = FInstancedStruct::Make<FQuestObjectiveKilled>(FName(), nullptr, GetOwner(), KillerActor);
-		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), KilledEvent);
+		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveKilled(FName(), nullptr, GetOwner(), KillerActor));
 	}
 }
 
@@ -81,7 +79,6 @@ void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		FInstancedStruct InteractEvent = FInstancedStruct::Make<FQuestObjectiveInteracted>(FName(), nullptr, GetOwner(), InteractingActor);
-		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), InteractEvent);
+		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveInteracted(FName(), nullptr, GetOwner(), InteractingActor));
 	}
 }

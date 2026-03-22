@@ -37,3 +37,5 @@ Plugins/SimpleQuest/Binaries/
 # OS
 .DS_Store
 Thumbs.db
+
+Plugins/SpeechCraft/

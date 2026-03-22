@@ -4,6 +4,8 @@
 
 #include "QuestStepCompletedEvent.generated.h"
 
+class UQuestReward;
+
 USTRUCT(BlueprintType)
 struct FQuestStepCompletedEvent : public FQuestEventBase
 {
@@ -11,11 +13,15 @@ struct FQuestStepCompletedEvent : public FQuestEventBase
 
 	FQuestStepCompletedEvent() = default;
 
-	FQuestStepCompletedEvent(const FName InQuestID, const TSubclassOf<UQuest>& InQuestClass, const int32 InStepID, const bool bInDidSucceed)
-		: FQuestEventBase(InQuestID, InQuestClass), StepID(InStepID), bDidSucceed(bInDidSucceed) {}
+	FQuestStepCompletedEvent(const FName InQuestID, const TSubclassOf<UQuest>& InQuestClass, const int32 InStepID, const bool bInDidSucceed, const bool bInEndedQuest, UQuestReward* InReward)
+		: FQuestEventBase(InQuestID, InQuestClass), StepID(InStepID), bDidSucceed(bInDidSucceed), bEndedQuest(bInEndedQuest), Reward(InReward) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	int32 StepID = -1;
 	UPROPERTY(BlueprintReadWrite)
 	bool bDidSucceed = false;
+	UPROPERTY(BlueprintReadWrite)
+	bool bEndedQuest;
+	UPROPERTY(BlueprintReadWrite)
+	UQuestReward* Reward = nullptr;
 };

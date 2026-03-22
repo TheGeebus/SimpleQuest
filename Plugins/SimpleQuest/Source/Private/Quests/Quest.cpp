@@ -245,16 +245,16 @@ void UQuest::StepFinished_Implementation(int32 CompletedStepID, bool bDidSucceed
 	// Remove the reference to the loaded quest objective so that it may be garbage collected
 	LoadedQuestObjectives.Remove(CompletedStepID);
 
-	// Notify the quest manager of quest step completion
+	// Get the quest reward
 	UQuestReward* Reward = nullptr;
 	if (UClass* RewardClass = Step->QuestReward.LoadSynchronous())
 	{
 		Reward = NewObject<UQuestReward>(this, RewardClass);
 	}
-	OnQuestStepComplete.ExecuteIfBound(this, CompletedStepID, bDidSucceed, Reward);
 	// If the step ends the quest, do so, notifying the quest manager 
 	if (Step->bCompletesQuest)
 	{
+		OnQuestStepComplete.ExecuteIfBound(this, CompletedStepID, bDidSucceed, true, Reward);
 		FinishQuest(bDidSucceed);
 		return;
 	}
@@ -264,6 +264,7 @@ void UQuest::StepFinished_Implementation(int32 CompletedStepID, bool bDidSucceed
 	{
 		for (const auto StepID : Step->NextSteps)
 		{
+			OnQuestStepComplete.ExecuteIfBound(this, CompletedStepID, bDidSucceed, false, Reward);
 			StartQuestStep(StepID);
 		}
 		return;
@@ -273,6 +274,7 @@ void UQuest::StepFinished_Implementation(int32 CompletedStepID, bool bDidSucceed
 	{
 		if (Step->bAutoProgress) // auto-progression may be disabled for each step
 		{
+			OnQuestStepComplete.ExecuteIfBound(this, CompletedStepID, bDidSucceed, false, Reward);
 			StartQuestStep(CompletedStepID + 1);
 			return;
 		}
@@ -281,6 +283,7 @@ void UQuest::StepFinished_Implementation(int32 CompletedStepID, bool bDidSucceed
 	// there is no step after this one in the QuestSteps array 
 	if (bQuestAutoComplete)
 	{
+		OnQuestStepComplete.ExecuteIfBound(this, CompletedStepID, bDidSucceed, true, Reward);
 		FinishQuest(bDidSucceed);
 	}
 }

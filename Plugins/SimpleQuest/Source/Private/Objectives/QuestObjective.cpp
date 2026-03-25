@@ -22,22 +22,41 @@ void UQuestObjective::SetObjectiveTarget_Implementation(int32 InStepID, const TS
 	MaxElements = NumElementsRequired;
 	bUseQuestCounter = bUseCounter;
 	SetCurrentElements(0);
-	/*
-	if (!TargetActors.IsEmpty())
+}
+
+bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
+{
+	bool bIsTargetRelevant = false;
+	const bool bHasTargetClass = IsValid(TargetClass);
+	if (bHasTargetClass)
 	{
-		for (const auto Actor : TargetActors )
+		if (InTargetObject->IsA(TargetClass))
 		{
-			if (IQuestTargetInterface* Interface = Actor->FindComponentByInterface<IQuestTargetInterface>())
-			{
-				UObject* ObjectPtr = Cast<UObject>(Interface);
-				FScriptInterface ScriptInterface;
-				ScriptInterface.SetInterface(Interface);
-				ScriptInterface.SetObject(ObjectPtr);
-				QuestTargetInterfaces.Add(ScriptInterface);
-			}			
+			bIsTargetRelevant = true; 
 		}
 	}
-	*/
+	
+	if (!TargetActors.IsEmpty())
+	{
+		if (const AActor* AsActor = Cast<AActor>(InTargetObject))
+		{
+			for (const TSoftObjectPtr<AActor>& SoftTarget : TargetActors)
+			{
+				if (SoftTarget.Get() == AsActor)
+				{
+					bIsTargetRelevant = true;
+					break;
+				}
+			}
+		}
+	}
+	else if (!bHasTargetClass)
+	{
+		bIsTargetRelevant = true; // Neither TargetActors nor TargetClass filters are set, anything is relevant
+	}
+	
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::IsObjectRelevant_Implementation : %s is relevant to %s: %hs"), *InTargetObject->GetName(), *this->GetName(), bIsTargetRelevant ? "true" : "false");
+	return bIsTargetRelevant;
 }
 
 void UQuestObjective::CompleteObjective(bool bDidSucceed)
@@ -52,7 +71,7 @@ void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled)
 	OnEnableTarget.Broadcast(Target, GetStepID(), bIsTargetEnabled);
 }
 
-void UQuestObjective::EnableQuestTargetActorSet(bool bIsTargetEnabled)
+void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 {
 	for (const auto Target : TargetActors)
 	{

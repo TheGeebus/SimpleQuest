@@ -21,7 +21,7 @@ struct FQuestStepCompletedEvent : public FQuestEventBase
 	UPROPERTY(BlueprintReadWrite)
 	bool bDidSucceed = false;
 	UPROPERTY(BlueprintReadWrite)
-	bool bEndedQuest;
+	bool bEndedQuest = false;
 	UPROPERTY(BlueprintReadWrite)
 	UQuestReward* Reward = nullptr;
 };

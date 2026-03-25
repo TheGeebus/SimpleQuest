@@ -95,6 +95,8 @@ void UQuest::CheckQuestTarget(UObject* InQuestTargetObject)
 	TSet<UQuestObjective*> ObjectivesToCheck;
 	for (const auto ObjectivePair : LoadedQuestObjectives)
 	{
+		if (!IsValid(ObjectivePair.Value)) continue;
+		
 		const FQuestStep& Step = QuestSteps[ObjectivePair.Key];
 		// Check for completion of all prerequisite quest steps
 		if (Step.PrerequisiteSteps.IsEmpty())
@@ -119,15 +121,22 @@ void UQuest::CheckQuestTarget(UObject* InQuestTargetObject)
 			{
 				ObjectivesToCheck.Add(LoadedQuestObjectives[ObjectivePair.Key]);
 			}
+			else if (ObjectivePair.Value->IsObjectRelevant(InQuestTargetObject))
+			{
+				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuest::CheckQuestTarget : prereqs not met for step %i but target is relevant, firing OnQuestStepPrereqsFail"), ObjectivePair.Key);
+				OnQuestStepPrereqsFail.ExecuteIfBound(this, ObjectivePair.Key);
+			}			
 		}
 	}
 	if (!ObjectivesToCheck.IsEmpty())
 	{
 		for (const auto Objective : ObjectivesToCheck)
-		if (Objective->IsValidLowLevel())
 		{
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuest::CheckQuestTarget : checking objective: %s"), *Objective->GetName());
-			Objective->TryCompleteObjective(InQuestTargetObject);
+			if (IsValid(Objective) && Objective->IsObjectRelevant(InQuestTargetObject))
+			{
+				Objective->TryCompleteObjective(InQuestTargetObject);
+			}
 		}
 	}
 }

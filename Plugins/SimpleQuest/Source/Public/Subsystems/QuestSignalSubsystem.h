@@ -26,9 +26,11 @@ class SIMPLEQUEST_API UQuestSignalSubsystem : public UGameInstanceSubsystem
 public:
 	virtual void Deinitialize() override; 
 	UFUNCTION(BlueprintCallable)
-	void SubscribeToQuestEvent(const TSubclassOf<UObject>& QuestClass, const UScriptStruct* EventClass, UObject* Listener);
+	void SubscribeToQuestEvent(const TSubclassOf<UObject>& QuestClass, const UScriptStruct* Event, UObject* Listener);
+	
 	UFUNCTION(BlueprintCallable)
 	void PublishQuestEvent(const TSubclassOf<UObject>& QuestClass, const FInstancedStruct& Event);
+
 	UFUNCTION(BlueprintCallable)
 	void UnsubscribeFromQuestEvent(const TSubclassOf<UObject>& QuestClass, const UScriptStruct* Event, const UObject* Listener);
 

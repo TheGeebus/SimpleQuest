@@ -9,6 +9,8 @@
 #include "QuestWatcherComponent.generated.h"
 
 
+struct FQuestStepPrereqCheckFailed;
+struct FQuestPrerequisiteCheckFailed;
 struct FQuestEndedEvent;
 struct FQuestStartedEvent;
 struct FQuestStepCompletedEvent;
@@ -31,15 +33,19 @@ struct FWatchedQuestSettings
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bDoWatchQuestEnabled = true;
+	bool bWatchQuestEnabled = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bDoWatchQuestStart = true;
+	bool bWatchPrerequisiteFailure = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bDoWatchQuestStepStart = true;
+	bool bWatchQuestStart = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bDoWatchQuestStepEnd = true;
+	bool bWatchQuestStepStart = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bDoWatchQuestEnd = true;
+	bool bWatchQuestStepPrereqsFailure = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bWatchQuestStepEnd = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bWatchQuestEnd = true;
 };
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -51,17 +57,23 @@ public:
 	UQuestWatcherComponent();
 
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestActivated, const FName&, WatchedQuestID);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestPrerequisiteCheckFailed, const FName&, WatchedQuestID);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, const FName&, WatchedQuestID);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStepStarted, const FName&, WatchedQuestID, int32, StartedStepID);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestStepPrereqCheckFailed, const FName&, WatchedQuestID, int32, StartedStepID);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FOnQuestStepCompleted, const FName&, WatchedQuestID, int32, CompletedStepID, bool, bDidSucceed, bool, bEndedQuest);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, const FName&, WatchedQuestID, bool, bDidSucceed);
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestPrerequisiteCheckFailed OnQuestPrerequisiteCheckFailed;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestStarted OnQuestStarted;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestStepStarted OnQuestStepStarted;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestStepPrereqCheckFailed OnQuestStepPrereqCheckFailed;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestStepCompleted OnQuestStepCompleted;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
@@ -70,28 +82,18 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-//	virtual void WatchedQuestActivatedEvent_Implementation(UQuest* InWatchedQuest) override;
 	virtual void WatchedQuestActivatedEvent(const FQuestEnabledEvent& QuestEnabledEvent);
+	virtual void WatchedQuestPrerequisitesFailedEvent(const FQuestPrerequisiteCheckFailed& QuestPrerequisitesFailedEvent);
 	virtual void WatchedQuestStartedEvent(const FQuestStartedEvent& QuestStartedEvent);
-//	virtual void WatchedQuestStepStartedEvent_Implementation(UQuest* InWatchedQuest, int32 InStartedStepID) override;
 	virtual void WatchedQuestStepStartedEvent(const FQuestStepStartedEvent& QuestStepStartedEvent);
-//	virtual void WatchedStepCompletedEvent_Implementation(UQuest* InWatchedQuest, int32 InCompletedStepID, bool bDidSucceed) override;
+	virtual void WatchedQuestStepPrereqsFailedEvent(const FQuestStepPrereqCheckFailed& QuestStepPrereqCheckFailedEvent);
 	virtual void WatchedQuestStepCompletedEvent(const FQuestStepCompletedEvent& QuestStepCompletedEvent);
-//	virtual void WatchedQuestCompletedEvent_Implementation(UQuest* InWatchedQuest, bool bDidSucceed) override;
 	virtual void WatchedQuestCompletedEvent(const FQuestEndedEvent& QuestEndedEvent);
 
+	UFUNCTION(BlueprintCallable)
 	void RegisterQuestWatcher();	
 private:
-	/*
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
-	bool bDoWatchQuestEnabled = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
-	bool bDoWatchQuestStepStart = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
-	bool bDoWatchQuestStepEnd = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
-	bool bDoWatchQuestEnd = true;
-	*/
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
 	TMap<TSoftClassPtr<UQuest>, FWatchedQuestSettings> WatchedQuests;
 

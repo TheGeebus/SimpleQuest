@@ -19,6 +19,7 @@
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestTryStartEvent.h"
 #include "Events/QuestEnabledEvent.h"
+#include "Events/QuestStepPrereqCheckFailed.h"
 #include "Interfaces/QuestTargetInterface.h"
 #include "Interfaces/QuestWatcherInterface.h"
 #include "Subsystems/QuestSignalSubsystem.h"
@@ -86,12 +87,8 @@ void UQuestManagerSubsystem::RegisterQuestGiver(const FQuestRegistrationEvent& E
 	
 	if (LoadedQuestClasses.Contains(QuestClass))
 	{
-		if (QuestSignalSubsystem)
-		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : enabling quest: %s"), *QuestClass->GetFName().ToString());
-
-			SetQuestEnabled(Event.ChannelObjectID, QuestClass, true);
-		}
+		UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : enabling quest: %s"), *QuestClass->GetFName().ToString());
+		SetQuestEnabled(Event.ChannelObjectID, QuestClass, true);
 	}
 	if (!QuestGiverMap.Contains(QuestClass))
 	{
@@ -192,6 +189,7 @@ UQuest* UQuestManagerSubsystem::LoadQuest(const TSoftClassPtr<UQuest>& QuestClas
 		NewQuest->OnSetQuestTextVisibility.BindDynamic(this, &UQuestManagerSubsystem::UpdateQuestTextVisibility);
 		NewQuest->OnQueueCommsEvent.BindDynamic(this, &UQuestManagerSubsystem::QueueCommsEvent);
 		NewQuest->OnQuestStepStarted.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepStartedEvent);
+		NewQuest->OnQuestStepPrereqsFail.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepPrereqCheckFail);
 		NewQuest->OnQuestStepComplete.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepEndedEvent);
 		NewQuest->OnQuestComplete.BindDynamic(this, &UQuestManagerSubsystem::CompleteQuest);
 		NewQuest->OnObjectiveEnabled.BindUObject(this, &UQuestManagerSubsystem::OnQuestTargetEnabledEvent);
@@ -212,6 +210,14 @@ void UQuestManagerSubsystem::OnQuestStepStartedEvent(UQuest* ActiveQuest, int32 
 	if (QuestSignalSubsystem)
 	{
 		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepStartedEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StartedQuestStepID));
+	}
+}
+
+void UQuestManagerSubsystem::OnQuestStepPrereqCheckFail(UQuest* ActiveQuest, int32 StepWithPrereqsID)
+{
+	if (QuestSignalSubsystem)
+	{
+		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepPrereqCheckFailed(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StepWithPrereqsID));
 	}
 }
 
@@ -298,6 +304,10 @@ bool UQuestManagerSubsystem::StartQuest_Implementation(const TSoftClassPtr<UQues
 	if (!ArePrerequisitesComplete(StartedQuest))
 	{
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::StartQuest : Prerequisites are not complete, aborting..."));
+		if (QuestSignalSubsystem)
+		{
+			QuestSignalSubsystem->PublishTyped(InQuestClass.Get(), FQuestPrerequisiteCheckFailed(StartedQuest->GetQuestID(), InQuestClass.Get()));
+		}
 		return false;
 	}
 
@@ -326,10 +336,10 @@ void UQuestManagerSubsystem::DeactivateQuestGivers(const UQuest* DeactivatedQues
 	}
 }
 
-bool UQuestManagerSubsystem::ArePrerequisitesComplete(UQuest* StartedQuest) const
+bool UQuestManagerSubsystem::ArePrerequisitesComplete(UQuest* QuestToCheck) const
 {
-	const bool bCheckForSuccess = StartedQuest->ShouldQuestPrerequisitesSucceed();
-	for (auto PrereqClass : StartedQuest->GetPrerequisiteQuests())
+	const bool bCheckForSuccess = QuestToCheck->ShouldQuestPrerequisitesSucceed();
+	for (auto PrereqClass : QuestToCheck->GetPrerequisiteQuests())
 	{
 		if (PrereqClass.IsValid())
 		{

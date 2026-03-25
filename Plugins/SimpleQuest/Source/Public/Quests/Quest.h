@@ -46,8 +46,8 @@ struct FQuestStep
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Conditions, AdvancedDisplay)
 	bool bPrerequisitesMustSucceed = false;
 	/**
-	* Overridable base class containing the instructions for completing this step
-	* See also: UQuestObjective
+	* Object containing the instructions for completing this step.
+	* @see UQuestObjective
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Conditions)
 	TSubclassOf<UQuestObjective> QuestObjective = nullptr;
@@ -59,7 +59,7 @@ struct FQuestStep
 	int32 NumberOfElements = 0;
 	/**
 	* The quest step targets. A TSet of soft references to actors in the world, such as any specific targets that must be
-	* interacted with to fulfill the conditions for completing this step.
+	* interacted with to fulfill the conditions for completing this step, either in success or failure.
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Conditions)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
@@ -156,12 +156,13 @@ struct FQuestStep
 	bool bCompletesQuest = false;
 
 	const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
+
 };
 
 /**
  * A quest is a set of linked goals - or FQuestSteps - that together create a single in-game mission. To create a
  * new quest, create a new child blueprint that inherits this base class. Quests can be triggered by calling the
- * StartQuest function on the UQuestManagerSubsystem class and passing the appropriate TSubclassOf<UQuest>.
+ * StartQuest function on the UQuestManagerSubsystem class and passing the appropriate Quest class.
  */
 UCLASS(Blueprintable)
 class SIMPLEQUEST_API UQuest : public UObject
@@ -180,6 +181,7 @@ public:
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSetQuestTextVisibility, bool, bIsVisible, bool, bUseCounter);
 	DECLARE_DYNAMIC_DELEGATE_OneParam(FOnQueueCommsEvent, const FCommsEvent&, InCommsEvent);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestStepStarted, UQuest*, ActiveQuest, int32, CompletedStepID);
+	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestStepPrereqsFail, UQuest*, ActiveQuest, int32, StepIDWithActivePrereqs);
 	DECLARE_DYNAMIC_DELEGATE_FiveParams(FOnQuestStepComplete, UQuest*, ActiveQuest, int32, CompletedStepID, bool, bDidSucceed, bool, bEndedQuest, UQuestReward*, QuestReward);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestComplete, UQuest*, CompletedQuest, bool, bDidSucceed);
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnQuestlineComplete, UQuest*, CompletedQuest, bool, bDidSucceed);
@@ -189,6 +191,7 @@ public:
 	FOnSetQuestTextVisibility OnSetQuestTextVisibility;
 	FOnQueueCommsEvent OnQueueCommsEvent;
 	FOnQuestStepStarted OnQuestStepStarted;
+	FOnQuestStepPrereqsFail OnQuestStepPrereqsFail;
 	FOnQuestStepComplete OnQuestStepComplete;
 	FOnQuestComplete OnQuestComplete;
 	FOnQuestlineComplete OnQuestlineComplete;
@@ -253,7 +256,7 @@ protected:
 	 * prerequisites. This can be useful to create more elaborate branching or looping behaviors in long quest lines.
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = Completion, AdvancedDisplay)
-	TSet<TSoftClassPtr<UQuest>> PrequisitesToReset;
+	TSet<TSoftClassPtr<UQuest>> PrerequisitesToReset;
 
 	/**
 	 * Quick reference set of active StepIDs
@@ -291,9 +294,6 @@ protected:
 	void UpdateQuestCounter(int32 InStepID, int32 NewDisplayAmount);
 	void FinishQuest(bool bDidSucceed);
 
-	// UPROPERTY()
-	// TObjectPtr<UQuestSignalSubsystem> QuestSignalSubsystem;
-
 	UFUNCTION()
 	void OnObjectiveEnabledEvent(UObject* InTargetObject, int32 InStepID, bool bNewIsEnabled);
 
@@ -306,7 +306,7 @@ public:
 	FName GetQuestID() const;
 	const TSet<TSoftClassPtr<UQuest>>& GetPrerequisiteQuests() const { return PrerequisiteQuests; }
 	const TSet<TSoftClassPtr<UQuest>>& GetNextQuests() const { return NextQuests; }
-	const TSet<TSoftClassPtr<UQuest>>& GetPrerequisitesToReset() const { return PrequisitesToReset; }
+	const TSet<TSoftClassPtr<UQuest>>& GetPrerequisitesToReset() const { return PrerequisitesToReset; }
 	const TSet<int32>& GetCurrentActiveSteps() const { return CurrentActiveSteps; }
 	bool DoesCompleteQuestline() const { return bCompletesQuestline; }
 	bool ShouldQuestPrerequisitesSucceed() const { return bPrerequisiteQuestsMustSucceed; }

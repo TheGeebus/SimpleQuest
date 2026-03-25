@@ -131,7 +131,7 @@ public:
 	TMap<TSoftClassPtr<UQuest>, FQuestWatchers> QuestWatcherMap;
 
 	UFUNCTION(BlueprintCallable)
-	bool ArePrerequisitesComplete(UQuest* StartedQuest) const;
+	bool ArePrerequisitesComplete(UQuest* QuestToCheck) const;
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
@@ -161,6 +161,8 @@ protected:
 	void DeactivateQuestGivers(const UQuest* DeactivatedQuest) const;
 	UFUNCTION()
 	void OnQuestStepStartedEvent(UQuest* ActiveQuest, int32 StartedQuestStepID);
+	UFUNCTION()
+	void OnQuestStepPrereqCheckFail(UQuest* ActiveQuest, int32 StepWithPrereqsID);
 	UFUNCTION()
 	void OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, bool bEndedQuest, UQuestReward* Reward);
 	void PublishQuestEndEvent(const UQuest* EndedQuest, bool bDidSucceed) const;

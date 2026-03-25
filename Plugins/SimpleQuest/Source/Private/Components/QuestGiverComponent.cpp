@@ -70,7 +70,7 @@ void UQuestGiverComponent::StartQuest(UQuest* QuestToStart)
 			if (CheckQuestSignalSubsystem())
 			{
 				QuestSignalSubsystem->PublishTyped(QuestClass, FTryQuestStartEvent(QuestClass->GetFName(), QuestClass));
-				UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::StartQuest : successfully started quest: %s"), *QuestClass->GetName());
+				UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::StartQuest : attempting to start quest: %s"), *QuestClass->GetName());
 			}
 			else
 			{

@@ -8,9 +8,9 @@
 void UKillClassQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
 {
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation checked: %s"), *InTargetObject->GetName());
-	if (InTargetObject->IsA(GetTargetClass()))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation detected a match"));
+	//if (InTargetObject->IsA(GetTargetClass()))
+	//{
+	//	UE_LOG(LogSimpleQuest, Verbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation detected a match"));
 		SetCurrentElements(GetCurrentElements() + 1);
 		if (GetCurrentElements() >= GetMaxElements())
 		{
@@ -19,9 +19,9 @@ void UKillClassQuestObjective::TryCompleteObjective_Implementation(UObject* InTa
 			return;
 		}
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation did not complete: %s"), *GetFullName());
-	}
-	else
+	//}
+	/*else
 	{
 		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation failed to match"));
-	}
+	}*/
 }

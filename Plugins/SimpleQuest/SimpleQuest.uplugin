@@ -20,6 +20,14 @@
 			"Name": "SimpleQuest",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "SimpleQuestEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"Settings"
+			]
 		}
 	],
 	"AdditionalPluginConfig": [

@@ -5,9 +5,14 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleInterface.h"
 
+class FQuestlineGraphAssetTypeActions;
+
 class FSimpleQuestEditor : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+
+private:
+	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
 };

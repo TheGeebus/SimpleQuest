@@ -6,7 +6,19 @@ public class SimpleQuestEditor: ModuleRules
 	{
 		PublicDependencyModuleNames.AddRange(new string[] { "GameplayTags" });
 		
-		PrivateDependencyModuleNames.AddRange(new string[] {"Core", "CoreUObject", "Engine", "UnrealEd", "Settings", "SimpleQuest" });
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Core", 
+			"CoreUObject", 
+			"Engine", 
+			"UnrealEd", 
+			"Settings", 
+			"SimpleQuest", 
+			"AssetTools", 
+			"GraphEditor",
+			"Slate",
+			"SlateCore"
+		});
 
 		if (Target.bBuildEditor)
 		{

@@ -213,7 +213,6 @@ public:
 		}
 	}
 
-
 private:
 	UEdGraph* GraphObj;
 };
@@ -228,6 +227,32 @@ void UQuestlineGraphSchema::CreateDefaultNodesForGraph(UEdGraph& Graph) const
 	SetNodeMetaData(EntryNode, FNodeMetadata::DefaultGraphNode);
 }
 
+void UQuestlineGraphSchema::CollectSourceQuests(const UEdGraphPin* Pin, TSet<UQuestlineNode_Quest*>& OutSources,
+	TSet<const UEdGraphNode*>& Visited)
+{
+	if (!Pin) return;
+
+	const UEdGraphNode* Node = Pin->GetOwningNode();
+	if (Visited.Contains(Node)) return;
+	Visited.Add(Node);
+
+	if (UQuestlineNode_Quest* Quest = const_cast<UQuestlineNode_Quest*>(Cast<const UQuestlineNode_Quest>(Node)))
+	{
+		OutSources.Add(Quest);
+		return;
+	}
+
+	if (const UQuestlineNode_Knot* Knot = Cast<const UQuestlineNode_Knot>(Node))
+	{
+		const UEdGraphPin* KnotIn = Knot->FindPin(TEXT("KnotIn"));
+		if (KnotIn)
+		{
+			for (const UEdGraphPin* Linked : KnotIn->LinkedTo)
+				CollectSourceQuests(Linked, OutSources, Visited);
+		}
+	}
+}
+
 const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const
 {
 	if (!A || !B)
@@ -235,72 +260,128 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PinNull", "Invalid pin"));
 	}
 
-	// Disallow connections between two pins of the same direction
 	if (A->Direction == B->Direction)
 	{
 		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "SameDirection", "Cannot connect two inputs or two outputs"));
 	}
 
-	// Normalize so we always work with output → input
 	const UEdGraphPin* OutputPin = A->Direction == EGPD_Output ? A : B;
 	const UEdGraphPin* InputPin  = A->Direction == EGPD_Input  ? A : B;
 
 	const UEdGraphNode* OutputNode = OutputPin->GetOwningNode();
 	const UEdGraphNode* InputNode  = InputPin->GetOwningNode();
-	
-	// Allow reroute nodes to pass through freely
+
 	const bool bOutputIsKnot = Cast<const UQuestlineNode_Knot>(OutputNode) != nullptr;
 	const bool bInputIsKnot  = Cast<const UQuestlineNode_Knot>(InputNode)  != nullptr;
 
 	if (bOutputIsKnot || bInputIsKnot)
 	{
-		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-	}
-
-	if (OutputNode == InputNode)
-	{
-		// Allow Quest output to connect to same Quest's Activate (self-loop re-trigger)
-		if (Cast<const UQuestlineNode_Quest>(OutputNode) && InputPin->PinName == TEXT("Activate"))
+		if (bOutputIsKnot && bInputIsKnot)
 		{
+			if (OutputNode == InputNode)
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "KnotSelfLoop", "Cannot connect a reroute node to itself"));
+			}
+
+			const FName OutCat = Cast<const UQuestlineNode_Knot>(OutputNode)->GetEffectiveCategory();
+			const FName InCat  = Cast<const UQuestlineNode_Knot>(InputNode)->GetEffectiveCategory();
+
+			if (OutCat != TEXT("QuestActivation") &&
+				InCat  != TEXT("QuestActivation") &&
+				OutCat != InCat)
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch", "Reroute node signal types do not match"));
+			}
 			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 		}
-		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
-			NSLOCTEXT("SimpleQuestEditor", "SameNode", "Cannot connect a node to itself"));
-	}
-	
-	// Entry node Start pin may only connect to a Quest node's Activate pin
-	if (Cast<const UQuestlineNode_Entry>(OutputNode))
-	{
-		if (!Cast<const UQuestlineNode_Quest>(InputNode))
+
+		if (bInputIsKnot)
 		{
-			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
-				NSLOCTEXT("SimpleQuestEditor", "EntryOnlyToQuest", "Quest Start may only connect to a Quest node"));
+			const FName KnotCategory = Cast<const UQuestlineNode_Knot>(InputNode)->GetEffectiveCategory();
+			const FName WireCategory = OutputPin->PinType.PinCategory;
+
+			if (KnotCategory != TEXT("QuestActivation") && WireCategory != KnotCategory)
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch", "Signal type does not match this reroute node"));
+			}
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 		}
-		if (InputPin->PinName != TEXT("Activate"))
+
+		// bOutputIsKnot, non-knot destination — fall through to duplicate check
+	}
+	else
+	{
+		if (OutputNode == InputNode)
 		{
+			if (Cast<const UQuestlineNode_Quest>(OutputNode) && InputPin->PinName == TEXT("Activate"))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+			}
 			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
-				NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to the Activate pin"));
+				NSLOCTEXT("SimpleQuestEditor", "SameNode", "Cannot connect a node to itself"));
+		}
+
+		if (Cast<const UQuestlineNode_Entry>(OutputNode))
+		{
+			if (!Cast<const UQuestlineNode_Quest>(InputNode))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "EntryOnlyToQuest", "Quest Start may only connect to a Quest node"));
+			}
+			if (InputPin->PinName != TEXT("Activate"))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to the Activate pin"));
+			}
+		}
+
+		if (Cast<const UQuestlineNode_Quest>(OutputNode))
+		{
+			const bool bValidInput = Cast<const UQuestlineNode_Quest>(InputNode)
+								  || Cast<const UQuestlineNode_Knot>(InputNode)
+								  || Cast<const UQuestlineNode_Exit_Success>(InputNode)
+								  || Cast<const UQuestlineNode_Exit_Failure>(InputNode);
+			if (!bValidInput)
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "QuestOutputOnlyToQuest",
+						"Quest outputs may only connect to other Quest nodes or exit nodes"));
+			}
 		}
 	}
 
-	// Quest output pins may only connect to Quest input pins and graph exit nodes
-	if (Cast<const UQuestlineNode_Quest>(OutputNode))
+	if (!bInputIsKnot)
 	{
-		const bool bValidInput = Cast<const UQuestlineNode_Quest>(InputNode)
-							  || Cast<const UQuestlineNode_Knot>(InputNode)
-							  || Cast<const UQuestlineNode_Exit_Success>(InputNode)
-							  || Cast<const UQuestlineNode_Exit_Failure>(InputNode);
-		if (!bValidInput)
+		TSet<UQuestlineNode_Quest*> IncomingSources;
 		{
-			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
-				NSLOCTEXT("SimpleQuestEditor", "QuestOutputOnlyToQuest",
-					"Quest outputs may only connect to other Quest nodes or exit nodes"));
+			TSet<const UEdGraphNode*> Visited;
+			CollectSourceQuests(OutputPin, IncomingSources, Visited);
+		}
+		if (IncomingSources.Num() > 0)
+		{
+			for (const UEdGraphPin* Existing : InputPin->LinkedTo)
+			{
+				TSet<UQuestlineNode_Quest*> ExistingSources;
+				TSet<const UEdGraphNode*> Visited;
+				CollectSourceQuests(Existing, ExistingSources, Visited);
+
+				if (IncomingSources.Intersect(ExistingSources).Num() > 0)
+				{
+					return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+						NSLOCTEXT("SimpleQuestEditor", "DuplicateSource",
+							"This input already receives a signal from that Quest node"));
+				}
+			}
 		}
 	}
-
 
 	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 }
+
+
 
 void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& ContextMenuBuilder) const
 {
@@ -349,7 +430,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 			FText::GetEmpty(),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitFailure", "Add Questline Failed"),
+			NSLOCTEXT("SimpleQuestEditor", "AddExitFailure", "Add Questline Failure"),
 			NSLOCTEXT("SimpleQuestEditor", "AddExitFailureTooltip", "Add a Questline Failed exit node"),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Failure>(
@@ -376,6 +457,9 @@ FLinearColor UQuestlineGraphSchema::GetPinTypeColor(const FEdGraphPinType& PinTy
 	}
 	return FLinearColor::White;   // QuestActivation — Activate, Prerequisites, AnyOutcome, Start, knots
 }
+
+/* Automatic reroute node placement when looping back to the same node -- currently always feeds wire into left side of node, needs a fix to create a clean loop */
+
 /*
 bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const
 {

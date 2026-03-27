@@ -38,3 +38,35 @@ void UQuestlineNode_Knot::AutowireNewNode(UEdGraphPin* FromPin)
 		}
 	}
 }
+
+FName UQuestlineNode_Knot::GetEffectiveCategory() const
+{
+	const UEdGraphPin* InPin  = FindPin(TEXT("KnotIn"));
+	const UEdGraphPin* OutPin = FindPin(TEXT("KnotOut"));
+
+	if (InPin && InPin->LinkedTo.Num() > 0)
+		return InPin->LinkedTo[0]->PinType.PinCategory; // let input determine signal type (success, fail, either)
+
+	if (OutPin && OutPin->LinkedTo.Num() > 0)
+		return OutPin->LinkedTo[0]->PinType.PinCategory; // fallback to output type if input is unset
+
+	return TEXT("QuestActivation");
+}
+
+void UQuestlineNode_Knot::NodeConnectionListChanged()
+{
+	Super::NodeConnectionListChanged();
+
+	UEdGraphPin* InPin  = FindPin(TEXT("KnotIn"));
+	UEdGraphPin* OutPin = FindPin(TEXT("KnotOut"));
+	if (!InPin || !OutPin) return;
+
+	const FName NewCategory = GetEffectiveCategory();
+	if (InPin->PinType.PinCategory == NewCategory && OutPin->PinType.PinCategory == NewCategory)
+		return;
+
+	Modify();
+	InPin->PinType.PinCategory  = NewCategory;
+	OutPin->PinType.PinCategory = NewCategory;
+}
+

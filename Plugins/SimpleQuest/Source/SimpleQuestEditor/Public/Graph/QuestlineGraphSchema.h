@@ -9,6 +9,8 @@
 #include "Nodes/QuestlineNode_Exit_Failure.h"
 #include "QuestlineGraphSchema.generated.h"
 
+class UQuestlineNode_Quest;
+
 UCLASS()
 class UQuestlineGraphSchema : public UEdGraphSchema
 {
@@ -18,6 +20,9 @@ public:
 	// Called when the graph is first created — populates it with the entry node
 	virtual void CreateDefaultNodesForGraph(UEdGraph& Graph) const override;
 
+	// Find any source quest nodes of a given wire
+	static void CollectSourceQuests(const UEdGraphPin* Pin, TSet<UQuestlineNode_Quest*>& OutSources, TSet<const UEdGraphNode*>& Visited);
+	
 	// Determines whether a connection between two pins is valid
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const override;
 

@@ -14,4 +14,6 @@ public:
 	virtual bool CanUserDeleteNode() const override { return true; }
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
+	FName GetEffectiveCategory() const;
+	virtual void NodeConnectionListChanged() override;
 };

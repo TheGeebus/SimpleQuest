@@ -37,6 +37,9 @@ Plugins/SimpleQuest/Binaries/
 # Claude Code
 .claude/
 
+# Dev notes
+dev-notes-*.txt
+
 # OS
 .DS_Store
 Thumbs.db

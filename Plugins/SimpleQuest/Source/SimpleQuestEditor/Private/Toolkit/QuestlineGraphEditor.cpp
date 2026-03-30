@@ -108,6 +108,10 @@ void FQuestlineGraphEditor::BindGraphCommands()
     GraphEditorCommands->MapAction(
         FGenericCommands::Get().Delete,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DeleteSelectedNodes));
+    
+    GraphEditorCommands->MapAction(
+       FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
+       FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
 }
 
 void FQuestlineGraphEditor::DeleteSelectedNodes()

@@ -13,8 +13,10 @@ struct FQuestEventBase : public FSignalEventBase
 	FQuestEventBase() = default;
 
 	FQuestEventBase(const FGameplayTag InQuestTag, const TSubclassOf<UQuest>& InQuestClass)
-		: FSignalEventBase(InQuestTag.GetTagName()), QuestClass(InQuestClass)
-	{}
+		: FSignalEventBase(InQuestTag.GetTagName()), QuestClass(InQuestClass), QuestTag(InQuestTag)
+	{
+		EventTag = InQuestTag;
+	}
 
 	UPROPERTY()
 	TSubclassOf<UQuest> QuestClass;

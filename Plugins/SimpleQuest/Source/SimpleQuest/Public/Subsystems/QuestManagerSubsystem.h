@@ -18,7 +18,6 @@ class UQuestGiverInterface;
 struct FQuestText;
 class UQuest;
 class UQuestReward;
-class UQuestGiverManifest;
 
 USTRUCT(BlueprintType)
 struct FQuestGivers

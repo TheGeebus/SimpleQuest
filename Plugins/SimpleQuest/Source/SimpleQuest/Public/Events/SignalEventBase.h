@@ -15,7 +15,7 @@ struct FSignalEventBase
 	
 	UPROPERTY(BlueprintReadWrite)
 	FName ChannelObjectID;
-
+	
 	UPROPERTY(BlueprintReadWrite)
 	FGameplayTag EventTag;
 };

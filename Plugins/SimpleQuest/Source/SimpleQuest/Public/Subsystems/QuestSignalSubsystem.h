@@ -109,11 +109,11 @@ FDelegateHandle UQuestSignalSubsystem::SubscribeTyped(UObject* ChannelObject, Li
 
 template <typename EventType, typename ListenerType>
 requires derived_from<FSignalEventBase, EventType>
-FDelegateHandle UQuestSignalSubsystem::SubscribeTypedByTag(const FGameplayTag EventTag, ListenerType* Listener,
+FDelegateHandle UQuestSignalSubsystem::SubscribeTypedByTag(const FGameplayTag QuestTag, ListenerType* Listener,
 	void(ListenerType::* Function)(const EventType&))
 {
 	check(IsInGameThread());
-	auto& Delegate = TaggedEventChannels.FindOrAdd(EventTag);
+	auto& Delegate = TaggedEventChannels.FindOrAdd(QuestTag);
 	return Delegate.AddLambda(
 	[WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function](const FInstancedStruct& Struct)
 	{

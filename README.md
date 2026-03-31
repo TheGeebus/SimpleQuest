@@ -12,7 +12,9 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Features
 
-- **Non-linear quest graph** -- Quest steps form a DAG with bidirectional prerequisite and next-step edges. Multiple steps can be active simultaneously, branches can converge, and completing one path can permanently close or re-enable another.
+- **Visual quest creation graph** -- See the links between story elements laid out as wire connections between nodes. Easily make changes and craft your story in the familiar visual language of blueprints.
+- **Multi-level quest graphs** -- Quest graphs can be nested as nodes in other quest graphs, affording near infinite possibility for narrative customization while preserving a clean organizational structure that's intuitive and easy to navigate.  
+- **True non-linear quest creation** -- Quest steps form a DAG with bidirectional prerequisite and next-step edges. Multiple steps can be active simultaneously, branches can converge, and completing one path can permanently close or re-enable another.
 - **Typed publish/subscribe event bus** -- Channels keyed by `(UObject*, EventType)` pairs guarantee that events are structurally unreachable by unintended subscribers. No conditional filtering required at any call site.
 - **Blueprint/C++ parity** -- All objectives, rewards, and components are fully accessible from Blueprint. Core systems are implemented in C++ with `BlueprintNativeEvent` override points throughout.
 - **Late-registration state replay** -- Components that register after quest events have already fired receive the current in-flight state automatically. Safe for streaming levels, dynamically spawned actors, and multiplayer join-in-progress scenarios.

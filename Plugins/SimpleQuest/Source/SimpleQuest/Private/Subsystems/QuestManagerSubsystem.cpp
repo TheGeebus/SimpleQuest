@@ -259,6 +259,7 @@ void UQuestManagerSubsystem::ActivateQuestClass(const TSoftClassPtr<UQuest>& InQ
 	{
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::ActivateQuestClass : enabling quest: %s"), *LoadedQuest->GetQuestTag().ToString());
 		SetQuestEnabled(LoadedQuest->GetQuestTag(), LoadedQuest->GetClass(), true);
+		ActiveQuestTags.AddTag(LoadedQuest->GetQuestTag());
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::ActivateQuestClass : Quest loaded: %s"), *LoadedQuest->GetQuestTag().ToString());
 
 		if (!QuestsWithGivers.Contains(LoadedQuest->GetQuestTag()))
@@ -467,6 +468,7 @@ void UQuestManagerSubsystem::UpdateQuestTextVisibility(bool bIsVisible, bool bUs
 
 void UQuestManagerSubsystem::CompleteQuest(UQuest* CompletedQuest, bool bDidSucceed)
 {
+	ActiveQuestTags.RemoveTag(CompletedQuest->GetQuestTag());
 	CompletedQuestClasses.Add(CompletedQuest->GetClass());
 	PublishQuestEndEvent(CompletedQuest, bDidSucceed);
 	if (OnQuestEnd.IsBound())

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
@@ -143,6 +144,9 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
+
+	UPROPERTY(BlueprintReadOnly, Category="Quest State")
+	FGameplayTagContainer ActiveQuestTags;
 
 protected:
 	// Quests to load when the game launches. 

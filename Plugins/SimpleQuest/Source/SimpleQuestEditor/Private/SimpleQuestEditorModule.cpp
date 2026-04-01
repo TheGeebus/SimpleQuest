@@ -7,7 +7,9 @@
 #include "EdGraphUtilities.h"
 #include "SGraphNodeKnot.h"
 #include "Graph/QuestlineGraphSchema.h"
+#include "Kismet2/KismetEditorUtilities.h"
 #include "Nodes/QuestlineNode_Knot.h"
+#include "Settings/SimpleQuestSettings.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -35,6 +37,30 @@ void FSimpleQuestEditor::StartupModule()
 
 	QuestlineConnectionFactory = UQuestlineGraphSchema::MakeQuestlineConnectionFactory();
 	FEdGraphUtilities::RegisterVisualPinConnectionFactory(QuestlineConnectionFactory);
+
+	FEditorDelegates::OnEditorInitialized.AddLambda([](double)
+	{
+		const USimpleQuestSettings* Settings = GetDefault<USimpleQuestSettings>();
+
+		// Derive the Blueprint asset path from the _C class path
+		FString ClassPath = Settings->QuestManagerClass.ToSoftObjectPath().ToString();
+		if (!ClassPath.RemoveFromEnd(TEXT("_C")))
+		{
+			return; // Not a Blueprint class, nothing to compile
+		}
+
+		UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ClassPath, nullptr, LOAD_NoWarn);
+		if (UBlueprint* BP = Cast<UBlueprint>(Loaded))
+		{
+			if (BP->Status != EBlueprintStatus::BS_UpToDate)
+			{
+				FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::SkipGarbageCollection);
+				BP->MarkPackageDirty();
+				// Optionally auto-save to avoid asking user to save:
+				// UEditorLoadingAndSavingUtils::SavePackages({BP->GetOutermost()}, false);
+			}
+		}
+	});
 }
 
 void FSimpleQuestEditor::ShutdownModule()

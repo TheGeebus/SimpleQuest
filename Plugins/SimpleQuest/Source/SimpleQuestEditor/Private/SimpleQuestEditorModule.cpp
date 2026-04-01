@@ -5,6 +5,7 @@
 #include "AssetToolsModule.h"
 #include "Modules/ModuleManager.h"
 #include "EdGraphUtilities.h"
+#include "FileHelpers.h"
 #include "SGraphNodeKnot.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -56,8 +57,8 @@ void FSimpleQuestEditor::StartupModule()
 			{
 				FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::SkipGarbageCollection);
 				BP->MarkPackageDirty();
-				// Optionally auto-save to avoid asking user to save:
-				// UEditorLoadingAndSavingUtils::SavePackages({BP->GetOutermost()}, false);
+				// auto-save to avoid asking user to save:
+				UEditorLoadingAndSavingUtils::SavePackages({BP->GetOutermost()}, false);
 			}
 		}
 	});

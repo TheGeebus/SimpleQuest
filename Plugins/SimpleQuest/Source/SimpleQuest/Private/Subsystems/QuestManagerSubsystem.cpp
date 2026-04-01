@@ -3,7 +3,6 @@
 
 #include "Subsystems/QuestManagerSubsystem.h"
 
-#include "SignalUtilities.h"
 #include "Components/AudioComponent.h"
 #include "Interfaces/QuestGiverInterface.h"
 #include "Kismet/GameplayStatics.h"
@@ -21,6 +20,7 @@
 #include "Events/QuestStepPrereqCheckFailed.h"
 #include "Interfaces/QuestTargetInterface.h"
 #include "Interfaces/QuestWatcherInterface.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Subsystems/QuestSignalSubsystem.h"
 
 
@@ -57,9 +57,10 @@ void UQuestManagerSubsystem::Deinitialize()
 
 void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 {
-	if (!InitialQuests.IsEmpty())
+	TArray<TSoftClassPtr<UQuest>> QuestsToStart = GetSimpleQuestSettings()->InitialQuests;
+	if (!QuestsToStart.IsEmpty())
 	{
-		for (const TSoftClassPtr<UQuest>& QuestSoftClass : InitialQuests)
+		for (const TSoftClassPtr<UQuest>& QuestSoftClass : QuestsToStart)
 		{
 			if (const UClass* QuestClass = QuestSoftClass.LoadSynchronous())
 			{
@@ -511,4 +512,9 @@ void UQuestManagerSubsystem::OnQuestTargetEnabledEvent(UQuest* InQuest, UObject*
 			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepCompletedEvent(InQuest->GetQuestID(), InQuest->GetClass(), InStepID, true, false, nullptr));
 		}
 	}
+}
+
+const USimpleQuestSettings* UQuestManagerSubsystem::GetSimpleQuestSettings() const
+{
+	return GetDefault<USimpleQuestSettings>();
 }

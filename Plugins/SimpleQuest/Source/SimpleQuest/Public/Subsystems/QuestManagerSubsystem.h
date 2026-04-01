@@ -7,6 +7,7 @@
 #include "QuestTypes.h"
 #include "QuestManagerSubsystem.generated.h"
 
+class USimpleQuestSettings;
 class UQuestReward;
 struct FQuestStartedEvent;
 struct FTryQuestStartEvent;
@@ -189,7 +190,9 @@ protected:
 	void CompleteQuestline(UQuest* CompletedQuest, bool bDidSucceed);
 	UFUNCTION()
 	void OnQuestTargetEnabledEvent(UQuest* InQuest, UObject* TargetObject, int32 InStepID, bool bNewIsEnabled);
-
+	UFUNCTION()
+	const USimpleQuestSettings* GetSimpleQuestSettings() const;
+	
 	// Voice line audio player. 
 	UPROPERTY()
 	TObjectPtr<UAudioComponent> AudioComponent;

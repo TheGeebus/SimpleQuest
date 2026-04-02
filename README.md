@@ -1,8 +1,12 @@
 # SimpleQuest
 
-A source-available Unreal Engine plugin for non-linear, branching quest systems. Currently free for non-commercial use, a future MIT licensed free-use release is planned following a funding milestone. SimpleQuest is built on a directed acyclic graph of quest steps with a typed publish/subscribe event bus, giving designers the freedom to craft questlines that feel alive rather than scripted.
+A source-available Unreal Engine plugin for the management and visual authoring of linear and non-linear linked goals: featuring support for branching, converging, and looping gameplay event sequences in any game type. Currently free for non-commercial use, a future MIT licensed free-use release is planned following a funding milestone. SimpleQuest is built on a general directed graph of quest steps with a typed publish/subscribe event bus, giving designers the freedom to craft questlines that feel alive rather than scripted.
+
+While the visual graph asset shown below can be created in the current iteration, it is not yet fully functional. Sequence authoring is currently still done according to the method described in Quick Start section. Fully functional visual graph authoring of goal sequences will be included in the upcoming release.
 
 ![SimpleQuestDemo-v0 3](https://github.com/user-attachments/assets/4c800c0e-f417-4e22-941d-824b321b7cfc)
+
+This repo contains a full Unreal 5.6 sample project directory that may be cloned with the plugin already in place. Simply clone the repo and open the project to play the demo level, contained in the SimpleQuest plugin content folder. To use SimpleQuest in an existing project, follow the instructions in the Installation section below.
 
 This version is for Unreal Engine 5.6.
 
@@ -16,7 +20,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 - **Visual quest creation graph** -- See the links between story elements laid out as wire connections between nodes. Easily make changes and craft your story in the familiar visual language of blueprints.
 - **Multi-level quest graphs** -- Quest graphs can be nested as nodes in other quest graphs, affording near infinite possibility for narrative customization while preserving a clean organizational structure that's intuitive and easy to navigate.  
-- **True non-linear quest creation** -- Quest steps form a DAG with bidirectional prerequisite and next-step edges. Multiple steps can be active simultaneously, branches can converge, and completing one path can permanently close or re-enable another.
+- **True non-linear quest creation** -- Quest steps form a directed graph with bidirectional prerequisite and next-step edges. Multiple steps can be active simultaneously, branches can converge, and completing one path can permanently close or re-enable another.
 - **Typed publish/subscribe event bus** -- Channels keyed by `(FGameplayTag, EventType)` pairs guarantee that events are structurally unreachable by unintended subscribers. No conditional filtering required at any call site.
 - **Blueprint/C++ parity** -- All objectives, rewards, and components are fully accessible from Blueprint. Core systems are implemented in C++ with `BlueprintNativeEvent` override points throughout.
 - **Late-registration state replay** -- Components that register after quest events have already fired receive the current in-flight state automatically. Safe for streaming levels, dynamically spawned actors, and multiplayer join-in-progress scenarios.
@@ -36,7 +40,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Installation
 
-1. Copy the `SimpleQuest` folder into your project's `Plugins/` directory.
+1. Copy the `Plugins/SimpleQuest` folder into your project's `Plugins/` directory.
 2. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
 3. Open the solution and build the **Development Editor** target.
 4. Enable the plugin in **Edit > Plugins** if it is not already active.
@@ -99,7 +103,7 @@ UQuest (data asset)
                                              ends quest, or
                                              starts next quest
 ```
-Steps within a quest form a directed acyclic graph. The broader quest network supports cycles to enable replayability and conditional re-activation.
+Steps within a quest also form a directed graph and support cycles to enable replayability and conditional re-activation. Compile time validation provides protection from invalid cylical connections and graph nesting.
 
 ### UQuestManagerSubsystem
 
@@ -107,7 +111,7 @@ The orchestration hub. Maintains maps of registered givers and watchers, validat
 
 ### UQuestSignalSubsystem
 
-A typed pub/sub event bus. Channels are keyed by `(UObject*, UScriptStruct*)` pairs. Subscribers capture weak object pointers and are silently dropped on broadcast if the subscriber has been garbage collected. C++20 `derived_from` concept constraints enforce type safety at compile time.
+A typed pub/sub event bus. Channels are keyed by `(UObject*, UScriptStruct*)` pairs (transitioning to `FGameplayTag` pairs in the next release). Subscribers capture weak object pointers and are silently dropped on broadcast if the subscriber has been garbage collected. C++20 `derived_from` concept constraints enforce type safety at compile time.
 
 ---
 

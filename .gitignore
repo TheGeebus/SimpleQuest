@@ -38,8 +38,7 @@ Plugins/SimpleQuest/Binaries/
 .claude/
 
 # Dev notes and reference files
-dev-notes-*.txt
-notes-*.txt
+Notes/
 
 # OS
 .DS_Store

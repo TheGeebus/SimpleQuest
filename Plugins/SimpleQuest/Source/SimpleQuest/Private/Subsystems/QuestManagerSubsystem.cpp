@@ -3,10 +3,7 @@
 
 #include "Subsystems/QuestManagerSubsystem.h"
 
-#include "SignalUtilities.h"
-#include "Components/AudioComponent.h"
 #include "Interfaces/QuestGiverInterface.h"
-#include "Kismet/GameplayStatics.h"
 #include "Quests/Quest.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestlineEndedEvent.h"
@@ -21,7 +18,7 @@
 #include "Events/QuestStepPrereqCheckFailed.h"
 #include "Interfaces/QuestTargetInterface.h"
 #include "Interfaces/QuestWatcherInterface.h"
-#include "Subsystems/QuestSignalSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 
 
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -30,7 +27,7 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 	if (UGameInstance* GameInstance = GetGameInstance())
 	{
-		QuestSignalSubsystem = GameInstance->GetSubsystem<UQuestSignalSubsystem>();
+		QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
 		if (QuestSignalSubsystem)
 		{
 			QuestWatcherRegistrationDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestRegistrationEvent>(UQuestWatcherInterface::StaticClass(), this, &UQuestManagerSubsystem::RegisterQuestWatcher);

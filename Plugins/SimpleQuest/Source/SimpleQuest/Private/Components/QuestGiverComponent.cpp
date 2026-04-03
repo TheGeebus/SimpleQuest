@@ -6,7 +6,7 @@
 #include "Events/QuestRegistrationEvent.h"
 #include "Events/QuestTryStartEvent.h"
 #include "Events/QuestEnabledEvent.h"
-#include "Subsystems/QuestSignalSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 
 UQuestGiverComponent::UQuestGiverComponent()
 {
@@ -35,7 +35,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 			if (UClass* LoadedQuestClass = QuestClass.LoadSynchronous())
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered quest giver: %s"), *GetOwner()->GetName());
-				QuestSignalSubsystem->SubscribeTyped<FQuestEnabledEvent>(LoadedQuestClass, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
+				SignalSubsystem->SubscribeTyped<FQuestEnabledEvent>(LoadedQuestClass, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
 				RegisterForQuestClass(LoadedQuestClass);
 			}
 		}
@@ -51,7 +51,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 void UQuestGiverComponent::RegisterForQuestClass(UClass* LoadedQuestClass)
 {
-	QuestSignalSubsystem->PublishTyped(UQuestGiverInterface::StaticClass(), FQuestRegistrationEvent(LoadedQuestClass->GetDefaultObject<UQuest>()->GetQuestTag(), LoadedQuestClass, GetOwner()));
+	SignalSubsystem->PublishTyped(UQuestGiverInterface::StaticClass(), FQuestRegistrationEvent(LoadedQuestClass->GetDefaultObject<UQuest>()->GetQuestTag(), LoadedQuestClass, GetOwner()));
 }
 
 void UQuestGiverComponent::OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent)
@@ -69,7 +69,7 @@ void UQuestGiverComponent::GiveQuest(UQuest* QuestToStart)
 		{
 			if (CheckQuestSignalSubsystem())
 			{
-				QuestSignalSubsystem->PublishTyped(QuestClass, FTryQuestStartEvent(QuestToStart->GetQuestTag(), QuestClass));
+				SignalSubsystem->PublishTyped(QuestClass, FTryQuestStartEvent(QuestToStart->GetQuestTag(), QuestClass));
 				UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::StartQuest : attempting to start quest: %s"), *QuestClass->GetName());
 			}
 			else

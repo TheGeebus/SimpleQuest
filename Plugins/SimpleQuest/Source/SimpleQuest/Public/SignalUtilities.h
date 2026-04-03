@@ -1,7 +1,7 @@
 #pragma once
 
 #include "StructUtils/InstancedStruct.h"
-#include "Events/SignalEventBase.h"
+#include "Signals/SignalEventBase.h"
 #include "SignalUtilities.generated.h"
 
 

@@ -4,7 +4,7 @@
 #include "SignalEventBase.generated.h"
 
 USTRUCT(BlueprintType)
-struct FSignalEventBase
+struct SIMPLECORE_API FSignalEventBase
 {
 	GENERATED_BODY()
 

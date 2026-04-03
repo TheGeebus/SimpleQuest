@@ -13,7 +13,7 @@ struct FTryQuestStartEvent;
 struct FQuestRegistrationEvent;
 struct FQuestEnabledEvent;
 struct FQuestObjectiveTriggered;
-class UQuestSignalSubsystem;
+class USignalSubsystem;
 class IQuestTargetInterface;
 class UQuestGiverInterface;
 struct FQuestText;
@@ -219,7 +219,7 @@ protected:
 	TObjectPtr<UQuest> QuestDefaultObject;
 
 	UPROPERTY()
-	TObjectPtr<UQuestSignalSubsystem> QuestSignalSubsystem;
+	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
 
 	FDelegateHandle QuestWatcherRegistrationDelegateHandle;
 	FDelegateHandle QuestGiverRegistrationDelegateHandle;

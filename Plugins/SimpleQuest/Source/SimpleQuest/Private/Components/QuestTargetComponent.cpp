@@ -9,7 +9,7 @@
 #include "Events/QuestObjectiveTriggered.h"
 #include "Events/QuestStepCompletedEvent.h"
 #include "Events/QuestStepStartedEvent.h"
-#include "Subsystems/QuestSignalSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 
 
 UQuestTargetComponent::UQuestTargetComponent()
@@ -28,7 +28,7 @@ void UQuestTargetComponent::BeginPlay()
 	Super::BeginPlay();
 	if (CheckQuestSignalSubsystem())
 	{
-		OnQuestTargetActivatedDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestStepStartedEvent>(GetOwner(), this, &UQuestTargetComponent::OnTargetActivated);
+		OnQuestTargetActivatedDelegateHandle = SignalSubsystem->SubscribeTyped<FQuestStepStartedEvent>(GetOwner(), this, &UQuestTargetComponent::OnTargetActivated);
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::BeginPlay : Quest target registered: %s"), *GetOwner()->GetActorNameOrLabel());
 	}
 }
@@ -39,7 +39,7 @@ void UQuestTargetComponent::OnTargetActivated(const FQuestStepStartedEvent& Step
 	{
 		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel Object ID: %s : Event type: %s : Owner: %s"), *StepStartedEvent.ChannelObjectID.ToString(), *StepStartedEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-		OnQuestTargetDeactivatedDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestStepCompletedEvent>(GetOwner(), this, &UQuestTargetComponent::OnTargetDeactivated);
+		OnQuestTargetDeactivatedDelegateHandle = SignalSubsystem->SubscribeTyped<FQuestStepCompletedEvent>(GetOwner(), this, &UQuestTargetComponent::OnTargetDeactivated);
 		Execute_SetActivated(this, true);
 	}
 }
@@ -63,7 +63,7 @@ void UQuestTargetComponent::GetTriggered()
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		QuestSignalSubsystem->PublishTyped(UQuestTargetInterface::StaticClass(), FQuestObjectiveTriggered(FGameplayTag(), nullptr, GetOwner()));
+		SignalSubsystem->PublishTyped(UQuestTargetInterface::StaticClass(), FQuestObjectiveTriggered(FGameplayTag(), nullptr, GetOwner()));
 	}
 }
 
@@ -71,7 +71,7 @@ void UQuestTargetComponent::GetKilled(AActor* KillerActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveKilled(FGameplayTag(), nullptr, GetOwner(), KillerActor));
+		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveKilled(FGameplayTag(), nullptr, GetOwner(), KillerActor));
 	}
 }
 
@@ -79,6 +79,6 @@ void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		QuestSignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveInteracted(FGameplayTag(), nullptr, GetOwner(), InteractingActor));
+		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveInteracted(FGameplayTag(), nullptr, GetOwner(), InteractingActor));
 	}
 }

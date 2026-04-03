@@ -11,7 +11,7 @@
 #include "Events/QuestStepPrereqCheckFailed.h"
 #include "Events/QuestStepStartedEvent.h"
 #include "Quests/Quest.h"
-#include "Subsystems/QuestSignalSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 
 
 UQuestWatcherComponent::UQuestWatcherComponent()
@@ -116,31 +116,31 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				{
 					if (QuestPair.Value.bWatchQuestEnabled)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
 					}
 					if (QuestPair.Value.bWatchPrerequisiteFailure)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestPrerequisitesFailedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestPrerequisitesFailedEvent);
 					}
 					if (QuestPair.Value.bWatchQuestStart)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
 					}
 					if (QuestPair.Value.bWatchQuestStepStart)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
 					}
 					if (QuestPair.Value.bWatchQuestStepPrereqsFailure)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepPrereqsFailedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepPrereqsFailedEvent);
 					}
 					if (QuestPair.Value.bWatchQuestStepEnd)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
 					}
 					if (QuestPair.Value.bWatchQuestEnd)
 					{
-						QuestSignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
+						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
 					}
 				}
 			}

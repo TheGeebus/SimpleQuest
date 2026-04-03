@@ -18,6 +18,7 @@ public:
     {}
 
     virtual void DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End, const FConnectionParams& Params) override;
+     
     virtual void DrawWireSegment(const FVector2f& Start, const FVector2f& End,	int32 LayerId, const FLinearColor& Color, float Thickness) override;
     virtual void DrawArcSegment(const FVector2f& Start, const FVector2f& StartTangent, const FVector2f& End, const FVector2f& EndTangent, int32 LayerId, const FLinearColor& Color, float Thickness) override;
     virtual bool IsIdenticalRibbonSegment(float RibbonMin, float RibbonMax, float CurrentMin, float CurrentMax) override;

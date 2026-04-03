@@ -4,7 +4,7 @@
 #include "Components/QuestComponentBase.h"
 
 #include "SimpleQuestLog.h"
-#include "Subsystems/QuestSignalSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 
 
 UQuestComponentBase::UQuestComponentBase()
@@ -19,7 +19,7 @@ void UQuestComponentBase::PostInitProperties()
 	{
 		if (const UGameInstance* GameInstance = World->GetGameInstance())
 		{
-			QuestSignalSubsystem = GameInstance->GetSubsystem<UQuestSignalSubsystem>();
+			SignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
 		}
 	}
 }
@@ -31,14 +31,14 @@ void UQuestComponentBase::BeginPlay()
 
 bool UQuestComponentBase::CheckQuestSignalSubsystem()
 {
-	if (QuestSignalSubsystem.Get() == nullptr)
+	if (SignalSubsystem.Get() == nullptr)
 	{
 		if (const UWorld* World = GetWorld())
 		{
 			if (const UGameInstance* GameInstance = World->GetGameInstance())
 			{
-				QuestSignalSubsystem = GameInstance->GetSubsystem<UQuestSignalSubsystem>();
-				if (QuestSignalSubsystem == nullptr)
+				SignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
+				if (SignalSubsystem == nullptr)
 				{
 					UE_LOG(LogSimpleQuest, Error, TEXT("UQuestComponentBase::CheckQuestSignalSubsystem : QuestSignalSubsystem was null"));
 				}
@@ -53,5 +53,5 @@ bool UQuestComponentBase::CheckQuestSignalSubsystem()
 			UE_LOG(LogSimpleQuest, Error, TEXT("UQuestComponentBase::CheckQuestSignalSubsystem : World is null"));
 		}
 	}
-	return QuestSignalSubsystem != nullptr;
+	return SignalSubsystem != nullptr;
 }

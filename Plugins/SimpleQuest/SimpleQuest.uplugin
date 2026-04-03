@@ -28,12 +28,13 @@
 			"AdditionalDependencies": [
 				"Settings"
 			]
-		},
-		{
-			"Name": "SimpleQuestEditorEN",
-			"Type": "Editor",
-			"LoadingPhase": "PostDefault"
 		}
+	],
+	"Plugins": [
+		{
+			"Name": "SimpleCore",
+			"Enabled": true
+		}		
 	],
 	"AdditionalPluginConfig": [
 		"SimpleQuest"

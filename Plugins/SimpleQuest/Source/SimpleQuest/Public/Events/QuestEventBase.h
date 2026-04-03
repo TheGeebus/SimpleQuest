@@ -1,6 +1,6 @@
 #pragma once
 
-#include "SignalEventBase.h"
+#include "Signals/SignalEventBase.h"
 #include "QuestEventBase.generated.h"
 
 class UQuest;

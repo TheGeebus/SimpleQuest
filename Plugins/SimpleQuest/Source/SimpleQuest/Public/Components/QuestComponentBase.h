@@ -8,7 +8,7 @@
 #include "QuestComponentBase.generated.h"
 
 
-class UQuestSignalSubsystem;
+class USignalSubsystem;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -32,5 +32,5 @@ protected:
 	//TObjectPtr<UQuestManagerSubsystem> QuestManager;
 
 	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UQuestSignalSubsystem> QuestSignalSubsystem;	
+	TObjectPtr<USignalSubsystem> SignalSubsystem;
 };

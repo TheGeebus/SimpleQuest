@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "QuestTypes.h"
 #include "GameplayTagContainer.h"
+#include "Quests/QuestNode.h"
 #include "Quest.generated.h"
 
 class UQuest;
@@ -173,7 +174,7 @@ enum class EQuestPrerequisiteOutcome : uint8
 };
 
 /**
- * A prerequisite quest for this quest and their require completion status that mst be attained before starting (but not activating)
+ * A prerequisite quest for this quest and the required completion status that must be attained before starting (but not activating)
  * this quest. Contains both a quest class and a required outcome.
  */
 USTRUCT(BlueprintType)
@@ -200,7 +201,7 @@ struct FQuestPrerequisite
  * StartQuest function on the UQuestManagerSubsystem class and passing the appropriate Quest class.
  */
 UCLASS(Blueprintable)
-class SIMPLEQUEST_API UQuest : public UObject
+class SIMPLEQUEST_API UQuest : public UQuestNode
 {
 	GENERATED_BODY()
 
@@ -234,22 +235,6 @@ public:
 
 protected:
 	virtual void PostInitProperties() override; 
-	
-	/**
-	 * Stable identity for this quest, derived from the authoring node's QuestGuid at compile time. Used as the primary
-	 * key for save data. Never hand-edited.
-	 */
-	UPROPERTY(VisibleDefaultsOnly, BlueprintReadWrite)
-	FGuid QuestGuid;
-	
-	/**
-	 * Hierarchical tag for this quest, generated at compile time from the questline asset name and the quest node's
-	 * label. Used for event bus routing and runtime queries.
-	 *
-	 * Format: Quest.<QuestlineName>.<SanitizedNodeLabel>
-	 */
-	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-	FGameplayTag QuestTag;
 	
 	/**
 	 * All of these quests must be completed prior to the start of this quest. If any quest in this set is not
@@ -353,8 +338,8 @@ protected:
 */
 	
 public:
-	FGuid GetQuestGuid() const { return QuestGuid; }
-	FGameplayTag GetQuestTag() const { return QuestTag; }
+	// Legacy shim — NodeGuid is the canonical identifier on UQuestNodeBase
+	FORCEINLINE FGuid GetQuestGuid() const { return GetNodeGuid(); }
 	const TArray<FQuestPrerequisite>& GetPrerequisiteQuests() const { return PrerequisiteQuests; }
 	const TSet<TSoftClassPtr<UQuest>>& GetNextQuestsOnSuccess() const { return NextQuestsOnSuccess; }
 	const TSet<TSoftClassPtr<UQuest>>& GetNextQuestsOnFailure() const { return NextQuestsOnFailure; }

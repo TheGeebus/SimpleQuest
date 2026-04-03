@@ -124,7 +124,7 @@ void FQuestlineGraphCompiler::CompileOuterGraph(UQuestlineGraph* InGraph)
         CDO->Modify();
 
         // Write the node's stable GUID to the CDO
-        CDO->QuestGuid = QuestNode->QuestGuid;
+        CDO->GetNodeGuid() = QuestNode->QuestGuid;
 
         // Build, register, and write the Gameplay Tag
         const FString NodeLabel = SanitizeTagSegment(QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());

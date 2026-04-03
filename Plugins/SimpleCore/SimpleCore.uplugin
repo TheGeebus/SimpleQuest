@@ -19,16 +19,7 @@
         {
             "Name": "SimpleCore",
             "Type": "Runtime",
-            "LoadingPhase": "Default",
-            "AdditionalDependencies": [
-                "StructUtils"
-            ]
-        }
-    ],
-    "Plugins": [
-        {
-            "Name": "StructUtils",
-            "Enabled": true
+            "LoadingPhase": "Default"
         }
     ]
 }

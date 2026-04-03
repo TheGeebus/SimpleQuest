@@ -9,8 +9,7 @@ public class SimpleCore : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
-			"GameplayTags",
-			"StructUtils"
+			"GameplayTags"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]

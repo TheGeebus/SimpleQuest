@@ -55,7 +55,7 @@ private:
 #if WITH_EDITORONLY_DATA
 public:	
 	/**
-	 * The outer questline graph object. Contains Quest nodes and the wiring between them.
+	 * The questline graph object. Contains Quest nodes and the wiring between them.
 	 */
 	UPROPERTY()
 	TObjectPtr<UEdGraph> QuestlineEdGraph;

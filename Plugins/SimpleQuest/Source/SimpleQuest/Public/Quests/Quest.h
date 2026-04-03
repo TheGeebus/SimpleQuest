@@ -338,8 +338,6 @@ protected:
 */
 	
 public:
-	// Legacy shim — NodeGuid is the canonical identifier on UQuestNodeBase
-	FORCEINLINE FGuid GetQuestGuid() const { return GetNodeGuid(); }
 	const TArray<FQuestPrerequisite>& GetPrerequisiteQuests() const { return PrerequisiteQuests; }
 	const TSet<TSoftClassPtr<UQuest>>& GetNextQuestsOnSuccess() const { return NextQuestsOnSuccess; }
 	const TSet<TSoftClassPtr<UQuest>>& GetNextQuestsOnFailure() const { return NextQuestsOnFailure; }

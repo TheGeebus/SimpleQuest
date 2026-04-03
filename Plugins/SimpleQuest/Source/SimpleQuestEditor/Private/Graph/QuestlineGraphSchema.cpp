@@ -31,7 +31,29 @@ static bool HasDownstreamExit(const UEdGraphPin* OutputPin, TSet<const UEdGraphN
 		if (Cast<UQuestlineNode_ExitBase>(Node)) return true;
 		if (const UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
 		{
-			if (HasDownstreamExit(Knot->FindPin(TEXT("KnotOut")), Visited))	return true;
+			if (HasDownstreamExit(Knot->FindPin(TEXT("KnotOut")), Visited)) return true;
+		}
+	}
+	return false;
+}
+
+// Returns true if OutputPin already leads to any content node (Quest, Leaf, or LinkedQuestline), directly or via reroutes.
+static bool HasDownstreamContent(const UEdGraphPin* OutputPin, TSet<const UEdGraphNode*>& Visited)
+{
+	if (!OutputPin) return false;
+	for (const UEdGraphPin* Connected : OutputPin->LinkedTo)
+	{
+		if (!Connected) continue;
+		const UEdGraphNode* Node = Connected->GetOwningNode();
+		if (Visited.Contains(Node)) continue;
+		Visited.Add(Node);
+		if (Cast<const UQuestlineNode_Quest>(Node)
+			|| Cast<const UQuestlineNode_Leaf>(Node)
+			|| Cast<const UQuestlineNode_LinkedQuestline>(Node))
+			return true;
+		if (const UQuestlineNode_Knot* Knot = Cast<const UQuestlineNode_Knot>(Node))
+		{
+			if (HasDownstreamContent(Knot->FindPin(TEXT("KnotOut")), Visited)) return true;
 		}
 	}
 	return false;
@@ -382,6 +404,15 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 					"A Quest on this wire already leads to a Questline end node. Each outcome can only trigger one ending."));
 			}
 		}
+		// Rule 3: the output pin cannot already lead to a content node — exit and progression are mutually exclusive
+		{
+			TSet<const UEdGraphNode*> Visited;
+			if (HasDownstreamContent(OutputPin, Visited))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "ExitMixedWithContent",
+					"This output already activates a Quest node. A wire cannot both progress and end the questline."));
+			}
+		}
 	}
 	
 	// Lambda for checking upstream connections
@@ -456,6 +487,17 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 	};
 
+	// Mixed-terminal guard: connecting to a content node is illegal if the output already leads to an exit
+	if (Cast<const UQuestlineNode_ContentBase>(InputNode))
+	{
+		TSet<const UEdGraphNode*> Visited;
+		if (HasDownstreamExit(OutputPin, Visited))
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "ContentMixedWithExit",
+				"This output already leads to an exit node. A wire cannot both end and progress the questline."));
+		}
+	}
+	
 	// Either the input or the output pin is a knot (reroute node) 
 	if (bOutputIsKnot || bInputIsKnot)
 	{
@@ -481,6 +523,26 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 						NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch", "Reroute node signal types do not match"));
 				}
 			}
+
+			// Mixed-terminal guard: merging two knot paths must not produce a wire that leads to both an exit and a content node
+			{
+				if (UEdGraphPin* KnotOutPin = Cast<const UQuestlineNode_Knot>(InputNode)
+						? const_cast<UQuestlineNode_Knot*>(Cast<const UQuestlineNode_Knot>(InputNode))->FindPin(TEXT("KnotOut"))
+						: nullptr)
+				{
+					TSet<const UEdGraphNode*> VA; const bool bFromExit    = HasDownstreamExit(OutputPin, VA);
+					TSet<const UEdGraphNode*> VB; const bool bFromContent = HasDownstreamContent(OutputPin, VB);
+					TSet<const UEdGraphNode*> VC; const bool bToExit      = HasDownstreamExit(KnotOutPin, VC);
+					TSet<const UEdGraphNode*> VD; const bool bToContent   = HasDownstreamContent(KnotOutPin, VD);
+
+					if ((bFromExit && bToContent) || (bFromContent && bToExit))
+					{
+						return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "KnotMergesMixed",
+							"This connection would merge an exit path with a progression path on the same wire."));
+					}
+				}
+			}
+			
 			if (const FPinConnectionResponse R = CheckDuplicateSources(); R.Response != CONNECT_RESPONSE_MAKE) return R;
 			return CheckDownstreamParallelPaths(InputPin);
 		}
@@ -499,6 +561,26 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 						NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch", "Signal type does not match this reroute node"));
 				}
 			}
+			
+			// Mixed-terminal guard: merging two knot paths must not produce a wire that leads to both an exit and a content node
+			{
+				if (UEdGraphPin* KnotOutPin = Cast<const UQuestlineNode_Knot>(InputNode)
+						? const_cast<UQuestlineNode_Knot*>(Cast<const UQuestlineNode_Knot>(InputNode))->FindPin(TEXT("KnotOut"))
+						: nullptr)
+				{
+					TSet<const UEdGraphNode*> VA; const bool bFromExit    = HasDownstreamExit(OutputPin, VA);
+					TSet<const UEdGraphNode*> VB; const bool bFromContent = HasDownstreamContent(OutputPin, VB);
+					TSet<const UEdGraphNode*> VC; const bool bToExit      = HasDownstreamExit(KnotOutPin, VC);
+					TSet<const UEdGraphNode*> VD; const bool bToContent   = HasDownstreamContent(KnotOutPin, VD);
+
+					if ((bFromExit && bToContent) || (bFromContent && bToExit))
+					{
+						return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "KnotMergesMixed",
+							"This connection would merge an exit path with a progression path on the same wire."));
+					}
+				}
+			}
+
 			if (const FPinConnectionResponse R = CheckDuplicateSources(); R.Response != CONNECT_RESPONSE_MAKE) return R;
 			return CheckDownstreamParallelPaths(InputPin);
 		}

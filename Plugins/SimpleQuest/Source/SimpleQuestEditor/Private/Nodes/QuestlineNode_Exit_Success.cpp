@@ -7,5 +7,5 @@ void UQuestlineNode_Exit_Success::AllocateDefaultPins()
 
 FText UQuestlineNode_Exit_Success::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	return NSLOCTEXT("SimpleQuestEditor", "ExitSuccess", "Questline Success");
+	return NSLOCTEXT("SimpleQuestEditor", "ExitSuccess", "Success");
 }

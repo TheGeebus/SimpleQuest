@@ -14,12 +14,13 @@
 
 void SQuestlineGraphPanel::Construct(const FArguments& InArgs,
                                      UEdGraph* InGraph,
-                                     TSharedPtr<FUICommandList> InCommands)
+                                     const TSharedPtr<FUICommandList>& InCommands)
 {
     SAssignNew(GraphEditor, SGraphEditor)
         .IsEditable(true)
         .GraphToEdit(InGraph)
-        .AdditionalCommands(InCommands);
+        .AdditionalCommands(InCommands)
+        .GraphEvents(InArgs._GraphEvents);
 
     ChildSlot[ GraphEditor.ToSharedRef() ];
     FSlateApplication::Get().OnFocusChanging().AddSP(this, &SQuestlineGraphPanel::HandleFocusChanging);

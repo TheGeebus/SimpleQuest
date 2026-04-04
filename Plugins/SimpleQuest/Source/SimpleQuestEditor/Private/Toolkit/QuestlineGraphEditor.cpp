@@ -12,15 +12,21 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
 #include "Widgets/Notifications/SNotificationList.h"
+#include "PropertyEditorModule.h"
+#include "Modules/ModuleManager.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
+const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Details"));
+
+
+FQuestlineGraphEditor::~FQuestlineGraphEditor() = default;
 
 void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph)
 {
     QuestlineGraph = InQuestlineGraph;
 
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v1")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v3")
         ->AddArea
         (
             FTabManager::NewPrimaryArea()
@@ -28,13 +34,26 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
             ->Split
             (
                 FTabManager::NewStack()
-                ->SetSizeCoefficient(1.f)
+                ->SetSizeCoefficient(0.15f)
+                ->AddTab(DetailsTabId, ETabState::OpenedTab)
+            )
+            ->Split
+            (
+                FTabManager::NewStack()
+                ->SetSizeCoefficient(0.85f)
                 ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
             )
         );
     
     BindGraphCommands();
     ExtendToolbar();
+
+    FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+    FDetailsViewArgs DetailsViewArgs;
+    DetailsViewArgs.bHideSelectionTip = true;
+    DetailsViewArgs.bAllowSearch = false;
+    DetailsView = PropertyModule.CreateDetailView(DetailsViewArgs);
+
     InitAssetEditor(
         Mode,
         InitToolkitHost,
@@ -73,12 +92,18 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         GraphViewportTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnGraphViewportTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Viewport"));
+
+    InTabManager->RegisterTabSpawner(
+        DetailsTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnDetailsTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "DetailsTab", "Details"));
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
     InTabManager->UnregisterTabSpawner(GraphViewportTabId);
+    InTabManager->UnregisterTabSpawner(DetailsTabId);
 }
 
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTabArgs& Args)
@@ -97,7 +122,12 @@ TSharedRef<SQuestlineGraphPanel> FQuestlineGraphEditor::CreateGraphEditorWidget(
     check(QuestlineGraph);
     check(QuestlineGraph->QuestlineEdGraph);
 
-    return SNew(SQuestlineGraphPanel, QuestlineGraph->QuestlineEdGraph, GraphEditorCommands);
+    SGraphEditor::FGraphEditorEvents GraphEvents;
+    GraphEvents.OnSelectionChanged = SGraphEditor::FOnSelectionChanged::CreateSP(
+        this, &FQuestlineGraphEditor::OnGraphSelectionChanged);
+
+    return SNew(SQuestlineGraphPanel, QuestlineGraph->QuestlineEdGraph, GraphEditorCommands)
+        .GraphEvents(GraphEvents);
 }
 
 void FQuestlineGraphEditor::BindGraphCommands()
@@ -173,3 +203,24 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
     ToolbarBuilder.AddToolBarButton(FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph);
     ToolbarBuilder.EndSection();
 }
+
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnDetailsTab(const FSpawnTabArgs& Args)
+{
+    return SNew(SDockTab)
+        .Label(NSLOCTEXT("SimpleQuestEditor", "DetailsTabLabel", "Details"))
+        [
+            DetailsView.IsValid() ? DetailsView.ToSharedRef() : SNullWidget::NullWidget
+        ];
+}
+
+void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSet& SelectedNodes)
+{
+    if (!DetailsView.IsValid()) return;
+
+    TArray<UObject*> Selected;
+    for (UObject* Obj : SelectedNodes)
+        Selected.Add(Obj);
+
+    DetailsView->SetObjects(Selected);
+}
+

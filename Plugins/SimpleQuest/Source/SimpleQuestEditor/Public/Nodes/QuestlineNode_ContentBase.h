@@ -12,6 +12,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_ContentBase : public UQuestlineNodeBa
 	GENERATED_BODY()
 
 public:
+	UQuestlineNode_ContentBase();
 	virtual bool IsContentNode() const override { return true; }
 	
 	virtual void AllocateDefaultPins() override;
@@ -20,6 +21,9 @@ public:
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+
+	virtual void OnRenameNode(const FString& NewName) override;
+	
 
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")

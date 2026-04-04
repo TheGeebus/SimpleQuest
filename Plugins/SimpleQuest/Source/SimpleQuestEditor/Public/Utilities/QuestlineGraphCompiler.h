@@ -28,7 +28,7 @@ class SIMPLEQUESTEDITOR_API FQuestlineGraphCompiler
 {
 public:
 	FQuestlineGraphCompiler();
-	virtual ~FQuestlineGraphCompiler() = default;
+	virtual ~FQuestlineGraphCompiler();
 
     /** Entry point. Validates the asset, then kicks off recursive graph compilation. Returns true if there were no errors. */
 	virtual bool Compile(UQuestlineGraph* InGraph);

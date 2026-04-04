@@ -27,6 +27,8 @@ FQuestlineGraphCompiler::FQuestlineGraphCompiler()
 {
 }
 
+FQuestlineGraphCompiler::~FQuestlineGraphCompiler() = default;
+
 
 // -------------------------------------------------------------------------------------------------
 // Entry point

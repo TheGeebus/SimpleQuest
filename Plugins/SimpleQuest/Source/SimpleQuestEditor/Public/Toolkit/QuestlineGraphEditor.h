@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Toolkits/AssetEditorToolkit.h"
 #include "Toolkit/QuestlineGraphPanel.h"
+#include "IDetailsView.h"
 #include "ISimpleQuestEditorModule.h"
 
 
@@ -14,6 +15,7 @@ class SGraphEditor;
 class FQuestlineGraphEditor : public FAssetEditorToolkit
 {
 public:
+	~FQuestlineGraphEditor();
 	void InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph);
 
 	// FAssetEditorToolkit interface
@@ -40,4 +42,14 @@ private:
 	TSharedPtr<SQuestlineGraphPanel> GraphEditorWidget;
 	TSharedPtr<FUICommandList> GraphEditorCommands;
 	static const FName GraphViewportTabId;
+
+	/*-----------------------------------------------------------------------------------
+	 * Details Panel
+	 *----------------------------------------------------------------------------------*/
+	
+	TSharedRef<SDockTab> SpawnDetailsTab(const FSpawnTabArgs& Args);
+	void OnGraphSelectionChanged(const FGraphPanelSelectionSet& SelectedNodes);
+
+	TSharedPtr<IDetailsView> DetailsView;
+	static const FName DetailsTabId;
 };

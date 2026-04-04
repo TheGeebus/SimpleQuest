@@ -1,5 +1,10 @@
 ﻿#include "Nodes/QuestlineNode_ContentBase.h"
 
+UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
+{
+	bCanRenameNode = true;
+}
+
 void UQuestlineNode_ContentBase::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input,TEXT("QuestActivation"),TEXT("Activate"));
@@ -39,4 +44,9 @@ void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
 {
 	Super::PostDuplicate(bDuplicateForPIE);
 	QuestGuid = FGuid::NewGuid();
+}
+
+void UQuestlineNode_ContentBase::OnRenameNode(const FString& NewName)
+{
+    NodeLabel = FText::FromString(NewName);
 }

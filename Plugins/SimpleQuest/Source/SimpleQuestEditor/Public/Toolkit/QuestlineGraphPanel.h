@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GraphEditor.h"
 #include "Widgets/SCompoundWidget.h"
 #include "GraphEditor.h"
 
@@ -11,9 +12,10 @@ class SQuestlineGraphPanel : public SCompoundWidget
 {
 public:
 	SLATE_BEGIN_ARGS(SQuestlineGraphPanel) {}
+		SLATE_ARGUMENT(SGraphEditor::FGraphEditorEvents, GraphEvents)
 	SLATE_END_ARGS()
 
-	void Construct(const FArguments& InArgs, UEdGraph* InGraph, TSharedPtr<FUICommandList> InCommands);
+	void Construct(const FArguments& InArgs, UEdGraph* InGraph, const TSharedPtr<FUICommandList>& InCommands);
 
 	TSharedPtr<SGraphEditor> GetGraphEditor() const { return GraphEditor; }
 

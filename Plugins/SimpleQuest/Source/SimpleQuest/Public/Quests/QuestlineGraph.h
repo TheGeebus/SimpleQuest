@@ -61,8 +61,12 @@ private:
     
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
+#if !WITH_EDITOR
+    TArray<TUniquePtr<FNativeGameplayTag>> RegisteredNativeTags;
+#endif
 
 public:
+    virtual void PostLoad() override;
     const TArray<FName>& GetEntryNodeTags() const { return EntryNodeTags; }
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }

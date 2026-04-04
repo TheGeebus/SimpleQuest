@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "ISimpleQuestEditorModule.h"
+#include "NativeGameplayTags.h"
 #include "Modules/ModuleInterface.h"
 
 struct FGraphPanelPinConnectionFactory;
@@ -19,6 +20,9 @@ public:
 	virtual void RegisterCompilerFactory(FQuestlineCompilerFactoryDelegate InFactory) override;
 	virtual void UnregisterCompilerFactory() override;
 	virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const override;
+	virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) override;
+
+	TMap<FString, TArray<TUniquePtr<FNativeGameplayTag>>> CompiledTagRegistry; // keyed by graph package path
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
@@ -29,4 +33,5 @@ private:
 
 	void OnMapChanged(uint32 MapChangeEventFlag);
 	void OnPreBeginPIE(const bool bIsSimulating);
+	
 };

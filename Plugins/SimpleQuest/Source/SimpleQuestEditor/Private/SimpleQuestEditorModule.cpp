@@ -118,6 +118,24 @@ TUniquePtr<FQuestlineGraphCompiler> FSimpleQuestEditor::CreateCompiler() const
 	return MakeUnique<FQuestlineGraphCompiler>();
 }
 
+void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames)
+{
+	CompiledTagRegistry.Remove(GraphPath);
+	TArray<TUniquePtr<FNativeGameplayTag>>& Entries = CompiledTagRegistry.Add(GraphPath);
+
+	for (const FName& TagName : TagNames)
+	{
+		Entries.Add(MakeUnique<FNativeGameplayTag>(
+			FName("SimpleQuest"),
+			FName("SimpleQuest"),
+			TagName,
+			TEXT(""),
+			ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+	}
+
+	UGameplayTagsManager::Get().ConstructGameplayTagTree();
+}
+
 void FSimpleQuestEditor::OnMapChanged(uint32 MapChangeEventFlag)
 {
 	if (MapChangeEventFlag == static_cast<uint32>(EMapChangeType::SaveMap)) FQuestGiverManifestBuilder::RebuildManifest();

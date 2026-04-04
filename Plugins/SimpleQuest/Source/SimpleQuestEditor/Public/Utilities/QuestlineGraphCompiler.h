@@ -95,7 +95,7 @@ protected:
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
 
 private:
-	void SyncTagDataTable(UQuestlineGraph* InGraph);
+	void RegisterCompiledTags(UQuestlineGraph* InGraph);
 
 	UQuestlineGraph* RootGraph = nullptr;
 

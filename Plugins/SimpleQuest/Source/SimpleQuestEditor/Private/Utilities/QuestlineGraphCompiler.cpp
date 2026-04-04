@@ -3,7 +3,9 @@
 #include "Utilities/QuestlineGraphCompiler.h"
 
 #include "GameplayTagsManager.h"
-#include "SimpleQuestLog.h"
+#include "ISimpleQuestEditorModule.h"
+#include "SimpleQuestEditorModule.h"
+#include "NativeGameplayTags.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
@@ -22,11 +24,6 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
-#include "Engine/DataTable.h"
-#include "GameplayTagsSettings.h"
-#include "Factories/DataTableFactory.h"
-#include "AssetToolsModule.h"
-
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -96,8 +93,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
     
-    SyncTagDataTable(InGraph);
-    
+    RegisterCompiledTags(InGraph);
+
     return !bHasErrors;
 }
 
@@ -174,7 +171,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UQuestlineGraph* Graph, cons
     }
 
     if (bHasErrors) return {};
-
+    
     // ---- Pass 2: output pin wiring ----
 
     for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
@@ -390,52 +387,10 @@ void FQuestlineGraphCompiler::AddWarning(const FString& Message)
     UE_LOG(LogTemp, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
-void FQuestlineGraphCompiler::SyncTagDataTable(UQuestlineGraph* InGraph)
+void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
 {
-    // Derive the DataTable asset path from the questline graph's package path
-    const FString GraphPackageName = InGraph->GetOutermost()->GetName();
-    const FString TablePackageName = GraphPackageName + TEXT("_Tags");
-    const FString TableAssetName   = FPackageName::GetLongPackageAssetName(TablePackageName);
-    const FString TablePackagePath = FPackageName::GetLongPackagePath(TablePackageName);
-
-    // Try to load existing DataTable; create it if this is the first compile
-    const FString TableObjectPath = TablePackageName + TEXT(".") + TableAssetName;
-    UDataTable* TagTable = LoadObject<UDataTable>(nullptr, *TableObjectPath);
-
-    if (!TagTable)
-    {
-        IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
-        UDataTableFactory* Factory = NewObject<UDataTableFactory>();
-        Factory->Struct = FGameplayTagTableRow::StaticStruct();
-        TagTable = Cast<UDataTable>(AssetTools.CreateAsset(TableAssetName, TablePackagePath, UDataTable::StaticClass(), Factory));
-
-        if (!TagTable)
-        {
-            AddError(FString::Printf(TEXT("Failed to create tag DataTable asset at '%s'."), *TablePackageName));
-            return;
-        }
-
-        // One-time registration with the tag manager settings
-        UGameplayTagsSettings* TagSettings = GetMutableDefault<UGameplayTagsSettings>();
-        const FSoftObjectPath TablePath(TagTable);
-        if (!TagSettings->GameplayTagTableList.Contains(TablePath))
-        {
-            TagSettings->GameplayTagTableList.Add(TablePath);
-            TagSettings->TryUpdateDefaultConfigFile();
-        }
-    }
-
-    // Repopulate rows from the freshly compiled tag list
-    TagTable->EmptyTable();
-    for (const FName& TagName : InGraph->CompiledQuestTags)
-    {
-        FGameplayTagTableRow Row;
-        Row.Tag = TagName;
-        TagTable->AddRow(TagName, Row);
-    }
-    TagTable->MarkPackageDirty();
-
-    // Rebuild the live tag tree so pickers see the new tags immediately
-    UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+    ISimpleQuestEditorModule::Get().RegisterCompiledTags(
+        InGraph->GetPackage()->GetName(),
+        InGraph->CompiledQuestTags);
 }
 

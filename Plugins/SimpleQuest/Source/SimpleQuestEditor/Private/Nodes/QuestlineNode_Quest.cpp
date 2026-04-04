@@ -1,7 +1,6 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Nodes/QuestlineNode_Quest.h"
-#include "Quests/Quest.h"
 
 FText UQuestlineNode_Quest::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {

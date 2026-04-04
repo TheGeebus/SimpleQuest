@@ -54,4 +54,12 @@ public:
      * Creates a compiler instance using the registered factory if one exists, otherwise returns the default FQuestlineGraphCompiler.
      */
     virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const = 0;
+
+    /**
+     * Register native Gameplay Tags that are created at graph compilation time so they show up in the Gameplay Tags Manager in
+     * Project Settings.
+     * @param GraphPath Path to the QuestlineGraph asset from which to register the compiled tags 
+     * @param TagNames The FName representations of the gameplay tags on this graph
+     */
+    virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) = 0;
 };

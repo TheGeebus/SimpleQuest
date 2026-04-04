@@ -13,7 +13,7 @@ struct FSignalEventBase;
 
 using FSignalEventMulticast = TMulticastDelegate<void(const FInstancedStruct&)>;
 
-template <typename Base, typename Derived>
+template <typename Derived, typename Base>
 concept derived_from_base = std::is_base_of_v<Base, Derived>;
 
 UCLASS()
@@ -25,19 +25,19 @@ public:
     virtual void Deinitialize() override;
 
     template<typename EventType>
-    requires derived_from_base<FSignalEventBase, EventType>
+    requires derived_from_base<EventType, FSignalEventBase>
     void PublishTyped(UObject* ChannelObject, const EventType& Event);
 
     template <typename EventType, typename ListenerType>
-    requires derived_from_base<FSignalEventBase, EventType>
+    requires derived_from_base<EventType, FSignalEventBase>
     FDelegateHandle SubscribeTyped(UObject* ChannelObject, ListenerType* Listener, void(ListenerType::* Function)(const EventType&));
 
     template <typename EventType, typename ListenerType>
-    requires derived_from_base<FSignalEventBase, EventType>
+    requires derived_from_base<EventType, FSignalEventBase>
     FDelegateHandle SubscribeTypedByTag(FGameplayTag EventTag, ListenerType* Listener, void(ListenerType::* Function)(const EventType&));
 
     template<typename EventType>
-    requires derived_from_base<FSignalEventBase, EventType>
+    requires derived_from_base<EventType, FSignalEventBase>
     void UnsubscribeTyped(UObject* ChannelObject, FDelegateHandle Handle);
 
     void UnsubscribeTypedByTag(FGameplayTag EventTag, FDelegateHandle Handle);
@@ -51,11 +51,13 @@ private:
 };
 
 template <typename EventType>
-requires derived_from_base<FSignalEventBase, EventType>
+requires derived_from_base<EventType, FSignalEventBase>
 void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Event)
 {
     if (bIsShuttingDown) return;
 
+    // Legacy broadcast method with channels keyed by UObject/UScriptStruct pairs. Currently preserved for backwards compatibility.
+    // Will be removed following transition to tags as event identifiers
     const FSignalEventChannelKey Channel = MakeKey(ChannelObject, EventType::StaticStruct());
     FInstancedStruct EventCopy = FInstancedStruct::Make<EventType>(Event);
 
@@ -65,10 +67,14 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
         DelegateCopy.Broadcast(EventCopy);
     }
 
-    // Events are FGameplayTagContainers because linked event graphs may have subscribers at both the parent and child levels,
-    // so we store a separate tag describing all the parent and child graph hierarchies in a tree.
-    // We want to walk all tag hierarchies, checking if we've already broadcast this exact event because tag hierarchies
-    // may have duplicates that represent branch nodes.
+    // Events hold EventTags - FGameplayTagContainers - because linked questline graphs may have subscribers at both the parent and
+    // child levels. So we store a tag that describes the whole questline hierarchy from the top parent level down to this event,
+    // and we also store separate tags that describe the hierarchy from the start of each linked child graph in the chain without its
+    // parent context. Subscribers may then subscribe to specific instances of an event in some graph which is reused in some chain of
+    // linked graphs or to all instances of the event throughout that chain as needed.
+    //
+    // We want to walk all tag hierarchies from the tip to root, checking if we've already broadcast this exact event because tag
+    // hierarchies examined starting from the tip may have duplicates that represent graph links.
     
     TSet<FGameplayTag> VisitedTags;
     for (const FGameplayTag& RootTag : Event.EventTags)
@@ -76,7 +82,7 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
         FGameplayTag CurrentTag = RootTag;
         while (CurrentTag.IsValid())
         {
-            if (VisitedTags.Contains(CurrentTag)) break; // skip the event if we've visited the same tag on another root
+            if (VisitedTags.Contains(CurrentTag)) break; // Detected common ancestry with a branch we've already walked up, so this tag and any parent tags in this hierarchy are duplicates. Stop walking this branch and move to the next.
             VisitedTags.Add(CurrentTag);
 
             if (auto* Delegate = TagChannels.Find(CurrentTag))
@@ -84,14 +90,14 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
                 FSignalEventMulticast DelegateCopy = *Delegate;
                 DelegateCopy.Broadcast(EventCopy);
             }
-            CurrentTag = CurrentTag.RequestDirectParent(); // walk up the hierarchy from tip to root, iterating parent for loop to next root in tag container when done
+            CurrentTag = CurrentTag.RequestDirectParent(); // Inner 'while' loop walks up the hierarchy from tip to root, iterating outer 'for' loop to next root in tag container when done
         }
     }
 
 }
 
 template <typename EventType, typename ListenerType>
-requires derived_from_base<FSignalEventBase, EventType>
+requires derived_from_base<EventType, FSignalEventBase>
 FDelegateHandle USignalSubsystem::SubscribeTyped(UObject* ChannelObject, ListenerType* Listener,
     void(ListenerType::* Function)(const EventType&))
 {
@@ -110,7 +116,7 @@ FDelegateHandle USignalSubsystem::SubscribeTyped(UObject* ChannelObject, Listene
 }
 
 template <typename EventType, typename ListenerType>
-requires derived_from_base<FSignalEventBase, EventType>
+requires derived_from_base<EventType, FSignalEventBase>
 FDelegateHandle USignalSubsystem::SubscribeTypedByTag(const FGameplayTag EventTag, ListenerType* Listener,
     void(ListenerType::* Function)(const EventType&))
 {
@@ -128,7 +134,7 @@ FDelegateHandle USignalSubsystem::SubscribeTypedByTag(const FGameplayTag EventTa
 }
 
 template <typename EventType>
-requires derived_from_base<FSignalEventBase, EventType>
+requires derived_from_base<EventType, FSignalEventBase>
 void USignalSubsystem::UnsubscribeTyped(UObject* ChannelObject, const FDelegateHandle Handle)
 {
     const FSignalEventChannelKey Channel = MakeKey(ChannelObject, EventType::StaticStruct());

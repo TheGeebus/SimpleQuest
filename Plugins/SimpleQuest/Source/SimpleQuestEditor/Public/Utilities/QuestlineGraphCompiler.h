@@ -75,7 +75,10 @@ protected:
 
 	/** Internal questline compiler error flag. Returned by the main Compile function. */
 	bool bHasErrors = false;
-	
+
+	/** Accumulates all compiled node classes across the full recursive compilation run. Written to the top-level graph by Compile(). */
+	TMap<FGameplayTag, TSubclassOf<UQuestNodeBase>> AllCompiledNodeClasses;
+
 private:
 	/**
 	 * Returns the UQuestNodeBase CDO for a Quest or Leaf content node. Returns null for LinkedQuestline nodes (compiler-only,

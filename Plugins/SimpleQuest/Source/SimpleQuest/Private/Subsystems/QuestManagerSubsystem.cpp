@@ -5,6 +5,8 @@
 
 #include "Interfaces/QuestGiverInterface.h"
 #include "Quests/Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestlineEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
@@ -56,6 +58,7 @@ void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 {
 	if (!InitialQuests.IsEmpty())
 	{
+		// Legacy
 		for (const TSoftClassPtr<UQuest>& QuestSoftClass : InitialQuests)
 		{
 			if (const UClass* QuestClass = QuestSoftClass.LoadSynchronous())
@@ -66,6 +69,19 @@ void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 			else
 			{
 				UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::Initialize : soft reference to class was invalid, loading failed"));
+			}
+		}
+
+		// Start initial questline assets compiled by visual graph
+		for (const TSoftObjectPtr<UQuestlineGraph>& GraphPtr : InitialQuestlines)
+		{
+			if (UQuestlineGraph* Graph = GraphPtr.LoadSynchronous())
+			{
+				ActivateQuestlineGraph(Graph);
+			}
+			else
+			{
+				UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartInitialQuestlines : failed to load questline graph asset"));
 			}
 		}
 	}
@@ -175,6 +191,7 @@ UQuest* UQuestManagerSubsystem::LoadQuest(const TSoftClassPtr<UQuest>& QuestClas
 		
 		LoadedQuestClasses.Add(NewQuest->GetClass());
 		LoadedQuests.Add(NewQuest);
+		NewQuest->SetContextualTag(NewQuest->GetQuestTag());
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::LoadQuest : Quest Loaded, class: %s"), *QuestClass->GetName());
 		for (auto Pair : QuestGiverMap)
 		{
@@ -481,10 +498,22 @@ void UQuestManagerSubsystem::CompleteQuest(UQuest* CompletedQuest, bool bDidSucc
 		CompletedQuestClasses.Remove(Quest.LoadSynchronous());
 	}
 
-	const TSet<TSoftClassPtr<UQuest>>& NextQuests = bDidSucceed ? CompletedQuest->GetNextQuestsOnSuccess() : CompletedQuest->GetNextQuestsOnFailure();
-	for (auto NewQuest : NextQuests)
+	const TSet<FGameplayTag>& NextNodeTags = bDidSucceed ? CompletedQuest->GetNextNodesOnSuccess() : CompletedQuest->GetNextNodesOnFailure();
+	if (!NextNodeTags.IsEmpty())
 	{
-		ActivateQuestClass(NewQuest);
+		for (const FGameplayTag& Tag : NextNodeTags)
+		{
+			ActivateNodeByTag(Tag);
+		}
+	}
+	else
+	{
+		// Legacy fallback: quests authored before the tag-based compiler wrote NextNodesOnSuccess/Failure
+		const TSet<TSoftClassPtr<UQuest>>& NextQuests = bDidSucceed ? CompletedQuest->GetNextQuestsOnSuccess() : CompletedQuest->GetNextQuestsOnFailure();
+		for (const TSoftClassPtr<UQuest>& NewQuest : NextQuests)
+		{
+			ActivateQuestClass(NewQuest);
+		}
 	}
 }
 
@@ -515,5 +544,52 @@ void UQuestManagerSubsystem::OnQuestTargetEnabledEvent(UQuest* InQuest, UObject*
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::OnQuestTargetEnabledEvent : publishing quest step ended event: %s"), *InQuest->GetQuestTag().ToString());
 			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepCompletedEvent(InQuest->GetQuestTag(), InQuest->GetClass(), InStepID, true, false, nullptr));
 		}
+	}
+}
+
+void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
+{
+	if (!Graph) return;
+
+	for (const auto& Pair : Graph->GetCompiledNodeClasses())
+	{
+		NodeTagToClass.Add(Pair.Key, Pair.Value);
+	}
+
+	for (const FGameplayTag& EntryTag : Graph->GetEntryNodeTags())
+	{
+		ActivateNodeByTag(EntryTag);
+	}
+}
+
+void UQuestManagerSubsystem::ActivateNodeByTag(const FGameplayTag NodeTag)
+{
+	const TSubclassOf<UQuestNodeBase>* ClassPtr = NodeTagToClass.Find(NodeTag);
+	if (!ClassPtr || !*ClassPtr)
+	{
+		UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no class registered for tag '%s'"), *NodeTag.ToString());
+		return;
+	}
+
+	if ((*ClassPtr)->IsChildOf(UQuest::StaticClass()))
+	{
+		ActivateQuestClass(TSoftClassPtr<UQuest>(*ClassPtr));
+	}
+	else
+	{
+		// Generic UQuestNodeBase subclass (e.g. UQuestStep leaf node)
+		UQuestNodeBase* Node = NewObject<UQuestNodeBase>(this, *ClassPtr);
+		Node->Activate(NodeTag);
+	}
+}
+
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* CompletedNode, bool bDidSucceed)
+{
+	if (!CompletedNode) return;
+
+	const TSet<FGameplayTag>& NextTags = bDidSucceed ? CompletedNode->GetNextNodesOnSuccess() : CompletedNode->GetNextNodesOnFailure();
+	for (const FGameplayTag& Tag : NextTags)
+	{
+		ActivateNodeByTag(Tag);
 	}
 }

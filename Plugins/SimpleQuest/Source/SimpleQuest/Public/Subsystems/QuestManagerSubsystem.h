@@ -19,6 +19,9 @@ class UQuestGiverInterface;
 struct FQuestText;
 class UQuest;
 class UQuestReward;
+class UQuestlineGraph;
+class UQuestNodeBase;
+
 
 USTRUCT(BlueprintType)
 struct FQuestGivers
@@ -149,22 +152,30 @@ public:
 	FGameplayTagContainer ActiveQuestTags;
 
 protected:
-	// Quests to load when the game launches. 
+	/** Quests to load when the game launches. */ 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "QuestMap", meta = (AllowPrivateAccess = "true"))
 	TArray<TSoftClassPtr<UQuest>> InitialQuests;
 
-	// Quests currently loaded by the quest manager subsystem.
+	/** Questline graph assets to activate when the game launches. Prefer this over InitialQuests for graphs compiled with the current compiler. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="QuestMap")
+	TArray<TSoftObjectPtr<UQuestlineGraph>> InitialQuestlines;
+
+	/** Quests currently loaded by the quest manager subsystem. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "LoadedQuests", meta = (AllowPrivateAccess = "true"))
 	TArray<TObjectPtr<UQuest>> LoadedQuests;
 
-	// Quick reference set of loaded quests.
+	/** Tag-to-class registry built at runtime from loaded questline graph assets. Used by ActivateNodeByTag. */
+	UPROPERTY()
+	TMap<FGameplayTag, TSubclassOf<UQuestNodeBase>> NodeTagToClass;
+
+	/** Quick reference set of loaded quests. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "LoadedQuests", meta = (AllowPrivateAccess = "true"))
 	TSet<TSubclassOf<UQuest>> LoadedQuestClasses;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "LoadedQuests", meta = (AllowPrivateAccess = "true"))
 	TSet<TSubclassOf<UQuest>> StartedQuestClasses;
 	
-	// Completed quests. Checked against quest prerequisites to determine eligibility.
+	/** Completed quests. Checked against quest prerequisites to determine eligibility. */
 	UPROPERTY()
 	TMap<TSubclassOf<UQuest>, bool> CompletedQuestClasses;
 	
@@ -180,6 +191,15 @@ protected:
 	virtual void PublishQuestEndEvent(const UQuest* EndedQuest, bool bDidSucceed) const;
 	virtual void SetQuestEnabled(const FGameplayTag QuestTag, const TSubclassOf<UQuest>& LoadedQuestClass, bool bIsEnabled);
 	virtual void ActivateQuestClass(const TSoftClassPtr<UQuest>& InQuestClass);
+
+	/** Registers all node classes from the graph into NodeTagToClass and activates its entry nodes. */
+	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph);
+
+	/** Looks up the class for NodeTag in NodeTagToClass and activates the appropriate node. Delegates to ActivateQuestClass for UQuest subclasses. */
+	virtual void ActivateNodeByTag(FGameplayTag NodeTag);
+
+	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesOnSuccess / NextNodesOnFailure. */
+	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, bool bDidSucceed);
 
 	
 	/**

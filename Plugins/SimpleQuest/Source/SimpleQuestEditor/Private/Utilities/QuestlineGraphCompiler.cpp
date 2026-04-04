@@ -60,7 +60,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 
     // Mark the graph asset as dirty, meaning it needs to be saved
     InGraph->Modify();
-    InGraph->CompiledQuestTags.Empty();
+    InGraph->CompiledNodeClasses.Empty();
+    InGraph->EntryNodeTags.Empty();
+    AllCompiledNodeClasses.Empty();
 
     // The graphs that have already been compiled. Provided to CompileGraph, which forwards it to all recursive calls.
     TArray<FString> VisitedAssetPaths;
@@ -68,7 +70,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 
     // Start recursive compilation, working forward from the Start node. This is the top level so there are no boundary tags to
     // pass in from a parent graph yet.
-    CompileGraph(InGraph, TagPrefix, {}, {}, VisitedAssetPaths);
+    TArray<FGameplayTag> EntryTags = CompileGraph(InGraph, TagPrefix, {}, {}, VisitedAssetPaths);
+    InGraph->EntryNodeTags = EntryTags;
+    InGraph->CompiledNodeClasses = MoveTemp(AllCompiledNodeClasses);
 
     return !bHasErrors;
 }

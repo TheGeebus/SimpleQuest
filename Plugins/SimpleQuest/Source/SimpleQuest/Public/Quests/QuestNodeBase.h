@@ -22,6 +22,12 @@ public:
     FOnNodeActivated OnNodeActivated;
     FOnNodeCompleted OnNodeCompleted;
 
+    /**
+     * Activate this node with the given contextual tag. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
+     * to add activation behavior.
+     */
+    virtual void Activate(FGameplayTag InContextualTag);
+
 protected:
     /**
      * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID

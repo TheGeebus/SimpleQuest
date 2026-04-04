@@ -1,19 +1,20 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Graph/QuestlineGraphSchema.h"
+#include "Graph/QuestlineDrawingPolicyMixin.h"
 #include "BlueprintConnectionDrawingPolicy.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Nodes/QuestlineNode_Exit_Failure.h"
+#include "Nodes/QuestlineNode_Exit_Success.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
-#include "Nodes/QuestlineNode_Exit_Failure.h"
-#include "Nodes/QuestlineNode_Exit_Success.h"
 #include "ScopedTransaction.h"
-#include "Graph/QuestlineDrawingPolicyMixin.h"
-#include "Nodes/QuestlineNode_Leaf.h"
-#include "Nodes/QuestlineNode_LinkedQuestline.h"
+
 
 
 class FQuestlineConnectionDrawingPolicy	: public TQuestlineDrawingPolicyMixin<FKismetConnectionDrawingPolicy>
@@ -454,8 +455,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			AddQuestTooltip,
 			0));
 
-	NewQuestAction->NodeTemplate = NewObject<UQuestlineNode_Quest>(
-		const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	NewQuestAction->NodeTemplate = NewObject<UQuestlineNode_Quest>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 
 	ContextMenuBuilder.AddAction(NewQuestAction);
 
@@ -467,8 +467,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddRerouteNodeTooltip", "Add a reroute node"),
 			0));
 
-	RerouteAction->NodeTemplate = NewObject<UQuestlineNode_Knot>(
-		const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	RerouteAction->NodeTemplate = NewObject<UQuestlineNode_Knot>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 
 	ContextMenuBuilder.AddAction(RerouteAction);
 
@@ -479,8 +478,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddExitSuccess", "Add Questline Success"),
 			NSLOCTEXT("SimpleQuestEditor", "AddExitSuccessTooltip", "Add a Questline Success exit node"),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Success>(
-			const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Success>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 
@@ -491,8 +489,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddExitFailure", "Add Questline Failure"),
 			NSLOCTEXT("SimpleQuestEditor", "AddExitFailureTooltip", "Add a Questline Failed exit node"),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Failure>(
-			const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Failure>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 	
@@ -503,8 +500,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddLeafNode", "Add Quest Step"),
 			NSLOCTEXT("SimpleQuestEditor", "AddLeafNodeTooltip", "Add a Quest Step leaf node"),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_Leaf>(
-			const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_Step>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 
@@ -515,8 +511,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddLinkedNode", "Add Linked Questline"),
 			NSLOCTEXT("SimpleQuestEditor", "AddLinkedNodeTooltip", "Reference an external questline graph asset"),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_LinkedQuestline>(
-			const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_LinkedQuestline>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 }

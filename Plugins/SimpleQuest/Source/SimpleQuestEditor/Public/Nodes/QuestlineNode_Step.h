@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "QuestlineNode_ContentBase.h"
-#include "QuestlineNode_Leaf.generated.h"
+#include "QuestlineNode_Step.generated.h"
 
 class UQuestStep;
 
 UCLASS()
-class SIMPLEQUESTEDITOR_API UQuestlineNode_Leaf : public UQuestlineNode_ContentBase
+class SIMPLEQUESTEDITOR_API UQuestlineNode_Step : public UQuestlineNode_ContentBase
 {
 	GENERATED_BODY()
 

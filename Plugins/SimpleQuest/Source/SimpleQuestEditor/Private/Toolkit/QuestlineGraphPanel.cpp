@@ -6,7 +6,7 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Exit_Success.h"
 #include "Nodes/QuestlineNode_Exit_Failure.h"
-#include "Nodes/QuestlineNode_Leaf.h"
+#include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "ScopedTransaction.h"
 #include "Framework/Application/SlateApplication.h"
@@ -75,7 +75,7 @@ UEdGraphNode* SQuestlineGraphPanel::SpawnNodeForKey(FKey Key, FVector2D GraphPos
 
     Graph->Modify();
     if (Key == EKeys::Q) return SpawnNode<UQuestlineNode_Quest>(GraphPos);
-    if (Key == EKeys::W) return SpawnNode<UQuestlineNode_Leaf>(GraphPos);
+    if (Key == EKeys::W) return SpawnNode<UQuestlineNode_Step>(GraphPos);
     if (Key == EKeys::E) return SpawnNode<UQuestlineNode_LinkedQuestline>(GraphPos);
     if (Key == EKeys::R) return SpawnNode<UQuestlineNode_Knot>(GraphPos);
     if (Key == EKeys::S) return SpawnNode<UQuestlineNode_Exit_Success>(GraphPos);

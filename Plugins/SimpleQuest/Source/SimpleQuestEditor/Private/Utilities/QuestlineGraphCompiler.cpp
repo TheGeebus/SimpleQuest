@@ -7,7 +7,7 @@
 #include "Quests/Quest.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
-#include "Nodes/QuestlineNode_Leaf.h"
+#include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Entry.h"
@@ -335,7 +335,7 @@ UQuestNodeBase* FQuestlineGraphCompiler::GetCDOForContentNode(UQuestlineNode_Con
         if (!QuestNode->QuestClass) return nullptr;
         return Cast<UQuestNodeBase>(QuestNode->QuestClass->GetDefaultObject());
     }
-    if (const UQuestlineNode_Leaf* LeafNode = Cast<UQuestlineNode_Leaf>(ContentNode))
+    if (const UQuestlineNode_Step* LeafNode = Cast<UQuestlineNode_Step>(ContentNode))
     {
         if (!LeafNode->StepClass) return nullptr;
         return Cast<UQuestNodeBase>(LeafNode->StepClass->GetDefaultObject());

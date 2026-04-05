@@ -88,7 +88,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 
     // Start recursive compilation, working forward from the Start node. This is the top level so there are no boundary tags to
     // pass in from a parent graph yet.
-    TArray<FName> EntryTags = CompileGraph(InGraph, TagPrefix, {}, {}, VisitedAssetPaths);
+    TArray<FName> EntryTags = CompileGraph(InGraph->QuestlineEdGraph, TagPrefix, {}, {}, VisitedAssetPaths);
     InGraph->EntryNodeTags = EntryTags;
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
@@ -103,10 +103,10 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 // CompileGraph — recursive
 // -------------------------------------------------------------------------------------------------
 
-TArray<FName> FQuestlineGraphCompiler::CompileGraph(UQuestlineGraph* Graph, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
+TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
     const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths)
 {
-    if (!Graph || !Graph->QuestlineEdGraph) return {};
+    if (!Graph) return {};
 
     // ---- Pass 1: label uniqueness, GUID write, tag assignment ----
     // LinkedQuestline nodes are compiler-only scaffolding with no CDO; skip tag assignment
@@ -115,7 +115,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UQuestlineGraph* Graph, cons
     TMap<FString, UQuestlineNode_ContentBase*> LabelMap;
     TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*> NodeInstanceMap;
     
-    for (UEdGraphNode* Node : Graph->QuestlineEdGraph->Nodes)
+    for (UEdGraphNode* Node : Graph->Nodes)
     {
         UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node);
         if (!ContentNode) continue;
@@ -140,9 +140,15 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UQuestlineGraph* Graph, cons
         // Create the appropriate runtime instance
         UQuestNodeBase* Instance = nullptr;
 
-        if (Cast<UQuestlineNode_Quest>(ContentNode))
+        if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
         {
-            Instance = NewObject<UQuestNode>(RootGraph);
+            UQuestNode* QuestInstance = NewObject<UQuestNode>(RootGraph);
+            if (QuestEdNode->GetInnerGraph())
+            {
+                const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
+                QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, {}, VisitedAssetPaths);
+            }            
+            Instance = QuestInstance;
         }
         else if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
@@ -227,7 +233,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UQuestlineGraph* Graph, cons
     // ---- Resolve entry tags from the graph's Entry node ----
 
     TArray<FName> EntryTags;
-    for (UEdGraphNode* Node : Graph->QuestlineEdGraph->Nodes)
+    for (UEdGraphNode* Node : Graph->Nodes)
     {
         if (!Cast<UQuestlineNode_Entry>(Node)) continue;
 
@@ -265,7 +271,8 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
             }
         }
 
-        // Exit nodes: inject boundary tags for the parent graph so a child graph knows what its exits connect to on the parent level 
+        // Exit nodes: inject boundary tags for the parent graph so a child graph knows what its exits connect to on the parent level
+        // Passed to children when compilation recurses into the child graph.
         else if (Cast<UQuestlineNode_Exit_Success>(Node))
         {
             for (const FName& Tag : SuccessBoundaryTags) OutTags.AddUnique(Tag);
@@ -328,7 +335,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
             
             // Recursion on the linked graph asset, providing the context gathered from this node's parent graph, including any context
             // that parent graph may have been provided by a parent graph of its own
-            TArray<FName> LinkedEntryTags = CompileGraph(LinkedGraph, LinkedPrefix, LinkedSuccessBoundary, LinkedFailureBoundary, VisitedAssetPaths);
+            TArray<FName> LinkedEntryTags = CompileGraph(LinkedGraph->QuestlineEdGraph, LinkedPrefix, LinkedSuccessBoundary, LinkedFailureBoundary, VisitedAssetPaths);
 
             VisitedAssetPaths.RemoveSingleSwap(LinkedPath);
 

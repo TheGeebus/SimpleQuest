@@ -29,6 +29,7 @@ public:
 
 private:
 	TSharedRef<SDockTab> SpawnGraphViewportTab(const FSpawnTabArgs& Args);
+	SGraphEditor::FGraphEditorEvents MakeGraphEvents();
 	TSharedRef<SQuestlineGraphPanel> CreateGraphEditorWidget();
 	void BindGraphCommands();
 	void DeleteSelectedNodes();
@@ -45,7 +46,6 @@ private:
 	FSlateIcon GetCompileStatusIcon() const;
 
 	EQuestlineCompileStatus CompileStatus = EQuestlineCompileStatus::Unknown;
-	FDelegateHandle OnGraphChangedHandle;
 
 	TObjectPtr<UQuestlineGraph> QuestlineGraph;
 	TSharedPtr<SQuestlineGraphPanel> GraphEditorWidget;
@@ -70,4 +70,17 @@ private:
 
 	TSharedPtr<SQuestlineHierarchyPanel> HierarchyPanel;
 	static const FName HierarchyTabId;
+
+	/*-----------------------------------------------------------------------------------
+	 * Nested Graph Navigation
+	 *----------------------------------------------------------------------------------*/
+
+	void NavigateTo(UEdGraph* Graph);
+	void NavigateBack();
+	void OnNodeDoubleClicked(UEdGraphNode* Node);
+
+	TArray<UEdGraph*> GraphNavigationStack;
+	TArray<FDelegateHandle> GraphChangedHandles;  // one per graph in stack
+	TSharedPtr<SBox> ViewportContainer;           // wraps the current SQuestlineGraphPanel
+
 };

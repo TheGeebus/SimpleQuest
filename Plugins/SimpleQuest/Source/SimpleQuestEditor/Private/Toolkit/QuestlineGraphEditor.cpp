@@ -14,6 +14,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "PropertyEditorModule.h"
 #include "Modules/ModuleManager.h"
+#include "Nodes/QuestlineNode_Quest.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -23,9 +24,12 @@ const FName FQuestlineGraphEditor::HierarchyTabId(TEXT("QuestlineGraphEditor_Hie
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
 {
-    if (QuestlineGraph && QuestlineGraph->QuestlineEdGraph)
+    for (int32 i = 0; i < GraphNavigationStack.Num(); ++i)
     {
-        QuestlineGraph->QuestlineEdGraph->RemoveOnGraphChangedHandler(OnGraphChangedHandle);
+        if (GraphNavigationStack[i])
+        {
+            GraphNavigationStack[i]->RemoveOnGraphChangedHandler(GraphChangedHandles[i]);
+        }
     }
 }
 
@@ -82,7 +86,6 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
         true,  // bCreateDefaultToolbar
         InQuestlineGraph);
 
-    OnGraphChangedHandle = InQuestlineGraph->QuestlineEdGraph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateSP(this, &FQuestlineGraphEditor::OnGraphChanged));
 }
 
 FName FQuestlineGraphEditor::GetToolkitFName() const
@@ -112,7 +115,7 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
     InTabManager->RegisterTabSpawner(
         GraphViewportTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnGraphViewportTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Viewport"));
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Quest Graph Editor"));
 
     InTabManager->RegisterTabSpawner(
         DetailsTabId,
@@ -122,7 +125,7 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
     InTabManager->RegisterTabSpawner(
         HierarchyTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnHierarchyTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "HierarchyTab", "Hierarchy"));
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "HierarchyTab", "Quest Tag Hierarchy"));
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -136,12 +139,21 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTabArgs& Args)
 {
     GraphEditorWidget = CreateGraphEditorWidget();
-
+    ViewportContainer = SNew(SBox);
+    NavigateTo(QuestlineGraph->QuestlineEdGraph);
     return SNew(SDockTab)
-        .Label(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTabLabel", "Graph"))
+        .Label(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTabLabel", "Graph: Quest"))
         [
-            GraphEditorWidget.ToSharedRef()
+            ViewportContainer.ToSharedRef()
         ];
+}
+
+SGraphEditor::FGraphEditorEvents FQuestlineGraphEditor::MakeGraphEvents()
+{
+    SGraphEditor::FGraphEditorEvents GraphEvents;
+    GraphEvents.OnSelectionChanged = SGraphEditor::FOnSelectionChanged::CreateSP(this, &FQuestlineGraphEditor::OnGraphSelectionChanged);
+    GraphEvents.OnNodeDoubleClicked = FSingleNodeEvent::CreateSP(this, &FQuestlineGraphEditor::OnNodeDoubleClicked);
+    return GraphEvents;
 }
 
 TSharedRef<SQuestlineGraphPanel> FQuestlineGraphEditor::CreateGraphEditorWidget()
@@ -149,12 +161,8 @@ TSharedRef<SQuestlineGraphPanel> FQuestlineGraphEditor::CreateGraphEditorWidget(
     check(QuestlineGraph);
     check(QuestlineGraph->QuestlineEdGraph);
 
-    SGraphEditor::FGraphEditorEvents GraphEvents;
-    GraphEvents.OnSelectionChanged = SGraphEditor::FOnSelectionChanged::CreateSP(
-        this, &FQuestlineGraphEditor::OnGraphSelectionChanged);
-
     return SNew(SQuestlineGraphPanel, QuestlineGraph->QuestlineEdGraph, GraphEditorCommands)
-        .GraphEvents(GraphEvents);
+        .GraphEvents(MakeGraphEvents());
 }
 
 void FQuestlineGraphEditor::BindGraphCommands()
@@ -300,3 +308,31 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnHierarchyTab(const FSpawnTabArg
         ];
 }
 
+void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)
+{
+    GraphNavigationStack.Add(Graph);
+    GraphChangedHandles.Add(Graph->AddOnGraphChangedHandler(
+        FOnGraphChanged::FDelegate::CreateSP(this, &FQuestlineGraphEditor::OnGraphChanged)));
+
+    TSharedRef<SQuestlineGraphPanel> Panel = SNew(SQuestlineGraphPanel, Graph, GraphEditorCommands)
+        .GraphEvents(MakeGraphEvents());
+    GraphEditorWidget = Panel;
+    ViewportContainer->SetContent(Panel);
+}
+
+void FQuestlineGraphEditor::NavigateBack()
+{
+    if (GraphNavigationStack.Num() <= 1) return;
+    UEdGraph* Leaving = GraphNavigationStack.Pop();
+    Leaving->RemoveOnGraphChangedHandler(GraphChangedHandles.Pop());
+    NavigateTo(GraphNavigationStack.Pop());  // re-navigate to previous (re-adds it)
+}
+
+void FQuestlineGraphEditor::OnNodeDoubleClicked(UEdGraphNode* Node)
+{
+    if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+    {
+        if (QuestNode->GetInnerGraph())
+            NavigateTo(QuestNode->GetInnerGraph());
+    }
+}

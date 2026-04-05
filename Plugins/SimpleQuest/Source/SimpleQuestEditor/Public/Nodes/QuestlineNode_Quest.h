@@ -15,6 +15,17 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_Quest : public UQuestlineNode_Content
 
 public:
 
-	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 
+	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual void PostPlacedNewNode() override;
+	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+
+private:
+	void CreateInnerGraph();
+	
+	UPROPERTY()
+	TObjectPtr<UEdGraph> InnerGraph;
+
+public:
+	FORCEINLINE UEdGraph* GetInnerGraph() const { return InnerGraph; }
 };

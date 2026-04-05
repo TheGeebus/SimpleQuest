@@ -29,7 +29,10 @@ public:
 	FQuestlineGraphCompiler();
 	virtual ~FQuestlineGraphCompiler();
 
-    /** Entry point. Validates the asset, then kicks off recursive graph compilation. Returns true if there were no errors. */
+    /**
+     * Entry point. Validates the asset, then kicks off recursive graph compilation. Collects and registers all nested and
+     * linked quest Gameplay Tags. Returns true if there were no errors.
+     */
 	virtual bool Compile(UQuestlineGraph* InGraph);
 
 protected:
@@ -44,8 +47,10 @@ protected:
 	 * @param VisitedAssetPaths		Stack of asset paths currently open in the recursion, used for cycle detection.
 	 * @return						Tags of the content nodes directly reachable from this graph's Entry node.
 	 */
-	virtual TArray<FName> CompileGraph(UQuestlineGraph* Graph, const FString& TagPrefix,	const TArray<FName>& SuccessBoundaryTags,
+	// 
+	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
 		const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths);
+
 	
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
@@ -93,7 +98,7 @@ protected:
 	 * For creating new node types, prefer to subclass UQuestlineNodeBase and override internal classification methods such as IsExitNode, etc.
 	 */
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
-
+	
 private:
 	void RegisterCompiledTags(UQuestlineGraph* InGraph);
 

@@ -3,13 +3,15 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Toolkits/AssetEditorToolkit.h"
-#include "Toolkit/QuestlineGraphPanel.h"
-#include "Toolkit/QuestlineHierarchyPanel.h"
+//#include "Toolkits/AssetEditorToolkit.h"
+//#include "Toolkit/QuestlineGraphPanel.h"
+//#include "Toolkit/QuestlineOutlinerPanel.h"
 #include "IDetailsView.h"
-#include "ISimpleQuestEditorModule.h"
 
 
+class SQuestlineGraphPanel;
+struct FQuestlineOutlinerItem;
+class SQuestlineOutlinerPanel;
 class UQuestlineGraph;
 class SGraphEditor;
 
@@ -65,19 +67,18 @@ private:
 	static const FName DetailsTabId;
 
 	/*-----------------------------------------------------------------------------------
-	 * Questline Hierarchy Panel
+	 * Questline Outliner Panel
 	 *----------------------------------------------------------------------------------*/
 
-	TSharedRef<SDockTab> SpawnHierarchyTab(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnOutlinerTab(const FSpawnTabArgs& Args);
 
-	TSharedPtr<SQuestlineHierarchyPanel> HierarchyPanel;
-	static const FName HierarchyTabId;
+	TSharedPtr<SQuestlineOutlinerPanel> OutlinerPanel;
+	static const FName OutlinerTabId;
 
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation
 	 *----------------------------------------------------------------------------------*/
 
-	void NavigateTo(UEdGraph* Graph);
 	void NavigateBack();
 	void NavigateForward();
 	void OnBreadcrumbClicked(UEdGraph* const& Graph);
@@ -92,5 +93,23 @@ private:
 	TSharedPtr<SBox> GraphPanelContainer;						// swapped by NavigateTo
 	TSharedPtr<SBreadcrumbTrail<UEdGraph*>> BreadcrumbTrail;	// updated by NavigateTo
 	bool bIsNavigatingHistory = false;
+	struct FEdNodeLocation
+	{
+		UEdGraph* HostGraph = nullptr;
+		UEdGraphNode* EdNode = nullptr;
+		bool IsValid() const { return HostGraph && EdNode; }
+	};
 
+	FEdNodeLocation FindEdNodeLocation(const FGuid& ContentGuid) const;
+	void OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutlinerItem> Item);
+
+public:
+	void NavigateTo(UEdGraph* Graph);
+
+	/** Navigate to and select the editor node matching ContentGuid within this editor's asset. */
+	void NavigateToContentNode(const FGuid& ContentGuid);
+
+	/** Navigate to this editor's root graph and select its Entry node. */
+	void NavigateToEntry();
+	
 };

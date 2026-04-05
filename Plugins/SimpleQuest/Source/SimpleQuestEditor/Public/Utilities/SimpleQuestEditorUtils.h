@@ -7,3 +7,21 @@
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
+
+namespace SimpleQuestEditorUtilities
+{
+	/**
+	 * Sanitizes a designer-entered label into a valid Gameplay Tag segment. Trims whitespace, replaces any character that is not
+	 * alphanumeric or underscore with an underscore.
+	 */
+	inline FString SanitizeQuestlineTagSegment(const FString& InLabel)
+	{
+		FString Result = InLabel.TrimStartAndEnd();
+		for (TCHAR& Ch : Result)
+		{
+			if (!FChar::IsAlnum(Ch) && Ch != TEXT('_'))
+				Ch = TEXT('_');
+		}
+		return Result;
+	}
+}

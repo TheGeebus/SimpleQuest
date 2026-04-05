@@ -70,7 +70,8 @@ protected:
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
-	 * underscores, removes leading/trailing whitespace.
+	 * underscores, removes leading/trailing whitespace. May be overriden to change the default behavior, which is to simply
+	 * call SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment.
 	 */
 	virtual FString SanitizeTagSegment(const FString& InLabel) const;
 

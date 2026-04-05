@@ -24,6 +24,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -369,13 +370,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
 
 FString FQuestlineGraphCompiler::SanitizeTagSegment(const FString& InLabel) const
 {
-    FString Result = InLabel.TrimStartAndEnd();
-    for (TCHAR& Char : Result)
-    {
-        if (!FChar::IsAlnum(Char) && Char != TEXT('_'))
-            Char = TEXT('_');
-    }
-    return Result;
+    return SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(InLabel);
 }
 
 FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const

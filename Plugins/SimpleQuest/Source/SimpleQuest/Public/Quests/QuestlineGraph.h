@@ -70,6 +70,7 @@ public:
     const TArray<FName>& GetEntryNodeTags() const { return EntryNodeTags; }
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
+    const FString& GetQuestlineID() const { return QuestlineID; }
 
 
     // Editor-only: the actual UEdGraph object is only needed in the editor. The data it represents is compiled in-editor for use at runtime

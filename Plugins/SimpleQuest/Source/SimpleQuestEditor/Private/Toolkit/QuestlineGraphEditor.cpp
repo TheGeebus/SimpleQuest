@@ -5,6 +5,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "GraphEditor.h"
 #include "GraphEditorActions.h"
+#include "ISimpleQuestEditorModule.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Framework/Docking/TabManager.h"
@@ -14,13 +15,16 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "PropertyEditorModule.h"
 #include "Modules/ModuleManager.h"
+#include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Quests/QuestNodeBase.h"
+#include "Toolkit/QuestlineOutlinerPanel.h"
 #include "Widgets/Navigation/SBreadcrumbTrail.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
 const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Details"));
-const FName FQuestlineGraphEditor::HierarchyTabId(TEXT("QuestlineGraphEditor_Hierarchy"));
+const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outliner"));
 
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
@@ -52,7 +56,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
                 (
                     FTabManager::NewStack()
                     ->SetSizeCoefficient(0.6f)
-                    ->AddTab(HierarchyTabId, ETabState::OpenedTab)
+                    ->AddTab(OutlinerTabId, ETabState::OpenedTab)
                 )
                 ->Split
                 (
@@ -112,29 +116,35 @@ FLinearColor FQuestlineGraphEditor::GetWorldCentricTabColorScale() const
 void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
     FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
+    
+    WorkspaceMenuCategory = InTabManager->AddLocalWorkspaceMenuCategory(
+            NSLOCTEXT("SimpleQuestEditor", "WorkspaceMenu_QuestlineGraphEditor", "Questline Graph Editor"));
 
     InTabManager->RegisterTabSpawner(
         GraphViewportTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnGraphViewportTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Quest Graph Editor"));
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Questline Graph Editor"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 
     InTabManager->RegisterTabSpawner(
         DetailsTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnDetailsTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "DetailsTab", "Details"));
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "DetailsTab", "Details"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 
     InTabManager->RegisterTabSpawner(
-        HierarchyTabId,
-        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnHierarchyTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "HierarchyTab", "Quest Tag Hierarchy"));
+        OutlinerTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnOutlinerTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "OutlinerTab", "Questline Outliner"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
-    FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
     InTabManager->UnregisterTabSpawner(GraphViewportTabId);
     InTabManager->UnregisterTabSpawner(DetailsTabId);
-    InTabManager->UnregisterTabSpawner(HierarchyTabId);
+    InTabManager->UnregisterTabSpawner(OutlinerTabId);
+    FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 }
 
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTabArgs& Args)
@@ -142,24 +152,82 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTa
     GraphPanelContainer = SNew(SBox);
 
     SAssignNew(BreadcrumbTrail, SBreadcrumbTrail<UEdGraph*>)
+        .ButtonStyle(FAppStyle::Get(), "GraphBreadcrumbButton")
+        .TextStyle(FAppStyle::Get(), "GraphBreadcrumbButtonText")
+        .DelimiterImage(FAppStyle::GetBrush("BreadcrumbTrail.Delimiter"))
+        .PersistentBreadcrumbs(true)
         .OnCrumbClicked(this, &FQuestlineGraphEditor::OnBreadcrumbClicked);
 
     NavigateTo(QuestlineGraph->QuestlineEdGraph);
 
     return SNew(SDockTab)
-        .Label(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTabLabel", "Graph"))
+        .Label(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTabLabel", "Questline Graph"))
         [
-            SNew(SVerticalBox)
-            + SVerticalBox::Slot()
-            .AutoHeight()
-            .Padding(4.f, 2.f)
-            [
-                BreadcrumbTrail.ToSharedRef()
-            ]
-            + SVerticalBox::Slot()
-            .FillHeight(1.f)
+            SNew(SOverlay)
+
+            + SOverlay::Slot()
+            .VAlign(VAlign_Fill)
+            .HAlign(HAlign_Fill)
             [
                 GraphPanelContainer.ToSharedRef()
+            ]
+
+            + SOverlay::Slot()
+            .VAlign(VAlign_Top)
+            .HAlign(HAlign_Fill)
+            [
+                SNew(SBorder)
+                .BorderImage(FAppStyle::GetBrush("Graph.TitleBackground"))
+                .HAlign(HAlign_Fill)
+                [
+                    SNew(SHorizontalBox)
+
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(SButton)
+                        .ButtonStyle(FAppStyle::Get(), "GraphBreadcrumbButton")
+                        .OnClicked_Lambda([this]() { NavigateBack(); return FReply::Handled(); })
+                        .IsEnabled(this, &FQuestlineGraphEditor::CanNavigateBack)
+                        .ToolTip(FQuestlineGraphEditorCommands::Get().NavigateBack->MakeTooltip())
+                        [
+                            SNew(SImage)
+                            .Image(FAppStyle::GetBrush("GraphBreadcrumb.BrowseBack"))
+                        ]
+                    ]
+
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Center)
+                    [
+                        SNew(SButton)
+                        .ButtonStyle(FAppStyle::Get(), "GraphBreadcrumbButton")
+                        .OnClicked_Lambda([this]() { NavigateForward(); return FReply::Handled(); })
+                        .IsEnabled(this, &FQuestlineGraphEditor::CanNavigateForward)
+                        .ToolTip(FQuestlineGraphEditorCommands::Get().NavigateForward->MakeTooltip())
+                        [
+                            SNew(SImage)
+                            .Image(FAppStyle::GetBrush("GraphBreadcrumb.BrowseForward"))
+                        ]
+                    ]
+
+                    + SHorizontalBox::Slot()
+                    .AutoWidth()
+                    .VAlign(VAlign_Fill)
+                    [
+                        SNew(SSeparator)
+                        .Orientation(Orient_Vertical)
+                    ]
+
+                    + SHorizontalBox::Slot()
+                    .FillWidth(1.f)
+                    .VAlign(VAlign_Center)
+                    .Padding(4.f, 0.f)
+                    [
+                        BreadcrumbTrail.ToSharedRef()
+                    ]
+                ]
             ]
         ];
 }
@@ -186,6 +254,7 @@ void FQuestlineGraphEditor::BindGraphCommands()
     FGraphEditorCommands::Register();
 
     GraphEditorCommands = MakeShared<FUICommandList>();
+    
     GraphEditorCommands->MapAction(
         FGenericCommands::Get().Delete,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DeleteSelectedNodes));
@@ -194,15 +263,16 @@ void FQuestlineGraphEditor::BindGraphCommands()
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
 
-    GraphEditorCommands->MapAction(
-    FQuestlineGraphEditorCommands::Get().NavigateBack,
-    FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::NavigateBack),
-    FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanNavigateBack));
+    GetToolkitCommands()->MapAction(
+        FQuestlineGraphEditorCommands::Get().NavigateBack,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::NavigateBack),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanNavigateBack));
 
-    GraphEditorCommands->MapAction(
+    GetToolkitCommands()->MapAction(
         FQuestlineGraphEditorCommands::Get().NavigateForward,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::NavigateForward),
         FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanNavigateForward));
+
 
 }
 
@@ -210,10 +280,12 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
 {
     if (!GraphEditorWidget.IsValid()) return;
 
-    const FScopedTransaction Transaction(
-        NSLOCTEXT("SimpleQuestEditor", "DeleteSelectedNodes", "Delete Selected Nodes"));
+    UEdGraph* CurrentGraph = GraphBackwardStack.IsEmpty() ? nullptr : GraphBackwardStack.Last();
+    if (!CurrentGraph) return;
 
-    QuestlineGraph->QuestlineEdGraph->Modify();
+    const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "DeleteSelectedNodes", "Delete Selected Nodes"));
+
+    CurrentGraph->Modify();
 
     for (UObject* Obj : GraphEditorWidget->GetGraphEditor()->GetSelectedNodes())
     {
@@ -222,7 +294,7 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
         {
             Node->Modify();
             Node->GetSchema()->BreakNodeLinks(*Node);
-            QuestlineGraph->QuestlineEdGraph->RemoveNode(Node);
+            CurrentGraph->RemoveNode(Node);
         }
     }
 }
@@ -243,7 +315,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
 
     CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
 
-    if (bSuccess && HierarchyPanel.IsValid()) HierarchyPanel->Refresh();
+    if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
 }
 
 void FQuestlineGraphEditor::SaveAsset_Execute()
@@ -274,12 +346,6 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
             })
         );
     ToolbarBuilder.EndSection();
-
-    ToolbarBuilder.BeginSection("Navigation");
-    ToolbarBuilder.AddToolBarButton(FQuestlineGraphEditorCommands::Get().NavigateBack,    NAME_None, INVTEXT("←"), TAttribute<FText>(), FSlateIcon(FAppStyle::GetAppStyleSetName(), "EditorViewport.PreviousView"));
-    ToolbarBuilder.AddToolBarButton(FQuestlineGraphEditorCommands::Get().NavigateForward, NAME_None, INVTEXT("→"), TAttribute<FText>(), FSlateIcon(FAppStyle::GetAppStyleSetName(), "EditorViewport.NextView"));
-    ToolbarBuilder.EndSection();
-
 }
 
 FText FQuestlineGraphEditor::GetGraphDisplayName(UEdGraph* Graph) const
@@ -341,15 +407,79 @@ void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSe
     DetailsView->SetObjects(Selected);
 }
 
-TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnHierarchyTab(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnOutlinerTab(const FSpawnTabArgs& Args)
 {
-    HierarchyPanel = SNew(SQuestlineHierarchyPanel, QuestlineGraph);
+    OutlinerPanel = SNew(SQuestlineOutlinerPanel, QuestlineGraph)
+        .OnItemNavigate(this, &FQuestlineGraphEditor::OnOutlinerItemNavigate);
 
     return SNew(SDockTab)
-        .Label(NSLOCTEXT("SimpleQuestEditor", "HierarchyTabLabel", "Hierarchy"))
+        .Label(NSLOCTEXT("SimpleQuestEditor", "OutlinerTabLabel", "Questline Outliner"))
         [
-            HierarchyPanel.ToSharedRef()
+            OutlinerPanel.ToSharedRef()
         ];
+}
+
+FQuestlineGraphEditor::FEdNodeLocation FQuestlineGraphEditor::FindEdNodeLocation(const FGuid& ContentGuid) const
+{
+    if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) return {};
+
+    for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
+    {
+        UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node);
+        if (!Content) continue;
+
+        if (Content->QuestGuid == ContentGuid)
+            return { QuestlineGraph->QuestlineEdGraph, Node };
+
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Content))
+        {
+            if (UEdGraph* Inner = QuestNode->GetInnerGraph())
+            {
+                for (UEdGraphNode* InnerNode : Inner->Nodes)
+                {
+                    UQuestlineNode_ContentBase* InnerContent = Cast<UQuestlineNode_ContentBase>(InnerNode);
+                    if (InnerContent && InnerContent->QuestGuid == ContentGuid)
+                        return { Inner, InnerNode };
+                }
+            }
+        }
+    }
+    return {};
+}
+
+void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutlinerItem> Item)
+{
+    if (!Item.IsValid()) return;
+
+    // Local item — navigate within this editor
+    if (Item->LinkDepth == 0)
+    {
+        if (Item->ItemType == EOutlinerItemType::Root) return;  // nothing to navigate to
+        NavigateToContentNode(Item->Node->GetQuestGuid());
+        return;
+    }
+
+    // Linked item — open or focus the source asset's editor
+    UQuestlineGraph* SourceAsset = Item->SourceGraph;
+    if (!SourceAsset) return;
+
+    UAssetEditorSubsystem* AssetEditors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+    AssetEditors->OpenEditorForAsset(SourceAsset);
+
+    IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(SourceAsset, false);
+    FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
+    if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
+
+    FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
+
+    if (Item->ItemType == EOutlinerItemType::LinkedGraph)
+    {
+        LinkedEditor->NavigateToEntry();
+    }
+    else
+    {
+        LinkedEditor->NavigateToContentNode(Item->Node->GetQuestGuid());
+    }
 }
 
 void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)
@@ -369,6 +499,47 @@ void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)
         for (UEdGraph* StackGraph : GraphBackwardStack)
         {
             BreadcrumbTrail->PushCrumb(GetGraphDisplayName(StackGraph), StackGraph);
+        }
+    }
+}
+
+void FQuestlineGraphEditor::NavigateToContentNode(const FGuid& ContentGuid)
+{
+    FEdNodeLocation Location = FindEdNodeLocation(ContentGuid);
+    if (!Location.IsValid()) return;
+
+    UEdGraph* CurrentGraph = GraphBackwardStack.IsEmpty() ? nullptr : GraphBackwardStack.Last();
+
+    if (Location.HostGraph != CurrentGraph)
+    {
+        // If the target is an inner graph and we're not already at root, go to root first
+        if (Location.HostGraph != QuestlineGraph->QuestlineEdGraph && CurrentGraph != QuestlineGraph->QuestlineEdGraph)
+        {
+            NavigateTo(QuestlineGraph->QuestlineEdGraph);
+        }
+        NavigateTo(Location.HostGraph);
+    }
+
+    if (GraphEditorWidget.IsValid())
+    {
+        GraphEditorWidget->GetGraphEditor()->JumpToNode(Location.EdNode, false, true);
+    }
+}
+
+void FQuestlineGraphEditor::NavigateToEntry()
+{
+    UEdGraph* CurrentGraph = GraphBackwardStack.IsEmpty() ? nullptr : GraphBackwardStack.Last();
+    if (CurrentGraph != QuestlineGraph->QuestlineEdGraph)
+        NavigateTo(QuestlineGraph->QuestlineEdGraph);
+
+    if (!GraphEditorWidget.IsValid()) return;
+
+    for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
+    {
+        if (Cast<UQuestlineNode_Entry>(Node))
+        {
+            GraphEditorWidget->GetGraphEditor()->JumpToNode(Node, false, true);
+            break;
         }
     }
 }

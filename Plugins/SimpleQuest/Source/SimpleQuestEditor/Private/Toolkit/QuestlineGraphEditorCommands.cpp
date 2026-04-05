@@ -12,8 +12,9 @@ void FQuestlineGraphEditorCommands::RegisterCommands()
 		"Compile the questline graph, writing inter-quest relationships to each Quest CDO",
 		EUserInterfaceActionType::Button,
 		FInputChord());
-	UI_COMMAND(NavigateBack, "Back", "Navigate to the previous graph", EUserInterfaceActionType::Button, FInputChord(EKeys::Left, false, false, true, false));
-	UI_COMMAND(NavigateForward, "Forward", "Navigate to the next graph", EUserInterfaceActionType::Button, FInputChord(EKeys::Right, false, false, true, false));
+	UI_COMMAND(NavigateBack, "Back", "Navigate to the previous graph", EUserInterfaceActionType::Button, FInputChord(EKeys::LeftBracket,  false, true, false, false));
+	UI_COMMAND(NavigateForward, "Forward", "Navigate to the next graph", EUserInterfaceActionType::Button, FInputChord(EKeys::RightBracket, false, true, false, false));
+
 }
 
 #undef LOCTEXT_NAMESPACE

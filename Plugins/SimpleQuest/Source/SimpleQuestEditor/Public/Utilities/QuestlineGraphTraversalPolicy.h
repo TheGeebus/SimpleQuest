@@ -41,8 +41,7 @@ public:
     void CollectDownstreamTerminalInputs(const UEdGraphPin* KnotOutPin, TArray<const UEdGraphPin*>& OutTerminalPins, TSet<const UEdGraphNode*>& Visited) const;
     FPinReachability ComputeForwardReachability(const UEdGraphPin* OutputPin) const;
     FPinReachability ComputeFullReachability(const UEdGraphPin* OutputPin, const UEdGraphNode* OutputNode) const;
-
-
+    
     // ---- Classification API (virtual: policy is extensible) ----
 
     /** Returns true if Node should be treated as a success exit terminal. Default: UQuestlineNode_Exit_Success. */

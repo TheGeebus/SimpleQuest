@@ -7,7 +7,7 @@
 class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
 class UQuestNodeBase;
-class UQuestNode;
+class UQuest;
 class UEdGraphPin;
 class FQuestlineGraphTraversalPolicy;
 

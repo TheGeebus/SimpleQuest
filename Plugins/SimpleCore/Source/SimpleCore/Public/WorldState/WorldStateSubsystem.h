@@ -9,13 +9,13 @@
 #include "WorldStateSubsystem.generated.h"
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FStateSatisfiedEvent : public FSignalEventBase
+struct SIMPLECORE_API FWorldStateFactAddedEvent : public FSignalEventBase
 {
 	GENERATED_BODY()
 
-	FStateSatisfiedEvent() = default;
+	FWorldStateFactAddedEvent() = default;
 
-	explicit FStateSatisfiedEvent(const FGameplayTag InStateTag)
+	explicit FWorldStateFactAddedEvent(const FGameplayTag InStateTag)
 		: FSignalEventBase(InStateTag.GetTagName(), InStateTag)
 	{}
 
@@ -24,13 +24,13 @@ struct SIMPLECORE_API FStateSatisfiedEvent : public FSignalEventBase
 };
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FStateUnsatisfiedEvent : public FSignalEventBase
+struct SIMPLECORE_API FWorldStateFactRemovedEvent : public FSignalEventBase
 {
 	GENERATED_BODY()
 
-	FStateUnsatisfiedEvent() = default;
+	FWorldStateFactRemovedEvent() = default;
 
-	explicit FStateUnsatisfiedEvent(const FGameplayTag InStateTag)
+	explicit FWorldStateFactRemovedEvent(const FGameplayTag InStateTag)
 		: FSignalEventBase(InStateTag.GetTagName(), InStateTag)
 	{}
 
@@ -45,15 +45,15 @@ class SIMPLECORE_API UWorldStateSubsystem : public UGameInstanceSubsystem
 
 public:
 	UFUNCTION(BlueprintCallable)
-	void SatisfyState(FGameplayTag StateTag);
+	void AddFact(FGameplayTag StateTag);
 
 	UFUNCTION(BlueprintCallable)
-	void UnsatisfyState(FGameplayTag StateTag);
+	void RemoveFact(FGameplayTag StateTag);
 
 	UFUNCTION(BlueprintCallable, BlueprintPure)
-	bool IsStateSatisfied(FGameplayTag StateTag) const;
+	bool HasFact(FGameplayTag StateTag) const;
 
 private:
 	UPROPERTY()
-	FGameplayTagContainer SatisfiedStateTags;
+	FGameplayTagContainer WorldFacts;
 };

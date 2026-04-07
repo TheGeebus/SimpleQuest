@@ -13,11 +13,9 @@ struct FQuestStepCompletedEvent : public FQuestEventBase
 
 	FQuestStepCompletedEvent() = default;
 
-	FQuestStepCompletedEvent(const FGameplayTag InQuestTag, const TSubclassOf<UQuest>& InQuestClass, const int32 InStepID, const bool bInDidSucceed, const bool bInEndedQuest, UQuestReward* InReward)
-		: FQuestEventBase(InQuestTag, InQuestClass), StepID(InStepID), bDidSucceed(bInDidSucceed), bEndedQuest(bInEndedQuest), Reward(InReward) {}
+	FQuestStepCompletedEvent(const FGameplayTag InQuestTag, const bool bInDidSucceed, const bool bInEndedQuest, UQuestReward* InReward)
+		: FQuestEventBase(InQuestTag), bDidSucceed(bInDidSucceed), bEndedQuest(bInEndedQuest), Reward(InReward) {}
 
-	UPROPERTY(BlueprintReadWrite)
-	int32 StepID = -1;
 	UPROPERTY(BlueprintReadWrite)
 	bool bDidSucceed = false;
 	UPROPERTY(BlueprintReadWrite)

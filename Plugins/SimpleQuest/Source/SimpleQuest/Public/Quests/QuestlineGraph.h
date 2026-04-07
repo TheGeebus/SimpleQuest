@@ -4,12 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "GameplayTagContainer.h"
 #include "QuestlineGraph.generated.h"
 
 class UQuestNodeBase;
 class UEdGraph;
-class UQuest;
 
 /**
  * Authoring container for a questline, a directed graph of quest and step nodes. Owns a UEdGraph (QuestlineEdGraph) containing

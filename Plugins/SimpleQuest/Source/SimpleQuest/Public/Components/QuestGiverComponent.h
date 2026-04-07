@@ -11,8 +11,6 @@
 
 
 struct FQuestEnabledEvent;
-class UQuestEventBase;
-class UQuest;
 class UQuestManagerSubsystem;
 
 
@@ -24,7 +22,7 @@ class SIMPLEQUEST_API UQuestGiverComponent : public UQuestComponentBase, public 
 public:	
 	UQuestGiverComponent();
 
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestGiverActivated, bool, bWasQuestActived, UQuest*, ActivatedQuest, bool, bIsAnyQuestEnabled);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestGiverActivated, bool, bWasQuestActivated, FGameplayTag, QuestTag, bool, bIsAnyQuestEnabled);
 	
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
 	FOnQuestGiverActivated OnQuestGiverActivated;
@@ -35,8 +33,8 @@ protected:
 	 * Transitional — internal subscription and registration still uses this.
 	 * Will be removed when QuestTagsToGive drives the full component lifecycle.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<TSoftClassPtr<UQuest>> QuestClassesToGive;
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	//TArray<TSoftClassPtr<UQuest>> QuestClassesToGive;
 	
 	/**
 	 * New authoritative property — read by the manifest builder and eventually the sole registration mechanism once the
@@ -45,19 +43,22 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FGameplayTagContainer QuestTagsToGive;
 	
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TMap<TSubclassOf<UQuest>, TObjectPtr<UQuest>> EnabledQuests;
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess=true))
+	FGameplayTagContainer EnabledQuestTags;
 	
 private:
 	
-	UFUNCTION(BlueprintCallable)
-	void GiveQuest(UQuest* QuestToStart);
+	//UFUNCTION(BlueprintCallable)
+	//void GiveQuest(UQuest* QuestToStart);
 
 	UFUNCTION(BlueprintCallable)
-	virtual void SetQuestGiverActivated(const TSubclassOf<UQuest>& QuestClassToEnable, const FName& QuestID, bool bIsQuestActive) override;
+	void GiveQuestByTag(const FGameplayTag& QuestTag);
+
+	UFUNCTION(BlueprintCallable)
+	virtual void SetQuestGiverActivated(const FGameplayTag& QuestTag, bool bIsQuestActive) override;
 	
 	void RegisterQuestGiver();
-	void RegisterForQuestClass(UClass* LoadedQuestClass);
+	//void RegisterForQuestClass(UClass* LoadedQuestClass);
 	void OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent);
 
 public:
@@ -66,5 +67,5 @@ public:
 	UFUNCTION(BlueprintCallable)
 	bool CanGiveAnyQuests() const;
 	UFUNCTION(BlueprintCallable)
-	bool IsQuestEnabled(const FGuid& QuestGuid);
+	bool IsQuestEnabled(FGameplayTag QuestTag);
 };

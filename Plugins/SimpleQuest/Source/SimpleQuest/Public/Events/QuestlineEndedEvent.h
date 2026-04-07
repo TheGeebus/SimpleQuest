@@ -11,8 +11,8 @@ struct FQuestlineEndedEvent : public FQuestEventBase
 
 	FQuestlineEndedEvent() = default;
 
-	FQuestlineEndedEvent(const FGameplayTag InQuestTag, const TSubclassOf<UQuest>& InQuestClass, const bool bInDidSucceed)
-		: FQuestEventBase(InQuestTag, InQuestClass), bDidSucceed(bInDidSucceed) {}
+	FQuestlineEndedEvent(const FGameplayTag InQuestTag, const bool bInDidSucceed)
+		: FQuestEventBase(InQuestTag), bDidSucceed(bInDidSucceed) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	bool bDidSucceed = false;

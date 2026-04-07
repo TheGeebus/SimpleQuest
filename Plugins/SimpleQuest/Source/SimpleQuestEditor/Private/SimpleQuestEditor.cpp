@@ -12,7 +12,6 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
-#include "Utilities/QuestGiverManifestBuilder.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -43,8 +42,6 @@ void FSimpleQuestEditor::StartupModule()
 	
 	FQuestlineGraphEditorCommands::Register();
 
-	FEditorDelegates::MapChange.AddRaw(this, &FSimpleQuestEditor::OnMapChanged);
-	FEditorDelegates::PreBeginPIE.AddRaw(this, &FSimpleQuestEditor::OnPreBeginPIE);
 	FEditorDelegates::OnEditorInitialized.AddLambda([](double)
     {
         const USimpleQuestSettings* Settings = GetDefault<USimpleQuestSettings>();
@@ -134,16 +131,6 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 	}
 
 	UGameplayTagsManager::Get().ConstructGameplayTagTree();
-}
-
-void FSimpleQuestEditor::OnMapChanged(uint32 MapChangeEventFlag)
-{
-	if (MapChangeEventFlag == static_cast<uint32>(EMapChangeType::SaveMap)) FQuestGiverManifestBuilder::RebuildManifest();
-}
-
-void FSimpleQuestEditor::OnPreBeginPIE(const bool bIsSimulating)
-{
-	FQuestGiverManifestBuilder::RebuildManifest();
 }
 
 /*

@@ -5,7 +5,6 @@
 #include "SimpleQuestSettings.generated.h"
 
 class UQuestManagerSubsystem;
-class UQuest;
 
 UCLASS(config=SimpleQuest, DefaultConfig, meta=(DisplayName="Simple Quest"))
 class SIMPLEQUEST_API USimpleQuestSettings : public UDeveloperSettings

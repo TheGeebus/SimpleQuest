@@ -30,8 +30,5 @@ private:
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
-
-	void OnMapChanged(uint32 MapChangeEventFlag);
-	void OnPreBeginPIE(const bool bIsSimulating);
 	
 };

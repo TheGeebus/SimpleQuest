@@ -63,7 +63,7 @@ void UQuestTargetComponent::GetTriggered()
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		SignalSubsystem->PublishTyped(UQuestTargetInterface::StaticClass(), FQuestObjectiveTriggered(FGameplayTag(), nullptr, GetOwner()));
+		SignalSubsystem->PublishTyped(UQuestTargetInterface::StaticClass(), FQuestObjectiveTriggered(GetOwner()));
 	}
 }
 
@@ -71,7 +71,7 @@ void UQuestTargetComponent::GetKilled(AActor* KillerActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveKilled(FGameplayTag(), nullptr, GetOwner(), KillerActor));
+		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveKilled(GetOwner(), KillerActor));
 	}
 }
 
@@ -79,6 +79,6 @@ void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
 {
 	if (CheckQuestSignalSubsystem())
 	{
-		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveInteracted(FGameplayTag(), nullptr, GetOwner(), InteractingActor));
+		SignalSubsystem->PublishTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), FQuestObjectiveInteracted(GetOwner(), InteractingActor));
 	}
 }

@@ -3,14 +3,12 @@
 
 #include "Components/QuestWatcherComponent.h"
 
+#include "SimpleQuestLog.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestEndedEvent.h"
-#include "Events/QuestPrerequisiteCheckFailed.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestStepCompletedEvent.h"
-#include "Events/QuestStepPrereqCheckFailed.h"
 #include "Events/QuestStepStartedEvent.h"
-#include "Quests/Quest.h"
 #include "Signals/SignalSubsystem.h"
 
 
@@ -29,19 +27,10 @@ void UQuestWatcherComponent::BeginPlay()
 void UQuestWatcherComponent::WatchedQuestActivatedEvent(const FQuestEnabledEvent& QuestEnabledEvent)
 {
 	if (!QuestEnabledEvent.bIsActivated) { return; }
-	const FQuestActiveStepIDs ActiveSteps;
-	ActivatedQuestsMap.Add(QuestEnabledEvent.QuestClass) = ActiveSteps;
+	ActiveQuestTags.AddTag(QuestEnabledEvent.GetQuestTag());
 	if (OnQuestActivated.IsBound())
 	{
-		OnQuestActivated.Broadcast(QuestEnabledEvent.QuestClass->GetFName());
-	}
-}
-
-void UQuestWatcherComponent::WatchedQuestPrerequisitesFailedEvent(const FQuestPrerequisiteCheckFailed& QuestPrerequisitesFailedEvent)
-{
-	if (OnQuestPrerequisiteCheckFailed.IsBound())
-	{
-		OnQuestPrerequisiteCheckFailed.Broadcast(QuestPrerequisitesFailedEvent.QuestClass->GetFName());
+		OnQuestActivated.Broadcast(QuestEnabledEvent.GetQuestTag());
 	}
 }
 
@@ -49,52 +38,33 @@ void UQuestWatcherComponent::WatchedQuestStartedEvent(const FQuestStartedEvent& 
 {
 	if (OnQuestStarted.IsBound())
 	{
-		OnQuestStarted.Broadcast(QuestStartedEvent.QuestClass->GetFName());
+		OnQuestStarted.Broadcast(QuestStartedEvent.GetQuestTag());
 	}
 }
 
 void UQuestWatcherComponent::WatchedQuestStepStartedEvent(const FQuestStepStartedEvent& QuestStepStartedEvent)
 {
-	if (ActivatedQuestsMap.Contains(QuestStepStartedEvent.QuestClass))
-	{
-		ActivatedQuestsMap[QuestStepStartedEvent.QuestClass].ActiveStepIDs.Add(QuestStepStartedEvent.StepID);
-	}
 	if (OnQuestStepStarted.IsBound())
 	{
-		OnQuestStepStarted.Broadcast(QuestStepStartedEvent.QuestClass->GetFName(), QuestStepStartedEvent.StepID);
-	}
-}
-
-void UQuestWatcherComponent::WatchedQuestStepPrereqsFailedEvent(const FQuestStepPrereqCheckFailed& QuestStepPrereqCheckFailedEvent)
-{
-	if (OnQuestStepPrereqCheckFailed.IsBound())
-	{
-		OnQuestStepPrereqCheckFailed.Broadcast(QuestStepPrereqCheckFailedEvent.QuestClass->GetFName(), QuestStepPrereqCheckFailedEvent.QuestStepID);
+		OnQuestStepStarted.Broadcast(QuestStepStartedEvent.GetQuestTag());
 	}
 }
 
 void UQuestWatcherComponent::WatchedQuestStepCompletedEvent(const FQuestStepCompletedEvent& QuestStepCompletedEvent)
 {
-	if (ActivatedQuestsMap.Contains(QuestStepCompletedEvent.QuestClass))
-	{
-		ActivatedQuestsMap[QuestStepCompletedEvent.QuestClass].ActiveStepIDs.Remove(QuestStepCompletedEvent.StepID);
-	}
 	if (OnQuestStepCompleted.IsBound())
 	{
-		OnQuestStepCompleted.Broadcast(QuestStepCompletedEvent.QuestClass->GetFName(), QuestStepCompletedEvent.StepID, QuestStepCompletedEvent.bDidSucceed, QuestStepCompletedEvent.bEndedQuest);
+		OnQuestStepCompleted.Broadcast(QuestStepCompletedEvent.GetQuestTag(), QuestStepCompletedEvent.bDidSucceed, QuestStepCompletedEvent.bEndedQuest);
 	}
 }
 
 void UQuestWatcherComponent::WatchedQuestCompletedEvent(const FQuestEndedEvent& QuestEndedEvent)
 {
-	if (ActivatedQuestsMap.Contains(QuestEndedEvent.QuestClass))
-	{
-		ActivatedQuestsMap.Remove(QuestEndedEvent.QuestClass);
-	}
-	CompletedQuestClasses.Add(QuestEndedEvent.QuestClass.Get());
+	ActiveQuestTags.RemoveTag(QuestEndedEvent.GetQuestTag());
+	CompletedQuestTags.AddTag(QuestEndedEvent.GetQuestTag());
 	if (OnQuestCompleted.IsBound())
 	{
-		OnQuestCompleted.Broadcast(QuestEndedEvent.QuestClass->GetFName(), QuestEndedEvent.bDidSucceed);
+		OnQuestCompleted.Broadcast(QuestEndedEvent.GetQuestTag(), QuestEndedEvent.bDidSucceed);
 	}
 }
 
@@ -107,42 +77,32 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 	}
 	if (!WatchedQuests.IsEmpty())
 	{
-		for (auto QuestPair : WatchedQuests)
-		{			
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered quest watcher: %s"), *GetOwner()->GetName());
-			if (UClass* OutQuestClass = QuestPair.Key.LoadSynchronous())
+		for (auto& QuestPair : WatchedQuests)
+		{
+			const FGameplayTag& QuestTag = QuestPair.Key;
+			if (!QuestTag.IsValid()) { continue; }
+
+			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered watcher for tag: %s"), *QuestTag.ToString());
+
+			if (QuestPair.Value.bWatchQuestEnabled)
 			{
-				if (CheckQuestSignalSubsystem())
-				{
-					if (QuestPair.Value.bWatchQuestEnabled)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
-					}
-					if (QuestPair.Value.bWatchPrerequisiteFailure)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestPrerequisitesFailedEvent);
-					}
-					if (QuestPair.Value.bWatchQuestStart)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
-					}
-					if (QuestPair.Value.bWatchQuestStepStart)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
-					}
-					if (QuestPair.Value.bWatchQuestStepPrereqsFailure)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepPrereqsFailedEvent);
-					}
-					if (QuestPair.Value.bWatchQuestStepEnd)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
-					}
-					if (QuestPair.Value.bWatchQuestEnd)
-					{
-						SignalSubsystem->SubscribeTyped(OutQuestClass, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
-					}
-				}
+				SignalSubsystem->SubscribeTypedByTag<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
+			}
+			if (QuestPair.Value.bWatchQuestStart)
+			{
+				SignalSubsystem->SubscribeTypedByTag<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
+			}
+			if (QuestPair.Value.bWatchQuestStepStart)
+			{
+				SignalSubsystem->SubscribeTypedByTag<FQuestStepStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
+			}
+			if (QuestPair.Value.bWatchQuestStepEnd)
+			{
+				SignalSubsystem->SubscribeTypedByTag<FQuestStepCompletedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
+			}
+			if (QuestPair.Value.bWatchQuestEnd)
+			{
+				SignalSubsystem->SubscribeTypedByTag<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
 			}
 		}
 	}
@@ -150,7 +110,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 	{
 		if (GetOwner())
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : QuestClassesToWatch is empty, registration failed. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : WatchedQuests is empty, registration failed. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
 		}
 	}
 }

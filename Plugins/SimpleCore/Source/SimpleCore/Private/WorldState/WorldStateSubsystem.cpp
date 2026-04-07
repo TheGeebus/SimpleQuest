@@ -3,31 +3,31 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
 
-void UWorldStateSubsystem::SatisfyState(const FGameplayTag StateTag)
+void UWorldStateSubsystem::AddFact(const FGameplayTag StateTag)
 {
-	if (!StateTag.IsValid() || SatisfiedStateTags.HasTagExact(StateTag)) return;
+	if (!StateTag.IsValid() || WorldFacts.HasTagExact(StateTag)) return;
 
-	SatisfiedStateTags.AddTag(StateTag);
+	WorldFacts.AddTag(StateTag);
 
 	if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
 	{
-		Signals->PublishTyped(this, FStateSatisfiedEvent(StateTag));
+		Signals->PublishTyped(this, FWorldStateFactAddedEvent(StateTag));
 	}
 }
 
-void UWorldStateSubsystem::UnsatisfyState(const FGameplayTag StateTag)
+void UWorldStateSubsystem::RemoveFact(const FGameplayTag StateTag)
 {
-	if (!SatisfiedStateTags.HasTagExact(StateTag)) return;
+	if (!WorldFacts.HasTagExact(StateTag)) return;
 
-	SatisfiedStateTags.RemoveTag(StateTag);
+	WorldFacts.RemoveTag(StateTag);
 
 	if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
 	{
-		Signals->PublishTyped(this, FStateUnsatisfiedEvent(StateTag));
+		Signals->PublishTyped(this, FWorldStateFactRemovedEvent(StateTag));
 	}
 }
 
-bool UWorldStateSubsystem::IsStateSatisfied(const FGameplayTag StateTag) const
+bool UWorldStateSubsystem::HasFact(const FGameplayTag StateTag) const
 {
-	return SatisfiedStateTags.HasTagExact(StateTag);
+	return WorldFacts.HasTagExact(StateTag);
 }

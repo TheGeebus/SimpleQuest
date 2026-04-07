@@ -11,8 +11,8 @@ struct FQuestObjectiveTriggered : public FQuestEventBase
 
 	FQuestObjectiveTriggered() = default;
 
-	FQuestObjectiveTriggered(const FGameplayTag InQuestTag, const TSubclassOf<UQuest>& InQuestClass, AActor* InTriggeredActor)
-		: FQuestEventBase(InQuestTag, InQuestClass), TriggeredActor(InTriggeredActor) {}
+	FQuestObjectiveTriggered(AActor* InTriggeredActor)
+		: FQuestEventBase(FGameplayTag()), TriggeredActor(InTriggeredActor) {}
 		
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<AActor> TriggeredActor;

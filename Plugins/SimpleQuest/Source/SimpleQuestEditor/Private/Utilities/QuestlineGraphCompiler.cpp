@@ -10,7 +10,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
-#include "Quests/QuestNode.h"
+#include "Quests/Quest.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -146,7 +146,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
         {
-            UQuestNode* QuestInstance = NewObject<UQuestNode>(RootGraph);
+            UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
             if (QuestEdNode->GetInnerGraph())
             {
                 const FString InnerPrefix = TagPrefix + TEXT(".") + Label;

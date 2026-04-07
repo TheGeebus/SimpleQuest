@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+class UQuestStep;
 struct FGameplayTag;
 struct FQuestStartedEvent;
 struct FTryQuestStartEvent;
@@ -147,7 +148,7 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
-
+	
 	UPROPERTY(BlueprintReadOnly, Category="Quest State")
 	FGameplayTagContainer ActiveQuestTags;
 
@@ -224,6 +225,8 @@ protected:
 	void CompleteQuestline(UQuest* CompletedQuest, bool bDidSucceed);
 	UFUNCTION()
 	void OnQuestTargetEnabledEvent(UQuest* InQuest, UObject* TargetObject, int32 InStepID, bool bNewIsEnabled);
+	UFUNCTION()
+	void OnStepTargetEnabledEvent(UQuestStep* Step, UObject* TargetObject, bool bIsEnabled);
 
 	/*
 	// Voice line audio player. 
@@ -245,4 +248,9 @@ protected:
 	FDelegateHandle QuestGiverRegistrationDelegateHandle;
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
 
+private:
+	UFUNCTION()
+	void HandleOnNodeCompleted(UQuestNodeBase* Node, bool bDidSucceed);
+	UFUNCTION()
+	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 };

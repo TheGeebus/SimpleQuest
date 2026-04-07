@@ -41,6 +41,7 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
 
 void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph)
 {
+    CrossAssetBackEditor.Reset();
     QuestlineGraph = InQuestlineGraph;
 
     const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v4")
@@ -152,12 +153,9 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTa
 {
     GraphPanelContainer = SNew(SBox);
 
-    SAssignNew(BreadcrumbTrail, SBreadcrumbTrail<UEdGraph*>)
-        .ButtonStyle(FAppStyle::Get(), "GraphBreadcrumbButton")
-        .TextStyle(FAppStyle::Get(), "GraphBreadcrumbButtonText")
-        .DelimiterImage(FAppStyle::GetBrush("BreadcrumbTrail.Delimiter"))
-        .PersistentBreadcrumbs(true)
-        .OnCrumbClicked(this, &FQuestlineGraphEditor::OnBreadcrumbClicked);
+    SAssignNew(BreadcrumbBar, SQuestlineBreadcrumbBar)
+        .OnCrumbClicked(FOnQuestlineCrumbClicked::CreateSP(this, &FQuestlineGraphEditor::NavigateTo))
+        .OnDelimiterClicked(FOnQuestlineDelimiterClicked::CreateSP(this, &FQuestlineGraphEditor::NavigateToLocation));
 
     NavigateTo(QuestlineGraph->QuestlineEdGraph);
 
@@ -226,7 +224,7 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTa
                     .VAlign(VAlign_Center)
                     .Padding(4.f, 0.f)
                     [
-                        BreadcrumbTrail.ToSharedRef()
+                        BreadcrumbBar.ToSharedRef()
                     ]
                 ]
             ]
@@ -460,6 +458,31 @@ static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph,
     return {};
 }
 
+TArray<FQuestlineBreadcrumb> FQuestlineGraphEditor::BuildBreadcrumbs(UEdGraph* Graph) const
+{
+    TArray<FQuestlineBreadcrumb> Crumbs;
+    UEdGraph* Current = Graph;
+    while (Current)
+    {
+        FQuestlineBreadcrumb Crumb;
+        Crumb.Graph       = Current;
+        Crumb.DisplayName = GetGraphDisplayName(Current);
+
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Current->GetOuter()))
+        {
+            Crumb.EntryNode = QuestNode;
+            Current = Cast<UEdGraph>(QuestNode->GetOuter());
+        }
+        else
+        {
+            Crumb.EntryNode = nullptr;
+            Current = nullptr;
+        }
+        Crumbs.Insert(Crumb, 0);
+    }
+    return Crumbs;
+}
+
 FQuestlineGraphEditor::FEdNodeLocation FQuestlineGraphEditor::FindEdNodeLocation(const FGuid& ContentGuid) const
 {
     return FindEdNodeInGraph(QuestlineGraph->QuestlineEdGraph, ContentGuid);
@@ -470,10 +493,14 @@ void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutliner
 {
     if (!Item.IsValid()) return;
 
+    if (Item->ItemType == EOutlinerItemType::Root)
+    {
+        NavigateToEntry();
+        return;
+    }
+    
     if (Item->LinkDepth == 0)
     {
-        if (Item->ItemType == EOutlinerItemType::Root) return;
-
         NavigateToContentNode(Item->Node->GetQuestGuid());
         return;
     }
@@ -489,6 +516,7 @@ void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutliner
     if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
 
     FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
+    LinkedEditor->CrossAssetBackEditor = StaticCastSharedRef<FQuestlineGraphEditor>(AsShared());
 
     if (Item->ItemType == EOutlinerItemType::LinkedGraph)
     {
@@ -496,7 +524,7 @@ void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutliner
     }
     else
     {
-        FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid());
+        FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid()); 
         if (!Location.IsValid()) return;
         LinkedEditor->NavigateToLocation(Location.HostGraph, Location.EdNode);
     }
@@ -512,15 +540,8 @@ void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)
     GraphEditorWidget = Panel;
     GraphPanelContainer->SetContent(Panel);
 
-    // Rebuild breadcrumb trail from full navigation stack
-    if (BreadcrumbTrail.IsValid())
-    {
-        BreadcrumbTrail->ClearCrumbs();
-        for (UEdGraph* StackGraph : GraphBackwardStack)
-        {
-            BreadcrumbTrail->PushCrumb(GetGraphDisplayName(StackGraph), StackGraph);
-        }
-    }
+    // Rebuild breadcrumb trail from new graph hierarchy
+    if (BreadcrumbBar.IsValid()) BreadcrumbBar->SetCrumbs(BuildBreadcrumbs(Graph));
 }
 
 void FQuestlineGraphEditor::NavigateToContentNode(const FGuid& ContentGuid)
@@ -567,12 +588,19 @@ void FQuestlineGraphEditor::NavigateToLocation(UEdGraph* HostGraph, UEdGraphNode
 
 void FQuestlineGraphEditor::NavigateBack()
 {
-    if (GraphBackwardStack.Num() <= 1) return;
-    UEdGraph* Leaving = GraphBackwardStack.Pop();
-    Leaving->RemoveOnGraphChangedHandler(GraphChangedHandles.Pop());
-    GraphForwardStack.Add(Leaving);                                                     // Save for forward navigation
-    TGuardValue<bool> Guard(bIsNavigatingHistory, true);
-    NavigateTo(GraphBackwardStack.Pop());                                         // re-navigate to previous (re-adds it)
+    if (GraphBackwardStack.Num() > 1)
+    {
+        UEdGraph* Leaving = GraphBackwardStack.Pop();
+        Leaving->RemoveOnGraphChangedHandler(GraphChangedHandles.Pop());
+        GraphForwardStack.Add(Leaving);                                                     // Save for forward navigation
+        TGuardValue<bool> Guard(bIsNavigatingHistory, true);
+        NavigateTo(GraphBackwardStack.Pop());                                         // re-navigate to previous (re-adds it)
+    }
+    else if (TSharedPtr<FQuestlineGraphEditor> Parent = CrossAssetBackEditor.Pin())
+    {
+        CrossAssetBackEditor.Reset();
+        if (Parent.IsValid()) Parent->FocusWindow();
+    }
 }
 
 void FQuestlineGraphEditor::NavigateForward()
@@ -582,25 +610,6 @@ void FQuestlineGraphEditor::NavigateForward()
     TGuardValue Guard(bIsNavigatingHistory, true);
     NavigateTo(Next);
 }
-
-void FQuestlineGraphEditor::OnBreadcrumbClicked(UEdGraph* const& Graph)
-{
-    // Pop everything above the clicked graph
-    while (GraphBackwardStack.Num() > 0 && GraphBackwardStack.Last() != Graph)
-    {
-        UEdGraph* Leaving = GraphBackwardStack.Pop();
-        Leaving->RemoveOnGraphChangedHandler(GraphChangedHandles.Pop());
-        GraphForwardStack.Add(Leaving);
-    }
-    if (GraphBackwardStack.Num() > 0)
-    {
-        UEdGraph* Target = GraphBackwardStack.Pop();
-        Target->RemoveOnGraphChangedHandler(GraphChangedHandles.Pop());
-        TGuardValue Guard(bIsNavigatingHistory, true);
-        NavigateTo(Target);  // re-adds it cleanly
-    }
-}
-
 
 void FQuestlineGraphEditor::OnNodeDoubleClicked(UEdGraphNode* Node)
 {

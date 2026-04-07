@@ -3,10 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-//#include "Toolkits/AssetEditorToolkit.h"
-//#include "Toolkit/QuestlineGraphPanel.h"
-//#include "Toolkit/QuestlineOutlinerPanel.h"
 #include "IDetailsView.h"
+#include "Toolkit/QuestlineBreadcrumbBar.h"
+
 
 
 class SQuestlineGraphPanel;
@@ -90,17 +89,18 @@ private:
 
 	void NavigateBack();
 	void NavigateForward();
-	void OnBreadcrumbClicked(UEdGraph* const& Graph);
+	TArray<FQuestlineBreadcrumb> BuildBreadcrumbs(UEdGraph* Graph) const;
 	void OnNodeDoubleClicked(UEdGraphNode* Node);
 
-	bool CanNavigateBack() const { return GraphBackwardStack.Num() > 1; }
+	bool CanNavigateBack() const { return GraphBackwardStack.Num() > 1 || CrossAssetBackEditor.IsValid(); }
 	bool CanNavigateForward() const { return GraphForwardStack.Num() > 0; }
 	
 	TArray<UEdGraph*> GraphBackwardStack;						// backwards-looking stack of opened graphs
 	TArray<UEdGraph*> GraphForwardStack;						// populates when using 'back' button, cleared on NavigateTo
 	TArray<FDelegateHandle> GraphChangedHandles;				// one per graph in stack
 	TSharedPtr<SBox> GraphPanelContainer;						// swapped by NavigateTo
-	TSharedPtr<SBreadcrumbTrail<UEdGraph*>> BreadcrumbTrail;	// updated by NavigateTo
+	TSharedPtr<SQuestlineBreadcrumbBar> BreadcrumbBar;			// updated by NavigateTo
+	TWeakPtr<FQuestlineGraphEditor> CrossAssetBackEditor;		// manages navigation to and from linked questline assets 
 	bool bIsNavigatingHistory = false;
 
 public:

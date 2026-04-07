@@ -23,8 +23,9 @@ struct FQuestlineOutlinerItem
 	FString DisplayName;
 	UQuestNodeBase* Node = nullptr;
 	EOutlinerItemType ItemType = EOutlinerItemType::Quest;
-	int32 LinkDepth = 0;									// 0 = local, 1 = first-level linked, 2+ = deeper
-	TObjectPtr<UQuestlineGraph> SourceGraph = nullptr;		// asset directly hosting this node; navigation only
+	int32 LinkDepth = 0;										// 0 = local, 1 = first-level linked, 2+ = deeper
+	TObjectPtr<UQuestlineGraph> SourceGraph = nullptr;			// asset directly hosting this node; navigation only
+	TObjectPtr<UQuestlineGraph> ContainingAsset = nullptr;		// LinkedGraph items only: the asset whose graph holds the UQuestlineNode_LinkedQuestline pointing here
 	TArray<TSharedPtr<FQuestlineOutlinerItem>> Children;
 
 	bool IsLinked() const { return ItemType == EOutlinerItemType::LinkedGraph; }
@@ -63,6 +64,7 @@ public:
 	/** Rebuilds the tree from the current compiled state of the graph. Call after compilation. */
 	void Refresh();
 
+
 private:
 	void RebuildTree();
 	TSharedRef<ITableRow> GenerateRow(TSharedPtr<FQuestlineOutlinerItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
@@ -72,5 +74,5 @@ private:
 	TArray<TSharedPtr<FQuestlineOutlinerItem>> RootItems;
 	TSharedPtr<STreeView<TSharedPtr<FQuestlineOutlinerItem>>> TreeView;
 	FOnOutlinerItemNavigate OnItemNavigate;
-	
+		
 };

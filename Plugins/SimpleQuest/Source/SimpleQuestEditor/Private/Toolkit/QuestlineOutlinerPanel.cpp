@@ -247,8 +247,8 @@ void SQuestlineOutlinerPanel::RebuildTree()
     }
 
     // Linked items need their source asset resolved from the graph's linked questline nodes
-    TFunction<void(UEdGraph*, const FString&)> ResolveLinkedSources =
-        [&](UEdGraph* Graph, const FString& TagPrefix)
+    TFunction<void(UEdGraph*, const FString&, UQuestlineGraph*)> ResolveLinkedSources =
+        [&](UEdGraph* Graph, const FString& TagPrefix, UQuestlineGraph* CurrentAsset)
         {
             if (!Graph) return;
             for (UEdGraphNode* Node : Graph->Nodes)
@@ -263,7 +263,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
                     const FString LinkedID = SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
                         LinkedAsset->GetQuestlineID().IsEmpty() ? LinkedAsset->GetName() : LinkedAsset->GetQuestlineID());
 
-                    const FString LinkedPrefix = TagPrefix + TEXT(".") + LinkedID;
+                    const FString LinkedPrefix    = TagPrefix + TEXT(".") + LinkedID;
                     const FString FullLinkedPrefix = TEXT("Quest.") + LinkedPrefix;
 
                     for (auto& ItemPair : ItemMap)
@@ -272,26 +272,31 @@ void SQuestlineOutlinerPanel::RebuildTree()
                             ItemPair.Value->SourceGraph = LinkedAsset;
                     }
 
+                    // Stamp ContainingAsset on the header item specifically
+                    if (TSharedPtr<FQuestlineOutlinerItem>* Header = ItemMap.Find(FName(*FullLinkedPrefix)))
+                    {
+                        (*Header)->ContainingAsset = CurrentAsset;
+                    }
                     if (LinkedAsset->QuestlineEdGraph)
-                        ResolveLinkedSources(LinkedAsset->QuestlineEdGraph, LinkedPrefix);
+                    {
+                        ResolveLinkedSources(LinkedAsset->QuestlineEdGraph, LinkedPrefix, LinkedAsset);
+                    }
                 }
                 else if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
                 {
                     UEdGraph* InnerGraph = QuestNode->GetInnerGraph();
                     if (!InnerGraph) continue;
 
-                    const FString QuestLabel = SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-                        QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+                    const FString QuestLabel = SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
                     if (QuestLabel.IsEmpty()) continue;
 
-                    const FString InnerPrefix = TagPrefix + TEXT(".") + QuestLabel;
-                    ResolveLinkedSources(InnerGraph, InnerPrefix);
+                    ResolveLinkedSources(InnerGraph, TagPrefix + TEXT(".") + QuestLabel, CurrentAsset);
                 }
             }
         };
 
     const FString RootPrefix = SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID);
-    ResolveLinkedSources(QuestlineGraph->QuestlineEdGraph, RootPrefix);
+    ResolveLinkedSources(QuestlineGraph->QuestlineEdGraph, RootPrefix, QuestlineGraph);
 
 }
 

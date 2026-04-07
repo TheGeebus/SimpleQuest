@@ -1,6 +1,6 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
-#include "SimpleQuestEditorENModule.h"
+#include "SimpleQuestEditorEN.h"
 #include "Modules/ModuleManager.h"
 
 #if WITH_ELECTRONIC_NODES

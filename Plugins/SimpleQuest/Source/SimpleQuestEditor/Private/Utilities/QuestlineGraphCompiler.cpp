@@ -4,7 +4,7 @@
 
 #include "GameplayTagsManager.h"
 #include "ISimpleQuestEditorModule.h"
-#include "SimpleQuestEditorModule.h"
+#include "SimpleQuestEditor.h"
 #include "NativeGameplayTags.h"
 #include "SimpleQuestLog.h"
 #include "Quests/QuestlineGraph.h"

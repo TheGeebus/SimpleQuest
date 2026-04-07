@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "SimpleQuestEditorModule.h"
+#include "SimpleQuestEditor.h"
 #include "AssetTypes/QuestlineGraphAssetTypeActions.h"
 #include "AssetToolsModule.h"
 #include "Modules/ModuleManager.h"

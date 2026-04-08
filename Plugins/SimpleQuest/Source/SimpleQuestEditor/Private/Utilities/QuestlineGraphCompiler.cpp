@@ -19,6 +19,14 @@
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Exit_Success.h"
 #include "Nodes/QuestlineNode_Exit_Failure.h"
+#include "Quests/PrerequisiteExpression.h"
+#include "Quests/QuestPrereqGroupNode.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupSetter.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Utils/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
@@ -26,6 +34,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Utils/QuestStateTagUtils.h"
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -111,6 +120,8 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 {
     if (!Graph) return {};
 
+    TArray<FName> MonitorTags;
+
     // ---- Pass 1: label uniqueness, GUID write, tag assignment ----
     // LinkedQuestline nodes are compiler-only scaffolding with no CDO; skip tag assignment
 
@@ -181,6 +192,47 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         NodeInstanceMap.Add(ContentNode, Instance);
     }
 
+    // ---- Pass 1b: setter nodes — create UQuestPrereqGroupNode monitors ----
+
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node);
+        if (!Setter) continue;
+
+        if (Setter->GroupName.IsNone())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupName set and will be skipped."), *TagPrefix));
+            continue;
+        }
+
+        const FName GroupTagName = FName(*FString::Printf(TEXT("Quest.Prereq.%s.Satisfied"), *SanitizeTagSegment(Setter->GroupName.ToString())));
+
+        UQuestPrereqGroupNode* Monitor = NewObject<UQuestPrereqGroupNode>(RootGraph);
+        Monitor->GroupTag = UGameplayTagsManager::Get().RequestGameplayTag(GroupTagName, false);
+
+        for (UEdGraphPin* Pin : Setter->Pins)
+        {
+            if (Pin->Direction != EGPD_Input) continue;
+            if (!Pin->PinName.ToString().StartsWith(TEXT("Condition"))) continue;
+
+            for (UEdGraphPin* LinkedOutputPin : Pin->LinkedTo)
+            {
+                const FName FactTagName = ResolveOutputPinToStateFact(LinkedOutputPin, TagPrefix);
+                if (FactTagName.IsNone()) continue;
+
+                const FGameplayTag FactTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
+                if (FactTag.IsValid())
+                {
+                    Monitor->ConditionTags.AddUnique(FactTag);
+                }
+            }
+        }
+
+        AllCompiledNodes.Add(GroupTagName, Monitor);
+        AllCompiledQuestTags.Add(GroupTagName);
+        MonitorTags.Add(GroupTagName);
+    }
+    
     if (bHasErrors) return {};
     
     // ---- Pass 2: output pin wiring ----
@@ -233,6 +285,13 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             (FailurePin && CheckExit(FailurePin)) ||
             (AnyPin && CheckExit(AnyPin));
 
+        if (UEdGraphPin* PrereqPin = ContentNode->FindPin(TEXT("Prerequisites"), EGPD_Input))
+        {
+            if (PrereqPin->LinkedTo.Num() > 0)
+            {
+                Instance->PrerequisiteExpression = CompilePrerequisiteExpression(PrereqPin, TagPrefix, VisitedAssetPaths);
+            }
+        }
     }
 
     // ---- Resolve entry tags from the graph's Entry node ----
@@ -251,7 +310,8 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         }
         break;
     }
-
+    
+    EntryTags.Append(MonitorTags);
     return EntryTags;
 }
 
@@ -398,5 +458,175 @@ void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
     ISimpleQuestEditorModule::Get().RegisterCompiledTags(
         InGraph->GetPackage()->GetName(),
         InGraph->CompiledQuestTags);
+}
+
+int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)
+{
+    if (!OutputPin) return INDEX_NONE;
+    UEdGraphNode* Node = OutputPin->GetOwningNode();
+
+    if (UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+    {
+        UEdGraphPin* KnotIn = Knot->FindPin(TEXT("KnotIn"), EGPD_Input);
+        if (KnotIn && KnotIn->LinkedTo.Num() > 0)
+        {
+            return CompilePrerequisiteFromOutputPin(KnotIn->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+        }
+        return INDEX_NONE;
+    }
+    
+    // AND
+    if (Cast<UQuestlineNode_PrerequisiteAnd>(Node))
+    {
+        FPrerequisiteExpressionNode ExprNode;
+        ExprNode.Type = EPrerequisiteExpressionType::And;
+        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+
+        for (UEdGraphPin* Pin : Node->Pins)
+        {
+            if (Pin->Direction != EGPD_Input) continue;
+            for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+            {
+                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
+                if (ChildIndex != INDEX_NONE)
+                {
+                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
+                }
+            }
+        }
+        return NodeIndex;
+    }
+    
+    // OR
+    if (Cast<UQuestlineNode_PrerequisiteOr>(Node))
+    {
+        FPrerequisiteExpressionNode ExprNode;
+        ExprNode.Type = EPrerequisiteExpressionType::Or;
+        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+
+        for (UEdGraphPin* Pin : Node->Pins)
+        {
+            if (Pin->Direction != EGPD_Input) continue;
+            for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+            {
+                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
+                if (ChildIndex != INDEX_NONE)
+                {
+                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
+                }
+            }
+        }
+        return NodeIndex;
+    }
+
+    // NOT
+    if (Cast<UQuestlineNode_PrerequisiteNot>(Node))
+    {
+        FPrerequisiteExpressionNode ExprNode;
+        ExprNode.Type = EPrerequisiteExpressionType::Not;
+        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+
+        if (UEdGraphPin* CondPin = Node->FindPin(TEXT("Condition_0"), EGPD_Input))
+        {
+            if (CondPin->LinkedTo.Num() > 0)
+            {
+                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(CondPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+                if (ChildIndex != INDEX_NONE)
+                {
+                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
+                }
+            }
+        }
+        return NodeIndex;
+    }
+
+    // Getter: resolves to a Leaf on the group's Satisfied tag
+    if (UQuestlineNode_PrerequisiteGroupGetter* Getter = Cast<UQuestlineNode_PrerequisiteGroupGetter>(Node))
+    {
+        if (!Getter->GroupTag.IsValid())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Getter has no GroupTag set and will be skipped."), *TagPrefix));
+            return INDEX_NONE;
+        }
+        FPrerequisiteExpressionNode LeafNode;
+        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+        LeafNode.LeafTag = Getter->GroupTag;
+        return OutExpression.Nodes.Add(LeafNode);
+    }
+
+    // Content node: Success/Failure becomes single Leaf; Any Outcome builds OR(Succeeded, Failed)
+    if (Cast<UQuestlineNode_ContentBase>(Node))
+    {
+        if (OutputPin->PinName == TEXT("Any Outcome"))
+        {
+            const UQuestlineNode_ContentBase* CN = Cast<UQuestlineNode_ContentBase>(Node);
+            const FString Label = SanitizeTagSegment(CN->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+            const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
+
+            FPrerequisiteExpressionNode OrNode;
+            OrNode.Type = EPrerequisiteExpressionType::Or;
+            const int32 OrIndex = OutExpression.Nodes.Add(OrNode);
+
+            auto AddLeaf = [&](const FString& Leaf) -> int32
+            {
+                FPrerequisiteExpressionNode LeafNode;
+                LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(NodeTagName, Leaf), false);
+                return OutExpression.Nodes.Add(LeafNode);
+            };
+
+            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(QuestStateTagUtils::Leaf_Succeeded));
+            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(QuestStateTagUtils::Leaf_Failed));
+            return OrIndex;
+        }
+
+        const FName FactTagName = ResolveOutputPinToStateFact(OutputPin, TagPrefix);
+        if (FactTagName.IsNone()) return INDEX_NONE;
+
+        FPrerequisiteExpressionNode LeafNode;
+        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+        LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
+        return OutExpression.Nodes.Add(LeafNode);
+    }
+
+    return INDEX_NONE;
+}
+
+FPrerequisiteExpression FQuestlineGraphCompiler::CompilePrerequisiteExpression(UEdGraphPin* PrerequisiteInputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths)
+{
+    FPrerequisiteExpression Expression;
+    if (!PrerequisiteInputPin || PrerequisiteInputPin->LinkedTo.IsEmpty()) return Expression;
+
+    // Schema enforces exactly one wire into any QuestPrerequisite input pin
+    const int32 RootIndex = CompilePrerequisiteFromOutputPin(PrerequisiteInputPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, Expression);
+
+    if (RootIndex == INDEX_NONE)
+    {
+        Expression.Nodes.Reset(); // unresolvable — fall back to Always
+    }
+    else
+    {
+        Expression.RootIndex = RootIndex;
+    }
+
+    return Expression;
+}
+
+FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
+    UEdGraphPin* OutputPin, const FString& TagPrefix) const
+{
+    const UQuestlineNode_ContentBase* ContentNode = Cast<const UQuestlineNode_ContentBase>(OutputPin->GetOwningNode());
+    if (!ContentNode) return NAME_None;
+
+    const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+    if (Label.IsEmpty()) return NAME_None;
+
+    const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
+    const FName PinName = OutputPin->PinName;
+
+    if (PinName == TEXT("Success")) return QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Succeeded);
+    if (PinName == TEXT("Failure")) return QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Failed);
+
+    return NAME_None; // Any Outcome — caller builds the OR node
 }
 

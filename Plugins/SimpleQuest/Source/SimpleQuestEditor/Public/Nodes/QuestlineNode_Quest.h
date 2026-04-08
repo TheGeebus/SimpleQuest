@@ -19,6 +19,7 @@ public:
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }
 
 private:
 	void CreateInnerGraph();

@@ -13,6 +13,7 @@ struct FQuestStartedEvent;
 struct FQuestEnabledEvent;
 struct FQuestObjectiveTriggered;
 class USignalSubsystem;
+class UWorldStateSubsystem;
 class IQuestTargetInterface;
 class UQuestGiverInterface;
 struct FQuestText;
@@ -64,14 +65,27 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
-	
-	UPROPERTY(BlueprintReadOnly, Category="Quest State")
-	FGameplayTagContainer ActiveQuestTags;
+
 
 	// TEMPORARY BRIDGE
 	UFUNCTION(BlueprintCallable)
 	void GiveNodeQuest(FGameplayTag NodeTag);
 	
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
+	bool IsQuestActive(FGameplayTag QuestTag) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
+	bool IsQuestCompleted(FGameplayTag QuestTag) const;   // either outcome
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
+	bool IsQuestSucceeded(FGameplayTag QuestTag) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
+	bool IsQuestFailed(FGameplayTag QuestTag) const;
+
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
+	bool IsQuestPendingGiver(FGameplayTag QuestTag) const;
+
 protected:
 
 	/** Questline graph assets to activate when the game launches. Prefer this over InitialQuests for graphs compiled with the current compiler. */
@@ -124,6 +138,9 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
+	
+	UPROPERTY()
+	TObjectPtr<UWorldStateSubsystem> WorldState;
 
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
 
@@ -132,4 +149,11 @@ private:
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, bool bDidSucceed);
 	UFUNCTION()
 	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
+	void SetQuestActive(FGameplayTag QuestTag);
+	void SetQuestCompleted(FGameplayTag QuestTag, bool bSucceeded);
+	void SetQuestPendingGiver(FGameplayTag QuestTag);
+	void ClearQuestPendingGiver(FGameplayTag QuestTag);
+
+	
 };

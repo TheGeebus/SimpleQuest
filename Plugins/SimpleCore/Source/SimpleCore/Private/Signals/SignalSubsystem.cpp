@@ -12,7 +12,7 @@ void USignalSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-void USignalSubsystem::UnsubscribeTypedByTag(const FGameplayTag EventTag, const FDelegateHandle Handle)
+void USignalSubsystem::UnsubscribeByTag(const FGameplayTag EventTag, const FDelegateHandle Handle)
 {
 	if (FSignalEventMulticast* Delegate = TagChannels.Find(EventTag))
 	{

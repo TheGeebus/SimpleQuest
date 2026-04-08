@@ -2,6 +2,8 @@
 
 #include "Quests/QuestNodeBase.h"
 #include "GameplayTagsManager.h"
+#include "Quests/PrerequisiteExpression.h"
+
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {

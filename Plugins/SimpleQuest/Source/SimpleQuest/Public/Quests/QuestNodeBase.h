@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "PrerequisiteExpression.h"
 #include "QuestNodeBase.generated.h"
 
 class UQuestReward;
@@ -64,13 +65,11 @@ protected:
     TSet<FName> NextNodesOnFailure;
 
     /**
-     * Prerequisite tags that must be satisfied before this node can be started. Compiler-written from connected Prereq
-     * Reference nodes in the graph.
-     *
-     * Format: QuestPrereq.*
+     * A struct that holds the composable prerequisites for this quest graph node: the relevant tags representing events and their
+     * required completion statuses along with the boolean-style logic by which they are combined.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TArray<FName> PrereqTags;
+    FPrerequisiteExpression PrerequisiteExpression;
 
     /** Reward granted on completion of this node. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
@@ -89,6 +88,11 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     bool bGiverGated = false;
+    
+    UPROPERTY()
+    TWeakObjectPtr<UGameInstance> CachedGameInstance;
+    
+   public:
 
 public:
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
@@ -99,5 +103,6 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesOnFailure() const { return NextNodesOnFailure; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsGiverGated() const { return bGiverGated; }
+    void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     
 };

@@ -17,6 +17,8 @@
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
+#include "WorldState/WorldStateSubsystem.h"
+#include "Utils/QuestStateTagUtils.h"
 #include "Utils/SimpleCoreDebug.h"
 
 
@@ -27,6 +29,7 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	if (UGameInstance* GameInstance = GetGameInstance())
 	{
 		QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
+		WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
 		if (QuestSignalSubsystem)
 		{
 			ObjectiveTriggeredDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
@@ -187,6 +190,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
 		{
 			Instance->ResolveQuestTag(Pair.Key);
 			LoadedNodeInstances.Add(Pair.Key, Instance);
+			Instance->RegisterWithGameInstance(GetGameInstance());
 			Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
 			Instance->OnNodeActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeActivated);
 			if (UQuestStep* Step = Cast<UQuestStep>(Instance))
@@ -212,7 +216,7 @@ void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGamepl
 {
 	if (Node->GetQuestTag().IsValid())
 	{
-		ActiveQuestTags.AddTag(Node->GetQuestTag());
+        SetQuestActive(Node->GetQuestTag());
 	}
 	// Signal for watcher/HUD integration — typed to the node's class as broadcast channel
 	// (no specific quest class in the node system; subscribers listen on UQuestNode::StaticClass())
@@ -236,6 +240,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
 	const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	if ((*InstancePtr)->IsGiverGated())
 	{
+		SetQuestPendingGiver(NodeTag);
 		// Don't activate yet — notify givers this node is available
 		if (QuestSignalSubsystem)
 		{
@@ -258,8 +263,11 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* CompletedNode, boo
 {
 	if (!CompletedNode) return;
 
-	if (CompletedNode->GetQuestTag().IsValid()) ActiveQuestTags.RemoveTag(CompletedNode->GetQuestTag());
-
+	if (CompletedNode->GetQuestTag().IsValid())
+	{
+		SetQuestCompleted(CompletedNode->GetQuestTag(), bDidSucceed);
+	}
+	
 	if (QuestSignalSubsystem)
 	{
 		QuestSignalSubsystem->PublishTyped(UQuestNodeBase::StaticClass(), FQuestEndedEvent(CompletedNode->GetQuestTag(), bDidSucceed));
@@ -285,6 +293,68 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(FGameplayTag QuestTag, bool 
 
 void UQuestManagerSubsystem::GiveNodeQuest(FGameplayTag NodeTag)
 {
+	ClearQuestPendingGiver(NodeTag);
 	ActivateNodeByTag(NodeTag.GetTagName());
 }
 
+FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)
+{
+    const FName FactName = QuestStateTagUtils::MakeStateFact(QuestTag.GetTagName(), Leaf);
+    return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+}
+
+void UQuestManagerSubsystem::SetQuestActive(FGameplayTag QuestTag)
+{
+    if (WorldState && QuestTag.IsValid())
+        WorldState->AddFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+}
+
+void UQuestManagerSubsystem::SetQuestCompleted(FGameplayTag QuestTag, bool bSucceeded)
+{
+    if (!WorldState || !QuestTag.IsValid()) return;
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+    const FString& Leaf = bSucceeded ? QuestStateTagUtils::Leaf_Succeeded : QuestStateTagUtils::Leaf_Failed;
+    WorldState->AddFact(MakeQuestStateFact(QuestTag, Leaf));
+}
+
+void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
+{
+	if (WorldState && QuestTag.IsValid())
+	{
+		WorldState->AddFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+	}
+}
+
+void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
+{
+	if (WorldState && QuestTag.IsValid())
+	{
+		WorldState->RemoveFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+	}
+}
+
+bool UQuestManagerSubsystem::IsQuestActive(FGameplayTag QuestTag) const
+{
+    return WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+}
+
+bool UQuestManagerSubsystem::IsQuestCompleted(FGameplayTag QuestTag) const
+{
+    return IsQuestSucceeded(QuestTag) || IsQuestFailed(QuestTag);
+}
+
+bool UQuestManagerSubsystem::IsQuestSucceeded(FGameplayTag QuestTag) const
+{
+    return WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Succeeded));
+}
+
+bool UQuestManagerSubsystem::IsQuestFailed(FGameplayTag QuestTag) const
+{
+    return WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Failed));
+}
+
+bool UQuestManagerSubsystem::IsQuestPendingGiver(FGameplayTag QuestTag) const
+{
+    return WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+}

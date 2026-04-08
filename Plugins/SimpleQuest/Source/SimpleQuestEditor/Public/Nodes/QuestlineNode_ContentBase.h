@@ -33,4 +33,7 @@ public:
 	// on duplication. Never hand-edited.
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	FGuid QuestGuid;
+
+protected:
+	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }
 };

@@ -40,7 +40,7 @@ public:
     requires derived_from_base<EventType, FSignalEventBase>
     void UnsubscribeTyped(UObject* ChannelObject, FDelegateHandle Handle);
 
-    void UnsubscribeTypedByTag(FGameplayTag EventTag, FDelegateHandle Handle);
+    void UnsubscribeByTag(FGameplayTag EventTag, FDelegateHandle Handle);
 
 private:
     static FSignalEventChannelKey MakeKey(const UObject* Object, const UScriptStruct* Struct);

@@ -22,6 +22,7 @@ public class SimpleQuestEditor: ModuleRules
 			"SlateCore",
 			"InputCore",
 			"BlueprintGraph",
+			"ToolMenus",
 		});
 
 		if (Target.bBuildEditor)

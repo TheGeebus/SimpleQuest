@@ -56,10 +56,10 @@ public:
     virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const = 0;
 
     /**
-     * Register native Gameplay Tags that are created at graph compilation time so they show up in the Gameplay Tags Manager in
-     * Project Settings.
-     * @param GraphPath Path to the QuestlineGraph asset from which to register the compiled tags 
-     * @param TagNames The FName representations of the gameplay tags on this graph
+     * Register native Gameplay Tags produced at graph compilation time. For each quest tag registered, the corresponding WorldState
+     * fact tags (Active, Succeeded, Failed, PendingGiver) are automatically registered in the same pass. Any caller — compiler,
+     * importer, or procedural generator — receives this guarantee by calling through this interface.
      */
     virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) = 0;
+
 };

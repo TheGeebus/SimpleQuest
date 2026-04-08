@@ -14,6 +14,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_Step : public UQuestlineNode_ContentB
 
 public:
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Step"); }
 
 	/** The objective that defines how this step is completed. Required for compilation. */
 	UPROPERTY(EditAnywhere, Category = "Step")

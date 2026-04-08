@@ -12,6 +12,7 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
+#include "Utils/QuestStateTagUtils.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -120,7 +121,17 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 	CompiledTagRegistry.Remove(GraphPath);
 	TArray<TUniquePtr<FNativeGameplayTag>>& Entries = CompiledTagRegistry.Add(GraphPath);
 
-	for (const FName& TagName : TagNames)
+	// Register quest tags and their derived state facts
+	TArray<FName> AllTags = TagNames;
+	for (const FName& QuestTag : TagNames)
+	{
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Succeeded));
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Failed));
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+	}
+
+	for (const FName& TagName : AllTags)
 	{
 		Entries.Add(MakeUnique<FNativeGameplayTag>(
 			FName("SimpleQuest"),

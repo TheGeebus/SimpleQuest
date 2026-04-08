@@ -8,7 +8,7 @@ UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
 void UQuestlineNode_ContentBase::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input,TEXT("QuestActivation"),TEXT("Activate"));
-	CreatePin(EGPD_Input,TEXT("QuestActivation"),TEXT("Prerequisites"));
+	CreatePin(EGPD_Input,TEXT("QuestPrerequisite"),TEXT("Prerequisites"));
 	CreatePin(EGPD_Output,TEXT("QuestSuccess"),TEXT("Success"));
 	CreatePin(EGPD_Output,TEXT("QuestFailure"),TEXT("Failure"));
 	CreatePin(EGPD_Output,TEXT("QuestActivation"),TEXT("Any Outcome"));
@@ -38,6 +38,31 @@ void UQuestlineNode_ContentBase::PostPlacedNewNode()
 {
 	Super::PostPlacedNewNode();
 	QuestGuid = FGuid::NewGuid();
+
+	const UEdGraph* Graph = GetGraph();
+	if (!Graph) return;
+
+	const FString BaseName = GetDefaultNodeBaseName();
+
+	TSet<FString> ExistingLabels;
+	for (const UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (const UQuestlineNode_ContentBase* Other = Cast<UQuestlineNode_ContentBase>(Node))
+		{
+			if (Other != this)
+			{
+				ExistingLabels.Add(Other->NodeLabel.ToString());
+			}
+		}
+	}
+
+	FString Candidate = BaseName;
+	int32 Counter = 1;
+	while (ExistingLabels.Contains(Candidate))
+	{
+		Candidate = FString::Printf(TEXT("%s_%d"), *BaseName, Counter++);
+	}
+	NodeLabel = FText::FromString(Candidate);
 }
 
 void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Quests/PrerequisiteExpression.h"
 
 class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
@@ -75,6 +76,11 @@ protected:
 	 */
 	virtual FString SanitizeTagSegment(const FString& InLabel) const;
 	
+	/**
+     * Entry point for prerequisite expression compilation. Called from Pass 2 for each content node with something wired to its
+     * Prerequisites pin. Returns a trivially-true expression if the pin is empty.
+     */
+    virtual FPrerequisiteExpression CompilePrerequisiteExpression(UEdGraphPin* PrerequisiteInputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths);
 	
 	/** Constructs the FName used to register and look up a node's gameplay tag. */
 	virtual FName MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const;
@@ -110,8 +116,21 @@ protected:
 	 */
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
 	
+	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
+
 private:
-	void RegisterCompiledTags(UQuestlineGraph* InGraph);
+
+	/**
+	 * Recursive helper. Walks one output pin in the prerequisite expression sub-graph and appends the corresponding node(s) to 
+	 * OutExpression. Returns the index of the root node added, or INDEX_NONE if the pin could not be resolved.
+	 */
+	int32 CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression);
+
+	/**
+	 * Given a Success or Failure output pin on a content node, returns the corresponding WorldState state fact FName (Quest.State.<Tag>.Succeeded / Failed).
+	 * Returns NAME_None for Any Outcome (caller builds the OR node) or non-content-node pins.
+	 */
+	FName ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const;
 
 	UQuestlineGraph* RootGraph = nullptr;
 

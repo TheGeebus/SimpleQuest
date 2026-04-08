@@ -22,8 +22,10 @@ public:
 			else if (Category == TEXT("QuestFailure")) Params.WireColor = SQ_ED_RED;
 			else Params.WireColor = FLinearColor::White;
 		}
-		if (InputPin && InputPin->PinName == TEXT("Prerequisites"))
-			Params.bUserFlag1 = true;
+		const bool bIsPrerequisiteWire =
+			(OutputPin && OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite")) ||
+			(InputPin  && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
+		if (bIsPrerequisiteWire) Params.bUserFlag1 = true;
 	}
 	
 	virtual void DetermineWiringStyle(UEdGraphPin* OutputPin, UEdGraphPin* InputPin, FConnectionParams& Params) override

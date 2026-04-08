@@ -10,6 +10,11 @@
 #include "Nodes/QuestlineNode_Exit_Success.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupSetter.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
@@ -267,6 +272,48 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     const bool bOutputIsKnot = TraversalPolicy->IsPassThroughNode(OutputNode);
     const bool bInputIsKnot  = TraversalPolicy->IsPassThroughNode(InputNode);
 
+	// ---- Prerequisites ---- 
+	const bool bOutputIsPrereq = (OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite"));
+	const bool bInputIsPrereq  = (InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
+	if ((bOutputIsPrereq || bInputIsPrereq) && !bOutputIsKnot && !bInputIsKnot)
+	{
+		// A QuestPrerequisite input pin may only carry one wire. Use an AND or an OR node to combine conditions
+		if (bInputIsPrereq && InputPin->Direction == EGPD_Input && InputPin->LinkedTo.Num() > 0)
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrerequisiteSingleInput",
+				"This prerequisite input already has a connection. Use an AND or OR node to combine conditions."));
+		}
+
+		// prereq output to prereq input: operator chaining or getter → operator
+		if (bOutputIsPrereq && bInputIsPrereq)
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+		// prereq output to non-prereq input: only the Prerequisites pin on a content node
+		if (bOutputIsPrereq)
+		{
+			if (InputPin->PinName == TEXT("Prerequisites") && TraversalPolicy->IsContentNode(InputNode))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+			}
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqOutputInvalid",
+				"Prerequisite outputs may only connect to the Prerequisites pin or other prerequisite nodes"));
+		}
+
+		// non-prereq output to prereq input: only Quest outcome pins (Success, Failure, Any Outcome)
+		const FName OutputCategory = OutputPin->PinType.PinCategory;
+		const bool bIsQuestOutcome =
+			OutputCategory == TEXT("QuestSuccess") ||
+			OutputCategory == TEXT("QuestFailure") ||
+			(OutputCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
+
+		if (bIsQuestOutcome && TraversalPolicy->IsContentNode(OutputNode))
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+			NSLOCTEXT("SimpleQuestEditor", "PrereqInputInvalid",
+				"Prerequisite inputs may only accept connections from Quest outcome pins"));
+	}
+	
     // ---- Exit node enforcement ----
     if (TraversalPolicy->IsExitNode(InputNode))
     {
@@ -382,10 +429,18 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
             if (TargetCategory != SourceCategory)
             {
                 const FText Msg = bOutputIsKnot
-                    ? NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch",       "Reroute node signal types do not match")
+                    ? NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatch", "Reroute node signal types do not match")
                     : NSLOCTEXT("SimpleQuestEditor", "KnotTypeMismatchSingle", "Signal type does not match this reroute node");
                 return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, Msg);
             }
+
+        	// Prerequisite wires may not fan into reroute nodes — use AND node to combine conditions
+        	const FName EffectiveCategory = Cast<const UQuestlineNode_Knot>(InputNode)->GetEffectiveCategory();
+        	if (EffectiveCategory == TEXT("QuestPrerequisite"))
+        	{
+        		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "PrerequisiteRerouteMultiple", "Use an AND node to combine prerequisite conditions."));
+        	}
         }
 
         if (bInputIsKnot)
@@ -514,6 +569,61 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 		Action->NodeTemplate = NewObject<UQuestlineNode_LinkedQuestline>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
+	// Prereq AND
+	{
+	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqAnd", "Add AND"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqAndTooltip", "All wired conditions must be satisfied"),
+	        0));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteAnd>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    ContextMenuBuilder.AddAction(Action);
+	}
+
+	// Prereq OR
+	{
+	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqOr", "Add OR"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqOrTooltip", "Any wired condition being satisfied is enough"),
+	        0));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteOr>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    ContextMenuBuilder.AddAction(Action);
+	}
+
+	// Prereq NOT
+	{
+	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqNot", "Add NOT"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqNotTooltip", "Condition must NOT be satisfied"),
+	        0));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteNot>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    ContextMenuBuilder.AddAction(Action);
+	}
+
+	// Prereq Group Setter
+	{
+	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqSetter", "Add Prereq Group"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqSetterTooltip", "Define a named prerequisite group from wired conditions"),
+	        0));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteGroupSetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    ContextMenuBuilder.AddAction(Action);
+	}
+
+	// Prereq Group Getter
+	{
+	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqGetter", "Get Prereq Group"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqGetterTooltip", "Reference a named prerequisite group"),
+	        0));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteGroupGetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    ContextMenuBuilder.AddAction(Action);
+	}
+
 }
 
 void UQuestlineGraphSchema::GetContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const

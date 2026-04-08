@@ -16,3 +16,9 @@ void UQuestNodeBase::ResolveQuestTag(FName TagName)
 	QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName);
 }
 
+const TArray<FName>* UQuestNodeBase::GetNextNodesForOutcome(FGameplayTag OutcomeTag) const
+{
+	const FQuestOutcomeNodeList* List = NextNodesByOutcome.Find(OutcomeTag);
+	return List ? &List->NodeTags : nullptr;
+}
+

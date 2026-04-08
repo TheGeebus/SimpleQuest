@@ -16,7 +16,7 @@ struct SIMPLECORE_API FWorldStateFactAddedEvent : public FSignalEventBase
 	FWorldStateFactAddedEvent() = default;
 
 	explicit FWorldStateFactAddedEvent(const FGameplayTag InStateTag)
-		: FSignalEventBase(InStateTag.GetTagName(), InStateTag)
+		: FSignalEventBase(InStateTag)
 	{}
 
 	UPROPERTY(BlueprintReadWrite)
@@ -31,7 +31,7 @@ struct SIMPLECORE_API FWorldStateFactRemovedEvent : public FSignalEventBase
 	FWorldStateFactRemovedEvent() = default;
 
 	explicit FWorldStateFactRemovedEvent(const FGameplayTag InStateTag)
-		: FSignalEventBase(InStateTag.GetTagName(), InStateTag)
+		: FSignalEventBase(InStateTag)
 	{}
 
 	UPROPERTY(BlueprintReadWrite)

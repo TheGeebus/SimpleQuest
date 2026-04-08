@@ -3,8 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "NativeGameplayTags.h"
 #include "Objectives/QuestObjective.h"
 #include "KillClassQuestObjective.generated.h"
+
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Outcome_KillClass_Killed)
 
 /**
  * 

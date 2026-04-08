@@ -57,8 +57,8 @@ private:
 	TObjectPtr<UQuestObjective> ActiveObjective;
 	
 	UFUNCTION()
-	void OnObjectiveEnabledEvent(UObject* InTargetObject, int32 InStepID, bool bNewIsEnabled);
+	void OnObjectiveEnabledEvent(UObject* InTargetObject, bool bNewIsEnabled);
 	
 	UFUNCTION(BlueprintCallable)
-	void OnObjectiveComplete(int32 StepID, bool bDidSucceed);
+	void OnObjectiveComplete(FGameplayTag OutcomeTag);
 };

@@ -3,6 +3,7 @@
 
 #include "Objectives/QuestObjective.h"
 
+#include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Interfaces/QuestTargetInterface.h"
 
@@ -12,11 +13,9 @@ void UQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObjec
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::SetObjectiveTarget_Implementation(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass,
-	int32 NumElementsRequired, bool bUseCounter)
+void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass, int32 NumElementsRequired, bool bUseCounter)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
-	StepID = InStepID;
 	TargetActors = InTargetActors;
 	TargetClass = InTargetClass;
 	MaxElements = NumElementsRequired;
@@ -59,16 +58,16 @@ bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
 	return bIsTargetRelevant;
 }
 
-void UQuestObjective::CompleteObjective(bool bDidSucceed)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag)
 {
 	bStepCompleted = true;
-	OnQuestObjectiveComplete.Broadcast(StepID, bDidSucceed);
+	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
 	ConditionalBeginDestroy();
 }
 
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
 {
-	OnEnableTarget.Broadcast(Target, GetStepID(), bIsTargetEnabled);
+	OnEnableTarget.Broadcast(Target, bIsTargetEnabled);
 }
 
 void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
@@ -85,7 +84,7 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 
 void UQuestObjective::EnableQuestTargetClass(bool bIsTargetEnabled) const
 {
-	OnEnableTarget.Broadcast(GetTargetClass(), GetStepID(), bIsTargetEnabled);
+	OnEnableTarget.Broadcast(GetTargetClass(), bIsTargetEnabled);
 }
 
 void UQuestObjective::SetCurrentElements(const int32 NewAmount)

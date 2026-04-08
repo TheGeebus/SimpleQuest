@@ -27,6 +27,10 @@ public:
     template<typename EventType>
     requires derived_from_base<EventType, FSignalEventBase>
     void PublishTyped(UObject* ChannelObject, const EventType& Event);
+    
+    template<typename EventType>
+    requires derived_from_base<EventType, FSignalEventBase>
+    void PublishTyped(const EventType& Event);
 
     template <typename EventType, typename ListenerType>
     requires derived_from_base<EventType, FSignalEventBase>
@@ -66,16 +70,41 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
         FSignalEventMulticast DelegateCopy = *Delegate;
         DelegateCopy.Broadcast(EventCopy);
     }
+    
+    TSet<FGameplayTag> VisitedTags;
+    for (const FGameplayTag& RootTag : Event.EventTags)
+    {
+        FGameplayTag CurrentTag = RootTag;
+        while (CurrentTag.IsValid())
+        {
+            if (VisitedTags.Contains(CurrentTag)) break; 
+            VisitedTags.Add(CurrentTag);
 
-    // Events hold EventTags - FGameplayTagContainers - because linked questline graphs may have subscribers at both the parent and
-    // child levels. So we store a tag that describes the whole questline hierarchy from the top parent level down to this event,
-    // and we also store separate tags that describe the hierarchy from the start of each linked child graph in the chain without its
-    // parent context. Subscribers may then subscribe to specific instances of an event in some graph which is reused in some chain of
-    // linked graphs or to all instances of the event throughout that chain as needed.
+            if (auto* Delegate = TagChannels.Find(CurrentTag))
+            {
+                FSignalEventMulticast DelegateCopy = *Delegate;
+                DelegateCopy.Broadcast(EventCopy);
+            }
+            CurrentTag = CurrentTag.RequestDirectParent(); 
+        }
+    }
+}
+
+template<typename EventType>
+requires derived_from_base<EventType, FSignalEventBase>
+void USignalSubsystem::PublishTyped(const EventType& Event)
+{
+    if (bIsShuttingDown) return;
+
+    // Events hold EventTags - FGameplayTagContainers - to enable tree-like tag hierarchies. We store a tag that describes the whole
+    // tree from the top parent level down to this event, and we also store separate tags that describe the hierarchy from the start
+    // of each branch node without its parent context. Subscribers may then subscribe to specific instances of an event throughout a
+    // tree by using the version with full context or to all instances of the event throughout that tree that appear in any branch.
     //
     // We want to walk all tag hierarchies from the tip to root, checking if we've already broadcast this exact event because tag
-    // hierarchies examined starting from the tip may have duplicates that represent graph links.
+    // hierarchies examined starting from the tip may have duplicates that represent branch nodes.
     
+    FInstancedStruct EventCopy = FInstancedStruct::Make<EventType>(Event);
     TSet<FGameplayTag> VisitedTags;
     for (const FGameplayTag& RootTag : Event.EventTags)
     {
@@ -84,7 +113,6 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
         {
             if (VisitedTags.Contains(CurrentTag)) break; // Detected common ancestry with a branch we've already walked up, so this tag and any parent tags in this hierarchy are duplicates. Stop walking this branch and move to the next.
             VisitedTags.Add(CurrentTag);
-
             if (auto* Delegate = TagChannels.Find(CurrentTag))
             {
                 FSignalEventMulticast DelegateCopy = *Delegate;
@@ -93,7 +121,6 @@ void USignalSubsystem::PublishTyped(UObject* ChannelObject, const EventType& Eve
             CurrentTag = CurrentTag.RequestDirectParent(); // Inner 'while' loop walks up the hierarchy from tip to root, iterating outer 'for' loop to next root in tag container when done
         }
     }
-
 }
 
 template <typename EventType, typename ListenerType>

@@ -37,7 +37,7 @@ void UQuestTargetComponent::OnTargetActivated(const FQuestStepStartedEvent& Step
 {	
 	if (CheckQuestSignalSubsystem())
 	{
-		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel Object ID: %s : Event type: %s : Owner: %s"), *StepStartedEvent.ChannelObjectID.ToString(), *StepStartedEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Event tag: %s : Event type: %s : Owner: %s"), *StepStartedEvent.EventTags.ToStringSimple(), *StepStartedEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
 		OnQuestTargetDeactivatedDelegateHandle = SignalSubsystem->SubscribeTyped<FQuestStepCompletedEvent>(GetOwner(), this, &UQuestTargetComponent::OnTargetDeactivated);
 		Execute_SetActivated(this, true);

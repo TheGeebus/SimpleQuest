@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FAbandonQuestEvent;
 class UQuestStep;
 struct FGameplayTag;
 struct FQuestStartedEvent;
@@ -36,8 +37,6 @@ protected:
 	virtual void Deinitialize() override;
 
 public:
-
-
 	/**
 	 * Check if this actor fulfills a quest requirement.
 	 * @param InQuestElement A pointer to an element that possibly completes a quest condition. This may be an 
@@ -65,26 +64,11 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
-
-
+	
 	// TEMPORARY BRIDGE
 	UFUNCTION(BlueprintCallable)
 	void GiveNodeQuest(FGameplayTag NodeTag);
 	
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
-	bool IsQuestActive(FGameplayTag QuestTag) const;
-
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
-	bool IsQuestCompleted(FGameplayTag QuestTag) const;   // either outcome
-
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
-	bool IsQuestSucceeded(FGameplayTag QuestTag) const;
-
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
-	bool IsQuestFailed(FGameplayTag QuestTag) const;
-
-	UFUNCTION(BlueprintCallable, BlueprintPure, Category="Quest State")
-	bool IsQuestPendingGiver(FGameplayTag QuestTag) const;
 
 protected:
 
@@ -103,7 +87,7 @@ protected:
 	virtual void ActivateNodeByTag(FName NodeTag);
 
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesOnSuccess / NextNodesOnFailure. */
-	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, bool bDidSucceed);
+	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag);
 
 	
 	/**
@@ -122,7 +106,7 @@ protected:
 	void UpdateQuestTextVisibility(bool bIsVisible, bool bUseCounter);
 	*/
 
-	void PublishQuestEndedEvent(FGameplayTag QuestTag, bool bDidSucceed) const;
+	void PublishQuestEndedEvent(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
 	UFUNCTION()
 	void OnStepTargetEnabledEvent(UQuestStep* Step, UObject* TargetObject, bool bIsEnabled);
 
@@ -143,17 +127,18 @@ protected:
 	TObjectPtr<UWorldStateSubsystem> WorldState;
 
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
+	FDelegateHandle AbandonDelegateHandle;
 
 private:
 	UFUNCTION()
-	void HandleOnNodeCompleted(UQuestNodeBase* Node, bool bDidSucceed);
+	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
 	UFUNCTION()
 	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	void HandleAbandonQuestEvent(const FAbandonQuestEvent& Event);
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestActive(FGameplayTag QuestTag);
-	void SetQuestCompleted(FGameplayTag QuestTag, bool bSucceeded);
+	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
-
 	
 };

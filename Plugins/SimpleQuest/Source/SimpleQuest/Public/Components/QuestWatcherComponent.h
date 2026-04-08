@@ -46,7 +46,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, FGameplayTag, QuestTag);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStepStarted, FGameplayTag, QuestTag);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestStepCompleted, FGameplayTag, QuestTag, bool, bDidSucceed, bool, bEndedQuest);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, FGameplayTag, QuestTag, bool, bDidSucceed);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, FGameplayTag, QuestTag, FGameplayTag, OutcomeTag);
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;

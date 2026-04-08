@@ -9,6 +9,15 @@
 
 class UQuestReward;
 
+USTRUCT(BlueprintType)
+struct FQuestOutcomeNodeList
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FName> NodeTags;
+};
+
 UCLASS(Abstract, Blueprintable)
 class SIMPLEQUEST_API UQuestNodeBase : public UObject
 {
@@ -18,7 +27,7 @@ class SIMPLEQUEST_API UQuestNodeBase : public UObject
 
 public:
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeActivated, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
-    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeCompleted, UQuestNodeBase*, Node, bool, bDidSucceed);
+    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag);
 
     FOnNodeActivated OnNodeActivated;
     FOnNodeCompleted OnNodeCompleted;
@@ -56,13 +65,14 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly)
     FGameplayTag ContextualTag;
 
-    /** Tags of nodes to activate on successful completion. Compiler-written. */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnSuccess;
+    TMap<FGameplayTag, FQuestOutcomeNodeList> NextNodesByOutcome;
 
-    /** Tags of nodes to activate on failed completion. Compiler-written. */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnFailure;
+    TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
+
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesOnAbandon;      // activated only by AbandonQuest()
 
     /**
      * A struct that holds the composable prerequisites for this quest graph node: the relevant tags representing events and their
@@ -99,8 +109,9 @@ public:
     FORCEINLINE FGameplayTag GetQuestTag() const { return QuestTag; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE void SetContextualTag(const FGameplayTag InTag) { ContextualTag = InTag; }
-    FORCEINLINE const TSet<FName>& GetNextNodesOnSuccess() const { return NextNodesOnSuccess; }
-    FORCEINLINE const TSet<FName>& GetNextNodesOnFailure() const { return NextNodesOnFailure; }
+    FORCEINLINE const TArray<FName>* GetNextNodesForOutcome(FGameplayTag OutcomeTag) const;
+    FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
+    FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsGiverGated() const { return bGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }

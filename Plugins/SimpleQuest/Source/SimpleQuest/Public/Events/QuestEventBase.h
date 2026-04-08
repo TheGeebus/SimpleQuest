@@ -12,7 +12,7 @@ struct FQuestEventBase : public FSignalEventBase
 	FQuestEventBase() = default;
 
 	FQuestEventBase(const FGameplayTag InQuestTag)
-		: FSignalEventBase(InQuestTag.GetTagName(), InQuestTag)
+		: FSignalEventBase(InQuestTag)
 	{}
 
 	FGameplayTag GetQuestTag() const { return EventTags.IsEmpty() ? FGameplayTag() : EventTags.GetByIndex(0); }

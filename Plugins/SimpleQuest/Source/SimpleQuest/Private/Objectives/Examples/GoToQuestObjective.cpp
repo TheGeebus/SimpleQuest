@@ -7,18 +7,17 @@
 #include "Interfaces/QuestTargetDelegateWrapper.h"
 #include "Interfaces/QuestTargetInterface.h"
 
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "Quest.BuiltIn.GoTo.Outcome.Reached")
 
 void UGoToQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
 {
-	UE_LOG(LogSimpleQuest, Log, TEXT("UGoToQuestObjective::TryCompleteObjective_Implementation : finished objective: %s"), *GetFullName());
 	EnableTargetObject(InTargetObject, false);
-	CompleteObjective(true);
+	CompleteObjectiveWithOutcome(Tag_Outcome_GoTo_Reached);
 }
 
-void UGoToQuestObjective::SetObjectiveTarget_Implementation(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass,
-	int32 NumElementsRequired, bool bUseCounter)
+void UGoToQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass,
+                                                            int32 NumElementsRequired, bool bUseCounter)
 {
-	Super::SetObjectiveTarget_Implementation(InStepID, InTargetActors, InTargetClass, NumElementsRequired, bUseCounter);
-
+	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClass, NumElementsRequired, bUseCounter);
 	EnableQuestTargetActors(true);
 }

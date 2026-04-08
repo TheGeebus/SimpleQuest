@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "QuestObjective.generated.h"
 
 class UQuestTargetInterface;
@@ -17,27 +18,26 @@ class SIMPLEQUEST_API UQuestObjective : public UObject
 	GENERATED_BODY()
 
 public:
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEnableTarget, UObject*, InTargetObject, int32, InStepID, bool, bNewIsEnabled);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnableTarget, UObject*, InTargetObject, bool, bNewIsEnabled);
 	FOnEnableTarget OnEnableTarget;
 		
 	DECLARE_DELEGATE_TwoParams(FSetCounterDelegate, int32, int32);
 	FSetCounterDelegate OnTargetTriggered;
 	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, int32, InStepID, bool, bDidSucceed);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuestObjectiveComplete, FGameplayTag, OutcomeTag);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
 	
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
 	 * to bind additional delegates. (see: UGoToQuestObjective)
 	 * 
-	 * @param InStepID numeric ID of the current quest step
 	 * @param InTargetActors a set of specific target actors in the scene
 	 * @param InTargetClass a generic class to target (as for kills or pickups)
 	 * @param NumElementsRequired the number of elements required to complete the step
 	 * @param bUseCounter use a quest counter widget to track the status of this step
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void SetObjectiveTarget(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass = nullptr, int32 NumElementsRequired = 0, bool bUseCounter = false);
+	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass = nullptr, int32 NumElementsRequired = 0, bool bUseCounter = false);
 
 	/**
 	 * Determine if the InTargetObject is relevant to the completion of this quest and logic should proceed to TryCompleteObjective.
@@ -73,7 +73,7 @@ public:
 	
 protected:
 	UFUNCTION(BlueprintCallable)
-	void CompleteObjective(bool bDidSucceed);
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag);
 
 	UFUNCTION(BlueprintCallable)
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
@@ -84,6 +84,9 @@ protected:
 	UFUNCTION(BlueprintCallable)
 	void EnableQuestTargetClass(bool bIsTargetEnabled) const;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (Categories = "Quest"), Category = "Outcomes")
+	TArray<FGameplayTag> PossibleOutcomes;
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
@@ -94,8 +97,6 @@ protected:
 	int32 CurrentElements = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bStepCompleted = false;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	int32 StepID = -1;
 	UPROPERTY()
 	bool bUseQuestCounter = false;
 	
@@ -103,7 +104,6 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE UClass* GetTargetClass() const { return TargetClass; }
 	FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
-	FORCEINLINE int32 GetStepID() const { return StepID; }
 	// Broadcasts OnSetCounter when changing the value 
 	UFUNCTION(BlueprintCallable, BlueprintSetter=SetCurrentElements)
 	void SetCurrentElements(const int32 NewAmount);

@@ -41,7 +41,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 void UQuestGiverComponent::OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Channel Object ID: %s : Event type: %s : Owner: %s"), *QuestEnabledEvent.ChannelObjectID.ToString(), *QuestEnabledEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *QuestEnabledEvent.EventTags.ToStringSimple(), *QuestEnabledEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
 	SetQuestGiverActivated(QuestEnabledEvent.GetQuestTag(), QuestEnabledEvent.bIsActivated);
 }

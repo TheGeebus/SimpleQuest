@@ -246,8 +246,8 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         UQuestNodeBase* Instance = NodeInstanceMap.FindRef(ContentNode);
         if (!Instance) continue;
 
-        Instance->NextNodesOnSuccess.Empty();
-        Instance->NextNodesOnFailure.Empty();
+        Instance->NextNodesByOutcome.Empty();
+        Instance->NextNodesOnAnyOutcome.Empty();
 
         TArray<FName> SuccessTags, FailureTags, AnyOutcomeTags;
 
@@ -263,13 +263,14 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         {
             ResolvePinToTags(AnyOutcomePin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, AnyOutcomeTags);
         }
-        for (const FName& TagName : SuccessTags) Instance->NextNodesOnSuccess.Add(TagName);
-        for (const FName& TagName : FailureTags) Instance->NextNodesOnFailure.Add(TagName);
+        
+        // Success and Failure pin routing deferred to item 14 — dynamic outcome pins
+        // AnyOutcome still works in the interim
         for (const FName& TagName : AnyOutcomeTags)
         {
-            Instance->NextNodesOnSuccess.Add(TagName);
-            Instance->NextNodesOnFailure.Add(TagName);
+            Instance->NextNodesOnAnyOutcome.Add(TagName);
         }
+        
         // A node whose output chain reaches an exit should complete its parent graph on resolution
         UEdGraphPin* SuccessPin = ContentNode->FindPin(TEXT("Success"), EGPD_Output);
         UEdGraphPin* FailurePin = ContentNode->FindPin(TEXT("Failure"), EGPD_Output);
@@ -575,8 +576,9 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 return OutExpression.Nodes.Add(LeafNode);
             };
 
-            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(QuestStateTagUtils::Leaf_Succeeded));
-            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(QuestStateTagUtils::Leaf_Failed));
+            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(TEXT("Outcome.Success")));
+            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(TEXT("Outcome.Failure")));
+
             return OrIndex;
         }
 
@@ -624,8 +626,8 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
     const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
     const FName PinName = OutputPin->PinName;
 
-    if (PinName == TEXT("Success")) return QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Succeeded);
-    if (PinName == TEXT("Failure")) return QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Failed);
+    if (PinName == TEXT("Success")) return QuestStateTagUtils::MakeStateFact(NodeTagName, TEXT("Outcome.Success"));
+    if (PinName == TEXT("Failure")) return QuestStateTagUtils::MakeStateFact(NodeTagName, TEXT("Outcome.Failure"));
 
     return NAME_None; // Any Outcome — caller builds the OR node
 }

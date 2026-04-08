@@ -14,16 +14,16 @@ void UQuestStep::Activate(FGameplayTag InContextualTag)
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnEnableTarget.AddDynamic(this, &UQuestStep::OnObjectiveEnabledEvent);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
-	ActiveObjective->SetObjectiveTarget(0, TargetActors, TargetClass, NumberOfElements, false);
+	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClass, NumberOfElements, false);
 }
 
-void UQuestStep::OnObjectiveEnabledEvent(UObject* InTargetObject, int32 InStepID, bool bNewIsEnabled)
+void UQuestStep::OnObjectiveEnabledEvent(UObject* InTargetObject, bool bNewIsEnabled)
 {
 	OnStepTargetEnabled.ExecuteIfBound(this, InTargetObject, bNewIsEnabled);
 }
 
-void UQuestStep::OnObjectiveComplete(int32 StepID, bool bDidSucceed)
+void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
-	OnNodeCompleted.ExecuteIfBound(this, bDidSucceed);
+	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
 }
 

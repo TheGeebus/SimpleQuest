@@ -64,7 +64,7 @@ void UQuestWatcherComponent::WatchedQuestCompletedEvent(const FQuestEndedEvent& 
 	CompletedQuestTags.AddTag(QuestEndedEvent.GetQuestTag());
 	if (OnQuestCompleted.IsBound())
 	{
-		OnQuestCompleted.Broadcast(QuestEndedEvent.GetQuestTag(), QuestEndedEvent.bDidSucceed);
+		OnQuestCompleted.Broadcast(QuestEndedEvent.GetQuestTag(), QuestEndedEvent.OutcomeTag);
 	}
 }
 

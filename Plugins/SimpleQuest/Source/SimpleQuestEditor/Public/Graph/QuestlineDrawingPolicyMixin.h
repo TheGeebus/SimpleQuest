@@ -18,8 +18,8 @@ public:
 		if (OutputPin)
 		{
 			const FName Category = OutputPin->PinType.PinCategory;
-			if (Category == TEXT("QuestSuccess")) Params.WireColor = SQ_ED_GREEN;
-			else if (Category == TEXT("QuestFailure")) Params.WireColor = SQ_ED_RED;
+			if (Category == TEXT("QuestOutcome")) Params.WireColor = SQ_ED_OUTCOME;
+			else if (Category == TEXT("QuestAbandon")) Params.WireColor = SQ_ED_ABANDON;
 			else Params.WireColor = FLinearColor::White;
 		}
 		const bool bIsPrerequisiteWire =

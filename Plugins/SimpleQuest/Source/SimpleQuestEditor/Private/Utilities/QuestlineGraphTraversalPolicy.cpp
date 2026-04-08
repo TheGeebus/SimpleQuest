@@ -3,8 +3,7 @@
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraphPin.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "Nodes/QuestlineNode_Exit_Success.h"
-#include "Nodes/QuestlineNode_Exit_Failure.h"
+#include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 
 
@@ -12,16 +11,6 @@
 // -------------------------------------------------------------------------------------------------
 // Classification defaults - may be overridden by subclasses to extend the policy
 // -------------------------------------------------------------------------------------------------
-
-bool FQuestlineGraphTraversalPolicy::IsExitSuccessNode(const UEdGraphNode* Node) const
-{
-    return Cast<const UQuestlineNode_Exit_Success>(Node) != nullptr;
-}
-
-bool FQuestlineGraphTraversalPolicy::IsExitFailureNode(const UEdGraphNode* Node) const
-{
-    return Cast<const UQuestlineNode_Exit_Failure>(Node) != nullptr;
-}
 
 bool FQuestlineGraphTraversalPolicy::IsExitNode(const UEdGraphNode* Node) const
 {

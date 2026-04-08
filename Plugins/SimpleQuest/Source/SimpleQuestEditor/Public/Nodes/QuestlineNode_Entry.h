@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "QuestlineNodeBase.h"
 #include "QuestlineNode_Entry.generated.h"
 
@@ -17,7 +18,12 @@ public:
 	virtual bool CanUserDeleteNode() const override { return false; }
 	virtual bool CanDuplicateNode() const override { return false; }
 
-	static const FName PinName_AnyOutcome;
-	static const FName PinName_Success;
-	static const FName PinName_Failure;
+	/**
+	 * Outcome tags this entry node can receive from a parent graph. Each tag gets its own output pin. Populate manually or
+	 * via right-click > Import Outcome Pins.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Quest", meta = (Categories = "Quest"))
+	TArray<FGameplayTag> IncomingOutcomeTags;
+
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 };

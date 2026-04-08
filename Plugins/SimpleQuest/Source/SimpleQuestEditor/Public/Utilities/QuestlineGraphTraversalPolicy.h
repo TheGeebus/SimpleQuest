@@ -44,13 +44,7 @@ public:
     
     // ---- Classification API (virtual: policy is extensible) ----
 
-    /** Returns true if Node should be treated as a success exit terminal. Default: UQuestlineNode_Exit_Success. */
-    virtual bool IsExitSuccessNode(const UEdGraphNode* Node) const;
-
-    /** Returns true if Node should be treated as a failure exit terminal. Default: UQuestlineNode_Exit_Failure. */
-    virtual bool IsExitFailureNode(const UEdGraphNode* Node) const;
-
-    /** Returns true if Node should be treated as any kind of exit terminal. Default: IsExitSuccessNode || IsExitFailureNode. */
+    /** Returns true if Node should be treated as an exit terminal. Default: UQuestlineNode_Exit (any OutcomeTag). */
     virtual bool IsExitNode(const UEdGraphNode* Node) const;
 
     /**

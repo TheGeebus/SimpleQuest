@@ -43,14 +43,12 @@ protected:
 	 *
 	 * @param Graph					The questline graph asset to compile.
 	 * @param TagPrefix				Sanitized questline ID used as the tag namespace for this graph's nodes.
-	 * @param SuccessBoundaryTags	Tags injected when an Exit_Success node is reached (empty at top level).
-	 * @param FailureBoundaryTags	Tags injected when an Exit_Failure node is reached (empty at top level).
+	 * @param BoundaryTagsByOutcome	Tags injected when an Exit_Success node is reached (empty at top level).
 	 * @param VisitedAssetPaths		Stack of asset paths currently open in the recursion, used for cycle detection.
 	 * @return						Tags of the content nodes directly reachable from this graph's Entry node.
 	 */
 	// 
-	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
-		const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths);
+	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
 
 	
 	/**
@@ -61,13 +59,12 @@ protected:
 	 * @param FromPin				The output pin to trace.
 	 * @param TagPrefix				Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
 	 *								connections before recursing into the linked asset.
-	 * @param SuccessBoundaryTags	Forwarded to Exit_Success resolution.
-	 * @param FailureBoundaryTags	Forwarded to Exit_Failure resolution.
+	 * @param BoundaryTagsByOutcome	Forwarded to Exit_Success resolution.
 	 * @param VisitedAssetPaths		Cycle detection stack, shared with CompileGraph.
 	 * @param OutTags				Accumulates the resolved tags.
 	 */
-	virtual void ResolvePinToTags(UEdGraphPin* FromPin,	const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
-		const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags);
+	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
+	                              TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with

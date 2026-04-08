@@ -236,6 +236,7 @@ SGraphEditor::FGraphEditorEvents FQuestlineGraphEditor::MakeGraphEvents()
     SGraphEditor::FGraphEditorEvents GraphEvents;
     GraphEvents.OnSelectionChanged = SGraphEditor::FOnSelectionChanged::CreateSP(this, &FQuestlineGraphEditor::OnGraphSelectionChanged);
     GraphEvents.OnNodeDoubleClicked = FSingleNodeEvent::CreateSP(this, &FQuestlineGraphEditor::OnNodeDoubleClicked);
+    GraphEvents.OnTextCommitted = FOnNodeTextCommitted::CreateSP(this, &FQuestlineGraphEditor::OnNodeTitleCommitted);
     return GraphEvents;
 }
 
@@ -291,8 +292,8 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
         UEdGraphNode* Node = Cast<UEdGraphNode>(Obj);
         if (Node && Node->CanUserDeleteNode())
         {
-            Node->Modify();
-            Node->GetSchema()->BreakNodeLinks(*Node);
+            //Node->Modify();
+            //Node->GetSchema()->BreakNodeLinks(*Node);
             CurrentGraph->RemoveNode(Node);
         }
     }
@@ -385,6 +386,16 @@ FSlateIcon FQuestlineGraphEditor::GetCompileStatusIcon() const
     }
 }
 
+
+void FQuestlineGraphEditor::OnNodeTitleCommitted(const FText& NewText, ETextCommit::Type CommitType, UEdGraphNode* NodeBeingChanged)
+{
+    if (CommitType == ETextCommit::OnCleared) return;
+    if (!NodeBeingChanged || !NodeBeingChanged->GetCanRenameNode()) return;
+
+    const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "RenameNode", "Rename Node"));
+    NodeBeingChanged->Modify();
+    NodeBeingChanged->OnRenameNode(NewText.ToString());
+}
 
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnDetailsTab(const FSpawnTabArgs& Args)
 {

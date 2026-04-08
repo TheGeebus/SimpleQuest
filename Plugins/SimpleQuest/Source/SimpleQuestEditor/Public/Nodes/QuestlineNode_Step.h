@@ -13,6 +13,9 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_Step : public UQuestlineNode_ContentB
 	GENERATED_BODY()
 
 public:
+	virtual void AllocateDefaultPins() override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Step"); }
 

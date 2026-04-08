@@ -3,6 +3,14 @@
 #include "Nodes/QuestlineNode_Quest.h"
 
 #include "Graph/QuestlineGraphSchema.h"
+#include "Nodes/QuestlineNode_Exit.h"
+
+
+void UQuestlineNode_Quest::AllocateDefaultPins()
+{
+	RebuildOutcomePinsFromInnerGraph();
+	Super::AllocateDefaultPins();
+}
 
 FText UQuestlineNode_Quest::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
@@ -28,5 +36,21 @@ void UQuestlineNode_Quest::CreateInnerGraph()
 	InnerGraph->Schema = UQuestlineGraphSchema::StaticClass();
 	const UQuestlineGraphSchema* Schema = GetDefault<UQuestlineGraphSchema>();
 	Schema->CreateDefaultNodesForGraph(*InnerGraph);
+}
+
+void UQuestlineNode_Quest::RebuildOutcomePinsFromInnerGraph()
+{
+	if (!InnerGraph) return;
+	for (UEdGraphNode* Node : InnerGraph->Nodes)
+	{
+		if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
+		{
+			if (ExitNode->OutcomeTag.IsValid())
+			{
+				const FName PinName = ExitNode->OutcomeTag.GetTagName();
+				if (!FindPin(PinName)) CreatePin(EGPD_Output, TEXT("QuestOutcome"), PinName);
+			}
+		}
+	}
 }
 

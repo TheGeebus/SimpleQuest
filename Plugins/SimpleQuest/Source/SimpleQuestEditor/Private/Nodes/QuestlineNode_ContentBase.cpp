@@ -9,9 +9,8 @@ void UQuestlineNode_ContentBase::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input,TEXT("QuestActivation"),TEXT("Activate"));
 	CreatePin(EGPD_Input,TEXT("QuestPrerequisite"),TEXT("Prerequisites"));
-	CreatePin(EGPD_Output,TEXT("QuestSuccess"),TEXT("Success"));
-	CreatePin(EGPD_Output,TEXT("QuestFailure"),TEXT("Failure"));
 	CreatePin(EGPD_Output,TEXT("QuestActivation"),TEXT("Any Outcome"));
+	if (bHasAbandonPin) CreatePin(EGPD_Output, TEXT("QuestAbandon"), TEXT("Abandoned"));
 }
 
 void UQuestlineNode_ContentBase::AutowireNewNode(UEdGraphPin* FromPin)
@@ -71,7 +70,38 @@ void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
 	QuestGuid = FGuid::NewGuid();
 }
 
+void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bHasAbandonPin))
+	{
+		if (bHasAbandonPin)
+		{
+			if (!FindPin(TEXT("Abandoned")))
+			{
+				CreatePin(EGPD_Output, TEXT("QuestAbandon"), TEXT("Abandoned"));
+			}
+		}
+		else if (UEdGraphPin* AbandonPin = FindPin(TEXT("Abandoned")))
+		{
+			AbandonPin->BreakAllPinLinks();
+			RemovePin(FindPin(TEXT("Abandoned")));
+		}
+		
+		if (UEdGraph* Graph = GetGraph())
+		{
+			Graph->NotifyGraphChanged();
+		}
+	}
+}
+
 void UQuestlineNode_ContentBase::OnRenameNode(const FString& NewName)
 {
-    NodeLabel = FText::FromString(NewName);
+	Modify();
+	NodeLabel = FText::FromString(NewName);
+
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}	
 }

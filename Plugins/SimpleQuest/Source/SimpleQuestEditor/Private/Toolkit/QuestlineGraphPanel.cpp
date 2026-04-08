@@ -4,8 +4,7 @@
 #include "Graph/QuestlineGraphSchema.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Knot.h"
-#include "Nodes/QuestlineNode_Exit_Success.h"
-#include "Nodes/QuestlineNode_Exit_Failure.h"
+#include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "ScopedTransaction.h"
@@ -57,7 +56,7 @@ static FVector2D GetPinAlignmentOffset(FKey Key)
 bool SQuestlineGraphPanel::IsHotkey(FKey Key)
 {
     return Key == EKeys::Q || Key == EKeys::W || Key == EKeys::E
-        || Key == EKeys::R || Key == EKeys::S || Key == EKeys::F;
+        || Key == EKeys::R || Key == EKeys::X;
 }
 
 FVector2D SQuestlineGraphPanel::ToGraphCoords(const FGeometry& Geometry, FVector2D ScreenPos) const
@@ -91,8 +90,7 @@ UEdGraphNode* SQuestlineGraphPanel::SpawnNodeForKey(FKey Key, FVector2D GraphPos
     if (Key == EKeys::W) return SpawnNode<UQuestlineNode_Step>(GraphPos);
     if (Key == EKeys::E) return SpawnNode<UQuestlineNode_LinkedQuestline>(GraphPos);
     if (Key == EKeys::R) return SpawnNode<UQuestlineNode_Knot>(GraphPos);
-    if (Key == EKeys::S) return SpawnNode<UQuestlineNode_Exit_Success>(GraphPos);
-    if (Key == EKeys::F) return SpawnNode<UQuestlineNode_Exit_Failure>(GraphPos);
+    if (Key == EKeys::X) return SpawnNode<UQuestlineNode_Exit>(GraphPos);
     return nullptr;
 }
 

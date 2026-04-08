@@ -2,18 +2,26 @@
 
 #include "Nodes/QuestlineNode_Entry.h"
 
-const FName UQuestlineNode_Entry::PinName_AnyOutcome = TEXT("Any Outcome");
-const FName UQuestlineNode_Entry::PinName_Success = TEXT("On Success");
-const FName UQuestlineNode_Entry::PinName_Failure = TEXT("On Failure");
-
 void UQuestlineNode_Entry::AllocateDefaultPins()
 {
-	CreatePin(EGPD_Output, TEXT("QuestSuccess"), PinName_Success);
-	CreatePin(EGPD_Output, TEXT("QuestFailure"), PinName_Failure);
-	CreatePin(EGPD_Output, TEXT("QuestActivation"), PinName_AnyOutcome);
+	// Named outcome paths — fire only when this graph was entered via that specific outcome
+	for (const FGameplayTag& Tag : IncomingOutcomeTags)
+	{
+		if (Tag.IsValid()) CreatePin(EGPD_Output, TEXT("QuestOutcome"), Tag.GetTagName());
+	}
 
+	// Unconditional path — always fires when this graph activates
+	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
 }
 
+void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, IncomingOutcomeTags))
+	{
+		ReconstructNode();
+	}
+}
 
 FText UQuestlineNode_Entry::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {

@@ -61,6 +61,8 @@ private:
 	TSharedPtr<SQuestlineGraphPanel> GraphEditorWidget;
 	TSharedPtr<FUICommandList> GraphEditorCommands;
 	static const FName GraphViewportTabId;
+	
+	void OnNodeTitleCommitted(const FText& NewText, ETextCommit::Type CommitType, UEdGraphNode* NodeBeingChanged);
 
 	/*-----------------------------------------------------------------------------------
 	 * Details Panel

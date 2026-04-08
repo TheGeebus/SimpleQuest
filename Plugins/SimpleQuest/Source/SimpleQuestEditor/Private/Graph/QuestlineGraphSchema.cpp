@@ -6,8 +6,7 @@
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Quest.h"
-#include "Nodes/QuestlineNode_Exit_Failure.h"
-#include "Nodes/QuestlineNode_Exit_Success.h"
+#include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
@@ -19,7 +18,6 @@
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
-
 
 
 class FQuestlineConnectionDrawingPolicy	: public TQuestlineDrawingPolicyMixin<FKismetConnectionDrawingPolicy>
@@ -299,12 +297,10 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 				"Prerequisite outputs may only connect to the Prerequisites pin or other prerequisite nodes"));
 		}
 
-		// non-prereq output to prereq input: only Quest outcome pins (Success, Failure, Any Outcome)
-		const FName OutputCategory = OutputPin->PinType.PinCategory;
-		const bool bIsQuestOutcome =
-			OutputCategory == TEXT("QuestSuccess") ||
-			OutputCategory == TEXT("QuestFailure") ||
-			(OutputCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
+		// non-prereq output to prereq input: only Quest outcome pins 
+		const bool bIsQuestOutcome = OutputPin->PinType.PinCategory == TEXT("QuestOutcome")
+			|| OutputPin->PinType.PinCategory == TEXT("QuestAbandon")
+			|| (OutputPin->PinType.PinCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
 
 		if (bIsQuestOutcome && TraversalPolicy->IsContentNode(OutputNode))
 			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
@@ -526,28 +522,17 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 
 	ContextMenuBuilder.AddAction(RerouteAction);
 
-	// Add Questline Success exit
+	// Add Questline exit
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 			FText::GetEmpty(),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitSuccess", "Add Questline Success"),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitSuccessTooltip", "Add a Questline Success exit node"),
+			NSLOCTEXT("SimpleQuestEditor", "AddExit", "Add Questline Exit"),
+			NSLOCTEXT("SimpleQuestEditor", "AddExitTooltip", "Add a Questline exit node"),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Success>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_Exit>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 
-	// Add Questline Failure exit
-	{
-		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
-			FText::GetEmpty(),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitFailure", "Add Questline Failure"),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitFailureTooltip", "Add a Questline Failed exit node"),
-			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_Exit_Failure>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
-		ContextMenuBuilder.AddAction(Action);
-	}
-	
 	// Add Leaf node action
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
@@ -633,15 +618,15 @@ void UQuestlineGraphSchema::GetContextMenuActions(UToolMenu* Menu, UGraphNodeCon
 
 FLinearColor UQuestlineGraphSchema::GetPinTypeColor(const FEdGraphPinType& PinType) const
 {
-	if (PinType.PinCategory == TEXT("QuestSuccess"))
+	if (PinType.PinCategory == TEXT("QuestOutcome"))
 	{
-		return SQ_ED_GREEN;		// green
+		return SQ_ED_OUTCOME;		// green
 	}
-	if (PinType.PinCategory == TEXT("QuestFailure"))
+	if (PinType.PinCategory == TEXT("QuestAbandon"))
 	{
-		return SQ_ED_RED;		// red
+		return SQ_ED_ABANDON;		// red
 	}
-	return FLinearColor::White;		// QuestActivation — Activate, Prerequisites, AnyOutcome, Start, knots
+	return FLinearColor::White;			// QuestActivation — Activate, Prerequisites, AnyOutcome, Start, knots
 }
 
 /* Automatic reroute node placement when looping back to the same node -- currently always feeds wire into left side of node, needs a fix to create a clean loop */

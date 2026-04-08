@@ -2,8 +2,9 @@
 
 #pragma once
 
-#define SQ_ED_GREEN FLinearColor(0.05f, 0.75f, 0.15f)
-#define SQ_ED_RED FLinearColor(0.85f, 0.08f, 0.08f)
+#define SQ_ED_UNSET FLinearColor(0.3f, 0.3f, 0.3f)
+#define SQ_ED_OUTCOME FLinearColor(0.9f, 0.7f, 0.1f)
+#define SQ_ED_ABANDON FLinearColor(0.5f, 0.5f, 0.6f)
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;

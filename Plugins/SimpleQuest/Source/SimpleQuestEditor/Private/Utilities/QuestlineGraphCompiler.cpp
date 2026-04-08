@@ -17,8 +17,7 @@
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Entry.h"
-#include "Nodes/QuestlineNode_Exit_Success.h"
-#include "Nodes/QuestlineNode_Exit_Failure.h"
+#include "Nodes/QuestlineNode_Exit.h"
 #include "Quests/PrerequisiteExpression.h"
 #include "Quests/QuestPrereqGroupNode.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
@@ -99,7 +98,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 
     // Start recursive compilation, working forward from the Start node. This is the top level so there are no boundary tags to
     // pass in from a parent graph yet.
-    TArray<FName> EntryTags = CompileGraph(InGraph->QuestlineEdGraph, TagPrefix, {}, {}, VisitedAssetPaths);
+    TArray<FName> EntryTags = CompileGraph(InGraph->QuestlineEdGraph, TagPrefix, {}, VisitedAssetPaths);
     InGraph->EntryNodeTags = EntryTags;
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
@@ -115,8 +114,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 // CompileGraph — recursive
 // -------------------------------------------------------------------------------------------------
 
-TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
-    const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths)
+TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
+                                                    TArray<FString>& VisitedAssetPaths)
 {
     if (!Graph) return {};
 
@@ -161,7 +160,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             if (QuestEdNode->GetInnerGraph())
             {
                 const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-                QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, {}, VisitedAssetPaths);
+                QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, VisitedAssetPaths);
             }            
             Instance = QuestInstance;
         }
@@ -248,43 +247,50 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         Instance->NextNodesByOutcome.Empty();
         Instance->NextNodesOnAnyOutcome.Empty();
+        Instance->NextNodesOnAbandon.Empty();
 
-        TArray<FName> SuccessTags, FailureTags, AnyOutcomeTags;
+        // Route each output pin into the correct runtime routing set
+        for (UEdGraphPin* Pin : ContentNode->Pins)
+        {
+            if (Pin->Direction != EGPD_Output) continue;
 
-        if (UEdGraphPin* SuccessPin = ContentNode->FindPin(TEXT("Success"), EGPD_Output))
-        {
-            ResolvePinToTags(SuccessPin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, SuccessTags);
-        }
-        if (UEdGraphPin* FailurePin = ContentNode->FindPin(TEXT("Failure"), EGPD_Output))
-        {
-            ResolvePinToTags(FailurePin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, FailureTags);
-        }
-        if (UEdGraphPin* AnyOutcomePin = ContentNode->FindPin(TEXT("Any Outcome"), EGPD_Output))
-        {
-            ResolvePinToTags(AnyOutcomePin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, AnyOutcomeTags);
-        }
-        
-        // Success and Failure pin routing deferred to item 14 — dynamic outcome pins
-        // AnyOutcome still works in the interim
-        for (const FName& TagName : AnyOutcomeTags)
-        {
-            Instance->NextNodesOnAnyOutcome.Add(TagName);
-        }
-        
-        // A node whose output chain reaches an exit should complete its parent graph on resolution
-        UEdGraphPin* SuccessPin = ContentNode->FindPin(TEXT("Success"), EGPD_Output);
-        UEdGraphPin* FailurePin = ContentNode->FindPin(TEXT("Failure"), EGPD_Output);
-        UEdGraphPin* AnyPin = ContentNode->FindPin(TEXT("Any Outcome"), EGPD_Output);
+            TArray<FName> ResolvedTags;
+            ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags);
+            if (ResolvedTags.IsEmpty()) continue;
 
-        auto CheckExit = [this](UEdGraphPin* Pin) -> bool
+            if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+            {
+                const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Pin->PinName, false);
+                if (OutcomeTag.IsValid())
+                {
+                    FQuestOutcomeNodeList& List = Instance->NextNodesByOutcome.FindOrAdd(OutcomeTag);
+                    for (const FName& Tag : ResolvedTags) List.NodeTags.AddUnique(Tag);
+                }
+            }
+            else if (Pin->PinName == TEXT("Any Outcome"))
+            {
+                for (const FName& Tag : ResolvedTags) Instance->NextNodesOnAnyOutcome.Add(Tag);
+            }
+            else if (Pin->PinType.PinCategory == TEXT("QuestAbandon"))
+            {
+                for (const FName& Tag : ResolvedTags) Instance->NextNodesOnAbandon.Add(Tag);
+            }
+        }
+
+        // Mark nodes whose output chain reaches an exit — they complete their parent graph
         {
-            TSet<const UEdGraphNode*> V;
-            return TraversalPolicy->HasDownstreamExit(Pin, V);
-        };
-        Instance->bCompletesParentGraph =
-            (SuccessPin && CheckExit(SuccessPin)) ||
-            (FailurePin && CheckExit(FailurePin)) ||
-            (AnyPin && CheckExit(AnyPin));
+            auto CheckExit = [this](UEdGraphPin* Pin) -> bool
+            {
+                TSet<const UEdGraphNode*> V;
+                return TraversalPolicy->HasDownstreamExit(Pin, V);
+            };
+            bool bCompletesParent = false;
+            for (UEdGraphPin* Pin : ContentNode->Pins)
+            {
+                if (Pin->Direction == EGPD_Output && CheckExit(Pin)) { bCompletesParent = true; break; }
+            }
+            Instance->bCompletesParentGraph = bCompletesParent;
+        }
 
         if (UEdGraphPin* PrereqPin = ContentNode->FindPin(TEXT("Prerequisites"), EGPD_Input))
         {
@@ -306,7 +312,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         {
             if (Pin->Direction == EGPD_Output)
             {
-                ResolvePinToTags(Pin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, EntryTags);
+                ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, EntryTags);
             }
         }
         break;
@@ -321,8 +327,8 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 // ResolvePinToTags - the node traversal engine
 // -------------------------------------------------------------------------------------------------
 
-void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TArray<FName>& SuccessBoundaryTags,
-    const TArray<FName>& FailureBoundaryTags, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
+void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
+                                               TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
@@ -333,19 +339,27 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         {
             if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
             {
-                ResolvePinToTags(KnotOut, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, OutTags);
+                ResolvePinToTags(KnotOut, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutTags);
             }
         }
 
         // Exit nodes: inject boundary tags for the parent graph so a child graph knows what its exits connect to on the parent level
         // Passed to children when compilation recurses into the child graph.
-        else if (Cast<UQuestlineNode_Exit_Success>(Node))
+        else if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
         {
-            for (const FName& Tag : SuccessBoundaryTags) OutTags.AddUnique(Tag);
-        }
-        else if (Cast<UQuestlineNode_Exit_Failure>(Node))
-        {
-            for (const FName& Tag : FailureBoundaryTags) OutTags.AddUnique(Tag);
+            if (const TArray<FName>* BoundaryTags = BoundaryTagsByOutcome.Find(ExitNode->OutcomeTag))
+            {
+                for (const FName& Tag : *BoundaryTags) OutTags.AddUnique(Tag);
+            }
+            // Fall back to Any Outcome boundary (stored under invalid tag by linked node handler)
+            else if (const TArray<FName>* AnyBoundaryTags = BoundaryTagsByOutcome.Find(FGameplayTag()))
+            {
+                for (const FName& Tag : *AnyBoundaryTags) OutTags.AddUnique(Tag);
+            }
+            else if (!ExitNode->OutcomeTag.IsValid())
+            {
+                AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix));
+            }
         }
 
         // LinkedQuestline: resolve its immediate downstream wiring as the linked graph's boundaries, then recurse
@@ -371,41 +385,41 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
                 continue;
             }
 
-            // What the linked graph's exit nodes should activate = what comes after the LinkedQuestline node in the parent graph.
-            // Resolve those from the parent context before recursing.
-            TArray<FName> LinkedSuccessBoundary, LinkedFailureBoundary;
+            // Build boundary map from this linked node's output pins. Named outcome pins are keyed by their FGameplayTag.
+            // Any Outcome is stored under FGameplayTag() (invalid tag) as a catch-all.
+            TMap<FGameplayTag, TArray<FName>> LinkedBoundaryByOutcome;
 
-            if (UEdGraphPin* LinkedSuccessPin = LinkedNode->FindPin(TEXT("Success"), EGPD_Output))
+            for (UEdGraphPin* OutputPin : LinkedNode->Pins)
             {
-                ResolvePinToTags(LinkedSuccessPin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, LinkedSuccessBoundary);
-            }
-            if (UEdGraphPin* LinkedFailurePin = LinkedNode->FindPin(TEXT("Failure"), EGPD_Output))
-            {
-                ResolvePinToTags(LinkedFailurePin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, LinkedFailureBoundary);
-            }
-            // AnyOutcome output feeds both boundary sets
-            if (UEdGraphPin* LinkedAnyPin = LinkedNode->FindPin(TEXT("Any Outcome"), EGPD_Output))
-            {
-                TArray<FName> AnyTags;
-                ResolvePinToTags(LinkedAnyPin, TagPrefix, SuccessBoundaryTags, FailureBoundaryTags, VisitedAssetPaths, AnyTags);
-                for (const FName& Tag : AnyTags)
+                if (OutputPin->Direction != EGPD_Output) continue;
+
+                TArray<FName> PinTags;
+                ResolvePinToTags(OutputPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, PinTags);
+                if (PinTags.IsEmpty()) continue;
+
+                if (OutputPin->PinType.PinCategory == TEXT("QuestOutcome"))
                 {
-                    LinkedSuccessBoundary.AddUnique(Tag);
-                    LinkedFailureBoundary.AddUnique(Tag);
+                    const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
+                    if (OutcomeTag.IsValid())
+                    {
+                        for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(OutcomeTag).AddUnique(Tag);
+                    }
+                }
+                else if (OutputPin->PinName == TEXT("Any Outcome"))
+                {
+                    // Stored under invalid tag — injected for any exit outcome (see exit node branch)
+                    for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(FGameplayTag()).AddUnique(Tag);
                 }
             }
 
             VisitedAssetPaths.Add(LinkedPath);
 
             const FString LinkedPrefix = TagPrefix + TEXT(".") + SanitizeTagSegment(LinkedGraph->QuestlineID.IsEmpty() ? LinkedGraph->GetName() : LinkedGraph->QuestlineID);
-            
-            // Recursion on the linked graph asset, providing the context gathered from this node's parent graph, including any context
-            // that parent graph may have been provided by a parent graph of its own
-            TArray<FName> LinkedEntryTags = CompileGraph(LinkedGraph->QuestlineEdGraph, LinkedPrefix, LinkedSuccessBoundary, LinkedFailureBoundary, VisitedAssetPaths);
+
+            TArray<FName> LinkedEntryTags = CompileGraph(LinkedGraph->QuestlineEdGraph, LinkedPrefix, LinkedBoundaryByOutcome, VisitedAssetPaths);
 
             VisitedAssetPaths.RemoveSingleSwap(LinkedPath);
 
-            // The entry tags of the compiled linked graph are what "flows through" the LinkedQuestline node
             for (const FName& Tag : LinkedEntryTags)
             {
                 OutTags.AddUnique(Tag);
@@ -564,20 +578,40 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
             const FString Label = SanitizeTagSegment(CN->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
             const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
 
+            // Collect all named QuestOutcome pins on this node
+            TArray<UEdGraphPin*> OutcomePins;
+            for (UEdGraphPin* Pin : Node->Pins)
+            {
+                if (Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+                    OutcomePins.Add(Pin);
+            }
+
+            // No named outcomes — this node is satisfied by Leaf_Completed alone
+            if (OutcomePins.IsEmpty())
+            {
+                FPrerequisiteExpressionNode LeafNode;
+                LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
+                    QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Completed), false);
+                return OutExpression.Nodes.Add(LeafNode);
+            }
+
+            // Build OR over all named outcome facts
             FPrerequisiteExpressionNode OrNode;
             OrNode.Type = EPrerequisiteExpressionType::Or;
             const int32 OrIndex = OutExpression.Nodes.Add(OrNode);
 
-            auto AddLeaf = [&](const FString& Leaf) -> int32
+            for (UEdGraphPin* OutcomePin : OutcomePins)
             {
+                const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
+                if (!OutcomeTag.IsValid()) continue;
+
                 FPrerequisiteExpressionNode LeafNode;
                 LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(NodeTagName, Leaf), false);
-                return OutExpression.Nodes.Add(LeafNode);
-            };
-
-            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(TEXT("Outcome.Success")));
-            OutExpression.Nodes[OrIndex].ChildIndices.Add(AddLeaf(TEXT("Outcome.Failure")));
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
+                    QuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false);
+                OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
+            }
 
             return OrIndex;
         }
@@ -625,10 +659,15 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
 
     const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
     const FName PinName = OutputPin->PinName;
-
-    if (PinName == TEXT("Success")) return QuestStateTagUtils::MakeStateFact(NodeTagName, TEXT("Outcome.Success"));
-    if (PinName == TEXT("Failure")) return QuestStateTagUtils::MakeStateFact(NodeTagName, TEXT("Outcome.Failure"));
-
-    return NAME_None; // Any Outcome — caller builds the OR node
+    
+    if (OutputPin->PinType.PinCategory == TEXT("QuestOutcome"))
+    {
+        const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(PinName, false);
+        if (OutcomeTag.IsValid())
+        {
+            return QuestStateTagUtils::MakeOutcomeFact(OutcomeTag);
+        }
+    }
+    return NAME_None; // Any Outcome or Abandon — caller handles these
 }
 

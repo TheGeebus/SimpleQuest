@@ -104,6 +104,7 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE UClass* GetTargetClass() const { return TargetClass; }
 	FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
+	FORCEINLINE const TArray<FGameplayTag>& GetPossibleOutcomes() const { return PossibleOutcomes; }
 	// Broadcasts OnSetCounter when changing the value 
 	UFUNCTION(BlueprintCallable, BlueprintSetter=SetCurrentElements)
 	void SetCurrentElements(const int32 NewAmount);

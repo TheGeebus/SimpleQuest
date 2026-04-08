@@ -21,7 +21,7 @@ public:
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
-
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
 	
 
@@ -33,6 +33,9 @@ public:
 	// on duplication. Never hand-edited.
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	FGuid QuestGuid;
+
+	UPROPERTY(EditAnywhere, Category = "Quest")
+	bool bHasAbandonPin = false;
 
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }

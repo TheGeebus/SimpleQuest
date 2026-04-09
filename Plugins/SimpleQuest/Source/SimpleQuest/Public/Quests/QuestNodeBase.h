@@ -8,6 +8,7 @@
 #include "QuestNodeBase.generated.h"
 
 class UQuestReward;
+struct FWorldStateFactAddedEvent;
 
 USTRUCT(BlueprintType)
 struct FQuestOutcomeNodeList
@@ -33,8 +34,9 @@ public:
     FOnNodeCompleted OnNodeCompleted;
 
     /**
-     * Activate this node with the given contextual tag. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
-     * to add activation behavior.
+     * Entry point for node activation. Evaluates PrerequisiteExpression against WorldState; activates immediately if satisfied,
+     * otherwise defers with a WorldState subscription per leaf tag and activates when all prerequisites are met. Do not override
+     * — override ActivateInternal for custom activation logic.
      */
     virtual void Activate(FGameplayTag InContextualTag);
     
@@ -42,6 +44,12 @@ public:
     void ResolveQuestTag(FName TagName);
 
 protected:
+    /**
+     * Called when prerequisites are confirmed satisfied. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
+     * for additional activation behaviour; always call Super::ActivateInternal first.
+     */
+    virtual void ActivateInternal(FGameplayTag InContextualTag);
+    
     /**
      * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID
      * chain for save data keying in linked graphs.
@@ -101,8 +109,17 @@ protected:
     
     UPROPERTY()
     TWeakObjectPtr<UGameInstance> CachedGameInstance;
-    
-   public:
+
+private:
+    // Stores the contextual tag while waiting for prerequisites to clear
+    FGameplayTag DeferredContextualTag;
+
+    // Per-leaf-tag subscription handles; cleared when prerequisites are satisfied
+    TMap<FGameplayTag, FDelegateHandle> PrereqSubscriptionHandles;
+
+    void DeferActivation(FGameplayTag InContextualTag);
+    void OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+    void TryActivateDeferred();
 
 public:
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }

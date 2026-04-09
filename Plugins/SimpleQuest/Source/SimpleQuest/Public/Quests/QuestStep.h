@@ -25,8 +25,7 @@ public:
 
 	DECLARE_DELEGATE_ThreeParams(FOnStepTargetEnabled, UQuestStep*, UObject*, bool)
 	FOnStepTargetEnabled OnStepTargetEnabled;
-	
-	void Activate(FGameplayTag InContextualTag);
+
 	
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
@@ -36,6 +35,8 @@ public:
 	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
 
 protected:
+	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
+
 	/** The objective that defines how this step is completed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
 	TSoftClassPtr<UQuestObjective> QuestObjective;

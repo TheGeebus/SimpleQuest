@@ -4,9 +4,9 @@
 
 #include "Objectives/QuestObjective.h"
 
-void UQuestStep::Activate(FGameplayTag InContextualTag)
+void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
-	Super::Activate(InContextualTag);
+	Super::ActivateInternal(InContextualTag);
 
 	UClass* ObjClass = QuestObjective.LoadSynchronous();
 	if (!ObjClass) return;

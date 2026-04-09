@@ -69,7 +69,8 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void GiveNodeQuest(FGameplayTag NodeTag);
 	
-
+	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+	
 protected:
 
 	/** Questline graph assets to activate when the game launches. Prefer this over InitialQuests for graphs compiled with the current compiler. */
@@ -122,12 +123,14 @@ protected:
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
-	
 	UPROPERTY()
 	TObjectPtr<UWorldStateSubsystem> WorldState;
 
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
 	FDelegateHandle AbandonDelegateHandle;
+	
+	// Append-only record of how many times each quest node has been resolved. Never decremented. Used for stats, debugging, and save data.
+	TMap<FGameplayTag, int32> QuestCompletionCounts;
 
 private:
 	UFUNCTION()

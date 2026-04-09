@@ -36,6 +36,7 @@ Plugins/SimpleQuest/Binaries/
 
 # Claude Code
 .claude/
+CLAUDE.md
 
 # Dev notes and reference files
 Notes/

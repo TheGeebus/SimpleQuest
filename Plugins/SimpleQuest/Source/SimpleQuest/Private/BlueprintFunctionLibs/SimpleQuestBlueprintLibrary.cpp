@@ -9,6 +9,7 @@
 #include "Utils/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Engine/GameInstance.h"
+#include "Subsystems/QuestManagerSubsystem.h"
 
 // -------------------------------------------------------------------------
 // Private helpers
@@ -30,6 +31,15 @@ USignalSubsystem* USimpleQuestBlueprintLibrary::GetSignalSubsystem(const UObject
     if (!World) return nullptr;
     UGameInstance* GI = World->GetGameInstance();
     return GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;
+}
+
+UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<UQuestManagerSubsystem>() : nullptr;
 }
 
 // -------------------------------------------------------------------------
@@ -59,6 +69,12 @@ bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldConte
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
     if (!WS || !OutcomeTag.IsValid()) return false;
     return WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false));
+}
+
+int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)
+{
+    UQuestManagerSubsystem* QM = GetQuestManager(WorldContext);
+    return QM ? QM->GetQuestCompletionCount(QuestTag) : 0;
 }
 
 // -------------------------------------------------------------------------

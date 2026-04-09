@@ -3,31 +3,61 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
 
-void UWorldStateSubsystem::AddFact(const FGameplayTag StateTag)
+void UWorldStateSubsystem::AddFact(const FGameplayTag Tag, const EFactBroadcastMode BroadcastMode)
 {
-	if (!StateTag.IsValid() || WorldFacts.HasTagExact(StateTag)) return;
+	if (!Tag.IsValid()) return;
 
-	WorldFacts.AddTag(StateTag);
-
-	if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
+	const int32 NewCount = ++WorldFacts.FindOrAdd(Tag);
+	const bool bShouldBroadcast = BroadcastMode == EFactBroadcastMode::Always || (BroadcastMode == EFactBroadcastMode::BoundaryOnly && NewCount == 1);
+	if (bShouldBroadcast)
 	{
-		Signals->PublishTyped(this, FWorldStateFactAddedEvent(StateTag));
+		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
+		{
+			Signals->PublishTyped(this, FWorldStateFactAddedEvent(Tag));
+		}
 	}
 }
 
-void UWorldStateSubsystem::RemoveFact(const FGameplayTag StateTag)
+void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadcastMode BroadcastMode)
 {
-	if (!WorldFacts.HasTagExact(StateTag)) return;
+	int32* Count = WorldFacts.Find(Tag);
+	if (!Count || *Count <= 0) return;
 
-	WorldFacts.RemoveTag(StateTag);
+	const bool bReachedZero = (--(*Count) == 0);
+	if (bReachedZero) WorldFacts.Remove(Tag);
 
-	if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
+	const bool bShouldBroadcast = BroadcastMode == EFactBroadcastMode::Always || (BroadcastMode == EFactBroadcastMode::BoundaryOnly && bReachedZero);
+	if (bShouldBroadcast)
 	{
-		Signals->PublishTyped(this, FWorldStateFactRemovedEvent(StateTag));
+		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
+		{
+			Signals->PublishTyped(this, FWorldStateFactRemovedEvent(Tag));
+		}
 	}
 }
 
-bool UWorldStateSubsystem::HasFact(const FGameplayTag StateTag) const
+void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppressBroadcast)
 {
-	return WorldFacts.HasTagExact(StateTag);
+	if (!WorldFacts.Contains(Tag)) return;
+
+	WorldFacts.Remove(Tag);
+	if (!bSuppressBroadcast)
+	{
+		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
+		{
+			Signals->PublishTyped(this, FWorldStateFactRemovedEvent(Tag));
+		}
+	}
+}
+
+bool UWorldStateSubsystem::HasFact(const FGameplayTag Tag) const
+{
+	const int32* Count = WorldFacts.Find(Tag);
+	return Count && *Count > 0;
+}
+
+int32 UWorldStateSubsystem::GetFactValue(const FGameplayTag Tag) const
+{
+	const int32* Count = WorldFacts.Find(Tag);
+	return Count ? *Count : 0;
 }

@@ -259,10 +259,20 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
 	}
 
 	const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+
+	// Diamond convergence guard — prevents double-activation of a node that is already running or queued for a giver. Completed
+	// is intentionally excluded so loops and repeatable quests can re-enter a previously resolved node.
+	if (NodeTag.IsValid() && WorldState)
+	{
+		if (WorldState->HasFact(MakeQuestStateFact(NodeTag, QuestStateTagUtils::Leaf_Active)) || WorldState->HasFact(MakeQuestStateFact(NodeTag, QuestStateTagUtils::Leaf_PendingGiver)))
+		{
+			return;
+		}
+	}
+
 	if ((*InstancePtr)->IsGiverGated())
 	{
 		SetQuestPendingGiver(NodeTag);
-		// Don't activate yet — notify givers this node is available
 		if (QuestSignalSubsystem)
 		{
 			QuestSignalSubsystem->PublishTyped(UQuestNodeBase::StaticClass(), FQuestEnabledEvent(NodeTag, true));
@@ -312,6 +322,12 @@ void UQuestManagerSubsystem::GiveNodeQuest(FGameplayTag NodeTag)
 {
 	ClearQuestPendingGiver(NodeTag);
 	ActivateNodeByTag(NodeTag.GetTagName());
+}
+
+int32 UQuestManagerSubsystem::GetQuestCompletionCount(const FGameplayTag QuestTag) const
+{
+	const int32* Count = QuestCompletionCounts.Find(QuestTag);
+	return Count ? *Count : 0;
 }
 
 FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)

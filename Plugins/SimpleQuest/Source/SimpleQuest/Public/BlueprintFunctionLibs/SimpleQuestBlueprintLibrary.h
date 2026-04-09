@@ -30,6 +30,9 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag);
 
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
+    static int32 GetQuestCompletionCount(const UObject* WorldContext, FGameplayTag QuestTag);
+
     // -------------------------------------------------------------------------
     // Quest actions — publish to the signal bus; designer never touches the bus
     // -------------------------------------------------------------------------
@@ -56,4 +59,6 @@ public:
 private:
     static class UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);
     static class USignalSubsystem* GetSignalSubsystem(const UObject* WorldContext);
+    static class UQuestManagerSubsystem* GetQuestManager(const UObject* WorldContext);
+
 };

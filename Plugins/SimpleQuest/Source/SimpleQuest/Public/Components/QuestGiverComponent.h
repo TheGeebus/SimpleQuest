@@ -62,6 +62,7 @@ private:
 	void RegisterQuestGiver();
 	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	void OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 public:
 	UFUNCTION(BlueprintCallable)

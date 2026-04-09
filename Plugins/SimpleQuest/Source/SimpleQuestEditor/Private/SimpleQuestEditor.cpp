@@ -7,6 +7,7 @@
 #include "EdGraphUtilities.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "SGraphNodeKnot.h"
+#include "SimpleQuestLog.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Nodes/QuestlineNode_Knot.h"
@@ -14,6 +15,9 @@
 #include "Toolkit/QuestlineGraphEditorCommands.h"
 #include "Utils/QuestStateTagUtils.h"
 #include "Engine/Blueprint.h"
+#include "Quests/QuestlineGraph.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Utils/SimpleCoreDebug.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -32,29 +36,42 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 
 void FSimpleQuestEditor::StartupModule()
 {
-	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-	QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>();
-	AssetTools.RegisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
+    IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
+    QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>();
+    AssetTools.RegisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
 
-	QuestlineGraphNodeFactory = MakeShared<FQuestlineGraphNodeFactory>();
-	FEdGraphUtilities::RegisterVisualNodeFactory(QuestlineGraphNodeFactory);
+    QuestlineGraphNodeFactory = MakeShared<FQuestlineGraphNodeFactory>();
+    FEdGraphUtilities::RegisterVisualNodeFactory(QuestlineGraphNodeFactory);
 
-	QuestlineConnectionFactory = UQuestlineGraphSchema::MakeQuestlineConnectionFactory();
-	FEdGraphUtilities::RegisterVisualPinConnectionFactory(QuestlineConnectionFactory);
-	
-	FQuestlineGraphEditorCommands::Register();
+    QuestlineConnectionFactory = UQuestlineGraphSchema::MakeQuestlineConnectionFactory();
+    FEdGraphUtilities::RegisterVisualPinConnectionFactory(QuestlineConnectionFactory);
 
-	FEditorDelegates::OnEditorInitialized.AddLambda([](double)
+    FQuestlineGraphEditorCommands::Register();
+
+    // Register compiled quest tags immediately from the AR on-disk cache. Must happen here — not in a delegate — so tags
+    // are valid before the default map opens and validates tag properties on actor components.
+	// In StartupModule — replace the direct RegisterTagsFromAssetRegistry() call with:
+	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AR = ARModule.Get();
+
+	if (AR.IsLoadingAssets())
+	{
+		AR.OnFilesLoaded().AddRaw(this, &FSimpleQuestEditor::RegisterTagsFromAssetRegistry);
+	}
+	else
+	{
+		RegisterTagsFromAssetRegistry();
+	}
+
+    // Blueprint compile check requires a fully initialized editor — keep in delegate.
+    FEditorDelegates::OnEditorInitialized.AddLambda([this](double)
     {
         const USimpleQuestSettings* Settings = GetDefault<USimpleQuestSettings>();
-    
-        // Derive the Blueprint asset path from the _C class path
         FString ClassPath = Settings->QuestManagerClass.ToSoftObjectPath().ToString();
         if (!ClassPath.RemoveFromEnd(TEXT("_C")))
         {
-            return; // Not a Blueprint class, nothing to compile
+            return;
         }
-    
         UObject* Loaded = StaticLoadObject(UObject::StaticClass(), nullptr, *ClassPath, nullptr, LOAD_NoWarn);
         if (UBlueprint* BP = Cast<UBlueprint>(Loaded))
         {
@@ -62,11 +79,54 @@ void FSimpleQuestEditor::StartupModule()
             {
                 FKismetEditorUtilities::CompileBlueprint(BP, EBlueprintCompileOptions::SkipGarbageCollection);
                 BP->MarkPackageDirty();
-                // Optionally auto-save to avoid asking user to save:
-                // UEditorLoadingAndSavingUtils::SavePackages({BP->GetOutermost()}, false);
             }
         }
     });
+}
+
+void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
+{
+	FAssetRegistryModule* ARModule = FModuleManager::GetModulePtr<FAssetRegistryModule>("AssetRegistry");
+	if (!ARModule) return;
+
+	IAssetRegistry& AR = ARModule->Get();
+
+	FARFilter Filter;
+	Filter.ClassPaths.Add(UQuestlineGraph::StaticClass()->GetClassPathName());
+	Filter.bRecursiveClasses = true;
+
+	TArray<FAssetData> QuestlineAssets;
+	AR.GetAssets(Filter, QuestlineAssets);
+
+	UE_LOG(LogTemp, Display, TEXT("SimpleQuestEditor: RegisterTagsFromAssetRegistry — found %d questline asset(s)"), QuestlineAssets.Num());
+
+	for (const FAssetData& AssetData : QuestlineAssets)
+	{
+		FAssetTagValueRef TagValue = AssetData.TagsAndValues.FindTag(TEXT("CompiledQuestTags"));
+
+		UE_LOG(LogTemp, Display, TEXT("  Asset: %s | CompiledQuestTags set: %s | Value: %s"),
+			*AssetData.AssetName.ToString(),
+			TagValue.IsSet() ? TEXT("yes") : TEXT("no"),
+			TagValue.IsSet() ? *TagValue.GetValue() : TEXT("(none)"));
+
+		if (!TagValue.IsSet() || TagValue.GetValue().IsEmpty())
+		{
+			continue;
+		}
+
+		TArray<FString> TagStrings;
+		TagValue.GetValue().ParseIntoArray(TagStrings, TEXT("|"), true);
+
+		TArray<FName> TagNames;
+		TagNames.Reserve(TagStrings.Num());
+		for (const FString& TagStr : TagStrings)
+		{
+			TagNames.Add(FName(*TagStr));
+		}
+
+		RegisterCompiledTags(AssetData.GetObjectPathString(), TagNames);
+		UE_LOG(LogTemp, Display, TEXT("  Registered %d tag(s) from %s"), TagNames.Num(), *AssetData.AssetName.ToString());
+	}
 }
 
 void FSimpleQuestEditor::ShutdownModule()

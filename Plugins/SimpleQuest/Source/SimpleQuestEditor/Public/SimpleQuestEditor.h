@@ -30,5 +30,6 @@ private:
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
-
+	
+	void RegisterTagsFromAssetRegistry();
 };

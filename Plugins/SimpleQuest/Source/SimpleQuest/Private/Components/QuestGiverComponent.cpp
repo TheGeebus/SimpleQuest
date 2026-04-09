@@ -12,6 +12,7 @@
 #include "Utils/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Events/QuestStartedEvent.h"
+#include "UObject/AssetRegistryTagsContext.h"
 
 
 UQuestGiverComponent::UQuestGiverComponent()
@@ -71,6 +72,22 @@ void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, con
 void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
 	SetQuestGiverActivated(Event.GetQuestTag(), false);
+}
+
+void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
+{
+	Super::GetAssetRegistryTags(Context);
+
+	if (!QuestTagsToGive.IsEmpty())
+	{
+		TArray<FString> TagStrings;
+		TagStrings.Reserve(QuestTagsToGive.Num());
+		for (const FGameplayTag& Tag : QuestTagsToGive)
+		{
+			TagStrings.Add(Tag.ToString());
+		}
+		Context.AddTag(FAssetRegistryTag(TEXT("QuestTagsToGive"), FString::Join(TagStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
 }
 
 void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag)

@@ -7,11 +7,24 @@
 #include "NativeGameplayTags.h"
 #endif
 
+
 void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
 {
 	UObject::GetAssetRegistryTags(Context);
+
 	const FString EffectiveID = QuestlineID.IsEmpty() ? GetName() : QuestlineID;
-	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"),	EffectiveID, FAssetRegistryTag::TT_Alphabetical));
+	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"), EffectiveID, FAssetRegistryTag::TT_Alphabetical));
+
+	if (!CompiledQuestTags.IsEmpty())
+	{
+		TArray<FString> TagStrings;
+		TagStrings.Reserve(CompiledQuestTags.Num());
+		for (const FName& TagName : CompiledQuestTags)
+		{
+			TagStrings.Add(TagName.ToString());
+		}
+		Context.AddTag(FAssetRegistryTag(TEXT("CompiledQuestTags"), FString::Join(TagStrings, TEXT("|")),	FAssetRegistryTag::TT_Hidden));
+	}
 }
 
 void UQuestlineGraph::PostLoad()

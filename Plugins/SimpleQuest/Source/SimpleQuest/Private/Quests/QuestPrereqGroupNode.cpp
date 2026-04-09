@@ -19,12 +19,12 @@ void UQuestPrereqGroupNode::Activate(FGameplayTag InContextualTag)
 
 	for (const FGameplayTag& CondTag : ConditionTags)
 	{
-		FDelegateHandle Handle = Signals->SubscribeTypedByTag<FWorldStateFactAddedEvent>(CondTag, this, &UQuestPrereqGroupNode::OnConditionFactAdded);
+		FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(CondTag, this, &UQuestPrereqGroupNode::OnConditionFactAdded);
 		SubscriptionHandles.Add(CondTag, Handle);
 	}
 }
 
-void UQuestPrereqGroupNode::OnConditionFactAdded(const FWorldStateFactAddedEvent& Event)
+void UQuestPrereqGroupNode::OnConditionFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
 	TrySatisfyGroup();
 }
@@ -48,7 +48,7 @@ void UQuestPrereqGroupNode::TrySatisfyGroup()
 	{
 		for (auto& Pair : SubscriptionHandles)
 		{
-			Signals->UnsubscribeByTag(Pair.Key, Pair.Value);
+			Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
 		}
 		SubscriptionHandles.Reset();
 	}

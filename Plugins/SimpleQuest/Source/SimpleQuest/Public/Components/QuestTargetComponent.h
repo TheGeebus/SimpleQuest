@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "QuestComponentBase.h"
 #include "Components/ActorComponent.h"
 #include "Interfaces/QuestTargetInterface.h"
@@ -42,11 +43,16 @@ protected:
 	virtual void PostInitProperties() override;
 	virtual void BeginPlay() override;
 
-	virtual void OnTargetActivated(const FQuestStepStartedEvent& StepStartedEvent);
-	virtual void OnTargetDeactivated(const FQuestStepCompletedEvent& StepCompletedEvent);
-
+	virtual void OnTargetActivated(FGameplayTag Channel, const FQuestStepStartedEvent& StepStartedEvent);
+	virtual void OnTargetDeactivated(FGameplayTag Channel, const FQuestStepCompletedEvent& StepCompletedEvent);
+	
+	// Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
+	// The subsystem publishes step events on the step tag; any target configured with that tag activates.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	FGameplayTagContainer StepTagsToWatch;
+	
 private:
-
-	FDelegateHandle OnQuestTargetActivatedDelegateHandle;
-	FDelegateHandle OnQuestTargetDeactivatedDelegateHandle;
+	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
+	FDelegateHandle StepCompletedHandle;
+	FGameplayTag ActiveStepTag;
 };

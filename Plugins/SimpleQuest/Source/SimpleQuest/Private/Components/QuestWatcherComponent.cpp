@@ -24,7 +24,7 @@ void UQuestWatcherComponent::BeginPlay()
 	RegisterQuestWatcher();
 }
 
-void UQuestWatcherComponent::WatchedQuestActivatedEvent(const FQuestEnabledEvent& QuestEnabledEvent)
+void UQuestWatcherComponent::WatchedQuestActivatedEvent(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent)
 {
 	if (!QuestEnabledEvent.bIsActivated) { return; }
 	ActiveQuestTags.AddTag(QuestEnabledEvent.GetQuestTag());
@@ -34,7 +34,7 @@ void UQuestWatcherComponent::WatchedQuestActivatedEvent(const FQuestEnabledEvent
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestStartedEvent(const FQuestStartedEvent& QuestStartedEvent)
+void UQuestWatcherComponent::WatchedQuestStartedEvent(FGameplayTag Channel, const FQuestStartedEvent& QuestStartedEvent)
 {
 	if (OnQuestStarted.IsBound())
 	{
@@ -42,7 +42,7 @@ void UQuestWatcherComponent::WatchedQuestStartedEvent(const FQuestStartedEvent& 
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestStepStartedEvent(const FQuestStepStartedEvent& QuestStepStartedEvent)
+void UQuestWatcherComponent::WatchedQuestStepStartedEvent(FGameplayTag Channel, const FQuestStepStartedEvent& QuestStepStartedEvent)
 {
 	if (OnQuestStepStarted.IsBound())
 	{
@@ -50,7 +50,7 @@ void UQuestWatcherComponent::WatchedQuestStepStartedEvent(const FQuestStepStarte
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestStepCompletedEvent(const FQuestStepCompletedEvent& QuestStepCompletedEvent)
+void UQuestWatcherComponent::WatchedQuestStepCompletedEvent(FGameplayTag Channel, const FQuestStepCompletedEvent& QuestStepCompletedEvent)
 {
 	if (OnQuestStepCompleted.IsBound())
 	{
@@ -58,7 +58,7 @@ void UQuestWatcherComponent::WatchedQuestStepCompletedEvent(const FQuestStepComp
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestCompletedEvent(const FQuestEndedEvent& QuestEndedEvent)
+void UQuestWatcherComponent::WatchedQuestCompletedEvent(FGameplayTag Channel, const FQuestEndedEvent& QuestEndedEvent)
 {
 	ActiveQuestTags.RemoveTag(QuestEndedEvent.GetQuestTag());
 	CompletedQuestTags.AddTag(QuestEndedEvent.GetQuestTag());
@@ -86,23 +86,23 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 
 			if (QuestPair.Value.bWatchQuestEnabled)
 			{
-				SignalSubsystem->SubscribeTypedByTag<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
+				SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
 			}
 			if (QuestPair.Value.bWatchQuestStart)
 			{
-				SignalSubsystem->SubscribeTypedByTag<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
+				SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
 			}
 			if (QuestPair.Value.bWatchQuestStepStart)
 			{
-				SignalSubsystem->SubscribeTypedByTag<FQuestStepStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
+				SignalSubsystem->SubscribeMessage<FQuestStepStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepStartedEvent);
 			}
 			if (QuestPair.Value.bWatchQuestStepEnd)
 			{
-				SignalSubsystem->SubscribeTypedByTag<FQuestStepCompletedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
+				SignalSubsystem->SubscribeMessage<FQuestStepCompletedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStepCompletedEvent);
 			}
 			if (QuestPair.Value.bWatchQuestEnd)
 			{
-				SignalSubsystem->SubscribeTypedByTag<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
+				SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
 			}
 		}
 	}

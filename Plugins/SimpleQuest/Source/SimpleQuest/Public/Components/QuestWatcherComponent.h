@@ -62,11 +62,11 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	virtual void WatchedQuestActivatedEvent(const FQuestEnabledEvent& QuestEnabledEvent);
-	virtual void WatchedQuestStartedEvent(const FQuestStartedEvent& QuestStartedEvent);
-	virtual void WatchedQuestStepStartedEvent(const FQuestStepStartedEvent& QuestStepStartedEvent);
-	virtual void WatchedQuestStepCompletedEvent(const FQuestStepCompletedEvent& QuestStepCompletedEvent);
-	virtual void WatchedQuestCompletedEvent(const FQuestEndedEvent& QuestEndedEvent);
+	virtual void WatchedQuestActivatedEvent(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent);
+	virtual void WatchedQuestStartedEvent(FGameplayTag Channel, const FQuestStartedEvent& QuestStartedEvent);
+	virtual void WatchedQuestStepStartedEvent(FGameplayTag Channel, const FQuestStepStartedEvent& QuestStepStartedEvent);
+	virtual void WatchedQuestStepCompletedEvent(FGameplayTag Channel, const FQuestStepCompletedEvent& QuestStepCompletedEvent);
+	virtual void WatchedQuestCompletedEvent(FGameplayTag Channel, const FQuestEndedEvent& QuestEndedEvent);
 
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestWatcher();	

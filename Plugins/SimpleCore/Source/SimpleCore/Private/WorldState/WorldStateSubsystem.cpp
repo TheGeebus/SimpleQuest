@@ -13,7 +13,7 @@ void UWorldStateSubsystem::AddFact(const FGameplayTag Tag, const EFactBroadcastM
 	{
 		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
 		{
-			Signals->PublishTyped(this, FWorldStateFactAddedEvent(Tag));
+			Signals->PublishMessage(Tag, FWorldStateFactAddedEvent(Tag));
 		}
 	}
 }
@@ -31,7 +31,7 @@ void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadca
 	{
 		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
 		{
-			Signals->PublishTyped(this, FWorldStateFactRemovedEvent(Tag));
+			Signals->PublishMessage(Tag, FWorldStateFactRemovedEvent(Tag));
 		}
 	}
 }
@@ -45,7 +45,7 @@ void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppres
 	{
 		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())
 		{
-			Signals->PublishTyped(this, FWorldStateFactRemovedEvent(Tag));
+			Signals->PublishMessage(Tag, FWorldStateFactRemovedEvent(Tag));
 		}
 	}
 }

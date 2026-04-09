@@ -5,6 +5,7 @@
 
 #include "SimpleQuestLog.h"
 #include "Events/QuestEnabledEvent.h"
+#include "Events/QuestGivenEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 
@@ -29,7 +30,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 			if (!QuestTag.IsValid()) { continue; }
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"),
 				*QuestTag.ToString(), *GetOwner()->GetName());
-			SignalSubsystem->SubscribeTypedByTag<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
 		}
 	}
 	else
@@ -39,21 +40,18 @@ void UQuestGiverComponent::RegisterQuestGiver()
 	}
 }
 
-void UQuestGiverComponent::OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent)
+void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *QuestEnabledEvent.EventTags.ToStringSimple(), *QuestEnabledEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *Channel.ToString(), *QuestEnabledEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
 	SetQuestGiverActivated(QuestEnabledEvent.GetQuestTag(), QuestEnabledEvent.bIsActivated);
 }
 
 void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag)
 {
-	if (QuestTag.IsValid())
+	if (QuestTag.IsValid() && SignalSubsystem)
 	{
-		if (UQuestManagerSubsystem* QuestManager = GetWorld()->GetGameInstance()->GetSubsystem<UQuestManagerSubsystem>())
-		{
-			QuestManager->GiveNodeQuest(QuestTag);
-		}
+		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
 	}
 }
 

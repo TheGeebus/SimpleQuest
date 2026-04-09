@@ -59,7 +59,7 @@ private:
 	
 	void RegisterQuestGiver();
 	//void RegisterForQuestClass(UClass* LoadedQuestClass);
-	void OnQuestEnabledEventReceived(const FQuestEnabledEvent& QuestEnabledEvent);
+	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent);
 
 public:
 	UFUNCTION(BlueprintCallable)

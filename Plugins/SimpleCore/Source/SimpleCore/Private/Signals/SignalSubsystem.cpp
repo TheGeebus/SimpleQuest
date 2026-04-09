@@ -5,22 +5,15 @@
 void USignalSubsystem::Deinitialize()
 {
 	bIsShuttingDown = true;
-	for (auto& Pair : ObjectChannels) { Pair.Value.Clear(); }
-	ObjectChannels.Empty();
 	for (auto& Pair : TagChannels) { Pair.Value.Clear(); }
 	TagChannels.Empty();
 	Super::Deinitialize();
 }
 
-void USignalSubsystem::UnsubscribeByTag(const FGameplayTag EventTag, const FDelegateHandle Handle)
+void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDelegateHandle Handle)
 {
-	if (FSignalEventMulticast* Delegate = TagChannels.Find(EventTag))
+	if (FSignalEventMulticast* Delegate = TagChannels.Find(Channel))
 	{
 		Delegate->Remove(Handle);
 	}
-}
-
-FSignalEventChannelKey USignalSubsystem::MakeKey(const UObject* Object, const UScriptStruct* Struct)
-{
-	return FSignalEventChannelKey(Object, Struct);
 }

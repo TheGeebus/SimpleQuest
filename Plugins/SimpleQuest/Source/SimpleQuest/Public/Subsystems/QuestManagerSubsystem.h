@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FQuestGivenEvent;
 struct FAbandonQuestEvent;
 class UQuestStep;
 struct FGameplayTag;
@@ -44,7 +45,7 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void CountQuestElement(UObject* InQuestElement);
-	void CheckQuestObjectives(const FQuestObjectiveTriggered& QuestObjectiveEvent);
+	void CheckQuestObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& QuestObjectiveEvent);
 
 	/*
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestTextUpdated, const FQuestText&, InQuestText);
@@ -64,10 +65,6 @@ public:
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
-	
-	// TEMPORARY BRIDGE
-	UFUNCTION(BlueprintCallable)
-	void GiveNodeQuest(FGameplayTag NodeTag);
 	
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 	
@@ -125,23 +122,26 @@ protected:
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
 	UPROPERTY()
 	TObjectPtr<UWorldStateSubsystem> WorldState;
-
+	
+	FDelegateHandle GivenDelegateHandle;
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
 	FDelegateHandle AbandonDelegateHandle;
-	
+
 	// Append-only record of how many times each quest node has been resolved. Never decremented. Used for stats, debugging, and save data.
 	TMap<FGameplayTag, int32> QuestCompletionCounts;
 
 private:
+
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
 	UFUNCTION()
 	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
-	void HandleAbandonQuestEvent(const FAbandonQuestEvent& Event);
+	void HandleAbandonQuestEvent(FGameplayTag Channel, const FAbandonQuestEvent& Event);
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestActive(FGameplayTag QuestTag);
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
+	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
 	
 };

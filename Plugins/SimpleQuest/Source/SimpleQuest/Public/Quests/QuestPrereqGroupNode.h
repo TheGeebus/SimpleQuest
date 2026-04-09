@@ -27,6 +27,6 @@ private:
 	/** Per-condition subscription handles, keyed by condition tag for clean unsubscription. */
 	TMap<FGameplayTag, FDelegateHandle> SubscriptionHandles;
 
-	void OnConditionFactAdded(const FWorldStateFactAddedEvent& Event);
+	void OnConditionFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void TrySatisfyGroup();
 };

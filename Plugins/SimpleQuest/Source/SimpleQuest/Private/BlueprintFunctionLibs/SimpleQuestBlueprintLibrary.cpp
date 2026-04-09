@@ -4,11 +4,10 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
 #include "Events/AbandonQuestEvent.h"
-#include "Events/QuestEnabledEvent.h"
-#include "Quests/QuestNodeBase.h"
 #include "Utils/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Engine/GameInstance.h"
+#include "Events/QuestGivenEvent.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 
 // -------------------------------------------------------------------------
@@ -49,19 +48,19 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 bool USimpleQuestBlueprintLibrary::IsQuestActive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag.GetTagName(), QuestStateTagUtils::Leaf_Active), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag.GetTagName(), QuestStateTagUtils::Leaf_Completed), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag.GetTagName(), QuestStateTagUtils::Leaf_PendingGiver), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
@@ -83,12 +82,12 @@ int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* World
 
 void USimpleQuestBlueprintLibrary::AbandonQuest(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishTyped(UQuestNodeBase::StaticClass(), FAbandonQuestEvent(QuestTag));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(QuestTag, FAbandonQuestEvent(QuestTag));
 }
 
 void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishTyped(UQuestNodeBase::StaticClass(), FQuestEnabledEvent(QuestTag, true));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
 }
 
 // -------------------------------------------------------------------------

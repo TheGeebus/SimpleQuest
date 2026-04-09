@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Signals/SignalEventBase.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "WorldStateSubsystem.generated.h"
 
@@ -20,14 +19,14 @@ enum class EFactBroadcastMode : uint8
 };
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FWorldStateFactAddedEvent : public FSignalEventBase
+struct SIMPLECORE_API FWorldStateFactAddedEvent
 {
     GENERATED_BODY()
 
     FWorldStateFactAddedEvent() = default;
 
     explicit FWorldStateFactAddedEvent(const FGameplayTag InStateTag)
-        : FSignalEventBase(InStateTag)
+        : StateTag(InStateTag)
     {}
 
     UPROPERTY(BlueprintReadWrite)
@@ -35,14 +34,14 @@ struct SIMPLECORE_API FWorldStateFactAddedEvent : public FSignalEventBase
 };
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FWorldStateFactRemovedEvent : public FSignalEventBase
+struct SIMPLECORE_API FWorldStateFactRemovedEvent
 {
     GENERATED_BODY()
 
     FWorldStateFactRemovedEvent() = default;
 
     explicit FWorldStateFactRemovedEvent(const FGameplayTag InStateTag)
-        : FSignalEventBase(InStateTag)
+        : StateTag(InStateTag)
     {}
 
     UPROPERTY(BlueprintReadWrite)

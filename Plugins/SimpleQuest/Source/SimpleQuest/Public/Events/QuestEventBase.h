@@ -1,20 +1,22 @@
 #pragma once
 
-#include "Signals/SignalEventBase.h"
 #include "QuestEventBase.generated.h"
 
 
 USTRUCT(BlueprintType)
-struct FQuestEventBase : public FSignalEventBase
+struct FQuestEventBase
 {
 	GENERATED_BODY()
 
 	FQuestEventBase() = default;
 
-	FQuestEventBase(const FGameplayTag InQuestTag)
-		: FSignalEventBase(InQuestTag)
+	explicit FQuestEventBase(const FGameplayTag InQuestTag)
+		: QuestTag(InQuestTag)
 	{}
-
-	FGameplayTag GetQuestTag() const { return EventTags.IsEmpty() ? FGameplayTag() : EventTags.GetByIndex(0); }
+	
+	UPROPERTY(BlueprintReadWrite)
+	FGameplayTag QuestTag;
+	
+	FGameplayTag GetQuestTag() const { return QuestTag; }
 
 };

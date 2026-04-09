@@ -1,14 +1,32 @@
 #pragma once
 
+#if !UE_BUILD_SHIPPING
+
 #define LOG_IT_BABY(Color, DisplayString, ...) \
-UE_LOG(LogSimpleQuest, Warning, TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
-{ if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, Color, *FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__)); }
+do { \
+const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
+UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *_SQMsg); \
+if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, Color, _SQMsg); \
+} while(0)
 
 #define LOG_IT_TICK(Color, DisplayString, ...) \
-UE_LOG(LogSimpleQuest, Warning, TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
-{ if (GEngine) GEngine->AddOnScreenDebugMessage(__LINE__, -1.f, Color, *FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__)); }
+do { \
+const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
+UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *_SQMsg); \
+if (GEngine) GEngine->AddOnScreenDebugMessage((int32)HashCombine(GetTypeHash(FString(TEXT(__FILE__))), __LINE__), -1.f, Color, _SQMsg); \
+} while(0)
 
 #define LOG_IT_FOREVER(Color, DisplayString, ...) \
-UE_LOG(LogSimpleQuest, Warning, TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
-{ if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 999999.f, Color, *FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__)); }
+do { \
+const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
+UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *_SQMsg); \
+if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 999999.f, Color, _SQMsg); \
+} while(0)
 
+#else
+
+#define LOG_IT_BABY(Color, DisplayString, ...)
+#define LOG_IT_TICK(Color, DisplayString, ...)
+#define LOG_IT_FOREVER(Color, DisplayString, ...)
+
+#endif

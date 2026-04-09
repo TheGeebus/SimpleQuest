@@ -6,10 +6,12 @@
 #include "GameplayTagContainer.h"
 #include "QuestComponentBase.h"
 #include "Components/ActorComponent.h"
+#include "Events/QuestStartedEvent.h"
 #include "Interfaces/QuestGiverInterface.h"
 #include "QuestGiverComponent.generated.h"
 
 
+struct FQuestGiverRegisteredEvent;
 struct FQuestEnabledEvent;
 class UQuestManagerSubsystem;
 
@@ -58,14 +60,15 @@ private:
 	virtual void SetQuestGiverActivated(const FGameplayTag& QuestTag, bool bIsQuestActive) override;
 	
 	void RegisterQuestGiver();
-	//void RegisterForQuestClass(UClass* LoadedQuestClass);
-	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent);
+	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event);
+	void OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event);
 
 public:
 	UFUNCTION(BlueprintCallable)
-	FGameplayTagContainer GetQuestTagsToGive() const { return QuestTagsToGive; };
+	FGameplayTagContainer GetQuestTagsToGive() const { return QuestTagsToGive; }
 	UFUNCTION(BlueprintCallable)
 	bool CanGiveAnyQuests() const;
 	UFUNCTION(BlueprintCallable)
 	bool IsQuestEnabled(FGameplayTag QuestTag);
+
 };

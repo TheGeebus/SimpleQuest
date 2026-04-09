@@ -23,10 +23,6 @@ class SIMPLEQUEST_API UQuestStep : public UQuestNodeBase
 
 public:
 
-	DECLARE_DELEGATE_ThreeParams(FOnStepTargetEnabled, UQuestStep*, UObject*, bool)
-	FOnStepTargetEnabled OnStepTargetEnabled;
-
-	
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE TSubclassOf<AActor> GetTargetClass() const { return TargetClass; }
@@ -56,9 +52,6 @@ protected:
 private:
 	UPROPERTY()
 	TObjectPtr<UQuestObjective> ActiveObjective;
-	
-	UFUNCTION()
-	void OnObjectiveEnabledEvent(UObject* InTargetObject, bool bNewIsEnabled);
 	
 	UFUNCTION(BlueprintCallable)
 	void OnObjectiveComplete(FGameplayTag OutcomeTag);

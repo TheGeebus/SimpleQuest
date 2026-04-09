@@ -30,5 +30,5 @@ private:
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
-	
+
 };

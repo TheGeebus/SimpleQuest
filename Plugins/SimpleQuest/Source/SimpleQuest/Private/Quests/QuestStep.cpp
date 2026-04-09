@@ -12,14 +12,8 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	if (!ObjClass) return;
 
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
-	ActiveObjective->OnEnableTarget.AddDynamic(this, &UQuestStep::OnObjectiveEnabledEvent);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClass, NumberOfElements, false);
-}
-
-void UQuestStep::OnObjectiveEnabledEvent(UObject* InTargetObject, bool bNewIsEnabled)
-{
-	OnStepTargetEnabled.ExecuteIfBound(this, InTargetObject, bNewIsEnabled);
 }
 
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)

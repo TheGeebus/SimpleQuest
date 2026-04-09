@@ -5,23 +5,22 @@
 #include "Quests/QuestNodeBase.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
-#include "Events/QuestStepCompletedEvent.h"
-#include "Events/QuestStepStartedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/AbandonQuestEvent.h"
-#include "Interfaces/QuestTargetInterface.h"
 #include "Signals/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestGivenEvent.h"
+#include "Events/QuestGiverRegisteredEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Utils/QuestStateTagUtils.h"
-#include "Utils/SimpleCoreDebug.h"
-
+#if WITH_EDITOR
+#include "Components/QuestGiverComponent.h"
+#endif
 
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -33,11 +32,14 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
         if (QuestSignalSubsystem)
         {
-            ObjectiveTriggeredDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckQuestObjectives);
             AbandonDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FAbandonQuestEvent>(Tag_Channel_QuestAbandoned, this, &UQuestManagerSubsystem::HandleAbandonQuestEvent);
             GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
+            GiverRegisteredDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGiverRegisteredEvent>(Tag_Channel_QuestGiverRegistered, this, &UQuestManagerSubsystem::HandleGiverRegisteredEvent);
         }
     }
+
+    RegisterGiversFromAssetRegistry();
+    
     UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
     if (const UWorld* World = GetWorld())
     {
@@ -49,9 +51,9 @@ void UQuestManagerSubsystem::Deinitialize()
 {
     if (QuestSignalSubsystem)
     {
-        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestTarget, ObjectiveTriggeredDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestAbandoned, AbandonDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiven, GivenDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiverRegistered, GiverRegisteredDelegateHandle);
     }
     Super::Deinitialize();
 }
@@ -81,29 +83,15 @@ void UQuestManagerSubsystem::CountQuestElement_Implementation(UObject* InQuestEl
 
 void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& QuestObjectiveEvent)
 {
-    for (auto& Pair : LoadedNodeInstances)
+    TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(Channel.GetTagName());
+    if (!NodePtr) return;
+
+    if (UQuestStep* Step = Cast<UQuestStep>(*NodePtr))
     {
-        if (UQuestStep* Step = Cast<UQuestStep>(Pair.Value))
+        if (Step->GetActiveObjective())
         {
-            if (Step->GetActiveObjective() && Step->GetActiveObjective()->IsObjectRelevant(QuestObjectiveEvent.TriggeredActor))
-            {
-                Step->GetActiveObjective()->TryCompleteObjective(QuestObjectiveEvent.TriggeredActor);
-            }
+            Step->GetActiveObjective()->TryCompleteObjective(QuestObjectiveEvent.TriggeredActor);
         }
-    }
-}
-
-void UQuestManagerSubsystem::OnStepTargetEnabledEvent(UQuestStep* Step, UObject* TargetObject, bool bIsEnabled)
-{
-    if (!QuestSignalSubsystem) return;
-
-    if (bIsEnabled)
-    {
-        QuestSignalSubsystem->PublishMessage(Step->GetQuestTag(), FQuestStepStartedEvent(Step->GetQuestTag()));
-    }
-    else
-    {
-        QuestSignalSubsystem->PublishMessage(Step->GetQuestTag(), FQuestStepCompletedEvent(Step->GetQuestTag(), true, false, nullptr));
     }
 }
 
@@ -120,10 +108,6 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
             Instance->RegisterWithGameInstance(GetGameInstance());
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
             Instance->OnNodeActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeActivated);
-            if (UQuestStep* Step = Cast<UQuestStep>(Instance))
-            {
-                Step->OnStepTargetEnabled.BindUObject(this, &UQuestManagerSubsystem::OnStepTargetEnabledEvent);
-            }
         }
     }
 
@@ -147,6 +131,11 @@ void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGamepl
     if (QuestSignalSubsystem)
     {
         QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag()));
+        if (Cast<UQuestStep>(Node))
+        {
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestObjectiveTriggered>(Node->GetQuestTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
+            ActiveStepTriggerHandles.Add(Node->GetQuestTag(), Handle);
+        }
     }
 }
 
@@ -191,7 +180,12 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
         }
     }
 
-    if ((*InstancePtr)->IsGiverGated())
+    for (auto Tag : RegisteredGiverQuestTags)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : checking registered giver tag: %s"), *Tag.ToString());
+    }
+    
+    if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
     {
         SetQuestPendingGiver(NodeTag);
         if (QuestSignalSubsystem)
@@ -218,6 +212,14 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     if (Node->GetQuestTag().IsValid())
     {
         SetQuestResolved(Node->GetQuestTag(), OutcomeTag);
+        if (QuestSignalSubsystem)
+        {
+            if (FDelegateHandle* Handle = ActiveStepTriggerHandles.Find(Node->GetQuestTag()))
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Node->GetQuestTag(), *Handle);
+                ActiveStepTriggerHandles.Remove(Node->GetQuestTag());
+            }
+        }
     }
 
     PublishQuestEndedEvent(Node->GetQuestTag(), OutcomeTag);
@@ -244,8 +246,89 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
 {
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid()) return;
+    RegisteredGiverQuestTags.Remove(QuestTag);
     ClearQuestPendingGiver(QuestTag);
     ActivateNodeByTag(QuestTag.GetTagName());
+}
+
+void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
+{
+#if WITH_EDITOR
+    // In editor/PIE: scan in-memory CDOs directly — always reflects current compiled state,
+    // no save required. Catches compile-without-save which the AR cannot see.
+    for (TObjectIterator<UBlueprint> It; It; ++It)
+    {
+        const UBlueprint* Blueprint = *It;
+        if (!Blueprint->GeneratedClass) continue;
+
+        const AActor* CDO = Cast<AActor>(Blueprint->GeneratedClass->GetDefaultObject());
+        if (!CDO) continue;
+
+        const UQuestGiverComponent* GiverComp = CDO->FindComponentByClass<UQuestGiverComponent>();
+        if (!GiverComp) continue;
+
+        for (const FGameplayTag& Tag : GiverComp->GetQuestTagsToGive())
+        {
+            if (!Tag.IsValid()) continue;
+            RegisteredGiverQuestTags.Add(Tag);
+            UE_LOG(LogSimpleQuest, Verbose,
+                TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (in-memory)"),
+                *Tag.ToString(), *Blueprint->GetName());
+        }
+    }
+#else
+    // Packaged build: AR scan — user data baked into cooked registry at save time.
+    IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
+
+    FARFilter Filter;
+    Filter.ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("Blueprint")));
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> Blueprints;
+    AR.GetAssets(Filter, Blueprints);
+
+    for (const FAssetData& Asset : Blueprints)
+    {
+        FString TagValue;
+        if (!Asset.GetTagValue(TEXT("QuestTagsToGive"), TagValue) || TagValue.IsEmpty())
+            continue;
+
+        TArray<FString> TagStrings;
+        TagValue.ParseIntoArray(TagStrings, TEXT(","));
+
+        for (const FString& TagStr : TagStrings)
+        {
+            const FGameplayTag QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
+            if (!QuestTag.IsValid())
+            {
+                UE_LOG(LogSimpleQuest, Warning,
+                    TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : tag '%s' is not registered — has the questline been compiled?"),
+                    *TagStr);
+                continue;
+            }
+            RegisteredGiverQuestTags.Add(QuestTag);
+            UE_LOG(LogSimpleQuest, Verbose,
+                TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (asset registry)"),
+                *QuestTag.ToString(), *Asset.AssetName.ToString());
+        }
+    }
+#endif
+}
+
+void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid()) return;
+
+    RegisteredGiverQuestTags.Add(QuestTag);
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
+
+    if (WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Active)))
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
+            *QuestTag.ToString());
+    }
 }
 
 int32 UQuestManagerSubsystem::GetQuestCompletionCount(const FGameplayTag QuestTag) const

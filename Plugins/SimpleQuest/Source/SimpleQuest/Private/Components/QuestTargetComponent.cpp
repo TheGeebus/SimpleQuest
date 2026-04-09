@@ -2,11 +2,13 @@
 
 #include "Components/QuestTargetComponent.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveInteracted.h"
 #include "Events/QuestObjectiveKilled.h"
 #include "Events/QuestObjectiveTriggered.h"
-#include "Events/QuestStepCompletedEvent.h"
-#include "Events/QuestStepStartedEvent.h"
+#include "Events/QuestStartedEvent.h"
+#include "Events/QuestEndedEvent.h"
+#include "Events/QuestStartedEvent.h"
 #include "Signals/SignalSubsystem.h"
 
 UQuestTargetComponent::UQuestTargetComponent()
@@ -14,38 +16,33 @@ UQuestTargetComponent::UQuestTargetComponent()
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestTargetComponent::PostInitProperties()
-{
-    Super::PostInitProperties();
-}
-
 void UQuestTargetComponent::BeginPlay()
 {
     Super::BeginPlay();
-    if (!CheckQuestSignalSubsystem()) return;
+    if (!SignalSubsystem) return;
 
     for (const FGameplayTag& StepTag : StepTagsToWatch)
     {
         if (!StepTag.IsValid()) continue;
-        FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStepStartedEvent>(StepTag, this, &UQuestTargetComponent::OnTargetActivated);
+        FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTargetComponent::OnTargetActivated);
         StepStartedHandles.Add(StepTag, Handle);
         UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
 }
 
-void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuestStepStartedEvent& StepStartedEvent)
+void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
-    if (!CheckQuestSignalSubsystem()) return;
+    if (!SignalSubsystem) return;
 
     UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s : Owner: %s"), *Channel.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
     ActiveStepTag = Channel;
-    StepCompletedHandle = SignalSubsystem->SubscribeMessage<FQuestStepCompletedEvent>(Channel, this, &UQuestTargetComponent::OnTargetDeactivated);
+    StepCompletedHandle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(Channel, this, &UQuestTargetComponent::OnTargetDeactivated);
     Execute_SetActivated(this, true);
 }
 
-void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQuestStepCompletedEvent& StepCompletedEvent)
+void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
-    if (CheckQuestSignalSubsystem() && StepCompletedHandle.IsValid())
+    if (SignalSubsystem && StepCompletedHandle.IsValid())
     {
         SignalSubsystem->UnsubscribeMessage(ActiveStepTag, StepCompletedHandle);
         StepCompletedHandle.Reset();
@@ -62,24 +59,25 @@ void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
 
 void UQuestTargetComponent::GetTriggered()
 {
-    if (CheckQuestSignalSubsystem())
-    {
-        SignalSubsystem->PublishMessage(Tag_Channel_QuestTarget, FQuestObjectiveTriggered(GetOwner()));
-    }
+    if (!SignalSubsystem) return;
+    if (!ActiveStepTag.IsValid()) return; // Not active for any step, ignore
+
+    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveTriggered(GetOwner()));
 }
 
 void UQuestTargetComponent::GetKilled(AActor* KillerActor)
 {
-    if (CheckQuestSignalSubsystem())
-    {
-        SignalSubsystem->PublishMessage(Tag_Channel_QuestTarget, FQuestObjectiveKilled(GetOwner(), KillerActor));
-    }
+    if (!SignalSubsystem) return;
+    if (!ActiveStepTag.IsValid()) return;
+
+    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveKilled(GetOwner(), KillerActor));
 }
 
 void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
 {
-    if (CheckQuestSignalSubsystem())
-    {
-        SignalSubsystem->PublishMessage(Tag_Channel_QuestTarget, FQuestObjectiveInteracted(GetOwner(), InteractingActor));
-    }
+    if (!SignalSubsystem) return;
+    if (!ActiveStepTag.IsValid()) return;
+
+    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveInteracted(GetOwner(), InteractingActor));
 }
+

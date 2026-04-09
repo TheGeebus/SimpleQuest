@@ -12,46 +12,12 @@ UQuestComponentBase::UQuestComponentBase()
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestComponentBase::PostInitProperties()
-{
-	Super::PostInitProperties();
-	if (const UWorld* World = GetWorld())
-	{
-		if (const UGameInstance* GameInstance = World->GetGameInstance())
-		{
-			SignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
-		}
-	}
-}
-
 void UQuestComponentBase::BeginPlay()
 {
 	Super::BeginPlay();
-}
-
-bool UQuestComponentBase::CheckQuestSignalSubsystem()
-{
-	if (SignalSubsystem.Get() == nullptr)
+	if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
 	{
-		if (const UWorld* World = GetWorld())
-		{
-			if (const UGameInstance* GameInstance = World->GetGameInstance())
-			{
-				SignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
-				if (SignalSubsystem == nullptr)
-				{
-					UE_LOG(LogSimpleQuest, Error, TEXT("UQuestComponentBase::CheckQuestSignalSubsystem : QuestSignalSubsystem was null"));
-				}
-			}
-			else
-			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("UQuestComponentBase::CheckQuestSignalSubsystem : GameInstance was null"));
-			}
-		}
-		else
-		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("UQuestComponentBase::CheckQuestSignalSubsystem : World is null"));
-		}
+		SignalSubsystem = GI->GetSubsystem<USignalSubsystem>();
 	}
-	return SignalSubsystem != nullptr;
+	ensureMsgf(SignalSubsystem, TEXT("UQuestComponentBase: SignalSubsystem unavailable on %s — is SimpleCore loaded?"), *GetOwner()->GetActorNameOrLabel());
 }

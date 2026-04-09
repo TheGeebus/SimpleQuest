@@ -99,13 +99,6 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     bool bCompletesParentGraph = false;
-
-    /**
-     * Whether activation of this node waits for a registered quest giver rather than starting immediately. Compiler-written
-     * based on the presence of a giver-gate in the graph.
-     */
-    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    bool bGiverGated = false;
     
     UPROPERTY()
     TWeakObjectPtr<UGameInstance> CachedGameInstance;
@@ -130,7 +123,6 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
-    FORCEINLINE bool IsGiverGated() const { return bGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     
 };

@@ -6,12 +6,14 @@
 #include "GameplayTagContainer.h"
 #include "QuestComponentBase.h"
 #include "Components/ActorComponent.h"
+#include "Events/QuestEndedEvent.h"
+#include "Events/QuestStartedEvent.h"
 #include "Interfaces/QuestTargetInterface.h"
 #include "QuestTargetComponent.generated.h"
 
 
-struct FQuestStepCompletedEvent;
-struct FQuestStepStartedEvent;
+struct FQuestStartedEvent;
+struct FQuestEndedEvent;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -40,11 +42,10 @@ public:
 	virtual void GetInteracted(AActor* InteractingActor);
 
 protected:
-	virtual void PostInitProperties() override;
 	virtual void BeginPlay() override;
 
-	virtual void OnTargetActivated(FGameplayTag Channel, const FQuestStepStartedEvent& StepStartedEvent);
-	virtual void OnTargetDeactivated(FGameplayTag Channel, const FQuestStepCompletedEvent& StepCompletedEvent);
+	virtual void OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	virtual void OnTargetDeactivated(FGameplayTag Channel, const FQuestEndedEvent& Event);
 	
 	// Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
 	// The subsystem publishes step events on the step tag; any target configured with that tag activates.

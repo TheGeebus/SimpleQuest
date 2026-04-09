@@ -6,8 +6,13 @@
 #include "SimpleQuestLog.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestGivenEvent.h"
+#include "Events/QuestGiverRegisteredEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Subsystems/QuestManagerSubsystem.h"
+#include "WorldState/WorldStateSubsystem.h"
+#include "Utils/QuestStateTagUtils.h"
+#include "GameplayTagsManager.h"
+#include "Events/QuestStartedEvent.h"
+
 
 UQuestGiverComponent::UQuestGiverComponent()
 {
@@ -23,28 +28,49 @@ void UQuestGiverComponent::BeginPlay()
 
 void UQuestGiverComponent::RegisterQuestGiver()
 {
-	if (!QuestTagsToGive.IsEmpty())
+	if (QuestTagsToGive.IsEmpty())
 	{
-		for (const FGameplayTag& QuestTag : QuestTagsToGive)
-		{
-			if (!QuestTag.IsValid()) { continue; }
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"),
-				*QuestTag.ToString(), *GetOwner()->GetName());
-			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
-		}
+		UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestGiverComponent::RegisterQuestGiver : QuestTagsToGive is empty. Actor: %s"),	*GetOwner()->GetActorNameOrLabel());
+		return;
 	}
-	else
+
+	UWorldStateSubsystem* WorldState = GetWorld() && GetWorld()->GetGameInstance() ? GetWorld()->GetGameInstance()->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+
+	for (const FGameplayTag& QuestTag : QuestTagsToGive)
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestGiverComponent::RegisterQuestGiver : QuestTagsToGive is empty. Actor: %s"),
-			*GetOwner()->GetActorNameOrLabel());
+		if (!QuestTag.IsValid()) continue;
+
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"), *QuestTag.ToString(), *GetOwner()->GetName());
+
+		if (SignalSubsystem)
+		{
+			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestStartedEventReceived);
+			SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
+		}
+		// Catch-up: quest may have become giver-gated before this component came online
+		if (WorldState)
+		{
+			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver), false);
+			if (WorldState->HasFact(PendingFact))
+			{
+				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());
+				SetQuestGiverActivated(QuestTag, true);
+			}
+		}
 	}
 }
 
-void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent)
+void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *Channel.ToString(), *QuestEnabledEvent.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *Channel.ToString(), *Event.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-	SetQuestGiverActivated(QuestEnabledEvent.GetQuestTag(), QuestEnabledEvent.bIsActivated);
+	SetQuestGiverActivated(Event.GetQuestTag(), Event.bIsActivated);
+}
+
+void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
+{
+	SetQuestGiverActivated(Event.GetQuestTag(), false);
 }
 
 void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag)

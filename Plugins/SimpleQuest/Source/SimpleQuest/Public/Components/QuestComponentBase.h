@@ -20,16 +20,7 @@ public:
 	UQuestComponentBase();
 
 protected:
-	virtual void PostInitProperties() override;
 	virtual void BeginPlay() override;
-
-	//bool CheckQuestManager();
-	bool CheckQuestSignalSubsystem();
-
-	// void RegisterForQuestClass(UClass* LoadedQuestClass);
-		
-	//UPROPERTY(VisibleAnywhere)
-	//TObjectPtr<UQuestManagerSubsystem> QuestManager;
 
 	UPROPERTY(VisibleAnywhere)
 	TObjectPtr<USignalSubsystem> SignalSubsystem;

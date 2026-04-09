@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
 struct FAbandonQuestEvent;
 class UQuestStep;
@@ -105,8 +106,6 @@ protected:
 	*/
 
 	void PublishQuestEndedEvent(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
-	UFUNCTION()
-	void OnStepTargetEnabledEvent(UQuestStep* Step, UObject* TargetObject, bool bIsEnabled);
 
 	/*
 	// Voice line audio player. 
@@ -143,5 +142,19 @@ private:
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
+	void RegisterGiversFromAssetRegistry();	
+	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
 	
+	/**
+	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize
+	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
+	 */
+	TSet<FGameplayTag> RegisteredGiverQuestTags;
+	FDelegateHandle GiverRegisteredDelegateHandle;
+
+	/**
+	 * Quest tags mapped to the 
+	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
+	 */
+	TMap<FGameplayTag, FDelegateHandle> ActiveStepTriggerHandles;
 };

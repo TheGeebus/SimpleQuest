@@ -13,6 +13,7 @@
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
 #include "Utils/QuestStateTagUtils.h"
+#include "Engine/Blueprint.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -87,9 +88,6 @@ void FSimpleQuestEditor::ShutdownModule()
 	QuestlineConnectionFactory.Reset();
 	
 	QuestlineGraphAssetTypeActions.Reset();
-
-
-
 }
 
 void FSimpleQuestEditor::RegisterCompilerFactory(FQuestlineCompilerFactoryDelegate InFactory)

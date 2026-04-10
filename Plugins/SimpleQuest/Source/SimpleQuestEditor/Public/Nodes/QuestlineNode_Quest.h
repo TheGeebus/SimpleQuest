@@ -17,6 +17,7 @@ public:
 	virtual void AllocateDefaultPins() override;
 	
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }

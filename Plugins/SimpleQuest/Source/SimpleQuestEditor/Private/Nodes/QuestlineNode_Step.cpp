@@ -4,6 +4,7 @@
 
 #include "Objectives/QuestObjective.h"
 #include "Quests/QuestStep.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 void UQuestlineNode_Step::AllocateDefaultPins()
 {
@@ -33,4 +34,9 @@ FText UQuestlineNode_Step::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	if (!NodeLabel.IsEmpty()) return NodeLabel;
 	return NSLOCTEXT("SimpleQuestEditor", "LeafNodeDefaultTitle", "Quest Step");
+}
+
+FLinearColor UQuestlineNode_Step::GetNodeTitleColor() const
+{
+	return SQ_ED_NODE_STEP;
 }

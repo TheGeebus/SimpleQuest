@@ -17,6 +17,7 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Step"); }
 
 	/** The objective that defines how this step is completed. Required for compilation. */

@@ -57,5 +57,8 @@ public:
 	static void ClearActiveDragFromPin();
 
 private:
+	static void CollectUpstreamSources(const UEdGraphPin* Pin, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphPin*>& Visited);
+	static bool PinReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category, TSet<const UEdGraphPin*>& Visited);
+	static bool AnySourceReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category);
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
 };

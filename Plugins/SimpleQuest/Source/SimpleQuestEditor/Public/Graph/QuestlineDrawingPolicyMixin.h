@@ -4,6 +4,7 @@
 
 #include "BlueprintConnectionDrawingPolicy.h"
 #include "Graph/QuestlineGraphSchema.h"
+#include "Nodes/QuestlineNode_Knot.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 template <typename TBase>
@@ -18,16 +19,27 @@ public:
 		if (OutputPin)
 		{
 			const FName Category = OutputPin->PinType.PinCategory;
-			if (Category == TEXT("QuestOutcome")) Params.WireColor = SQ_ED_WIRE_OUTCOME;
-			else if (Category == TEXT("QuestDeactivated") || Category == TEXT("QuestDeactivate")) Params.WireColor = SQ_ED_WIRE_DEACTIVATION;
-			else Params.WireColor = SQ_ED_WIRE_ACTIVATION;
+			if (Category == TEXT("QuestOutcome"))													Params.WireColor = SQ_ED_WIRE_OUTCOME;
+			else if (Category == TEXT("QuestDeactivated") || Category == TEXT("QuestDeactivate"))	Params.WireColor = SQ_ED_WIRE_DEACTIVATION;
+			else																					Params.WireColor = SQ_ED_WIRE_ACTIVATION;
 		}
+
 		const bool bIsPrerequisiteWire =
 			(OutputPin && OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite")) ||
-			(InputPin && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
-		if (bIsPrerequisiteWire) Params.bUserFlag1 = true;
-	}
+			(InputPin  && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
 
+		if (bIsPrerequisiteWire)
+		{
+			Params.bUserFlag1 = true;
+		}
+		else if (InputPin)
+		{
+			// An activation-type wire is drawn dashed if every path it reaches downstream terminates at a prerequisite input.
+			// It carries a signal used exclusively as a condition, not as an activation or deactivation trigger.
+			TSet<const UEdGraphNode*> Visited;
+			if (LeadsOnlyToPrereqInputs(InputPin, Visited)) Params.bUserFlag1 = true;
+		}
+	}
 	
 	virtual void DetermineWiringStyle(UEdGraphPin* OutputPin, UEdGraphPin* InputPin, FConnectionParams& Params) override
 	{
@@ -49,5 +61,32 @@ public:
 		UQuestlineGraphSchema::SetActiveDragFromPin(Pin);
 		TBase::DrawPreviewConnector(PinGeometry, StartPoint, EndPoint, Pin);
 	}
+	
+	// Returns true if every downstream terminal reachable from InputPin is a QuestPrerequisite input. Used to determine whether
+	// an activation-type wire should be drawn dashed (prereq-only path).
+	static bool LeadsOnlyToPrereqInputs(const UEdGraphPin* InputPin, TSet<const UEdGraphNode*>& Visited)
+	{
+		if (!InputPin) return false;
+		const UEdGraphNode* Node = InputPin->GetOwningNode();
+		if (Visited.Contains(Node)) return true; // cycle guard
 
+		if (InputPin->PinType.PinCategory == TEXT("QuestPrerequisite"))
+			return true;
+
+		if (const UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+		{
+			Visited.Add(Node);
+			const UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output);
+			if (!KnotOut || KnotOut->LinkedTo.IsEmpty())
+			{
+				return false; // unconnected downstream — no confirmed prereq path, draw solid
+			}
+			for (const UEdGraphPin* Linked : KnotOut->LinkedTo)
+			{
+				if (!LeadsOnlyToPrereqInputs(Linked, Visited)) return false;
+			}
+			return true;
+		}
+		return false; // any other non-prereq input terminal
+	}
 };

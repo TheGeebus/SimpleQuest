@@ -19,6 +19,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_LinkedQuestline : public UQuestlineNo
 
 public:
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual FLinearColor GetNodeTitleColor() const override;
 
 	/** The external questline graph asset this node references. */
 	UPROPERTY(EditAnywhere, Category = "Quest")

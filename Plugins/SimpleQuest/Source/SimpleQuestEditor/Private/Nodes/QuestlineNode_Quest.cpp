@@ -4,6 +4,7 @@
 
 #include "Graph/QuestlineGraphSchema.h"
 #include "Nodes/QuestlineNode_Exit.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 
 void UQuestlineNode_Quest::AllocateDefaultPins()
@@ -16,6 +17,11 @@ FText UQuestlineNode_Quest::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	if (!NodeLabel.IsEmpty()) return NodeLabel;
 	return NSLOCTEXT("SimpleQuestEditor", "QuestNodeDefaultTitle", "Quest");
+}
+
+FLinearColor UQuestlineNode_Quest::GetNodeTitleColor() const
+{
+	return SQ_ED_NODE_QUEST;
 }
 
 void UQuestlineNode_Quest::PostPlacedNewNode()

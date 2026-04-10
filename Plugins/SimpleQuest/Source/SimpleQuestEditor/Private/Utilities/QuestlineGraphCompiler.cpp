@@ -100,6 +100,13 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     UtilityNodeKeyMap.Empty();
     RootGraph = InGraph;
 
+    // Refresh outcome pins on all step nodes so that changes to PossibleOutcomes on an objective class are reflected without
+    // the designer having to touch ObjectiveClass again.
+    for (UEdGraphNode* Node : InGraph->QuestlineEdGraph->Nodes)
+    {
+        if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(Node)) StepNode->RefreshOutcomePins();
+    }
+
     // The graphs that have already been compiled. Provided to CompileGraph, which forwards it to all recursive calls.
     TArray<FString> VisitedAssetPaths;
     VisitedAssetPaths.Add(InGraph->GetPathName());

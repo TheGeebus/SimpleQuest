@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "QuestlineNode_Step.generated.h"
 
@@ -13,12 +14,14 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_Step : public UQuestlineNode_ContentB
 	GENERATED_BODY()
 
 public:
-	virtual void AllocateDefaultPins() override;
+	virtual void AllocateOutcomePins() override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	void RefreshOutcomePins();
 
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Step"); }
+	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override;
 
 	/** The objective that defines how this step is completed. Required for compilation. */
 	UPROPERTY(EditAnywhere, Category = "Step")
@@ -39,4 +42,8 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Step")
 	FVector TargetVector = FVector::ZeroVector;
+
+private:
+	static FText MakeOutcomePinLabel(const FGameplayTag& Tag);
+
 };

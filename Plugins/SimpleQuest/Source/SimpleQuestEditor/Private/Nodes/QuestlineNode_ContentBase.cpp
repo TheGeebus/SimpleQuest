@@ -7,9 +7,13 @@ UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
 
 void UQuestlineNode_ContentBase::AllocateDefaultPins()
 {
-	CreatePin(EGPD_Input,  TEXT("QuestActivation"),  TEXT("Activate"));
-	CreatePin(EGPD_Input,  TEXT("QuestPrerequisite"), TEXT("Prerequisites"));
-	CreatePin(EGPD_Output, TEXT("QuestActivation"),   TEXT("Any Outcome"));
+	// Input
+	CreatePin(EGPD_Input,  TEXT("QuestActivation"),   TEXT("Activate"));
+	CreatePin(EGPD_Input,  TEXT("QuestPrerequisite"),  TEXT("Prerequisites"));
+
+	// Ouput
+	CreatePin(EGPD_Output, TEXT("QuestActivation"),    TEXT("Any Outcome"));
+	AllocateOutcomePins(); // virtual hook: subclasses can create additional output pins between Activate and Deactivate.
 	if (bShowDeactivationPins)
 	{
 		CreatePin(EGPD_Input,  TEXT("QuestDeactivate"),  TEXT("Deactivate"));

@@ -23,7 +23,6 @@ public:
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
-	
 
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")
@@ -39,4 +38,11 @@ public:
 
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }
+
+	/**
+	 * Override to insert custom output pins between Prerequisites and Any Outcome. Do NOT override AllocateDefaultPins — the
+	 * base class controls pin ordering to guarantee Deactivate always appears at the bottom.
+	 */
+	virtual void AllocateOutcomePins() {}
+
 };

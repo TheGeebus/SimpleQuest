@@ -8,7 +8,7 @@ void UQuestlineNode_PrerequisiteAnd::AllocateDefaultPins()
 	{
 		CreatePin(EGPD_Input, TEXT("QuestPrerequisite"), *FString::Printf(TEXT("Condition_%d"), i));
 	}
-	CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("PrereqOut"));
+	CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("Out"));
 }
 
 FText UQuestlineNode_PrerequisiteAnd::GetNodeTitle(ENodeTitleType::Type TitleType) const

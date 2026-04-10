@@ -12,6 +12,7 @@
 
 
 struct FQuestGiverRegisteredEvent;
+struct FQuestDeactivatedEvent;
 struct FQuestEnabledEvent;
 class UQuestManagerSubsystem;
 
@@ -62,6 +63,7 @@ private:
 	void RegisterQuestGiver();
 	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	void OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	void OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 public:

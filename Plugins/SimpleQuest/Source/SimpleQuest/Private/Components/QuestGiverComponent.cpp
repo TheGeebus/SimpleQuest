@@ -9,8 +9,9 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
+#include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
@@ -47,6 +48,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		{
 			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestStartedEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived);
 			SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
 		}
 		// Catch-up: quest may have become giver-gated before this component came online
@@ -70,6 +72,11 @@ void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, con
 }
 
 void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
+{
+	SetQuestGiverActivated(Event.GetQuestTag(), false);
+}
+
+void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
 	SetQuestGiverActivated(Event.GetQuestTag(), false);
 }

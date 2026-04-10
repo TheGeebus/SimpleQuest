@@ -7,9 +7,12 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
 struct FAbandonQuestEvent;
+struct FQuestDeactivatedEvent;
+enum class EDeactivationSource : uint8;
 class UQuestStep;
 struct FGameplayTag;
 struct FQuestStartedEvent;
@@ -33,44 +36,20 @@ UCLASS(Abstract, Blueprintable, config = Game)
 class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
+
+	friend class USimpleQuestBlueprintLibrary;
 	
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
-
-public:
-	/**
-	 * Check if this actor fulfills a quest requirement.
-	 * @param InQuestElement A pointer to an element that possibly completes a quest condition. This may be an 
-	 * enemy killed, an item used, a trigger in the scene, an action taken, etc. 
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void CountQuestElement(UObject* InQuestElement);
+	
 	void CheckQuestObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& QuestObjectiveEvent);
 
-	/*
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestTextUpdated, const FQuestText&, InQuestText);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestTextVisibilityUpdated, bool, bIsVisible, bool, bUseCounter);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCommsEventStart, const FCommsEvent&, InCommsEvent);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCommsEventEnd);
-
-	UPROPERTY(BlueprintAssignable, BlueprintCallable)
-	FOnQuestTextUpdated OnQuestTextUpdated;
-	UPROPERTY(BlueprintAssignable, BlueprintCallable)
-	FOnQuestTextVisibilityUpdated OnQuestTextVisibilityUpdated;
-	UPROPERTY(BlueprintAssignable, BlueprintCallable)
-	FOnCommsEventStart OnCommsEventStart;
-	UPROPERTY(BlueprintAssignable, BlueprintCallable)
-	FOnCommsEventEnd OnCommsEventEnd;
-	*/
-
+	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+	
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
 	
-	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
-	
-protected:
-
 	/** Questline graph assets to activate when the game launches. Prefer this over InitialQuests for graphs compiled with the current compiler. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="QuestMap")
 	TArray<TSoftObjectPtr<UQuestlineGraph>> InitialQuestlines;
@@ -85,37 +64,10 @@ protected:
 	/** Looks up the instance for NodeTag in LoadedNodeInstances and activates it. */
 	virtual void ActivateNodeByTag(FName NodeTag);
 
-	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesOnSuccess / NextNodesOnFailure. */
+	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag);
 
-	
-	/**
-	 * HUD stuff - should probably be abstracted into another system that binds to the events on this one 
-	 */
-	/*
-	TArray<FCommsEvent> CommsEventQueue;
-	FTimerHandle CommsEventTimerHandle;
-	void CommsEventTimerEnd();
-	UFUNCTION()
-	void QueueCommsEvent(const FCommsEvent& InCommsEvent);
-	void StartCommsEvent();
-	UFUNCTION()
-	void UpdateQuestText(const FQuestText& InQuestText);
-	UFUNCTION()
-	void UpdateQuestTextVisibility(bool bIsVisible, bool bUseCounter);
-	*/
-
 	void PublishQuestEndedEvent(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
-
-	/*
-	// Voice line audio player. 
-	UPROPERTY()
-	TObjectPtr<UAudioComponent> AudioComponent;
-
-	// How long to keep the subtitles on screen after playing a voice line.
-	UPROPERTY(EditDefaultsOnly)
-	float CommsEventSubtitleDelay = 3.f;
-	*/
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -130,31 +82,44 @@ protected:
 	TMap<FGameplayTag, int32> QuestCompletionCounts;
 
 private:
-
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
 	UFUNCTION()
 	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	UFUNCTION()
+	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
+
 	void HandleAbandonQuestEvent(FGameplayTag Channel, const FAbandonQuestEvent& Event);
+	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
+	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
+	void HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event);
+	void HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestActive(FGameplayTag QuestTag);
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
-	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
+
+	/**
+	 * Tears down an active or pending-giver node: cancels objectives, clears WorldState facts, writes Deactivated (and
+	 * optionally Blocked), then publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, watchers,
+	 * and this subsystem's own HandleNodeDeactivatedEvent) can react. No-op on Completed nodes.
+	 */
+	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, bool bWriteBlocked);
+
 	void RegisterGiversFromAssetRegistry();	
-	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
-	
+
 	/**
 	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize
 	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
 	 */
 	TSet<FGameplayTag> RegisteredGiverQuestTags;
 	FDelegateHandle GiverRegisteredDelegateHandle;
-
-	/**
-	 * Quest tags mapped to the 
-	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
-	 */
+	FDelegateHandle DeactivateEventDelegateHandle;
+	
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepTriggerHandles;
+
+	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
+	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
 };

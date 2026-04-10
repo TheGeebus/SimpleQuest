@@ -13,6 +13,7 @@
 struct FQuestEndedEvent;
 struct FQuestStartedEvent;
 struct FQuestEnabledEvent;
+struct FQuestDeactivatedEvent;
 
 
 USTRUCT(BlueprintType)
@@ -26,7 +27,12 @@ struct FWatchedQuestEventSettings
 	bool bWatchQuestStart = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bWatchQuestEnd = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bWatchDeactivated = false;
 };
+
+
+
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class SIMPLEQUEST_API UQuestWatcherComponent : public UQuestComponentBase, public IQuestWatcherInterface
@@ -39,6 +45,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestActivated, FGameplayTag, QuestTag);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStarted, FGameplayTag, QuestTag);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestCompleted, FGameplayTag, QuestTag, FGameplayTag, OutcomeTag);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestDeactivated, FGameplayTag, QuestTag);
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
@@ -46,6 +53,8 @@ public:
 	FOnQuestStarted OnQuestStarted;
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestCompleted OnQuestCompleted;
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestDeactivated OnQuestDeactivated;
 	
 protected:
 	virtual void BeginPlay() override;
@@ -53,6 +62,7 @@ protected:
 	virtual void WatchedQuestActivatedEvent(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent);
 	virtual void WatchedQuestStartedEvent(FGameplayTag Channel, const FQuestStartedEvent& QuestStartedEvent);
 	virtual void WatchedQuestCompletedEvent(FGameplayTag Channel, const FQuestEndedEvent& QuestEndedEvent);
+	virtual void WatchedQuestDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& QuestDeactivatedEvent);
 
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestWatcher();	

@@ -29,4 +29,8 @@ public:
 
 	/** Returns true if this node should be traversed through transparently (i.e., a reroute/knot). Default: false. */
 	virtual bool IsPassThroughNode() const { return false; }
+
+	/** Returns true if this node is a utility/flow-control node (SetBlocked, ClearBlocked, GroupSignal, etc.). Default: false. */
+	virtual bool IsUtilityNode() const { return false; }
+
 };

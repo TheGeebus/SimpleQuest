@@ -7,7 +7,8 @@
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
-    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid()
+        ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 
     if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState))
     {
@@ -21,6 +22,28 @@ void UQuestNodeBase::ActivateInternal(FGameplayTag InContextualTag)
 {
     SetContextualTag(InContextualTag);
     OnNodeActivated.ExecuteIfBound(this, InContextualTag);
+}
+
+void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)
+{
+    // Cancel any deferred prereq subscriptions that are still live
+    if (DeferredContextualTag.IsValid())
+    {
+        if (USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr)
+        {
+            for (auto& Pair : PrereqSubscriptionHandles)
+            {
+                Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
+            }
+            PrereqSubscriptionHandles.Reset();
+        }
+        DeferredContextualTag = FGameplayTag::EmptyTag;
+    }
+}
+
+void UQuestNodeBase::ForwardActivation()
+{
+    OnNodeForwardActivated.ExecuteIfBound(this);
 }
 
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
@@ -52,7 +75,6 @@ void UQuestNodeBase::TryActivateDeferred()
 
     if (!PrerequisiteExpression.Evaluate(WorldState)) return;
 
-    // Prerequisites satisfied, unsubscribe and activate
     if (USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>())
     {
         for (auto& Pair : PrereqSubscriptionHandles)

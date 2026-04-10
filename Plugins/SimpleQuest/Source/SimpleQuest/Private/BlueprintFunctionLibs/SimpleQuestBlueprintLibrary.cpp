@@ -4,7 +4,7 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
 #include "Events/AbandonQuestEvent.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestGivenEvent.h"

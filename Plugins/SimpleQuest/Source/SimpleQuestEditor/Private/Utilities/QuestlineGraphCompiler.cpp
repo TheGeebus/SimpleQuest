@@ -3,14 +3,20 @@
 #include "Utilities/QuestlineGraphCompiler.h"
 
 #include "GameplayTagsManager.h"
+#include "NativeGameplayTags.h"
 #include "ISimpleQuestEditorModule.h"
 #include "SimpleQuestEditor.h"
-#include "NativeGameplayTags.h"
 #include "SimpleQuestLog.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
 #include "Quests/Quest.h"
+#include "Quests/PrerequisiteExpression.h"
+#include "Quests/QuestPrereqGroupNode.h"
+#include "Quests/SetBlockedNode.h"
+#include "Quests/ClearBlockedNode.h"
+#include "Quests/GroupSignalSetterNode.h"
+#include "Quests/GroupSignalGetterNode.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -18,14 +24,16 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Exit.h"
-#include "Quests/PrerequisiteExpression.h"
-#include "Quests/QuestPrereqGroupNode.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupSetter.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
+#include "Nodes/Groups/QuestlineNode_GroupSignalSetter.h"
+#include "Nodes/Groups/QuestlineNode_GroupSignalGetter.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
@@ -33,7 +41,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -84,12 +92,12 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
         }
     }
 
-    // Mark the graph asset as dirty, meaning it needs to be saved
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
     InGraph->EntryNodeTags.Empty();
-    AllCompiledNodes.Empty();
     InGraph->CompiledQuestTags.Empty();
+    AllCompiledNodes.Empty();
+    UtilityNodeKeyMap.Empty();
     RootGraph = InGraph;
 
     // The graphs that have already been compiled. Provided to CompileGraph, which forwards it to all recursive calls.
@@ -231,6 +239,51 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         AllCompiledQuestTags.Add(GroupTagName);
         MonitorTags.Add(GroupTagName);
     }
+
+    // ---- Pass 1c: utility nodes ----
+    TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UQuestlineNode_UtilityBase* UtilEdNode = Cast<UQuestlineNode_UtilityBase>(Node);
+        if (!UtilEdNode) continue;
+
+        UQuestNodeBase* Instance = nullptr;
+
+        if (UQuestlineNode_SetBlocked* BlockNode = Cast<UQuestlineNode_SetBlocked>(UtilEdNode))
+        {
+            USetBlockedNode* Inst = NewObject<USetBlockedNode>(RootGraph);
+            Inst->TargetQuestTags = BlockNode->TargetQuestTags;
+            Instance = Inst;
+        }
+        else if (UQuestlineNode_ClearBlocked* ClearBlockNode = Cast<UQuestlineNode_ClearBlocked>(UtilEdNode))
+        {
+            UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
+            Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
+            Instance = Inst;
+        }
+        else if (UQuestlineNode_GroupSignalSetter* GroupSetter = Cast<UQuestlineNode_GroupSignalSetter>(UtilEdNode))
+        {
+            UGroupSignalSetterNode* Inst = NewObject<UGroupSignalSetterNode>(RootGraph);
+            Inst->GroupSignalTag = GroupSetter->GroupSignalTag;
+            Instance = Inst;
+        }
+        else if (UQuestlineNode_GroupSignalGetter* GroupGetter = Cast<UQuestlineNode_GroupSignalGetter>(UtilEdNode))
+        {
+            UGroupSignalGetterNode* Inst = NewObject<UGroupSignalGetterNode>(RootGraph);
+            Inst->GroupSignalTag = GroupGetter->GroupSignalTag;
+            Instance = Inst;
+        }
+
+        if (!Instance) continue;
+
+        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
+        UtilityEdNodes.Add(UtilEdNode);
+        UtilityNodeKeyMap.Add(Node, UtilKey);
+        AllCompiledNodes.Add(UtilKey, Instance);
+        AllCompiledEditorNodes.Add(UtilKey, Node);
+        // Intentionally NOT added to AllCompiledQuestTags — utility nodes are internal
+        // routing scaffolding, not externally tracked quest states
+    }
     
     if (bHasErrors) return {};
     
@@ -247,12 +300,23 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         Instance->NextNodesByOutcome.Empty();
         Instance->NextNodesOnAnyOutcome.Empty();
-        Instance->NextNodesOnAbandon.Empty();
+        Instance->NextNodesOnDeactivation.Empty();
+        Instance->NextNodesToDeactivateOnDeactivation.Empty();
 
         // Route each output pin into the correct runtime routing set
         for (UEdGraphPin* Pin : ContentNode->Pins)
         {
             if (Pin->Direction != EGPD_Output) continue;
+
+            // Deactivated pin: split routing by destination pin category rather than using ResolvePinToTags
+            if (Pin->PinType.PinCategory == TEXT("QuestDeactivated"))
+            {
+                TArray<FName> ActivateTags, DeactivateTags;
+                ResolveDeactivatedPinToTags(Pin, TagPrefix, VisitedAssetPaths, ActivateTags, DeactivateTags);
+                for (const FName& Tag : ActivateTags)  Instance->NextNodesOnDeactivation.Add(Tag);
+                for (const FName& Tag : DeactivateTags) Instance->NextNodesToDeactivateOnDeactivation.Add(Tag);
+                continue;
+            }
 
             TArray<FName> ResolvedTags;
             ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags);
@@ -271,10 +335,6 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             {
                 for (const FName& Tag : ResolvedTags) Instance->NextNodesOnAnyOutcome.Add(Tag);
             }
-            else if (Pin->PinType.PinCategory == TEXT("QuestAbandon"))
-            {
-                for (const FName& Tag : ResolvedTags) Instance->NextNodesOnAbandon.Add(Tag);
-            }
         }
 
         // Mark nodes whose output chain reaches an exit — they complete their parent graph
@@ -291,7 +351,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             }
             Instance->bCompletesParentGraph = bCompletesParent;
         }
-
+        
         if (UEdGraphPin* PrereqPin = ContentNode->FindPin(TEXT("Prerequisites"), EGPD_Input))
         {
             if (PrereqPin->LinkedTo.Num() > 0)
@@ -300,7 +360,26 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             }
         }
     }
+    
+    // ---- Pass 2b: utility node Forward output wiring ----
 
+    for (UQuestlineNode_UtilityBase* UtilEdNode : UtilityEdNodes)
+    {
+        const FName* UtilKey = UtilityNodeKeyMap.Find(UtilEdNode);
+        if (!UtilKey) continue;
+
+        UQuestNodeBase* UtilInst = AllCompiledNodes.FindRef(*UtilKey);
+        if (!UtilInst) continue;
+
+        UtilInst->NextNodesOnForward.Empty();
+
+        if (UEdGraphPin* ForwardPin = UtilEdNode->FindPin(TEXT("Forward"), EGPD_Output))
+        {
+            TArray<FName> ForwardTags;
+            ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
+            for (const FName& Tag : ForwardTags) UtilInst->NextNodesOnForward.Add(Tag);
+        }
+    }
     // ---- Resolve entry tags from the graph's Entry node ----
 
     TArray<FName> EntryTags;
@@ -438,6 +517,12 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
                     OutTags.AddUnique(TagName);
                 }
             }
+        }
+        
+        // Utility node: return its GUID-based key so the caller can route into NextNodesOnForward
+        else if (const FName* UtilKey = UtilityNodeKeyMap.Find(Node))
+        {
+            OutTags.AddUnique(*UtilKey);
         }
     }
 }
@@ -669,5 +754,52 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
         }
     }
     return NAME_None; // Any Outcome or Abandon — caller handles these
+}
+
+void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(
+    UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths,
+    TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags)
+{
+    for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
+    {
+        UEdGraphNode* Node = LinkedPin->GetOwningNode();
+
+        // Knot: pass through; the output side carries the category context to each destination
+        if (UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+        {
+            if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
+            {
+                ResolveDeactivatedPinToTags(KnotOut, TagPrefix, VisitedAssetPaths, OutActivateTags, OutDeactivateTags);
+            }
+            continue;
+        }
+
+        // Content node: classify by which input pin was connected
+        if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node))
+        {
+            const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+            if (Label.IsEmpty()) continue;
+            const FName TagName = MakeNodeTagName(TagPrefix, Label);
+            if (TagName.IsNone()) continue;
+
+            if (LinkedPin->PinType.PinCategory == TEXT("QuestActivation"))
+            {
+                // Deactivated to Activate: activate this node when the source deactivates
+                OutActivateTags.AddUnique(TagName);
+            }
+            else if (LinkedPin->PinType.PinCategory == TEXT("QuestDeactivate"))
+            {
+                // Deactivated to Deactivate: cascade deactivation to this node
+                OutDeactivateTags.AddUnique(TagName);
+            }
+            continue;
+        }
+
+        // Utility node: can only receive Activate, so always goes to OutActivateTags
+        if (const FName* UtilKey = UtilityNodeKeyMap.Find(Node))
+        {
+            OutActivateTags.AddUnique(*UtilKey);
+        }
+    }
 }
 

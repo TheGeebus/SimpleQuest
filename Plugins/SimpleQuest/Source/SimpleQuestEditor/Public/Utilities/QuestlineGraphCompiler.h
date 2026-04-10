@@ -49,7 +49,6 @@ protected:
 	 */
 	// 
 	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
-
 	
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
@@ -107,6 +106,13 @@ protected:
 	TArray<FName> AllCompiledQuestTags;	
 
 	/**
+	 * Maps utility editor nodes to their compile-time FName keys. Keyed by editor node pointer; values are GUID-derived FNames
+	 * (Util_<NodeGuid>) used as AllCompiledNodes lookup keys. Not gameplay tags — utility nodes are internal routing only,
+	 * not tracked quest states.
+	 */
+	TMap<UEdGraphNode*, FName> UtilityNodeKeyMap;
+
+	/**
 	 * Rules for moving between nodes. Subclass and register via ISimpleQuestEditorModule interface to override classification logic.
 	 * 
 	 * For creating new node types, prefer to subclass UQuestlineNodeBase and override internal classification methods such as IsExitNode, etc.
@@ -128,6 +134,13 @@ private:
 	 * Returns NAME_None for Any Outcome (caller builds the OR node) or non-content-node pins.
 	 */
 	FName ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const;
+
+	/**
+	 * Follows the Deactivated output pin and splits resolved node tags by destination pin category: connections to Activate inputs
+	 * populate OutActivateTags (NextNodesOnDeactivation); connections to Deactivate inputs populate OutDeactivateTags
+	 * (NextNodesToDeactivateOnDeactivation).
+	 */
+	void ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags);
 
 	UQuestlineGraph* RootGraph = nullptr;
 

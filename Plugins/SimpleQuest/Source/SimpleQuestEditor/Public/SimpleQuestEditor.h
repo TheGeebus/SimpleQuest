@@ -15,6 +15,7 @@ class FSimpleQuestEditor : public ISimpleQuestEditorModule
 {
 public:
 	virtual void StartupModule() override;
+	void OnPostEngineInit();
 	virtual void ShutdownModule() override;
 
 	virtual void RegisterCompilerFactory(FQuestlineCompilerFactoryDelegate InFactory) override;
@@ -32,4 +33,6 @@ private:
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
 	
 	void RegisterTagsFromAssetRegistry();
+
+	bool bIsRegisteringTags = false;
 };

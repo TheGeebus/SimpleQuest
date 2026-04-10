@@ -2,7 +2,9 @@
 
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
 
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 FLinearColor UQuestlineNode_PrerequisiteBase::GetNodeTitleColor() const
 {
-	return FLinearColor(0.4f, 0.2f, 0.8f); // violet — visually distinct from quest/step nodes
+	return SQ_ED_NODE_PREREQ_GROUP;
 }

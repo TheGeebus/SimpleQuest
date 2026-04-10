@@ -2,9 +2,27 @@
 
 #pragma once
 
-#define SQ_ED_UNSET FLinearColor(0.3f, 0.3f, 0.3f)
-#define SQ_ED_OUTCOME FLinearColor(0.9f, 0.7f, 0.1f)
-#define SQ_ED_ABANDON FLinearColor(0.5f, 0.5f, 0.6f)
+#include "Settings/SimpleQuestSettings.h"
+
+// ---- Wire colors ----
+#define SQ_ED_WIRE_ACTIVATION    (GetDefault<USimpleQuestSettings>()->ActivationWireColor)
+#define SQ_ED_WIRE_PREREQUISITE  (GetDefault<USimpleQuestSettings>()->PrerequisiteWireColor)
+#define SQ_ED_WIRE_OUTCOME       (GetDefault<USimpleQuestSettings>()->OutcomeWireColor)
+#define SQ_ED_WIRE_DEACTIVATION  (GetDefault<USimpleQuestSettings>()->DeactivationWireColor)
+
+// ---- Pin colors ----
+#define SQ_ED_PIN_DEFAULT        (GetDefault<USimpleQuestSettings>()->DefaultPinColor)
+
+// ---- Node title colors ----
+#define SQ_ED_NODE_ENTRY         (GetDefault<USimpleQuestSettings>()->EntryNodeColor)
+#define SQ_ED_NODE_QUEST         (GetDefault<USimpleQuestSettings>()->QuestNodeColor)
+#define SQ_ED_NODE_STEP          (GetDefault<USimpleQuestSettings>()->StepNodeColor)
+#define SQ_ED_NODE_LINKED        (GetDefault<USimpleQuestSettings>()->LinkedQuestlineGraphNodeColor)
+#define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestSettings>()->ActivateGroupNodeColor)
+#define SQ_ED_NODE_PREREQ_GROUP  (GetDefault<USimpleQuestSettings>()->PrerequisiteGroupNodeColor)
+#define SQ_ED_NODE_UTILITY       (GetDefault<USimpleQuestSettings>()->UtilityNodeColor)
+#define SQ_ED_NODE_GRAPH_OUTCOME (GetDefault<USimpleQuestSettings>()->GraphOutcomeNodeColor)
+
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;

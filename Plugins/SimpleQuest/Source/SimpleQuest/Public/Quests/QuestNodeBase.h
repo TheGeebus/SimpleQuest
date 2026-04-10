@@ -25,13 +25,20 @@ class SIMPLEQUEST_API UQuestNodeBase : public UObject
     GENERATED_BODY()
 
     friend class FQuestlineGraphCompiler;
+    friend class UQuestManagerSubsystem;
 
 public:
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeActivated, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag);
+    DECLARE_DYNAMIC_DELEGATE_OneParam (FOnNodeForwardActivated, UQuestNodeBase*, Node);
 
     FOnNodeActivated OnNodeActivated;
     FOnNodeCompleted OnNodeCompleted;
+    /**
+     * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeActivated/OnNodeCompleted.
+     * Manager chains NextNodesOnForward without writing any lifecycle facts.
+     */
+    FOnNodeForwardActivated OnNodeForwardActivated;
 
     /**
      * Entry point for node activation. Evaluates PrerequisiteExpression against WorldState; activates immediately if satisfied,
@@ -46,9 +53,22 @@ public:
 protected:
     /**
      * Called when prerequisites are confirmed satisfied. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
-     * for additional activation behaviour; always call Super::ActivateInternal first.
+     * for additional activation behavior; always call Super::ActivateInternal first.
      */
     virtual void ActivateInternal(FGameplayTag InContextualTag);
+    
+    /**
+     * Called by the manager when this node is deactivated while Active. Override in subclasses to destroy live objectives
+     * and cancel any subscriptions specific to the active lifecycle. Default implementation cancels deferred prereq subscriptions.
+     * Always call Super::DeactivateInternal.
+     */
+    virtual void DeactivateInternal(FGameplayTag InContextualTag);
+    
+    /**
+     * Called by utility nodes instead of the normal activation/completion lifecycle. Default implementation fires OnNodeForwardActivated
+     * so the manager can chain NextNodesOnForward. Utility nodes call this after completing their utility action.
+     */
+    virtual void ForwardActivation();
     
     /**
      * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID
@@ -73,6 +93,10 @@ protected:
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly)
     FGameplayTag ContextualTag;
 
+    /**
+     * Map of tags representing each discrete outcome possible as set on either the UQuestObjective or by the exit nodes on the
+     * child graph contained by this node.
+     */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TMap<FGameplayTag, FQuestOutcomeNodeList> NextNodesByOutcome;
 
@@ -80,8 +104,20 @@ protected:
     TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnAbandon;      // activated only by AbandonQuest()
+    TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
+    
+    /** Nodes to activate normally when this node deactivates (Deactivated output → Activate input). */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesOnDeactivation;
 
+    /** Nodes to deactivate when this node deactivates (Deactivated output to any Deactivate inputs). */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesToDeactivateOnDeactivation;
+
+    /** Nodes to activate as a pass-through (utility node chaining; no lifecycle writes). */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesOnForward;
+    
     /**
      * A struct that holds the composable prerequisites for this quest graph node: the relevant tags representing events and their
      * required completion statuses along with the boolean-style logic by which they are combined.
@@ -122,7 +158,11 @@ public:
     FORCEINLINE const TArray<FName>* GetNextNodesForOutcome(FGameplayTag OutcomeTag) const;
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
+    FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
+    FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
+    FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
+
     
 };

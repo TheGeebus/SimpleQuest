@@ -3,9 +3,10 @@
 
 #include "Components/QuestWatcherComponent.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestStartedEvent.h"
@@ -52,6 +53,15 @@ void UQuestWatcherComponent::WatchedQuestCompletedEvent(FGameplayTag Channel, co
 	}
 }
 
+void UQuestWatcherComponent::WatchedQuestDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& QuestDeactivatedEvent)
+{
+	ActiveQuestTags.RemoveTag(QuestDeactivatedEvent.GetQuestTag());
+	if (OnQuestDeactivated.IsBound())
+	{
+		OnQuestDeactivated.Broadcast(QuestDeactivatedEvent.GetQuestTag());
+	}
+}
+
 void UQuestWatcherComponent::RegisterQuestWatcher()
 {
     if (!SignalSubsystem)
@@ -81,6 +91,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         if (QuestPair.Value.bWatchQuestEnabled) SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
         if (QuestPair.Value.bWatchQuestStart) SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
         if (QuestPair.Value.bWatchQuestEnd)	SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
+    	if (QuestPair.Value.bWatchDeactivated) SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestDeactivatedEvent);
 
         if (!WorldState) continue;
 
@@ -121,6 +132,18 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
                 if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(QuestTag, FGameplayTag::EmptyTag);
             }
         }
+    	
+    	// Quest has been deactivated
+    	if (QuestPair.Value.bWatchDeactivated)
+    	{
+    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated), false);
+    		if (WorldState->HasFact(DeactivatedFact))
+    		{
+    			ActiveQuestTags.RemoveTag(QuestTag);
+    			if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(QuestTag);
+    		}
+    	}
     }
 }
+
 

@@ -18,15 +18,16 @@ public:
 		if (OutputPin)
 		{
 			const FName Category = OutputPin->PinType.PinCategory;
-			if (Category == TEXT("QuestOutcome")) Params.WireColor = SQ_ED_OUTCOME;
-			else if (Category == TEXT("QuestAbandon")) Params.WireColor = SQ_ED_ABANDON;
-			else Params.WireColor = FLinearColor::White;
+			if (Category == TEXT("QuestOutcome")) Params.WireColor = SQ_ED_WIRE_OUTCOME;
+			else if (Category == TEXT("QuestDeactivated") || Category == TEXT("QuestDeactivate")) Params.WireColor = SQ_ED_WIRE_DEACTIVATION;
+			else Params.WireColor = SQ_ED_WIRE_ACTIVATION;
 		}
 		const bool bIsPrerequisiteWire =
 			(OutputPin && OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite")) ||
-			(InputPin  && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
+			(InputPin && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
 		if (bIsPrerequisiteWire) Params.bUserFlag1 = true;
 	}
+
 	
 	virtual void DetermineWiringStyle(UEdGraphPin* OutputPin, UEdGraphPin* InputPin, FConnectionParams& Params) override
 	{

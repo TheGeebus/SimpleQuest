@@ -32,6 +32,7 @@ public:
 
 protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
+	virtual void DeactivateInternal(FGameplayTag InContextualTag) override;
 
 	/** The objective that defines how this step is completed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)

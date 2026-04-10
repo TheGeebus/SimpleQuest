@@ -35,7 +35,7 @@ public:
 	FGuid QuestGuid;
 
 	UPROPERTY(EditAnywhere, Category = "Quest")
-	bool bHasAbandonPin = false;
+	bool bShowDeactivationPins = false;
 
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }

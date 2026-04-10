@@ -7,10 +7,14 @@ UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
 
 void UQuestlineNode_ContentBase::AllocateDefaultPins()
 {
-	CreatePin(EGPD_Input,TEXT("QuestActivation"),TEXT("Activate"));
-	CreatePin(EGPD_Input,TEXT("QuestPrerequisite"),TEXT("Prerequisites"));
-	CreatePin(EGPD_Output,TEXT("QuestActivation"),TEXT("Any Outcome"));
-	if (bHasAbandonPin) CreatePin(EGPD_Output, TEXT("QuestAbandon"), TEXT("Abandoned"));
+	CreatePin(EGPD_Input,  TEXT("QuestActivation"),  TEXT("Activate"));
+	CreatePin(EGPD_Input,  TEXT("QuestPrerequisite"), TEXT("Prerequisites"));
+	CreatePin(EGPD_Output, TEXT("QuestActivation"),   TEXT("Any Outcome"));
+	if (bShowDeactivationPins)
+	{
+		CreatePin(EGPD_Input,  TEXT("QuestDeactivate"),  TEXT("Deactivate"));
+		CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
+	}
 }
 
 void UQuestlineNode_ContentBase::AutowireNewNode(UEdGraphPin* FromPin)
@@ -73,21 +77,31 @@ void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
 void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bHasAbandonPin))
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bShowDeactivationPins))
 	{
-		if (bHasAbandonPin)
+		if (bShowDeactivationPins)
 		{
-			if (!FindPin(TEXT("Abandoned")))
+			if (!FindPin(TEXT("Deactivate")))
 			{
-				CreatePin(EGPD_Output, TEXT("QuestAbandon"), TEXT("Abandoned"));
+				CreatePin(EGPD_Input, TEXT("QuestDeactivate"), TEXT("Deactivate"));
+			}
+			if (!FindPin(TEXT("Deactivated")))
+			{
+				CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
 			}
 		}
-		else if (UEdGraphPin* AbandonPin = FindPin(TEXT("Abandoned")))
+		else
 		{
-			AbandonPin->BreakAllPinLinks();
-			RemovePin(FindPin(TEXT("Abandoned")));
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivate")))
+			{
+				Pin->BreakAllPinLinks(); RemovePin(Pin);
+			}
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
+			{
+				Pin->BreakAllPinLinks(); RemovePin(Pin);
+			}
 		}
-		
+
 		if (UEdGraph* Graph = GetGraph())
 		{
 			Graph->NotifyGraphChanged();

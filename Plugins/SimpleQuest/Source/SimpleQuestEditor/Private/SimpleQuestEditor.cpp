@@ -1,4 +1,4 @@
-﻿#pragma once
+﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "SimpleQuestEditor.h"
 #include "AssetTypes/QuestlineGraphAssetTypeActions.h"
@@ -13,11 +13,11 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
-#include "Utils/QuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "Engine/Blueprint.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "Utils/SimpleCoreDebug.h"
+#include "Utilities/SimpleCoreDebug.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -48,19 +48,13 @@ void FSimpleQuestEditor::StartupModule()
 
     FQuestlineGraphEditorCommands::Register();
 
-    // Register compiled quest tags immediately from the AR on-disk cache. Must happen here — not in a delegate — so tags
-    // are valid before the default map opens and validates tag properties on actor components.
-	// In StartupModule — replace the direct RegisterTagsFromAssetRegistry() call with:
+	FCoreDelegates::OnPostEngineInit.AddRaw(this, &FSimpleQuestEditor::OnPostEngineInit);
+
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARModule.Get();
-
 	if (AR.IsLoadingAssets())
 	{
 		AR.OnFilesLoaded().AddRaw(this, &FSimpleQuestEditor::RegisterTagsFromAssetRegistry);
-	}
-	else
-	{
-		RegisterTagsFromAssetRegistry();
 	}
 
     // Blueprint compile check requires a fully initialized editor — keep in delegate.
@@ -84,8 +78,19 @@ void FSimpleQuestEditor::StartupModule()
     });
 }
 
+void FSimpleQuestEditor::OnPostEngineInit()
+{
+	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+	IAssetRegistry& AR = ARModule.Get();
+	AR.WaitForCompletion();
+	RegisterTagsFromAssetRegistry();
+}
+
 void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 {
+	if (bIsRegisteringTags) return;
+	TGuardValue<bool> Guard(bIsRegisteringTags, true);
+	
 	FAssetRegistryModule* ARModule = FModuleManager::GetModulePtr<FAssetRegistryModule>("AssetRegistry");
 	if (!ARModule) return;
 
@@ -133,7 +138,13 @@ void FSimpleQuestEditor::ShutdownModule()
 {
 	FEditorDelegates::MapChange.RemoveAll(this);
 	FEditorDelegates::PreBeginPIE.RemoveAll(this);
+	FCoreDelegates::OnPostEngineInit.RemoveAll(this);
 	
+	if (FModuleManager::Get().IsModuleLoaded("AssetRegistry"))
+	{
+		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnFilesLoaded().RemoveAll(this);
+	}
+
 	FQuestlineGraphEditorCommands::Unregister();
 	
 	if (FModuleManager::Get().IsModuleLoaded("AssetTools"))
@@ -179,27 +190,25 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 	CompiledTagRegistry.Remove(GraphPath);
 	TArray<TUniquePtr<FNativeGameplayTag>>& Entries = CompiledTagRegistry.Add(GraphPath);
 
-	// Register quest tags and their derived state facts
 	TArray<FName> AllTags = TagNames;
 	for (const FName& QuestTag : TagNames)
 	{
 		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
 		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
 		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
+		AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
 	}
 
 	for (const FName& TagName : AllTags)
 	{
-		Entries.Add(MakeUnique<FNativeGameplayTag>(
-			FName("SimpleQuest"),
-			FName("SimpleQuest"),
-			TagName,
-			TEXT(""),
+		Entries.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"), TagName, TEXT(""),
 			ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 	}
 
 	UGameplayTagsManager::Get().ConstructGameplayTagTree();
 }
+
 
 /*
 class FQuestlineConnectionFactory : public FGraphPanelPinConnectionFactory

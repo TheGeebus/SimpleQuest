@@ -108,7 +108,10 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
     {
         if (UQuestNodeBase* Instance = Pair.Value)
         {
-            Instance->ResolveQuestTag(Pair.Key);
+            if (!Pair.Key.ToString().StartsWith(TEXT("Util_")))
+            {
+                Instance->ResolveQuestTag(Pair.Key);
+            }
             LoadedNodeInstances.Add(Pair.Key, Instance);
             Instance->RegisterWithGameInstance(GetGameInstance());
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
@@ -128,6 +131,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
         ActivateNodeByTag(EntryTagName);
     }
 }
+
 
 void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
 {

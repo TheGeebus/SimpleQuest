@@ -4,8 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "ISimpleQuestEditorModule.h"
-#include "NativeGameplayTags.h"
 #include "Modules/ModuleInterface.h"
+#include "NativeGameplayTags.h"
 
 struct FGraphPanelPinConnectionFactory;
 class FQuestlineGraphAssetTypeActions;
@@ -15,7 +15,6 @@ class FSimpleQuestEditor : public ISimpleQuestEditorModule
 {
 public:
 	virtual void StartupModule() override;
-	void OnPostEngineInit();
 	virtual void ShutdownModule() override;
 
 	virtual void RegisterCompilerFactory(FQuestlineCompilerFactoryDelegate InFactory) override;
@@ -23,7 +22,7 @@ public:
 	virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const override;
 	virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) override;
 
-	TMap<FString, TArray<TUniquePtr<FNativeGameplayTag>>> CompiledTagRegistry; // keyed by graph package path
+	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
@@ -32,7 +31,12 @@ private:
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
 	
+	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
+
 	void RegisterTagsFromAssetRegistry();
+	void OnAssetRemoved(const FAssetData& AssetData);
+	void WriteCompiledTagsIni() const;
+	void RebuildNativeTags();
 
 	bool bIsRegisteringTags = false;
 };

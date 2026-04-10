@@ -515,11 +515,24 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	        return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "DeactivatedNotToEntryExit",
 	               "Deactivated may not connect to Entry or Exit nodes"));
 	    }
-	    const FName InputCat = InputPin->PinType.PinCategory;
-	    if (InputCat == TEXT("QuestActivation") || InputCat == TEXT("QuestDeactivate"))
-	    {
-	        return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-	    }		
+		const FName InputCat = InputPin->PinType.PinCategory;
+		if (InputCat == TEXT("QuestActivation"))
+		{
+			// Mirror of the bInputIsDeactivate check above: a QuestDeactivated signal that already reaches this node's Deactivate
+			// pin may not also connect to its Activate pin.
+			if (AnySourceReachesCategory(OutputPin, InputNode, TEXT("QuestDeactivate")))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "ActivateDeactivateConflict",
+					   "This signal already deactivates this node — the same signal cannot both activate and deactivate it"));
+			}
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+		}
+		if (InputCat == TEXT("QuestDeactivate"))
+		{
+			// Reached only if bInputIsDeactivate is somehow false despite the category matching; kept for safety but unreachable
+			// under normal schema evaluation.
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+		}
 	    return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "DeactivatedInvalidTarget",
 	           "Deactivated may only connect to an Activate or Deactivate pin"));
 	}

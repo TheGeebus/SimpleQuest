@@ -13,4 +13,8 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteNot : public UQuestlineNo
 public:
 	virtual void AllocateDefaultPins() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+
+protected:
+	virtual FText GetConditionPinLabel(int32 Index) const override;
+
 };

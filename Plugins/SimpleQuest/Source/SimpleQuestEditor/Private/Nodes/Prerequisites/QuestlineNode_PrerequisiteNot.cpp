@@ -11,3 +11,8 @@ FText UQuestlineNode_PrerequisiteNot::GetNodeTitle(ENodeTitleType::Type TitleTyp
 {
 	return FText::FromString(TEXT("NOT"));
 }
+
+FText UQuestlineNode_PrerequisiteNot::GetConditionPinLabel(int32 Index) const
+{
+	return FText::FromString(TEXT("In"));
+}

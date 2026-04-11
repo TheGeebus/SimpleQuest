@@ -9,7 +9,7 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/UQuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestStartedEvent.h"
@@ -54,7 +54,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		// Catch-up: quest may have become giver-gated before this component came online
 		if (WorldState)
 		{
-			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver), false);
+			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver), false);
 			if (WorldState->HasFact(PendingFact))
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());

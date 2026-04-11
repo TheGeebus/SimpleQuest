@@ -2,6 +2,10 @@
 
 #include "Nodes/QuestlineNode_Exit.h"
 
+#include "Utilities/SimpleQuestEditorUtils.h"
+
+#define LOCTEXT_NAMESPACE "SimpleQuestEditor"
+
 void UQuestlineNode_Exit::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input, TEXT("QuestActivation"), TEXT("Outcome"));
@@ -23,7 +27,11 @@ FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	if (OutcomeTag.IsValid())
 	{
-		return FText::FromName(OutcomeTag.GetTagName());
+		FFormatNamedArguments Args;
+		Args.Add("OutcomePrefix", FText::FromName(FName("Outcome")));
+		Args.Add("LeafTag", GetTagLeafLabel(OutcomeTag.GetTagName()));
+		FText OutText = FText::Format(LOCTEXT("ExitTitleFormat", "{OutcomePrefix}: {LeafTag}"), Args);
+		return OutText;
 	}
 	return NSLOCTEXT("SimpleQuestEditor", "ExitNodeUnset", "Exit (no outcome set)");
 }
@@ -46,3 +54,5 @@ void UQuestlineNode_Exit::PostEditChangeProperty(FPropertyChangedEvent& Property
 		}
 	}
 }
+
+#undef LOCTEXT_NAMESPACE

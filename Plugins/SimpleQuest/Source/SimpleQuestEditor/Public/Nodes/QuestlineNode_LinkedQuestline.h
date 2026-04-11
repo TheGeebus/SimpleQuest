@@ -20,8 +20,13 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_LinkedQuestline : public UQuestlineNo
 public:
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostLoad() override;
 
 	/** The external questline graph asset this node references. */
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	TSoftObjectPtr<UQuestlineGraph> LinkedGraph;
+
+	/** Scans the linked graph's Exit nodes and syncs QuestOutcome output pins to match. */
+	void RebuildOutcomePinsFromLinkedGraph();
 };

@@ -33,7 +33,7 @@
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Groups/QuestlineNode_GroupSignalSetter.h"
 #include "Nodes/Groups/QuestlineNode_GroupSignalGetter.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/UQuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
@@ -41,7 +41,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/UQuestStateTagUtils.h"
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -217,7 +217,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
                 const UQuestObjective* ObjCDO = QuestStepNode->ObjectiveClass->GetDefaultObject<UQuestObjective>();
                 for (const FGameplayTag& OutcomeTag : ObjCDO->GetPossibleOutcomes())
                 {
-                    AllCompiledQuestTags.AddUnique(QuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
+                    AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
                 }
             }
         }
@@ -553,6 +553,11 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         // Quest or Step: return the tag assigned during Pass 1
         else if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node))
         {
+            // Only resolve forward chain when wired to an Activate input. Prerequisite and Deactivate inputs are compiled
+            // by their own dedicated passes.
+            if (LinkedPin->PinType.PinCategory != TEXT("QuestActivation"))
+                continue;
+
             const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
             if (!Label.IsEmpty())
             {
@@ -579,7 +584,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
 
 FString FQuestlineGraphCompiler::SanitizeTagSegment(const FString& InLabel) const
 {
-    return SimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(InLabel);
+    return USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(InLabel);
 }
 
 FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const
@@ -722,7 +727,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 FPrerequisiteExpressionNode LeafNode;
                 LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
                 LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-                    QuestStateTagUtils::MakeStateFact(NodeTagName, QuestStateTagUtils::Leaf_Completed), false);
+                    UQuestStateTagUtils::MakeStateFact(NodeTagName, UQuestStateTagUtils::Leaf_Completed), false);
                 return OutExpression.Nodes.Add(LeafNode);
             }
 
@@ -738,7 +743,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 
                 FPrerequisiteExpressionNode LeafNode;
                 LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
                 OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
             }
 
@@ -794,7 +799,7 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
         const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(PinName, false);
         if (OutcomeTag.IsValid())
         {
-            return QuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag);
+            return UQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag);
         }
     }
     return NAME_None; // Any Outcome or Abandon — caller handles these

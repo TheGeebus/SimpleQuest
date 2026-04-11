@@ -27,7 +27,7 @@
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
 
-namespace SimpleQuestEditorUtilities
+namespace USimpleQuestEditorUtilities
 {
 	/**
 	 * Sanitizes a designer-entered label into a valid Gameplay Tag segment. Trims whitespace, replaces any character that is not

@@ -44,6 +44,11 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
+	if (ActiveObjective)
+	{
+		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		ActiveObjective = nullptr;
+	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
 }
 

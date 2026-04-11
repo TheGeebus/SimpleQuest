@@ -64,6 +64,8 @@ void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQue
         }
         ActiveStepEndHandles.Remove(Channel);
     }
+    
+    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetDeactivated : Channel: %s : Owner: %s"), *Channel.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
     // Only visually deactivate when no steps remain active
     if (ActiveStepEndHandles.IsEmpty())

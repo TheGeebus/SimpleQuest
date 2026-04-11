@@ -14,7 +14,7 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/UQuestStateTagUtils.h"
 #include "Engine/Blueprint.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -219,13 +219,13 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 		for (const FName& QuestTag : Pair.Value)
 		{
 			AllTags.Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(QuestStateTagUtils::Namespace))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace))
 			{
-				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
-				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
-				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
-				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
-				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
+				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
+				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
+				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
+				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
 			}
 		}
 	}
@@ -288,13 +288,13 @@ void FSimpleQuestEditor::RebuildNativeTags()
 					ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(QuestStateTagUtils::Namespace))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace))
 			{
-				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
-				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
-				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
-				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
-				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
+				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
+				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
+				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
+				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
 			}
 		}
 	}

@@ -6,7 +6,7 @@
 
 class UQuestlineNode_Exit;
 
-namespace SimpleQuestEditorUtilities
+namespace USimpleQuestEditorUtilities
 {
 	FString SanitizeQuestlineTagSegment(const FString& InLabel)
 	{

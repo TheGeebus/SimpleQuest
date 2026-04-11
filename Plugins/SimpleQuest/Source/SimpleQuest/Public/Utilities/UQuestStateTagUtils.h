@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-namespace QuestStateTagUtils
+namespace UQuestStateTagUtils
 {
 	static const FString Namespace			 = TEXT("Quest.State.");
 	static const FString Leaf_Active		 = TEXT("Active");

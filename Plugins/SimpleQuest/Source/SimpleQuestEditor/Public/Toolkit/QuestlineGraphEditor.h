@@ -54,6 +54,11 @@ private:
 
 	void OnGraphChanged(const FEdGraphEditAction& Action);
 	FSlateIcon GetCompileStatusIcon() const;
+	
+	TSharedRef<SWidget> GenerateCompileOptionsMenu();
+
+	void OnExternalCompile(const FString& PackagePath, bool bSuccess);
+	FDelegateHandle ExternalCompileHandle;
 
 	EQuestlineCompileStatus CompileStatus = EQuestlineCompileStatus::Unknown;
 

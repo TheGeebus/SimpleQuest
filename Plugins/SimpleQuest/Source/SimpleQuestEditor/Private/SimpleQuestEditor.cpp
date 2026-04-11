@@ -18,9 +18,12 @@
 #include "Engine/Blueprint.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Framework/Notifications/NotificationManager.h"
 #include "Utilities/SimpleCoreDebug.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
+#include "UObject/SavePackage.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -208,6 +211,74 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 	CompiledTagRegistry.Add(GraphPath, TagNames);
 	WriteCompiledTagsIni();
 	RebuildNativeTags();
+}
+
+void FSimpleQuestEditor::CompileAllQuestlineGraphs()
+{
+    IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+    FARFilter Filter;
+    Filter.ClassPaths.Add(UQuestlineGraph::StaticClass()->GetClassPathName());
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> QuestlineAssets;
+    AR.GetAssets(Filter, QuestlineAssets);
+
+    if (QuestlineAssets.IsEmpty())
+    {
+        // Notification: "No questline graphs found."
+        return;
+    }
+
+    FScopedSlowTask SlowTask(QuestlineAssets.Num(),
+        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Progress", "Compiling questline graphs..."));
+    SlowTask.MakeDialog(/*bShowCancelButton=*/ true);
+
+    int32 SuccessCount = 0;
+    int32 FailCount = 0;
+
+    for (const FAssetData& AssetData : QuestlineAssets)
+    {
+        if (SlowTask.ShouldCancel()) break;
+
+        SlowTask.EnterProgressFrame(1.f,
+            FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Item", "Compiling {0}..."),
+                FText::FromName(AssetData.AssetName)));
+
+        UQuestlineGraph* Graph = Cast<UQuestlineGraph>(AssetData.GetAsset());
+        if (!Graph) { ++FailCount; continue; }
+
+        TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
+        if (Compiler->Compile(Graph))
+        {
+            ++SuccessCount;
+            UPackage* Package = Graph->GetOutermost();
+            Package->MarkPackageDirty();
+            // Save so AR metadata is updated and INI stays authoritative
+        	FSavePackageArgs Args;
+            UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
+        	QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
+        }
+        else
+        {
+            ++FailCount;
+        	QuestlineCompiledDelegate.Broadcast(Graph->GetOutermost()->GetName(), false);
+        }
+    }
+
+    // Summary notification
+    const FText Summary = FText::Format(
+        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary",
+            "Compiled {0} questline(s): {1} succeeded, {2} failed"),
+        FText::AsNumber(SuccessCount + FailCount),
+        FText::AsNumber(SuccessCount),
+        FText::AsNumber(FailCount));
+
+    FNotificationInfo Info(Summary);
+    Info.ExpireDuration = 5.f;
+    Info.bUseSuccessFailIcons = true;
+    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(
+        FailCount == 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
 }
 
 void FSimpleQuestEditor::WriteCompiledTagsIni() const

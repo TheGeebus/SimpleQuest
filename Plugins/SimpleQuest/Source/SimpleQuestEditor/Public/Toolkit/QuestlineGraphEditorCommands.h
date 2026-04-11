@@ -20,6 +20,7 @@ public:
 	virtual void RegisterCommands() override;
 
 	TSharedPtr<FUICommandInfo> CompileQuestlineGraph;
+	TSharedPtr<FUICommandInfo> CompileAllQuestlineGraphs;
 	TSharedPtr<FUICommandInfo> NavigateBack;
 	TSharedPtr<FUICommandInfo> NavigateForward;
 };

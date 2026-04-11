@@ -23,6 +23,11 @@ public:
 	virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) override;
 
 	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
+	
+	virtual void CompileAllQuestlineGraphs() override;
+	
+	FOnQuestlineCompiled QuestlineCompiledDelegate;
+	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
@@ -37,6 +42,6 @@ private:
 	void OnAssetRemoved(const FAssetData& AssetData);
 	void WriteCompiledTagsIni() const;
 	void RebuildNativeTags();
-
+	
 	bool bIsRegisteringTags = false;
 };

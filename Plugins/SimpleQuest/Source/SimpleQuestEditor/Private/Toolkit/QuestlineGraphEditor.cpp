@@ -30,6 +30,8 @@ const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outl
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
 {
+    ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Remove(ExternalCompileHandle);
+
     for (int32 i = 0; i < GraphBackwardStack.Num(); ++i)
     {
         if (GraphBackwardStack[i])
@@ -42,8 +44,9 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
 void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph)
 {
     CrossAssetBackEditor.Reset();
-    QuestlineGraph = InQuestlineGraph;
-
+    QuestlineGraph = InQuestlineGraph;    
+    ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
+    
     const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v4")
         ->AddArea
         (
@@ -263,6 +266,13 @@ void FQuestlineGraphEditor::BindGraphCommands()
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
 
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().CompileAllQuestlineGraphs,
+        FExecuteAction::CreateLambda([]()
+        {
+            ISimpleQuestEditorModule::Get().CompileAllQuestlineGraphs();
+        }));
+    
     GetToolkitCommands()->MapAction(
         FQuestlineGraphEditorCommands::Get().NavigateBack,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::NavigateBack),
@@ -272,8 +282,6 @@ void FQuestlineGraphEditor::BindGraphCommands()
         FQuestlineGraphEditorCommands::Get().NavigateForward,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::NavigateForward),
         FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanNavigateForward));
-
-
 }
 
 void FQuestlineGraphEditor::DeleteSelectedNodes()
@@ -338,14 +346,64 @@ void FQuestlineGraphEditor::ExtendToolbar()
 void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
 {
     ToolbarBuilder.BeginSection("Compile");
-    ToolbarBuilder.AddToolBarButton(FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph, NAME_None, TAttribute<FText>(), TAttribute<FText>(),
-        TAttribute<FSlateIcon>::CreateLambda(
-            [this]() -> FSlateIcon
-            {
-                return GetCompileStatusIcon();
-            })
-        );
+
+    // Main compile button — compiles current graph, with status icon
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
+        NAME_None,
+        TAttribute<FText>(),
+        TAttribute<FText>(),
+        TAttribute<FSlateIcon>::CreateLambda([this]() -> FSlateIcon
+        {
+            return GetCompileStatusIcon();
+        }));
+
+    // Compile options dropdown (Save on Compile, Jump to Error — future)
+    ToolbarBuilder.AddComboButton(
+        FUIAction(),
+        FOnGetContent::CreateSP(this, &FQuestlineGraphEditor::GenerateCompileOptionsMenu),
+        TAttribute<FText>(),
+        NSLOCTEXT("SimpleQuestEditor", "CompileOptions_Tooltip", "Compile options"),
+        TAttribute<FSlateIcon>(),
+        /*bInSimpleComboBox=*/ true);
+
+    // Compile All — dedicated button
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().CompileAllQuestlineGraphs,
+        NAME_None,
+        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Label", "All"),
+        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Tooltip", "Compile and save every questline graph in the project"),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), "Blueprint.CompileStatus.Background"));
+
+
     ToolbarBuilder.EndSection();
+}
+
+TSharedRef<SWidget> FQuestlineGraphEditor::GenerateCompileOptionsMenu()
+{
+    FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/ true, GraphEditorCommands);
+
+    // Placeholder for future options:
+    // MenuBuilder.BeginSection("CompileSettings", LOCTEXT("CompileSettings", "Settings"));
+    // MenuBuilder.AddSubMenu(..., "Save on Compile", ...);
+    // MenuBuilder.AddMenuEntry(JumpToErrorNode);
+    // MenuBuilder.EndSection();
+
+    MenuBuilder.BeginSection("CompileInfo");
+    MenuBuilder.AddMenuEntry(NSLOCTEXT("SimpleQuestEditor", "CompileOptions_Placeholder", "No options yet"),
+        FText(), FSlateIcon(), FUIAction(), NAME_None, EUserInterfaceActionType::None);
+    MenuBuilder.EndSection();
+
+    return MenuBuilder.MakeWidget();
+}
+
+void FQuestlineGraphEditor::OnExternalCompile(const FString& PackagePath, bool bSuccess)
+{
+    if (!QuestlineGraph) return;
+    if (QuestlineGraph->GetOutermost()->GetName() != PackagePath) return;
+
+    CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
+    if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
 }
 
 FText FQuestlineGraphEditor::GetGraphDisplayName(UEdGraph* Graph) const

@@ -11,6 +11,8 @@ class FQuestlineGraphCompiler;
 // Factory delegate type. Must return a valid non-null compiler instance.
 DECLARE_DELEGATE_RetVal(TUniquePtr<FQuestlineGraphCompiler>, FQuestlineCompilerFactoryDelegate);
 
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnQuestlineCompiled, const FString& /*PackagePath*/, bool /*bSuccess*/);
+
 /**
  * Public interface for the SimpleQuestEditor module.
  *
@@ -62,4 +64,7 @@ public:
      */
     virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) = 0;
 
+    virtual void CompileAllQuestlineGraphs() = 0;
+
+    virtual FOnQuestlineCompiled& OnQuestlineCompiled() = 0;
 };

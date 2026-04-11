@@ -45,10 +45,35 @@ public:
 	{
 		TBase::DetermineWiringStyle(OutputPin, InputPin, Params);
 
+		// Default directions — may be overridden below for reversed knots
 		Params.StartDirection = EGPD_Output;
 		Params.EndDirection = EGPD_Input;
 		Params.WireThickness = this->Settings->DefaultDataWireThickness;
 		this->ApplyQuestlineWireParams(OutputPin, InputPin, Params);
+
+		// ── Reversed knot tangent detection ──
+		// Mirror FKismetConnectionDrawingPolicy::ShouldChangeTangentForKnot
+		// for our custom UQuestlineNode_Knot (which doesn't inherit UK2Node_Knot).
+		if (OutputPin)
+		{
+			if (UQuestlineNode_Knot* OutputKnot = Cast<UQuestlineNode_Knot>(OutputPin->GetOwningNode()))
+			{
+				if (ShouldReverseKnotTangent(OutputKnot))
+				{
+					Params.StartDirection = EGPD_Input;
+				}
+			}
+		}
+		if (InputPin)
+		{
+			if (UQuestlineNode_Knot* InputKnot = Cast<UQuestlineNode_Knot>(InputPin->GetOwningNode()))
+			{
+				if (ShouldReverseKnotTangent(InputKnot))
+				{
+					Params.EndDirection = EGPD_Output;
+				}
+			}
+		}
 
 		if (this->HoveredPins.Num() > 0)
 		{
@@ -89,4 +114,72 @@ public:
 		}
 		return false; // any other non-prereq input terminal
 	}
+	
+	bool ShouldReverseKnotTangent(const UQuestlineNode_Knot* Knot) const
+	{
+		// Cache lookup
+		if (const bool* pCached = KnotReversalCache.Find(Knot))
+			return *pCached;
+
+		bool bReversed = false;
+
+		FVector2f CenterPos, AvgInputPos, AvgOutputPos;
+		bool bCenterValid = false, bInputValid = false, bOutputValid = false;
+
+		// Get knot center from its output pin widget position
+		if (const UEdGraphPin* OutPin = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
+		{
+			bCenterValid = this->FindPinCenter(const_cast<UEdGraphPin*>(OutPin), CenterPos);
+		}
+
+		// Average position of everything connected to input side
+		if (const UEdGraphPin* InPin = Knot->FindPin(TEXT("KnotIn"), EGPD_Input))
+		{
+			bInputValid = GetAverageLinkedPosition(InPin, AvgInputPos);
+		}
+
+		// Average position of everything connected to output side
+		if (const UEdGraphPin* OutPin = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
+		{
+			bOutputValid = GetAverageLinkedPosition(OutPin, AvgOutputPos);
+		}
+
+		if (bInputValid && bOutputValid)
+		{
+			bReversed = AvgOutputPos.X < AvgInputPos.X;
+		}
+		else if (bCenterValid)
+		{
+			if (bInputValid)  bReversed = CenterPos.X < AvgInputPos.X;
+			if (bOutputValid) bReversed = AvgOutputPos.X < CenterPos.X;
+		}
+
+		KnotReversalCache.Add(Knot, bReversed);
+		return bReversed;
+	}
+
+	bool GetAverageLinkedPosition(const UEdGraphPin* Pin, FVector2f& OutAvg) const
+	{
+		FVector2f Sum = FVector2f::ZeroVector;
+		int32 Count = 0;
+		for (const UEdGraphPin* Linked : Pin->LinkedTo)
+		{
+			FVector2f Pos;
+			if (this->FindPinCenter(const_cast<UEdGraphPin*>(Linked), Pos))
+			{
+				Sum += Pos;
+				Count++;
+			}
+		}
+		if (Count > 0)
+		{
+			OutAvg = Sum / static_cast<float>(Count);
+			return true;
+		}
+		return false;
+	}
+
+private:
+	
+	mutable TMap<const UQuestlineNode_Knot*, bool> KnotReversalCache;
 };

@@ -29,4 +29,8 @@ public:
 	void RefreshOutcomePins();
 
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
+	
+private:
+	void ImportOutcomePinsFromParent();
 };

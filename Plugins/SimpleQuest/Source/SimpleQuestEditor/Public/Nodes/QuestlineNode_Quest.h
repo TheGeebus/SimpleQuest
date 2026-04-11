@@ -21,12 +21,18 @@ public:
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }
+	
+	void RebuildOutcomePinsFromInnerGraph();
 
 private:
 	void CreateInnerGraph();
-	void RebuildOutcomePinsFromInnerGraph();
+	void SubscribeToInnerGraphChanges();
+	void OnInnerGraphChanged(const FEdGraphEditAction& Action);
+
 	UPROPERTY()
 	TObjectPtr<UEdGraph> InnerGraph;
+
+	FDelegateHandle InnerGraphChangedHandle;
 
 public:
 	FORCEINLINE UEdGraph* GetInnerGraph() const { return InnerGraph; }

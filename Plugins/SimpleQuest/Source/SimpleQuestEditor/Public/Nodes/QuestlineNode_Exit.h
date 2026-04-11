@@ -20,6 +20,7 @@ public
 	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 
 	/** The outcome this exit represents. Left unset while the graph is being sketched — compiler warns, not errors. */
 	UPROPERTY(EditAnywhere, Category = "Exit", meta = (Categories = "Quest"))

@@ -62,8 +62,8 @@ protected:
 	/** Registers all compiled node instances from the graph into LoadedNodeInstances and activates its entry nodes. */
 	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph);
 
-	/** Looks up the instance for NodeTag in LoadedNodeInstances and activates it. */
-	virtual void ActivateNodeByTag(FName NodeTag);
+	/** Looks up the instance for NodeTag in LoadedNodeInstances and activates it. IncomingOutcomeTag carries the outcome from the parent node for per-outcome entry routing in Quest nodes. */
+	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag());
 
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag);

@@ -25,5 +25,8 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Quest", meta = (Categories = "Quest"))
 	TArray<FGameplayTag> IncomingOutcomeTags;
 
+	/** Surgically adds/removes outcome output pins to match IncomingOutcomeTags without disturbing existing wiring. */
+	void RefreshOutcomePins();
+
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 };

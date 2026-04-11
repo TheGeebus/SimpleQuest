@@ -44,19 +44,22 @@ void UQuestlineNode_Quest::CreateInnerGraph()
 	Schema->CreateDefaultNodesForGraph(*InnerGraph);
 }
 
+void UQuestlineNode_Quest::SubscribeToInnerGraphChanges()
+{
+	if (InnerGraph && !InnerGraphChangedHandle.IsValid())
+	{
+		InnerGraphChangedHandle = InnerGraph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateUObject(this, &UQuestlineNode_Quest::OnInnerGraphChanged));
+	}
+}
+
+void UQuestlineNode_Quest::OnInnerGraphChanged(const FEdGraphEditAction& Action)
+{
+	RebuildOutcomePinsFromInnerGraph();
+}
+
 void UQuestlineNode_Quest::RebuildOutcomePinsFromInnerGraph()
 {
-	if (!InnerGraph) return;
-	for (UEdGraphNode* Node : InnerGraph->Nodes)
-	{
-		if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
-		{
-			if (ExitNode->OutcomeTag.IsValid())
-			{
-				const FName PinName = ExitNode->OutcomeTag.GetTagName();
-				if (!FindPin(PinName)) CreatePin(EGPD_Output, TEXT("QuestOutcome"), PinName);
-			}
-		}
-	}
+	const TArray<FName> DesiredOutcomes = SimpleQuestEditorUtilities::CollectExitOutcomeTagNames(InnerGraph);
+	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

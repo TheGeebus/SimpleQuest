@@ -14,12 +14,22 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
 }
 
+void UQuestlineNode_Entry::RefreshOutcomePins()
+{
+	TArray<FName> DesiredNames;
+	for (const FGameplayTag& Tag : IncomingOutcomeTags)
+	{
+		if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
+	}
+	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
+}
+
 void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, IncomingOutcomeTags))
 	{
-		ReconstructNode();
+		RefreshOutcomePins();
 	}
 }
 

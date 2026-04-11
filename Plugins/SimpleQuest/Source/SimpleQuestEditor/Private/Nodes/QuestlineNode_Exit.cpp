@@ -34,3 +34,15 @@ FLinearColor UQuestlineNode_Exit::GetNodeTitleColor() const
 		? FLinearColor(0.9f, 0.7f, 0.1f)   // gold — outcome assigned
 		: FLinearColor(0.6f, 0.6f, 0.6f);  // grey — unassigned
 }
+
+void UQuestlineNode_Exit::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Exit, OutcomeTag))
+	{
+		if (UEdGraph* Graph = GetGraph())
+		{
+			Graph->NotifyGraphChanged();
+		}
+	}
+}

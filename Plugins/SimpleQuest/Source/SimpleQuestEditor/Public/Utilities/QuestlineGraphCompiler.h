@@ -45,11 +45,12 @@ protected:
 	 * @param TagPrefix				Sanitized questline ID used as the tag namespace for this graph's nodes.
 	 * @param BoundaryTagsByOutcome	Tags injected when an Exit_Success node is reached (empty at top level).
 	 * @param VisitedAssetPaths		Stack of asset paths currently open in the recursion, used for cycle detection.
-	 * @return						Tags of the content nodes directly reachable from this graph's Entry node.
+	 * @param OutEntryTagsByOutcome Tags from input pins connected to optional Outcome graph entry pins on Quest or Linked
+	 *								Questline child graphs 
+	 * @return						Returns the tags connected to an Any Outcome graph entry pin
 	 */
-	// 
-	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
-	
+	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome = nullptr);	
+
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
 	 * content nodes. Exit nodes return the appropriate boundary tag set. LinkedQuestline nodes are compiled recursively and
@@ -62,8 +63,7 @@ protected:
 	 * @param VisitedAssetPaths		Cycle detection stack, shared with CompileGraph.
 	 * @param OutTags				Accumulates the resolved tags.
 	 */
-	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
-	                              TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags);
+	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with

@@ -206,7 +206,7 @@ void UQuestManagerSubsystem::HandleAbandonQuestEvent(FGameplayTag Channel, const
     SetQuestDeactivated(QuestTag, EDeactivationSource::External, false);
 }
 
-void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag)
 {
     TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
     if (!InstancePtr || !*InstancePtr)
@@ -248,9 +248,22 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
 
     if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
     {
+        // Always activate the "Any Outcome" entry paths
         for (const FName& StepTag : QuestNode->GetEntryStepTags())
         {
             ActivateNodeByTag(StepTag);
+        }
+
+        // If entered via a specific outcome, also activate that outcome's entry paths
+        if (IncomingOutcomeTag.IsValid())
+        {
+            if (const FQuestOutcomeNodeList* OutcomeEntries = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+            {
+                for (const FName& StepTag : OutcomeEntries->NodeTags)
+                {
+                    ActivateNodeByTag(StepTag);
+                }
+            }
         }
     }
 }
@@ -275,11 +288,11 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     if (const TArray<FName>* OutcomeNodes = Node->GetNextNodesForOutcome(OutcomeTag))
     {
-        for (const FName& Tag : *OutcomeNodes) ActivateNodeByTag(Tag);
+        for (const FName& Tag : *OutcomeNodes) ActivateNodeByTag(Tag, OutcomeTag);
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
-        ActivateNodeByTag(Tag);
+        ActivateNodeByTag(Tag, OutcomeTag);
     }
 }
 

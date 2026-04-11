@@ -129,8 +129,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 // CompileGraph — recursive
 // -------------------------------------------------------------------------------------------------
 
-TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
-                                                    TArray<FString>& VisitedAssetPaths)
+TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome)	
 {
     if (!Graph) return {};
 
@@ -175,7 +174,14 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             if (QuestEdNode->GetInnerGraph())
             {
                 const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-                QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, VisitedAssetPaths);
+                TMap<FGameplayTag, TArray<FName>> InnerEntryByOutcome;
+                QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, VisitedAssetPaths, &InnerEntryByOutcome);
+
+                for (auto& Pair : InnerEntryByOutcome)
+                {
+                    FQuestOutcomeNodeList& List = QuestInstance->EntryStepTagsByOutcome.FindOrAdd(Pair.Key);
+                    List.NodeTags = MoveTemp(Pair.Value);
+                }
             }            
             Instance = QuestInstance;
         }
@@ -411,8 +417,25 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         for (UEdGraphPin* Pin : Node->Pins)
         {
-            if (Pin->Direction == EGPD_Output)
+            if (Pin->Direction != EGPD_Output) continue;
+
+            // Named outcome pins: route into the per-outcome map when the caller provides one
+            if (Pin->PinType.PinCategory == TEXT("QuestOutcome") && OutEntryTagsByOutcome)
             {
+                const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Pin->PinName, false);
+                if (OutcomeTag.IsValid())
+                {
+                    TArray<FName> OutcomeTags;
+                    ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutcomeTags);
+                    for (const FName& Tag : OutcomeTags)
+                    {
+                        OutEntryTagsByOutcome->FindOrAdd(OutcomeTag).AddUnique(Tag);
+                    }
+                }
+            }
+            else
+            {
+                // "Any Outcome" pin (or all pins when no per-outcome map is requested)
                 ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, EntryTags);
             }
         }

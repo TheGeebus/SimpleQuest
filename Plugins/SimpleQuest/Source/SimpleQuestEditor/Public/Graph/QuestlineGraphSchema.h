@@ -38,7 +38,7 @@ public:
 	/** Returns the color to show on this pin type */
 	virtual FLinearColor GetPinTypeColor(const FEdGraphPinType& PinType) const override;
 
-	//virtual bool TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const override;
+	virtual bool TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const override;
 	
 	virtual FConnectionDrawingPolicy* CreateConnectionDrawingPolicy(
 	int32 InBackLayerID, int32 InFrontLayerID, float InZoomFactor,

@@ -35,13 +35,6 @@ public:
 		GraphObj = InGraph;
 	}
 
-	/*
-	virtual void Draw(TMap<TSharedRef<SWidget>, FArrangedWidget>& InPinGeometries, FArrangedChildren& ArrangedNodes) override
-	{
-		FConnectionDrawingPolicy::Draw(InPinGeometries, ArrangedNodes);
-	}
-	*/
-	
 	virtual void DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End, const FConnectionParams& Params) override
 	{		
 		const FVector2f SplineTangent = ComputeSplineTangent(Start, End);
@@ -947,52 +940,56 @@ FLinearColor UQuestlineGraphSchema::GetPinTypeColor(const FEdGraphPinType& PinTy
 	return SQ_ED_WIRE_ACTIVATION;
 }
 
-
-/* Automatic reroute node placement when looping back to the same node -- currently always feeds wire into left side of node, needs a fix to create a clean loop */
-
-/*
 bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const
 {
-	UEdGraphPin* OutputPin = A->Direction == EGPD_Output ? A : B;
-	UEdGraphPin* InputPin = A->Direction == EGPD_Input ? A : B;
+    UEdGraphPin* OutputPin = (A->Direction == EGPD_Output) ? A : B;
+    UEdGraphPin* InputPin  = (A->Direction == EGPD_Input)  ? A : B;
 
-	// Intercept self-loop: insert two knots to route the wire around the node
-	if (OutputPin->GetOwningNode() == InputPin->GetOwningNode() &&
-		Cast<UQuestlineNode_Quest>(OutputPin->GetOwningNode()) &&
-		InputPin->PinName == TEXT("Activate"))
-	{
-		UEdGraphNode* QuestNode = OutputPin->GetOwningNode();
-		UEdGraph* Graph = QuestNode->GetGraph();
-		Graph->Modify();
+    // ── Self-loop: insert two-knot arch above the node ──
+    UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
+    if (OwningNode == InputPin->GetOwningNode())
+    {
+        if (UQuestlineNodeBase* ContentNode = Cast<UQuestlineNodeBase>(OwningNode))
+        {
+            if (!ContentNode->IsContentNode()) 
+                return Super::TryCreateConnection(A, B);
 
-		const float NodeWidth  = 200.f;
-		const float KnotOffset =  60.f;
+            UEdGraph* Graph = OwningNode->GetGraph();
+            Graph->Modify();
 
-		auto MakeKnot = [&](float X, float Y) -> UQuestlineNode_Knot*
-		{
-			FGraphNodeCreator<UQuestlineNode_Knot> Creator(*Graph);
-			UQuestlineNode_Knot* Knot = Creator.CreateNode();
-			Knot->NodePosX = X;
-			Knot->NodePosY = Y;
-			Creator.Finalize();
-			if (UEdGraphPin* In = Knot->FindPin(TEXT("KnotIn"))) In->PinType = OutputPin->PinType;
-			if (UEdGraphPin* Out = Knot->FindPin(TEXT("KnotOut"))) Out->PinType = OutputPin->PinType;
-			return Knot;
-		};
+            const float NodeWidth  = 200.f;
+            const float KnotOffset =  60.f;
 
-		UQuestlineNode_Knot* KnotRight = MakeKnot(QuestNode->NodePosX + NodeWidth, QuestNode->NodePosY - KnotOffset);
-		UQuestlineNode_Knot* KnotLeft = MakeKnot(QuestNode->NodePosX, QuestNode->NodePosY - KnotOffset);
+            auto MakeKnot = [&](float X, float Y) -> UQuestlineNode_Knot*
+            {
+                FGraphNodeCreator<UQuestlineNode_Knot> Creator(*Graph);
+                UQuestlineNode_Knot* Knot = Creator.CreateNode();
+                Knot->NodePosX = X;
+                Knot->NodePosY = Y;
+                Creator.Finalize();
+                if (UEdGraphPin* In  = Knot->FindPin(TEXT("KnotIn")))  In->PinType = OutputPin->PinType;
+                if (UEdGraphPin* Out = Knot->FindPin(TEXT("KnotOut"))) Out->PinType = OutputPin->PinType;
+                return Knot;
+            };
 
-		Super::TryCreateConnection(OutputPin, KnotRight->FindPin(TEXT("KnotIn")));
-		Super::TryCreateConnection(KnotRight->FindPin(TEXT("KnotOut")), KnotLeft->FindPin(TEXT("KnotIn")));
-		Super::TryCreateConnection(KnotLeft->FindPin(TEXT("KnotOut")), InputPin);
+            UQuestlineNode_Knot* KnotRight = MakeKnot(
+                OwningNode->NodePosX + NodeWidth,
+                OwningNode->NodePosY - KnotOffset);
+            UQuestlineNode_Knot* KnotLeft = MakeKnot(
+                OwningNode->NodePosX,
+                OwningNode->NodePosY - KnotOffset);
 
-		return true;
-	}
+            Super::TryCreateConnection(OutputPin, KnotRight->FindPin(TEXT("KnotIn")));
+            Super::TryCreateConnection(KnotRight->FindPin(TEXT("KnotOut")), KnotLeft->FindPin(TEXT("KnotIn")));
+            Super::TryCreateConnection(KnotLeft->FindPin(TEXT("KnotOut")), InputPin);
 
-	return Super::TryCreateConnection(A, B);
+            return true;
+        }
+    }
+
+    return Super::TryCreateConnection(A, B);
 }
-*/
+
 
 // File-local storage — never crosses DLL boundaries
 static TFunction<FConnectionDrawingPolicy*(int32, int32, float, const FSlateRect&, FSlateWindowElementList&, UEdGraph*)>

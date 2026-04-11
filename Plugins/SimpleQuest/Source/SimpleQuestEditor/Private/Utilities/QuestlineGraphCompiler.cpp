@@ -189,10 +189,11 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             UQuestStep* StepInstance = NewObject<UQuestStep>(RootGraph);
             StepInstance->QuestObjective = StepNode->ObjectiveClass;
             StepInstance->Reward = StepNode->RewardClass;
-            StepInstance->TargetClass = StepNode->TargetClass;
+            StepInstance->TargetClasses = StepNode->TargetClasses;
             StepInstance->NumberOfElements = StepNode->NumberOfElements;
             StepInstance->TargetVector = StepNode->TargetVector;
             StepInstance->TargetActors.Append(StepNode->TargetActors);
+            StepInstance->PrerequisiteGateMode = StepNode->PrerequisiteGateMode;
             Instance = StepInstance;
         }
 
@@ -201,6 +202,20 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         Instance->QuestContentGuid = ContentNode->QuestGuid;
         const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
+
+        // Register outcome fact tags so prerequisite expressions can reference them as valid gameplay tags.
+        if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
+        {
+            if (QuestStepNode->ObjectiveClass)
+            {
+                const UQuestObjective* ObjCDO = QuestStepNode->ObjectiveClass->GetDefaultObject<UQuestObjective>();
+                for (const FGameplayTag& OutcomeTag : ObjCDO->GetPossibleOutcomes())
+                {
+                    AllCompiledQuestTags.AddUnique(QuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
+                }
+            }
+        }
+        
         AllCompiledNodes.Add(TagName, Instance);
         AllCompiledEditorNodes.Add(TagName, ContentNode);
         NodeInstanceMap.Add(ContentNode, Instance);
@@ -699,9 +714,8 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 if (!OutcomeTag.IsValid()) continue;
 
                 FPrerequisiteExpressionNode LeafNode;
-                LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-                    QuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false);
+                LeafNode.Type = EPrerequisiteExpressionType::Leaf;
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
                 OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
             }
 
@@ -757,7 +771,7 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
         const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(PinName, false);
         if (OutcomeTag.IsValid())
         {
-            return QuestStateTagUtils::MakeOutcomeFact(OutcomeTag);
+            return QuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag);
         }
     }
     return NAME_None; // Any Outcome or Abandon — caller handles these

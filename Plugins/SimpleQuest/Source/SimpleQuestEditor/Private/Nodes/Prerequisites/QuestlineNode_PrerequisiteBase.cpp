@@ -19,8 +19,7 @@ FText UQuestlineNode_PrerequisiteBase::GetPinDisplayName(const UEdGraphPin* Pin)
 	{
 		const FString Name = Pin->PinName.ToString();
 
-		if (Name == TEXT("Out") || Name == TEXT("PrereqOut"))
-			return FText::FromString(TEXT("Out"));
+		if (Name == TEXT("Out") || Name == TEXT("PrereqOut")) return FText::FromString(TEXT("Out"));
 
 		if (Name.StartsWith(TEXT("Condition_")))
 		{

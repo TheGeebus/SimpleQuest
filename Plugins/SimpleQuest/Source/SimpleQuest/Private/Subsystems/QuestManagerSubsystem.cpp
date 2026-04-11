@@ -58,12 +58,22 @@ void UQuestManagerSubsystem::Deinitialize()
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiven, GivenDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiverRegistered, GiverRegisteredDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestDeactivateRequest, DeactivateEventDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestTarget, ClassBridgeHandle);
 
         for (auto& Pair : DeactivationSubscriptionHandles)
         {
             QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
         }
         DeactivationSubscriptionHandles.Reset();
+
+        for (auto& Pair : DeferredCompletionPrereqHandles)
+        {
+            for (auto& Item : Pair.Value)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value);
+            }
+        }
+        DeferredCompletionPrereqHandles.Reset();
     }
     Super::Deinitialize();
 }
@@ -91,13 +101,17 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FQ
     TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(Channel.GetTagName());
     if (!NodePtr) return;
 
-    if (UQuestStep* Step = Cast<UQuestStep>(*NodePtr))
+    UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
+    if (!Step || !Step->GetActiveObjective()) return;
+
+    if (Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesProgression
+        && !Step->IsGiverGated()  // giver-gated steps already resolved prereqs at activation
+        && !Step->PrerequisiteExpression.IsAlways())
     {
-        if (Step->GetActiveObjective())
-        {
-            Step->GetActiveObjective()->TryCompleteObjective(QuestObjectiveEvent.TriggeredActor);
-        }
+        if (!Step->PrerequisiteExpression.Evaluate(WorldState)) return;
     }
+
+    Step->GetActiveObjective()->TryCompleteObjective(QuestObjectiveEvent.TriggeredActor);
 }
 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
@@ -132,9 +146,19 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
     }
 }
 
-
 void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
 {
+    UQuestStep* Step = Cast<UQuestStep>(Node);
+    if (Step
+        && !Step->IsGiverGated()
+        && Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesCompletion
+        && !Step->PrerequisiteExpression.IsAlways()
+        && !Step->PrerequisiteExpression.Evaluate(WorldState))
+    {
+        DeferChainToNextNodes(Step, OutcomeTag);
+        return;
+    }
+
     ChainToNextNodes(Node, OutcomeTag);
 }
 
@@ -147,10 +171,23 @@ void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGamepl
     if (QuestSignalSubsystem)
     {
         QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag()));
-        if (Cast<UQuestStep>(Node))
+        if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
             FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestObjectiveTriggered>(Node->GetQuestTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
             ActiveStepTriggerHandles.Add(Node->GetQuestTag(), Handle);
+            if (!Step->GetTargetClasses().IsEmpty())
+            {
+                for (const TSubclassOf<AActor>& Class : Step->GetTargetClasses())
+                {
+                    ClassFilteredSteps.Add(Node->GetQuestTag(), Class);
+                }
+
+                // Subscribe once to global channel if this is the first class-filtered step
+                if (!ClassBridgeHandle.IsValid())
+                {
+                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);
+                }
+            }
         }
     }
 }
@@ -198,6 +235,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName)
 
     if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
     {
+        (*InstancePtr)->bWasGiverGated = true;
         SetQuestPendingGiver(NodeTag);
         if (QuestSignalSubsystem)
         {
@@ -261,7 +299,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
         ClearQuestPendingGiver(QuestTag);
     }
 
-    // Active node cleanup — call DeactivateInternal to tear down objectives and deferred prereq subs.
+    // Active node cleanup — call DeactivateInternal to tear down objectives and handle prereq subscribers
     if (WorldState->HasFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Active)))
     {
         if (TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(TagName))
@@ -276,6 +314,17 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
             if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
             ActiveStepTriggerHandles.Remove(QuestTag);
         }
+            
+        // Cancel any deferred completion if the step is deactivated while waiting for prerequisite completion
+        if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
+        {
+            for (const auto& Pair : *Handles)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
+            }
+            DeferredCompletionPrereqHandles.Remove(QuestTag);
+        }
+        DeferredCompletionOutcomes.Remove(QuestTag);
     }
 
     WorldState->AddFact(MakeQuestStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
@@ -385,6 +434,73 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
 #endif
 }
 
+void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& Event)
+{
+    if (!Event.TriggeredActor || !QuestSignalSubsystem) return;
+
+    // Check every class-filtered step to see if this kill is relevant
+    for (const auto& Pair : ClassFilteredSteps)
+    {
+        if (Event.TriggeredActor->IsA(Pair.Value))
+        {
+            // Re-publish on the step's specific channel — existing CheckQuestObjectives handles the rest
+            QuestSignalSubsystem->PublishMessage(Pair.Key, Event);
+        }
+    }
+}
+
+void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag)
+{
+    const FGameplayTag StepTag = Step->GetQuestTag();
+    DeferredCompletionOutcomes.Add(StepTag, OutcomeTag);
+
+    TArray<FGameplayTag> LeafTags;
+    Step->PrerequisiteExpression.CollectLeafTags(LeafTags);
+
+    TMap<FGameplayTag, FDelegateHandle>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
+    for (const FGameplayTag& LeafTag : LeafTags)
+    {
+        FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded);
+        Handles.Add(LeafTag, Handle);
+    }
+
+}
+
+void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
+{
+    // Check all deferred steps — the fact that changed could satisfy any of them
+    TArray<FGameplayTag> StepTags;
+    DeferredCompletionOutcomes.GetKeys(StepTags);
+    for (const FGameplayTag& StepTag : StepTags)
+    {
+        TryFireDeferredCompletion(StepTag);
+    }
+}
+
+void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
+{
+    TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(StepTag.GetTagName());
+    if (!NodePtr) return;
+
+    UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
+    if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState)) return;
+
+    // Clean up subscriptions
+    if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
+    {
+        for (auto& Pair : *Handles)
+        {
+            QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
+        }
+        DeferredCompletionPrereqHandles.Remove(StepTag);
+    }
+
+    FGameplayTag OutcomeTag;
+    DeferredCompletionOutcomes.RemoveAndCopyValue(StepTag, OutcomeTag);
+
+    ChainToNextNodes(Step, OutcomeTag);
+}
+
 void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event)
 {
     const FGameplayTag QuestTag = Event.GetQuestTag();
@@ -434,8 +550,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     QuestCompletionCounts.FindOrAdd(QuestTag)++;
     if (OutcomeTag.IsValid())
     {
-        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(
-            QuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false));
+        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(QuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
     }
 }
 

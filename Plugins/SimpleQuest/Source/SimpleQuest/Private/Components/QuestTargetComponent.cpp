@@ -33,22 +33,43 @@ void UQuestTargetComponent::BeginPlay()
 void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (!SignalSubsystem) return;
+    
+    // Guard: only respond to exact tag matches — parent tags in StepTagsToWatch would otherwise catch every descendant step's started event
+    if (!StepTagsToWatch.HasTagExact(Channel))
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("UQuestTargetComponent::OnTargetActivated : '%s' on '%s' — channel tag is not an exact match for any watched tag. Check StepTagsToWatch configuration."),
+            *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
+        return;
+    }
+    
+    // Guard against duplicate activation for the same step
+    if (ActiveStepEndHandles.Contains(Channel)) return;
+
+    FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(Channel, this, &UQuestTargetComponent::OnTargetDeactivated);
+    ActiveStepEndHandles.Add(Channel, Handle);
 
     UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s : Owner: %s"), *Channel.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
-    ActiveStepTag = Channel;
-    StepCompletedHandle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(Channel, this, &UQuestTargetComponent::OnTargetDeactivated);
+
     Execute_SetActivated(this, true);
 }
 
 void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
-    if (SignalSubsystem && StepCompletedHandle.IsValid())
+    if (SignalSubsystem)
     {
-        SignalSubsystem->UnsubscribeMessage(ActiveStepTag, StepCompletedHandle);
-        StepCompletedHandle.Reset();
-        ActiveStepTag = FGameplayTag::EmptyTag;
+        if (FDelegateHandle* Handle = ActiveStepEndHandles.Find(Channel))
+        {
+            SignalSubsystem->UnsubscribeMessage(Channel, *Handle);
+        }
+        ActiveStepEndHandles.Remove(Channel);
     }
-    Execute_SetActivated(this, false);
+
+    // Only visually deactivate when no steps remain active
+    if (ActiveStepEndHandles.IsEmpty())
+    {
+        Execute_SetActivated(this, false);
+    }
 }
 
 void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
@@ -60,24 +81,34 @@ void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
 void UQuestTargetComponent::GetTriggered()
 {
     if (!SignalSubsystem) return;
-    if (!ActiveStepTag.IsValid()) return; // Not active for any step, ignore
+    if (ActiveStepEndHandles.IsEmpty()) return;
 
-    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveTriggered(GetOwner()));
+    TMap<FGameplayTag, FDelegateHandle> HandlesCopy = ActiveStepEndHandles;
+    for (const auto& Pair : HandlesCopy)
+    {
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveTriggered(GetOwner()));
+    }
 }
 
 void UQuestTargetComponent::GetKilled(AActor* KillerActor)
 {
     if (!SignalSubsystem) return;
-    if (!ActiveStepTag.IsValid()) return;
+    if (ActiveStepEndHandles.IsEmpty()) return;
 
-    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveKilled(GetOwner(), KillerActor));
+    for (const auto& Pair : ActiveStepEndHandles)
+    {
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveKilled(GetOwner(), KillerActor));
+    }
 }
 
 void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
 {
     if (!SignalSubsystem) return;
-    if (!ActiveStepTag.IsValid()) return;
+    if (ActiveStepEndHandles.IsEmpty()) return;
 
-    SignalSubsystem->PublishMessage(ActiveStepTag, FQuestObjectiveInteracted(GetOwner(), InteractingActor));
+    for (const auto& Pair : ActiveStepEndHandles)
+    {
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveInteracted(GetOwner(), InteractingActor));
+    }
 }
 

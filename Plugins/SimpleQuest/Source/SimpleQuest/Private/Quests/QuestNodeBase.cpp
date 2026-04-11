@@ -7,8 +7,7 @@
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
-    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid()
-        ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 
     if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState))
     {

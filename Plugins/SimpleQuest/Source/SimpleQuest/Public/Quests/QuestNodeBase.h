@@ -34,6 +34,7 @@ public:
 
     FOnNodeActivated OnNodeActivated;
     FOnNodeCompleted OnNodeCompleted;
+    
     /**
      * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeActivated/OnNodeCompleted.
      * Manager chains NextNodesOnForward without writing any lifecycle facts.
@@ -41,15 +42,15 @@ public:
     FOnNodeForwardActivated OnNodeForwardActivated;
 
     /**
-     * Entry point for node activation. Evaluates PrerequisiteExpression against WorldState; activates immediately if satisfied,
-     * otherwise defers with a WorldState subscription per leaf tag and activates when all prerequisites are met. Do not override
-     * — override ActivateInternal for custom activation logic.
+     * Entry point for node activation. Base implementation evaluates PrerequisiteExpression against WorldState; activates immediately
+     * if satisfied, otherwise defers. UQuestStep overrides this to bypass prerequisite gating for non-giver steps (prerequisites gate
+     * progression or completion instead — see EPrerequisiteGateMode).
      */
     virtual void Activate(FGameplayTag InContextualTag);
     
     /** Resolve a raw, editor-time FName tag created by the graph compiler into the registered runtime FGameplayTag */
     void ResolveQuestTag(FName TagName);
-
+    
 protected:
     /**
      * Called when prerequisites are confirmed satisfied. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
@@ -138,6 +139,8 @@ protected:
     
     UPROPERTY()
     TWeakObjectPtr<UGameInstance> CachedGameInstance;
+    
+    void DeferActivation(FGameplayTag InContextualTag);
 
 private:
     // Stores the contextual tag while waiting for prerequisites to clear
@@ -146,10 +149,15 @@ private:
     // Per-leaf-tag subscription handles; cleared when prerequisites are satisfied
     TMap<FGameplayTag, FDelegateHandle> PrereqSubscriptionHandles;
 
-    void DeferActivation(FGameplayTag InContextualTag);
     void OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
     void TryActivateDeferred();
 
+    /**
+     * Set by the manager when this node enters PendingGiver state. When true, prerequisites gate actual activation (giver semantics).
+     * When false, prerequisites gate progression only — activation is immediate.
+     */
+    bool bWasGiverGated = false;
+    
 public:
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
     FORCEINLINE FGameplayTag GetQuestTag() const { return QuestTag; }
@@ -162,6 +170,7 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
+    FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
 
     

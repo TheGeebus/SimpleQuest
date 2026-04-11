@@ -219,11 +219,14 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 		for (const FName& QuestTag : Pair.Value)
 		{
 			AllTags.Add(QuestTag);
-			AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
-			AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
-			AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
-			AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
-			AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+			if (!QuestTag.ToString().StartsWith(QuestStateTagUtils::Namespace))
+			{
+				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
+				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
+				AllTags.Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+			}
 		}
 	}
 
@@ -285,11 +288,14 @@ void FSimpleQuestEditor::RebuildNativeTags()
 					ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
-			Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
-			Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
-			Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
-			Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+			if (!QuestTag.ToString().StartsWith(QuestStateTagUtils::Namespace))
+			{
+				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Active));
+				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Completed));
+				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_PendingGiver));
+				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Deactivated));
+				Add(QuestStateTagUtils::MakeStateFact(QuestTag, QuestStateTagUtils::Leaf_Blocked));
+			}
 		}
 	}
 

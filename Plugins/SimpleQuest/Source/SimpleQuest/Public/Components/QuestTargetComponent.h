@@ -51,9 +51,10 @@ protected:
 	// The subsystem publishes step events on the step tag; any target configured with that tag activates.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
 	FGameplayTagContainer StepTagsToWatch;
-	
+
 private:
 	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
-	FDelegateHandle StepCompletedHandle;
-	FGameplayTag ActiveStepTag;
+	
+	// Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously
+	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
 };

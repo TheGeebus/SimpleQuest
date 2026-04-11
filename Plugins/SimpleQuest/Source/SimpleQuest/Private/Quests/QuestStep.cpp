@@ -1,7 +1,23 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Quests/QuestStep.h"
+
+#include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
+#include "WorldState/WorldStateSubsystem.h"
+
+void UQuestStep::Activate(FGameplayTag InContextualTag)
+{
+	if (IsGiverGated())
+	{
+		// Giver semantics: prerequisites gate activation, same as base class.
+		Super::Activate(InContextualTag);
+		return;
+	}
+
+	// No giver: activate immediately and let prerequisites gate progression or completion according to PrerequisiteGateMode.
+	ActivateInternal(InContextualTag);
+}
 
 void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
@@ -12,12 +28,11 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
-	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClass, NumberOfElements, false);
+	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClasses, NumberOfElements, false);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {
-	// Tear down the live objective before the base class clears deferred prereq subscriptions
 	if (ActiveObjective)
 	{
 		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
@@ -31,3 +46,4 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
 }
+

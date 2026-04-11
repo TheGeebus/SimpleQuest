@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FWorldStateFactAddedEvent;
 struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
@@ -120,6 +121,28 @@ private:
 	
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepTriggerHandles;
 
+	TMap<FGameplayTag, FDelegateHandle> ActiveClassTriggerHandles;
+	TMultiMap<FGameplayTag, UClass*> ClassFilteredSteps;
+	FDelegateHandle ClassBridgeHandle;	
+
+	void CheckClassObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& Event);
+	
 	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
 	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
+
+	/*------------------------------------------------------------------------------------------------------------------
+	 * Deferred Completion
+	 *----------------------------------------------------------------------------------------------------------------*/
+	
+	// Key: Step tag; Value: Pending outcome tag
+	TMap<FGameplayTag, FGameplayTag> DeferredCompletionOutcomes;
+
+	// Subscription handles for deferred completion prerequisite monitoring
+	TMap<FGameplayTag, TMap<FGameplayTag, FDelegateHandle>> DeferredCompletionPrereqHandles;
+
+	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag);
+	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void TryFireDeferredCompletion(FGameplayTag StepTag);
+
+
 };

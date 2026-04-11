@@ -13,20 +13,21 @@ void UQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObjec
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass, int32 NumElementsRequired, bool bUseCounter)
+void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired, bool bUseCounter)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
 	TargetActors = InTargetActors;
-	TargetClass = InTargetClass;
+	TargetClasses = InTargetClasses;
 	MaxElements = NumElementsRequired;
 	bUseQuestCounter = bUseCounter;
 	SetCurrentElements(0);
 }
 
+/*
 bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
 {
 	bool bIsTargetRelevant = false;
-	const bool bHasTargetClass = IsValid(TargetClass);
+	const bool bHasTargetClass = IsValid(TargetClasses);
 	if (bHasTargetClass)
 	{
 		if (InTargetObject->IsA(TargetClass))
@@ -57,6 +58,7 @@ bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::IsObjectRelevant_Implementation : %s is relevant to %s: %hs"), *InTargetObject->GetName(), *this->GetName(), bIsTargetRelevant ? "true" : "false");
 	return bIsTargetRelevant;
 }
+*/
 
 void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag)
 {
@@ -82,9 +84,12 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 	}
 }
 
-void UQuestObjective::EnableQuestTargetClass(bool bIsTargetEnabled) const
+void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 {
-	OnEnableTarget.Broadcast(GetTargetClass(), bIsTargetEnabled);
+	for (const TSubclassOf<AActor>& Class : TargetClasses)
+	{
+		if (Class) OnEnableTarget.Broadcast(Class.Get(), bIsTargetEnabled);
+	}
 }
 
 void UQuestObjective::SetCurrentElements(const int32 NewAmount)

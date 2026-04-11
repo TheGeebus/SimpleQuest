@@ -37,8 +37,9 @@ public:
 	 * @param bUseCounter use a quest counter widget to track the status of this step
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass = nullptr, int32 NumElementsRequired = 0, bool bUseCounter = false);
+	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0, bool bUseCounter = false);
 
+	
 	/**
 	 * Determine if the InTargetObject is relevant to the completion of this quest and logic should proceed to TryCompleteObjective.
 	 * Should be overriden by child classes to define what objects are relevant to the completion of the objective through
@@ -50,8 +51,8 @@ public:
 	 * @return TRUE if the object is relevant to the completion of this quest objective, whether by success or failure.
 	 * @see UQuestObjective::TryCompleteObjective()
 	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	bool IsObjectRelevant(UObject* InTargetObject);
+	//UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
+	//bool IsObjectRelevant(UObject* InTargetObject);
 	
 	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
@@ -82,7 +83,7 @@ protected:
 	void EnableQuestTargetActors(bool bIsTargetEnabled);
 
 	UFUNCTION(BlueprintCallable)
-	void EnableQuestTargetClass(bool bIsTargetEnabled) const;
+	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (Categories = "Quest"), Category = "Outcomes")
 	TArray<FGameplayTag> PossibleOutcomes;
@@ -90,7 +91,7 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
-	TObjectPtr<UClass> TargetClass = nullptr;
+	TSet<TSubclassOf<AActor>> TargetClasses;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	int32 MaxElements = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
@@ -102,7 +103,7 @@ protected:
 	
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
-	FORCEINLINE UClass* GetTargetClass() const { return TargetClass; }
+	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
 	FORCEINLINE const TArray<FGameplayTag>& GetPossibleOutcomes() const { return PossibleOutcomes; }
 	// Broadcasts OnSetCounter when changing the value 

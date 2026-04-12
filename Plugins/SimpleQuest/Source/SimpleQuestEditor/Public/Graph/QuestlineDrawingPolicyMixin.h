@@ -123,7 +123,9 @@ public:
 
 		bool bReversed = false;
 
-		FVector2f CenterPos, AvgInputPos, AvgOutputPos;
+		FVector2f CenterPos(0.f);
+		FVector2f AvgInputPos(0.f);
+		FVector2f AvgOutputPos(0.f);
 		bool bCenterValid = false, bInputValid = false, bOutputValid = false;
 
 		// Get knot center from its output pin widget position

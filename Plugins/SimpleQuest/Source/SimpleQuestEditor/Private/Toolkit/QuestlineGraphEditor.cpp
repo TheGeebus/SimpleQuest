@@ -312,17 +312,32 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
     const bool bSuccess = Compiler->Compile(QuestlineGraph);
 
-    const FText Notification = bSuccess
-        ? NSLOCTEXT("SimpleQuestEditor", "CompileSuccess", "Questline compiled successfully.")
-        : NSLOCTEXT("SimpleQuestEditor", "CompileFailed", "Questline compilation failed. Check the Output Log for details.");
+    // Flush compiler messages to the Quest Compiler MessageLog panel
+    if (Compiler->GetMessages().Num() > 0)
+    {
+        FMessageLog CompilerLog("QuestCompiler");
+        CompilerLog.NewPage(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompilePageLabel", "{0}"), FText::FromString(QuestlineGraph->GetName())));
+        CompilerLog.AddMessages(Compiler->GetMessages());
 
-    FNotificationInfo Info(Notification);
-    Info.ExpireDuration = 3.f;
-    Info.bUseSuccessFailIcons = true;
-    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+        if (Compiler->GetNumErrors() > 0)
+        {
+            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileErrors", "Quest compilation: {0} error(s)"), Compiler->GetNumErrors()));
+        }
+        else if (Compiler->GetNumWarnings() > 0)
+        {
+            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileWarnings", "Quest compilation: {0} warning(s)"), Compiler->GetNumWarnings()));
+        }
+    }
+    else
+    {
+        // Clean compile — simple success toast
+        FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "CompileSuccess", "Questline compiled successfully."));
+        Info.ExpireDuration = 3.f;
+        Info.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+    }
 
     CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
-
     if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
 }
 

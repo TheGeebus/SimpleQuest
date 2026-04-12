@@ -8,16 +8,34 @@ FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
 	int32 LastDot;
 	if (Full.FindLastChar(TEXT('.'), LastDot))
 	{
-		return FText::FromString(Full.Mid(LastDot + 1));
+		return FText::FromString(FName::NameToDisplayString(Full.Mid(LastDot + 1), false));
 	}
-	return FText::FromName(TagName);
+	return FText::FromString(FName::NameToDisplayString(Full, false));
+}
+
+FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
+{
+	const FString Full = TagName.ToString();
+	int32 OutcomePos = Full.Find(TEXT("Outcome."));
+	if (OutcomePos != INDEX_NONE)
+	{
+		FString Remainder = Full.Mid(OutcomePos + 8);
+		TArray<FString> Segments;
+		Remainder.ParseIntoArray(Segments, TEXT("."));
+		for (FString& Seg : Segments)
+		{
+			Seg = FName::NameToDisplayString(Seg, false);
+		}
+		return FText::FromString(FString::Join(Segments, TEXT(": ")));
+	}
+	return GetTagLeafLabel(TagName);
 }
 
 FText UQuestlineNodeBase::GetPinDisplayName(const UEdGraphPin* Pin) const
 {
 	if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
 	{
-		return GetTagLeafLabel(Pin->PinName);
+		return GetOutcomeLabel(Pin->PinName);
 	}
 	return Super::GetPinDisplayName(Pin);
 }

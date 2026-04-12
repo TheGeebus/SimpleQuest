@@ -23,7 +23,10 @@ public class SimpleQuestEditor: ModuleRules
 			"InputCore",
 			"BlueprintGraph",
 			"ToolMenus",
-			"AssetRegistry",
+			"AssetRegistry", 
+			"MessageLog",
+			"KismetCompiler", 
+			"GameplayTagsEditor"
 		});
 
 		if (Target.bBuildEditor)

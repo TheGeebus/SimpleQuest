@@ -22,13 +22,20 @@ struct FWatchedQuestEventSettings
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchQuestEnabled = true;
+	bool bWatchActivation = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchQuestStart = true;
+	bool bWatchDeactivation = false;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchQuestEnd = true;
+	bool bWatchStart = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchDeactivated = false;
+	bool bWatchEnd = true;
+
+	/**
+	 * If non-empty, OnQuestCompleted only fires when the completion outcome matches one of these tags. If empty, fires for
+	 * any outcome (default). Only relevant when bWatchQuestEnd is true.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "Quest.Outcome", EditCondition = "bWatchEnd"))
+	FGameplayTagContainer OutcomeFilter;
 };
 
 

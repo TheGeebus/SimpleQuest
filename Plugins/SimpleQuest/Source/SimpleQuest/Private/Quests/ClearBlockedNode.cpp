@@ -3,7 +3,7 @@
 #include "Quests/ClearBlockedNode.h"
 #include "GameplayTagsManager.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 
 void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {

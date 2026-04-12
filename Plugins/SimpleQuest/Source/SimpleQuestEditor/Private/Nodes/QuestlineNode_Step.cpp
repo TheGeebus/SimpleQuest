@@ -11,15 +11,14 @@
 void UQuestlineNode_Step::AllocateOutcomePins()
 {
 	if (!ObjectiveClass) return;
-	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
+
+	TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+	for (const FGameplayTag& Tag : Outcomes)
 	{
-		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
+		if (Tag.IsValid())
 		{
-			if (Tag.IsValid())
-			{
-				UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Tag.GetTagName());
-				if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Tag.GetTagName());
-			}
+			UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Tag.GetTagName());
+			if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Tag.GetTagName());
 		}
 	}
 }
@@ -35,13 +34,11 @@ void UQuestlineNode_Step::RefreshOutcomePins()
 	TArray<FName> DesiredNames;
 	if (ObjectiveClass)
 	{
-		if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
+		TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+		for (const FGameplayTag& Tag : Outcomes)
 		{
-			for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
-			{
-				if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
-			}
-		}
+			if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
+		}	
 	}
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }

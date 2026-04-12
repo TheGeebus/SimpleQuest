@@ -22,8 +22,11 @@ public:
 	 * Outcome tags this entry node can receive from a parent graph. Each tag gets its own output pin. Populate manually or
 	 * via right-click > Import Outcome Pins.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Quest", meta = (Categories = "Quest"))
+	UPROPERTY(EditAnywhere, Category = "Quest", meta = (Categories = "Quest.Outcome"))
 	TArray<FGameplayTag> IncomingOutcomeTags;
+
+	UPROPERTY(EditAnywhere, Category = "Quest")
+	bool bShowDeactivationPins = false;
 
 	/** Surgically adds/removes outcome output pins to match IncomingOutcomeTags without disturbing existing wiring. */
 	void RefreshOutcomePins();

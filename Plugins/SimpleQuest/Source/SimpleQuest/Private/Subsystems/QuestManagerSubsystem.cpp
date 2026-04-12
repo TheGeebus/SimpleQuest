@@ -19,7 +19,7 @@
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -221,17 +221,42 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
-    // Diamond convergence guard — refuses activation if the node is already running, waiting for a giver,
-    // or explicitly blocked. Completed is intentionally excluded so loops and repeatable quests can re-enter.
+    // Diamond convergence guard — refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
+    // Completed is intentionally excluded so loops and repeatable quests can re-enter.
     if (NodeTag.IsValid() && WorldState)
     {
         if (WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active))       ||
             WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_PendingGiver)) ||
             WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Blocked)))
         {
+            // Already-active Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs
+            // where a Quest node is activated before its incoming outcome arrives.
+            if (IncomingOutcomeTag.IsValid()
+                && WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)))
+            {
+                if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
+                {
+                    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' to already-active quest '%s'"),
+                        *IncomingOutcomeTag.ToString(), *NodeTagName.ToString());
+
+                    const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+                    if (!EntryFactName.IsNone())
+                    {
+                        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+                    }
+
+                    if (const FQuestOutcomeNodeList* OutcomeEntries = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+                    {
+                        for (const FName& StepTag : OutcomeEntries->NodeTags)
+                        {
+                            ActivateNodeByTag(StepTag);
+                        }
+                    }
+                }
+            }
             return;
         }
-        // Clear Deactivated if present — a deactivated node is allowed to re-enter via its Activate input.
+        // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
         WorldState->RemoveFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Deactivated));
     }
 
@@ -250,6 +275,18 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
 
     if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
     {
+        // Write entry outcome fact for prerequisite expressions within the inner graph
+        if (IncomingOutcomeTag.IsValid() && WorldState)
+        {
+            const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+            if (!EntryFactName.IsNone())
+            {
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: setting entry outcome fact '%s' for quest '%s'"),
+                    *EntryFactName.ToString(), *NodeTagName.ToString());
+                WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+            }
+        }
+        
         // Always activate the "Any Outcome" entry paths
         for (const FName& StepTag : QuestNode->GetEntryStepTags())
         {

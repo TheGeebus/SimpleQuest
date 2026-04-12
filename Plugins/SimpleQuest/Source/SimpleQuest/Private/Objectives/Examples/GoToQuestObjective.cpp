@@ -7,7 +7,7 @@
 #include "Interfaces/QuestTargetDelegateWrapper.h"
 #include "Interfaces/QuestTargetInterface.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "Quest.BuiltIn.GoTo.Outcome.Reached")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "Quest.Outcome.Reached")
 
 void UGoToQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
 {

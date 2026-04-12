@@ -6,27 +6,62 @@
 #include "Modules/ModuleManager.h"
 #include "EdGraphUtilities.h"
 #include "GameplayTagsManager.h"
+#include "MessageLogModule.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "SGraphNodeKnot.h"
+#include "SGraphPin.h"
 #include "SimpleQuestLog.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "Engine/Blueprint.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Framework/Notifications/NotificationManager.h"
-#include "Utilities/SimpleCoreDebug.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
+#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "UObject/SavePackage.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
+
+/*
+class SGraphPin_HiddenConnector : public SGraphPin
+{
+public:
+	SLATE_BEGIN_ARGS(SGraphPin_HiddenConnector) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs, UEdGraphPin* InPin)
+	{
+		SGraphPin::Construct(SGraphPin::FArguments(), InPin);
+	}
+
+protected:
+	virtual const FSlateBrush* GetPinIcon() const override
+	{
+		return FAppStyle::GetNoBrush();
+	}
+};
+
+class FQuestlineK2PinFactory : public FGraphPanelPinFactory
+{
+	virtual TSharedPtr<SGraphPin> CreatePin(UEdGraphPin* InPin) const override
+	{
+		if (InPin && InPin->GetOwningNode()->IsA<UK2Node_CompleteObjectiveWithOutcome>()
+			&& InPin->PinName == UK2Node_CompleteObjectiveWithOutcome::OutcomeTagPinName)
+		{
+			return SNew(SGraphPin_HiddenConnector, InPin);
+		}
+		return nullptr;
+	}
+};
+*/
 
 class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 {
@@ -52,8 +87,16 @@ void FSimpleQuestEditor::StartupModule()
 	QuestlineConnectionFactory = UQuestlineGraphSchema::MakeQuestlineConnectionFactory();
 	FEdGraphUtilities::RegisterVisualPinConnectionFactory(QuestlineConnectionFactory);
 
+	/*
+	QuestlineK2PinFactory = MakeShared<FQuestlineK2PinFactory>();
+	FEdGraphUtilities::RegisterVisualPinFactory(QuestlineK2PinFactory);
+	*/
+	
 	FQuestlineGraphEditorCommands::Register();
 
+	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
+	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
+	
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARModule.Get();
 	// Always subscribe — OnFilesLoaded fires when async loading finishes, whenever that is.
@@ -165,8 +208,21 @@ void FSimpleQuestEditor::ShutdownModule()
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnAssetRemoved().RemoveAll(this);
 	}
 
+	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
+	{
+		FMessageLogModule& MessageLogModule = FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog");
+		MessageLogModule.UnregisterLogListing("QuestCompiler");
+	}
+
 	FQuestlineGraphEditorCommands::Unregister();
-	
+
+	/*
+	if (QuestlineK2PinFactory.IsValid())
+	{
+		FEdGraphUtilities::UnregisterVisualPinFactory(QuestlineK2PinFactory);
+	}
+	*/
+
 	if (FModuleManager::Get().IsModuleLoaded("AssetTools"))
 	{
 		IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools").Get();
@@ -236,6 +292,10 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 
     int32 SuccessCount = 0;
     int32 FailCount = 0;
+    int32 TotalErrors = 0;
+    int32 TotalWarnings = 0;
+    FMessageLog CompilerLog("QuestCompiler");
+	CompilerLog.NewPage(NSLOCTEXT("SimpleQuestEditor", "CompileAllPageLabel", "Compile All"));
 
     for (const FAssetData& AssetData : QuestlineAssets)
     {
@@ -247,61 +307,120 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 
         UQuestlineGraph* Graph = Cast<UQuestlineGraph>(AssetData.GetAsset());
         if (!Graph) { ++FailCount; continue; }
-
+    	
         TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
         if (Compiler->Compile(Graph))
         {
             ++SuccessCount;
             UPackage* Package = Graph->GetOutermost();
             Package->MarkPackageDirty();
-            // Save so AR metadata is updated and INI stays authoritative
-        	FSavePackageArgs Args;
+            FSavePackageArgs Args;
             UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
-        	QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
+            QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
         }
         else
         {
             ++FailCount;
-        	QuestlineCompiledDelegate.Broadcast(Graph->GetOutermost()->GetName(), false);
+            QuestlineCompiledDelegate.Broadcast(Graph->GetOutermost()->GetName(), false);
         }
+
+    	// Add messages directly — no per-graph NewPage
+    	if (Compiler->GetMessages().Num() > 0)
+    	{
+    		CompilerLog.AddMessages(Compiler->GetMessages());
+    		TotalErrors += Compiler->GetNumErrors();
+    		TotalWarnings += Compiler->GetNumWarnings();
+    	}
     }
 
     // Summary notification
-    const FText Summary = FText::Format(
-        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary",
-            "Compiled {0} questline(s): {1} succeeded, {2} failed"),
-        FText::AsNumber(SuccessCount + FailCount),
-        FText::AsNumber(SuccessCount),
-        FText::AsNumber(FailCount));
-
-    FNotificationInfo Info(Summary);
-    Info.ExpireDuration = 5.f;
-    Info.bUseSuccessFailIcons = true;
-    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(
-        FailCount == 0 ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+    if (TotalErrors > 0 || TotalWarnings > 0)
+    {
+        // Clickable toast — opens the MessageLog with all per-graph pages
+        CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Issues", "Compiled {0} questline(s): {1} error(s), {2} warning(s)"),
+            FText::AsNumber(SuccessCount + FailCount),
+            FText::AsNumber(TotalErrors),
+            FText::AsNumber(TotalWarnings)));
+    }
+    else
+    {
+        // Clean run — simple success toast
+        const FText Summary = FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary", "Compiled {0} questline(s) successfully"),
+            FText::AsNumber(SuccessCount + FailCount));
+        FNotificationInfo Info(Summary);
+        Info.ExpireDuration = 5.f;
+        Info.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+    }
 }
 
 void FSimpleQuestEditor::WriteCompiledTagsIni() const
 {
-	// Collect and expand all tags from all registered graphs. Each quest node tag generates five state fact tags alongside itself.
+	const FString IniPath = FPaths::ConvertRelativePathToFull(
+		FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
+
+	// ── Phase 1: read existing tags so designer-authored entries survive ──
+	TSet<FName> PreExistingTags;
+	{
+		FString ExistingContent;
+		if (FPaths::FileExists(IniPath) && FFileHelper::LoadFileToString(ExistingContent, *IniPath))
+		{
+			TArray<FString> Lines;
+			ExistingContent.ParseIntoArrayLines(Lines);
+			for (const FString& Line : Lines)
+			{
+				const int32 TagStart = Line.Find(TEXT("Tag=\""));
+				if (TagStart == INDEX_NONE) continue;
+				const int32 ValueStart = TagStart + 5;
+				const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,
+					ESearchDir::FromStart, ValueStart);
+				if (ValueEnd != INDEX_NONE)
+				{
+					PreExistingTags.Add(FName(*Line.Mid(ValueStart, ValueEnd - ValueStart)));
+				}
+			}
+		}
+	}
+
+	// ── Phase 2: collect compiled tags + state facts ──
 	TArray<FName> AllTags;
+	TSet<FName> CompiledTagSet;
 	for (const auto& Pair : CompiledTagRegistry)
 	{
 		for (const FName& QuestTag : Pair.Value)
 		{
 			AllTags.Add(QuestTag);
+			CompiledTagSet.Add(QuestTag);
 			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace))
 			{
-				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
-				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
-				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
-				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
-				AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
+				auto AddState = [&](const FString& Leaf)
+				{
+					
+					FName Fact = UQuestStateTagUtils::MakeStateFact(QuestTag, Leaf);
+					AllTags.Add(Fact);
+					CompiledTagSet.Add(Fact);
+				};
+				AddState(UQuestStateTagUtils::Leaf_Active);
+				AddState(UQuestStateTagUtils::Leaf_Completed);
+				AddState(UQuestStateTagUtils::Leaf_PendingGiver);
+				AddState(UQuestStateTagUtils::Leaf_Deactivated);
+				AddState(UQuestStateTagUtils::Leaf_Blocked);
 			}
 		}
 	}
 
-	// Deduplicate and sort for stable VCS diffs.
+	// ── Phase 3: preserve designer-authored tags the compiler doesn't own ──
+	int32 PreservedCount = 0;
+	for (const FName& Tag : PreExistingTags)
+	{
+		if (!CompiledTagSet.Contains(Tag))
+		{
+			AllTags.Add(Tag);
+			++PreservedCount;
+		}
+	}
+
+	// ── Phase 4: deduplicate, sort, write ──
 	AllTags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
 	{
 		int32 WriteIdx = 0;
@@ -313,28 +432,25 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 		AllTags.SetNum(WriteIdx);
 	}
 
-	// Build INI content in the standard [/Script/GameplayTags.GameplayTagsList] format. UE scans Config/Tags/*.ini natively at startup before any map load.
 	FString IniContent;
 	IniContent.Reserve(AllTags.Num() * 80);
 	IniContent += TEXT("[/Script/GameplayTags.GameplayTagsList]\n");
 	for (const FName& TagName : AllTags)
 	{
-		IniContent += FString::Printf(TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
+		IniContent += FString::Printf(
+			TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
 	}
 
-	const FString IniPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
-	const FString IniDir  = FPaths::GetPath(IniPath);
-
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — writing %d tag(s) to: %s"), AllTags.Num(), *IniPath);
-
+	const FString IniDir = FPaths::GetPath(IniPath);
 	if (!IFileManager::Get().DirectoryExists(*IniDir))
 	{
-		IFileManager::Get().MakeDirectory(*IniDir, /*Tree=*/true);
+		IFileManager::Get().MakeDirectory(*IniDir, true);
 	}
 
 	if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
 	{
-		UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write succeeded"));
+		UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) (%d compiled, %d preserved) to: %s"),
+			AllTags.Num(), CompiledTagSet.Num(), PreservedCount, *IniPath);
 	}
 	else
 	{

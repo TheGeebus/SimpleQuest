@@ -29,8 +29,8 @@ FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 	{
 		FFormatNamedArguments Args;
 		Args.Add("OutcomePrefix", FText::FromName(FName("Outcome")));
-		Args.Add("LeafTag", GetTagLeafLabel(OutcomeTag.GetTagName()));
-		FText OutText = FText::Format(LOCTEXT("ExitTitleFormat", "{OutcomePrefix}: {LeafTag}"), Args);
+		Args.Add("LeafTag", GetOutcomeLabel(OutcomeTag.GetTagName()));
+		FText OutText = FText::Format(LOCTEXT("ExitTitleFormat", "{OutcomePrefix} - {LeafTag}"), Args);
 		return OutText;
 	}
 	return NSLOCTEXT("SimpleQuestEditor", "ExitNodeUnset", "Exit (no outcome set)");
@@ -39,8 +39,8 @@ FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 FLinearColor UQuestlineNode_Exit::GetNodeTitleColor() const
 {
 	return OutcomeTag.IsValid()
-		? FLinearColor(0.9f, 0.7f, 0.1f)   // gold — outcome assigned
-		: FLinearColor(0.6f, 0.6f, 0.6f);  // grey — unassigned
+		? SQ_ED_NODE_EXIT_ACTIVE  
+		: SQ_ED_NODE_EXIT_INACTIVE; 
 }
 
 void UQuestlineNode_Exit::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)

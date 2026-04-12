@@ -33,15 +33,18 @@
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Groups/QuestlineNode_GroupSignalSetter.h"
 #include "Nodes/Groups/QuestlineNode_GroupSignalGetter.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/UObjectToken.h"
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
+#include "Toolkit/QuestlineGraphEditor.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
+
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -65,6 +68,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     }
 
     bHasErrors = false;
+    Messages.Empty();
+    NumErrors = 0;
+    NumWarnings = 0;
     RootGraph = InGraph;
 
     // Derive the effective questline ID; designer override takes priority, asset name is the fallback
@@ -155,12 +161,12 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         if (Label.IsEmpty())
         {
-            AddError(FString::Printf(TEXT("[%s] A content node has an empty label. All Quest and Step nodes must have a label before compiling."), *TagPrefix));
+            AddError(FString::Printf(TEXT("[%s] A content node has an empty label. All Quest and Step nodes must have a label before compiling."), *TagPrefix), ContentNode);
             continue;
         }
         if (LabelMap.Contains(Label))
         {
-            AddError(FString::Printf(TEXT("[%s] Duplicate node label '%s'. Labels must be unique within a graph."), *TagPrefix, *Label));
+            AddError(FString::Printf(TEXT("[%s] Duplicate node label '%s'. Labels must be unique within a graph."), *TagPrefix, *Label), ContentNode);
             continue;
         }
         LabelMap.Add(Label, ContentNode);
@@ -182,6 +188,23 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
                     FQuestOutcomeNodeList& List = QuestInstance->EntryStepTagsByOutcome.FindOrAdd(Pair.Key);
                     List.NodeTags = MoveTemp(Pair.Value);
                 }
+                
+                // Register entry outcome fact tags for prerequisite expressions within the inner graph
+                for (UEdGraphNode* InnerNode : QuestEdNode->GetInnerGraph()->Nodes)
+                {
+                    if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
+                    {
+                        const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
+                        for (const FGameplayTag& OutcomeTag : EntryNode->IncomingOutcomeTags)
+                        {
+                            if (OutcomeTag.IsValid())
+                            {
+                                AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, OutcomeTag));
+                            }
+                        }
+                        break;
+                    }
+                }
             }            
             Instance = QuestInstance;
         }
@@ -189,7 +212,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         {
             if (!StepNode->ObjectiveClass)
             {
-                AddError(FString::Printf(TEXT("[%s] Step node '%s' has no Objective Class assigned."), *TagPrefix, *Label));
+                AddError(FString::Printf(TEXT("[%s] Step node '%s' has no Objective Class assigned."), *TagPrefix, *Label), ContentNode);
                 continue;
             }
             UQuestStep* StepInstance = NewObject<UQuestStep>(RootGraph);
@@ -209,14 +232,16 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
 
-        // Register outcome fact tags so prerequisite expressions can reference them as valid gameplay tags.
+        // Register outcome tags: both the raw Quest.Outcome.* tag (for tag-picker persistence across INI regeneration) and 
+        // the per-node fact tag Quest.State.<Node>.Outcome.<Leaf> (for prerequisite resolution).
         if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
             if (QuestStepNode->ObjectiveClass)
             {
-                const UQuestObjective* ObjCDO = QuestStepNode->ObjectiveClass->GetDefaultObject<UQuestObjective>();
-                for (const FGameplayTag& OutcomeTag : ObjCDO->GetPossibleOutcomes())
+                TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass);
+                for (const FGameplayTag& OutcomeTag : Outcomes)
                 {
+                    AllCompiledQuestTags.AddUnique(OutcomeTag.GetTagName());
                     AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
                 }
             }
@@ -236,7 +261,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         if (Setter->GroupName.IsNone())
         {
-            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupName set and will be skipped."), *TagPrefix));
+            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupName set and will be skipped."), *TagPrefix), Setter);
             continue;
         }
 
@@ -365,6 +390,33 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             }
         }
 
+        // Entry Deactivated pin: merge inner Entry node's deactivation routing into this Quest instance
+        if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
+        {
+            if (UEdGraph* InnerGraph = QuestEdNode->GetInnerGraph())
+            {
+                for (UEdGraphNode* InnerNode : InnerGraph->Nodes)
+                {
+                    if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
+                    {
+                        if (UEdGraphPin* DeactivatedPin = EntryNode->FindPin(TEXT("Deactivated"), EGPD_Output))
+                        {
+                            if (DeactivatedPin->LinkedTo.Num() > 0)
+                            {
+                                const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+                                const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
+                                TArray<FName> ActivateTags, DeactivateTags;
+                                ResolveDeactivatedPinToTags(DeactivatedPin, InnerPrefix, VisitedAssetPaths, ActivateTags, DeactivateTags);
+                                for (const FName& Tag : ActivateTags)  Instance->NextNodesOnDeactivation.Add(Tag);
+                                for (const FName& Tag : DeactivateTags) Instance->NextNodesToDeactivateOnDeactivation.Add(Tag);
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
         // Mark nodes whose output chain reaches an exit — they complete their parent graph
         {
             auto CheckExit = [this](UEdGraphPin* Pin) -> bool
@@ -482,7 +534,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
             }
             else if (!ExitNode->OutcomeTag.IsValid())
             {
-                AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix));
+                AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix), ExitNode);
             }
         }
 
@@ -491,21 +543,21 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         {
             if (LinkedNode->LinkedGraph.IsNull())
             {
-                AddWarning(FString::Printf(TEXT("[%s] A LinkedQuestline node has no graph assigned and will be skipped."), *TagPrefix));
+                AddWarning(FString::Printf(TEXT("[%s] A LinkedQuestline node has no graph assigned and will be skipped."), *TagPrefix), LinkedNode);
                 continue;
             }
 
             UQuestlineGraph* LinkedGraph = LinkedNode->LinkedGraph.LoadSynchronous();
             if (!LinkedGraph)
             {
-                AddError(FString::Printf(TEXT("[%s] Failed to load linked graph asset '%s'."), *TagPrefix, *LinkedNode->LinkedGraph.ToString()));
+                AddError(FString::Printf(TEXT("[%s] Failed to load linked graph asset '%s'."), *TagPrefix, *LinkedNode->LinkedGraph.ToString()), LinkedNode);
                 continue;
             }
 
             const FString LinkedPath = LinkedGraph->GetPathName();
             if (VisitedAssetPaths.Contains(LinkedPath))
             {
-                AddError(FString::Printf(TEXT("Cycle detected: '%s' is already in the current compile stack. Check linked questline references for circular dependencies."), *LinkedPath));
+                AddError(FString::Printf(TEXT("Cycle detected: '%s' is already in the current compile stack. Check linked questline references for circular dependencies."), *LinkedPath), LinkedNode);
                 continue;
             }
 
@@ -592,15 +644,23 @@ FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const F
     return FName(*FString::Printf(TEXT("Quest.%s.%s"), *TagPrefix, *SanitizedLabel));
 }
 
-void FQuestlineGraphCompiler::AddError(const FString& Message)
+void FQuestlineGraphCompiler::AddError(const FString& Message, const UEdGraphNode* Node)
 {
     bHasErrors = true;
-    UE_LOG(LogTemp, Error, TEXT("QuestlineGraphCompiler: %s"), *Message);
+    NumErrors++;
+    TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Error, FText::FromString(Message));
+    if (Node) AddNodeNavigationToken(Msg, Node);
+    Messages.Add(Msg);
+    UE_LOG(LogSimpleQuest, Error, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
-void FQuestlineGraphCompiler::AddWarning(const FString& Message)
+void FQuestlineGraphCompiler::AddWarning(const FString& Message, const UEdGraphNode* Node)
 {
-    UE_LOG(LogTemp, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
+    NumWarnings++;
+    TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning, FText::FromString(Message));
+    if (Node) AddNodeNavigationToken(Msg, Node);
+    Messages.Add(Msg);
+    UE_LOG(LogSimpleQuest, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
 void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
@@ -695,7 +755,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     {
         if (!Getter->GroupTag.IsValid())
         {
-            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Getter has no GroupTag set and will be skipped."), *TagPrefix));
+            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Getter has no GroupTag set and will be skipped."), *TagPrefix), Getter);
             return INDEX_NONE;
         }
         FPrerequisiteExpressionNode LeafNode;
@@ -704,6 +764,44 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
         return OutExpression.Nodes.Add(LeafNode);
     }
 
+    // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Active fact
+    if (Cast<UQuestlineNode_Entry>(Node))
+    {
+        const FName QuestTagName = FName(*(TEXT("Quest.") + TagPrefix));
+
+        if (OutputPin->PinName == TEXT("Any Outcome"))
+        {
+            // The parent quest's Active fact is always set when the inner graph is running
+            FPrerequisiteExpressionNode LeafNode;
+            LeafNode.Type = EPrerequisiteExpressionType::Leaf;
+            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTagName, UQuestStateTagUtils::Leaf_Active), false);
+            return OutExpression.Nodes.Add(LeafNode);
+        }
+
+        const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
+        if (!OutcomeTag.IsValid())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] Entry outcome pin '%s' does not resolve to a valid gameplay tag — prerequisite skipped."),
+                                       *TagPrefix, *OutputPin->PinName.ToString()), Node);
+            return INDEX_NONE;
+        }
+
+        // Warn if used in a top-level graph — entry outcome facts are only written when a Quest node receives an IncomingOutcomeTag
+        UObject* GraphOuter = Node->GetGraph() ? Node->GetGraph()->GetOuter() : nullptr;
+        if (!Cast<UQuestlineNode_Quest>(GraphOuter))
+        {
+            AddWarning(FString::Printf(TEXT("[%s] Entry outcome '%s' used as prerequisite in a top-level graph — this fact is only set when a parent Quest node is activated with a matching outcome."),
+                                       *TagPrefix, *OutcomeTag.ToString()), Node);
+        }
+
+        FPrerequisiteExpressionNode LeafNode;
+        LeafNode.Type = EPrerequisiteExpressionType::Leaf;
+        LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
+            UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, OutcomeTag), false);
+        return OutExpression.Nodes.Add(LeafNode);
+    }
+
+    
     // Content node: Success/Failure becomes single Leaf; Any Outcome builds OR(Succeeded, Failed)
     if (Cast<UQuestlineNode_ContentBase>(Node))
     {
@@ -850,5 +948,38 @@ void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(
             OutActivateTags.AddUnique(*UtilKey);
         }
     }
+}
+
+void FQuestlineGraphCompiler::AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node)
+{
+    TWeakObjectPtr<UEdGraphNode> WeakNode = const_cast<UEdGraphNode*>(Node);
+
+    Msg->AddToken(FActionToken::Create(
+        FText::FromString(Node->GetNodeTitle(ENodeTitleType::ListView).ToString()),
+        NSLOCTEXT("SimpleQuestEditor", "GoToNode", "Navigate to this node in the graph editor"),
+        FOnActionTokenExecuted::CreateLambda([WeakNode]()
+        {
+            UEdGraphNode* PinnedNode = WeakNode.Get();
+            if (!PinnedNode || !PinnedNode->GetGraph()) return;
+
+            // Walk outer chain to find the UQuestlineGraph asset
+            UQuestlineGraph* QuestlineGraph = nullptr;
+            for (UObject* Outer = PinnedNode->GetGraph(); Outer; Outer = Outer->GetOuter())
+            {
+                QuestlineGraph = Cast<UQuestlineGraph>(Outer);
+                if (QuestlineGraph) break;
+            }
+            if (!QuestlineGraph || !GEditor) return;
+
+            // Open the asset editor and navigate to the node
+            UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+            EditorSubsystem->OpenEditorForAsset(QuestlineGraph);
+
+            if (IAssetEditorInstance* EditorInstance = EditorSubsystem->FindEditorForAsset(QuestlineGraph, false))
+            {
+                static_cast<FQuestlineGraphEditor*>(EditorInstance)->NavigateToLocation(PinnedNode->GetGraph(), PinnedNode);
+            }
+        })
+    ));
 }
 

@@ -19,6 +19,12 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 
 	// Unconditional path — always fires when this graph activates
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
+
+	// Deactivation — fires when the parent Quest node is deactivated
+	if (bShowDeactivationPins)
+	{
+		CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
+	}
 }
 
 void UQuestlineNode_Entry::RefreshOutcomePins()
@@ -37,6 +43,28 @@ void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& Propert
 	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, IncomingOutcomeTags))
 	{
 		RefreshOutcomePins();
+	}
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, bShowDeactivationPins))
+	{
+		if (bShowDeactivationPins)
+		{
+			if (!FindPin(TEXT("Deactivated")))
+			{
+				CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
+			}
+		}
+		else
+		{
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
+			{
+				Pin->BreakAllPinLinks();
+				RemovePin(Pin);
+			}
+		}
+		if (UEdGraph* Graph = GetGraph())
+		{
+			Graph->NotifyGraphChanged();
+		}
 	}
 }
 

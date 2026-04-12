@@ -7,6 +7,7 @@
 #include "Modules/ModuleInterface.h"
 #include "NativeGameplayTags.h"
 
+struct FGraphPanelPinFactory;
 struct FGraphPanelPinConnectionFactory;
 class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
@@ -35,6 +36,8 @@ private:
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
+
+	//TSharedPtr<FGraphPanelPinFactory> QuestlineK2PinFactory;
 	
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
 

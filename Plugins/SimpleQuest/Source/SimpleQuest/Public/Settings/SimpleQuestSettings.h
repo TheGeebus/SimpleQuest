@@ -36,6 +36,12 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
 	FLinearColor EntryNodeColor = FLinearColor(0.7f, 0.15f, 0.1f);
+
+	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
+	FLinearColor ExitNodeActiveColor = FLinearColor(0.9f, 0.7f, 0.1f); 
+
+	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
+	FLinearColor ExitNodeInactiveColor = FLinearColor(0.6f, 0.6f, 0.6f);
 	
 	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
 	FLinearColor QuestNodeColor = FLinearColor(0.2f, 0.4f, 0.7f);

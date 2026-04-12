@@ -23,8 +23,8 @@
 		},
 		{
 			"Name": "SimpleQuestEditor",
-			"Type": "Editor",
-			"LoadingPhase": "PreDefault",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "Default",
 			"AdditionalDependencies": [
 				"Settings"
 			]
@@ -34,7 +34,11 @@
 		{
 			"Name": "SimpleCore",
 			"Enabled": true
-		}		
+		},
+		{
+			"Name": "GameplayTagsEditor",
+			"Enabled": true
+		}
 	],
 	"AdditionalPluginConfig": [
 		"SimpleQuest"

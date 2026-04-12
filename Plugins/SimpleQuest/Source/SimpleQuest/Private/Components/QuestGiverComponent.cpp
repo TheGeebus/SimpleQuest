@@ -9,7 +9,7 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/UQuestStateTagUtils.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestStartedEvent.h"

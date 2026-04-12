@@ -5,7 +5,7 @@
 
 #include "SimpleQuestLog.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_KillClass_Killed, "Quest.BuiltIn.KillClass.Outcome.Killed")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_KillClass_Killed, "Quest.Outcome.TargetKilled")
 
 void UKillClassQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
 {

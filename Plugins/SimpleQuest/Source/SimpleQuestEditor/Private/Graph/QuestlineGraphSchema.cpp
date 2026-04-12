@@ -38,10 +38,10 @@ public:
 	virtual void DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End, const FConnectionParams& Params) override
 	{		
 		const FVector2f SplineTangent = ComputeSplineTangent(Start, End);
-		const FVector2f P0Tangent = Params.StartTangent.IsNearlyZero() /* ? DirectionalSplineTangent : Params.StartTangent; */
+		const FVector2f P0Tangent = Params.StartTangent.IsNearlyZero() 
 			? ((Params.StartDirection == EGPD_Output) ? SplineTangent : -SplineTangent)
 			: Params.StartTangent;
-		const FVector2f P1Tangent = Params.EndTangent.IsNearlyZero() /* ? DirectionalSplineTangent : Params.EndTangent; */
+		const FVector2f P1Tangent = Params.EndTangent.IsNearlyZero() 
 			? ((Params.EndDirection == EGPD_Input) ? SplineTangent : -SplineTangent)
 			: Params.EndTangent;
 		
@@ -356,7 +356,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 		const bool bIsQuestOutcome = OutputPin->PinType.PinCategory == TEXT("QuestOutcome")
 			|| (OutputPin->PinType.PinCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
 
-		if (bIsQuestOutcome && TraversalPolicy->IsContentNode(OutputNode))
+		if (bIsQuestOutcome && (TraversalPolicy->IsContentNode(OutputNode) || Cast<const UQuestlineNode_Entry>(OutputNode)))
 		{
 			if (AnySourceReachesCategory(OutputPin, InputNode, TEXT("QuestDeactivate")))
 			{

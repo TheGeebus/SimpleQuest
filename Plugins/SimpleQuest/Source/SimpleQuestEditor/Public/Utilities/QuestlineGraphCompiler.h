@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Logging/TokenizedMessage.h"
 #include "Quests/PrerequisiteExpression.h"
 
 class UQuestlineGraph;
@@ -82,14 +83,19 @@ protected:
 	virtual FName MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const;
 
 	/** Logs a compile error and sets the internal error flag. */
-	void AddError(const FString& Message);
+	void AddError(const FString& Message, const UEdGraphNode* Node = nullptr);
 
 	/** Logs a compile warning without setting the internal error flag. */
-	void AddWarning(const FString& Message);
+	void AddWarning(const FString& Message, const UEdGraphNode* Node = nullptr);
 
 	/** Internal questline compiler error flag. Returned by the main Compile function. */
 	bool bHasErrors = false;
 
+	/** FMessageLog error logging messages accumulated during compilation */	
+	TArray<TSharedRef<FTokenizedMessage>> Messages;
+	int32 NumErrors = 0;
+	int32 NumWarnings = 0;
+	
 	/**
 	 * Accumulates all compiled node classes across the full recursive compilation run. This is the runtime data set, which inlines
 	 * linked questline graph nodes, effectively erasing them. Written to the top-level graph by Compile().
@@ -142,7 +148,15 @@ private:
 	 */
 	void ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags);
 
+	/** Appends a clickable action token that navigates to the given node in the graph editor. */
+	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
+
 	UQuestlineGraph* RootGraph = nullptr;
 
-
+public:
+	/** Accumulated compiler messages from the most recent Compile() call. */
+	const TArray<TSharedRef<FTokenizedMessage>>& GetMessages() const { return Messages; }
+	int32 GetNumErrors() const { return NumErrors; }
+	int32 GetNumWarnings() const { return NumWarnings; }
+	
 };

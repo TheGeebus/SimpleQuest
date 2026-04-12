@@ -54,4 +54,7 @@ protected:
 
 	/** Returns the leaf segment of a dotted tag name (everything after the last '.'). */
 	static FText GetTagLeafLabel(FName TagName);
+
+	/** Strips the Quest.Outcome. prefix, preserving any sub-hierarchy the designer authored. Falls back to GetTagLeafLabel. */
+	static FText GetOutcomeLabel(FName TagName);
 };

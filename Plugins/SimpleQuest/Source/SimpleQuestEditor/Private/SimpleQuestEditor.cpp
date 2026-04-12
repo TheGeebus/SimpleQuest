@@ -391,7 +391,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 		{
 			AllTags.Add(QuestTag);
 			CompiledTagSet.Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)	&& !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
 			{
 				auto AddState = [&](const FString& Leaf)
 				{
@@ -475,7 +475,7 @@ void FSimpleQuestEditor::RebuildNativeTags()
 					ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
 			{
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));

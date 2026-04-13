@@ -105,9 +105,9 @@ void FSimpleQuestEditor::StartupModule()
 	
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARModule.Get();
-	// Always subscribe — OnFilesLoaded fires when async loading finishes, whenever that is.
-	// If the AR is already done loading when we subscribe, the delegate will not fire, so
-	// we also call immediately as a fallback for that case.
+	
+	// Always subscribe — OnFilesLoaded fires when async loading finishes, whenever that is. If the AR is already done loading
+	// when we subscribe, the delegate will not fire, so we also call immediately as a fallback for that case.
 	AR.OnFilesLoaded().AddRaw(this, &FSimpleQuestEditor::RegisterTagsFromAssetRegistry);
 	AR.OnAssetRemoved().AddRaw(this, &FSimpleQuestEditor::OnAssetRemoved);
 	if (!AR.IsLoadingAssets())

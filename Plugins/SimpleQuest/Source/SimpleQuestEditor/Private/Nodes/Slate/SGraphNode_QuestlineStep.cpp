@@ -19,11 +19,14 @@
 #include "Widgets/Text/STextBlock.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Widgets/Layout/SSeparator.h"
+
 
 #define STEP_INFO_TEXT_COLOR	FLinearColor(0.9f, 0.9f, 0.9f)
-#define STEP_ACTOR_COLOR		FLinearColor(0.8f, 0.3f, 0.17f)
+#define STEP_ACTOR_COLOR		FLinearColor(0.8f, 0.5f, 0.17f)
 #define STEP_CLASS_COLOR		FLinearColor(0.2f, 0.325f, 0.85f)
 #define STEP_ELEMENT_COLOR		FLinearColor(0.25f, 0.8f, 0.20f)
+#define STEP_GIVER_COLOR		FLinearColor(0.75f, 0.4f, 1.f)
 
 #define LOCTEXT_NAMESPACE "SGraphNode_QuestlineStep"
 
@@ -37,14 +40,16 @@ void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNod
 
 void SGraphNode_QuestlineStep::UpdateGraphNode()
 {
-	// Query actors watching this step's tag — consumed by summary and expanded content
-	WatchingActorNames.Reset();
+	// Query givers and targets watching this step's tag — consumed by summary and expanded content
+	WatchingGiverNames.Reset();
+	WatchingTargetNames.Reset();
 	if (StepNode)
 	{
 		const FGameplayTag StepTag = USimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
 		if (StepTag.IsValid())
 		{
-			WatchingActorNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
+			WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
+			WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
 		}
 	}
 
@@ -166,7 +171,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		// Target summary (always visible when populated)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(FMargin(28.f, 3.f, 10.f, 1.f))
+		.Padding(FMargin(24.f, 3.f, 10.f, 1.f))
 		[
 			CreateTargetSummaryWidget()
 		]
@@ -179,11 +184,22 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		[
 			CreateNodeContentArea()
 		]
+		
+		// Separator between pins and expanded info
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(12.f, 2.f, 10.f, 4.f))
+		[
+			SNew(SSeparator)
+			.Thickness(2.f)
+			.ColorAndOpacity(FLinearColor::White)
+			.Visibility(this, &SGraphNode_QuestlineStep::GetExpandedContentVisibility)
+		]
 
 		// Expanded content (visibility toggled)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(FMargin(18.f, 2.f, 10.f, 0.f))
+		.Padding(FMargin(12.f, 2.f, 10.f, 0.f))
 		[
 			CreateExpandedContentWidget()
 		];
@@ -299,7 +315,8 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 {
 	if (!StepNode) return SNullWidget::NullWidget;
 
-	const int32 ActorCount = WatchingActorNames.Num();
+	const int32 ActorCount = WatchingTargetNames.Num();
+	const int32 GiverCount = WatchingGiverNames.Num();
 
 	int32 ClassCount = 0;
 	for (const TSubclassOf<AActor>& Class : StepNode->TargetClasses)
@@ -309,7 +326,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 
 	const int32 ElementCount = StepNode->NumberOfElements;
 
-	if (ActorCount == 0 && ClassCount == 0 && ElementCount <= 0)
+	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0)
 	{
 		return SNullWidget::NullWidget;
 	}
@@ -332,8 +349,22 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 		}
 	};
 
+	if (GiverCount > 0)
+	{
+		SummaryBox->AddSlot()
+			.AutoWidth()
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(FString::Printf(TEXT("Givers: %d"), GiverCount)))
+				.ColorAndOpacity(FSlateColor(STEP_GIVER_COLOR))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+			];
+		bNeedsSeparator = true;
+	}
+
 	if (ActorCount > 0)
 	{
+		AddSeparator();
 		SummaryBox->AddSlot()
 			.AutoWidth()
 			[
@@ -344,7 +375,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 			];
 		bNeedsSeparator = true;
 	}
-
+	
 	if (ClassCount > 0)
 	{
 		AddSeparator();
@@ -378,7 +409,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 {
 	// Actor names come from the live query computed in UpdateGraphNode()
-	const TArray<FString>& ActorNames = WatchingActorNames;
+	const TArray<FString>& ActorNames = WatchingTargetNames;
 
 	// ── Compute class names at construction time ──────────────
 	TArray<FString> ClassNames;
@@ -399,13 +430,26 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 	return SNew(SVerticalBox)
 		.Visibility(this, &SGraphNode_QuestlineStep::GetExpandedContentVisibility)
 
+		// Quest givers (expandable list)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.f, 1.f)
+		[
+			BuildTargetList(
+				LOCTEXT("GiversLabel", "Givers"),
+				WatchingGiverNames,
+				STEP_GIVER_COLOR,
+				[this]() { return StepNode && StepNode->bGiversExpanded; },
+				[this]() { if (StepNode) StepNode->bGiversExpanded = !StepNode->bGiversExpanded; })
+		]
+
 		// Target actors (expandable list)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(0.f, 1.f)
 		[
 			BuildTargetList(
-				LOCTEXT("ActorsLabel", "Actors"),
+				LOCTEXT("TargetActorsLabel", "Targets"),
 				ActorNames,
 				STEP_ACTOR_COLOR,
 				[this]() { return StepNode && StepNode->bTargetActorsExpanded; },
@@ -418,7 +462,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		.Padding(0.f, 1.f)
 		[
 			BuildTargetList(
-				LOCTEXT("ClassesLabel", "Classes"),
+				LOCTEXT("TargetClassesLabel", "Classes"),
 				ClassNames,
 				STEP_CLASS_COLOR,
 				[this]() { return StepNode && StepNode->bTargetClassesExpanded; },
@@ -428,7 +472,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Reward class
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
@@ -451,7 +495,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Prerequisite gate mode
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
@@ -474,15 +518,14 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Target vector (only when non-zero)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
 			{
 				if (!StepNode) return FText::GetEmpty();
 				const FVector& V = StepNode->TargetVector;
-				return FText::FromString(FString::Printf(
-					TEXT("Vector: (%.0f, %.0f, %.0f)"), V.X, V.Y, V.Z));
+				return FText::FromString(FString::Printf(TEXT("Vector: (%g, %g, %g)"), V.X, V.Y, V.Z));
 			})
 			.Visibility_Lambda([this]()
 			{
@@ -657,8 +700,36 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::BuildTargetList(const FText& Label
 			];
 	}
 
-	// ── Full row: Label | Items | Arrow ──
+	// ── Full row: Arrow | Label | Items ──
 	return SNew(SHorizontalBox)
+
+		// Expand/collapse arrow
+		+ SHorizontalBox::Slot()
+		.AutoWidth()
+		.VAlign(VAlign_Top)
+		.Padding(0.f, 0.f, 4.f, 0.f)
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), "NoBorder")
+			.ContentPadding(0)
+			.Cursor(EMouseCursor::Default)
+			.Visibility(Items.Num() > 1 ? EVisibility::Visible : EVisibility::Hidden)
+			.OnClicked_Lambda([ToggleExpanded]()
+			{
+				ToggleExpanded();
+				return FReply::Handled();
+			})
+			[
+				SNew(SImage)
+				.Image_Lambda([IsExpanded]() -> const FSlateBrush*
+				{
+					return FAppStyle::GetBrush(
+						IsExpanded() ? TEXT("TreeArrow_Expanded") : TEXT("TreeArrow_Collapsed"));
+				})
+				.ColorAndOpacity(FSlateColor(Color))
+				.DesiredSizeOverride(FVector2D(10.0, 10.0))
+			]
+		]
 
 		// Label — takes its natural text width
 		+ SHorizontalBox::Slot()
@@ -677,34 +748,6 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::BuildTargetList(const FText& Label
 		.VAlign(VAlign_Top)
 		[
 			ItemsColumn
-		]
-
-		// Expand/collapse arrow
-		+ SHorizontalBox::Slot()
-		.AutoWidth()
-		.VAlign(VAlign_Top)
-		.Padding(4.f, 0.f, 0.f, 0.f)
-		[
-			SNew(SButton)
-			.ButtonStyle(FAppStyle::Get(), "NoBorder")
-			.ContentPadding(0)
-			.Cursor(EMouseCursor::Default)
-			.Visibility(Items.Num() > 1 ? EVisibility::Visible : EVisibility::Collapsed)
-			.OnClicked_Lambda([ToggleExpanded]()
-			{
-				ToggleExpanded();
-				return FReply::Handled();
-			})
-			[
-				SNew(SImage)
-				.Image_Lambda([IsExpanded]() -> const FSlateBrush*
-				{
-					return FAppStyle::GetBrush(
-						IsExpanded() ? TEXT("TreeArrow_Expanded") : TEXT("TreeArrow_Collapsed"));
-				})
-				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
-				.DesiredSizeOverride(FVector2D(10.0, 10.0))
-			]
 		];
 }
 

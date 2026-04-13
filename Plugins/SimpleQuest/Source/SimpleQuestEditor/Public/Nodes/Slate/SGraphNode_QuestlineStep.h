@@ -45,8 +45,12 @@ private:
 	// Cached reference
 	UQuestlineNode_Step* StepNode = nullptr;
 
-	// Actors in loaded levels whose QuestTargetComponent watches this step's tag.
+	// Actors in all levels whose QuestTargetComponent watches this step's tag.
 	// Populated at the start of UpdateGraphNode() and consumed by summary + expanded content.
-	TArray<FString> WatchingActorNames;
+	TArray<FString> WatchingTargetNames;
+
+	// Actors in all levels whose QuestGiverComponent watches this step's tag.
+	// Populated at the start of UpdateGraphNode() and consumed by summary + expanded content.
+	TArray<FString> WatchingGiverNames;
 
 };

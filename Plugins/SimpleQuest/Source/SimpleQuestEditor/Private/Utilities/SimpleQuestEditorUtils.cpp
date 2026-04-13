@@ -12,6 +12,7 @@
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
 #include "Components/QuestTargetComponent.h"
+#include "Components/QuestGiverComponent.h"
 
 
 class UQuestlineNode_Exit;
@@ -102,52 +103,71 @@ TArray<FGameplayTag> USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 
 	return AllOutcomes;
 }
+
+namespace
+{
+	/** Walks the graph outer chain from any content node to reconstruct its compiled tag. */
+	FGameplayTag ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode)
+	{
+		if (!ContentNode) return FGameplayTag();
+
+		const FString NodeLabel = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+			ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+		if (NodeLabel.IsEmpty()) return FGameplayTag();
+
+		UEdGraph* CurrentGraph = ContentNode->GetGraph();
+		if (!CurrentGraph) return FGameplayTag();
+
+		TArray<FString> Segments;
+		Segments.Add(NodeLabel);
+
+		UObject* Outer = CurrentGraph->GetOuter();
+
+		while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+		{
+			const FString QuestLabel = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+				QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+			if (QuestLabel.IsEmpty()) return FGameplayTag();
+
+			Segments.Insert(QuestLabel, 0);
+
+			UEdGraph* QuestGraph = QuestNode->GetGraph();
+			if (!QuestGraph) return FGameplayTag();
+			Outer = QuestGraph->GetOuter();
+		}
+
+		const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+		if (!QuestlineAsset) return FGameplayTag();
+
+		const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
+		const FString QuestlineSegment = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+			QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
+		Segments.Insert(QuestlineSegment, 0);
+
+		const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
+
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructNodeTag: %s → %s"),
+			*ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
+
+		return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
+	}
+}
+
 FGameplayTag USimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
+{
+	return ReconstructNodeTagInternal(StepNode);
+}
+
+FGameplayTag USimpleQuestEditorUtilities::ReconstructParentQuestTag(const UQuestlineNode_Step* StepNode)
 {
 	if (!StepNode) return FGameplayTag();
 
-	const FString StepLabel = SanitizeQuestlineTagSegment(
-		StepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-	if (StepLabel.IsEmpty()) return FGameplayTag();
+	UEdGraph* StepGraph = StepNode->GetGraph();
+	if (!StepGraph) return FGameplayTag();
 
-	UEdGraph* CurrentGraph = StepNode->GetGraph();
-	if (!CurrentGraph) return FGameplayTag();
-
-	// Walk up the outer chain, collecting labels from any enclosing Quest nodes
-	TArray<FString> Segments;
-	Segments.Add(StepLabel);
-
-	UObject* Outer = CurrentGraph->GetOuter();
-
-	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
-	{
-		const FString QuestLabel = SanitizeQuestlineTagSegment(
-			QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-		if (QuestLabel.IsEmpty()) return FGameplayTag();
-
-		Segments.Insert(QuestLabel, 0);
-
-		UEdGraph* QuestGraph = QuestNode->GetGraph();
-		if (!QuestGraph) return FGameplayTag();
-		Outer = QuestGraph->GetOuter();
-	}
-
-	// The final outer should be the UQuestlineGraph asset
-	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
-	if (!QuestlineAsset) return FGameplayTag();
-
-	const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
-	const FString QuestlineSegment = SanitizeQuestlineTagSegment(
-		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
-	Segments.Insert(QuestlineSegment, 0);
-
-	// Build: Quest.<QuestlineID>.<QuestLabel>.<StepLabel>
-	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
-
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructStepTag: %s → %s"),
-		*StepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
-
-	return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
+	// The step must be inside a quest's inner graph for there to be a parent quest
+	UQuestlineNode_Quest* ParentQuest = Cast<UQuestlineNode_Quest>(StepGraph->GetOuter());
+	return ReconstructNodeTagInternal(ParentQuest);
 }
 
 TArray<FString> USimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGameplayTag& StepTag)
@@ -165,6 +185,32 @@ TArray<FString> USimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGa
 			if (const UQuestTargetComponent* Comp = It->FindComponentByClass<UQuestTargetComponent>())
 			{
 				if (Comp->GetStepTagsToWatch().HasTagExact(StepTag))
+				{
+					Names.Add(It->GetActorLabel());
+				}
+			}
+		}
+	}
+
+	Names.Sort();
+	return Names;
+}
+
+TArray<FString> USimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGameplayTag& QuestTag)
+{
+	TArray<FString> Names;
+	if (!QuestTag.IsValid() || !GEditor) return Names;
+
+	for (const FWorldContext& Context : GEditor->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (const UQuestGiverComponent* Comp = It->FindComponentByClass<UQuestGiverComponent>())
+			{
+				if (Comp->GetQuestTagsToGive().HasTagExact(QuestTag))
 				{
 					Names.Add(It->GetActorLabel());
 				}

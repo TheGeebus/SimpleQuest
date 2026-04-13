@@ -27,6 +27,7 @@
 
 
 class UQuestlineNode_Step;
+class UQuestlineNode_ContentBase;
 struct FGameplayTag;
 class UQuestObjective;
 class UK2Node_CompleteObjectiveWithOutcome; 
@@ -65,4 +66,15 @@ namespace USimpleQuestEditorUtilities
 	 */
 	TArray<FString> FindActorNamesWatchingTag(const FGameplayTag& StepTag);
 
+	/**
+	 * Reconstructs the compiled tag for the parent quest containing this step.
+	 * Returns invalid if the step is at the top level (no parent quest node).
+	 */
+	FGameplayTag ReconstructParentQuestTag(const UQuestlineNode_Step* StepNode);
+
+	/**
+	 * Finds actors in loaded editor worlds whose QuestGiverComponent gives the
+	 * given quest tag. Returns actor editor labels, sorted alphabetically.
+	 */
+	TArray<FString> FindActorNamesGivingTag(const FGameplayTag& QuestTag);	
 }

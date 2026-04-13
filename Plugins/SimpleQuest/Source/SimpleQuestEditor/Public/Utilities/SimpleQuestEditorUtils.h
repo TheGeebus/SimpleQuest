@@ -84,4 +84,17 @@ namespace USimpleQuestEditorUtilities
 	 */
 	int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 
+	/**
+	 * Returns the last-compiled gameplay tag for this step node via GUID lookup in CompiledNodes. The tag remains valid even
+	 * after a rename (INI preservation) — useful for preserving giver/target queries while awaiting recompile.
+	 */
+	FGameplayTag FindCompiledTagForNode(const UQuestlineNode_Step* StepNode);
+	
+	/**
+	 * Returns true if the step node's current label matches its last compiled tag. False if the node has been renamed since
+	 * last compile, or was never compiled.
+	 */
+	bool IsStepTagCurrent(const UQuestlineNode_Step* StepNode);
+
+
 }

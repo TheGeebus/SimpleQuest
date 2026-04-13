@@ -27,6 +27,7 @@
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "UObject/SavePackage.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 
@@ -303,6 +304,9 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     FMessageLog CompilerLog("QuestCompiler");
 	CompilerLog.NewPage(NSLOCTEXT("SimpleQuestEditor", "CompileAllPageLabel", "Compile All"));
 
+    int32 TotalRenames = 0;
+    int32 TotalRenamedActors = 0;
+
     for (const FAssetData& AssetData : QuestlineAssets)
     {
         if (SlowTask.ShouldCancel()) break;
@@ -318,6 +322,16 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
         if (Compiler->Compile(Graph))
         {
             ++SuccessCount;
+
+            // Propagate renames BEFORE broadcast — OnExternalCompile triggers RefreshAllNodeWidgets, which queries actors by compiled tag.
+            // Actors must already hold the new tags for those queries to succeed.
+            const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
+            if (DetectedRenames.Num() > 0)
+            {
+                TotalRenamedActors += USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
+                TotalRenames += DetectedRenames.Num();
+            }
+
             UPackage* Package = Graph->GetOutermost();
             Package->MarkPackageDirty();
             FSavePackageArgs Args;
@@ -358,6 +372,18 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
         Info.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
     }
+
+	// Tag rename toast
+	if (TotalRenames > 0)
+	{
+		FNotificationInfo RenameInfo(FText::Format(
+			NSLOCTEXT("SimpleQuestEditor", "CompileAll_TagRenames",
+				"{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
+			TotalRenames, TotalRenamedActors));
+		RenameInfo.ExpireDuration = 5.f;
+		RenameInfo.bUseSuccessFailIcons = true;
+		FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
+	}
 }
 
 void FSimpleQuestEditor::WriteCompiledTagsIni() const // this process is currently a bit inefficient; batch processing to be addressed on a future pass

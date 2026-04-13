@@ -20,6 +20,8 @@
 #include "PropertyCustomizationHelpers.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Layout/SSeparator.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
+
 
 
 #define STEP_INFO_TEXT_COLOR	FLinearColor(0.9f, 0.9f, 0.9f)
@@ -29,6 +31,12 @@
 #define STEP_GIVER_COLOR		FLinearColor(0.75f, 0.4f, 1.f)
 
 #define LOCTEXT_NAMESPACE "SGraphNode_QuestlineStep"
+
+static const FSlateBrush* GetStaleWarningBrush()
+{
+	static FSlateRoundedBoxBrush Brush(FLinearColor(1.f, 0.8f, 0.0f, .85f), 4.0f);
+	return &Brush;
+}
 
 void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNode_Step* InNode)
 {
@@ -40,21 +48,25 @@ void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNod
 
 void SGraphNode_QuestlineStep::UpdateGraphNode()
 {
-	// Query givers and targets watching this step's tag — consumed by summary and expanded content
 	bTagStale = false;
 	if (StepNode)
 	{
-		const FGameplayTag StepTag = USimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
-		if (StepTag.IsValid())
+		if (USimpleQuestEditorUtilities::IsStepTagCurrent(StepNode))
 		{
+			const FGameplayTag StepTag = USimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
 			WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
 			WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
 		}
 		else
 		{
-			// Tag not registered — node was renamed but not yet recompiled. Keep previous WatchingGiverNames/WatchingTargetNames
-			// so the display doesn't go blank.
 			bTagStale = true;
+			// Query using the old compiled tag — still valid in the dictionary and still referenced by actors until next compile propagates renames
+			const FGameplayTag CompiledTag = USimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
+			if (CompiledTag.IsValid())
+			{
+				WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
+				WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(CompiledTag);
+			}
 		}
 	}
 	else
@@ -186,21 +198,6 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			CreateTargetSummaryWidget()
 		]
 		
-		// Stale tag warning (visible after rename, before recompile)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(FMargin(28.f, 0.f, 10.f, 1.f))
-		[
-			SNew(STextBlock)
-			.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
-			.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.7f, 0.0f)))
-			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 8))
-			.Visibility_Lambda([this]()
-			{
-				return bTagStale ? EVisibility::Visible : EVisibility::Collapsed;
-			})
-		]
-
 		// Pin content area
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -210,6 +207,69 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			CreateNodeContentArea()
 		]
 		
+		// Stale tag warning bar (visible after rename, before recompile)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(4.f, 2.f, 4.f, 0.f))
+		[
+			SNew(SBorder)
+			.BorderImage(GetStaleWarningBrush())
+			.Padding(FMargin(8.f, 2.f))
+			.HAlign(HAlign_Center)
+			.Visibility_Lambda([this]()
+			{
+				return bTagStale ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.AutoWidth()
+				.VAlign(VAlign_Center)
+				.Padding(0.f, 1.f, 8.f, 1.f)
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot()
+					.Padding(FMargin(1.f, 0.5f, 0.f, 0.f))
+					[
+						SNew(SImage)
+						.Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
+						.DesiredSizeOverride(FVector2D(20.0, 20.0))
+						.ColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.65f))
+					]
+					+ SOverlay::Slot()
+					.Padding(FMargin(0.f, 0.f, 0.5f, 0.5f))
+					[
+						SNew(SImage)
+						.Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
+						.DesiredSizeOverride(FVector2D(20.0, 20.0))
+						.ColorAndOpacity(FLinearColor(1.f, 0.2f, 0.f, 1.f))
+					]
+				]
+				+ SHorizontalBox::Slot()
+				.VAlign(VAlign_Center)
+				[
+					SNew(SOverlay)
+							
+					+ SOverlay::Slot()
+					.Padding(FMargin(1.f, 1.f, 0.f, 0.f))
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 0.6f, 1.f)))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+					]
+							
+					+ SOverlay::Slot()
+					.Padding(FMargin(0.f, 0.f, 0.f, 0.f))
+					[
+						SNew(STextBlock)
+						.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.0f, 0.0f, 0.0f)))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+					]
+				]
+			]
+		]
 		// Separator between pins and expanded info
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -458,7 +518,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Quest givers (expandable list)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(0.f, 2.f)
 		[
 			BuildTargetList(
 				LOCTEXT("GiversLabel", "Givers"),
@@ -471,7 +531,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Target actors (expandable list)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(0.f, 2.f)
 		[
 			BuildTargetList(
 				LOCTEXT("TargetActorsLabel", "Targets"),
@@ -484,7 +544,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Target classes (expandable list)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(0.f, 1.f)
+		.Padding(0.f, 2.f)
 		[
 			BuildTargetList(
 				LOCTEXT("TargetClassesLabel", "Classes"),
@@ -497,7 +557,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Reward class
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
+		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
@@ -520,7 +580,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Prerequisite gate mode
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
+		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()
@@ -529,9 +589,9 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 				switch (StepNode->PrerequisiteGateMode)
 				{
 				case EPrerequisiteGateMode::GatesProgression:
-					return LOCTEXT("GateProgression", "Gate: Progression");
+					return LOCTEXT("GateProgression", "Prerequisite Gate Mode: Progression");
 				case EPrerequisiteGateMode::GatesCompletion:
-					return LOCTEXT("GateCompletion", "Gate: Completion");
+					return LOCTEXT("GateCompletion", "Prerequisite Gate Mode: Completion");
 				default:
 					return FText::GetEmpty();
 				}
@@ -543,7 +603,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		// Target vector (only when non-zero)
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.Padding(FMargin(14.f, 1.f, 0.f, 1.f))
+		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
 		[
 			SNew(STextBlock)
 			.Text_Lambda([this]()

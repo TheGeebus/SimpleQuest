@@ -13,6 +13,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Components/QuestTargetComponent.h"
 #include "Components/QuestGiverComponent.h"
+#include "Quests/QuestNodeBase.h"
 
 
 class UQuestlineNode_Exit;
@@ -262,5 +263,45 @@ int32 USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 	}
 
 	return ModifiedActors;
+}
+
+FGameplayTag USimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_Step* StepNode)
+{
+	if (!StepNode) return FGameplayTag();
+
+	UEdGraph* Graph = StepNode->GetGraph();
+	if (!Graph) return FGameplayTag();
+
+	UObject* Outer = Graph->GetOuter();
+	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+	{
+		UEdGraph* QuestGraph = QuestNode->GetGraph();
+		if (!QuestGraph) return FGameplayTag();
+		Outer = QuestGraph->GetOuter();
+	}
+
+	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	if (!QuestlineAsset) return FGameplayTag();
+
+	for (const auto& [TagName, NodeInstance] : QuestlineAsset->GetCompiledNodes())
+	{
+		if (NodeInstance && NodeInstance->GetQuestGuid() == StepNode->QuestGuid)
+		{
+			return FGameplayTag::RequestGameplayTag(TagName, false);
+		}
+	}
+
+	return FGameplayTag();
+}
+
+bool USimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
+{
+	const FGameplayTag CompiledTag = FindCompiledTagForNode(StepNode);
+	if (!CompiledTag.IsValid()) return false;
+
+	const FGameplayTag ReconstructedTag = ReconstructStepTag(StepNode);
+	if (!ReconstructedTag.IsValid()) return false;
+
+	return CompiledTag.GetTagName() == ReconstructedTag.GetTagName();
 }
 

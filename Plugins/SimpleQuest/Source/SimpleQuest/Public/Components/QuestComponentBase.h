@@ -8,6 +8,7 @@
 #include "QuestComponentBase.generated.h"
 
 
+struct FGameplayTag;
 class USignalSubsystem;
 class UQuestManagerSubsystem;
 
@@ -19,6 +20,12 @@ class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent, public IQues
 public:	
 	UQuestComponentBase();
 
+	/**
+	 * Applies tag renames to designer-configured tag containers. Called by the editor rename propagation system. Returns the
+	 * number of individual tag swaps performed.
+	 */
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames);
+	
 protected:
 	virtual void BeginPlay() override;
 

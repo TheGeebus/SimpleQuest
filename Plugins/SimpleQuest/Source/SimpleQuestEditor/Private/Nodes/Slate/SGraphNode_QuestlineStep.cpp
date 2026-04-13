@@ -41,8 +41,7 @@ void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNod
 void SGraphNode_QuestlineStep::UpdateGraphNode()
 {
 	// Query givers and targets watching this step's tag — consumed by summary and expanded content
-	WatchingGiverNames.Reset();
-	WatchingTargetNames.Reset();
+	bTagStale = false;
 	if (StepNode)
 	{
 		const FGameplayTag StepTag = USimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
@@ -51,6 +50,17 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
 			WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
 		}
+		else
+		{
+			// Tag not registered — node was renamed but not yet recompiled. Keep previous WatchingGiverNames/WatchingTargetNames
+			// so the display doesn't go blank.
+			bTagStale = true;
+		}
+	}
+	else
+	{
+		WatchingGiverNames.Reset();
+		WatchingTargetNames.Reset();
 	}
 
 	InputPins.Empty();
@@ -174,6 +184,21 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		.Padding(FMargin(24.f, 3.f, 10.f, 1.f))
 		[
 			CreateTargetSummaryWidget()
+		]
+		
+		// Stale tag warning (visible after rename, before recompile)
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(28.f, 0.f, 10.f, 1.f))
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
+			.ColorAndOpacity(FSlateColor(FLinearColor(1.0f, 0.7f, 0.0f)))
+			.Font(FCoreStyle::GetDefaultFontStyle("Italic", 8))
+			.Visibility_Lambda([this]()
+			{
+				return bTagStale ? EVisibility::Visible : EVisibility::Collapsed;
+			})
 		]
 
 		// Pin content area
@@ -369,7 +394,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 			.AutoWidth()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("Actors: %d"), ActorCount)))
+				.Text(FText::FromString(FString::Printf(TEXT("Targets: %d"), ActorCount)))
 				.ColorAndOpacity(FSlateColor(STEP_ACTOR_COLOR))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 			];

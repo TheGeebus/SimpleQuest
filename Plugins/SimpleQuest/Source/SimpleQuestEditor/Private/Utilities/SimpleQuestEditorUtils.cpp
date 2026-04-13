@@ -222,3 +222,45 @@ TArray<FString> USimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGame
 	return Names;
 }
 
+int32 USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0 || !GEditor) return 0;
+
+	int32 ModifiedActors = 0;
+
+	for (const FWorldContext& Context : GEditor->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* Actor = *It;
+			bool bActorModified = false;
+
+			TInlineComponentArray<UQuestComponentBase*> QuestComps;
+			Actor->GetComponents(QuestComps);
+
+			for (UQuestComponentBase* Comp : QuestComps)
+			{
+				const int32 SwapCount = Comp->ApplyTagRenames(Renames);
+				if (SwapCount > 0)
+				{
+					Comp->Modify();
+					bActorModified = true;
+					UE_LOG(LogSimpleQuest, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
+						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), SwapCount);
+				}
+			}
+
+			if (bActorModified)
+			{
+				Actor->MarkPackageDirty();
+				ModifiedActors++;
+			}
+		}
+	}
+
+	return ModifiedActors;
+}
+

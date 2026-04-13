@@ -98,6 +98,17 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
         }
     }
 
+    // ── Snapshot old GUID→Tag mapping for rename detection ────────
+    TMap<FGuid, FName> OldTagsByGuid;
+    for (const auto& [TagName, NodeInstance] : InGraph->CompiledNodes)
+    {
+        if (NodeInstance && NodeInstance->GetQuestGuid().IsValid())
+        {
+            OldTagsByGuid.Add(NodeInstance->GetQuestGuid(), TagName);
+        }
+    }
+    DetectedTagRenames.Empty();
+
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
     InGraph->EntryNodeTags.Empty();
@@ -124,7 +135,55 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
-    
+
+    // ── Detect renames via GUID bridge ────────────────────────────
+    for (const auto& [TagName, NodeInstance] : InGraph->CompiledNodes)
+    {
+        if (!NodeInstance || !NodeInstance->GetQuestGuid().IsValid()) continue;
+        if (const FName* OldTag = OldTagsByGuid.Find(NodeInstance->GetQuestGuid()))
+        {
+            if (*OldTag != TagName)
+            {
+                DetectedTagRenames.Add(*OldTag, TagName);
+            }
+        }
+    }
+
+    if (DetectedTagRenames.Num() > 0)
+    {
+        // Chain-collapse the persistent ledger
+        for (FQuestTagRename& Existing : InGraph->PendingTagRenames)
+        {
+            if (const FName* ChainedNew = DetectedTagRenames.Find(Existing.NewTag))
+            {
+                Existing.NewTag = *ChainedNew;
+            }
+        }
+
+        // Add new entries not already covered by chain collapse
+        TSet<FName> ExistingOldTags;
+        for (const FQuestTagRename& Existing : InGraph->PendingTagRenames)
+        {
+            ExistingOldTags.Add(Existing.OldTag);
+        }
+        for (const auto& [OldTag, NewTag] : DetectedTagRenames)
+        {
+            if (!ExistingOldTags.Contains(OldTag))
+            {
+                InGraph->PendingTagRenames.Add({ OldTag, NewTag });
+            }
+        }
+
+        // Prune identity entries (rename then rename back)
+        InGraph->PendingTagRenames.RemoveAll([](const FQuestTagRename& E)
+        {
+            return E.OldTag == E.NewTag;
+        });
+
+        UE_LOG(LogSimpleQuest, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
+            DetectedTagRenames.Num(), InGraph->PendingTagRenames.Num());
+    }
+
     RegisterCompiledTags(InGraph);
 
     return !bHasErrors;

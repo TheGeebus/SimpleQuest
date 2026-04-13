@@ -48,7 +48,9 @@ protected:
 	
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess=true))
 	FGameplayTagContainer EnabledQuestTags;
-	
+
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+
 private:
 	
 	//UFUNCTION(BlueprintCallable)

@@ -75,6 +75,57 @@ void UQuestWatcherComponent::WatchedQuestDeactivatedEvent(FGameplayTag Channel, 
 	}
 }
 
+int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
+{
+	int32 Count = 0;
+	for (const auto& [OldName, NewName] : Renames)
+	{
+		// WatchedStepTags
+		FGameplayTag FoundOld;
+		for (const FGameplayTag& Tag : WatchedStepTags.GetGameplayTagArray())
+		{
+			if (Tag.GetTagName() == OldName)
+			{
+				FoundOld = Tag;
+				break;
+			}
+		}
+		if (FoundOld.IsValid())
+		{
+			WatchedStepTags.RemoveTag(FoundOld);
+			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
+			if (NewTag.IsValid())
+			{
+				WatchedStepTags.AddTag(NewTag);
+			}
+			Count++;
+		}
+
+		// WatchedTags TMap keys — find old tag among keys
+		FGameplayTag FoundMapKey;
+		for (const auto& [Key, Value] : WatchedTags)
+		{
+			if (Key.GetTagName() == OldName)
+			{
+				FoundMapKey = Key;
+				break;
+			}
+		}
+		if (FoundMapKey.IsValid())
+		{
+			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
+			if (NewTag.IsValid())
+			{
+				FWatchedQuestEventSettings Moved = MoveTemp(WatchedTags[FoundMapKey]);
+				WatchedTags.Remove(FoundMapKey);
+				WatchedTags.Add(NewTag, MoveTemp(Moved));
+				Count++;
+			}
+		}
+	}
+	return Count;
+}
+
 void UQuestWatcherComponent::RegisterQuestWatcher()
 {
     if (!SignalSubsystem)

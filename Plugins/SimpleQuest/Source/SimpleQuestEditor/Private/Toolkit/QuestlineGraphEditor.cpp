@@ -20,6 +20,7 @@
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestNodeBase.h"
 #include "Toolkit/QuestlineOutlinerPanel.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Navigation/SBreadcrumbTrail.h"
 
 
@@ -312,6 +313,14 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
     const bool bSuccess = Compiler->Compile(QuestlineGraph);
 
+    // Apply detected tag renames to loaded worlds
+    int32 RenamedActors = 0;
+    const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
+    if (bSuccess && DetectedRenames.Num() > 0)
+    {
+        RenamedActors = USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
+    }
+    
     // Flush compiler messages to the Quest Compiler MessageLog panel
     if (Compiler->GetMessages().Num() > 0)
     {
@@ -335,6 +344,18 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         Info.ExpireDuration = 3.f;
         Info.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+    }
+
+    // Tag rename toast message
+    if (DetectedRenames.Num() > 0)
+    {
+        FNotificationInfo RenameInfo(FText::Format(
+            NSLOCTEXT("SimpleQuestEditor", "TagRenames",
+                "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
+            DetectedRenames.Num(), RenamedActors));
+        RenameInfo.ExpireDuration = 5.f;
+        RenameInfo.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
     // Rebuild node widgets — live queries (watching actors) depend on compiled tags. Must set CompileStatus AFTER this:

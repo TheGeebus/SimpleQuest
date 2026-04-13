@@ -127,6 +127,9 @@ protected:
 	
 	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
 
+	/** Renames detected during the most recent Compile(), keyed as FName (old → new). */
+	TMap<FName, FName> DetectedTagRenames;
+	
 private:
 
 	/**
@@ -158,5 +161,6 @@ public:
 	const TArray<TSharedRef<FTokenizedMessage>>& GetMessages() const { return Messages; }
 	int32 GetNumErrors() const { return NumErrors; }
 	int32 GetNumWarnings() const { return NumWarnings; }
+	const TMap<FName, FName>& GetDetectedRenames() const { return DetectedTagRenames; }
 	
 };

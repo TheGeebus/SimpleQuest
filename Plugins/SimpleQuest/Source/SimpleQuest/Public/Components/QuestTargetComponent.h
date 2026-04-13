@@ -52,6 +52,8 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
 	FGameplayTagContainer StepTagsToWatch;
 
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+	
 private:
 	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
 	

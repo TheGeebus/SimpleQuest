@@ -21,3 +21,9 @@ void UQuestComponentBase::BeginPlay()
 	}
 	ensureMsgf(SignalSubsystem, TEXT("UQuestComponentBase: SignalSubsystem unavailable on %s — is SimpleCore loaded?"), *GetOwner()->GetActorNameOrLabel());
 }
+
+int32 UQuestComponentBase::ApplyTagRenames(const TMap<FName, FName>& Renames)
+{
+	return 0;
+}
+

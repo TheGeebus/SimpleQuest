@@ -71,6 +71,8 @@ protected:
 	virtual void WatchedQuestCompletedEvent(FGameplayTag Channel, const FQuestEndedEvent& QuestEndedEvent);
 	virtual void WatchedQuestDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& QuestDeactivatedEvent);
 
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+	
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestWatcher();	
 private:

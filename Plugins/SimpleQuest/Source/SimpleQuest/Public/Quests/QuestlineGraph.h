@@ -9,6 +9,18 @@
 class UQuestNodeBase;
 class UEdGraph;
 
+USTRUCT()
+struct FQuestTagRename
+{
+    GENERATED_BODY()
+    
+    UPROPERTY()
+    FName OldTag;
+    
+    UPROPERTY()
+    FName NewTag;
+};
+
 /**
  * Authoring container for a questline, a directed graph of quest and step nodes. Owns a UEdGraph (QuestlineEdGraph) containing
  * the visual layout, and holds the compiler output used at runtime: entry node tags and the full node tag-to-class registry
@@ -30,6 +42,12 @@ private:
      */
     UPROPERTY()
     TArray<FName> CompiledQuestTags;
+
+    /**
+     * Tag renames detected during compilation, persisted for deferred propagation to unloaded actors. Chain-collapsed across compiles.
+     */
+    UPROPERTY()
+    TArray<FQuestTagRename> PendingTagRenames;
 
     /**
      * Tags of all content nodes directly reachable from this questline's Entry node. Populated by the compiler. Used by the
@@ -69,6 +87,8 @@ public:
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
     const FString& GetQuestlineID() const { return QuestlineID; }
+    const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
+    void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
 
 
     // Editor-only: the actual UEdGraph object is only needed in the editor. The data it represents is compiled in-editor for use at runtime

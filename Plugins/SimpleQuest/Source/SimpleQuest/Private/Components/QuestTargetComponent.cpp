@@ -74,6 +74,34 @@ void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQue
     }
 }
 
+int32 UQuestTargetComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
+{
+    int32 Count = 0;
+    for (const auto& [OldName, NewName] : Renames)
+    {
+        FGameplayTag FoundOld;
+        for (const FGameplayTag& Tag : StepTagsToWatch.GetGameplayTagArray())
+        {
+            if (Tag.GetTagName() == OldName)
+            {
+                FoundOld = Tag;
+                break;
+            }
+        }
+        if (FoundOld.IsValid())
+        {
+            StepTagsToWatch.RemoveTag(FoundOld);
+            FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
+            if (NewTag.IsValid())
+            {
+                StepTagsToWatch.AddTag(NewTag);
+            }
+            Count++;
+        }
+    }
+    return Count;
+}
+
 void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
 {
     IQuestTargetInterface::SetActivated_Implementation(bIsActivated);

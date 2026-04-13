@@ -33,13 +33,13 @@ public:
 	virtual void SetActivated_Implementation(bool bIsActivated) override;
 
 	UFUNCTION(BlueprintCallable)
-	virtual void GetTriggered();
+	virtual void SendTriggeredEvent();
 	
 	UFUNCTION(BlueprintCallable)
-	virtual void GetKilled(AActor* KillerActor);
+	virtual void SendKilledEvent(AActor* KillerActor);
 
 	UFUNCTION(BlueprintCallable)
-	virtual void GetInteracted(AActor* InteractingActor);
+	virtual void SendInteractedEvent(AActor* InteractingActor);
 
 protected:
 	virtual void BeginPlay() override;
@@ -57,4 +57,8 @@ private:
 	
 	// Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
+
+public:
+	const FGameplayTagContainer& GetStepTagsToWatch() const { return StepTagsToWatch; }
+
 };

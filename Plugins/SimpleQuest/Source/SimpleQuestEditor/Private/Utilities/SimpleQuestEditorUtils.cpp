@@ -6,8 +6,16 @@
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Objectives/QuestObjective.h"
+#include "Editor.h"
+#include "EngineUtils.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Components/QuestTargetComponent.h"
+
 
 class UQuestlineNode_Exit;
+
 
 FString USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
 {
@@ -15,7 +23,9 @@ FString USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& 
 	for (TCHAR& Ch : Result)
 	{
 		if (!FChar::IsAlnum(Ch) && Ch != TEXT('_'))
+		{
 			Ch = TEXT('_');
+		}
 	}
 	return Result;
 }
@@ -41,43 +51,128 @@ TArray<FGameplayTag> USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 {
 	if (!ObjectiveClass) return {};
 
-	// Scan Blueprint graphs for K2 completion nodes
+	TArray<FGameplayTag> AllOutcomes;
+
+	// ── Source 1: K2 node scan (Blueprint graphs) ──
 	if (UBlueprint* Blueprint = Cast<UBlueprint>(ObjectiveClass->ClassGeneratedBy))
 	{
-		TArray<FGameplayTag> Discovered;
-
 		TArray<UEdGraph*> AllGraphs;
 		Blueprint->GetAllGraphs(AllGraphs);
-
 		for (UEdGraph* Graph : AllGraphs)
 		{
 			TArray<UK2Node_CompleteObjectiveWithOutcome*> Nodes;
 			Graph->GetNodesOfClass(Nodes);
-
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				FGameplayTag Tag = Node->OutcomeTag;
-				if (Tag.IsValid())
+				if (Node->OutcomeTag.IsValid())	AllOutcomes.AddUnique(Node->OutcomeTag);
+			}
+		}
+	}
+
+	// ── Source 2: UPROPERTY reflection scan (ObjectiveOutcome meta) ──
+	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
+	{
+		for (TFieldIterator<FStructProperty> PropIt(ObjectiveClass); PropIt; ++PropIt)
+		{
+			if (PropIt->Struct == FGameplayTag::StaticStruct()
+				&& PropIt->HasMetaData(TEXT("ObjectiveOutcome")))
+			{
+				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
+				if (Tag && Tag->IsValid())
 				{
-					Discovered.AddUnique(Tag);
+					AllOutcomes.AddUnique(*Tag);
 				}
 			}
 		}
 
-		// K2 nodes are authoritative when present; fall through only if none found
-		if (Discovered.Num() > 0)
+		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
+		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("DiscoverObjectiveOutcomes: Found %d outcome(s) via K2 nodes in %s"),
-				Discovered.Num(), *ObjectiveClass->GetName());
-			return Discovered;
+			if (Tag.IsValid())
+			{
+				AllOutcomes.AddUnique(Tag);
+			}
 		}
 	}
 
-	// Fallback: CDO's manually-set PossibleOutcomes (C++ classes, legacy Blueprints)
-	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
+	if (AllOutcomes.Num() > 0)
 	{
-		return CDO->GetPossibleOutcomes();
+		UE_LOG(LogSimpleQuest, Verbose,	TEXT("DiscoverObjectiveOutcomes: Found %d outcome(s) for %s"),	AllOutcomes.Num(), *ObjectiveClass->GetName());
 	}
 
-	return {};
+	return AllOutcomes;
 }
+FGameplayTag USimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
+{
+	if (!StepNode) return FGameplayTag();
+
+	const FString StepLabel = SanitizeQuestlineTagSegment(
+		StepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	if (StepLabel.IsEmpty()) return FGameplayTag();
+
+	UEdGraph* CurrentGraph = StepNode->GetGraph();
+	if (!CurrentGraph) return FGameplayTag();
+
+	// Walk up the outer chain, collecting labels from any enclosing Quest nodes
+	TArray<FString> Segments;
+	Segments.Add(StepLabel);
+
+	UObject* Outer = CurrentGraph->GetOuter();
+
+	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+	{
+		const FString QuestLabel = SanitizeQuestlineTagSegment(
+			QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+		if (QuestLabel.IsEmpty()) return FGameplayTag();
+
+		Segments.Insert(QuestLabel, 0);
+
+		UEdGraph* QuestGraph = QuestNode->GetGraph();
+		if (!QuestGraph) return FGameplayTag();
+		Outer = QuestGraph->GetOuter();
+	}
+
+	// The final outer should be the UQuestlineGraph asset
+	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	if (!QuestlineAsset) return FGameplayTag();
+
+	const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
+	const FString QuestlineSegment = SanitizeQuestlineTagSegment(
+		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
+	Segments.Insert(QuestlineSegment, 0);
+
+	// Build: Quest.<QuestlineID>.<QuestLabel>.<StepLabel>
+	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructStepTag: %s → %s"),
+		*StepNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
+
+	return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
+}
+
+TArray<FString> USimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGameplayTag& StepTag)
+{
+	TArray<FString> Names;
+	if (!StepTag.IsValid() || !GEditor) return Names;
+
+	for (const FWorldContext& Context : GEditor->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			if (const UQuestTargetComponent* Comp = It->FindComponentByClass<UQuestTargetComponent>())
+			{
+				if (Comp->GetStepTagsToWatch().HasTagExact(StepTag))
+				{
+					Names.Add(It->GetActorLabel());
+				}
+			}
+		}
+	}
+
+	Names.Sort();
+	return Names;
+}
+

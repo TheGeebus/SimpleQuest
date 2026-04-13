@@ -80,7 +80,7 @@ void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
     OnQuestTargetActivated.Broadcast(bIsActivated);
 }
 
-void UQuestTargetComponent::GetTriggered()
+void UQuestTargetComponent::SendTriggeredEvent()
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
@@ -92,7 +92,7 @@ void UQuestTargetComponent::GetTriggered()
     }
 }
 
-void UQuestTargetComponent::GetKilled(AActor* KillerActor)
+void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
@@ -103,7 +103,7 @@ void UQuestTargetComponent::GetKilled(AActor* KillerActor)
     }
 }
 
-void UQuestTargetComponent::GetInteracted(AActor* InteractingActor)
+void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;

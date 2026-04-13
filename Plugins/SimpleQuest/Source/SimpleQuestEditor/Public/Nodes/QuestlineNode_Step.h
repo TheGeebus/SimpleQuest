@@ -9,6 +9,7 @@
 class UQuestObjective;
 class UQuestReward;
 
+
 UCLASS()
 class SIMPLEQUESTEDITOR_API UQuestlineNode_Step : public UQuestlineNode_ContentBase
 {
@@ -45,5 +46,14 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Step")
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
-	
+
+	/** Transient widget state — preserves expanded/collapsed detail view across widget rebuilds. Not serialized. */
+	UPROPERTY(Transient)
+	bool bStepDetailExpanded = false;
+
+	UPROPERTY(Transient)
+	bool bTargetActorsExpanded = false;
+
+	UPROPERTY(Transient)
+	bool bTargetClassesExpanded = false;
 };

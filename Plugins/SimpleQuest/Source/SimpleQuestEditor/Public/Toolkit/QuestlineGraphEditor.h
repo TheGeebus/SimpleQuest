@@ -58,6 +58,10 @@ private:
 	TSharedRef<SWidget> GenerateCompileOptionsMenu();
 
 	void OnExternalCompile(const FString& PackagePath, bool bSuccess);
+
+	/** Notifies all graphs in the questline (top-level + inner) to rebuild node widgets. */
+	void RefreshAllNodeWidgets();
+	
 	FDelegateHandle ExternalCompileHandle;
 
 	EQuestlineCompileStatus CompileStatus = EQuestlineCompileStatus::Unknown;

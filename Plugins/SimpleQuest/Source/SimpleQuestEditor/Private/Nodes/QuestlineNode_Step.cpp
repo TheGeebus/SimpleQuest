@@ -27,6 +27,12 @@ void UQuestlineNode_Step::PostEditChangeProperty(FPropertyChangedEvent& Property
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	RefreshOutcomePins();
+
+	// Always rebuild the custom Slate widget — target lists, border, etc. may depend on properties that don't affect pins.
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
 }
 
 void UQuestlineNode_Step::RefreshOutcomePins()

@@ -19,5 +19,10 @@ class SIMPLEQUEST_API UKillClassQuestObjective : public UQuestObjective
 
 public:
 	virtual void TryCompleteObjective_Implementation(UObject* InTargetObject) override;
+	virtual TArray<FGameplayTag> GetPossibleOutcomes() const override;
+	
+private:
+	UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))
+	FGameplayTag TargetKilledOutcomeTag;
 
 };

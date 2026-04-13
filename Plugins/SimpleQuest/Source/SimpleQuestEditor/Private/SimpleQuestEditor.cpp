@@ -24,6 +24,8 @@
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "UObject/SavePackage.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
@@ -70,6 +72,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		if (UQuestlineNode_Knot* KnotNode = Cast<UQuestlineNode_Knot>(Node))
 		{
 			return SNew(SGraphNodeKnot, KnotNode);
+		}
+		if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(Node))
+		{
+			return SNew(SGraphNode_QuestlineStep, StepNode);
 		}
 		return nullptr;
 	}
@@ -354,7 +360,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     }
 }
 
-void FSimpleQuestEditor::WriteCompiledTagsIni() const
+void FSimpleQuestEditor::WriteCompiledTagsIni() const // this process is currently a bit inefficient; batch processing to be addressed on a future pass
 {
 	const FString IniPath = FPaths::ConvertRelativePathToFull(
 		FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));

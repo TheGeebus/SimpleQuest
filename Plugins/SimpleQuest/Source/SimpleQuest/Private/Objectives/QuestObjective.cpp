@@ -23,6 +23,11 @@ void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPt
 	SetCurrentElements(0);
 }
 
+TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
+{
+	return PossibleOutcomes;
+}
+
 /*
 bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
 {

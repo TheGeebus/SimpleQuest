@@ -337,6 +337,10 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
+    // Rebuild node widgets — live queries (watching actors) depend on compiled tags. Must set CompileStatus AFTER this:
+    // NotifyGraphChanged fires OnGraphChanged which resets status to Unknown.
+    if (bSuccess) RefreshAllNodeWidgets();
+
     CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
     if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
 }
@@ -417,8 +421,29 @@ void FQuestlineGraphEditor::OnExternalCompile(const FString& PackagePath, bool b
     if (!QuestlineGraph) return;
     if (QuestlineGraph->GetOutermost()->GetName() != PackagePath) return;
 
+    if (bSuccess) RefreshAllNodeWidgets();
+
     CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
     if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
+
+}
+
+void FQuestlineGraphEditor::RefreshAllNodeWidgets()
+{
+    if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) return;
+
+    QuestlineGraph->QuestlineEdGraph->NotifyGraphChanged();
+
+    for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
+    {
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+        {
+            if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
+            {
+                InnerGraph->NotifyGraphChanged();
+            }
+        }
+    }
 }
 
 FText FQuestlineGraphEditor::GetGraphDisplayName(UEdGraph* Graph) const

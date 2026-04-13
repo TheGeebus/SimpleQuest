@@ -26,6 +26,7 @@
 #define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestSettings>()->GraphOutcomeNodeColor)
 
 
+class UQuestlineNode_Step;
 struct FGameplayTag;
 class UQuestObjective;
 class UK2Node_CompleteObjectiveWithOutcome; 
@@ -47,9 +48,21 @@ namespace USimpleQuestEditorUtilities
 	TArray<FName> CollectExitOutcomeTagNames(const UEdGraph* Graph);
 
 	/**
-	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint
-	 * graphs for UK2Node_CompleteObjectiveWithOutcome instances; falls back to the CDO's
-	 * PossibleOutcomes array for C++ classes or Blueprints without completion nodes.
+	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint graphs for UK2Node_CompleteObjectiveWithOutcome
+	 * instances; falls back to the CDO's PossibleOutcomes array for C++ classes or Blueprints without completion nodes.
 	 */
 	TArray<FGameplayTag> DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass);
+
+	/**
+	 * Reconstructs the compiled gameplay tag for a step node by walking the graph hierarchy (Step → Quest → QuestlineGraph).
+	 * Returns an invalid tag if the graph hasn't been compiled yet or the step label is empty.
+	 */
+	FGameplayTag ReconstructStepTag(const UQuestlineNode_Step* StepNode);
+
+	/**
+	 * Finds actors in loaded editor worlds whose QuestTargetComponent watches the given step tag. Returns actor editor labels,
+	 * sorted alphabetically.
+	 */
+	TArray<FString> FindActorNamesWatchingTag(const FGameplayTag& StepTag);
+
 }

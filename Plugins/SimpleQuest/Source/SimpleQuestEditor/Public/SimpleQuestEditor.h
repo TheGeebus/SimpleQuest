@@ -36,8 +36,6 @@ private:
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
-
-	//TSharedPtr<FGraphPanelPinFactory> QuestlineK2PinFactory;
 	
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
 

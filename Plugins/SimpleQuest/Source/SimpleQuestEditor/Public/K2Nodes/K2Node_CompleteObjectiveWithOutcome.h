@@ -12,7 +12,7 @@
  * Blueprint node that completes the owning UQuestObjective with a designer-specified outcome tag.
  *
  * All instances of this node in an objective Blueprint are automatically discovered and reflected as outcome output pins
- * on the corresponding Step node in the questline graph editor. This eliminates manual synchronization between the PossibleOutcomes
+ * on the corresponding Step node in the questline graph editor. This eliminates manual synchronization between outcome definitions
  * CDO array and the actual completion call sites.
  *
  * Only appears in UQuestObjective subclass Blueprints.

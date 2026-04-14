@@ -18,6 +18,6 @@ void UGoToQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetO
 
 void UGoToQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired, bool bUseCounter)
 {
-	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClasses, NumElementsRequired, bUseCounter);
+	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClasses, NumElementsRequired);
 	EnableQuestTargetActors(true);
 }

@@ -21,9 +21,3 @@ void UKillClassQuestObjective::TryCompleteObjective_Implementation(UObject* InTa
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("UKillClassQuestObjective::TryCompleteObjective_Implementation did not complete: %s"), *GetFullName());
 }
 
-TArray<FGameplayTag> UKillClassQuestObjective::GetPossibleOutcomes() const
-{
-	TArray<FGameplayTag> Outcomes;
-	Outcomes.Add(Tag_Outcome_KillClass_Killed);
-	return Outcomes;
-}

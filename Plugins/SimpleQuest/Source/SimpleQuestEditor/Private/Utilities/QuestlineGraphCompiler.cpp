@@ -121,7 +121,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     UtilityNodeKeyMap.Empty();
     RootGraph = InGraph;
 
-    // Refresh outcome pins on all step nodes so that changes to PossibleOutcomes on an objective class are reflected without
+    // Refresh outcome pins on all step nodes so that changes to outcomes on an objective class are reflected without
     // the designer having to touch ObjectiveClass again.
     for (UEdGraphNode* Node : InGraph->QuestlineEdGraph->Nodes)
     {

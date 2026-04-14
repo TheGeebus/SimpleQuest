@@ -13,19 +13,18 @@ void UQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObjec
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired, bool bUseCounter)
+void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
 	TargetActors = InTargetActors;
 	TargetClasses = InTargetClasses;
 	MaxElements = NumElementsRequired;
-	bUseQuestCounter = bUseCounter;
 	SetCurrentElements(0);
 }
 
 TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 {
-	return PossibleOutcomes;
+	return {};
 }
 
 /*

@@ -51,7 +51,7 @@ namespace USimpleQuestEditorUtilities
 
 	/**
 	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint graphs for UK2Node_CompleteObjectiveWithOutcome
-	 * instances; falls back to the CDO's PossibleOutcomes array for C++ classes or Blueprints without completion nodes.
+	 * instances; falls back to the CDO's GetPossibleOutcomes() virtual for classes where neither K2 nodes nor ObjectiveOutcome UPROPERTYs apply.
 	 */
 	TArray<FGameplayTag> DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass);
 

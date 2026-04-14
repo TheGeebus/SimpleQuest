@@ -11,6 +11,10 @@ class IQuestTargetInterface;
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
+ *
+ * Outcome tags are discovered automatically by the editor from two primary sources on subclasses:
+ * K2 node scan (Blueprint) and UPROPERTY reflection (C++). A virtual fallback (GetPossibleOutcomes)
+ * is available for programmatic or dynamic cases. See GetPossibleOutcomes for full documentation.
  */
 UCLASS(Blueprintable)
 class SIMPLEQUEST_API UQuestObjective : public UObject
@@ -34,10 +38,9 @@ public:
 	 * @param InTargetActors a set of specific target actors in the scene
 	 * @param InTargetClasses a set of classes to target (as for kills or pickups)
 	 * @param NumElementsRequired the number of elements required to complete the step
-	 * @param bUseCounter use a quest counter widget to track the status of this step
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0, bool bUseCounter = false);
+	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
 	
 	/**
 	 * Determine if the InTargetObject is relevant to the completion of this quest and logic should proceed to TryCompleteObjective.
@@ -72,21 +75,9 @@ public:
 	void TryCompleteObjective(UObject* InTargetObject);
 
 	/**
-	 * Override and return any native gameplay tags that should appear as Outcome pins on a Quest Step node hosting
-	 * this objective. This is one of three additive methods to define the possible outcomes for an objective.
-	 *
-	 * - Refer to UQuestObjective::PossibleOutcomes for additional documentation.
-	 *
-	 * @see UQuestObjective::PossibleOutcomes
-	 */
-	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
-	
-protected:
-
-	/**
 	 * Outcome Tag Discovery																						<br>
 	 * ---------------------																						<br>
-	 * The editor discovers outcome tags from three additive sources. All results merge
+	 * The editor discovers outcome tags from two primary sources. All results merge
 	 * into a single deduplicated set — pins on the Step node reflect the union.
 	 *
 	 * 1. K2 Node Scan (Blueprint subclasses):																		
@@ -117,21 +108,20 @@ protected:
 	 *    - ObjectiveOutcome marks the property for discovery — no value needed,
 	 *      presence is sufficient.
 	 *
-	 * 3. Virtual GetPossibleOutcomes (programmatic / legacy):
-	 *    - Override GetPossibleOutcomes() to return outcome tags computed at CDO construction time.
-	 *    - Use this for dynamic or configuration-driven outcomes that cannot be expressed as
-	 *      individual UPROPERTY members.																
-	 *    - Tags returned here are not constrained to the Quest.Outcome namespace.
+	 * Both sources are additive across the inheritance chain. A Blueprint subclass of a
+	 * C++ class that declares ObjectiveOutcome properties will produce pins for both sets combined.
 	 *
-	 * All three sources are additive across the inheritance chain. A Blueprint subclass of a
-	 * C++ class that declares ObjectiveOutcome properties and overrides GetPossibleOutcomes()
-	 * will produce pins for all three sets combined.
+	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
+	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes
+	 * computed at CDO construction time. Tags returned here are not constrained to the
+	 * Quest.Outcome namespace. Base implementation returns an empty array.
 	 *
 	 * @see USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes
 	 * @see UK2Node_CompleteObjectiveWithOutcome
 	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (Categories = "Quest"), Category = "Outcomes")
-	TArray<FGameplayTag> PossibleOutcomes;
+	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
+	
+protected:
 	
 	UFUNCTION(BlueprintCallable)
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag);
@@ -155,8 +145,6 @@ protected:
 	int32 CurrentElements = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
 	bool bStepCompleted = false;
-	UPROPERTY()
-	bool bUseQuestCounter = false;
 	
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }

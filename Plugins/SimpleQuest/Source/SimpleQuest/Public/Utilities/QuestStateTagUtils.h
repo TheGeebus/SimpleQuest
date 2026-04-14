@@ -6,7 +6,7 @@
 
 namespace UQuestStateTagUtils
 {
-	static const FString Namespace			 = TEXT("Quest.State.");
+	static const FString Namespace			 = TEXT("QuestState.");
 	static const FString Leaf_Active		 = TEXT("Active");
 	static const FString Leaf_Completed		 = TEXT("Completed");
 	static const FString Leaf_PendingGiver	 = TEXT("PendingGiver");

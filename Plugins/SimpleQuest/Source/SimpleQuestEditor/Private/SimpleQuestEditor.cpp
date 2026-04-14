@@ -33,6 +33,11 @@
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
+FString FSimpleQuestEditor::GetCompiledTagsIniPath()
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/CompiledTags.ini"));
+}
+
 class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 {
 	virtual TSharedPtr<SGraphNode> CreateNode(UEdGraphNode* Node) const override
@@ -70,6 +75,12 @@ void FSimpleQuestEditor::StartupModule()
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
+
+	// ── Early tag registration from compiled INI ──────────────────────
+	// Creates native tags BEFORE the Asset Registry finishes loading, ensuring quest tags are available for asset deserialization.
+	// The INI lives outside Config/Tags/ so the Gameplay Tag editor's save picker never sees it.
+	LoadCompiledTagsFromIni();
+	MigrateLegacyTagsIni();
 	
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARModule.Get();
@@ -149,7 +160,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 	// The INI is the authoritative compiled state. Only generate it from AR metadata when it doesn't already exist (first
 	// run, deleted file). After that it is exclusively maintained by RegisterCompiledTags at compile time. Writing it unconditionally
 	// here would overwrite a correctly-compiled INI with stale AR metadata whenever a graph was compiled but not saved.
-	const FString IniPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
+	const FString IniPath = GetCompiledTagsIniPath();
 	if (!FPaths::FileExists(IniPath))
 	{
 		WriteCompiledTagsIni();
@@ -277,8 +288,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
         return;
     }
 
-    FScopedSlowTask SlowTask(QuestlineAssets.Num(),
-        NSLOCTEXT("SimpleQuestEditor", "CompileAll_Progress", "Compiling questline graphs..."));
+    FScopedSlowTask SlowTask(QuestlineAssets.Num(), NSLOCTEXT("SimpleQuestEditor", "CompileAll_Progress", "Compiling questline graphs..."));
     SlowTask.MakeDialog(/*bShowCancelButton=*/ true);
 
     int32 SuccessCount = 0;
@@ -295,9 +305,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     {
         if (SlowTask.ShouldCancel()) break;
 
-        SlowTask.EnterProgressFrame(1.f,
-            FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Item", "Compiling {0}..."),
-                FText::FromName(AssetData.AssetName)));
+        SlowTask.EnterProgressFrame(1.f, FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Item", "Compiling {0}..."), FText::FromName(AssetData.AssetName)));
 
         UQuestlineGraph* Graph = Cast<UQuestlineGraph>(AssetData.GetAsset());
         if (!Graph) { ++FailCount; continue; }
@@ -349,8 +357,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     else
     {
         // Clean run — simple success toast
-        const FText Summary = FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary", "Compiled {0} questline(s) successfully"),
-            FText::AsNumber(SuccessCount + FailCount));
+        const FText Summary = FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary", "Compiled {0} questline(s) successfully"), FText::AsNumber(SuccessCount + FailCount));
         FNotificationInfo Info(Summary);
         Info.ExpireDuration = 5.f;
         Info.bUseSuccessFailIcons = true;
@@ -360,20 +367,62 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	// Tag rename toast
 	if (TotalRenames > 0)
 	{
-		FNotificationInfo RenameInfo(FText::Format(
-			NSLOCTEXT("SimpleQuestEditor", "CompileAll_TagRenames",
-				"{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
-			TotalRenames, TotalRenamedActors));
+		FNotificationInfo RenameInfo(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_TagRenames", "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."), TotalRenames, TotalRenamedActors));
 		RenameInfo.ExpireDuration = 5.f;
 		RenameInfo.bUseSuccessFailIcons = true;
 		FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
 	}
 }
 
+void FSimpleQuestEditor::LoadCompiledTagsFromIni()
+{
+	const FString IniPath = GetCompiledTagsIniPath();
+	FString Content;
+	if (!FFileHelper::LoadFileToString(Content, *IniPath))
+	{
+		UE_LOG(LogSimpleQuest, Display, TEXT("LoadCompiledTagsFromIni — no INI found (first run or not yet compiled)"));
+		return;
+	}
+
+	TArray<FString> Lines;
+	Content.ParseIntoArrayLines(Lines);
+	for (const FString& Line : Lines)
+	{
+		const int32 TagStart = Line.Find(TEXT("Tag=\""));
+		if (TagStart == INDEX_NONE) continue;
+		const int32 ValueStart = TagStart + 5;
+		const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,
+			ESearchDir::FromStart, ValueStart);
+		if (ValueEnd != INDEX_NONE)
+		{
+			const FName TagName(*Line.Mid(ValueStart, ValueEnd - ValueStart));
+			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(
+				FName("SimpleQuest"), FName("SimpleQuest"), TagName, TEXT(""),
+				ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+		}
+	}
+
+	if (CompiledNativeTags.Num() > 0)
+	{
+		UGameplayTagsManager::Get().ConstructGameplayTagTree();
+	}
+
+	UE_LOG(LogSimpleQuest, Display, TEXT("LoadCompiledTagsFromIni — registered %d native tag(s)"), CompiledNativeTags.Num());
+}
+
+void FSimpleQuestEditor::MigrateLegacyTagsIni()
+{
+	const FString LegacyPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
+	if (FPaths::FileExists(LegacyPath))
+	{
+		IFileManager::Get().Delete(*LegacyPath);
+		UE_LOG(LogSimpleQuest, Display,	TEXT("MigrateLegacyTagsIni — deleted legacy INI at Config/Tags/. Tags now managed via Config/SimpleQuest/."));
+	}
+}
+
 void FSimpleQuestEditor::WriteCompiledTagsIni() const
 {
-    const FString IniPath = FPaths::ConvertRelativePathToFull(
-        FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
+    const FString IniPath = GetCompiledTagsIniPath();
 
     // Collect compiled tags and state facts from registry
     TArray<FName> AllTags;
@@ -382,8 +431,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
         for (const FName& QuestTag : Pair.Value)
         {
             AllTags.Add(QuestTag);
-            if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)
-                && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+            if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)  && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
             {
                 auto AddState = [&](const FString& Leaf)
                 {
@@ -404,19 +452,26 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
         int32 WriteIdx = 0;
         for (int32 ReadIdx = 0; ReadIdx < AllTags.Num(); ++ReadIdx)
         {
-            if (ReadIdx == 0 || AllTags[ReadIdx] != AllTags[WriteIdx - 1])
-                AllTags[WriteIdx++] = AllTags[ReadIdx];
+	        if (ReadIdx == 0 || AllTags[ReadIdx] != AllTags[WriteIdx - 1])
+	        {
+	        	AllTags[WriteIdx++] = AllTags[ReadIdx];
+	        }
         }
         AllTags.SetNum(WriteIdx);
     }
 
     FString IniContent;
-    IniContent.Reserve(AllTags.Num() * 80);
+    IniContent.Reserve(AllTags.Num() * 80 + 512);
+    IniContent += TEXT("; ==========================================================================\n");
+    IniContent += TEXT("; AUTO-GENERATED by SimpleQuest compiler. DO NOT EDIT.\n");
+    IniContent += TEXT(";\n");
+    IniContent += TEXT("; Overwritten on every compile. Manual edits will be lost.\n");
+    IniContent += TEXT("; For custom gameplay tags, use Config/Tags/DefaultGameplayTags.ini.\n");
+    IniContent += TEXT("; ==========================================================================\n");
     IniContent += TEXT("[/Script/GameplayTags.GameplayTagsList]\n");
     for (const FName& TagName : AllTags)
     {
-        IniContent += FString::Printf(
-            TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
+        IniContent += FString::Printf(TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
     }
 
     const FString IniDir = FPaths::GetPath(IniPath);
@@ -427,8 +482,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 
     if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
-        UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"),
-            AllTags.Num(), *IniPath);
+        UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
     }
     else
     {

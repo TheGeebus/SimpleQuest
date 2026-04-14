@@ -39,6 +39,11 @@ private:
 	
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
 
+	// Add alongside the existing private declarations:
+	void LoadCompiledTagsFromIni();
+	void MigrateLegacyTagsIni();
+	static FString GetCompiledTagsIniPath();
+	
 	void RegisterTagsFromAssetRegistry();
 	void OnAssetRemoved(const FAssetData& AssetData);
 	void WriteCompiledTagsIni() const;

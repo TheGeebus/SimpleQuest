@@ -99,6 +99,12 @@ TArray<FGameplayTag> USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 
 	if (AllOutcomes.Num() > 0)
 	{
+		// Deterministic pin order regardless of discovery source — prevents pin shuffling across rebuilds
+		AllOutcomes.Sort([](const FGameplayTag& A, const FGameplayTag& B)
+		{
+			return A.GetTagName().LexicalLess(B.GetTagName());
+		});
+		
 		UE_LOG(LogSimpleQuest, Verbose,	TEXT("DiscoverObjectiveOutcomes: Found %d outcome(s) for %s"),	AllOutcomes.Num(), *ObjectiveClass->GetName());
 	}
 

@@ -398,7 +398,22 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
     }
     
     if (bHasErrors) return {};
-    
+
+    // ---- Stale pin diagnostic ----
+    for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
+    {
+        for (UEdGraphPin* Pin : ContentNode->Pins)
+        {
+            if (Pin->bOrphanedPin && Pin->LinkedTo.Num() > 0)
+            {
+                const FString Label = ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
+                AddWarning(FString::Printf(
+                    TEXT("[%s] Node '%s' has a stale pin '%s' with %d active connection(s). These wires will be ignored at runtime. Right-click the node to remove stale pins."),
+                    *TagPrefix, *Label, *Pin->PinName.ToString(), Pin->LinkedTo.Num()), ContentNode);
+            }
+        }
+    }
+
     // ---- Pass 2: output pin wiring ----
 
     for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
@@ -419,6 +434,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         for (UEdGraphPin* Pin : ContentNode->Pins)
         {
             if (Pin->Direction != EGPD_Output) continue;
+            if (Pin->bOrphanedPin) continue; 
 
             // Deactivated pin: split routing by destination pin category rather than using ResolvePinToTags
             if (Pin->PinType.PinCategory == TEXT("QuestDeactivated"))
@@ -460,7 +476,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
                     {
                         if (UEdGraphPin* DeactivatedPin = EntryNode->FindPin(TEXT("Deactivated"), EGPD_Output))
                         {
-                            if (DeactivatedPin->LinkedTo.Num() > 0)
+                            if (!DeactivatedPin->bOrphanedPin && DeactivatedPin->LinkedTo.Num() > 0)
                             {
                                 const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
                                 const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
@@ -486,7 +502,11 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             bool bCompletesParent = false;
             for (UEdGraphPin* Pin : ContentNode->Pins)
             {
-                if (Pin->Direction == EGPD_Output && CheckExit(Pin)) { bCompletesParent = true; break; }
+                if (Pin->Direction == EGPD_Output && !Pin->bOrphanedPin && CheckExit(Pin))
+                {
+                    bCompletesParent = true;
+                    break;
+                }
             }
             Instance->bCompletesParentGraph = bCompletesParent;
         }
@@ -529,6 +549,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         for (UEdGraphPin* Pin : Node->Pins)
         {
             if (Pin->Direction != EGPD_Output) continue;
+            if (Pin->bOrphanedPin) continue; // Skip stale entry pins
 
             // Named outcome pins: route into the per-outcome map when the caller provides one
             if (Pin->PinType.PinCategory == TEXT("QuestOutcome") && OutEntryTagsByOutcome)

@@ -39,45 +39,128 @@ FText UQuestlineNodeBase::GetPinDisplayName(const UEdGraphPin* Pin) const
 	}
 	return Super::GetPinDisplayName(Pin);
 }
-
-void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
+bool UQuestlineNodeBase::HasStalePins() const
 {
-	// ----- Diff existing and desired pins -----
-	
-	// Collect existing pins matching category and direction
-	TArray<UEdGraphPin*> ExistingPins;
+	for (const UEdGraphPin* Pin : Pins)
+	{
+		if (Pin->bOrphanedPin) return true;
+	}
+	return false;
+}
+
+void UQuestlineNodeBase::RemoveStalePins()
+{
+	TArray<UEdGraphPin*> PinsToRemove;
 	for (UEdGraphPin* Pin : Pins)
 	{
-		if (Pin->Direction == Direction && Pin->PinType.PinCategory == PinCategory)	ExistingPins.Add(Pin);
+		if (Pin->bOrphanedPin) PinsToRemove.Add(Pin);
 	}
 
-	// Find the stale pins to remove: Existing pin is not in Desired Pins 
-	TArray<UEdGraphPin*> PinsToRemove;
-	for (UEdGraphPin* Pin : ExistingPins)
-	{
-		if (!DesiredPinNames.Contains(Pin->PinName)) PinsToRemove.Add(Pin);
-	}
+	if (PinsToRemove.IsEmpty()) return;
 
-	// Find the new pins to add: Desired pin is not in Existing Pins
-	TArray<FName> NamesToAdd;
-	for (const FName& Name : DesiredPinNames)
-	{
-		const bool bExists = ExistingPins.ContainsByPredicate([&](const UEdGraphPin* Pin) { return Pin->PinName == Name; }); // exact name match
-		if (!bExists) NamesToAdd.Add(Name);
-	}
-
-	if (PinsToRemove.IsEmpty() && NamesToAdd.IsEmpty()) return;	// Nothing changed, no reason to rebuild, return early
-
-	// ----- Make the new pins -----
-	
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "RemoveStalePins", "Remove Stale Pins"));
 	Modify();
 
 	for (UEdGraphPin* Pin : PinsToRemove)
 	{
-		Pin->BreakAllPinLinks(false);
+		Pin->BreakAllPinLinks();
 		RemovePin(Pin);
 	}
 
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UQuestlineNodeBase::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+
+	if (HasStalePins())
+	{
+		FToolMenuSection& Section = Menu->AddSection(TEXT("StalePins"),
+			NSLOCTEXT("SimpleQuestEditor", "StalePinsSection", "Stale Pins"));
+
+		Section.AddMenuEntry(
+			TEXT("RemoveStalePins"),
+			NSLOCTEXT("SimpleQuestEditor", "RemoveStalePins_Label", "Remove Stale Pins"),
+			NSLOCTEXT("SimpleQuestEditor", "RemoveStalePins_Tooltip",
+				"Break all connections on orphaned pins and remove them from this node"),
+			FSlateIcon(),
+			FUIAction(FExecuteAction::CreateLambda([NodePtr = const_cast<UQuestlineNodeBase*>(this)]()
+			{
+				NodePtr->RemoveStalePins();
+			}))
+		);
+	}
+}
+
+void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
+{
+	// ----- Collect existing pins of this category (including orphaned) -----
+
+	TArray<UEdGraphPin*> ExistingPins;
+	for (UEdGraphPin* Pin : Pins)
+	{
+		if (Pin->Direction == Direction && Pin->PinType.PinCategory == PinCategory)
+		{
+			ExistingPins.Add(Pin);
+		}
+	}
+
+	// ----- Diff against desired set -----
+
+	bool bChanged = false;
+
+	// Orphan pins that are no longer desired; un-orphan pins that are desired again
+	TArray<UEdGraphPin*> PinsToRemove;
+	for (UEdGraphPin* Pin : ExistingPins)
+	{
+		const bool bDesired = DesiredPinNames.Contains(Pin->PinName);
+		if (bDesired && Pin->bOrphanedPin)
+		{
+			// Pin was stale but is desired again — restore it
+			Pin->bOrphanedPin = false;
+			bChanged = true;
+		}
+		else if (!bDesired && !Pin->bOrphanedPin)
+		{
+			if (Pin->LinkedTo.Num() > 0)
+			{
+				// Pin has wires — mark stale so designer can re-route
+				Pin->bOrphanedPin = true;
+			}
+			else
+			{
+				// No connections — nothing to preserve, remove immediately
+				PinsToRemove.Add(Pin);
+			}
+			bChanged = true;
+		}
+	}
+
+	// Find truly new names: not represented by any existing pin (active or orphaned)
+	TArray<FName> NamesToAdd;
+	for (const FName& Name : DesiredPinNames)
+	{
+		const bool bExists = ExistingPins.ContainsByPredicate(
+			[&](const UEdGraphPin* Pin) { return Pin->PinName == Name; });
+		if (!bExists) NamesToAdd.Add(Name);
+	}
+
+	if (!bChanged && NamesToAdd.IsEmpty()) return; // No changes detected
+
+	// ----- Apply changes -----
+
+	Modify();
+
+	// Get rid of only undesired pins with no connections
+	for (UEdGraphPin* Pin : PinsToRemove)
+	{
+		RemovePin(Pin);
+	}
+	
 	// Find insertion point
 	int32 InsertIndex = INDEX_NONE;
 	if (!InsertBeforeCategories.IsEmpty())
@@ -92,7 +175,6 @@ void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FNam
 		}
 	}
 
-	// Make pin
 	FEdGraphPinType PinType;
 	PinType.PinCategory = PinCategory;
 
@@ -102,9 +184,10 @@ void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FNam
 		if (InsertIndex != INDEX_NONE) ++InsertIndex;
 	}
 
-	// Notify listeners that the graph changed
+	// Notify listeners
 	if (UEdGraph* Graph = GetGraph())
 	{
 		Graph->NotifyGraphChanged();
 	}
 }
+

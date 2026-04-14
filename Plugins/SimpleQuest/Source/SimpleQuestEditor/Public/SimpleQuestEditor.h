@@ -42,7 +42,7 @@ private:
 	void RegisterTagsFromAssetRegistry();
 	void OnAssetRemoved(const FAssetData& AssetData);
 	void WriteCompiledTagsIni() const;
-	void RebuildNativeTags();
+	void RebuildNativeTags(bool bRefreshTree = false);
 	
 	bool bIsRegisteringTags = false;
 };

@@ -34,12 +34,20 @@ public:
 	virtual bool IsUtilityNode() const { return false; }
 
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
+	/** Returns true if this node has any orphaned (stale) pins. */
+	bool HasStalePins() const;
+
+	/** Breaks all links on orphaned pins and removes them from the node. */
+	void RemoveStalePins();
+	
 protected:
 	/**
-	 * Surgically synchronizes output or input pins of a given category to match a desired set of pin names. Removes pins
-	 * that are no longer desired (breaking their links), adds pins that are missing. Existing pins whose names still appear
-	 * in the desired set are left untouched — their wiring is preserved.
+	 * Surgically synchronizes output or input pins of a given category to match a desired set of pin names. Pins no longer
+	 * desired are orphaned if they have active connections (preserving wires for the designer to re-route), or removed immediately
+	 * if unconnected. Pins that reappear in the desired set after being orphaned are restored with their wiring intact. Existing
+	 * active pins whose names still appear in the desired set are left untouched.
 	 *
 	 * Calls Modify() and NotifyGraphChanged() only when something actually changed. No-ops cleanly.
 	 *

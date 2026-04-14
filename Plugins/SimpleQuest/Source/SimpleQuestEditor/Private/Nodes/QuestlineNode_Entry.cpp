@@ -6,6 +6,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Framework/Notifications/NotificationManager.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
 
 
@@ -44,11 +45,18 @@ void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& Propert
 	{
 		RefreshOutcomePins();
 	}
+	
 	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, bShowDeactivationPins))
 	{
+		Modify();
+
 		if (bShowDeactivationPins)
 		{
-			if (!FindPin(TEXT("Deactivated")))
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
+			{
+				Pin->bOrphanedPin = false;
+			}
+			else
 			{
 				CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
 			}
@@ -57,10 +65,17 @@ void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& Propert
 		{
 			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
 			{
-				Pin->BreakAllPinLinks();
-				RemovePin(Pin);
+				if (Pin->LinkedTo.Num() > 0)
+				{
+					Pin->bOrphanedPin = true;
+				}
+				else
+				{
+					Pin->BreakAllPinLinks(); RemovePin(Pin);
+				}
 			}
 		}
+
 		if (UEdGraph* Graph = GetGraph())
 		{
 			Graph->NotifyGraphChanged();
@@ -214,4 +229,9 @@ void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 FText UQuestlineNode_Entry::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	return NSLOCTEXT("SimpleQuestEditor", "EntryNodeTitle", "Start");
+}
+
+FLinearColor UQuestlineNode_Entry::GetNodeTitleColor() const
+{
+	return SQ_ED_NODE_ENTRY;
 }

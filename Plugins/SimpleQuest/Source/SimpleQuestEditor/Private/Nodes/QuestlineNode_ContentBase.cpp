@@ -83,13 +83,25 @@ void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& P
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bShowDeactivationPins))
 	{
+		Modify();
+
 		if (bShowDeactivationPins)
 		{
-			if (!FindPin(TEXT("Deactivate")))
+			// Un-orphan if they already exist as stale pins; create only if truly absent
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivate")))
+			{
+				Pin->bOrphanedPin = false;
+			}
+			else
 			{
 				CreatePin(EGPD_Input, TEXT("QuestDeactivate"), TEXT("Deactivate"));
 			}
-			if (!FindPin(TEXT("Deactivated")))
+
+			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
+			{
+				Pin->bOrphanedPin = false;
+			}
+			else
 			{
 				CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
 			}
@@ -98,11 +110,25 @@ void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& P
 		{
 			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivate")))
 			{
-				Pin->BreakAllPinLinks(); RemovePin(Pin);
+				if (Pin->LinkedTo.Num() > 0)
+				{
+					Pin->bOrphanedPin = true;
+				}
+				else
+				{
+					Pin->BreakAllPinLinks(); RemovePin(Pin);
+				}
 			}
 			if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
 			{
-				Pin->BreakAllPinLinks(); RemovePin(Pin);
+				if (Pin->LinkedTo.Num() > 0)
+				{
+					Pin->bOrphanedPin = true;
+				}
+				else
+				{
+					Pin->BreakAllPinLinks(); RemovePin(Pin);
+				}
 			}
 		}
 

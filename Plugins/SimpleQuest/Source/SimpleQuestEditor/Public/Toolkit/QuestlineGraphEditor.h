@@ -122,7 +122,6 @@ public:
 
 	/** Navigate to this editor's root graph and select its Entry node. */
 	void NavigateToEntry();
-
 	
 	void NavigateToLocation(UEdGraph* HostGraph, UEdGraphNode* EdNode);
 	

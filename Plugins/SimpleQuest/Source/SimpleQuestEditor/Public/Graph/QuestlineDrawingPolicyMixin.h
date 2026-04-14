@@ -16,7 +16,13 @@ public:
 	// Shared helper — called by both drawing policies to avoid duplicating color/flag logic
 	static void ApplyQuestlineWireParams(UEdGraphPin* OutputPin, UEdGraphPin* InputPin, FConnectionParams& Params)
 	{
-		if (OutputPin)
+		// Stale-pin check: mirrors Blueprint behavior (direct endpoints only, no knot tracing).
+		// Sets color but does NOT return — prerequisite dashing logic still runs below.
+		if ((OutputPin && OutputPin->bOrphanedPin) || (InputPin && InputPin->bOrphanedPin))
+		{
+			Params.WireColor = SQ_ED_WIRE_STALE;
+		}
+		else if (OutputPin)
 		{
 			const FName Category = OutputPin->PinType.PinCategory;
 			if (Category == TEXT("QuestOutcome"))													Params.WireColor = SQ_ED_WIRE_OUTCOME;
@@ -34,8 +40,6 @@ public:
 		}
 		else if (InputPin)
 		{
-			// An activation-type wire is drawn dashed if every path it reaches downstream terminates at a prerequisite input.
-			// It carries a signal used exclusively as a condition, not as an activation or deactivation trigger.
 			TSet<const UEdGraphNode*> Visited;
 			if (LeadsOnlyToPrereqInputs(InputPin, Visited)) Params.bUserFlag1 = true;
 		}
@@ -114,7 +118,7 @@ public:
 		}
 		return false; // any other non-prereq input terminal
 	}
-	
+
 	bool ShouldReverseKnotTangent(const UQuestlineNode_Knot* Knot) const
 	{
 		// Cache lookup

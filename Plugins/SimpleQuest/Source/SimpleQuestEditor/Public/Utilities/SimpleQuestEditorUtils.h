@@ -9,6 +9,7 @@
 #define SQ_ED_WIRE_PREREQUISITE		(GetDefault<USimpleQuestSettings>()->PrerequisiteWireColor)
 #define SQ_ED_WIRE_OUTCOME			(GetDefault<USimpleQuestSettings>()->OutcomeWireColor)
 #define SQ_ED_WIRE_DEACTIVATION		(GetDefault<USimpleQuestSettings>()->DeactivationWireColor)
+#define SQ_ED_WIRE_STALE			(GetDefault<USimpleQuestSettings>()->StaleWireColor)
 
 // ---- Pin colors ----
 #define SQ_ED_PIN_DEFAULT			(GetDefault<USimpleQuestSettings>()->DefaultPinColor)

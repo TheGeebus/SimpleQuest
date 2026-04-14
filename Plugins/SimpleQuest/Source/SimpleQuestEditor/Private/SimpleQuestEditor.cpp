@@ -33,39 +33,6 @@
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
-/*
-class SGraphPin_HiddenConnector : public SGraphPin
-{
-public:
-	SLATE_BEGIN_ARGS(SGraphPin_HiddenConnector) {}
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs, UEdGraphPin* InPin)
-	{
-		SGraphPin::Construct(SGraphPin::FArguments(), InPin);
-	}
-
-protected:
-	virtual const FSlateBrush* GetPinIcon() const override
-	{
-		return FAppStyle::GetNoBrush();
-	}
-};
-
-class FQuestlineK2PinFactory : public FGraphPanelPinFactory
-{
-	virtual TSharedPtr<SGraphPin> CreatePin(UEdGraphPin* InPin) const override
-	{
-		if (InPin && InPin->GetOwningNode()->IsA<UK2Node_CompleteObjectiveWithOutcome>()
-			&& InPin->PinName == UK2Node_CompleteObjectiveWithOutcome::OutcomeTagPinName)
-		{
-			return SNew(SGraphPin_HiddenConnector, InPin);
-		}
-		return nullptr;
-	}
-};
-*/
-
 class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 {
 	virtual TSharedPtr<SGraphNode> CreateNode(UEdGraphNode* Node) const override
@@ -175,7 +142,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 			TagNames.Add(FName(*TagStr));
 		}
 
-		CompiledTagRegistry.Add(AssetData.GetObjectPathString(), MoveTemp(TagNames));
+		CompiledTagRegistry.Add(AssetData.PackageName.ToString(), MoveTemp(TagNames));
 		UE_LOG(LogSimpleQuest, Display, TEXT("  %s — loaded %d tag(s)"), *AssetData.AssetName.ToString(), TagStrings.Num());
 	}
 	
@@ -195,12 +162,12 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 {
 	if (AssetData.AssetClassPath != UQuestlineGraph::StaticClass()->GetClassPathName()) return;
 
-	const FString RemovedPath = AssetData.GetObjectPathString();
+	const FString RemovedPath = AssetData.PackageName.ToString();
 	if (CompiledTagRegistry.Remove(RemovedPath) > 0)
 	{
 		UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved — removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
 		WriteCompiledTagsIni();
-		RebuildNativeTags();
+		RebuildNativeTags(true);
 	}
 }
 
@@ -270,10 +237,27 @@ TUniquePtr<FQuestlineGraphCompiler> FSimpleQuestEditor::CreateCompiler() const
 
 void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames)
 {
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s))"), *GraphPath, TagNames.Num());
+	// Detect stale tags: tags in the old compiled set that are absent from the new set
+	bool bHasStaleTags = false;
+	if (const TArray<FName>* OldTags = CompiledTagRegistry.Find(GraphPath))
+	{
+		TSet<FName> NewTagSet(TagNames);
+		for (const FName& OldTag : *OldTags)
+		{
+			if (!NewTagSet.Contains(OldTag))
+			{
+				bHasStaleTags = true;
+				UE_LOG(LogSimpleQuest, Display, TEXT("  Stale tag removed: %s"), *OldTag.ToString());
+			}
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s)"),
+		*GraphPath, TagNames.Num(), bHasStaleTags ? TEXT(", stale tags cleaned") : TEXT(""));
+
 	CompiledTagRegistry.Add(GraphPath, TagNames);
 	WriteCompiledTagsIni();
-	RebuildNativeTags();
+	RebuildNativeTags(bHasStaleTags);
 }
 
 void FSimpleQuestEditor::CompileAllQuestlineGraphs()
@@ -386,114 +370,74 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	}
 }
 
-void FSimpleQuestEditor::WriteCompiledTagsIni() const // this process is currently a bit inefficient; batch processing to be addressed on a future pass
+void FSimpleQuestEditor::WriteCompiledTagsIni() const
 {
-	const FString IniPath = FPaths::ConvertRelativePathToFull(
-		FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
+    const FString IniPath = FPaths::ConvertRelativePathToFull(
+        FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
 
-	// ── Phase 1: read existing tags so designer-authored entries survive ──
-	TSet<FName> PreExistingTags;
-	{
-		FString ExistingContent;
-		if (FPaths::FileExists(IniPath) && FFileHelper::LoadFileToString(ExistingContent, *IniPath))
-		{
-			TArray<FString> Lines;
-			ExistingContent.ParseIntoArrayLines(Lines);
-			for (const FString& Line : Lines)
-			{
-				const int32 TagStart = Line.Find(TEXT("Tag=\""));
-				if (TagStart == INDEX_NONE) continue;
-				const int32 ValueStart = TagStart + 5;
-				const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,
-					ESearchDir::FromStart, ValueStart);
-				if (ValueEnd != INDEX_NONE)
-				{
-					PreExistingTags.Add(FName(*Line.Mid(ValueStart, ValueEnd - ValueStart)));
-				}
-			}
-		}
-	}
+    // Collect compiled tags and state facts from registry
+    TArray<FName> AllTags;
+    for (const auto& Pair : CompiledTagRegistry)
+    {
+        for (const FName& QuestTag : Pair.Value)
+        {
+            AllTags.Add(QuestTag);
+            if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)
+                && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+            {
+                auto AddState = [&](const FString& Leaf)
+                {
+                    AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
+                };
+                AddState(UQuestStateTagUtils::Leaf_Active);
+                AddState(UQuestStateTagUtils::Leaf_Completed);
+                AddState(UQuestStateTagUtils::Leaf_PendingGiver);
+                AddState(UQuestStateTagUtils::Leaf_Deactivated);
+                AddState(UQuestStateTagUtils::Leaf_Blocked);
+            }
+        }
+    }
 
-	// ── Phase 2: collect compiled tags + state facts ──
-	TArray<FName> AllTags;
-	TSet<FName> CompiledTagSet;
-	for (const auto& Pair : CompiledTagRegistry)
-	{
-		for (const FName& QuestTag : Pair.Value)
-		{
-			AllTags.Add(QuestTag);
-			CompiledTagSet.Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)	&& !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
-			{
-				auto AddState = [&](const FString& Leaf)
-				{
-					
-					FName Fact = UQuestStateTagUtils::MakeStateFact(QuestTag, Leaf);
-					AllTags.Add(Fact);
-					CompiledTagSet.Add(Fact);
-				};
-				AddState(UQuestStateTagUtils::Leaf_Active);
-				AddState(UQuestStateTagUtils::Leaf_Completed);
-				AddState(UQuestStateTagUtils::Leaf_PendingGiver);
-				AddState(UQuestStateTagUtils::Leaf_Deactivated);
-				AddState(UQuestStateTagUtils::Leaf_Blocked);
-			}
-		}
-	}
+    // Deduplicate and sort
+    AllTags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
+    {
+        int32 WriteIdx = 0;
+        for (int32 ReadIdx = 0; ReadIdx < AllTags.Num(); ++ReadIdx)
+        {
+            if (ReadIdx == 0 || AllTags[ReadIdx] != AllTags[WriteIdx - 1])
+                AllTags[WriteIdx++] = AllTags[ReadIdx];
+        }
+        AllTags.SetNum(WriteIdx);
+    }
 
-	// ── Phase 3: preserve designer-authored tags the compiler doesn't own ──
-	int32 PreservedCount = 0;
-	for (const FName& Tag : PreExistingTags)
-	{
-		if (!CompiledTagSet.Contains(Tag))
-		{
-			AllTags.Add(Tag);
-			++PreservedCount;
-		}
-	}
+    FString IniContent;
+    IniContent.Reserve(AllTags.Num() * 80);
+    IniContent += TEXT("[/Script/GameplayTags.GameplayTagsList]\n");
+    for (const FName& TagName : AllTags)
+    {
+        IniContent += FString::Printf(
+            TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
+    }
 
-	// ── Phase 4: deduplicate, sort, write ──
-	AllTags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
-	{
-		int32 WriteIdx = 0;
-		for (int32 ReadIdx = 0; ReadIdx < AllTags.Num(); ++ReadIdx)
-		{
-			if (ReadIdx == 0 || AllTags[ReadIdx] != AllTags[WriteIdx - 1])
-				AllTags[WriteIdx++] = AllTags[ReadIdx];
-		}
-		AllTags.SetNum(WriteIdx);
-	}
+    const FString IniDir = FPaths::GetPath(IniPath);
+    if (!IFileManager::Get().DirectoryExists(*IniDir))
+    {
+        IFileManager::Get().MakeDirectory(*IniDir, true);
+    }
 
-	FString IniContent;
-	IniContent.Reserve(AllTags.Num() * 80);
-	IniContent += TEXT("[/Script/GameplayTags.GameplayTagsList]\n");
-	for (const FName& TagName : AllTags)
-	{
-		IniContent += FString::Printf(
-			TEXT("+GameplayTagList=(Tag=\"%s\",DevComment=\"SimpleQuest\")\n"), *TagName.ToString());
-	}
-
-	const FString IniDir = FPaths::GetPath(IniPath);
-	if (!IFileManager::Get().DirectoryExists(*IniDir))
-	{
-		IFileManager::Get().MakeDirectory(*IniDir, true);
-	}
-
-	if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-	{
-		UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) (%d compiled, %d preserved) to: %s"),
-			AllTags.Num(), CompiledTagSet.Num(), PreservedCount, *IniPath);
-	}
-	else
-	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write FAILED for: %s"), *IniPath);
-	}
+    if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+    {
+        UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"),
+            AllTags.Num(), *IniPath);
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write FAILED for: %s"), *IniPath);
+    }
 }
 
-void FSimpleQuestEditor::RebuildNativeTags()
+void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 {
-	// Destroy old instances first — FNativeGameplayTag deregisters itself from the native tag list on destruction, so Reset()
-	// cleanly removes all previously registered compiled tags.
 	CompiledNativeTags.Reset();
 
 	for (const auto& Pair : CompiledTagRegistry)
@@ -507,7 +451,8 @@ void FSimpleQuestEditor::RebuildNativeTags()
 					ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)
+				&& !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
 			{
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
@@ -518,12 +463,20 @@ void FSimpleQuestEditor::RebuildNativeTags()
 		}
 	}
 
-	// ConstructGameplayTagTree rebuilds the tree from all registered sources (including the FNativeGameplayTag instances we
-	// just created) WITHOUT calling ResetTagCache() first. EditorRefreshGameplayTagTree() does call ResetTagCache(), which
-	// clears the entire tag container before rebuilding — if anything races against that clear the freshly registered native
-	// tags can be lost. ConstructGameplayTagTree() is the safe call here.
-	UGameplayTagsManager::Get().ConstructGameplayTagTree();
+	if (bRefreshTree)
+	{
+		// Full tree teardown + rebuild to prune stale tags from the in-memory tree.
+		// Safe here: runs synchronously during compilation — no concurrent tag requests.
+		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+	}
+	else
+	{
+		// Additive rebuild — safe for startup and non-stale-removal cases where the original
+		// race concern (ResetTagCache clearing freshly registered native tags) applies.
+		UGameplayTagsManager::Get().ConstructGameplayTagTree();
+	}
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)"), CompiledNativeTags.Num());
+	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
+		CompiledNativeTags.Num(), bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
 }
 

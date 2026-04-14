@@ -31,6 +31,9 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
 	FLinearColor DeactivationWireColor = FLinearColor(0.9f, 0.4f, 0.3f);
 	
+	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
+	FLinearColor StaleWireColor = FLinearColor(1.f, 0.f, 0.f);
+
 	UPROPERTY(Config, EditAnywhere, Category="Pin Colors")
 	FLinearColor DefaultPinColor = FLinearColor::White;
 

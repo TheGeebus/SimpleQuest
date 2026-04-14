@@ -5,46 +5,71 @@
 #include "SimpleQuestLog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "Misc/ConfigCacheIni.h"
 #include "Quests/QuestlineGraph.h"
+#include "Utilities/QuestStateTagUtils.h"
 
 #define LOCTEXT_NAMESPACE "FSimpleQuestModule"
 
 DEFINE_LOG_CATEGORY(LogSimpleQuest);
 
-void FSimpleQuestModule::StartupModule()
+void FSimpleQuest::StartupModule()
 {
-	UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuestModule::RegisterCompiledQuestTags);
+	UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterCompiledQuestTags);
 }
 
-void FSimpleQuestModule::RegisterCompiledQuestTags()
+void FSimpleQuest::RegisterCompiledQuestTags()
 {
-	// Enumerate all UQuestlineGraph assets via the asset registry — no full loads
-	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+    IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
-	TArray<FAssetData> Assets;
-	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), Assets);
+    FARFilter Filter;
+    Filter.ClassPaths.Add(UQuestlineGraph::StaticClass()->GetClassPathName());
+    Filter.bRecursiveClasses = true;
 
-	UGameplayTagsManager& TagsManager = UGameplayTagsManager::Get();
-	for (const FAssetData& Asset : Assets)
-	{
-		// Load the asset to read CompiledQuestTags — this is acceptable here
-		// because it fires before DoneAddingNativeTags, at a defined startup point
-		if (UQuestlineGraph* Graph = Cast<UQuestlineGraph>(Asset.GetAsset()))
-		{
-			for (const FName& TagName : Graph->GetCompiledQuestTags())
-			{
-				TagsManager.AddNativeGameplayTag(TagName);
-			}
-		}
-	}
+    TArray<FAssetData> Assets;
+    AR.GetAssets(Filter, Assets);
+
+    UGameplayTagsManager& TagsManager = UGameplayTagsManager::Get();
+    int32 TotalTags = 0;
+
+    for (const FAssetData& Asset : Assets)
+    {
+        FAssetTagValueRef TagValue = Asset.TagsAndValues.FindTag(TEXT("CompiledQuestTags"));
+        if (!TagValue.IsSet() || TagValue.GetValue().IsEmpty())
+        {
+            continue;
+        }
+
+        TArray<FString> TagStrings;
+        TagValue.GetValue().ParseIntoArray(TagStrings, TEXT("|"), true);
+
+        for (const FString& TagStr : TagStrings)
+        {
+            const FName QuestTag(*TagStr);
+            TagsManager.AddNativeGameplayTag(QuestTag);
+            ++TotalTags;
+
+            // Expand state facts for tags not already in a state or outcome namespace
+            if (!TagStr.StartsWith(UQuestStateTagUtils::Namespace)
+                && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+            {
+                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
+                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
+                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
+                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
+                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
+                TotalTags += 5;
+            }
+        }
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("RegisterCompiledQuestTags — registered %d tag(s) "
+        "(incl. state facts) from %d questline asset(s)"), TotalTags, Assets.Num());
 }
-
-void FSimpleQuestModule::ShutdownModule()
+void FSimpleQuest::ShutdownModule()
 {
 
 }
 
 #undef LOCTEXT_NAMESPACE
 	
-IMPLEMENT_MODULE(FSimpleQuestModule, SimpleQuest)
+IMPLEMENT_MODULE(FSimpleQuest, SimpleQuest)

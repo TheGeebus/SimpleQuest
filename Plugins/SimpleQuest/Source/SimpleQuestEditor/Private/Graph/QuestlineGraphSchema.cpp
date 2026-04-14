@@ -321,7 +321,21 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 
     const bool bOutputIsKnot = TraversalPolicy->IsPassThroughNode(OutputNode);
     const bool bInputIsKnot  = TraversalPolicy->IsPassThroughNode(InputNode);
-	
+
+	// ---- Self-loop: only outcome/any-outcome outputs may loop back to own Activate ----
+	if (OutputNode == InputNode && !bOutputIsKnot && !bInputIsKnot)
+	{
+		const FName OutputCategory = OutputPin->PinType.PinCategory;
+		if (TraversalPolicy->IsContentNode(OutputNode)
+			&& InputPin->PinName == TEXT("Activate")
+			&& (OutputCategory == TEXT("QuestOutcome") || OutputCategory == TEXT("QuestActivation")))
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+		}
+		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "IllegalSelfLoop",
+				"Only outcome outputs may loop back to the same node's Activate pin"));
+	}
+
 	// ---- Prerequisites ---- 
 	const bool bOutputIsPrereq = (OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite"));
 	const bool bInputIsPrereq  = (InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
@@ -736,17 +750,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to the Activate pin"));
     		}
     	}
-
-    	// ---- Self-loop: allowed only back to own Activate pin ---- 
-        if (OutputNode == InputNode)
-        {
-            if (TraversalPolicy->IsContentNode(OutputNode) && InputPin->PinName == TEXT("Activate"))
-            {
-	            return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-            }
-            return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "SameNode", "Cannot connect a node to its own Prerequisites pin"));
-        }
-
+    	
     	// ---- Content node outputs ---- 
     	if (TraversalPolicy->IsContentNode(OutputNode))
     	{
@@ -949,16 +953,23 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
     UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
     if (OwningNode == InputPin->GetOwningNode())
     {
-        if (UQuestlineNodeBase* ContentNode = Cast<UQuestlineNodeBase>(OwningNode))
+        if (UQuestlineNodeBase* QuestNode = Cast<UQuestlineNodeBase>(OwningNode))
         {
-            if (!ContentNode->IsContentNode()) 
-                return Super::TryCreateConnection(A, B);
+            const FName OutputCategory = OutputPin->PinType.PinCategory;
+            const bool bIsLegalSelfLoop = QuestNode->IsContentNode()
+                && InputPin->PinName == TEXT("Activate")
+                && (OutputCategory == TEXT("QuestOutcome")
+                    || OutputCategory == TEXT("QuestActivation"));
 
+            if (!bIsLegalSelfLoop)
+            {
+	            return Super::TryCreateConnection(A, B);
+            }
             UEdGraph* Graph = OwningNode->GetGraph();
             Graph->Modify();
 
-            const float NodeWidth  = 200.f;
-            const float KnotOffset =  60.f;
+            const float NodeWidth = 200.f;
+            const float KnotOffset = 60.f;
 
             auto MakeKnot = [&](float X, float Y) -> UQuestlineNode_Knot*
             {
@@ -967,17 +978,19 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
                 Knot->NodePosX = X;
                 Knot->NodePosY = Y;
                 Creator.Finalize();
-                if (UEdGraphPin* In  = Knot->FindPin(TEXT("KnotIn")))  In->PinType = OutputPin->PinType;
-                if (UEdGraphPin* Out = Knot->FindPin(TEXT("KnotOut"))) Out->PinType = OutputPin->PinType;
+                if (UEdGraphPin* In  = Knot->FindPin(TEXT("KnotIn")))
+                {
+	                In->PinType = OutputPin->PinType;
+                }
+                if (UEdGraphPin* Out = Knot->FindPin(TEXT("KnotOut")))
+                {
+	                Out->PinType = OutputPin->PinType;
+                }
                 return Knot;
             };
 
-            UQuestlineNode_Knot* KnotRight = MakeKnot(
-                OwningNode->NodePosX + NodeWidth,
-                OwningNode->NodePosY - KnotOffset);
-            UQuestlineNode_Knot* KnotLeft = MakeKnot(
-                OwningNode->NodePosX,
-                OwningNode->NodePosY - KnotOffset);
+            UQuestlineNode_Knot* KnotRight = MakeKnot(OwningNode->NodePosX + NodeWidth, OwningNode->NodePosY - KnotOffset);
+            UQuestlineNode_Knot* KnotLeft = MakeKnot(OwningNode->NodePosX, OwningNode->NodePosY - KnotOffset);
 
             Super::TryCreateConnection(OutputPin, KnotRight->FindPin(TEXT("KnotIn")));
             Super::TryCreateConnection(KnotRight->FindPin(TEXT("KnotOut")), KnotLeft->FindPin(TEXT("KnotIn")));
@@ -989,7 +1002,6 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
 
     return Super::TryCreateConnection(A, B);
 }
-
 
 // File-local storage — never crosses DLL boundaries
 static TFunction<FConnectionDrawingPolicy*(int32, int32, float, const FSlateRect&, FSlateWindowElementList&, UEdGraph*)>
@@ -1031,7 +1043,9 @@ void UQuestlineGraphSchema::SetActiveDragFromPin(UEdGraphPin* Pin)
 UEdGraphPin* UQuestlineGraphSchema::GetActiveDragFromPin()
 {
 	if (UEdGraphNode* Node = GActiveDragFromNode.Get())
+	{
 		return Node->FindPin(GActiveDragFromPinName);
+	}
 	return nullptr;
 }
 
@@ -1047,7 +1061,9 @@ FConnectionDrawingPolicy* UQuestlineGraphSchema::CreateConnectionDrawingPolicy(i
 	if (GENPolicyFactory != nullptr)
 	{
 		if (FConnectionDrawingPolicy* Policy = GENPolicyFactory(InBackLayerID, InFrontLayerID, InZoomFactor, InClippingRect, InDrawElements, InGraphObj))
+		{
 			return Policy;
+		}
 	}
 
 	return new FQuestlineConnectionDrawingPolicy(InBackLayerID, InFrontLayerID, InZoomFactor, InClippingRect, InDrawElements, InGraphObj);

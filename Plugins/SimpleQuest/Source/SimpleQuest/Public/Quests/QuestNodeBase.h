@@ -163,7 +163,7 @@ public:
     FORCEINLINE FGameplayTag GetQuestTag() const { return QuestTag; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE void SetContextualTag(const FGameplayTag InTag) { ContextualTag = InTag; }
-    FORCEINLINE const TArray<FName>* GetNextNodesForOutcome(FGameplayTag OutcomeTag) const;
+    const TArray<FName>* GetNextNodesForOutcome(FGameplayTag OutcomeTag) const;
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }

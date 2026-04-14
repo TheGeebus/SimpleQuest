@@ -22,6 +22,9 @@
 #include "Utilities/QuestStateTagUtils.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
+#else
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 #endif
 
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)

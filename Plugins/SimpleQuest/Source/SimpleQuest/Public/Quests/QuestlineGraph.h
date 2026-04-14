@@ -6,6 +6,10 @@
 #include "UObject/Object.h"
 #include "QuestlineGraph.generated.h"
 
+#if !WITH_EDITOR
+class FNativeGameplayTag;
+#endif
+
 class UQuestNodeBase;
 class UEdGraph;
 

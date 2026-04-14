@@ -391,14 +391,12 @@ void FSimpleQuestEditor::LoadCompiledTagsFromIni()
 		const int32 TagStart = Line.Find(TEXT("Tag=\""));
 		if (TagStart == INDEX_NONE) continue;
 		const int32 ValueStart = TagStart + 5;
-		const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,
-			ESearchDir::FromStart, ValueStart);
+		const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,	ESearchDir::FromStart, ValueStart);
 		if (ValueEnd != INDEX_NONE)
 		{
 			const FName TagName(*Line.Mid(ValueStart, ValueEnd - ValueStart));
-			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(
-				FName("SimpleQuest"), FName("SimpleQuest"), TagName, TEXT(""),
-				ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
+				TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 		}
 	}
 
@@ -500,13 +498,11 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 		{
 			auto Add = [this](FName TagName)
 			{
-				CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(
-					FName("SimpleQuest"), FName("SimpleQuest"), TagName, TEXT(""),
-					ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+				CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
+					TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)
-				&& !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
 			{
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
 				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
@@ -519,14 +515,14 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 
 	if (bRefreshTree)
 	{
-		// Full tree teardown + rebuild to prune stale tags from the in-memory tree.
-		// Safe here: runs synchronously during compilation — no concurrent tag requests.
+		// Full tree teardown and rebuild to prune stale tags from the in-memory tree.
+		// Safe here: runs synchronously during compilation which means no concurrent tag requests.
 		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
 	}
 	else
 	{
-		// Additive rebuild — safe for startup and non-stale-removal cases where the original
-		// race concern (ResetTagCache clearing freshly registered native tags) applies.
+		// Additive rebuild. Safe for startup and non-stale-removal cases where the original race concern (ResetTagCache clearing
+		// freshly registered native tags) applies.
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
 

@@ -5,6 +5,8 @@
 
 #if !WITH_EDITOR
 #include "NativeGameplayTags.h"
+#include "Utilities/QuestStateTagUtils.h"
+#include "SimpleQuestLog.h"
 #endif
 
 
@@ -35,7 +37,26 @@ void UQuestlineGraph::PostLoad()
 #if !WITH_EDITOR
 	for (const FName& TagName : CompiledQuestTags)
 	{
-		RegisteredNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"), TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+		auto Add = [this](FName InTagName)
+		{
+			RegisteredNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),	InTagName, TEXT(""),
+				ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+		};
+
+		Add(TagName);
+
+		const FString TagStr = TagName.ToString();
+		if (!TagStr.StartsWith(UQuestStateTagUtils::Namespace) && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+		{
+			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Active));
+			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Completed));
+			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_PendingGiver));
+			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Deactivated));
+			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Blocked));
+		}
 	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestlineGraph::PostLoad [%s] — registered %d native tag(s) "
+		"(incl. state facts)"), *GetName(), RegisteredNativeTags.Num());
 #endif
 }

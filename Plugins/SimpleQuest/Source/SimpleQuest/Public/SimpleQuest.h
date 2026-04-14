@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FSimpleQuestModule : public IModuleInterface
+class FSimpleQuest : public IModuleInterface
 {
 public:
 

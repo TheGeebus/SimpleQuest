@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "PrerequisiteExpression.h"
+#include "Quests/Types/QuestNodeInfo.h"
 #include "QuestNodeBase.generated.h"
 
 class UQuestReward;
@@ -142,6 +143,13 @@ protected:
     
     void DeferActivation(FGameplayTag InContextualTag);
 
+    /**
+     * Compiled display metadata. DisplayName baked by the compiler from the unsanitized editor node title; QuestTag resolved at
+     * runtime alongside the standalone QuestTag field. Read by the manager when assembling outbound FQuestEventContext.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    FQuestNodeInfo NodeInfo;
+
 private:
     // Stores the contextual tag while waiting for prerequisites to clear
     FGameplayTag DeferredContextualTag;
@@ -172,6 +180,7 @@ public:
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
+    FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
 
     
 };

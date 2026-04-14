@@ -311,6 +311,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         if (!Instance) continue;
         
         Instance->QuestContentGuid = ContentNode->QuestGuid;
+        Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
         const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
 

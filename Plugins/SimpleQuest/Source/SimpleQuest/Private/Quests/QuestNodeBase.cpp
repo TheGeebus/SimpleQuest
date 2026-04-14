@@ -2,6 +2,7 @@
 
 #include "Quests/QuestNodeBase.h"
 #include "GameplayTagsManager.h"
+#include "SimpleQuestLog.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -91,6 +92,8 @@ void UQuestNodeBase::TryActivateDeferred()
 void UQuestNodeBase::ResolveQuestTag(FName TagName)
 {
     QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName);
+    NodeInfo.QuestTag = QuestTag;
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveQuestTag: %s → DisplayName='%s'"), *QuestTag.ToString(), *NodeInfo.DisplayName.ToString());
 }
 
 const TArray<FName>* UQuestNodeBase::GetNextNodesForOutcome(FGameplayTag OutcomeTag) const

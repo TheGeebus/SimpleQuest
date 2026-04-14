@@ -61,4 +61,22 @@ private:
 	static bool PinReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category, TSet<const UEdGraphPin*>& Visited);
 	static bool AnySourceReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category);
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
+
+	// ── Connection validation helpers (extracted from CanCreateConnection) ──
+
+	/** Direct prerequisite pin rules (both pins are non-knot, at least one is prereq category). */
+	FPinConnectionResponse ValidatePrerequisiteConnection(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* OutputNode, const UEdGraphNode* InputNode) const;
+
+	/** Deactivated/Deactivate pin rules (both pins are non-knot, at least one is deactivation category). */
+	FPinConnectionResponse ValidateDeactivationConnection(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* OutputNode, const UEdGraphNode* InputNode) const;
+
+	/** Knot/reroute routing: category matching, conflict mirroring, reachability, duplicate paths. */
+	FPinConnectionResponse ValidateKnotConnection(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* OutputNode, const UEdGraphNode* InputNode, bool bOutputIsKnot, bool bInputIsKnot) const;
+
+	/** Rejects connections that would deliver the same source quest signal twice to an input pin. */
+	FPinConnectionResponse CheckDuplicateSources(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin,	bool bOutputIsKnot) const;
+
+	/** Rejects connections that would create a parallel path to a downstream terminal via a reroute. */
+	FPinConnectionResponse CheckDownstreamParallelPaths(const UEdGraphPin* OutputPin, const UEdGraphPin* KnotInputPin) const;
+
 };

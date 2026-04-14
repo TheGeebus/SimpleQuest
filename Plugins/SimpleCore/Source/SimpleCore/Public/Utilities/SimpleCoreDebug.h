@@ -1,10 +1,10 @@
+// Copyright 2026, Greg Bussell, All Rights Reserved.
+
 #pragma once
 
 #if !UE_BUILD_SHIPPING
 
-#include "Logging/LogMacros.h"
-
-SIMPLEQUEST_API DECLARE_LOG_CATEGORY_EXTERN(LogSimpleCore, Log, All);
+#include "Utilities/SimpleCoreLog.h"
 
 #define LOG_IT_BABY(Color, DisplayString, ...) \
 do { \

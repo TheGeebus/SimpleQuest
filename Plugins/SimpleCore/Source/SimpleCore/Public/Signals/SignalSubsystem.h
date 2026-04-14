@@ -6,6 +6,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Utilities/SimpleCoreLog.h"
 #include "SignalSubsystem.generated.h"
 
 // Internal multicast delegate. Payload is type-erased; first arg is the original published channel tag.
@@ -47,6 +48,10 @@ void USignalSubsystem::PublishMessage(const FGameplayTag Channel, const T& Paylo
 {
     if (bIsShuttingDown) return;
 
+    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::Publish: channel='%s' type='%s'"),
+        *Channel.ToString(),
+        *T::StaticStruct()->GetName());
+    
     const FInstancedStruct PackedPayload = FInstancedStruct::Make<T>(Payload);
     TSet<FGameplayTag> VisitedTags;
     FGameplayTag CurrentTag = Channel;
@@ -70,6 +75,11 @@ FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, L
     void(ListenerType::* Function)(FGameplayTag, const T&))
 {
     check(IsInGameThread());
+
+    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::Subscribe: channel='%s' listener='%s'"),
+        *Channel.ToString(),
+        Listener ? *Listener->GetName() : TEXT("null"));
+    
     auto& Delegate = TagChannels.FindOrAdd(Channel);
     return Delegate.AddLambda(
         [WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function]

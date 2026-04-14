@@ -2,6 +2,8 @@
 
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/SimpleCoreLog.h"
+
 
 void UWorldStateSubsystem::AddFact(const FGameplayTag Tag, const EFactBroadcastMode BroadcastMode)
 {
@@ -16,6 +18,10 @@ void UWorldStateSubsystem::AddFact(const FGameplayTag Tag, const EFactBroadcastM
 			Signals->PublishMessage(Tag, FWorldStateFactAddedEvent(Tag));
 		}
 	}
+	UE_LOG(LogSimpleCore, Verbose, TEXT("WorldState::AddFact: '%s' count=%d broadcast=%s"),
+		*Tag.ToString(),
+		NewCount,
+		bShouldBroadcast ? TEXT("yes") : TEXT("no"));
 }
 
 void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadcastMode BroadcastMode)
@@ -34,6 +40,10 @@ void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadca
 			Signals->PublishMessage(Tag, FWorldStateFactRemovedEvent(Tag));
 		}
 	}
+	UE_LOG(LogSimpleCore, Verbose, TEXT("WorldState::RemoveFact: '%s' remaining=%d broadcast=%s"),
+		*Tag.ToString(),
+		bReachedZero ? 0 : *Count,
+		bShouldBroadcast ? TEXT("yes") : TEXT("no"));
 }
 
 void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppressBroadcast)
@@ -41,6 +51,10 @@ void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppres
 	if (!WorldFacts.Contains(Tag)) return;
 
 	WorldFacts.Remove(Tag);
+	UE_LOG(LogSimpleCore, Verbose, TEXT("WorldState::ClearFact: '%s' broadcast=%s"),
+		*Tag.ToString(),
+		bSuppressBroadcast ? TEXT("no") : TEXT("yes"));
+
 	if (!bSuppressBroadcast)
 	{
 		if (USignalSubsystem* Signals = GetGameInstance()->GetSubsystem<USignalSubsystem>())

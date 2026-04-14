@@ -97,6 +97,10 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
             return false;
         }
     }
+    
+    UE_LOG(LogSimpleQuest, Log, TEXT("Compile: starting '%s' (prefix='%s')"),
+        *InGraph->GetName(),
+        *TagPrefix);
 
     // ── Snapshot old GUID→Tag mapping for rename detection ────────
     TMap<FGuid, FName> OldTagsByGuid;
@@ -128,64 +132,25 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     TArray<FString> VisitedAssetPaths;
     VisitedAssetPaths.Add(InGraph->GetPathName());
 
-    // Start recursive compilation, working forward from the Start node. This is the top level so there are no boundary tags to
-    // pass in from a parent graph yet.
+    // Start recursive compilation, working forward from the Start node.
     TArray<FName> EntryTags = CompileGraph(InGraph->QuestlineEdGraph, TagPrefix, {}, VisitedAssetPaths);
     InGraph->EntryNodeTags = EntryTags;
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
 
-    // ── Detect renames via GUID bridge ────────────────────────────
-    for (const auto& [TagName, NodeInstance] : InGraph->CompiledNodes)
-    {
-        if (!NodeInstance || !NodeInstance->GetQuestGuid().IsValid()) continue;
-        if (const FName* OldTag = OldTagsByGuid.Find(NodeInstance->GetQuestGuid()))
-        {
-            if (*OldTag != TagName)
-            {
-                DetectedTagRenames.Add(*OldTag, TagName);
-            }
-        }
-    }
-
-    if (DetectedTagRenames.Num() > 0)
-    {
-        // Chain-collapse the persistent ledger
-        for (FQuestTagRename& Existing : InGraph->PendingTagRenames)
-        {
-            if (const FName* ChainedNew = DetectedTagRenames.Find(Existing.NewTag))
-            {
-                Existing.NewTag = *ChainedNew;
-            }
-        }
-
-        // Add new entries not already covered by chain collapse
-        TSet<FName> ExistingOldTags;
-        for (const FQuestTagRename& Existing : InGraph->PendingTagRenames)
-        {
-            ExistingOldTags.Add(Existing.OldTag);
-        }
-        for (const auto& [OldTag, NewTag] : DetectedTagRenames)
-        {
-            if (!ExistingOldTags.Contains(OldTag))
-            {
-                InGraph->PendingTagRenames.Add({ OldTag, NewTag });
-            }
-        }
-
-        // Prune identity entries (rename then rename back)
-        InGraph->PendingTagRenames.RemoveAll([](const FQuestTagRename& E)
-        {
-            return E.OldTag == E.NewTag;
-        });
-
-        UE_LOG(LogSimpleQuest, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
-            DetectedTagRenames.Num(), InGraph->PendingTagRenames.Num());
-    }
+    // Detect renames via GUID bridge
+    DetectAndRecordTagRenames(InGraph, OldTagsByGuid);
 
     RegisterCompiledTags(InGraph);
 
+    UE_LOG(LogSimpleQuest, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
+        *InGraph->GetName(),
+        InGraph->CompiledNodes.Num(),
+        InGraph->CompiledQuestTags.Num(),
+        NumErrors,
+        NumWarnings);
+    
     return !bHasErrors;
 }
 
@@ -198,24 +163,82 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 {
     if (!Graph) return {};
 
-    TArray<FName> MonitorTags;
-
     // ---- Pass 1: label uniqueness, GUID write, tag assignment ----
-    // LinkedQuestline nodes are compiler-only scaffolding with no CDO; skip tag assignment
-
     TArray<UQuestlineNode_ContentBase*> ContentNodes;
-    TMap<FString, UQuestlineNode_ContentBase*> LabelMap;
     TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*> NodeInstanceMap;
+    CompileNodeRegistration(Graph, TagPrefix, VisitedAssetPaths, ContentNodes, NodeInstanceMap);
+
+    // ---- Pass 1b: setter nodes — create UQuestPrereqGroupNode monitors ----
+    TArray<FName> MonitorTags;
+    CompileGroupSetters(Graph, TagPrefix, MonitorTags);
+
+    // ---- Pass 1c: utility nodes ----
+    TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
+    CompileUtilityNodes(Graph, UtilityEdNodes);
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGraph: [%s] %d content, %d group setter(s), %d utility node(s)"),
+        *TagPrefix,
+        ContentNodes.Num(),
+        MonitorTags.Num(),
+        UtilityEdNodes.Num());
     
+    if (bHasErrors) return {};
+
+    // ---- Stale pin diagnostic ----
+    for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
+    {
+        for (UEdGraphPin* Pin : ContentNode->Pins)
+        {
+            if (Pin->bOrphanedPin && Pin->LinkedTo.Num() > 0)
+            {
+                const FString Label = ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
+                AddWarning(FString::Printf(
+                    TEXT("[%s] Node '%s' has a stale pin '%s' with %d active connection(s). These wires will be ignored at runtime. Right-click the node to remove stale pins."),
+                    *TagPrefix, *Label, *Pin->PinName.ToString(), Pin->LinkedTo.Num()), ContentNode);
+            }
+        }
+    }
+
+    // ---- Pass 2: output pin wiring ----
+    CompileOutputWiring(ContentNodes, NodeInstanceMap, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths);
+
+    // ---- Pass 2b: utility node Forward output wiring ----
+    for (UQuestlineNode_UtilityBase* UtilEdNode : UtilityEdNodes)
+    {
+        const FName* UtilKey = UtilityNodeKeyMap.Find(UtilEdNode);
+        if (!UtilKey) continue;
+
+        UQuestNodeBase* UtilInst = AllCompiledNodes.FindRef(*UtilKey);
+        if (!UtilInst) continue;
+
+        UtilInst->NextNodesOnForward.Empty();
+
+        if (UEdGraphPin* ForwardPin = UtilEdNode->FindPin(TEXT("Forward"), EGPD_Output))
+        {
+            TArray<FName> ForwardTags;
+            ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
+            for (const FName& Tag : ForwardTags) UtilInst->NextNodesOnForward.Add(Tag);
+        }
+    }
+
+    // ---- Resolve entry tags from the graph's Entry node ----
+    TArray<FName> EntryTags = ResolveEntryTags(Graph, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutEntryTagsByOutcome);
+    EntryTags.Append(MonitorTags);
+    return EntryTags;
+}
+
+void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap)
+{
+    TMap<FString, UQuestlineNode_ContentBase*> LabelMap;
+
     for (UEdGraphNode* Node : Graph->Nodes)
     {
         UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node);
         if (!ContentNode) continue;
-        ContentNodes.Add(ContentNode);
+        OutContentNodes.Add(ContentNode);
         const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 
-        // Linked questlines are erased from the runtime data set. Their connections are resolved and tags are written in-line
-        // describing their context in the parent graph. 
+        // Linked questlines are erased from the runtime data set
         if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;
 
         if (Label.IsEmpty())
@@ -291,8 +314,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
 
-        // Register outcome tags: both the raw Quest.Outcome.* tag (for tag-picker persistence across INI regeneration) and 
-        // the per-node fact tag Quest.State.<Node>.Outcome.<Leaf> (for prerequisite resolution).
+        // Register outcome tags: both the raw Quest.Outcome.* tag and the per-node fact tag
         if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
             if (QuestStepNode->ObjectiveClass)
@@ -308,11 +330,12 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         
         AllCompiledNodes.Add(TagName, Instance);
         AllCompiledEditorNodes.Add(TagName, ContentNode);
-        NodeInstanceMap.Add(ContentNode, Instance);
+        OutNodeInstanceMap.Add(ContentNode, Instance);
     }
+}
 
-    // ---- Pass 1b: setter nodes — create UQuestPrereqGroupNode monitors ----
-
+void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags)
+{
     for (UEdGraphNode* Node : Graph->Nodes)
     {
         UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node);
@@ -349,11 +372,12 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         AllCompiledNodes.Add(GroupTagName, Monitor);
         AllCompiledQuestTags.Add(GroupTagName);
-        MonitorTags.Add(GroupTagName);
+        OutMonitorTags.Add(GroupTagName);
     }
+}
 
-    // ---- Pass 1c: utility nodes ----
-    TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
+void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes)
+{
     for (UEdGraphNode* Node : Graph->Nodes)
     {
         UQuestlineNode_UtilityBase* UtilEdNode = Cast<UQuestlineNode_UtilityBase>(Node);
@@ -389,37 +413,17 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         if (!Instance) continue;
 
         const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
-        UtilityEdNodes.Add(UtilEdNode);
+        OutUtilityEdNodes.Add(UtilEdNode);
         UtilityNodeKeyMap.Add(Node, UtilKey);
         AllCompiledNodes.Add(UtilKey, Instance);
         AllCompiledEditorNodes.Add(UtilKey, Node);
-        // Intentionally NOT added to AllCompiledQuestTags — utility nodes are internal
-        // routing scaffolding, not externally tracked quest states
     }
-    
-    if (bHasErrors) return {};
+}
 
-    // ---- Stale pin diagnostic ----
+void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths)
+{
     for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
     {
-        for (UEdGraphPin* Pin : ContentNode->Pins)
-        {
-            if (Pin->bOrphanedPin && Pin->LinkedTo.Num() > 0)
-            {
-                const FString Label = ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
-                AddWarning(FString::Printf(
-                    TEXT("[%s] Node '%s' has a stale pin '%s' with %d active connection(s). These wires will be ignored at runtime. Right-click the node to remove stale pins."),
-                    *TagPrefix, *Label, *Pin->PinName.ToString(), Pin->LinkedTo.Num()), ContentNode);
-            }
-        }
-    }
-
-    // ---- Pass 2: output pin wiring ----
-
-    for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
-    {
-        // LinkedQuestline nodes are erased; their wiring is handled by ResolvePinToTags when the parent graph encounters them
-        // while following the predecessor node's output pins
         if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;
 
         UQuestNodeBase* Instance = NodeInstanceMap.FindRef(ContentNode);
@@ -436,7 +440,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             if (Pin->Direction != EGPD_Output) continue;
             if (Pin->bOrphanedPin) continue; 
 
-            // Deactivated pin: split routing by destination pin category rather than using ResolvePinToTags
+            // Deactivated pin: split routing by destination pin category
             if (Pin->PinType.PinCategory == TEXT("QuestDeactivated"))
             {
                 TArray<FName> ActivateTags, DeactivateTags;
@@ -519,28 +523,10 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
             }
         }
     }
-    
-    // ---- Pass 2b: utility node Forward output wiring ----
+}
 
-    for (UQuestlineNode_UtilityBase* UtilEdNode : UtilityEdNodes)
-    {
-        const FName* UtilKey = UtilityNodeKeyMap.Find(UtilEdNode);
-        if (!UtilKey) continue;
-
-        UQuestNodeBase* UtilInst = AllCompiledNodes.FindRef(*UtilKey);
-        if (!UtilInst) continue;
-
-        UtilInst->NextNodesOnForward.Empty();
-
-        if (UEdGraphPin* ForwardPin = UtilEdNode->FindPin(TEXT("Forward"), EGPD_Output))
-        {
-            TArray<FName> ForwardTags;
-            ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
-            for (const FName& Tag : ForwardTags) UtilInst->NextNodesOnForward.Add(Tag);
-        }
-    }
-    // ---- Resolve entry tags from the graph's Entry node ----
-
+TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome)
+{
     TArray<FName> EntryTags;
     for (UEdGraphNode* Node : Graph->Nodes)
     {
@@ -549,7 +535,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         for (UEdGraphPin* Pin : Node->Pins)
         {
             if (Pin->Direction != EGPD_Output) continue;
-            if (Pin->bOrphanedPin) continue; // Skip stale entry pins
+            if (Pin->bOrphanedPin) continue;
 
             // Named outcome pins: route into the per-outcome map when the caller provides one
             if (Pin->PinType.PinCategory == TEXT("QuestOutcome") && OutEntryTagsByOutcome)
@@ -573,9 +559,56 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
         }
         break;
     }
-    
-    EntryTags.Append(MonitorTags);
     return EntryTags;
+}
+
+void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid)
+{
+    for (const auto& [TagName, NodeInstance] : InGraph->CompiledNodes)
+    {
+        if (!NodeInstance || !NodeInstance->GetQuestGuid().IsValid()) continue;
+        if (const FName* OldTag = OldTagsByGuid.Find(NodeInstance->GetQuestGuid()))
+        {
+            if (*OldTag != TagName)
+            {
+                DetectedTagRenames.Add(*OldTag, TagName);
+            }
+        }
+    }
+
+    if (DetectedTagRenames.Num() == 0) return;
+
+    // Chain-collapse the persistent ledger
+    for (FQuestTagRename& Existing : InGraph->PendingTagRenames)
+    {
+        if (const FName* ChainedNew = DetectedTagRenames.Find(Existing.NewTag))
+        {
+            Existing.NewTag = *ChainedNew;
+        }
+    }
+
+    // Add new entries not already covered by chain collapse
+    TSet<FName> ExistingOldTags;
+    for (const FQuestTagRename& Existing : InGraph->PendingTagRenames)
+    {
+        ExistingOldTags.Add(Existing.OldTag);
+    }
+    for (const auto& [OldTag, NewTag] : DetectedTagRenames)
+    {
+        if (!ExistingOldTags.Contains(OldTag))
+        {
+            InGraph->PendingTagRenames.Add({ OldTag, NewTag });
+        }
+    }
+
+    // Prune identity entries (rename then rename back)
+    InGraph->PendingTagRenames.RemoveAll([](const FQuestTagRename& E)
+    {
+        return E.OldTag == E.NewTag;
+    });
+
+    UE_LOG(LogSimpleQuest, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
+        DetectedTagRenames.Num(), InGraph->PendingTagRenames.Num());
 }
 
 
@@ -583,8 +616,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 // ResolvePinToTags - the node traversal engine
 // -------------------------------------------------------------------------------------------------
 
-void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome,
-                                               TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
+void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
@@ -768,47 +800,15 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     // AND
     if (Cast<UQuestlineNode_PrerequisiteAnd>(Node))
     {
-        FPrerequisiteExpressionNode ExprNode;
-        ExprNode.Type = EPrerequisiteExpressionType::And;
-        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
-
-        for (UEdGraphPin* Pin : Node->Pins)
-        {
-            if (Pin->Direction != EGPD_Input) continue;
-            for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
-            {
-                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
-                if (ChildIndex != INDEX_NONE)
-                {
-                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
-                }
-            }
-        }
-        return NodeIndex;
+        return CompileCombinatorNode(EPrerequisiteExpressionType::And, Node, TagPrefix, VisitedAssetPaths, OutExpression);
     }
-    
+
     // OR
     if (Cast<UQuestlineNode_PrerequisiteOr>(Node))
     {
-        FPrerequisiteExpressionNode ExprNode;
-        ExprNode.Type = EPrerequisiteExpressionType::Or;
-        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
-
-        for (UEdGraphPin* Pin : Node->Pins)
-        {
-            if (Pin->Direction != EGPD_Input) continue;
-            for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
-            {
-                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
-                if (ChildIndex != INDEX_NONE)
-                {
-                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
-                }
-            }
-        }
-        return NodeIndex;
+        return CompileCombinatorNode(EPrerequisiteExpressionType::Or, Node, TagPrefix, VisitedAssetPaths, OutExpression);
     }
-
+    
     // NOT
     if (Cast<UQuestlineNode_PrerequisiteNot>(Node))
     {
@@ -938,6 +938,27 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     }
 
     return INDEX_NONE;
+}
+
+int32 FQuestlineGraphCompiler::CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)
+{
+    FPrerequisiteExpressionNode ExprNode;
+    ExprNode.Type = Type;
+    const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+
+    for (UEdGraphPin* Pin : Node->Pins)
+    {
+        if (Pin->Direction != EGPD_Input) continue;
+        for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
+        {
+            const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
+            if (ChildIndex != INDEX_NONE)
+            {
+                OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
+            }
+        }
+    }
+    return NodeIndex;
 }
 
 FPrerequisiteExpression FQuestlineGraphCompiler::CompilePrerequisiteExpression(UEdGraphPin* PrerequisiteInputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths)

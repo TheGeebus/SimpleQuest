@@ -15,5 +15,6 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
 	if (FSignalEventMulticast* Delegate = TagChannels.Find(Channel))
 	{
 		Delegate->Remove(Handle);
+		UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::Unsubscribe: channel='%s'"), *Channel.ToString());
 	}
 }

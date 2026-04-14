@@ -8,6 +8,7 @@
 
 class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
+class UQuestlineNode_UtilityBase;
 class UQuestNodeBase;
 class UQuest;
 class UEdGraphPin;
@@ -154,6 +155,27 @@ private:
 	/** Appends a clickable action token that navigates to the given node in the graph editor. */
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
 
+	/** Pass 1: iterate content nodes, validate labels, create runtime instances, assign tags. */
+	void CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
+
+	/** Pass 1b: create UQuestPrereqGroupNode monitors for prerequisite group setter nodes. */
+	void CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags);
+
+	/** Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, GroupSignal). */
+	void CompileUtilityNodes(UEdGraph* Graph, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
+
+	/** Pass 2: route each content node's output pins into the runtime routing sets. */
+	void CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
+
+	/** Resolve entry tags from the graph's Entry node, splitting per-outcome when applicable. */
+	TArray<FName> ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome);
+
+	/** GUID-bridge rename detection: chain-collapse existing ledger, add new renames, prune identities. */
+	void DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid);
+
+	/** Shared handler for AND/OR combinator nodes — creates expression node and recurses into all input pins. */
+	int32 CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths,	FPrerequisiteExpression& OutExpression);
+	
 	UQuestlineGraph* RootGraph = nullptr;
 
 public:

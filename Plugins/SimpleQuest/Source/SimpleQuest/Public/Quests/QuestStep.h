@@ -22,6 +22,9 @@ class SIMPLEQUEST_API UQuestStep : public UQuestNodeBase
 	friend class FQuestlineGraphCompiler; 
 
 public:
+	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveContext, ProgressData);
+	FOnNodeProgress OnNodeProgress;
+	
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
 protected:
@@ -56,6 +59,9 @@ private:
 
 	UFUNCTION(BlueprintCallable)
 	void OnObjectiveComplete(FGameplayTag OutcomeTag);
+
+	UFUNCTION()
+	void OnObjectiveProgress(FQuestObjectiveContext ProgressData);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }

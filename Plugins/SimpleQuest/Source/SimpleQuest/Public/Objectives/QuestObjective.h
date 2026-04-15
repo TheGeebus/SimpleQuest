@@ -29,9 +29,9 @@ public:
 		
 	DECLARE_DELEGATE_TwoParams(FSetCounterDelegate, int32, int32);
 	FSetCounterDelegate OnTargetTriggered;
-	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuestObjectiveComplete, FGameplayTag, OutcomeTag);
-	FQuestObjectiveComplete OnQuestObjectiveComplete;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressData);
+	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
 	
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
@@ -112,6 +112,23 @@ protected:
 	UFUNCTION(BlueprintCallable)
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
 
+	/**
+	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
+	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.). Called automatically
+	 * by SetCurrentElements when the count changes.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
+	void ReportProgress(const FQuestObjectiveContext& InProgressData);
+
+	/**
+	 * Convenience for single-counter objectives. Increments CurrentElements by Amount, then either completes (if threshold
+	 * met) or reports progress. Fires exactly one event — never both. Returns true if the objective completed.
+	 *
+	 * Bypasses SetCurrentElements to avoid a double progress event on the final tick.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
+	bool AddProgress(const FQuestObjectiveContext& InContext, FGameplayTag OutcomeTag, int32 Amount = 1);
+	
 	UFUNCTION(BlueprintCallable)
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
 
@@ -139,7 +156,7 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
-	// Broadcasts OnSetCounter when changing the value 
+	/** Calls ReportProgress when the value changes */
 	UFUNCTION(BlueprintCallable, BlueprintSetter=SetCurrentElements)
 	void SetCurrentElements(const int32 NewAmount);
 	FORCEINLINE int32 GetCurrentElements() const { return CurrentElements; }

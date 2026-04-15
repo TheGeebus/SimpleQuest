@@ -5,6 +5,7 @@
 #include "Quests/QuestNodeBase.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
+#include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/AbandonQuestEvent.h"
@@ -150,6 +151,10 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
                 FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(ResolvedTag, this, &UQuestManagerSubsystem::HandleNodeDeactivatedEvent);
                 DeactivationSubscriptionHandles.Add(ResolvedTag, Handle);
             }
+            if (UQuestStep* Step = Cast<UQuestStep>(Instance))
+            {
+                Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
+            }
         }
     }
     
@@ -192,6 +197,19 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
     }
 
     ChainToNextNodes(Node, OutcomeTag);
+}
+
+void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeProgress: '%s' — %d/%d"),
+        *Step->GetQuestTag().ToString(),
+        ProgressData.CurrentCount,
+        ProgressData.RequiredCount);
+
+    FQuestEventContext Context = AssembleEventContext(Step, ProgressData);
+    QuestSignalSubsystem->PublishMessage(Step->GetQuestTag(), FQuestProgressEvent(Step->GetQuestTag(), Context));
 }
 
 void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag)

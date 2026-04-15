@@ -45,6 +45,31 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, cons
 	ConditionalBeginDestroy();
 }
 
+void UQuestObjective::ReportProgress(const FQuestObjectiveContext& InProgressData)
+{
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), InProgressData.CurrentCount, InProgressData.RequiredCount, *GetFullName());
+	OnQuestObjectiveProgress.Broadcast(InProgressData);
+}
+
+bool UQuestObjective::AddProgress(const FQuestObjectiveContext& InContext, FGameplayTag OutcomeTag, int32 Amount)
+{
+	// Set directly — bypasses SetCurrentElements to avoid double-fire (SetCurrentElements calls ReportProgress; we handle the event below)
+	CurrentElements = FMath::Clamp(CurrentElements + Amount, 0, MaxElements);
+
+	FQuestObjectiveContext OutContext = InContext;
+	OutContext.CurrentCount = CurrentElements;
+	OutContext.RequiredCount = MaxElements;
+
+	if (CurrentElements >= MaxElements)
+	{
+		CompleteObjectiveWithOutcome(OutcomeTag, OutContext);
+		return true;
+	}
+
+	ReportProgress(OutContext);
+	return false;
+}
+
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
 {
 	OnEnableTarget.Broadcast(Target, bIsTargetEnabled);
@@ -75,6 +100,9 @@ void UQuestObjective::SetCurrentElements(const int32 NewAmount)
 	if (CurrentElements != NewAmount && NewAmount <= MaxElements)
 	{
 		CurrentElements = NewAmount;
+		FQuestObjectiveContext ProgressContext;
+		ProgressContext.CurrentCount = CurrentElements;
+		ProgressContext.RequiredCount = MaxElements;
+		ReportProgress(ProgressContext);
 	}
 }
-

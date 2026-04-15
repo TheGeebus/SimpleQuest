@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Quests/Types/QuestObjectiveContext.h"
 #include "QuestManagerSubsystem.generated.h"
 
 struct FWorldStateFactAddedEvent;
@@ -27,8 +28,8 @@ struct FQuestText;
 class UQuestReward;
 class UQuestlineGraph;
 class UQuestNodeBase;
+class UQuestStep;
 struct FQuestEventContext;
-struct FQuestObjectiveContext;
 struct FInstancedStruct;
 
 
@@ -96,6 +97,8 @@ private:
 	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
+	UFUNCTION()
+	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData);
 	UFUNCTION()
 	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()

@@ -28,6 +28,7 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
+	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClasses, NumberOfElements);
 }
 
@@ -36,6 +37,7 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 	if (ActiveObjective)
 	{
 		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		ActiveObjective = nullptr;
 	}
 
@@ -48,8 +50,13 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 	{
 		CompletionData = ActiveObjective->TakeCompletionData();
 		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		ActiveObjective = nullptr;
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
 }
 
+void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressData)
+{
+	OnNodeProgress.ExecuteIfBound(this, ProgressData);
+}

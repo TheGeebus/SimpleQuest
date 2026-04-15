@@ -29,8 +29,6 @@ void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPt
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
 	TargetActors = InTargetActors;
 	TargetClasses = InTargetClasses;
-	MaxElements = NumElementsRequired;
-	SetCurrentElements(0);
 }
 
 TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
@@ -49,25 +47,6 @@ void UQuestObjective::ReportProgress(const FQuestObjectiveContext& InProgressDat
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), InProgressData.CurrentCount, InProgressData.RequiredCount, *GetFullName());
 	OnQuestObjectiveProgress.Broadcast(InProgressData);
-}
-
-bool UQuestObjective::AddProgress(const FQuestObjectiveContext& InContext, FGameplayTag OutcomeTag, int32 Amount)
-{
-	// Set directly — bypasses SetCurrentElements to avoid double-fire (SetCurrentElements calls ReportProgress; we handle the event below)
-	CurrentElements = FMath::Clamp(CurrentElements + Amount, 0, MaxElements);
-
-	FQuestObjectiveContext OutContext = InContext;
-	OutContext.CurrentCount = CurrentElements;
-	OutContext.RequiredCount = MaxElements;
-
-	if (CurrentElements >= MaxElements)
-	{
-		CompleteObjectiveWithOutcome(OutcomeTag, OutContext);
-		return true;
-	}
-
-	ReportProgress(OutContext);
-	return false;
 }
 
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
@@ -95,14 +74,3 @@ void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 	}
 }
 
-void UQuestObjective::SetCurrentElements(const int32 NewAmount)
-{
-	if (CurrentElements != NewAmount && NewAmount <= MaxElements)
-	{
-		CurrentElements = NewAmount;
-		FQuestObjectiveContext ProgressContext;
-		ProgressContext.CurrentCount = CurrentElements;
-		ProgressContext.RequiredCount = MaxElements;
-		ReportProgress(ProgressContext);
-	}
-}

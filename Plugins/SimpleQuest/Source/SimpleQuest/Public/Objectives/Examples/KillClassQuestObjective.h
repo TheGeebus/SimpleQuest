@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "NativeGameplayTags.h"
-#include "Objectives/QuestObjective.h"
+#include "Objectives/CountingQuestObjective.h"
 #include "KillClassQuestObjective.generated.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Outcome_KillClass_Killed)
@@ -13,7 +13,7 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Outcome_KillClass_Killed)
  * 
  */
 UCLASS()
-class SIMPLEQUEST_API UKillClassQuestObjective : public UQuestObjective
+class SIMPLEQUEST_API UKillClassQuestObjective : public UCountingQuestObjective
 {
 	GENERATED_BODY()
 

@@ -97,5 +97,9 @@ namespace USimpleQuestEditorUtilities
 	 */
 	bool IsStepTagCurrent(const UQuestlineNode_Step* StepNode);
 
-
+	/**
+	 * Syncs a node's pins of a given category to match a desired set of pin names. Pins not in DesiredPinNames are orphaned
+	 * (if wired) or removed (if unwired). Missing names are created. Calls Modify() and NotifyGraphChanged() internally.
+	 */
+	void SyncPinsByCategory(UEdGraphNode* Node,	EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
 }

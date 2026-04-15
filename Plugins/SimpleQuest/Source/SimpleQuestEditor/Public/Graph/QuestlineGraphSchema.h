@@ -62,6 +62,12 @@ private:
 	static bool AnySourceReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category);
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
 
+	/** Follows forward from StartNode through prerequisite pins and knots. Returns true if TargetNode is reachable in the prereq subgraph. */
+	static bool PrereqChainReachesNode(const UEdGraphNode* StartNode, const UEdGraphNode* TargetNode, TSet<const UEdGraphNode*>& Visited);
+
+	/** Walks backward through prereq inputs and knots, collecting non-prereq leaf source pins. */
+	static void CollectPrereqLeafSources(const UEdGraphNode* Node, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphNode*>& Visited);
+	
 	// ── Connection validation helpers (extracted from CanCreateConnection) ──
 
 	/** Direct prerequisite pin rules (both pins are non-knot, at least one is prereq category). */

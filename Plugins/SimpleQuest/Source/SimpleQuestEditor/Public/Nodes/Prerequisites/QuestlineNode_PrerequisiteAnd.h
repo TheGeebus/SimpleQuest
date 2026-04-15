@@ -20,4 +20,6 @@ public:
 private:
 	UPROPERTY()
 	int32 ConditionPinCount = 2;
+
+	void RemoveConditionPin(UEdGraphPin* PinToRemove);
 };

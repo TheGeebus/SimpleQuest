@@ -25,6 +25,8 @@
 #include "HAL/FileManager.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
+#include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -45,6 +47,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		if (UQuestlineNode_Knot* KnotNode = Cast<UQuestlineNode_Knot>(Node))
 		{
 			return SNew(SGraphNodeKnot, KnotNode);
+		}
+		if (UQuestlineNode_PrerequisiteBase* PrereqNode = Cast<UQuestlineNode_PrerequisiteBase>(Node))
+		{
+			return SNew(SGraphNode_PrerequisiteCombinator, PrereqNode);
 		}
 		if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(Node))
 		{

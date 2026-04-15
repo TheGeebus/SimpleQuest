@@ -308,6 +308,88 @@ bool UQuestlineGraphSchema::AnySourceReachesCategory(const UEdGraphPin* OutputPi
 	return false;
 }
 
+bool UQuestlineGraphSchema::PrereqChainReachesNode(const UEdGraphNode* StartNode, const UEdGraphNode* TargetNode, TSet<const UEdGraphNode*>& Visited)
+{
+    if (!StartNode || Visited.Contains(StartNode)) return false;
+    Visited.Add(StartNode);
+
+    for (const UEdGraphPin* Pin : StartNode->Pins)
+    {
+        if (Pin->Direction != EGPD_Output) continue;
+        if (Pin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
+
+        for (const UEdGraphPin* Linked : Pin->LinkedTo)
+        {
+            const UEdGraphNode* Next = Linked->GetOwningNode();
+            if (Next == TargetNode) return true;
+
+            if (Cast<const UQuestlineNode_Knot>(Next))
+            {
+                // Follow knot pass-through
+                if (const UEdGraphPin* KnotOut = Next->FindPin(TEXT("KnotOut"), EGPD_Output))
+                {
+                    for (const UEdGraphPin* KnotLinked : KnotOut->LinkedTo)
+                    {
+                        const UEdGraphNode* KnotNext = KnotLinked->GetOwningNode();
+                        if (KnotNext == TargetNode) return true;
+                        if (PrereqChainReachesNode(KnotNext, TargetNode, Visited)) return true;
+                    }
+                }
+            }
+            else if (Cast<const UQuestlineNode_PrerequisiteBase>(Next))
+            {
+                if (PrereqChainReachesNode(Next, TargetNode, Visited)) return true;
+            }
+        }
+    }
+    return false;
+}
+
+void UQuestlineGraphSchema::CollectPrereqLeafSources(const UEdGraphNode* Node, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphNode*>& Visited)
+{
+    if (!Node || Visited.Contains(Node)) return;
+    Visited.Add(Node);
+
+    for (const UEdGraphPin* Pin : Node->Pins)
+    {
+        if (Pin->Direction != EGPD_Input) continue;
+        if (Pin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
+
+        for (const UEdGraphPin* Linked : Pin->LinkedTo)
+        {
+            const UEdGraphNode* Source = Linked->GetOwningNode();
+
+            if (Cast<const UQuestlineNode_PrerequisiteBase>(Source))
+            {
+                CollectPrereqLeafSources(Source, OutSources, Visited);
+            }
+            else if (Cast<const UQuestlineNode_Knot>(Source))
+            {
+                // Follow knot backward
+                if (const UEdGraphPin* KnotIn = Source->FindPin(TEXT("KnotIn"), EGPD_Input))
+                {
+                    for (const UEdGraphPin* KnotLinked : KnotIn->LinkedTo)
+                    {
+                        const UEdGraphNode* KnotSource = KnotLinked->GetOwningNode();
+                        if (Cast<const UQuestlineNode_PrerequisiteBase>(KnotSource))
+                        {
+                            CollectPrereqLeafSources(KnotSource, OutSources, Visited);
+                        }
+                        else
+                        {
+                            OutSources.Add(KnotLinked);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                OutSources.Add(Linked); // Leaf: quest outcome, entry outcome, etc.
+            }
+        }
+    }
+}
+
 FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* OutputNode, const UEdGraphNode* InputNode) const
 {
 	const bool bOutputIsPrereq = (OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite"));
@@ -320,23 +402,60 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 			"This prerequisite input already has a connection. Use an AND or OR node to combine conditions."));
 	}
 
-	// Prereq output to prereq input: operator chaining or getter to operator
+	// Prereq-to-prereq: allow unless it creates a cycle
 	if (bOutputIsPrereq && bInputIsPrereq)
 	{
+		TSet<const UEdGraphNode*> Visited;
+		if (PrereqChainReachesNode(InputNode, OutputNode, Visited))
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+				NSLOCTEXT("SimpleQuestEditor", "PrereqCycle",
+				"This connection would create a circular prerequisite expression"));
+		}
+		
+		// Reject duplicate: OutputNode already feeds another input on InputNode
+		for (const UEdGraphPin* Pin : InputNode->Pins)
+		{
+			if (Pin->Direction != EGPD_Input) continue;
+			if (Pin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
+			for (const UEdGraphPin* Linked : Pin->LinkedTo)
+			{
+				if (Linked->GetOwningNode() == OutputNode)
+				{
+					return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+						NSLOCTEXT("SimpleQuestEditor", "PrereqDuplicateInput",
+						"This node already feeds another input on this operator"));
+				}
+			}
+		}
+		
 		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-	}
-
+	}	
+	
 	// Prereq output to non-prereq input: only the Prerequisites pin on a content node
 	if (bOutputIsPrereq)
 	{
 		if (InputPin->PinName == TEXT("Prerequisites") && TraversalPolicy->IsContentNode(InputNode))
 		{
+			// Check self-prerequisite: does this expression reference the target node's own outcomes?
+			TSet<const UEdGraphPin*> LeafSources;
+			TSet<const UEdGraphNode*> Visited;
+			CollectPrereqLeafSources(OutputNode, LeafSources, Visited);
+			for (const UEdGraphPin* Source : LeafSources)
+			{
+				if (Source->GetOwningNode() == InputNode)
+				{
+					return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+						NSLOCTEXT("SimpleQuestEditor", "SelfPrerequisite",
+						"This prerequisite expression includes an outcome from this quest — a quest cannot require its own completion"));
+				}
+			}
 			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 		}
 		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqOutputInvalid",
 			"Prerequisite outputs may only connect to the Prerequisites pin or other prerequisite nodes"));
 	}
-
+	
 	// Non-prereq output to prereq input: only Quest outcome pins
 	const bool bIsQuestOutcome = OutputPin->PinType.PinCategory == TEXT("QuestOutcome")
 		|| (OutputPin->PinType.PinCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
@@ -747,6 +866,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     {
 	    return ValidateKnotConnection(OutputPin, InputPin, OutputNode, InputNode, bOutputIsKnot, bInputIsKnot);
     }
+	
     // ---- Entry node: only connects to Quest/Step Activate or utility node Activate ----
     if (Cast<const UQuestlineNode_Entry>(OutputNode))
     {

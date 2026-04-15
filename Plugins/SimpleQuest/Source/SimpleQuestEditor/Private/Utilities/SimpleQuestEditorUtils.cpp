@@ -311,3 +311,92 @@ bool USimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* St
 	return CompiledTag.GetTagName() == ReconstructedTag.GetTagName();
 }
 
+void USimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
+{
+    if (!Node) return;
+
+    // ----- Collect existing pins of this category (including orphaned) -----
+
+    TArray<UEdGraphPin*> ExistingPins;
+    for (UEdGraphPin* Pin : Node->Pins)
+    {
+        if (Pin->Direction == Direction && Pin->PinType.PinCategory == PinCategory)
+        {
+            ExistingPins.Add(Pin);
+        }
+    }
+
+    // ----- Diff against desired set -----
+
+    bool bChanged = false;
+
+    TArray<UEdGraphPin*> PinsToRemove;
+    for (UEdGraphPin* Pin : ExistingPins)
+    {
+        const bool bDesired = DesiredPinNames.Contains(Pin->PinName);
+        if (bDesired && Pin->bOrphanedPin)
+        {
+            Pin->bOrphanedPin = false;
+            bChanged = true;
+        }
+        else if (!bDesired && !Pin->bOrphanedPin)
+        {
+            if (Pin->LinkedTo.Num() > 0)
+            {
+                Pin->bOrphanedPin = true;
+            }
+            else
+            {
+                PinsToRemove.Add(Pin);
+            }
+            bChanged = true;
+        }
+    }
+
+    TArray<FName> NamesToAdd;
+    for (const FName& Name : DesiredPinNames)
+    {
+        const bool bExists = ExistingPins.ContainsByPredicate(
+            [&](const UEdGraphPin* Pin) { return Pin->PinName == Name; });
+        if (!bExists) NamesToAdd.Add(Name);
+    }
+
+    if (!bChanged && NamesToAdd.IsEmpty()) return;
+
+    // ----- Apply changes -----
+
+    Node->Modify();
+
+    for (UEdGraphPin* Pin : PinsToRemove)
+    {
+        Node->RemovePin(Pin);
+    }
+
+    int32 InsertIndex = INDEX_NONE;
+    if (!InsertBeforeCategories.IsEmpty())
+    {
+        for (int32 i = 0; i < Node->Pins.Num(); i++)
+        {
+            if (InsertBeforeCategories.Contains(Node->Pins[i]->PinType.PinCategory))
+            {
+                InsertIndex = i;
+                break;
+            }
+        }
+    }
+
+    FEdGraphPinType PinType;
+    PinType.PinCategory = PinCategory;
+
+    for (const FName& Name : NamesToAdd)
+    {
+        Node->CreatePin(Direction, PinType, Name, InsertIndex);
+        if (InsertIndex != INDEX_NONE) ++InsertIndex;
+    }
+
+    if (UEdGraph* Graph = Node->GetGraph())
+    {
+        Graph->NotifyGraphChanged();
+    }
+}
+

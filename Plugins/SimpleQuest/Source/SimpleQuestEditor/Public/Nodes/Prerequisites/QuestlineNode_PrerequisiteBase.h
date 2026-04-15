@@ -13,9 +13,8 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteBase : public UQuestlineN
 public:
 	virtual bool CanUserDeleteNode() const override { return true; }
 	virtual bool CanDuplicateNode() const override  { return true; }
+	virtual FText GetConditionPinLabel(int32 Index) const;
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 
-protected:
-	virtual FText GetConditionPinLabel(int32 Index) const;
 };

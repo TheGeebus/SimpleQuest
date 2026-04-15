@@ -21,6 +21,13 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Execute);
 	CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Then);
+
+	FEdGraphPinType StructPinType;
+	StructPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+	StructPinType.PinSubCategoryObject = FQuestObjectiveContext::StaticStruct();
+
+	UEdGraphPin* DataPin = CreatePin(EGPD_Input, StructPinType, TEXT("CompletionData"));
+	DataPin->PinFriendlyName = LOCTEXT("DataPin", "Completion Data");
 }
 
 FText UK2Node_CompleteObjectiveWithOutcome::GetNodeTitle(ENodeTitleType::Type TitleType) const
@@ -85,12 +92,25 @@ TSharedPtr<SGraphNode> UK2Node_CompleteObjectiveWithOutcome::CreateVisualWidget(
 	return SNew(SGraphNode_CompleteObjective, this);
 }
 
+bool UK2Node_CompleteObjectiveWithOutcome::IsConnectionDisallowed(const UEdGraphPin* MyPin, const UEdGraphPin* OtherPin, FString& OutReason) const
+{
+	if (MyPin->PinName == TEXT("CompletionData"))
+	{
+		if (OtherPin->PinType.PinCategory != UEdGraphSchema_K2::PC_Struct)
+		{
+			OutReason = TEXT("Completion Data only accepts struct types.");
+			return true;
+		}
+	}
+	return Super::IsConnectionDisallowed(MyPin, OtherPin, OutReason);
+}
+
+
 // ---------------------------------------------------------------------------
 // UK2Node — compilation
 // ---------------------------------------------------------------------------
 
-void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(
-	FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
+void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
 {
 	Super::ExpandNode(CompilerContext, SourceGraph);
 
@@ -101,16 +121,10 @@ void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(
 		return;
 	}
 
-	// Spawn intermediate CallFunction → CompleteObjectiveWithOutcome(FGameplayTag)
 	UK2Node_CallFunction* CallNode = CompilerContext.SpawnIntermediateNode<UK2Node_CallFunction>(this, SourceGraph);
 	CallNode->FunctionReference.SetSelfMember(FName(TEXT("CompleteObjectiveWithOutcome")));
 	CallNode->AllocateDefaultPins();
 
-	// Wire execution
-	CompilerContext.MovePinLinksToIntermediate(*GetExecPin(), *CallNode->GetExecPin());
-	CompilerContext.MovePinLinksToIntermediate(*FindPinChecked(UEdGraphSchema_K2::PN_Then), *CallNode->GetThenPin());
-
-	// Export the UPROPERTY FGameplayTag to the function's parameter pin
 	UEdGraphPin* CallTagPin = CallNode->FindPin(TEXT("OutcomeTag"));
 	if (CallTagPin)
 	{
@@ -118,6 +132,16 @@ void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(
 		FGameplayTag::StaticStruct()->ExportText(ExportedValue, &OutcomeTag, nullptr, nullptr, PPF_None, nullptr);
 		CallTagPin->DefaultValue = ExportedValue;
 	}
+
+	UEdGraphPin* DataPin = FindPin(TEXT("CompletionData"));
+	UEdGraphPin* CallDataPin = CallNode->FindPin(TEXT("InCompletionData"));
+	if (DataPin && CallDataPin)
+	{
+		CompilerContext.MovePinLinksToIntermediate(*DataPin, *CallDataPin);
+	}
+
+	CompilerContext.MovePinLinksToIntermediate(*GetExecPin(), *CallNode->GetExecPin());
+	CompilerContext.MovePinLinksToIntermediate(*FindPinChecked(UEdGraphSchema_K2::PN_Then), *CallNode->GetThenPin());
 
 	BreakAllNodeLinks();
 }

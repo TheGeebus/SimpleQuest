@@ -13,23 +13,43 @@ void SGraphNode_CompleteObjective::Construct(const FArguments& InArgs, UK2Node_C
 	SGraphNodeK2Default::Construct(SGraphNodeK2Default::FArguments(), InNode);
 }
 
-void SGraphNode_CompleteObjective::CreateBelowPinControls(TSharedPtr<SVerticalBox> MainBox)
+void SGraphNode_CompleteObjective::CreatePinWidgets()
 {
-	UK2Node_CompleteObjectiveWithOutcome* Node = Cast<UK2Node_CompleteObjectiveWithOutcome>(GraphNode);
-	if (!Node) return;
+	// Exec pins first
+	for (UEdGraphPin* Pin : GraphNode->Pins)
+	{
+		if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+		{
+			CreateStandardPinWidget(Pin);
+		}
+	}
 
-	MainBox->AddSlot()
-		.AutoHeight()
-		.Padding(FMargin(18.f, 2.f, 18.f, 6.f))
-		[
-			SNew(SGameplayTagCombo)
-			.Filter(TEXT("Quest.Outcome"))
-			.Tag_Lambda([Node]() { return Node->OutcomeTag; })
-			.OnTagChanged_Lambda([this](const FGameplayTag NewTag)
-			{
-				OnOutcomeTagChanged(NewTag);
-			})
-		];
+	// Tag picker between exec and data pins
+	UK2Node_CompleteObjectiveWithOutcome* Node = Cast<UK2Node_CompleteObjectiveWithOutcome>(GraphNode);
+	if (Node && LeftNodeBox.IsValid())
+	{
+		LeftNodeBox->AddSlot()
+			.AutoHeight()
+			.Padding(FMargin(18.f, 2.f, 18.f, 6.f))
+			[
+				SNew(SGameplayTagCombo)
+				.Filter(TEXT("Quest.Outcome"))
+				.Tag_Lambda([Node]() { return Node->OutcomeTag; })
+				.OnTagChanged_Lambda([this](const FGameplayTag NewTag)
+				{
+					OnOutcomeTagChanged(NewTag);
+				})
+			];
+	}
+
+	// Data pins after
+	for (UEdGraphPin* Pin : GraphNode->Pins)
+	{
+		if (Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+		{
+			CreateStandardPinWidget(Pin);
+		}
+	}
 }
 
 void SGraphNode_CompleteObjective::OnOutcomeTagChanged(const FGameplayTag NewTag)

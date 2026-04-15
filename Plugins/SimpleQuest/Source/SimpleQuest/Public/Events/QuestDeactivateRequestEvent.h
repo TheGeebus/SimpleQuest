@@ -15,10 +15,8 @@ struct SIMPLEQUEST_API FQuestDeactivateRequestEvent : public FQuestEventBase
 	GENERATED_BODY()
 	
 	FQuestDeactivateRequestEvent() = default;
-	FQuestDeactivateRequestEvent(FGameplayTag InQuestTag, bool bInWriteBlocked)
-		: FQuestEventBase(InQuestTag), bWriteBlocked(bInWriteBlocked) {}
-	
-	UPROPERTY()
-	bool bWriteBlocked = false;
+	FQuestDeactivateRequestEvent(FGameplayTag InQuestTag)
+		: FQuestEventBase(InQuestTag) {}
+
 };
 

@@ -18,7 +18,7 @@ class SIMPLEQUEST_API UKillClassQuestObjective : public UQuestObjective
 	GENERATED_BODY()
 
 public:
-	virtual void TryCompleteObjective_Implementation(UObject* InTargetObject) override;
+	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
 	
 private:
 	UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))

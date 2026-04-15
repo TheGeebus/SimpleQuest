@@ -14,10 +14,16 @@ struct FQuestObjectiveTriggered
 
 	FQuestObjectiveTriggered() = default;
 
-	explicit FQuestObjectiveTriggered(UObject* InTriggeredActor)
-		: TriggeredActor(InTriggeredActor)
+	explicit FQuestObjectiveTriggered(UObject* InTriggeredActor, UObject* InInstigator = nullptr)
+		: TriggeredActor(InTriggeredActor), Instigator(InInstigator)
 	{}
 
+	/** The target actor that was triggered (victim, interact point, waypoint). */
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<UObject> TriggeredActor;
+
+	/** The actor that caused the trigger (killer, interactor). Null for passive triggers. */
+	UPROPERTY(BlueprintReadWrite)
+	TObjectPtr<UObject> Instigator;
 };
+

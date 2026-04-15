@@ -8,8 +8,19 @@
 #include "Interfaces/QuestTargetInterface.h"
 
 
-void UQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
+void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
+	/*-------------------------------------------------------------------------------------------------------------------*
+	 * Set fields on an FQuestObjectiveContext and pass it to CompleteObjectiveWithOutcome.
+	 * Common fields:
+	 *   InContext can be forwarded directly for pass-through, or build a new one:
+	 *   FQuestObjectiveContext OutContext;
+	 *   OutContext.TriggeredActor = InContext.TriggeredActor;
+	 *   OutContext.Instigator = InContext.Instigator;
+	 * Game-specific extension:
+	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType);
+	 *-------------------------------------------------------------------------------------------------------------------*/
+
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
@@ -27,46 +38,9 @@ TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 	return {};
 }
 
-/*
-bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData)
 {
-	bool bIsTargetRelevant = false;
-	const bool bHasTargetClass = IsValid(TargetClasses);
-	if (bHasTargetClass)
-	{
-		if (InTargetObject->IsA(TargetClass))
-		{
-			bIsTargetRelevant = true; 
-		}
-	}
-	
-	if (!TargetActors.IsEmpty())
-	{
-		if (const AActor* AsActor = Cast<AActor>(InTargetObject))
-		{
-			for (const TSoftObjectPtr<AActor>& SoftTarget : TargetActors)
-			{
-				if (SoftTarget.Get() == AsActor)
-				{
-					bIsTargetRelevant = true;
-					break;
-				}
-			}
-		}
-	}
-	else if (!bHasTargetClass)
-	{
-		bIsTargetRelevant = true; // Neither TargetActors nor TargetClass filters are set, anything is relevant
-	}
-	
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::IsObjectRelevant_Implementation : %s is relevant to %s: %hs"), *InTargetObject->GetName(), *this->GetName(), bIsTargetRelevant ? "true" : "false");
-	return bIsTargetRelevant;
-}
-*/
-
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag)
-{
-	bStepCompleted = true;
+	CompletionData = InCompletionData;
 	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
 	ConditionalBeginDestroy();
 }

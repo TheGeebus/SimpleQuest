@@ -27,7 +27,6 @@ void UQuestWatcherComponent::BeginPlay()
 
 void UQuestWatcherComponent::WatchedQuestActivatedEvent(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent)
 {
-	if (!QuestEnabledEvent.bIsActivated) { return; }
 	ActiveQuestTags.AddTag(QuestEnabledEvent.GetQuestTag());
 	if (OnQuestActivated.IsBound())
 	{

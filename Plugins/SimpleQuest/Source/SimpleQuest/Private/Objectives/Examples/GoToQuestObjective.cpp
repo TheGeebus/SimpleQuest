@@ -10,10 +10,10 @@ UGoToQuestObjective::UGoToQuestObjective()
 	ReachedOutcomeTag = Tag_Outcome_GoTo_Reached;
 }
 
-void UGoToQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
+void UGoToQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
-	EnableTargetObject(InTargetObject, false);
-	CompleteObjectiveWithOutcome(ReachedOutcomeTag);
+	EnableTargetObject(InContext.TriggeredActor, false);
+	CompleteObjectiveWithOutcome(ReachedOutcomeTag, InContext);
 }
 
 void UGoToQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)

@@ -1,7 +1,7 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Quests/QuestStep.h"
-
+#include "Quests/Types/QuestObjectiveContext.h"
 #include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
 #include "WorldState/WorldStateSubsystem.h"
@@ -46,6 +46,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
 	if (ActiveObjective)
 	{
+		CompletionData = ActiveObjective->TakeCompletionData();
 		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		ActiveObjective = nullptr;
 	}

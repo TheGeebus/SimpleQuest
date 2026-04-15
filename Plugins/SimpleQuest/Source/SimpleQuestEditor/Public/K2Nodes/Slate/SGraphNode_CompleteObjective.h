@@ -16,7 +16,7 @@ public:
 	void Construct(const FArguments& InArgs, UK2Node_CompleteObjectiveWithOutcome* InNode);
 
 protected:
-	virtual void CreateBelowPinControls(TSharedPtr<SVerticalBox> MainBox) override;
+	virtual void CreatePinWidgets() override;
 
 private:
 	void OnOutcomeTagChanged(const FGameplayTag NewTag);

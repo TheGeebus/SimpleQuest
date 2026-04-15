@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
+#include "Types/QuestObjectiveContext.h"
 #include "Types/QuestStepEnums.h"
 #include "QuestStep.generated.h"
 
@@ -49,7 +50,10 @@ protected:
 private:
 	UPROPERTY()
 	TObjectPtr<UQuestObjective> ActiveObjective;
-	
+
+	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
+	FQuestObjectiveContext CompletionData;
+
 	UFUNCTION(BlueprintCallable)
 	void OnObjectiveComplete(FGameplayTag OutcomeTag);
 
@@ -61,5 +65,6 @@ public:
 	FORCEINLINE FVector GetTargetVector() const { return TargetVector; }
 	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
+	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }
 	
 };

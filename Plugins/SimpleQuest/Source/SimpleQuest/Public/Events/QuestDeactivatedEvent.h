@@ -29,6 +29,11 @@ struct SIMPLEQUEST_API FQuestDeactivatedEvent : public FQuestEventBase
 		, Source(InSource)
 	{}
 
+	FQuestDeactivatedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventContext& InContext)
+		: FQuestEventBase(InQuestTag, InContext)
+		, Source(InSource)
+	{}
+
 	UPROPERTY(BlueprintReadWrite)
 	EDeactivationSource Source = EDeactivationSource::Internal;
 };

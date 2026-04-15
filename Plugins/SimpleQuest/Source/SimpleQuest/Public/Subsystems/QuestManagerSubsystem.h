@@ -27,6 +27,9 @@ struct FQuestText;
 class UQuestReward;
 class UQuestlineGraph;
 class UQuestNodeBase;
+struct FQuestEventContext;
+struct FQuestObjectiveContext;
+struct FInstancedStruct;
 
 
 /**
@@ -44,7 +47,7 @@ protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 	
-	void CheckQuestObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& QuestObjectiveEvent);
+	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 	
@@ -68,7 +71,7 @@ protected:
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag);
 
-	void PublishQuestEndedEvent(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -83,6 +86,14 @@ protected:
 	TMap<FGameplayTag, int32> QuestCompletionCounts;
 
 private:
+	/**
+	 * Assembles a fully populated FQuestEventContext from a node instance.
+	 * Stage 1: copies NodeInfo from the node.
+	 * Stage 2: copies InObjectiveData (non-empty only for completion events).
+	 * Stage 3: broadcasts OnAssembleEventContext for game code to fill GameData.
+	 */
+	FQuestEventContext AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionData) const;
+	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
 	UFUNCTION()
@@ -103,11 +114,11 @@ private:
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
 
 	/**
-	 * Tears down an active or pending-giver node: cancels objectives, clears WorldState facts, writes Deactivated (and
-	 * optionally Blocked), then publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, watchers,
-	 * and this subsystem's own HandleNodeDeactivatedEvent) can react. No-op on Completed nodes.
+	 * Tears down an active or pending-giver node: cancels objectives, clears WorldState facts, writes Deactivated, then
+	 * publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, watchers, and this subsystem's own
+	 * HandleNodeDeactivatedEvent) can react. No-op on Completed nodes.
 	 */
-	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, bool bWriteBlocked);
+	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source);
 
 	void RegisterGiversFromAssetRegistry();	
 
@@ -125,7 +136,7 @@ private:
 	TMultiMap<FGameplayTag, UClass*> ClassFilteredSteps;
 	FDelegateHandle ClassBridgeHandle;	
 
-	void CheckClassObjectives(FGameplayTag Channel, const FQuestObjectiveTriggered& Event);
+	void CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 	
 	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
 	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;

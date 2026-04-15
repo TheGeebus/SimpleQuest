@@ -12,7 +12,7 @@ struct FQuestObjectiveKilled : public FQuestObjectiveTriggered
 	FQuestObjectiveKilled() = default;
 
 	FQuestObjectiveKilled(AActor* InVictimActor, AActor* InKillerActor)
-		: FQuestObjectiveTriggered(InVictimActor), KillerActor(InKillerActor) {}
+		: FQuestObjectiveTriggered(InVictimActor, InKillerActor), KillerActor(InKillerActor) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<AActor> KillerActor;

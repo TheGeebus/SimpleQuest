@@ -13,4 +13,7 @@ struct FQuestStartedEvent : public FQuestEventBase
 
 	explicit FQuestStartedEvent(const FGameplayTag InQuestTag)
 		: FQuestEventBase(InQuestTag) {}
+
+	FQuestStartedEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+		: FQuestEventBase(InQuestTag, InContext) {}
 };

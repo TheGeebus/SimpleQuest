@@ -4,24 +4,35 @@
 
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestStateTagUtils.h"
+#include "WorldState/WorldStateSubsystem.h"
 
 void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — utility nodes do not write Active or publish FQuestStartedEvent.
 	ContextualTag = InContextualTag;
 
 	if (!TargetQuestTags.IsEmpty())
 	{
 		if (UGameInstance* GI = CachedGameInstance.Get())
 		{
-			if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
+			UWorldStateSubsystem* WS = GI->GetSubsystem<UWorldStateSubsystem>();
+			USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>();
+
+			for (const FGameplayTag& Tag : TargetQuestTags)
 			{
-				for (const FGameplayTag& Tag : TargetQuestTags)
+				if (WS)
 				{
-					Signals->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(Tag, true));
+					const FName FactName = UQuestStateTagUtils::MakeStateFact(Tag, UQuestStateTagUtils::Leaf_Blocked);
+					const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+					if (BlockedFact.IsValid()) WS->AddFact(BlockedFact);
+				}
+				if (Signals)
+				{
+					Signals->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(Tag));
 				}
 			}
 		}
 	}
 	ForwardActivation();
 }
+

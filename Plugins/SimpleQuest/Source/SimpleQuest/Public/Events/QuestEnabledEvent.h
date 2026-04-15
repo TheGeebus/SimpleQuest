@@ -11,9 +11,9 @@ struct FQuestEnabledEvent : public FQuestEventBase
 	
 	FQuestEnabledEvent() = default;
 
-	FQuestEnabledEvent(const FGameplayTag InQuestTag, const bool bNewIsActivated)
-		: FQuestEventBase(InQuestTag), bIsActivated(bNewIsActivated) {}
+	FQuestEnabledEvent(const FGameplayTag InQuestTag)
+		: FQuestEventBase(InQuestTag) {}
 
-	UPROPERTY()
-	bool bIsActivated = false;
+	FQuestEnabledEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+		: FQuestEventBase(InQuestTag, InContext) {}
 };

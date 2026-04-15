@@ -21,7 +21,7 @@ public:
 	UGoToQuestObjective();
 	
 protected:
-	virtual void TryCompleteObjective_Implementation(UObject* InTargetObject) override;
+	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
 	virtual void SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0) override;
 
 private:

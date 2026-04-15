@@ -96,7 +96,7 @@ void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, con
 {
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *Channel.ToString(), *Event.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-	SetQuestGiverActivated(Event.GetQuestTag(), Event.bIsActivated);
+	SetQuestGiverActivated(Event.GetQuestTag(), true);
 }
 
 void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)

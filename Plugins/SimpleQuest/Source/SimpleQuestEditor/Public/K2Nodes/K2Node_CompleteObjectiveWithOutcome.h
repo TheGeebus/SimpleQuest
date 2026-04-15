@@ -6,6 +6,7 @@
 #include "K2Node.h"
 #include "GameplayTagContainer.h"
 #include "EdGraph/EdGraphNodeUtils.h"
+#include "Quests/Types/QuestObjectiveContext.h"
 #include "K2Node_CompleteObjectiveWithOutcome.generated.h"
 
 /**
@@ -45,6 +46,7 @@ public:
 	virtual bool IsActionFilteredOut(const FBlueprintActionFilter& Filter) override;
 	virtual void ValidateNodeDuringCompilation(FCompilerResultsLog& MessageLog) const override;
 	virtual bool IsCompatibleWithGraph(const UEdGraph* TargetGraph) const override;
+	virtual bool IsConnectionDisallowed(const UEdGraphPin* MyPin, const UEdGraphPin* OtherPin, FString& OutReason) const override;
 
 private:
 	FNodeTextCache CachedNodeTitle;

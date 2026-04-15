@@ -4,6 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/QuestObjectiveContext.h"
+#include "StructUtils/InstancedStruct.h"
 #include "QuestObjective.generated.h"
 
 class UQuestTargetInterface;
@@ -43,20 +45,6 @@ public:
 	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
 	
 	/**
-	 * Determine if the InTargetObject is relevant to the completion of this quest and logic should proceed to TryCompleteObjective.
-	 * Should be overriden by child classes to define what objects are relevant to the completion of the objective through
-	 * either success or failure. This allows quests to check for both relevancy and prerequisite completion when triggering
-	 * a quest objective so that the system may signal that progress is still gated by another quest objective.
-	 * 
-	 * @param InTargetObject The quest target that was triggered. By default, this is checked against both the TargetClass and
-	 * any TargetActors. Override this event to define custom conditions for relevancy.
-	 * @return TRUE if the object is relevant to the completion of this quest objective, whether by success or failure.
-	 * @see UQuestObjective::TryCompleteObjective()
-	 */
-	//UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	//bool IsObjectRelevant(UObject* InTargetObject);
-	
-	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
 	 * to be overridden by child classes to provide the logic for quest step completion. When a quest target is triggered,
 	 * this will automatically be called if InTargetObject passes the relevancy check determined by the logic contained
@@ -67,12 +55,11 @@ public:
 	 * default implementation, but this can be overridden in C++ or Blueprint subclasses.
 	 *
 	 * Example child objectives: UGoToQuestObjective and UKillClassQuestObjective
-	 * @param InTargetObject The quest target that was triggered. Will be checked against IsObjectRelevant prior to calling
-	 * this function
- 	 * @see UQuestObjective::IsObjectRelevant()
+	 * @param InContext the context of this trigger event containing the triggered actor, any relevant instigator, and an
+	 *					optional designer-defined instanced struct that may contain additional fields as needed.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void TryCompleteObjective(UObject* InTargetObject);
+	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
 
 	/**
 	 * Outcome Tag Discovery																						<br>
@@ -121,10 +108,9 @@ public:
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
 	
-protected:
-	
+protected:	
 	UFUNCTION(BlueprintCallable)
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag);
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
 
 	UFUNCTION(BlueprintCallable)
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
@@ -135,6 +121,11 @@ protected:
 	UFUNCTION(BlueprintCallable)
 	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
 	
+private:
+	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionData. */
+	UPROPERTY()
+	FQuestObjectiveContext CompletionData;
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
@@ -143,8 +134,6 @@ protected:
 	int32 MaxElements = 0;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	int32 CurrentElements = 0;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	bool bStepCompleted = false;
 	
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
@@ -154,4 +143,5 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintSetter=SetCurrentElements)
 	void SetCurrentElements(const int32 NewAmount);
 	FORCEINLINE int32 GetCurrentElements() const { return CurrentElements; }
+	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
 };

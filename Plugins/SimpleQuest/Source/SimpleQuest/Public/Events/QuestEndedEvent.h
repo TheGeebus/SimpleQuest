@@ -14,6 +14,9 @@ struct FQuestEndedEvent : public FQuestEventBase
 	FQuestEndedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag)
 		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag) {}
 
+	FQuestEndedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag, const FQuestEventContext& InContext)
+		: FQuestEventBase(InQuestTag, InContext), OutcomeTag(InOutcomeTag) {}
+
 	UPROPERTY(BlueprintReadWrite)
 	FGameplayTag OutcomeTag;
 };

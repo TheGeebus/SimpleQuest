@@ -1,6 +1,4 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
-
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
@@ -18,6 +16,10 @@ public:
 		return NSLOCTEXT("SimpleQuestEditor", "ClearBlockedTitle", "Clear Blocked");
 	}
 
-	UPROPERTY(EditAnywhere, Category="Blocked")
+	virtual const FGameplayTagContainer& GetTargetQuestTags() const override { return TargetQuestTags; }
+	virtual void SetTargetQuestTags(const FGameplayTagContainer& NewTags) override { TargetQuestTags = NewTags; }
+	virtual FString GetTargetQuestTagsFilterString() const override { return TEXT("Quest"); }
+
+	UPROPERTY(EditAnywhere, Category="Blocked", meta=(Categories="Quest"))
 	FGameplayTagContainer TargetQuestTags;
 };

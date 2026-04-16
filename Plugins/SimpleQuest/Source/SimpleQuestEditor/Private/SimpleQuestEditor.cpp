@@ -9,7 +9,6 @@
 #include "MessageLogModule.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "SGraphNodeKnot.h"
-#include "SGraphPin.h"
 #include "SimpleQuestLog.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -24,7 +23,6 @@
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
-#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Groups/QuestlineNode_GroupGetterBase.h"
 #include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
@@ -32,9 +30,11 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Utility/QuestlineNode_UtilityBase.h"
 #include "Nodes/Slate/SGRaphNode_GroupNode.h"
 #include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
+#include "Nodes/Slate/SGraphNode_UtilityNode.h"
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
@@ -67,6 +67,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		if (Cast<UQuestlineNode_GroupSetterBase>(Node) || Cast<UQuestlineNode_GroupGetterBase>(Node))
 		{
 			return SNew(SGraphNode_GroupNode, Node);
+		}
+		if (Cast<UQuestlineNode_UtilityBase>(Node))
+		{
+			return SNew(SGraphNode_UtilityNode, Node);
 		}
 		if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(Node))
 		{

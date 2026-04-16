@@ -1,4 +1,6 @@
-﻿#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
+﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+
+#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
 
 
 void UQuestlineNode_PrerequisiteGroupGetter::AllocateDefaultPins()
@@ -8,7 +10,5 @@ void UQuestlineNode_PrerequisiteGroupGetter::AllocateDefaultPins()
 
 FText UQuestlineNode_PrerequisiteGroupGetter::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	return GroupTag.IsValid()
-		? FText::FromString(FString::Printf(TEXT("Get: %s"), *GroupTag.GetTagName().ToString()))
-		: FText::FromString(TEXT("Get Prereq Group"));
+	return FText::FromString(TEXT("Prereq Group: Get"));
 }

@@ -3,12 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "QuestlineNode_PrerequisiteBase.h"
+#include "GameplayTagContainer.h"
+#include "QuestlineNode_GroupSetterBase.h"
 #include "QuestlineNode_PrerequisiteGroupSetter.generated.h"
 
 
 UCLASS()
-class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteGroupSetter : public UQuestlineNode_PrerequisiteBase
+class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteGroupSetter : public UQuestlineNode_GroupSetterBase
 {
 	GENERATED_BODY()
 public:
@@ -18,11 +19,13 @@ public:
 
 	void AddConditionPin();
 
-	/** Identifies this group. Referenced by Getter nodes and Blueprint library calls. */
-	UPROPERTY(EditAnywhere, Category="Prerequisite Group")
-	FName GroupName;
+	/** Identifies this group. Referenced by Getter nodes and prerequisite expressions. */
+	UPROPERTY(EditAnywhere, Category="Prerequisite Group", meta=(Categories="QuestPrereqGroup"))
+	FGameplayTag GroupTag;
 
 private:
 	UPROPERTY()
 	int32 ConditionPinCount = 1;
+
+	void RemoveConditionPin(UEdGraphPin* PinToRemove);
 };

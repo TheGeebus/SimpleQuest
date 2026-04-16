@@ -3,9 +3,7 @@
 #include "Utilities/QuestlineGraphCompiler.h"
 
 #include "GameplayTagsManager.h"
-#include "NativeGameplayTags.h"
 #include "ISimpleQuestEditorModule.h"
-#include "SimpleQuestEditor.h"
 #include "SimpleQuestLog.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
@@ -15,8 +13,8 @@
 #include "Quests/QuestPrereqGroupNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"
-#include "Quests/GroupSignalSetterNode.h"
-#include "Quests/GroupSignalGetterNode.h"
+#include "Quests/ActivationGroupSetterNode.h"
+#include "Quests/ActivationGroupGetterNode.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -27,23 +25,21 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupSetter.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
-#include "Nodes/Groups/QuestlineNode_GroupSignalSetter.h"
-#include "Nodes/Groups/QuestlineNode_GroupSignalGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "Misc/UObjectToken.h"
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
-#include "Utilities/QuestStateTagUtils.h"
 
 
 
@@ -170,7 +166,8 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
     // ---- Pass 1b: setter nodes — create UQuestPrereqGroupNode monitors ----
     TArray<FName> MonitorTags;
-    CompileGroupSetters(Graph, TagPrefix, MonitorTags);
+    TArray<FName> GetterEntryTags;
+    CompileGroupSetters(Graph, TagPrefix, MonitorTags, GetterEntryTags);
 
     // ---- Pass 1c: utility nodes ----
     TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
@@ -202,28 +199,26 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
     // ---- Pass 2: output pin wiring ----
     CompileOutputWiring(ContentNodes, NodeInstanceMap, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths);
 
-    // ---- Pass 2b: utility node Forward output wiring ----
-    for (UQuestlineNode_UtilityBase* UtilEdNode : UtilityEdNodes)
+    // ---- Pass 2b: Forward output wiring for all utility-keyed nodes ----
+    for (auto& [EdNode, UtilKey] : UtilityNodeKeyMap)
     {
-        const FName* UtilKey = UtilityNodeKeyMap.Find(UtilEdNode);
-        if (!UtilKey) continue;
+        UQuestNodeBase* Inst = AllCompiledNodes.FindRef(UtilKey);
+        if (!Inst) continue;
 
-        UQuestNodeBase* UtilInst = AllCompiledNodes.FindRef(*UtilKey);
-        if (!UtilInst) continue;
+        Inst->NextNodesOnForward.Empty();
 
-        UtilInst->NextNodesOnForward.Empty();
-
-        if (UEdGraphPin* ForwardPin = UtilEdNode->FindPin(TEXT("Forward"), EGPD_Output))
+        if (UEdGraphPin* ForwardPin = EdNode->FindPin(TEXT("Forward"), EGPD_Output))
         {
             TArray<FName> ForwardTags;
             ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
-            for (const FName& Tag : ForwardTags) UtilInst->NextNodesOnForward.Add(Tag);
+            for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
         }
     }
 
     // ---- Resolve entry tags from the graph's Entry node ----
     TArray<FName> EntryTags = ResolveEntryTags(Graph, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutEntryTagsByOutcome);
     EntryTags.Append(MonitorTags);
+    EntryTags.Append(GetterEntryTags);
     return EntryTags;
 }
 
@@ -335,45 +330,106 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     }
 }
 
-void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags)
+void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags)
 {
+    // ---- Prerequisite group setters: merge conditions per unique GroupTag ----
+    TMap<FGameplayTag, TArray<UQuestlineNode_PrerequisiteGroupSetter*>> PrereqSettersByTag;
+
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node);
-        if (!Setter) continue;
-
-        if (Setter->GroupName.IsNone())
+        if (UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node))
         {
-            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupName set and will be skipped."), *TagPrefix), Setter);
-            continue;
-        }
-
-        const FName GroupTagName = FName(*FString::Printf(TEXT("Quest.Prereq.%s.Satisfied"), *SanitizeTagSegment(Setter->GroupName.ToString())));
-
-        UQuestPrereqGroupNode* Monitor = NewObject<UQuestPrereqGroupNode>(RootGraph);
-        Monitor->GroupTag = UGameplayTagsManager::Get().RequestGameplayTag(GroupTagName, false);
-
-        for (UEdGraphPin* Pin : Setter->Pins)
-        {
-            if (Pin->Direction != EGPD_Input) continue;
-            if (!Pin->PinName.ToString().StartsWith(TEXT("Condition"))) continue;
-
-            for (UEdGraphPin* LinkedOutputPin : Pin->LinkedTo)
+            if (!Setter->GroupTag.IsValid())
             {
-                const FName FactTagName = ResolveOutputPinToStateFact(LinkedOutputPin, TagPrefix);
-                if (FactTagName.IsNone()) continue;
+                AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
+                continue;
+            }
+            PrereqSettersByTag.FindOrAdd(Setter->GroupTag).Add(Setter);
+        }
+    }
 
-                const FGameplayTag FactTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
-                if (FactTag.IsValid())
+    for (auto& [GroupTag, Setters] : PrereqSettersByTag)
+    {
+        UQuestPrereqGroupNode* Monitor = NewObject<UQuestPrereqGroupNode>(RootGraph);
+        Monitor->GroupTag = GroupTag;
+
+        for (UQuestlineNode_PrerequisiteGroupSetter* Setter : Setters)
+        {
+            for (UEdGraphPin* Pin : Setter->Pins)
+            {
+                if (Pin->Direction != EGPD_Input) continue;
+                if (!Pin->PinName.ToString().StartsWith(TEXT("Condition"))) continue;
+
+                for (UEdGraphPin* LinkedOutputPin : Pin->LinkedTo)
                 {
-                    Monitor->ConditionTags.AddUnique(FactTag);
+                    const FName FactTagName = ResolveOutputPinToStateFact(LinkedOutputPin, TagPrefix);
+                    if (FactTagName.IsNone()) continue;
+
+                    const FGameplayTag FactTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
+                    if (FactTag.IsValid())
+                    {
+                        Monitor->ConditionTags.AddUnique(FactTag);
+                    }
                 }
             }
         }
 
+        const FName GroupTagName = GroupTag.GetTagName();
         AllCompiledNodes.Add(GroupTagName, Monitor);
         AllCompiledQuestTags.Add(GroupTagName);
         OutMonitorTags.Add(GroupTagName);
+
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] prereq group '%s' — %d condition(s) from %d setter(s)"),
+            *TagPrefix, *GroupTagName.ToString(), Monitor->ConditionTags.Num(), Setters.Num());
+    }
+
+    // ---- Activation group setters ----
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node);
+        if (!Setter) continue;
+
+        if (!Setter->GroupTag.IsValid())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] An Activation Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
+            continue;
+        }
+
+        UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
+        Inst->GroupTag = Setter->GroupTag;
+
+        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
+        UtilityNodeKeyMap.Add(Node, UtilKey);
+        AllCompiledNodes.Add(UtilKey, Inst);
+        AllCompiledEditorNodes.Add(UtilKey, Node);
+
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation setter '%s'"),
+            *TagPrefix, *Setter->GroupTag.GetTagName().ToString());
+    }
+
+    // ---- Activation group getters (source nodes — add to entry tags) ----
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node);
+        if (!Getter) continue;
+
+        if (!Getter->GroupTag.IsValid())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] An Activation Group Getter has no GroupTag set and will be skipped."), *TagPrefix), Getter);
+            continue;
+        }
+
+        UActivationGroupGetterNode* Inst = NewObject<UActivationGroupGetterNode>(RootGraph);
+        Inst->GroupTag = Getter->GroupTag;
+
+        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
+        UtilityNodeKeyMap.Add(Node, UtilKey);
+        AllCompiledNodes.Add(UtilKey, Inst);
+        AllCompiledEditorNodes.Add(UtilKey, Node);
+        OutGetterEntryTags.Add(UtilKey);
+
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation getter '%s' (entry tag)"),
+            *TagPrefix, *Getter->GroupTag.GetTagName().ToString());
     }
 }
 
@@ -396,18 +452,6 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuest
         {
             UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
             Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
-            Instance = Inst;
-        }
-        else if (UQuestlineNode_GroupSignalSetter* GroupSetter = Cast<UQuestlineNode_GroupSignalSetter>(UtilEdNode))
-        {
-            UGroupSignalSetterNode* Inst = NewObject<UGroupSignalSetterNode>(RootGraph);
-            Inst->GroupSignalTag = GroupSetter->GroupSignalTag;
-            Instance = Inst;
-        }
-        else if (UQuestlineNode_GroupSignalGetter* GroupGetter = Cast<UQuestlineNode_GroupSignalGetter>(UtilEdNode))
-        {
-            UGroupSignalGetterNode* Inst = NewObject<UGroupSignalGetterNode>(RootGraph);
-            Inst->GroupSignalTag = GroupGetter->GroupSignalTag;
             Instance = Inst;
         }
 
@@ -845,6 +889,20 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
         return OutExpression.Nodes.Add(LeafNode);
     }
 
+    // Setter PrereqOut: same leaf as getter — resolves to the group's tag
+    if (UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node))
+    {
+        if (!Setter->GroupTag.IsValid())
+        {
+            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
+            return INDEX_NONE;
+        }
+        FPrerequisiteExpressionNode LeafNode;
+        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+        LeafNode.LeafTag = Setter->GroupTag;
+        return OutExpression.Nodes.Add(LeafNode);
+    }
+    
     // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Active fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {

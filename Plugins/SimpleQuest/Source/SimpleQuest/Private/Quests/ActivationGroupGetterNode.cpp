@@ -1,15 +1,15 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
-#include "Quests/GroupSignalGetterNode.h"
+#include "Quests/ActivationGroupGetterNode.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
 
-void UGroupSignalGetterNode::ActivateInternal(FGameplayTag InContextualTag)
+void UActivationGroupGetterNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-    // Intentionally skips Super — utility nodes do not write Active or publish FQuestStartedEvent.
+    // Intentionally skips Super — does not write Active or publish FQuestStartedEvent.
     ContextualTag = InContextualTag;
 
-    if (!GroupSignalTag.IsValid()) return;
+    if (!GroupTag.IsValid()) return;
 
     UGameInstance* GI = CachedGameInstance.Get();
     if (!GI) return;
@@ -18,30 +18,29 @@ void UGroupSignalGetterNode::ActivateInternal(FGameplayTag InContextualTag)
     USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>();
     if (!WS || !Signals) return;
 
-    // Catch-up: if the setter already fired before this getter activated, forward immediately.
-    if (WS->HasFact(GroupSignalTag))
+    if (WS->HasFact(GroupTag))
     {
         ForwardActivation();
         return;
     }
 
-    SignalSubscriptionHandle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(GroupSignalTag, this, &UGroupSignalGetterNode::OnGroupSignalFired);
+    SignalSubscriptionHandle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(GroupTag, this, &UActivationGroupGetterNode::OnGroupSignalFired);
 }
 
-void UGroupSignalGetterNode::OnGroupSignalFired(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
+void UActivationGroupGetterNode::OnGroupSignalFired(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
     if (UGameInstance* GI = CachedGameInstance.Get())
     {
         if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
         {
-            Signals->UnsubscribeMessage(GroupSignalTag, SignalSubscriptionHandle);
+            Signals->UnsubscribeMessage(GroupTag, SignalSubscriptionHandle);
             SignalSubscriptionHandle = FDelegateHandle();
         }
     }
     ForwardActivation();
 }
 
-void UGroupSignalGetterNode::DeactivateInternal(FGameplayTag InContextualTag)
+void UActivationGroupGetterNode::DeactivateInternal(FGameplayTag InContextualTag)
 {
     if (SignalSubscriptionHandle.IsValid())
     {
@@ -49,7 +48,7 @@ void UGroupSignalGetterNode::DeactivateInternal(FGameplayTag InContextualTag)
         {
             if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
             {
-                Signals->UnsubscribeMessage(GroupSignalTag, SignalSubscriptionHandle);
+                Signals->UnsubscribeMessage(GroupTag, SignalSubscriptionHandle);
                 SignalSubscriptionHandle = FDelegateHandle();
             }
         }

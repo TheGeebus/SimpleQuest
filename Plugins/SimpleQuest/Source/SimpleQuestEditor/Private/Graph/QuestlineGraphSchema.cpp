@@ -12,16 +12,17 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupSetter.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
+#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
-#include "Nodes/Groups/QuestlineNode_GroupSignalGetter.h"
-#include "Nodes/Groups/QuestlineNode_GroupSignalSetter.h"
-#include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
-#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+
 
 
 class FQuestlineConnectionDrawingPolicy	: public TQuestlineDrawingPolicyMixin<FKismetConnectionDrawingPolicy>
@@ -1036,25 +1037,25 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	    ContextMenuBuilder.AddAction(Action);
 	}
 
-	// ---- Group Signal ----
+	// ---- Activation Group ----
 	{
-	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
-	        NSLOCTEXT("SimpleQuestEditor", "GroupSignalCategory", "Group Signal"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddGroupSignalSetter", "Set Group Signal"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddGroupSignalSetterTooltip", "Write a named signal fact to world state"),
-	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_GroupSignalSetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
-	    ContextMenuBuilder.AddAction(Action);
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "ActivationGroupCategory", "Activation Group"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupSetter", "Set Activation Group"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupSetterTooltip", "Write a named activation signal to world state"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupSetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
 	}
 	{
-	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
-	        NSLOCTEXT("SimpleQuestEditor", "GroupSignalCategory", "Group Signal"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddGroupSignalGetter", "Get Group Signal"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddGroupSignalGetterTooltip", "Wait for a named signal fact then forward activation"),
-	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_GroupSignalGetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
-	    ContextMenuBuilder.AddAction(Action);
-	}
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "ActivationGroupCategory", "Activation Group"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupGetter", "Get Activation Group"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupGetterTooltip", "Listen for a named activation signal then fire output"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupGetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}	
 }
 
 void UQuestlineGraphSchema::GetContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const

@@ -2,6 +2,7 @@
 
 #include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
 #include "ToolMenu.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 void UQuestlineNode_PrerequisiteGroupSetter::AllocateDefaultPins()
 {
@@ -14,7 +15,12 @@ void UQuestlineNode_PrerequisiteGroupSetter::AllocateDefaultPins()
 
 FText UQuestlineNode_PrerequisiteGroupSetter::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	return FText::FromString(FString::Printf(TEXT("Prereq Group: Set")));
+	return NSLOCTEXT("SimpleQuestEditor", "PrereqGroupSetterTitle", "Prerequisite Group: Set");
+}
+
+FLinearColor UQuestlineNode_PrerequisiteGroupSetter::GetNodeTitleColor() const
+{
+	return SQ_ED_NODE_PREREQ_GROUP;
 }
 
 void UQuestlineNode_PrerequisiteGroupSetter::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const

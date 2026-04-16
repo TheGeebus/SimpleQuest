@@ -27,7 +27,8 @@ public class SimpleQuestEditor: ModuleRules
 			"MessageLog",
 			"KismetCompiler", 
 			"GameplayTagsEditor",
-			"PropertyEditor"
+			"PropertyEditor",
+			"Projects"
 		});
 
 		if (Target.bBuildEditor)

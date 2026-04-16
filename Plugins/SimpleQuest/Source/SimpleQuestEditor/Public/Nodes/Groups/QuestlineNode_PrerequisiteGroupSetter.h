@@ -15,8 +15,14 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteGroupSetter : public UQue
 public:
 	virtual void AllocateDefaultPins() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
+	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
+	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
+	virtual FString GetGroupFilterString() const override { return TEXT("QuestPrereqGroup"); }
+	virtual void AddInputPin() override { AddConditionPin(); }
+	
 	void AddConditionPin();
 
 	/** Identifies this group. Referenced by Getter nodes and prerequisite expressions. */

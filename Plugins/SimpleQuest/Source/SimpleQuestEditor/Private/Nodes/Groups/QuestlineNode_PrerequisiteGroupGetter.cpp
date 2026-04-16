@@ -2,6 +2,8 @@
 
 #include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
 
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 
 void UQuestlineNode_PrerequisiteGroupGetter::AllocateDefaultPins()
 {
@@ -10,5 +12,10 @@ void UQuestlineNode_PrerequisiteGroupGetter::AllocateDefaultPins()
 
 FText UQuestlineNode_PrerequisiteGroupGetter::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	return FText::FromString(TEXT("Prereq Group: Get"));
+	return NSLOCTEXT("SimpleQuestEditor", "PrereqGroupGetterTitle", "Prerequisite Group: Get");
+}
+
+FLinearColor UQuestlineNode_PrerequisiteGroupGetter::GetNodeTitleColor() const
+{
+	return SQ_ED_NODE_PREREQ_GROUP;
 }

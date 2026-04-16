@@ -16,6 +16,12 @@ public:
 	virtual void AllocateDefaultPins() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 
+	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
+	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
+	virtual FString GetGroupFilterString() const override { return TEXT("QuestActivationGroup"); }
+	
 	UPROPERTY(EditAnywhere, Category="Activation Group", meta=(Categories="QuestActivationGroup"))
 	FGameplayTag GroupTag;
+
+	
 };

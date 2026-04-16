@@ -11,6 +11,7 @@
 #include "Widgets/Text/STextBlock.h"
 
 
+
 void SQuestlineOutlinerRow::Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable)
 {
     Item = InArgs._Item;
@@ -124,6 +125,8 @@ void SQuestlineOutlinerPanel::RebuildTree()
     // Pass 1 — items from compiled nodes
     for (const auto& Pair : CompiledNodes)
     {
+        if (Pair.Key.ToString().StartsWith(TEXT("Util_"))) continue;
+        
         auto Item = MakeShared<FQuestlineOutlinerItem>();
         Item->Tag  = Pair.Key;
         Item->Node = Pair.Value;

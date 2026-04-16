@@ -23,14 +23,21 @@
 #include "Framework/Notifications/NotificationManager.h"
 #include "Misc/FileHelper.h"
 #include "HAL/FileManager.h"
+#include "Interfaces/IPluginManager.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/Groups/QuestlineNode_GroupGetterBase.h"
+#include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Slate/SGRaphNode_GroupNode.h"
 #include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
+#include "Styling/SlateStyle.h"
+#include "Styling/SlateStyleRegistry.h"
+#include "Brushes/SlateImageBrush.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -56,6 +63,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 			|| Cast<UQuestlineNode_PrerequisiteNot>(Node))
 		{
 			return SNew(SGraphNode_PrerequisiteCombinator, CastChecked<UQuestlineNode_PrerequisiteBase>(Node));
+		}
+		if (Cast<UQuestlineNode_GroupSetterBase>(Node) || Cast<UQuestlineNode_GroupGetterBase>(Node))
+		{
+			return SNew(SGraphNode_GroupNode, Node);
 		}
 		if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(Node))
 		{
@@ -124,6 +135,22 @@ void FSimpleQuestEditor::StartupModule()
 			}
 		}
 	});
+	
+	StyleSet = MakeShareable(new FSlateStyleSet("SimpleQuestStyle"));
+	StyleSet->SetContentRoot(
+		IPluginManager::Get().FindPlugin("SimpleQuest")->GetBaseDir() / TEXT("Resources"));
+
+	StyleSet->Set("ClassThumbnail.QuestlineGraph",
+		new FSlateVectorImageBrush(
+			StyleSet->RootToContentDir(TEXT("SimpleQuestIconVector64"), TEXT(".svg")),
+			FVector2D(64, 64)));
+
+	StyleSet->Set("ClassIcon.QuestlineGraph",
+		new FSlateVectorImageBrush(
+			StyleSet->RootToContentDir(TEXT("SimpleQuestClassIconWhite16px"), TEXT(".svg")),
+			FVector2D(16, 16)));
+
+	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }
 
 void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
@@ -212,13 +239,11 @@ void FSimpleQuestEditor::ShutdownModule()
 
 	FQuestlineGraphEditorCommands::Unregister();
 
-	/*
-	if (QuestlineK2PinFactory.IsValid())
+	if (StyleSet.IsValid())
 	{
-		FEdGraphUtilities::UnregisterVisualPinFactory(QuestlineK2PinFactory);
+		FSlateStyleRegistry::UnRegisterSlateStyle(*StyleSet);
+		StyleSet.Reset();
 	}
-	*/
-
 	if (FModuleManager::Get().IsModuleLoaded("AssetTools"))
 	{
 		IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools").Get();

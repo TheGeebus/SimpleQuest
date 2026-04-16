@@ -38,6 +38,7 @@ public:
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual TSharedPtr<SGraphNode> CreateVisualWidget() override;
+	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 
 	// — UK2Node —
 	virtual void ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph) override;

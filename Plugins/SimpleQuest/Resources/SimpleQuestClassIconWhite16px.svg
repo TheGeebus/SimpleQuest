@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="16"
+   height="15.999999"
+   viewBox="0 0 4.2333332 4.233333"
+   version="1.1"
+   id="svg1"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1" />
+  <g
+     id="layer1">
+    <path
+       id="path1"
+       fill="none"
+       stroke="#000000"
+       stroke-width="1"
+       d="m 1.7853465,3.135592 c 0,0 -1.28408632,0.3262434 -1.25916145,-0.7304013 C 0.51983505,1.1028798 3.1314312,1.8216127 3.3307859,0.95959612 3.4911083,0.09888474 0.60431918,0.41873508 -0.13748653,0.46041127"
+       style="stroke:#ffffff;stroke-width:0.3175;stroke-linecap:butt;stroke-linejoin:round;stroke-dasharray:0.9525, 0.635;stroke-dashoffset:0;stroke-opacity:1">
+      <title
+         id="title1">Unnamed #1</title>
+    </path>
+    <path
+       id="path1-2"
+       fill="none"
+       stroke="#000000"
+       stroke-width="1"
+       d="m 1.7511142,3.5481234 c 0,0 0.70114,0.62706 0.70114,0.62706 0.045,-0.49742 0.5424,-0.7964 0.5424,-0.7964 0,0 0.46037,0.4498 0.45243,0.84402 0,0 0.7329,-0.67997 0.7329,-0.67997 -0.51858,-0.0265 -0.84402,-0.46832 -0.84402,-0.46832 0,0 0.41804,-0.4524298 0.88635,-0.4048098 0,0 -0.64823,-0.75406 -0.64823,-0.75406 -0.005,0.46037 -0.59531,0.76994 -0.59531,0.76994 0,0 -0.49212,-0.21696 -0.54769,-0.79111 0,0 -0.65352,0.69056 -0.65352,0.69056 0.56357,0.0503 0.85725,0.4577298 0.85725,0.4577298 0,0 -0.32543,0.48948 -0.8837,0.50536 z"
+       style="fill:#ffffff;fill-opacity:1;stroke-width:0;stroke-dasharray:none">
+      <title
+         id="title1-3">Unnamed</title>
+    </path>
+  </g>
+</svg>

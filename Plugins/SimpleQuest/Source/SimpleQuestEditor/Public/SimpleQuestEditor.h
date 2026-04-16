@@ -11,6 +11,7 @@ struct FGraphPanelPinFactory;
 struct FGraphPanelPinConnectionFactory;
 class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
+class FSlateStyleSet;
 
 class FSimpleQuestEditor : public ISimpleQuestEditorModule
 {
@@ -34,7 +35,8 @@ private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
 	TSharedPtr<FQuestlineGraphNodeFactory> QuestlineGraphNodeFactory;
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
-
+	TSharedPtr<FSlateStyleSet> StyleSet;
+	
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
 	
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;

@@ -142,6 +142,7 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         OutlinerTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnOutlinerTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "OutlinerTab", "Questline Outliner"))
+        .SetIcon(FSlateIcon("SimpleQuestStyle", "ClassIcon.QuestlineGraph"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 }
 

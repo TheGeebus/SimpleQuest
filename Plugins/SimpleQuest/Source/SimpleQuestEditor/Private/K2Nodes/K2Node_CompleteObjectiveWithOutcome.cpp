@@ -92,6 +92,12 @@ TSharedPtr<SGraphNode> UK2Node_CompleteObjectiveWithOutcome::CreateVisualWidget(
 	return SNew(SGraphNode_CompleteObjective, this);
 }
 
+FSlateIcon UK2Node_CompleteObjectiveWithOutcome::GetIconAndTint(FLinearColor& OutColor) const
+{
+	OutColor = FLinearColor::White;
+	return FSlateIcon("SimpleQuestStyle", "ClassIcon.QuestlineGraph");
+}
+
 bool UK2Node_CompleteObjectiveWithOutcome::IsConnectionDisallowed(const UEdGraphPin* MyPin, const UEdGraphPin* OtherPin, FString& OutReason) const
 {
 	if (MyPin->PinName == TEXT("CompletionData"))

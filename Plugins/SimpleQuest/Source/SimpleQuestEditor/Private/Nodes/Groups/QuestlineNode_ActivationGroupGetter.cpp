@@ -2,6 +2,8 @@
 
 #include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
 
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 void UQuestlineNode_ActivationGroupGetter::AllocateDefaultPins()
 {
 	// Source node — no input. Activated at graph start, subscribes to WorldState fact.

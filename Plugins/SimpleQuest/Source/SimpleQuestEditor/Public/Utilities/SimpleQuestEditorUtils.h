@@ -102,4 +102,5 @@ namespace USimpleQuestEditorUtilities
 	 * (if wired) or removed (if unwired). Missing names are created. Calls Modify() and NotifyGraphChanged() internally.
 	 */
 	void SyncPinsByCategory(UEdGraphNode* Node,	EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
+
 }

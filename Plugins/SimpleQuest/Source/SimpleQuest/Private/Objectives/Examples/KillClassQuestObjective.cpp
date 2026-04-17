@@ -7,6 +7,12 @@
 
 UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_KillClass_Killed, "Quest.Outcome.TargetKilled")
 
+
+UKillClassQuestObjective::UKillClassQuestObjective()
+{
+	TargetKilledOutcomeTag = Tag_Outcome_KillClass_Killed;
+}
+
 void UKillClassQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("KillClassQuestObjective::TryCompleteObjective checked: %s"),

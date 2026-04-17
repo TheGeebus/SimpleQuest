@@ -143,7 +143,7 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 	{
 		InnerVerticalBox->AddSlot()
 			.AutoHeight()
-			.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
+			.Padding(FMargin(10.f, 4.f, 10.f, 1.f))
 			[
 				CreateTagPickerWidget()
 			];
@@ -153,7 +153,7 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 	InnerVerticalBox->AddSlot()
 		.AutoHeight()
 		.HAlign(HAlign_Fill)
-		.Padding(0.f, 0.f, 0.f, 2.f)
+		.Padding(0.f, 0.f, 0.f, 4.f)
 		[
 			CreatePinContentArea()
 		];
@@ -228,9 +228,8 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 
 	CreatePinWidgets();
 
-	// Deferred: add pin button into RightColumn AFTER CreatePinWidgets
-	// so it sits below the output pin, matching the combinator pattern.
-	if (bIsSetter && RightColumn.IsValid())
+	// Deferred: add pin button into RightColumn AFTER CreatePinWidgets so it sits below the output pin.
+	if (bIsSetter && SetterNode && SetterNode->CanAddInputPin() && RightColumn.IsValid())
 	{
 		FMargin AddPinPadding = EditorSettings->GetOutputPinPadding();
 		AddPinPadding.Top += 6.0f;
@@ -258,7 +257,7 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 			SAssignNew(LeftNodeBox, SVerticalBox)
 		];
 
-	if (bIsSetter)
+	if (SetterNode && SetterNode->CanAddInputPin())
 	{
 		// Right side: two-cell layout straddling the centerline.
 		// Output pin bottom-aligned in top half; add-pin button added later in bottom half.
@@ -276,9 +275,19 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 				]
 			];
 	}
+	else if (bIsSetter)
+	{
+		// Single-input setter (activation setter): output pin only, centered.
+		PinOverlay->AddSlot()
+			.HAlign(HAlign_Right)
+			.VAlign(VAlign_Center)
+			[
+				SAssignNew(RightNodeBox, SVerticalBox)
+			];
+	}
 	else
 	{
-		// Getter: tag picker + output pin inline on same row
+		// Getter: tag picker inline with output pin on same row for flat layout.
 		PinOverlay->AddSlot()
 			.HAlign(HAlign_Right)
 			.VAlign(VAlign_Center)
@@ -287,7 +296,7 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
-				.Padding(10.f, 0.f, 0.f, 0.f)
+				.Padding(14.f, 0.f, 4.f, 0.f)
 				[
 					CreateTagPickerWidget()
 				]

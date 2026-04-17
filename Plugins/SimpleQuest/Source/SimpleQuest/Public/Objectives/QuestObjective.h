@@ -97,6 +97,8 @@ public:
 	 *
 	 * Both sources are additive across the inheritance chain. A Blueprint subclass of a
 	 * C++ class that declares ObjectiveOutcome properties will produce pins for both sets combined.
+	 * Use 'Add Call to Parent Function' context menu option by right-clicking the event node to add a
+	 * call to any C++ implementation on the appropriate branch in the child Objective blueprint.
 	 *
 	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
 	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes

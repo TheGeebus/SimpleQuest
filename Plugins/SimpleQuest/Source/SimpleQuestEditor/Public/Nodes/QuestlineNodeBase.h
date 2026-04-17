@@ -35,6 +35,7 @@ public:
 
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override;
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
+	virtual void PostEditUndo() override;
 
 	/** Returns true if this node has any orphaned (stale) pins. */
 	bool HasStalePins() const;
@@ -50,6 +51,9 @@ protected:
 	 * active pins whose names still appear in the desired set are left untouched.
 	 *
 	 * Calls Modify() and NotifyGraphChanged() only when something actually changed. No-ops cleanly.
+	 *
+	 * - Forwards the call to USimpleQuestEditorUtilities::SyncPinsByCategory, preserved for backwards compatibility pending callsite
+	 * revisions
 	 *
 	 * @param Direction              Pin direction to operate on.
 	 * @param PinCategory            Only pins matching this category (and Direction) are considered.

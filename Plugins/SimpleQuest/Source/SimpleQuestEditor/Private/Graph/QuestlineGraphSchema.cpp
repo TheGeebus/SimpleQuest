@@ -16,6 +16,7 @@
 #include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -24,6 +25,9 @@
 #include "ScopedTransaction.h"
 
 
+/*---------------------------------------------------------------------------------------------------------*
+ * Connection Drawing Policy - how to actually draw the wires (splines/dashed effect/etc.)
+ *---------------------------------------------------------------------------------------------------------*/
 
 class FQuestlineConnectionDrawingPolicy	: public TQuestlineDrawingPolicyMixin<FKismetConnectionDrawingPolicy>
 {
@@ -171,6 +175,8 @@ private:
 	UEdGraph* GraphObj;
 };
 
+/** Factory for the FQuestlineConnectionDrawingPolicy */
+
 class FQuestlineConnectionFactory : public FGraphPanelPinConnectionFactory
 {
 	mutable bool bInProgress = false;
@@ -193,6 +199,10 @@ TSharedPtr<FGraphPanelPinConnectionFactory> UQuestlineGraphSchema::MakeQuestline
 {
 	return MakeShared<FQuestlineConnectionFactory>();
 }
+
+/*---------------------------------------------------------------------------------------------------------*
+ * Questline Graph Schema - the rules of the graph: node types, connection rules, and menu actions
+ *---------------------------------------------------------------------------------------------------------*/
 
 UQuestlineGraphSchema::UQuestlineGraphSchema()
 	: TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
@@ -252,7 +262,10 @@ void UQuestlineGraphSchema::OnPinConnectionDoubleCicked(UEdGraphPin* PinA, UEdGr
 	}
 }
 
-// Backward traversal: collect all non-knot output pins that ultimately feed into Pin through knot chains.
+/*------------------------------------------------------------------------------------------*
+ * Connection rule static helper functions
+ *------------------------------------------------------------------------------------------*/
+
 void UQuestlineGraphSchema::CollectUpstreamSources(const UEdGraphPin* Pin, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphPin*>& Visited)
 {
     if (!Pin || Visited.Contains(Pin)) return;
@@ -274,7 +287,6 @@ void UQuestlineGraphSchema::CollectUpstreamSources(const UEdGraphPin* Pin, TSet<
     }
 }
 
-// Forward traversal: does OutputPin reach a pin of Category on TargetNode, following knot chains?
 bool UQuestlineGraphSchema::PinReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category, TSet<const UEdGraphPin*>& Visited)
 {
     if (!OutputPin || Visited.Contains(OutputPin)) return false;
@@ -292,7 +304,6 @@ bool UQuestlineGraphSchema::PinReachesCategory(const UEdGraphPin* OutputPin, con
     return false;
 }
 
-// Combined: does any upstream source of OutputPin already reach Category on TargetNode?
 bool UQuestlineGraphSchema::AnySourceReachesCategory(const UEdGraphPin* OutputPin, const UEdGraphNode* TargetNode, FName Category)
 {
 	TSet<const UEdGraphPin*> Sources, BackVisited;
@@ -468,6 +479,43 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqDeactivateConflict",
 				"An upstream source of this wire already deactivates this node — a signal cannot be both a prerequisite and a deactivation trigger"));
 		}
+
+		// Sibling dedupe: if this is a prereq-combinator input (AND/OR/NOT) or a prereq group setter condition input,
+		// reject if any sibling input on the same node already carries this outcome (direct, via utility, or via group chain).
+		const bool bIsCombinator   = Cast<const UQuestlineNode_PrerequisiteBase>(InputNode) != nullptr;
+		const bool bIsGroupSetter  = Cast<const UQuestlineNode_PrerequisiteGroupSetter>(InputNode) != nullptr;
+		if (bIsCombinator || bIsGroupSetter)
+		{
+			TSet<const UEdGraphPin*> IncomingSources;
+			{
+				TSet<const UEdGraphNode*> Visited;
+				TraversalPolicy->CollectEffectiveSources(OutputPin, IncomingSources, Visited);
+			}
+			if (IncomingSources.Num() > 0)
+			{
+				for (const UEdGraphPin* SiblingPin : InputNode->Pins)
+				{
+					if (SiblingPin == InputPin) continue;
+					if (SiblingPin->Direction != EGPD_Input) continue;
+					if (SiblingPin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
+					for (const UEdGraphPin* Existing : SiblingPin->LinkedTo)
+					{
+						TSet<const UEdGraphPin*> SiblingSources;
+						TSet<const UEdGraphNode*> Visited;
+						TraversalPolicy->CollectEffectiveSources(Existing, SiblingSources, Visited);
+
+						const UEdGraphPin* CollisionA = nullptr;
+						const UEdGraphPin* CollisionB = nullptr;
+						if (SignalSetsCollide(IncomingSources, SiblingSources, CollisionA, CollisionB))
+						{
+							return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+								NSLOCTEXT("SimpleQuestEditor", "PrereqSiblingDuplicateSource",
+								"That outcome already feeds another condition input on this node (direct, via a utility node, or via a group)."));
+						}
+					}
+				}
+			}
+		}
 		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 	}
 	return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqInputInvalid",
@@ -619,70 +667,50 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidateKnotConnection(const UEdGr
     return CheckDuplicateSources(OutputPin, InputPin, bOutputIsKnot);
 }
 
-FPinConnectionResponse UQuestlineGraphSchema::CheckDuplicateSources(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, bool bOutputIsKnot) const
+bool UQuestlineGraphSchema::IsAnyOutcomeSource(const UEdGraphPin* Pin)
 {
-	TSet<UQuestlineNode_ContentBase*> IncomingSources;
-	{ TSet<const UEdGraphNode*> V; TraversalPolicy->CollectSourceContentNodes(OutputPin, IncomingSources, V); }
-	if (IncomingSources.Num() > 0)
+	return Pin
+		&& Pin->PinType.PinCategory == TEXT("QuestActivation")
+		&& Pin->PinName == TEXT("Any Outcome");
+}
+
+bool UQuestlineGraphSchema::PinsRepresentSameSignal(const UEdGraphPin* A, const UEdGraphPin* B)
+{
+	if (!A || !B) return false;
+	if (A == B) return true;
+
+	const UEdGraphNode* NodeA = A->GetOwningNode();
+	const UEdGraphNode* NodeB = B->GetOwningNode();
+	if (NodeA != NodeB) return false;
+
+	// Same node: AnyOutcome absorbs specifics and collides with another AnyOutcome on the same node.
+	if (IsAnyOutcomeSource(A) || IsAnyOutcomeSource(B)) return true;
+
+	// Same node, both specific outcomes: identity by pin name.
+	return A->PinName == B->PinName;
+}
+
+bool UQuestlineGraphSchema::SignalSetsCollide(const TSet<const UEdGraphPin*>& SetA, const TSet<const UEdGraphPin*>& SetB, const UEdGraphPin*& OutCollisionA, const UEdGraphPin*& OutCollisionB)
+{
+	for (const UEdGraphPin* A : SetA)
 	{
-		for (const UEdGraphPin* Existing : InputPin->LinkedTo)
+		for (const UEdGraphPin* B : SetB)
 		{
-			TSet<UQuestlineNode_ContentBase*> ExistingSources;
-			TSet<const UEdGraphNode*> V;
-			TraversalPolicy->CollectSourceContentNodes(Existing, ExistingSources, V);
-			if (int32 NumCollisions = IncomingSources.Intersect(ExistingSources).Num(); NumCollisions > 0)
+			if (PinsRepresentSameSignal(A, B))
 			{
-				FText Msg;
-				if (bOutputIsKnot && IncomingSources.Num() > 1)
-				{
-					Msg = NumCollisions > 1
-						? NSLOCTEXT("SimpleQuestEditor", "DuplicateSourceKnotMultiple", "This input already receives a signal from some of those Quest nodes.")
-						: NSLOCTEXT("SimpleQuestEditor", "DuplicateSourceKnotSingle", "This input already receives a signal from one of those Quest nodes.");
-				}
-				else
-				{
-					Msg = NSLOCTEXT("SimpleQuestEditor", "DuplicateSource", "This input already receives a signal from that Quest node.");
-				}
-				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, Msg);
+				OutCollisionA = A;
+				OutCollisionB = B;
+				return true;
 			}
 		}
 	}
-	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+	OutCollisionA = nullptr;
+	OutCollisionB = nullptr;
+	return false;
 }
 
-FPinConnectionResponse UQuestlineGraphSchema::CheckDownstreamParallelPaths(const UEdGraphPin* OutputPin, const UEdGraphPin* KnotInputPin) const
-{
-	TSet<UQuestlineNode_ContentBase*> IncomingSources;
-	{ TSet<const UEdGraphNode*> V; TraversalPolicy->CollectSourceContentNodes(OutputPin, IncomingSources, V); }
-	if (IncomingSources.Num() == 0)
-	{
-		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-	}
 
-	const UEdGraphNode* KnotNode = KnotInputPin->GetOwningNode();
-	TArray<const UEdGraphPin*> DownstreamTerminals;
-	{
-		TSet<const UEdGraphNode*> V;
-		V.Add(KnotNode);
-		TraversalPolicy->CollectDownstreamTerminalInputs(TraversalPolicy->GetPassThroughOutputPin(KnotNode), DownstreamTerminals, V);
-	}
-	for (const UEdGraphPin* Terminal : DownstreamTerminals)
-	{
-		for (const UEdGraphPin* Existing : Terminal->LinkedTo)
-		{
-			TSet<UQuestlineNode_ContentBase*> ExistingSources;
-			TSet<const UEdGraphNode*> V;
-			TraversalPolicy->CollectSourceContentNodes(Existing, ExistingSources, V);
-			if (IncomingSources.Intersect(ExistingSources).Num() > 0)
-			{
-				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "DuplicatePathViaReroute", "This would create a parallel path to a destination node via another connection."));
-			}
-		}
-	}
-	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
-}
-
-static bool KnotLeadsToPrereq(const UQuestlineNode_Knot* StartKnot)
+bool UQuestlineGraphSchema::KnotLeadsToPrereq(const UQuestlineNode_Knot* StartKnot)
 {
 	TArray<const UQuestlineNode_Knot*> Stack;
 	TSet<const UQuestlineNode_Knot*> Visited;
@@ -709,8 +737,154 @@ static bool KnotLeadsToPrereq(const UQuestlineNode_Knot* StartKnot)
 	return false;
 }
 
+FPinConnectionResponse UQuestlineGraphSchema::CheckDuplicateSources(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, bool bOutputIsKnot) const
+{
+	// Collect the effective source outcome pins of the proposed wire.
+	TSet<const UEdGraphPin*> IncomingSources;
+	{
+		TSet<const UEdGraphNode*> Visited;
+		TraversalPolicy->CollectEffectiveSources(OutputPin, IncomingSources, Visited);
+	}
+	if (IncomingSources.Num() == 0)
+	{
+		// Empty source set: the wire traces back to an unresolved origin. Allow the connection; the signal identity becomes
+		// concrete when the upstream side is wired, and standard UE knot category inference propagates at that time.
+		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+	}
+
+	// Compare against every existing wire feeding this input using the unified AnyOutcome-aware comparator.
+	for (const UEdGraphPin* Existing : InputPin->LinkedTo)
+	{
+		TSet<const UEdGraphPin*> ExistingSources;
+		TSet<const UEdGraphNode*> Visited;
+		TraversalPolicy->CollectEffectiveSources(Existing, ExistingSources, Visited);
+
+		const UEdGraphPin* CollisionA = nullptr;
+		const UEdGraphPin* CollisionB = nullptr;
+		if (SignalSetsCollide(IncomingSources, ExistingSources, CollisionA, CollisionB))
+		{
+			FText Msg;
+			if (bOutputIsKnot && IncomingSources.Num() > 1)
+			{
+				Msg = NSLOCTEXT("SimpleQuestEditor", "DuplicateSourceKnotSingle",
+					"This input already receives a signal from one of those source outcomes (direct, via a utility node, or via an activation group).");
+			}
+			else
+			{
+				Msg = NSLOCTEXT("SimpleQuestEditor", "DuplicateSource",
+					"This input already receives a signal from that outcome (direct, via a utility node, or via an activation group).");
+			}
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, Msg);
+		}
+	}
+
+	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+}
+
+FPinConnectionResponse UQuestlineGraphSchema::CheckGroupSetterForwardReach(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* InputNode) const
+{
+    const UQuestlineNode_ActivationGroupSetter* Setter = Cast<const UQuestlineNode_ActivationGroupSetter>(InputNode);
+    if (!Setter) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+    const FGameplayTag SetterTag = Setter->GroupTag;
+    if (!SetterTag.IsValid()) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+    const UEdGraph* Graph = Setter->GetGraph();
+    if (!Graph) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+    // Collect every destination reached by same-graph getters matching this setter's tag.
+    TSet<const UEdGraphPin*> ReachedTerminals;
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        const UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node);
+        if (!Getter || Getter->GroupTag != SetterTag) continue;
+
+        if (const UEdGraphPin* Forward = Getter->FindPin(TEXT("Forward"), EGPD_Output))
+        {
+            TSet<const UEdGraphNode*> Visited;
+            TraversalPolicy->CollectActivationTerminals(Forward, ReachedTerminals, Visited);
+        }
+    }
+    if (ReachedTerminals.Num() == 0) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+    // Effective sources of the new wire.
+    TSet<const UEdGraphPin*> NewSources;
+    {
+        TSet<const UEdGraphNode*> Visited;
+        TraversalPolicy->CollectEffectiveSources(OutputPin, NewSources, Visited);
+    }
+    if (NewSources.Num() == 0) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+
+    // At each terminal, check for collisions with existing wires.
+    for (const UEdGraphPin* Terminal : ReachedTerminals)
+    {
+        for (const UEdGraphPin* Existing : Terminal->LinkedTo)
+        {
+            TSet<const UEdGraphPin*> ExistingSources;
+            TSet<const UEdGraphNode*> Visited;
+            TraversalPolicy->CollectEffectiveSources(Existing, ExistingSources, Visited);
+
+            const UEdGraphPin* CollisionA = nullptr;
+            const UEdGraphPin* CollisionB = nullptr;
+            if (SignalSetsCollide(NewSources, ExistingSources, CollisionA, CollisionB))
+            {
+                return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+                    NSLOCTEXT("SimpleQuestEditor", "GroupSetterForwardParallel",
+                    "Wiring this source into the group would create a parallel path to a destination the group already reaches through another route."));
+            }
+        }
+    }
+
+    return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+}
+
+FPinConnectionResponse UQuestlineGraphSchema::CheckDownstreamParallelPaths(const UEdGraphPin* OutputPin, const UEdGraphPin* KnotInputPin) const
+{
+	// Walk backward from the proposed upstream wire to collect effective source pins.
+	TSet<const UEdGraphPin*> IncomingSources;
+	{
+		TSet<const UEdGraphNode*> Visited;
+		TraversalPolicy->CollectEffectiveSources(OutputPin, IncomingSources, Visited);
+	}
+	if (IncomingSources.Num() == 0)
+	{
+		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+	}
+
+	// Find every downstream terminal reached through the knot about to receive this upstream wire.
+	const UEdGraphNode* KnotNode = KnotInputPin->GetOwningNode();
+	TArray<const UEdGraphPin*> DownstreamTerminals;
+	{
+		TSet<const UEdGraphNode*> V;
+		V.Add(KnotNode);
+		TraversalPolicy->CollectDownstreamTerminalInputs(TraversalPolicy->GetPassThroughOutputPin(KnotNode), DownstreamTerminals, V);
+	}
+
+	// For each terminal, compare the new upstream sources against every existing wire already feeding it.
+	for (const UEdGraphPin* Terminal : DownstreamTerminals)
+	{
+		for (const UEdGraphPin* Existing : Terminal->LinkedTo)
+		{
+			TSet<const UEdGraphPin*> ExistingSources;
+			TSet<const UEdGraphNode*> Visited;
+			TraversalPolicy->CollectEffectiveSources(Existing, ExistingSources, Visited);
+
+			const UEdGraphPin* CollisionA = nullptr;
+			const UEdGraphPin* CollisionB = nullptr;
+			if (SignalSetsCollide(IncomingSources, ExistingSources, CollisionA, CollisionB))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "DuplicatePathViaReroute", "This would create a parallel path to a destination node via another connection."));
+			}
+		}
+	}
+
+	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+}
+
 const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const
 {
+	Super::CanCreateConnection(A, B);
     if (!A || !B) return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PinNull", "Invalid pin"));
 
     if (A->Direction == B->Direction) return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "SameDirection", "Cannot connect two inputs or two outputs"));
@@ -723,7 +897,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     const bool bOutputIsKnot = TraversalPolicy->IsPassThroughNode(OutputNode);
     const bool bInputIsKnot  = TraversalPolicy->IsPassThroughNode(InputNode);
 
-	// ---- Self-loop: only outcome/any-outcome outputs may loop back to own Activate ----
+	// Self-loop: only outcome/any-outcome outputs may loop back to own Activate
 	if (OutputNode == InputNode && !bOutputIsKnot && !bInputIsKnot)
 	{
 		const FName OutputCategory = OutputPin->PinType.PinCategory;
@@ -731,7 +905,8 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 			&& InputPin->PinName == TEXT("Activate")
 			&& (OutputCategory == TEXT("QuestOutcome") || OutputCategory == TEXT("QuestActivation")))
 		{
-			return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+			// Self-loop still subject to the same dedupe as any other Activate connection.
+			return CheckDuplicateSources(OutputPin, InputPin, false);
 		}
 		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "IllegalSelfLoop",
 				"Only outcome outputs may loop back to the same node's Activate pin"));
@@ -873,32 +1048,51 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     {
     	const UQuestlineNodeBase* InputBase = Cast<const UQuestlineNodeBase>(InputNode);
     	const bool bIsUtility = InputBase && InputBase->IsUtilityNode();
-    	if (!TraversalPolicy->IsContentNode(InputNode) && !bIsUtility)
+    	const bool bIsGroupSetter = Cast<const UQuestlineNode_GroupSetterBase>(InputNode) != nullptr;
+    	if (!TraversalPolicy->IsContentNode(InputNode) && !bIsUtility && !bIsGroupSetter)
     	{
     		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyToQuest", "Quest Start may only connect to a Quest node or utility node"));
     	}
-    	if (InputPin->PinName != TEXT("Activate"))
+
+    	// Group setter inputs accept QuestActivation too (Activate_N on activation setters, Condition_N on prereq setters),
+    	// but we only allow the Activate_N case from Entry — Entry firing is an activation signal, not a prereq condition.
+    	const bool bSetterActivateInput = bIsGroupSetter
+			&& InputPin->PinType.PinCategory == TEXT("QuestActivation");
+    	if (!bSetterActivateInput && InputPin->PinName != TEXT("Activate"))
     	{
-    		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to the Activate pin"));
+    		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to an Activate pin"));
     	}
     }
 
-    // ---- Content node outputs ----
-    if (TraversalPolicy->IsContentNode(OutputNode))
-    {
-    	const UQuestlineNodeBase* InputBase = Cast<const UQuestlineNodeBase>(InputNode);
-    	const bool bValidInput = TraversalPolicy->IsContentNode(InputNode)
+	// ---- Content node outputs ----
+	if (TraversalPolicy->IsContentNode(OutputNode))
+	{
+		const UQuestlineNodeBase* InputBase = Cast<const UQuestlineNodeBase>(InputNode);
+		const bool bIsGroupSetter = Cast<const UQuestlineNode_GroupSetterBase>(InputNode) != nullptr;
+		const bool bValidInput = TraversalPolicy->IsContentNode(InputNode)
 			|| TraversalPolicy->IsPassThroughNode(InputNode)
 			|| TraversalPolicy->IsExitNode(InputNode)
-			|| (InputBase && InputBase->IsUtilityNode());
-    	if (!bValidInput)
-    	{
-    		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "QuestOutputOnlyToQuest",
-					"Quest outputs may only connect to other Quest nodes, exit nodes, or utility nodes"));
-    	}
-    }
+			|| (InputBase && InputBase->IsUtilityNode())
+			|| bIsGroupSetter;
+		if (!bValidInput)
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "QuestOutputOnlyToQuest",
+					"Quest outputs may only connect to other Quest nodes, exit nodes, utility nodes, or group setter nodes"));
+		}
+	}
+	
+	// If the destination is an activation group setter, walk forward from every matching-tag getter to make sure the signal
+	// we're about to pipe through the group doesn't create a parallel path to any destination the group already reaches.
+	if (Cast<const UQuestlineNode_ActivationGroupSetter>(InputNode))
+	{
+		if (const FPinConnectionResponse R = CheckGroupSetterForwardReach(OutputPin, InputPin, InputNode);
+			R.Response != CONNECT_RESPONSE_MAKE)
+		{
+			return R;
+		}
+	}
 
-    return CheckDuplicateSources(OutputPin, InputPin, bOutputIsKnot);
+	return CheckDuplicateSources(OutputPin, InputPin, bOutputIsKnot);
 }
 
 void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& ContextMenuBuilder) const
@@ -1081,7 +1275,7 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
     UEdGraphPin* OutputPin = (A->Direction == EGPD_Output) ? A : B;
     UEdGraphPin* InputPin  = (A->Direction == EGPD_Input)  ? A : B;
 
-    // ── Self-loop: insert two-knot arch above the node ──
+    // ── Self-loop: reuse existing arch if present, otherwise insert a new two-knot arch ──
     UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
     if (OwningNode == InputPin->GetOwningNode())
     {
@@ -1095,11 +1289,57 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
 
             if (!bIsLegalSelfLoop)
             {
-	            return Super::TryCreateConnection(A, B);
+                return Super::TryCreateConnection(A, B);
             }
+
+            // Run full connection validation before placing anything — the self-loop guard inside CanCreateConnection runs
+            // dedupe via CheckDuplicateSources, so an AnyOutcome-vs-specific collision on the node's own Activate will be caught here
+            // rather than after knot placement.
+            const FPinConnectionResponse Response = CanCreateConnection(OutputPin, InputPin);
+            if (Response.Response == CONNECT_RESPONSE_DISALLOW)
+            {
+                return false;
+            }
+
             UEdGraph* Graph = OwningNode->GetGraph();
             Graph->Modify();
 
+            // Look for an existing self-loop arch on this node. Criterion: a knot whose KnotOut connects back to this node's
+            // Activate pin. If found, reuse its KnotIn as the shared sink: new outcome wires land there instead of spawning a parallel arch.
+            UEdGraphPin* ReuseKnotInPin = nullptr;
+            for (UEdGraphPin* ActivateLink : InputPin->LinkedTo)
+            {
+                const UQuestlineNode_Knot* LeftKnot = Cast<UQuestlineNode_Knot>(ActivateLink->GetOwningNode());
+                if (!LeftKnot) continue;
+                const UEdGraphPin* LeftIn = LeftKnot->FindPin(TEXT("KnotIn"));
+                if (!LeftIn) continue;
+                for (UEdGraphPin* LeftInLinked : LeftIn->LinkedTo)
+                {
+                    UQuestlineNode_Knot* RightKnot = Cast<UQuestlineNode_Knot>(LeftInLinked->GetOwningNode());
+                    if (!RightKnot) continue;
+                    // Confirm the arch upstream side: RightKnot's KnotIn has at least one link to this node.
+                    const UEdGraphPin* RightIn = RightKnot->FindPin(TEXT("KnotIn"));
+                    if (!RightIn) continue;
+                    for (const UEdGraphPin* UpstreamLink : RightIn->LinkedTo)
+                    {
+                        if (UpstreamLink->GetOwningNode() == OwningNode)
+                        {
+                            ReuseKnotInPin = RightKnot->FindPin(TEXT("KnotIn"));
+                            break;
+                        }
+                    }
+                    if (ReuseKnotInPin) break;
+                }
+                if (ReuseKnotInPin) break;
+            }
+
+            if (ReuseKnotInPin)
+            {
+                // Arch exists — just plumb the new outcome into its upstream-side KnotIn.
+                return Super::TryCreateConnection(OutputPin, ReuseKnotInPin);
+            }
+
+            // No existing arch — build one.
             const float NodeWidth = 200.f;
             const float KnotOffset = 60.f;
 
@@ -1112,11 +1352,11 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
                 Creator.Finalize();
                 if (UEdGraphPin* In  = Knot->FindPin(TEXT("KnotIn")))
                 {
-	                In->PinType = OutputPin->PinType;
+                    In->PinType = OutputPin->PinType;
                 }
                 if (UEdGraphPin* Out = Knot->FindPin(TEXT("KnotOut")))
                 {
-	                Out->PinType = OutputPin->PinType;
+                    Out->PinType = OutputPin->PinType;
                 }
                 return Knot;
             };
@@ -1131,7 +1371,6 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
             return true;
         }
     }
-
     return Super::TryCreateConnection(A, B);
 }
 

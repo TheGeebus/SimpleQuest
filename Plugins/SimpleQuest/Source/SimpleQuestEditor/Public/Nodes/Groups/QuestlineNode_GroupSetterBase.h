@@ -18,6 +18,9 @@ public:
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override { return FText::GetEmpty(); }
 
+	/** Widget queries this to decide whether to show the "Add pin" button. Default: true (prereq setter has dynamic inputs). */
+	virtual bool CanAddInputPin() const { return true; }
+	
 	/** Widget accessors — concrete classes implement these. */
 	virtual FGameplayTag GetGroupTag() const { return FGameplayTag(); }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) {}

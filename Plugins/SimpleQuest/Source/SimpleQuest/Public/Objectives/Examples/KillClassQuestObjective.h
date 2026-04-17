@@ -18,6 +18,7 @@ class SIMPLEQUEST_API UKillClassQuestObjective : public UCountingQuestObjective
 	GENERATED_BODY()
 
 public:
+	UKillClassQuestObjective();
 	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
 	
 private:

@@ -98,6 +98,21 @@ void UQuestlineNodeBase::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeCo
 	}
 }
 
+void UQuestlineNodeBase::PostEditUndo()
+{
+	Super::PostEditUndo();
+
+	// Many questline nodes mutate their own Pins array inside a transaction (dynamic outcome pins, condition pins, deactivation
+	// pins, etc.). The transaction restores the UPROPERTYs and pin objects atomically, but the graph panel's SGraphPin widgets
+	// still reference the pre-undo pin pointers. NotifyGraphChanged prompts the panel to reconstruct its pin widgets so they bind
+	// to the restored objects. Hoisted to the base class since this is a near-universal hazard across the node hierarchy — any node
+	// with dynamic pins needs it.
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
 void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
 {
 	USimpleQuestEditorUtilities::SyncPinsByCategory(this, Direction, PinCategory, DesiredPinNames, InsertBeforeCategories);

@@ -5,6 +5,8 @@
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
 
 
 
@@ -116,10 +118,68 @@ void FQuestlineGraphTraversalPolicy::CollectDownstreamTerminalInputs(const UEdGr
     }
 }
 
+void FQuestlineGraphTraversalPolicy::CollectActivationTerminals(const UEdGraphPin* FromOutput, TSet<const UEdGraphPin*>& OutTerminals, TSet<const UEdGraphNode*>& VisitedNodes) const
+{
+    if (!FromOutput) return;
+    for (const UEdGraphPin* Linked : FromOutput->LinkedTo)
+    {
+        if (!Linked) continue;
+        const UEdGraphNode* Node = Linked->GetOwningNode();
+        if (!Node) continue;
+        if (VisitedNodes.Contains(Node)) continue;
+        VisitedNodes.Add(Node);
+
+        // Terminal sink: content or exit node. Only collect activation/deactivation inputs.
+        if (IsContentNode(Node) || IsExitNode(Node))
+        {
+            const FName Cat = Linked->PinType.PinCategory;
+            if (Cat == TEXT("QuestActivation") || Cat == TEXT("QuestDeactivate"))
+            {
+                OutTerminals.Add(Linked);
+            }
+            continue;
+        }
+
+        // Knot: walk KnotOut.
+        if (IsPassThroughNode(Node))
+        {
+            CollectActivationTerminals(GetPassThroughOutputPin(Node), OutTerminals, VisitedNodes);
+            continue;
+        }
+
+        // Utility node: Activate → Forward. Walk Forward output.
+        if (const UQuestlineNodeBase* Base = Cast<const UQuestlineNodeBase>(Node))
+        {
+            if (Base->IsUtilityNode())
+            {
+                if (const UEdGraphPin* Forward = Node->FindPin(TEXT("Forward"), EGPD_Output))
+                {
+                    CollectActivationTerminals(Forward, OutTerminals, VisitedNodes);
+                }
+                continue;
+            }
+        }
+
+        // Activation group setter: Activate → Forward. Walk Forward output.
+        // (Chained setter → setter is unusual but possible; the walker follows it.)
+        if (Cast<const UQuestlineNode_ActivationGroupSetter>(Node))
+        {
+            if (const UEdGraphPin* Forward = Node->FindPin(TEXT("Forward"), EGPD_Output))
+            {
+                CollectActivationTerminals(Forward, OutTerminals, VisitedNodes);
+            }
+            continue;
+        }
+        // Anything else (prereq combinator, getter, etc.) isn't a valid forward destination for activation chains — stop walking this branch.
+    }
+}
+
 
 // -------------------------------------------------------------------------------------------------
 // Backward traversal - fixed logic
 // -------------------------------------------------------------------------------------------------
+
+
 
 void FQuestlineGraphTraversalPolicy::CollectKnotInputSources(const UEdGraphPin* KnotInPin, TArray<const UEdGraphPin*>& OutSourcePins, TSet<const UEdGraphNode*>& Visited) const
 {
@@ -167,6 +227,107 @@ void FQuestlineGraphTraversalPolicy::CollectSourceContentNodes(const UEdGraphPin
     }
 }
 
+void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* SourcePin, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphNode*>& VisitedNodes) const
+{
+    if (!SourcePin) return;
+    const UEdGraphNode* OwnerNode = SourcePin->GetOwningNode();
+    if (!OwnerNode) return;
+
+    // Direct connection to a content node outcome pin
+    if (IsContentNode(OwnerNode))
+    {
+        OutSources.Add(SourcePin);
+        return;
+    }
+
+    if (VisitedNodes.Contains(OwnerNode)) return;
+    VisitedNodes.Add(OwnerNode);
+
+    // Knot reroute: walk through the matching input side to all connections.
+    if (IsPassThroughNode(OwnerNode))
+    {
+        if (const UEdGraphPin* InPin = GetPassThroughInputPin(OwnerNode))
+        {
+            for (const UEdGraphPin* Linked : InPin->LinkedTo)
+            {
+                CollectEffectiveSources(Linked, OutSources, VisitedNodes);
+            }
+        }
+        return;
+    }
+
+    // Utility node Forward output: walk through the Activate input to all connections.
+    if (const UQuestlineNodeBase* Base = Cast<const UQuestlineNodeBase>(OwnerNode))
+    {
+        if (Base->IsUtilityNode() && SourcePin->PinName == TEXT("Forward"))
+        {
+            if (const UEdGraphPin* ActivatePin = OwnerNode->FindPin(TEXT("Activate"), EGPD_Input))
+            {
+                for (const UEdGraphPin* Linked : ActivatePin->LinkedTo)
+                {
+                    CollectEffectiveSources(Linked, OutSources, VisitedNodes);
+                }
+            }
+            return;
+        }
+    }
+
+    // Activation group setter Forward output: walk through every Activate_N input.
+    if (const UQuestlineNode_ActivationGroupSetter* Setter = Cast<const UQuestlineNode_ActivationGroupSetter>(OwnerNode))
+    {
+        if (SourcePin->PinName == TEXT("Forward"))
+        {
+            for (const UEdGraphPin* Pin : Setter->Pins)
+            {
+                if (Pin->Direction != EGPD_Input) continue;
+                if (Pin->PinType.PinCategory != TEXT("QuestActivation")) continue;
+                for (const UEdGraphPin* Linked : Pin->LinkedTo)
+                {
+                    CollectEffectiveSources(Linked, OutSources, VisitedNodes);
+                }
+            }
+        }
+        return;
+    }
+
+    // Activation group getter Forward output: dereference the group tag to find every setter in the same graph with matching
+    // GroupTag, recurse into its input wires.
+    if (const UQuestlineNode_ActivationGroupGetter* Getter = Cast<const UQuestlineNode_ActivationGroupGetter>(OwnerNode))
+    {
+        if (SourcePin->PinName == TEXT("Forward"))
+        {
+            const FGameplayTag GetterTag = Getter->GroupTag;
+            if (!GetterTag.IsValid()) return;
+
+            if (const UEdGraph* Graph = Getter->GetGraph())
+            {
+                for (UEdGraphNode* Node : Graph->Nodes)
+                {
+                    const UQuestlineNode_ActivationGroupSetter* SiblingSetter = Cast<UQuestlineNode_ActivationGroupSetter>(Node);
+                    if (!SiblingSetter || SiblingSetter->GroupTag != GetterTag) continue;
+                    if (VisitedNodes.Contains(SiblingSetter)) continue;
+                    VisitedNodes.Add(SiblingSetter);
+
+                    for (const UEdGraphPin* Pin : SiblingSetter->Pins)
+                    {
+                        if (Pin->Direction != EGPD_Input) continue;
+                        if (Pin->PinType.PinCategory != TEXT("QuestActivation")) continue;
+                        for (const UEdGraphPin* Linked : Pin->LinkedTo)
+                        {
+                            CollectEffectiveSources(Linked, OutSources, VisitedNodes);
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // Anything else (Entry node's "Any Outcome", prereq nodes, etc.) is not a pass-through for activation chains; treat as
+    // an end point by adding the pin itself so callers can distinguish Entry's Any Outcome from content outcome if they
+    // need to.
+    OutSources.Add(SourcePin);
+}
 
 // -------------------------------------------------------------------------------------------------
 // Composite reachability - fixed logic
@@ -201,3 +362,4 @@ FQuestlineGraphTraversalPolicy::FPinReachability FQuestlineGraphTraversalPolicy:
     }
     return Result;
 }
+

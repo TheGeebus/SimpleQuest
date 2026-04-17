@@ -13,10 +13,14 @@
 
 void UQuestlineNode_Entry::AllocateDefaultPins()
 {
-	// Named outcome paths — fire only when this graph was entered via that specific outcome
-	for (const FGameplayTag& Tag : IncomingOutcomeTags)
+	// Named outcome paths — fire only when this graph was entered via that specific outcome. Driven by exposed specs in
+	// IncomingSignals. Specs with bExposed=false are stored but generate no pin (they persist the designer's selection
+	// state across re-imports).
+	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
-		if (Tag.IsValid()) CreatePin(EGPD_Output, TEXT("QuestOutcome"), Tag.GetTagName());
+		if (!Spec.bExposed) continue;
+		if (!Spec.Outcome.IsValid()) continue;
+		CreatePin(EGPD_Output, TEXT("QuestOutcome"), Spec.Outcome.GetTagName());
 	}
 
 	// Unconditional path — always fires when this graph activates
@@ -29,12 +33,50 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 	}
 }
 
+void UQuestlineNode_Entry::PostLoad()
+{
+	Super::PostLoad();
+
+	// Migrate legacy IncomingOutcomeTags array into IncomingSignals. Pre-Session-19 assets stored incoming outcomes as
+	// a flat tag list with no source qualification; each becomes an exposed spec with no ParentAsset/SourceNodeGuid.
+	// Session 20's source-aware import can enrich these later; in the meantime they function identically to the old pins.
+	if (IncomingOutcomeTags_DEPRECATED.Num() > 0)
+	{
+		for (const FGameplayTag& Tag : IncomingOutcomeTags_DEPRECATED)
+		{
+			if (!Tag.IsValid()) continue;
+
+			const bool bAlreadyPresent = IncomingSignals.ContainsByPredicate(
+				[&Tag](const FIncomingSignalPinSpec& Existing)
+				{
+					return !Existing.SourceNodeGuid.IsValid()
+						&& Existing.ParentAsset.IsNull()
+						&& Existing.Outcome == Tag;
+				});
+			if (bAlreadyPresent) continue;
+
+			FIncomingSignalPinSpec Spec;
+			Spec.Outcome = Tag;
+			Spec.bExposed = true;  // preserve existing visible pins; migrated outcomes stay exposed
+			IncomingSignals.Add(Spec);
+		}
+		IncomingOutcomeTags_DEPRECATED.Empty();
+	}
+
+	// Sync pins to IncomingSignals. On fresh post-migration load, AllocateDefaultPins ran with an empty IncomingSignals
+	// (migration hadn't happened yet), so pins need to be created now. SyncPinsByCategory preserves wiring on pins whose
+	// names match (un-orphans wired-survivors that came in from serialization).
+	RefreshOutcomePins();
+}
+
 void UQuestlineNode_Entry::RefreshOutcomePins()
 {
 	TArray<FName> DesiredNames;
-	for (const FGameplayTag& Tag : IncomingOutcomeTags)
+	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
-		if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
+		if (!Spec.bExposed) continue;
+		if (!Spec.Outcome.IsValid()) continue;
+		DesiredNames.Add(Spec.Outcome.GetTagName());
 	}
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
 }
@@ -42,7 +84,12 @@ void UQuestlineNode_Entry::RefreshOutcomePins()
 void UQuestlineNode_Entry::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, IncomingOutcomeTags))
+
+	// Use member-property name so edits to fields inside IncomingSignals[N] (e.g., bExposed toggle) register as IncomingSignals
+	// changes. GetPropertyName() returns the innermost field name, which would miss nested-struct edits.
+	const FName MemberName = PropertyChangedEvent.MemberProperty ? PropertyChangedEvent.MemberProperty->GetFName() : NAME_None;
+	
+	if (MemberName == GET_MEMBER_NAME_CHECKED(UQuestlineNode_Entry, IncomingSignals))
 	{
 		RefreshOutcomePins();
 	}
@@ -105,158 +152,180 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 
 void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 {
-    TArray<FName> FoundOutcomeNames;
+	TArray<FName> FoundOutcomeNames;
 
-    UObject* GraphOuter = GetGraph() ? GetGraph()->GetOuter() : nullptr;
-    if (!GraphOuter) return;
+	UObject* GraphOuter = GetGraph() ? GetGraph()->GetOuter() : nullptr;
+	if (!GraphOuter) return;
 
-    FQuestlineGraphTraversalPolicy TraversalPolicy;
+	FQuestlineGraphTraversalPolicy TraversalPolicy;
 
-    // Walk back from a container node's Activate input and harvest only the outcome pins that actually feed it.
-    // Uses the unified effective-source walker so indirect routes through knots, utility nodes, and activation
-    // group setter/getter chains are captured too.
-    auto CollectFromActivatePin = [&](const UEdGraphNode* ContainerNode)
-    {
-        const UEdGraphPin* ActivatePin = ContainerNode->FindPin(TEXT("Activate"), EGPD_Input);
-        if (!ActivatePin) return;
+	// Walk back from a container node's Activate input and harvest only the outcome pins that actually feed it. Uses the
+	// unified effective-source walker so indirect routes through knots, utility nodes, and activation group setter/getter
+	// chains are captured too.
+	auto CollectFromActivatePin = [&](const UEdGraphNode* ContainerNode)
+	{
+		const UEdGraphPin* ActivatePin = ContainerNode->FindPin(TEXT("Activate"), EGPD_Input);
+		if (!ActivatePin) return;
 
-        for (const UEdGraphPin* Wire : ActivatePin->LinkedTo)
-        {
-            TSet<const UEdGraphPin*> Sources;
-            TSet<const UEdGraphNode*> Visited;
-            TraversalPolicy.CollectEffectiveSources(Wire, Sources, Visited);
-            for (const UEdGraphPin* Source : Sources)
-            {
-                // Only import specific named outcomes. AnyOutcome routes cannot distinguish which outcome fired
-                // at runtime, so per-outcome entry pins would be dead; the AnyOutcome entry pin handles that path.
-                if (Source->PinType.PinCategory == TEXT("QuestOutcome") && !Source->PinName.IsNone())
-                {
-                    FoundOutcomeNames.AddUnique(Source->PinName);
-                }
-            }
-        }
-    };
+		for (const UEdGraphPin* Wire : ActivatePin->LinkedTo)
+		{
+			TSet<const UEdGraphPin*> Sources;
+			TSet<const UEdGraphNode*> Visited;
+			TraversalPolicy.CollectEffectiveSources(Wire, Sources, Visited);
+			for (const UEdGraphPin* Source : Sources)
+			{
+				// Only import specific named outcomes. AnyOutcome routes cannot distinguish which outcome fired at runtime,
+				// so per-outcome entry pins would be dead; the AnyOutcome entry pin handles that path.
+				if (Source->PinType.PinCategory == TEXT("QuestOutcome") && !Source->PinName.IsNone())
+				{
+					FoundOutcomeNames.AddUnique(Source->PinName);
+				}
+			}
+		}
+	};
 
-    // ── Case 1: inner graph owned by a Quest node ──────────────────────────
-    if (const UQuestlineNode_Quest* ParentQuestNode = Cast<UQuestlineNode_Quest>(GraphOuter))
-    {
-        CollectFromActivatePin(ParentQuestNode);
-    }
-    // ── Case 2: top-level QuestlineGraph — AR scan for LinkedQuestline refs ─
-    else if (UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(GraphOuter))
-    {
-        const IAssetRegistry& AR =
-            FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	// Case 1: inner graph owned by a Quest node
+	if (const UQuestlineNode_Quest* ParentQuestNode = Cast<UQuestlineNode_Quest>(GraphOuter))
+	{
+		CollectFromActivatePin(ParentQuestNode);
+	}
+	// Case 2: top-level QuestlineGraph — AR scan for LinkedQuestline refs
+	else if (UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(GraphOuter))
+	{
+		const IAssetRegistry& AR =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 
-        TArray<FAssetData> AllGraphAssets;
-        AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), AllGraphAssets);
+		TArray<FAssetData> AllGraphAssets;
+		AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), AllGraphAssets);
 
-        const FSoftObjectPath OurPath(QuestlineAsset);
+		const FSoftObjectPath OurPath(QuestlineAsset);
 
-        for (const FAssetData& AssetData : AllGraphAssets)
-        {
-            UQuestlineGraph* OtherAsset = Cast<UQuestlineGraph>(AssetData.GetAsset());
-            if (!OtherAsset || OtherAsset == QuestlineAsset || !OtherAsset->QuestlineEdGraph)
-                continue;
+		for (const FAssetData& AssetData : AllGraphAssets)
+		{
+			UQuestlineGraph* OtherAsset = Cast<UQuestlineGraph>(AssetData.GetAsset());
+			if (!OtherAsset || OtherAsset == QuestlineAsset || !OtherAsset->QuestlineEdGraph)
+				continue;
 
-            // For every LinkedQuestline node in the other asset that points at us, harvest the outcomes
-            // routed into that node's Activate pin.
-            for (const UEdGraphNode* Node : OtherAsset->QuestlineEdGraph->Nodes)
-            {
-                const UQuestlineNode_LinkedQuestline* LinkedNode =
-                    Cast<UQuestlineNode_LinkedQuestline>(Node);
-                if (!LinkedNode || LinkedNode->LinkedGraph.ToSoftObjectPath() != OurPath) continue;
-                CollectFromActivatePin(LinkedNode);
-            }
-        }
-    }
+			for (const UEdGraphNode* Node : OtherAsset->QuestlineEdGraph->Nodes)
+			{
+				const UQuestlineNode_LinkedQuestline* LinkedNode =
+					Cast<UQuestlineNode_LinkedQuestline>(Node);
+				if (!LinkedNode || LinkedNode->LinkedGraph.ToSoftObjectPath() != OurPath) continue;
+				CollectFromActivatePin(LinkedNode);
+			}
+		}
+	}
 
-    // ── Identify stale tags: currently present, no longer routed from any parent ──
-    TArray<FGameplayTag> StaleTags;
-    for (const FGameplayTag& ExistingTag : IncomingOutcomeTags)
-    {
-        if (!ExistingTag.IsValid()) continue;
-        if (!FoundOutcomeNames.Contains(ExistingTag.GetTagName()))
-        {
-            StaleTags.Add(ExistingTag);
-        }
-    }
+	// Identify stale specs: previously-exposed outcomes that are no longer routed into the parent.
+	TArray<int32> StaleIndices;
+	for (int32 i = 0; i < IncomingSignals.Num(); ++i)
+	{
+		const FIncomingSignalPinSpec& Spec = IncomingSignals[i];
+		if (!Spec.bExposed) continue;
+		if (!Spec.Outcome.IsValid()) continue;
+		if (!FoundOutcomeNames.Contains(Spec.Outcome.GetTagName()))
+		{
+			StaleIndices.Add(i);
+		}
+	}
 
-    // ── Early out when nothing would change ───────────────────────────────
-    const bool bWouldImport = !FoundOutcomeNames.IsEmpty();
-    const bool bWouldPrune  = !StaleTags.IsEmpty();
-    if (!bWouldImport && !bWouldPrune)
-    {
-        FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "NoParentOutcomes",
-            "No outcome tags are routed into this graph's parent Activate pin"));
-        Info.ExpireDuration = 3.0f;
-        FSlateNotificationManager::Get().AddNotification(Info);
-        return;
-    }
+	// Identify import actions: truly new tags get fresh specs; tags matching disabled specs get the existing spec re-enabled (no duplicates).
+	TArray<FGameplayTag> NewOutcomeTags;
+	TArray<int32> IndicesToReEnable;
+	for (const FName& OutcomeName : FoundOutcomeNames)
+	{
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(OutcomeName, /*bErrorIfNotFound=*/ false);
+		if (!Tag.IsValid()) continue;
 
-    // ── Apply additions and pruning under a single undoable transaction ──
-    const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor",
-        "ImportOutcomePins_Undo", "Import Outcome Pins"));
-    Modify();
+		int32 ExistingIndex = INDEX_NONE;
+		for (int32 i = 0; i < IncomingSignals.Num(); ++i)
+		{
+			if (IncomingSignals[i].Outcome == Tag)
+			{
+				ExistingIndex = i;
+				break;
+			}
+		}
 
-    // Prune stale tags first — SyncPinsByCategory (via RefreshOutcomePins) will orphan wired pins
-    // whose tags are no longer present, and cleanly remove unwired ones.
-    for (const FGameplayTag& Stale : StaleTags)
-    {
-        IncomingOutcomeTags.Remove(Stale);
-    }
+		if (ExistingIndex == INDEX_NONE)
+		{
+			NewOutcomeTags.Add(Tag);
+		}
+		else if (!IncomingSignals[ExistingIndex].bExposed)
+		{
+			IndicesToReEnable.Add(ExistingIndex);
+		}
+		// else: already exposed and present — nothing to do
+	}
 
-    // Import any newly discovered outcomes.
-    int32 ImportedCount = 0;
-    for (const FName& OutcomeName : FoundOutcomeNames)
-    {
-        const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(OutcomeName, /*bErrorIfNotFound=*/ false);
-        if (!Tag.IsValid()) continue;
-        if (IncomingOutcomeTags.Contains(Tag)) continue;
+	const bool bWouldImport = NewOutcomeTags.Num() > 0 || IndicesToReEnable.Num() > 0;
+	const bool bWouldPrune  = StaleIndices.Num() > 0;
+	if (!bWouldImport && !bWouldPrune)
+	{
+		FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "NoParentOutcomes",
+			"No outcome tags are routed into this graph's parent Activate pin"));
+		Info.ExpireDuration = 3.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		return;
+	}
 
-        IncomingOutcomeTags.Add(Tag);
-        ImportedCount++;
-    }
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor",
+		"ImportOutcomePins_Undo", "Import Outcome Pins"));
+	Modify();
 
-    // Refresh pins — additions + orphaning of stale wired pins + removal of stale unwired pins.
-    if (ImportedCount > 0 || StaleTags.Num() > 0)
-    {
-        RefreshOutcomePins();
-    }
+	// Prune stale: demote bExposed so the pin is removed but the spec is retained (designer selection state preserved for future re-imports).
+	for (int32 i = StaleIndices.Num() - 1; i >= 0; --i)
+	{
+		IncomingSignals[StaleIndices[i]].bExposed = false;
+	}
 
-    // ── Summary toast ─────────────────────────────────────────────────────
-    if (ImportedCount > 0 && StaleTags.Num() > 0)
-    {
-        FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedAndPrunedOutcomes",
+	// Re-enable disabled matches first (no new spec creation for these).
+	for (int32 Index : IndicesToReEnable)
+	{
+		IncomingSignals[Index].bExposed = true;
+	}
+
+	// Append new specs for genuinely new outcomes.
+	for (const FGameplayTag& Tag : NewOutcomeTags)
+	{
+		FIncomingSignalPinSpec Spec;
+		Spec.Outcome = Tag;
+		Spec.bExposed = true;
+		IncomingSignals.Add(Spec);
+	}
+
+	const int32 ImportedCount = NewOutcomeTags.Num() + IndicesToReEnable.Num();
+
+	if (ImportedCount > 0 || StaleIndices.Num() > 0)
+	{
+		RefreshOutcomePins();
+	}
+
+	if (ImportedCount > 0 && StaleIndices.Num() > 0)
+	{
+		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedAndPrunedOutcomes",
 			"Imported {0} outcome pin(s); flagged {1} stale pin(s) for cleanup"),
 			FText::AsNumber(ImportedCount),
-			FText::AsNumber(StaleTags.Num())));
-        Info.ExpireDuration = 3.5f;
-        FSlateNotificationManager::Get().AddNotification(Info);
-    }
-    else if (ImportedCount > 0)
-    {
-        FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedOutcomes",
-        	"Imported {0} outcome pin(s)"),
-        	FText::AsNumber(ImportedCount)));
-        Info.ExpireDuration = 3.0f;
-        FSlateNotificationManager::Get().AddNotification(Info);
-    }
-    else if (StaleTags.Num() > 0)
-    {
-        FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrunedOutcomes",
-        	"Flagged {0} stale pin(s) for cleanup; no new outcomes to import"),
-        	FText::AsNumber(StaleTags.Num())));
-        Info.ExpireDuration = 3.0f;
-        FSlateNotificationManager::Get().AddNotification(Info);
-    }
-    else
-    {
-        FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "AllOutcomesPresent",
-        	"All routed parent outcomes are already present as incoming pins"));
-        Info.ExpireDuration = 3.0f;
-        FSlateNotificationManager::Get().AddNotification(Info);
-    }
+			FText::AsNumber(StaleIndices.Num())));
+		Info.ExpireDuration = 3.5f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
+	else if (ImportedCount > 0)
+	{
+		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedOutcomes",
+			"Imported {0} outcome pin(s)"),
+			FText::AsNumber(ImportedCount)));
+		Info.ExpireDuration = 3.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
+	else if (StaleIndices.Num() > 0)
+	{
+		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrunedOutcomes",
+			"Flagged {0} stale pin(s) for cleanup; no new outcomes to import"),
+			FText::AsNumber(StaleIndices.Num())));
+		Info.ExpireDuration = 3.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
 }
 
 FText UQuestlineNode_Entry::GetNodeTitle(ENodeTitleType::Type TitleType) const

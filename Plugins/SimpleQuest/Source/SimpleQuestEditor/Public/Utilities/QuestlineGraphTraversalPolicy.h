@@ -4,10 +4,32 @@
 
 #include "CoreMinimal.h"
 
+class UQuestlineGraph;
 class UEdGraphNode;
 class UEdGraphPin;
 class UQuestlineNodeBase;
 class UQuestlineNode_ContentBase;
+
+/**
+ * A single effective-source entry: a terminal outcome pin on a content or Entry node, tagged with the asset that contains
+ * it. Used when the source walker crosses asset boundaries so callers can disambiguate between same-named outcomes in
+ * different assets. The UEdGraphPin* is the same pointer the within-graph walker would produce; Asset is the UQuestlineGraph
+ * that serializes the pin's owning node.
+ */
+struct SIMPLEQUESTEDITOR_API FQuestEffectiveSource
+{
+	const UEdGraphPin* Pin = nullptr;
+	const UQuestlineGraph* Asset = nullptr;
+
+	friend bool operator==(const FQuestEffectiveSource& A, const FQuestEffectiveSource& B)
+	{
+		return A.Pin == B.Pin && A.Asset == B.Asset;
+	}
+	friend uint32 GetTypeHash(const FQuestEffectiveSource& S)
+	{
+		return HashCombine(PointerHash(S.Pin), PointerHash(S.Asset));
+	}
+};
 
 /**
  * Graph traversal utility class for questline graphs. Non-virtual traversal methods implement a fixed walk-forward algorithm;
@@ -56,7 +78,28 @@ public:
      * @param VisitedNodes Cycle guard across nodes.
      */
     void CollectEffectiveSources(const UEdGraphPin* SourcePin, TSet<const UEdGraphPin*>& OutSources, TSet<const UEdGraphNode*>& VisitedNodes) const;
-    
+
+    /**
+	 * For a child graph whose outer is either a container Quest node (inline inner graph) or a top-level UQuestlineGraph
+	 * asset, collect all terminal outcome pins in parent assets that route into this child's Entry point. One level of
+	 * parentage only — chained LinkedQuestline hierarchies are not traversed (creates UX noise for Surface A without
+	 * clear value). Session 20+ surfaces may add deeper traversal if needed.
+	 *
+	 * Two parent shapes are handled:
+	 *   1. ChildGraph is owned by a UQuestlineNode_Quest: walks the Quest's Activate input backward.
+	 *   2. ChildGraph is owned by a UQuestlineGraph: AR-scans other assets for UQuestlineNode_LinkedQuestline nodes
+	 *		whose LinkedGraph points at the child, then walks each such LinkedQuestline's Activate input backward.
+	 *
+	 * Each collected source is tagged with the UQuestlineGraph asset that contains the source pin's owning node (via outer
+	 * traversal). Within-graph walking uses CollectEffectiveSources, so utility nodes, knots, and within-graph activation
+	 * group chains are transparent.
+	 *
+	 * @param ChildGraph   The inner/child graph whose Entry is being analyzed.
+	 * @param OutSources   Accumulating set of (pin, asset) pairs.
+	 */
+	void CollectEntryReachingSources(const UEdGraph* ChildGraph, TSet<FQuestEffectiveSource>& OutSources) const;
+	static const UQuestlineGraph* ResolveContainingAsset(const UEdGraph* Graph);
+
     void CollectDownstreamTerminalInputs(const UEdGraphPin* KnotOutPin, TArray<const UEdGraphPin*>& OutTerminalPins, TSet<const UEdGraphNode*>& Visited) const;
 
     /**
@@ -72,7 +115,7 @@ public:
 	 * @param VisitedNodes  Cycle guard across nodes.
 	 */
     void CollectActivationTerminals(const UEdGraphPin* FromOutput, TSet<const UEdGraphPin*>& OutTerminals, TSet<const UEdGraphNode*>& VisitedNodes) const;
-
+	
     FPinReachability ComputeForwardReachability(const UEdGraphPin* OutputPin) const;
     FPinReachability ComputeFullReachability(const UEdGraphPin* OutputPin, const UEdGraphNode* OutputNode) const;
     

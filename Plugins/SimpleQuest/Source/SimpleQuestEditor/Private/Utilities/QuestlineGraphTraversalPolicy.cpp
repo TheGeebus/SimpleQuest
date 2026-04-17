@@ -7,6 +7,10 @@
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Quests/QuestlineGraph.h"
 
 
 
@@ -328,6 +332,99 @@ void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* 
     // need to.
     OutSources.Add(SourcePin);
 }
+
+const UQuestlineGraph* FQuestlineGraphTraversalPolicy::ResolveContainingAsset(const UEdGraph* Graph)
+{
+    while (Graph)
+    {
+        UObject* Outer = Graph->GetOuter();
+        if (const UQuestlineGraph* Asset = Cast<UQuestlineGraph>(Outer))
+        {
+            return Asset;
+        }
+        if (const UEdGraphNode* ContainerNode = Cast<UEdGraphNode>(Outer))
+        {
+            Graph = ContainerNode->GetGraph();
+            continue;
+        }
+        return nullptr;
+    }
+    return nullptr;
+}
+
+void FQuestlineGraphTraversalPolicy::CollectEntryReachingSources(const UEdGraph* ChildGraph, TSet<FQuestEffectiveSource>& OutSources) const
+{
+    if (!ChildGraph) return;
+    UObject* GraphOuter = ChildGraph->GetOuter();
+    if (!GraphOuter) return;
+
+    // Helper: given an Activate pin on some container node in some parent graph, walk each incoming wire via CollectEffectiveSources
+    // and tag each terminal with the asset that owns the source pin.
+    auto CollectFromActivatePin = [this, &OutSources](const UEdGraphNode* ContainerNode)
+    {
+        if (!ContainerNode) return;
+        const UEdGraphPin* ActivatePin = ContainerNode->FindPin(TEXT("Activate"), EGPD_Input);
+        if (!ActivatePin) return;
+
+        for (const UEdGraphPin* Wire : ActivatePin->LinkedTo)
+        {
+            TSet<const UEdGraphPin*> PinSources;
+            TSet<const UEdGraphNode*> Visited;
+            CollectEffectiveSources(Wire, PinSources, Visited);
+
+            for (const UEdGraphPin* Source : PinSources)
+            {
+                const UEdGraphNode* OwnerNode = Source ? Source->GetOwningNode() : nullptr;
+                const UEdGraph* OwnerGraph = OwnerNode ? OwnerNode->GetGraph() : nullptr;
+                const UQuestlineGraph* Asset = ResolveContainingAsset(OwnerGraph);
+
+                FQuestEffectiveSource Entry;
+                Entry.Pin = Source;
+                Entry.Asset = Asset;
+                OutSources.Add(Entry);
+            }
+        }
+    };
+
+    // Case 1: ChildGraph is owned by a Quest node — inline inner graph. The parent graph is the Quest node's graph, and
+    // the source pins live in that same asset as the child.
+    if (const UQuestlineNode_Quest* ParentQuestNode = Cast<UQuestlineNode_Quest>(GraphOuter))
+    {
+        CollectFromActivatePin(ParentQuestNode);
+        return;
+    }
+
+    // Case 2: ChildGraph is the top-level graph of a UQuestlineGraph asset. Scan the asset registry for other questline
+    // graphs containing LinkedQuestline nodes that reference this asset, and walk each such LinkedQuestline's Activate
+    // input in its own graph.
+    if (UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(GraphOuter))
+    {
+        const IAssetRegistry& AR =
+            FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+
+        TArray<FAssetData> AllGraphAssets;
+        AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), AllGraphAssets);
+
+        const FSoftObjectPath OurPath(QuestlineAsset);
+
+        for (const FAssetData& AssetData : AllGraphAssets)
+        {
+            UQuestlineGraph* OtherAsset = Cast<UQuestlineGraph>(AssetData.GetAsset());
+            if (!OtherAsset || OtherAsset == QuestlineAsset || !OtherAsset->QuestlineEdGraph)
+                continue;
+
+            for (const UEdGraphNode* Node : OtherAsset->QuestlineEdGraph->Nodes)
+            {
+                const UQuestlineNode_LinkedQuestline* LinkedNode =
+                    Cast<UQuestlineNode_LinkedQuestline>(Node);
+                if (!LinkedNode || LinkedNode->LinkedGraph.ToSoftObjectPath() != OurPath) continue;
+
+                CollectFromActivatePin(LinkedNode);
+            }
+        }
+    }
+}
+
 
 // -------------------------------------------------------------------------------------------------
 // Composite reachability - fixed logic

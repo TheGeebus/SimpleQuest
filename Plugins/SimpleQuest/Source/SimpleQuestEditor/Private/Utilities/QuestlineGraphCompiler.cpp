@@ -272,7 +272,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
                     if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
                     {
                         const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
-                        for (const FGameplayTag& OutcomeTag : EntryNode->IncomingOutcomeTags)
+                        for (const FGameplayTag& OutcomeTag : EntryNode->IncomingOutcomeTags_DEPRECATED)
                         {
                             if (OutcomeTag.IsValid())
                             {

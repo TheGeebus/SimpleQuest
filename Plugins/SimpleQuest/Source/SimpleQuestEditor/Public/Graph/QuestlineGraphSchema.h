@@ -68,7 +68,7 @@ public:
 	 * @return A response struct, containing the validation response along with any relevant error tooltip message and flag.
 	 */
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const override;
-
+	
 	// Optional integration point for SimpleQuestEditorEN.
 	static void RegisterENPolicyFactory(TFunction<FConnectionDrawingPolicy*(int32, int32, float, const FSlateRect&, FSlateWindowElementList&, UEdGraph*)> Factory);
 	static void UnregisterENPolicyFactory();

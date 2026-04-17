@@ -11,18 +11,6 @@ void UQuestlineNode_Exit::AllocateDefaultPins()
 	CreatePin(EGPD_Input, TEXT("QuestActivation"), TEXT("Outcome"));
 }
 
-void UQuestlineNode_Exit::AutowireNewNode(UEdGraphPin* FromPin)
-{
-	if (!FromPin || FromPin->Direction != EGPD_Output) return;
-	if (UEdGraphPin* OutcomePin = FindPin(TEXT("Outcome")))
-	{
-		if (GetSchema()->TryCreateConnection(FromPin, OutcomePin))
-		{
-			FromPin->GetOwningNode()->NodeConnectionListChanged();
-		}
-	}
-}
-
 FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
 	if (OutcomeTag.IsValid())

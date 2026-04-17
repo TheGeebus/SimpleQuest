@@ -37,6 +37,20 @@ public:
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 	virtual void PostEditUndo() override;
 
+	/**
+	 * Auto-wire a newly-placed node to the pin the user dragged from. Walks candidate pins on this node in priority order matching
+	 * natural semantic pairing — outcome output prefers Activate input, prereq output prefers Prerequisites, deactivated output
+	 * prefers Deactivate — and attaches to the first candidate CanCreateConnection accepts. Silent on failure.
+	 */
+	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
+
+	/**
+	 * Called during AutowireNewNode when the drag source is a deactivation-flavored pin (QuestDeactivated output or QuestDeactivate
+	 * input). Override on nodes that support optional deactivation pins to ensure those pins exist before the auto-wire candidate
+	 * walk runs. Default: no-op.
+	 */
+	virtual void EnsureDeactivationPinsForAutowire() {}
+
 	/** Returns true if this node has any orphaned (stale) pins. */
 	bool HasStalePins() const;
 

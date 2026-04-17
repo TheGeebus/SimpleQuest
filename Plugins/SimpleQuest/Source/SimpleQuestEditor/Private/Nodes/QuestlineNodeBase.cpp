@@ -113,8 +113,195 @@ void UQuestlineNodeBase::PostEditUndo()
 	}
 }
 
+void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)
+{
+    if (!FromPin) return;
+    const UEdGraphSchema* Schema = GetSchema();
+    if (!Schema) return;
+
+	// If the drag source is a deactivation-flavored pin, ensure this node's deactivation pins are allocated before the candidate
+	// walk — they default off and would otherwise not be findable, causing the walker to fall through to Activate.
+	const FName FromCat = FromPin->PinType.PinCategory;
+	const bool bDragSourceIsDeactivation =
+		   FromCat == TEXT("QuestDeactivated")
+		|| FromCat == TEXT("QuestDeactivate");
+	if (bDragSourceIsDeactivation)
+	{
+		EnsureDeactivationPinsForAutowire();
+	}
+	
+    const EEdGraphPinDirection DesiredDirection =
+        (FromPin->Direction == EGPD_Output) ? EGPD_Input : EGPD_Output;
+
+    // Bucket pins by role so we can order them by natural semantic preference.
+    TArray<UEdGraphPin*> ActivateIns;
+    TArray<UEdGraphPin*> ConditionIns;
+    TArray<UEdGraphPin*> PrereqIns;
+    TArray<UEdGraphPin*> DeactivateIns;
+    TArray<UEdGraphPin*> ForwardOuts;
+    TArray<UEdGraphPin*> AnyOutcomeOuts;
+    TArray<UEdGraphPin*> NamedOutcomeOuts;
+	TArray<UEdGraphPin*> DeactivatedOuts;
+    TArray<UEdGraphPin*> PrereqOuts;
+    TArray<UEdGraphPin*> OtherPins;
+
+    for (UEdGraphPin* Pin : Pins)
+    {
+        if (!Pin || Pin->bHidden) continue;
+        if (Pin->Direction != DesiredDirection) continue;
+
+        const FName PinName = Pin->PinName;
+        const FName Cat = Pin->PinType.PinCategory;
+
+        if (DesiredDirection == EGPD_Input)
+        {
+	        if (PinName == TEXT("Activate") && Cat == TEXT("QuestActivation"))
+	        {
+	        	ActivateIns.Add(Pin);
+	        }
+	        else if (Cat == TEXT("QuestPrerequisite") && PinName.ToString().StartsWith(TEXT("Condition_")))
+	        {
+	        	ConditionIns.Add(Pin);
+	        }
+	        else if (PinName == TEXT("Prerequisites") && Cat == TEXT("QuestPrerequisite"))
+	        {
+	        	PrereqIns.Add(Pin);
+	        }
+	        else if (PinName == TEXT("Deactivate") && Cat == TEXT("QuestDeactivate"))
+	        {
+	        	DeactivateIns.Add(Pin);
+	        }
+	        else
+	        {
+	        	OtherPins.Add(Pin);
+	        }
+        }
+        else  // EGPD_Output
+        {
+	        if (PinName == TEXT("Forward") && Cat == TEXT("QuestActivation"))
+	        {
+	        	ForwardOuts.Add(Pin);
+	        }
+	        else if (PinName == TEXT("Any Outcome") && Cat == TEXT("QuestActivation"))
+	        {
+	        	AnyOutcomeOuts.Add(Pin);
+	        }
+	        else if (Cat == TEXT("QuestOutcome"))
+	        {
+	        	NamedOutcomeOuts.Add(Pin);
+	        }
+	        else if (Cat == TEXT("QuestDeactivated"))
+	        {
+		        DeactivatedOuts.Add(Pin);
+	        }
+        	else if (PinName == TEXT("PrereqOut") && Cat == TEXT("QuestPrerequisite"))
+	        {
+	        	PrereqOuts.Add(Pin);
+	        }
+	        else
+	        {
+	        	OtherPins.Add(Pin);
+	        }
+        }
+    }
+
+    // Among Condition_N pins, prefer empty ones first — the single-wire rule on prereq inputs
+    // rejects any new connection to an already-wired pin.
+    ConditionIns.Sort([](const UEdGraphPin& A, const UEdGraphPin& B)
+    {
+        const bool bAEmpty = A.LinkedTo.Num() == 0;
+        const bool bBEmpty = B.LinkedTo.Num() == 0;
+        if (bAEmpty != bBEmpty)
+        {
+	        return bAEmpty;
+        }
+        return A.PinName.LexicalLess(B.PinName);
+    });
+
+    // Build the priority-ordered candidate list by FromPin's category.
+    TArray<UEdGraphPin*> Candidates;
+
+    if (DesiredDirection == EGPD_Input)
+    {
+    	if (FromCat == TEXT("QuestDeactivated"))
+    	{
+    		// Deactivation cascades naturally into Deactivate; Activate is a reasonable fallback.
+    		Candidates.Append(DeactivateIns);
+    		Candidates.Append(ActivateIns);
+    		Candidates.Append(ConditionIns);
+    		Candidates.Append(PrereqIns);
+    	}
+        else if (FromCat == TEXT("QuestPrerequisite"))
+        {
+            // Prereq output chains into Prerequisites or another combinator Condition pin.
+            Candidates.Append(PrereqIns);
+            Candidates.Append(ConditionIns);
+            Candidates.Append(ActivateIns);
+            Candidates.Append(DeactivateIns);
+        }
+        else
+        {
+            // QuestOutcome / QuestActivation — the common case. Activation first.
+            Candidates.Append(ActivateIns);
+            Candidates.Append(ConditionIns);
+            Candidates.Append(PrereqIns);
+            Candidates.Append(DeactivateIns);
+        }
+    }
+    else  // Output direction on new node — user dragged from an input
+    {
+    	if (FromCat == TEXT("QuestDeactivate"))
+    	{
+    		// Back-drag from a Deactivate input wants a Deactivated output on the new node.
+    		Candidates.Append(DeactivatedOuts);
+    		Candidates.Append(ForwardOuts);
+    		Candidates.Append(AnyOutcomeOuts);
+    		Candidates.Append(NamedOutcomeOuts);
+    		Candidates.Append(PrereqOuts);
+    	}
+    	else if (FromCat == TEXT("QuestPrerequisite"))
+    	{
+    		Candidates.Append(PrereqOuts);
+    		Candidates.Append(NamedOutcomeOuts);
+    		Candidates.Append(AnyOutcomeOuts);
+    		Candidates.Append(ForwardOuts);
+    		Candidates.Append(DeactivatedOuts);
+    	}
+    	else
+    	{
+    		Candidates.Append(ForwardOuts);
+    		Candidates.Append(AnyOutcomeOuts);
+    		Candidates.Append(NamedOutcomeOuts);
+    		Candidates.Append(PrereqOuts);
+    		Candidates.Append(DeactivatedOuts);
+    	}
+    }
+    Candidates.Append(OtherPins);
+
+    // Attempt each candidate; the first one CanCreateConnection accepts wins.
+    for (UEdGraphPin* Candidate : Candidates)
+    {
+        const FPinConnectionResponse R = Schema->CanCreateConnection(FromPin, Candidate);
+        const bool bAcceptable =
+               R.Response == CONNECT_RESPONSE_MAKE
+            || R.Response == CONNECT_RESPONSE_BREAK_OTHERS_A
+            || R.Response == CONNECT_RESPONSE_BREAK_OTHERS_B
+            || R.Response == CONNECT_RESPONSE_BREAK_OTHERS_AB;
+        if (bAcceptable)
+        {
+            if (Schema->TryCreateConnection(FromPin, Candidate))
+            {
+                FromPin->GetOwningNode()->NodeConnectionListChanged();
+            }
+            return;
+        }
+    }
+    // No acceptable candidate — silent no-op. Designer connects manually if needed.
+}
+
 void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
 {
+	// Forward call to utility: preserved for backward compatibility
 	USimpleQuestEditorUtilities::SyncPinsByCategory(this, Direction, PinCategory, DesiredPinNames, InsertBeforeCategories);
 }
 

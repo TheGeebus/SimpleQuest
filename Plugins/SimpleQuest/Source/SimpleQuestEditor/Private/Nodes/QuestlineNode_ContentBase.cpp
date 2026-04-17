@@ -21,26 +21,6 @@ void UQuestlineNode_ContentBase::AllocateDefaultPins()
 	}
 }
 
-void UQuestlineNode_ContentBase::AutowireNewNode(UEdGraphPin* FromPin)
-{
-	if (!FromPin) return;
-	const UEdGraphSchema* Schema = GetSchema();
-	if (FromPin->Direction == EGPD_Output)
-	{
-		if (UEdGraphPin* ActivatePin = FindPin(TEXT("Activate")))
-		{
-			if (Schema->TryCreateConnection(FromPin, ActivatePin)) FromPin->GetOwningNode()->NodeConnectionListChanged();
-		}
-	}
-	else if (FromPin->Direction == EGPD_Input)
-	{
-		if (UEdGraphPin* AnyOutcomePin = FindPin(TEXT("Any Outcome")))
-		{
-			if (Schema->TryCreateConnection(AnyOutcomePin, FromPin)) FromPin->GetOwningNode()->NodeConnectionListChanged();
-		}
-	}
-}
-
 void UQuestlineNode_ContentBase::PostPlacedNewNode()
 {
 	Super::PostPlacedNewNode();
@@ -148,4 +128,35 @@ void UQuestlineNode_ContentBase::OnRenameNode(const FString& NewName)
 	{
 		Graph->NotifyGraphChanged();
 	}	
+}
+
+void UQuestlineNode_ContentBase::EnsureDeactivationPinsForAutowire()
+{
+	if (bShowDeactivationPins) return;
+
+	Modify();
+	bShowDeactivationPins = true;
+
+	if (UEdGraphPin* Pin = FindPin(TEXT("Deactivate")))
+	{
+		Pin->bOrphanedPin = false;
+	}
+	else
+	{
+		CreatePin(EGPD_Input, TEXT("QuestDeactivate"), TEXT("Deactivate"));
+	}
+
+	if (UEdGraphPin* Pin = FindPin(TEXT("Deactivated")))
+	{
+		Pin->bOrphanedPin = false;
+	}
+	else
+	{
+		CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
+	}
+
+	if (UEdGraph* Graph = GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
 }

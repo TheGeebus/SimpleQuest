@@ -16,13 +16,13 @@ public:
 	virtual bool IsContentNode() const override { return true; }
 	
 	virtual void AllocateDefaultPins() override;
-	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
 	virtual bool CanUserDeleteNode() const override { return true; }
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
+	virtual void EnsureDeactivationPinsForAutowire() override;
 
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")

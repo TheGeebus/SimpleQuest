@@ -17,7 +17,6 @@ public
 	virtual bool CanUserDeleteNode() const override { return true; }
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void AllocateDefaultPins() override;
-	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;

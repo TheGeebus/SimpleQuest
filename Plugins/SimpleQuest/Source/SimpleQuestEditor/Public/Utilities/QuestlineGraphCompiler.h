@@ -16,6 +16,7 @@ class UQuest;
 class UEdGraphPin;
 class FQuestlineGraphTraversalPolicy;
 
+
 /**
  * Compiles a UQuestlineGraph asset, walking the graph structure and writing derived data to each quest/step CDO.
  *
@@ -95,6 +96,27 @@ protected:
 	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
 	
 private:
+
+	/**
+	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
+	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
+	 * the compiler uses. Cleared at Compile() start.
+	 */
+	struct FSourceOutcomeKey
+	{
+		FName SourceTag;       // compiled tag of the source content node
+		FGameplayTag Outcome;  // invalid = "any outcome from this source"
+
+		bool operator==(const FSourceOutcomeKey& Other) const
+		{
+			return SourceTag == Other.SourceTag && Outcome == Other.Outcome;
+		}
+		friend uint32 GetTypeHash(const FSourceOutcomeKey& Key)
+		{
+			return HashCombine(GetTypeHash(Key.SourceTag), GetTypeHash(Key.Outcome));
+		}
+	};
+	
 	/**
 	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled QuestTag of the source content node. Used as the
 	 * SourceFilter on entry destinations so runtime routing can discriminate per-source. Returns NAME_None when the source
@@ -102,6 +124,14 @@ private:
 	 */
 	FName ResolveSourceFilterTag(const FIncomingSignalPinSpec& Spec, const UQuestlineGraph* ChildAsset) const;
 
+	/**
+	 * Recursively collects content-node (source, outcome) pairs that transitively reach a graph's boundary via any combination
+	 * of direct wires, Entered-pin passthroughs, and Entry-spec-pin passthroughs. Extends the one-level `CollectEntryReachingSources`
+	 * by continuing the walk up through Entry indirections until a concrete content-node source is found or the walk escapes
+	 * the compile tree (filtered by VisitedAssetPaths). Cycle-guarded via VisitedGraphs — a graph visited once doesn't re-emit.
+	 */
+	void CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourceOutcomeKey>& OutKeys, TSet<UEdGraph*>& VisitedGraphs);
+	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
 	 * the compiled QuestTag: Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass ordering — uses
@@ -203,26 +233,6 @@ private:
 
 	/** Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). */
 	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
-	
-	/**
-	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
-	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
-	 * the compiler uses. Cleared at Compile() start.
-	 */
-	struct FSourceOutcomeKey
-	{
-		FName SourceTag;       // compiled tag of the source content node
-		FGameplayTag Outcome;  // invalid = "any outcome from this source"
-
-		bool operator==(const FSourceOutcomeKey& Other) const
-		{
-			return SourceTag == Other.SourceTag && Outcome == Other.Outcome;
-		}
-		friend uint32 GetTypeHash(const FSourceOutcomeKey& Key)
-		{
-			return HashCombine(GetTypeHash(Key.SourceTag), GetTypeHash(Key.Outcome));
-		}
-	};
 
 	/** (source, outcome) pairs that reach each destination via direct outcome→Activate wiring (through utilities and Setter.Forward chains). */
 	TMap<FName, TSet<FSourceOutcomeKey>> DirectReachesByDest;
@@ -233,10 +243,20 @@ private:
 	/** Destinations reached by ActivationGroupGetters of each group tag (via the getter's Forward output chain). */
 	TMap<FGameplayTag, TSet<FName>> GroupGetterDestsByTag;
 
-	/** Editor-node refs captured during collection so tokenized warnings can link to the offending nodes. */
-	TMap<FGameplayTag, TArray<UEdGraphNode*>> SetterEdNodesByGroupTag;
-	TMap<FGameplayTag, TArray<UEdGraphNode*>> GetterEdNodesByGroupTag;
+	/**
+	 * Setter editor-node lookup keyed by group tag and then by the specific (source, outcome) pair the setter contributes.
+	 * Lets the warning emitter identify the setter that actually contributed THIS collision's source rather than picking an
+	 * arbitrary setter with a matching tag. Nested TMap avoids a custom hash pair-key.
+	 */
+	TMap<FGameplayTag, TMap<FSourceOutcomeKey, UEdGraphNode*>> SetterEdNodeByGroupAndSource;
 
+	/**
+	 * Getter editor-node lookup keyed by group tag and then by destination tag. Lets the warning emitter identify the specific
+	 * getter that reaches THIS collision's destination rather than picking an arbitrary getter with a matching tag — important
+	 * when multiple linked assets each contribute a getter for the same group but reach different destinations.
+	 */
+	TMap<FGameplayTag, TMap<FName, UEdGraphNode*>> GetterEdNodeByGroupAndDest;
+	
 	/**
 	 * Collision test with AnyOutcome absorption: two keys collide when their sources match AND their outcomes match OR either
 	 * outcome is invalid (the "any outcome" sentinel). Mirrors UQuestlineGraphSchema::PinsRepresentSameSignal semantics.
@@ -245,6 +265,21 @@ private:
 
 	/** Runs at the end of Compile() to analyze collected data and emit parallel-path warnings. */
 	void EmitParallelPathWarnings();
+	
+	/**
+	 * Emits one tokenized Warning-severity message per parallel-path collision. Message format: plain-text preamble with inline
+	 * clickable tokens for source, destination, setter, and (first) getter so designers can navigate directly to each offending
+	 * node from the Quest Compiler message log. Falls back to plain text for any node ref that didn't resolve.
+	 */
+	void EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourceOutcomeKey& SetterSource, const FSourceOutcomeKey& DirectSource, const FName& DestTag);
+	
+	/**
+	 * Activation Group metadata collection pass — iterates graph nodes for ActivationGroupSetters and ActivationGroupGetters,
+	 * walks their input/output chains via the traversal policy, and records setter source-outcome pairs and getter destinations
+	 * keyed by group tag. Called from CompileGraph per graph (including recursive linked compiles), so the compiler-level maps
+	 * accumulate entries from the entire compile tree.
+	 */
+	void CollectActivationGroupMetadata(UEdGraph* Graph, const FString& TagPrefix);
 	
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */

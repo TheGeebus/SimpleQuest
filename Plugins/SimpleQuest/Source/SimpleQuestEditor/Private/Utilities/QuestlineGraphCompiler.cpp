@@ -114,8 +114,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	DirectReachesByDest.Empty();
 	GroupSetterSourcesByTag.Empty();
 	GroupGetterDestsByTag.Empty();
-	SetterEdNodesByGroupTag.Empty();
-	GetterEdNodesByGroupTag.Empty();
+	SetterEdNodeByGroupAndSource.Empty();
+	GetterEdNodeByGroupAndDest.Empty();
 	
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
@@ -154,7 +154,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
         InGraph->CompiledQuestTags.Num(),
         NumErrors,
         NumWarnings);
-    
+
+	EmitParallelPathWarnings();
+	
     return !bHasErrors;
 }
 
@@ -207,7 +209,10 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
     // ---- Pass 2: output pin wiring ----
     CompileOutputWiring(ContentNodes, NodeInstanceMap, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths);
 
-    // ---- Pass 2b: Forward output wiring for all utility-keyed nodes ----
+	// ---- Collect activation group metadata for parallel-path analysis ----
+	CollectActivationGroupMetadata(Graph, TagPrefix);
+
+	// ---- Pass 2b: Forward output wiring for all utility-keyed nodes ----
     for (auto& [EdNode, UtilKey] : UtilityNodeKeyMap)
     {
         UQuestNodeBase* Inst = AllCompiledNodes.FindRef(UtilKey);
@@ -612,6 +617,13 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
         Instance->NextNodesOnDeactivation.Empty();
         Instance->NextNodesToDeactivateOnDeactivation.Empty();
 
+    	/**
+		 * Source tag for this content node, reconstructed from the compile-time label formula. LinkedQuestlines
+		 * are already `continue`d past at the top of this loop, so GetNodeTitle-based labeling is the right choice for
+		 * everything that reaches here (Quest, Step, etc.).
+		 */
+    	const FName SourceTag = MakeNodeTagName(TagPrefix, SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString()));
+    	
         // Route each output pin into the correct runtime routing set
         for (UEdGraphPin* Pin : ContentNode->Pins)
         {
@@ -637,14 +649,31 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Pin->PinName, false);
                 if (OutcomeTag.IsValid())
                 {
-                    FQuestOutcomeNodeList& List = Instance->NextNodesByOutcome.FindOrAdd(OutcomeTag);
-                    for (const FName& Tag : ResolvedTags) List.NodeTags.AddUnique(Tag);
+	                FQuestOutcomeNodeList& List = Instance->NextNodesByOutcome.FindOrAdd(OutcomeTag);
+                	for (const FName& Tag : ResolvedTags)
+                	{
+                		List.NodeTags.AddUnique(Tag);
+                	}
+                	// Record per-destination direct reach for (source, specific-outcome).
+                	const FSourceOutcomeKey Key{ SourceTag, OutcomeTag };
+                	for (const FName& Tag : ResolvedTags)
+                	{
+                		DirectReachesByDest.FindOrAdd(Tag).Add(Key);
+                	}
                 }
             }
             else if (Pin->PinName == TEXT("Any Outcome"))
             {
-                for (const FName& Tag : ResolvedTags) Instance->NextNodesOnAnyOutcome.Add(Tag);
+                for (const FName& Tag : ResolvedTags)
+                {
+	                Instance->NextNodesOnAnyOutcome.Add(Tag);
+                }
+            	// Surface D: record per-destination direct reach for (source, any-outcome). Invalid FGameplayTag encodes
+            	// "any outcome from this source" — collision test absorbs specific-outcome keys from the same source.
+            	const FSourceOutcomeKey Key{ SourceTag, FGameplayTag() };
+            	for (const FName& Tag : ResolvedTags) DirectReachesByDest.FindOrAdd(Tag).Add(Key);
             }
+        	
         }
 
         // Entry Deactivated pin: merge inner Entry node's deactivation routing into this Quest instance
@@ -713,15 +742,58 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 
 		/**
 		 * Non-outcome output pins (Entered sentinel, Deactivated) produce unconditional entry tags — no per-outcome or per-source
-		 * routing, just "fire when this graph enters regardless of context." Iteration gates on category (anything not QuestOutcome),
-		 * so the rename from "Any Outcome" to "Entered" is transparent to this pass.
+		 * routing, just "fire when this graph enters regardless of context."
 		 */
 		for (UEdGraphPin* Pin : Node->Pins)
 		{
-			if (Pin->Direction != EGPD_Output) continue;
-			if (Pin->bOrphanedPin) continue;
-			if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
-			ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, EntryTags);
+		    if (Pin->Direction != EGPD_Output) continue;
+		    if (Pin->bOrphanedPin) continue;
+		    if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
+
+		    TArray<FName> PinDests;
+		    ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, PinDests);
+		    EntryTags.Append(PinDests);
+
+		    /**
+		     * Surface D: the Entered pin represents "any parent source that activates this Entry's containing boundary." Semantically
+		     * source-abstracted — symmetric to content-node AnyOutcome which is outcome-abstracted. Enumerate each parent source
+		     * reaching this graph's boundary and record (sourceTag, outcomeTag) → destTag as a direct reach. ParallelPathKeysCollide
+		     * handles AnyOutcome absorption on each enumerated source. Filter by VisitedAssetPaths so AR-scan results from outside
+		     * the current compile tree (unrelated top-level assets that happen to link this graph) don't contaminate the analysis.
+		     */
+		    if (Pin->PinName == TEXT("Entered") && Pin->PinType.PinCategory == TEXT("QuestActivation") && PinDests.Num() > 0)
+		    {
+		        TSet<FQuestEffectiveSource> ReachingSources;
+		        FQuestlineGraphTraversalPolicy GraphTraversalPolicy;
+		        GraphTraversalPolicy.CollectEntryReachingSources(Graph, ReachingSources);
+
+		        for (const FQuestEffectiveSource& Source : ReachingSources)
+		        {
+		            if (!Source.Pin) continue;
+
+		            const FString SourceAssetPath = Source.Asset ? Source.Asset->GetPathName() : FString();
+		            if (!VisitedAssetPaths.Contains(SourceAssetPath)) continue;
+
+		            const UQuestlineNode_ContentBase* SourceContent = Cast<UQuestlineNode_ContentBase>(Source.Pin->GetOwningNode());
+		            if (!SourceContent) continue;
+
+		            const FName SourceTag = ComputeCompiledTagForContentNode(SourceContent, Source.Asset);
+		            if (SourceTag.IsNone()) continue;
+
+		            FGameplayTag OutcomeTag;
+		            if (Source.Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+		            {
+		                OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Source.Pin->PinName, false);
+		            }
+		            // QuestActivation "Any Outcome" from parent leaves OutcomeTag invalid — absorption handled by the collision test.
+
+		            const FSourceOutcomeKey Key{ SourceTag, OutcomeTag };
+		            for (const FName& DestTag : PinDests)
+		            {
+		                DirectReachesByDest.FindOrAdd(DestTag).Add(Key);
+		            }
+		        }
+		    }
 		}
 
 		/**
@@ -783,6 +855,14 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 					Dest.DestTag = DestTag;
 					Dest.SourceFilter = SourceFilter;
 					RouteList.Destinations.Add(Dest);
+					
+					/**
+					 * Entry source-qualified routing is a direct signal flow at runtime — the compiled source tag (SourceFilter)
+					 * delivers Spec.Outcome to DestTag without any group dispatch. Record alongside content-outcome-pin direct reaches so
+					 * cross-asset parallel-path collisions are detectable at analysis time. Spec.Outcome may be invalid for any-outcome-
+					 * from-source specs; the collision test absorbs that via ParallelPathKeysCollide.
+					 */
+					DirectReachesByDest.FindOrAdd(DestTag).Add(FSourceOutcomeKey{ SourceFilter, Spec.Outcome });
 				}
 			}
 		}
@@ -969,6 +1049,80 @@ void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
     ISimpleQuestEditorModule::Get().RegisterCompiledTags(
         InGraph->GetPackage()->GetName(),
         InGraph->CompiledQuestTags);
+}
+
+void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourceOutcomeKey>& OutKeys,	TSet<UEdGraph*>& VisitedGraphs)
+{
+	if (!InGraph || VisitedGraphs.Contains(InGraph)) return;
+	VisitedGraphs.Add(InGraph);
+
+	TSet<FQuestEffectiveSource> LocalSources;
+	TraversalPolicy->CollectEntryReachingSources(InGraph, LocalSources);
+
+	for (const FQuestEffectiveSource& Source : LocalSources)
+	{
+		if (!Source.Pin) continue;
+
+		const FString SourceAssetPath = Source.Asset ? Source.Asset->GetPathName() : FString();
+		if (!VisitedAssetPaths.Contains(SourceAssetPath)) continue;
+
+		UEdGraphNode* SourceNode = Source.Pin->GetOwningNode();
+
+		/**
+		 * Case A: source is a content-node outcome pin (or Any Outcome). Concrete terminal — record the compiled source tag
+		 * and outcome, stop walking this branch.
+		 */
+		if (const UQuestlineNode_ContentBase* SourceContent = Cast<UQuestlineNode_ContentBase>(SourceNode))
+		{
+			const FName SourceTag = ComputeCompiledTagForContentNode(SourceContent, Source.Asset);
+			if (SourceTag.IsNone()) continue;
+
+			FGameplayTag OutcomeTag;
+			if (Source.Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+			{
+				OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Source.Pin->PinName, false);
+			}
+			// QuestActivation "Any Outcome" from parent leaves OutcomeTag invalid — absorption handles it.
+			OutKeys.Add(FSourceOutcomeKey{ SourceTag, OutcomeTag });
+			continue;
+		}
+
+		/**
+		 * Case B: source is an Entry pin — transitive continuation.
+		 */
+		if (const UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(SourceNode))
+		{
+			// B1: Entered sentinel — climb to this Entry's graph and gather its parent sources recursively.
+			if (Source.Pin->PinName == TEXT("Entered") && Source.Pin->PinType.PinCategory == TEXT("QuestActivation"))
+			{
+				CollectTransitiveParentSources(EntryNode->GetGraph(), VisitedAssetPaths, OutKeys, VisitedGraphs);
+				continue;
+			}
+
+			/**
+			 * B2: Source-qualified spec pin. The spec's SourceNodeGuid already encodes the original content source (that's
+			 * the whole point of specs), so no recursion needed — resolve the source tag directly and record. Match the pin
+			 * to its spec by recomputing the disambiguated pin name.
+			 */
+			if (Source.Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+			{
+				for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
+				{
+					if (!Spec.bExposed) continue;
+					if (UQuestlineNode_Entry::BuildDisambiguatedPinName(Spec, EntryNode->IncomingSignals) != Source.Pin->PinName) continue;
+
+					const FName SourceTag = ResolveSourceFilterTag(Spec, Source.Asset);
+					if (SourceTag.IsNone()) continue;
+
+					OutKeys.Add(FSourceOutcomeKey{ SourceTag, Spec.Outcome });
+					break;
+				}
+				continue;
+			}
+		}
+
+		// Utility/prereq/other nodes as Entry-reaching sources shouldn't occur; if they do, we ignore them.
+	}
 }
 
 FName FQuestlineGraphCompiler::ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const
@@ -1387,6 +1541,184 @@ bool FQuestlineGraphCompiler::ParallelPathKeysCollide(const FSourceOutcomeKey& A
 
 void FQuestlineGraphCompiler::EmitParallelPathWarnings()
 {
-	// Piece D4 will fill this in. Placeholder ensures a clean build after D1 lands.
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("Surface D: %d setter group(s), %d getter group(s), %d direct-reach destination(s)"),
+		GroupSetterSourcesByTag.Num(), GroupGetterDestsByTag.Num(), DirectReachesByDest.Num());
+
+	/**
+	 * Cross-reference pass. For each group tag that has both setters and getters: for every destination the getters reach,
+	 * check if any direct-reach source at that destination collides with any setter source for the group (under AnyOutcome
+	 * absorption). Each collision emits one tokenized warning pointing at source, destination, setter, and getter.
+	 */
+	for (const auto& [GroupTag, GetterDests] : GroupGetterDestsByTag)
+	{
+		const TSet<FSourceOutcomeKey>* SetterSources = GroupSetterSourcesByTag.Find(GroupTag);
+		if (!SetterSources || SetterSources->IsEmpty()) continue;
+
+		for (const FName& DestTag : GetterDests)
+		{
+			const TSet<FSourceOutcomeKey>* DirectSources = DirectReachesByDest.Find(DestTag);
+			if (!DirectSources || DirectSources->IsEmpty()) continue;
+
+			for (const FSourceOutcomeKey& SetterSource : *SetterSources)
+			{
+				for (const FSourceOutcomeKey& DirectSource : *DirectSources)
+				{
+					if (!ParallelPathKeysCollide(SetterSource, DirectSource)) continue;
+					EmitParallelPathCollisionWarning(GroupTag, SetterSource, DirectSource, DestTag);
+				}
+			}
+		}
+	}
+}
+
+void FQuestlineGraphCompiler::EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourceOutcomeKey& SetterSource, const FSourceOutcomeKey& DirectSource, const FName& DestTag)
+{
+	/**
+	 * Resolve editor-node refs for the navigation tokens. Source and destination come from the compile-tree-wide editor-node
+	 * map keyed by compiled tag. Setter and getter come from the per-group editor-node maps populated during collection. If
+	 * any ref is missing, the corresponding slot falls back to a plain-text token showing the tag/name so the message is
+	 * still readable and informative.
+	 */
+	UEdGraphNode* SourceEdNode = AllCompiledEditorNodes.FindRef(SetterSource.SourceTag);
+	UEdGraphNode* DestEdNode = AllCompiledEditorNodes.FindRef(DestTag);
+
+	// Specific setter that contributed SetterSource to this group (not just any setter with the tag).
+	UEdGraphNode* SetterEdNode = nullptr;
+	if (const TMap<FSourceOutcomeKey, UEdGraphNode*>* Inner = SetterEdNodeByGroupAndSource.Find(GroupTag))
+	{
+		SetterEdNode = Inner->FindRef(SetterSource);
+	}
+
+	// Specific getter that reaches this destination via this group (not just any getter with the tag).
+	UEdGraphNode* GetterEdNode = nullptr;
+	if (const TMap<FName, UEdGraphNode*>* Inner = GetterEdNodeByGroupAndDest.Find(GroupTag))
+	{
+		GetterEdNode = Inner->FindRef(DestTag);
+	}
+
+	// Prefer the specific outcome when either side has it; fall back to "any outcome" for the AnyOutcome-absorption case.
+	const FString OutcomeStr = DirectSource.Outcome.IsValid()
+		? DirectSource.Outcome.ToString()
+		: (SetterSource.Outcome.IsValid() ? SetterSource.Outcome.ToString() : TEXT("any outcome"));
+
+	auto NodeTokenOrText = [this](UEdGraphNode* Node, const FString& Fallback, TSharedRef<FTokenizedMessage>& InMsg)
+	{
+		if (Node) AddNodeNavigationToken(InMsg, Node);
+		else InMsg->AddToken(FTextToken::Create(FText::FromString(Fallback)));
+	};
+
+	TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning);
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(TEXT("Parallel path: outcome '%s' on"), *OutcomeStr))));
+	NodeTokenOrText(SourceEdNode, SetterSource.SourceTag.ToString(), Msg);
+	Msg->AddToken(FTextToken::Create(FText::FromString(TEXT("reaches"))));
+	NodeTokenOrText(DestEdNode, DestTag.ToString(), Msg);
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(TEXT("both directly and via activation group '%s' (set by"), *GroupTag.ToString()))));
+	NodeTokenOrText(SetterEdNode, GroupTag.ToString(), Msg);
+	Msg->AddToken(FTextToken::Create(FText::FromString(TEXT(", received by"))));
+	NodeTokenOrText(GetterEdNode, GroupTag.ToString(), Msg);
+	Msg->AddToken(FTextToken::Create(FText::FromString(TEXT("). Consider removing one path."))));
+
+	Messages.Add(Msg);
+	NumWarnings++;
+
+	UE_LOG(LogSimpleQuest, Warning,
+		TEXT("Surface D parallel path: outcome '%s' on '%s' reaches '%s' both directly and via group '%s'"),
+		*OutcomeStr, *SetterSource.SourceTag.ToString(), *DestTag.ToString(), *GroupTag.ToString());
+}
+
+void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, const FString& TagPrefix)
+{
+	if (!Graph) return;
+
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		/**
+		 * ActivationGroupSetter: walk backward from the Activate input to find every (source, outcome) pair that feeds this setter.
+		 * CollectEffectiveSources handles knots, utility Forward, setter-Forward chains, and dereferences getters to their same-graph
+		 * setters — transitive sources are captured so a parallel path through a chained group is still detected as a collision.
+		 */
+		if (UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node))
+		{
+			const FGameplayTag GroupTag = Setter->GetGroupTag();
+			if (!GroupTag.IsValid()) continue;
+
+			UEdGraphPin* ActivatePin = Setter->FindPin(TEXT("Activate"), EGPD_Input);
+			if (!ActivatePin) continue;
+			
+			/**
+			 * CollectEffectiveSources expects an output-side pin it can walk through (knots, utility Forward, setter Forward,
+			 * getter Forward). Our ActivatePin is an input, so iterate its LinkedTo (each element is an output pin on an upstream
+			 * node) and call the walker per-link. Sources accumulate into SourcePins across iterations via the shared out-set.
+			 */
+			TSet<const UEdGraphPin*> SourcePins;
+			TSet<const UEdGraphNode*> VisitedNodes;
+			for (const UEdGraphPin* Linked : ActivatePin->LinkedTo)
+			{
+				TraversalPolicy->CollectEffectiveSources(Linked, SourcePins, VisitedNodes);
+			}
+
+			for (const UEdGraphPin* SourcePin : SourcePins)
+			{
+				if (!SourcePin) continue;
+				const UQuestlineNode_ContentBase* SourceContent = Cast<UQuestlineNode_ContentBase>(SourcePin->GetOwningNode());
+				if (!SourceContent) continue; // Entry/utility sources have no content-node identity — skip
+
+				const FString Label = Cast<const UQuestlineNode_LinkedQuestline>(SourceContent)
+					? SanitizeTagSegment(SourceContent->NodeLabel.ToString())
+					: SanitizeTagSegment(SourceContent->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+				const FName SourceTag = MakeNodeTagName(TagPrefix, Label);
+				if (SourceTag.IsNone()) continue;
+
+				/**
+				 * Outcome extraction: QuestOutcome pins carry a specific tag; QuestActivation "Any Outcome" leaves the outcome
+				 * invalid to encode "any outcome from this source" — the collision test absorbs specific keys from the same source.
+				 */
+				FGameplayTag OutcomeTag;
+				if (SourcePin->PinType.PinCategory == TEXT("QuestOutcome"))
+				{
+					OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(SourcePin->PinName, false);
+					if (!OutcomeTag.IsValid()) continue;
+				}
+
+				const FSourceOutcomeKey Key{ SourceTag, OutcomeTag };
+				GroupSetterSourcesByTag.FindOrAdd(GroupTag).Add(Key);
+				SetterEdNodeByGroupAndSource.FindOrAdd(GroupTag).Add(Key, Setter);
+			}
+		}
+
+		/**
+		 * ActivationGroupGetter: walk forward from the Forward output to find every destination it reaches. CollectActivationTerminals
+		 * terminates at content/exit Activate or Deactivate pins, passing transparently through knots, utility Forward, and
+		 * setter-Forward chains. Destinations are recorded under the group tag so the analysis pass can cross-reference with
+		 * setter sources for the same tag.
+		 */
+		if (UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node))
+		{
+			const FGameplayTag GroupTag = Getter->GetGroupTag();
+			if (!GroupTag.IsValid()) continue;
+
+			UEdGraphPin* ForwardPin = Getter->FindPin(TEXT("Forward"), EGPD_Output);
+			if (!ForwardPin) continue;
+
+			TSet<const UEdGraphPin*> Terminals;
+			TSet<const UEdGraphNode*> VisitedNodes;
+			TraversalPolicy->CollectActivationTerminals(ForwardPin, Terminals, VisitedNodes);
+
+			for (const UEdGraphPin* Terminal : Terminals)
+			{
+				if (!Terminal) continue;
+				const UQuestlineNode_ContentBase* DestContent = Cast<UQuestlineNode_ContentBase>(Terminal->GetOwningNode());
+				if (!DestContent) continue;
+
+				const FString Label = Cast<const UQuestlineNode_LinkedQuestline>(DestContent)
+					? SanitizeTagSegment(DestContent->NodeLabel.ToString())
+					: SanitizeTagSegment(DestContent->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+				const FName DestTag = MakeNodeTagName(TagPrefix, Label);
+				if (DestTag.IsNone()) continue;
+
+				GroupGetterDestsByTag.FindOrAdd(GroupTag).Add(DestTag);
+				GetterEdNodeByGroupAndDest.FindOrAdd(GroupTag).Add(DestTag, Getter);			}
+		}
+	}
 }
 

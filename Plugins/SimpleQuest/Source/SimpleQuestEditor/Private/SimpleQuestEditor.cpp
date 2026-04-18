@@ -38,6 +38,8 @@
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
+#include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
+#include "Nodes/QuestlineNode_Entry.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -91,13 +93,14 @@ void FSimpleQuestEditor::StartupModule()
 
 	QuestlineConnectionFactory = UQuestlineGraphSchema::MakeQuestlineConnectionFactory();
 	FEdGraphUtilities::RegisterVisualPinConnectionFactory(QuestlineConnectionFactory);
-
-	/*
-	QuestlineK2PinFactory = MakeShared<FQuestlineK2PinFactory>();
-	FEdGraphUtilities::RegisterVisualPinFactory(QuestlineK2PinFactory);
-	*/
 	
 	FQuestlineGraphEditorCommands::Register();
+
+	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
+	PropertyModule.RegisterCustomClassLayout(
+		UQuestlineNode_Entry::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineNodeEntryDetailsCustomization::MakeInstance));
+	PropertyModule.NotifyCustomizationModuleChanged();
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
@@ -241,6 +244,12 @@ void FSimpleQuestEditor::ShutdownModule()
 		MessageLogModule.UnregisterLogListing("QuestCompiler");
 	}
 
+	if (FModuleManager::Get().IsModuleLoaded("PropertyEditor"))
+	{
+		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
+		PropertyModule.UnregisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName());
+	}
+	
 	FQuestlineGraphEditorCommands::Unregister();
 
 	if (StyleSet.IsValid())

@@ -46,6 +46,7 @@ void UQuestlineNode_Step::RefreshOutcomePins()
 			if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
 		}	
 	}
+	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

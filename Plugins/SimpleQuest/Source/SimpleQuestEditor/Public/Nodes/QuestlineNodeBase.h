@@ -59,22 +59,17 @@ public:
 	
 protected:
 	/**
-	 * Surgically synchronizes output or input pins of a given category to match a desired set of pin names. Pins no longer
-	 * desired are orphaned if they have active connections (preserving wires for the designer to re-route), or removed immediately
-	 * if unconnected. Pins that reappear in the desired set after being orphaned are restored with their wiring intact. Existing
-	 * active pins whose names still appear in the desired set are left untouched.
+	 * Syncs this node's pins of a category to match DesiredPinNames. See USimpleQuestEditorUtilities::SyncPinsByCategory for
+	 * full contract — pins are added/orphaned/removed to converge on the desired set, and the final pin order within the
+	 * category matches DesiredPinNames so toggle-off-then-on returns a pin to its original position. Callers control ordering
+	 * by sorting DesiredPinNames as appropriate (alphabetical for outcome-style pins, ordinal for Condition_N-style pins).
 	 *
 	 * Calls Modify() and NotifyGraphChanged() only when something actually changed. No-ops cleanly.
 	 *
-	 * - Forwards the call to USimpleQuestEditorUtilities::SyncPinsByCategory, preserved for backwards compatibility pending callsite
-	 * revisions
-	 *
 	 * @param Direction              Pin direction to operate on.
-	 * @param PinCategory            Only pins matching this category (and Direction) are considered.
-	 * @param DesiredPinNames        The pin names that should exist after the sync.
-	 * @param InsertBeforeCategories New pins are inserted before the first existing pin whose category appears in this set.
-	 *								 Pass empty to append at the end. Order of DesiredPinNames array determines the order that the
-	 *								 new pins are added relative to themselves.
+	 * @param PinCategory            Pin category to sync.
+	 * @param DesiredPinNames        Authoritative final order of pins in this category. Existing pins are rewritten to match.
+	 * @param InsertBeforeCategories Categories before which newly-added pins are inserted. Pass empty to append at the end.
 	 */
 	void SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
 
@@ -83,4 +78,6 @@ protected:
 
 	/** Strips the Quest.Outcome. prefix, preserving any sub-hierarchy the designer authored. Falls back to GetTagLeafLabel. */
 	static FText GetOutcomeLabel(FName TagName);
+
+	static bool SortPinsAlphabetically(const FName& A, const FName& B) { return A.Compare(B) < 0; }
 };

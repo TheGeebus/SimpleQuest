@@ -99,8 +99,20 @@ namespace USimpleQuestEditorUtilities
 
 	/**
 	 * Syncs a node's pins of a given category to match a desired set of pin names. Pins not in DesiredPinNames are orphaned
-	 * (if wired) or removed (if unwired). Missing names are created. Calls Modify() and NotifyGraphChanged() internally.
+	 * (if wired) or removed (if unwired). Missing names are created. After the add/remove pass, pins of the category are
+	 * reordered in the node's Pins array so their positions match DesiredPinNames order — this means toggle-off-then-on returns
+	 * a pin to its original position rather than the bottom of the category. Orphaned pins (present but not in DesiredPinNames)
+	 * are placed after desired pins, preserving their relative order. Calls Modify() and NotifyGraphChanged() internally.
+	 *
+	 * Callers control ordering by the order of DesiredPinNames — sort alphabetically for stable display, leave in index order
+	 * for ordinal-named pins (e.g., "Condition_0", "Condition_1", ...).
 	 */
 	void SyncPinsByCategory(UEdGraphNode* Node,	EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
 
+	/**
+	 * In-place alphabetical sort for pin-name arrays passed to SyncPinsByCategory. Use when the pin category should display
+	 * in stable alphabetical order regardless of the source-data traversal order that produced the array (e.g., outcome pins
+	 * derived from objective UPROPERTY order, Exit tag collection order, or IncomingSignals array order).
+	 */
+	void SortPinNamesAlphabetical(TArray<FName>& PinNames);
 }

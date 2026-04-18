@@ -94,11 +94,17 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 	 * One pin per exposed spec. Specific-outcome specs have valid Outcome; any-outcome-from-source specs have invalid Outcome
 	 * but valid SourceNodeGuid. Both valid states generate pins — only drop specs with invalid source identity.
 	 */
+	TArray<FName> OutcomeNames;
 	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
 		if (!Spec.bExposed) continue;
 		if (!Spec.SourceNodeGuid.IsValid()) continue;
-		CreatePin(EGPD_Output, TEXT("QuestOutcome"), BuildDisambiguatedPinName(Spec, IncomingSignals));
+		OutcomeNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
+	}
+	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(OutcomeNames);
+	for (const FName& Name : OutcomeNames)
+	{
+		CreatePin(EGPD_Output, TEXT("QuestOutcome"), Name);
 	}
 
 	// Per-graph unconditional entry pin. Distinct from content nodes' "Any Outcome" sentinel — this represents "the graph was
@@ -167,6 +173,7 @@ void UQuestlineNode_Entry::RefreshOutcomePins()
 		if (!Spec.SourceNodeGuid.IsValid()) continue;
 		DesiredNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
+	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
 }
 

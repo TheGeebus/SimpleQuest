@@ -66,7 +66,8 @@ void UQuestlineNode_Quest::OnInnerGraphChanged(const FEdGraphEditAction& Action)
 
 void UQuestlineNode_Quest::RebuildOutcomePinsFromInnerGraph()
 {
-	const TArray<FName> DesiredOutcomes = USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(InnerGraph);
+	TArray<FName> DesiredOutcomes = USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(InnerGraph);
+	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

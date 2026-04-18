@@ -47,8 +47,14 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
-private:
+	/**
+	 * Scans the parent graphs for outcome pins routing into this Entry and imports them as source-qualified specs. Safe to
+	 * call repeatedly — identity matching prevents duplicates and refreshes CachedSourceLabel when the source was renamed.
+	 * Invoked from the context menu's "Import Outcome Pins" entry and the details panel's "Refresh from Sources" button.
+	 */
 	void ImportOutcomePinsFromParent();
+
+private:
 	
 	/**
 	 * True if this pin is a spec-generated incoming signal pin on the Entry node. Spec pins are the QuestOutcome category outputs;

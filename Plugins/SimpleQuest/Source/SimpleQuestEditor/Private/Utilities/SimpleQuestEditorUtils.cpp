@@ -361,9 +361,10 @@ void USimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGrap
         if (!bExists) NamesToAdd.Add(Name);
     }
 
-    if (!bChanged && NamesToAdd.IsEmpty()) return;
+    // ----- Apply add/remove -----
 
-    // ----- Apply changes -----
+    const bool bNeedsReorder = DesiredPinNames.Num() >= 2;
+    if (!bChanged && NamesToAdd.IsEmpty() && !bNeedsReorder) return;
 
     Node->Modify();
 
@@ -394,9 +395,74 @@ void USimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGrap
         if (InsertIndex != INDEX_NONE) ++InsertIndex;
     }
 
+    /**
+     * ----- Reorder category pins to match DesiredPinNames -----
+     *
+     * CreatePin appends at the end of the category range (or at InsertIndex), so a toggle-off-then-on cycle lands the new
+     * pin at the bottom. Enforce the final order here by rewriting the Pins[] slots occupied by this category: desired pins
+     * take the first slots in DesiredPinNames order, orphans fill the remaining slots in their original relative order.
+     * Slot positions held by other categories (inputs, other output categories) are untouched.
+     */
+    TArray<int32> CategorySlotIndices;
+    TArray<UEdGraphPin*> CategoryPins;
+    for (int32 i = 0; i < Node->Pins.Num(); ++i)
+    {
+        UEdGraphPin* Pin = Node->Pins[i];
+        if (Pin && Pin->Direction == Direction && Pin->PinType.PinCategory == PinCategory)
+        {
+            CategorySlotIndices.Add(i);
+            CategoryPins.Add(Pin);
+        }
+    }
+
+    if (CategorySlotIndices.Num() >= 2)
+    {
+        TMap<FName, UEdGraphPin*> ByName;
+        for (UEdGraphPin* Pin : CategoryPins)
+        {
+            ByName.Add(Pin->PinName, Pin);
+        }
+
+        TArray<UEdGraphPin*> NewOrder;
+        NewOrder.Reserve(CategoryPins.Num());
+
+        // Desired pins in desired order
+        for (const FName& Name : DesiredPinNames)
+        {
+            if (UEdGraphPin** Found = ByName.Find(Name))
+            {
+                NewOrder.Add(*Found);
+                ByName.Remove(Name);
+            }
+        }
+        // Orphans — preserve original relative order
+        for (UEdGraphPin* Pin : CategoryPins)
+        {
+            if (ByName.Contains(Pin->PinName))
+            {
+                NewOrder.Add(Pin);
+                ByName.Remove(Pin->PinName);
+            }
+        }
+
+        for (int32 i = 0; i < CategorySlotIndices.Num() && i < NewOrder.Num(); ++i)
+        {
+            if (Node->Pins[CategorySlotIndices[i]] != NewOrder[i])
+            {
+                Node->Pins[CategorySlotIndices[i]] = NewOrder[i];
+                bChanged = true;
+            }
+        }
+    }
+
     if (UEdGraph* Graph = Node->GetGraph())
     {
         Graph->NotifyGraphChanged();
     }
+}
+
+void USimpleQuestEditorUtilities::SortPinNamesAlphabetical(TArray<FName>& PinNames)
+{
+	PinNames.Sort([](const FName& A, const FName& B) { return A.Compare(B) < 0; });
 }
 

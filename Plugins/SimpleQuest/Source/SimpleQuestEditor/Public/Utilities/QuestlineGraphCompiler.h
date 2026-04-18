@@ -171,7 +171,7 @@ private:
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
 
 	/** Pass 1: iterate content nodes, validate labels, create runtime instances, assign tags. */
-	void CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
+	void CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
 
 	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */
 	void CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags);
@@ -192,6 +192,17 @@ private:
 	int32 CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths,	FPrerequisiteExpression& OutExpression);
 	
 	UQuestlineGraph* RootGraph = nullptr;
+
+	/**
+	 * Accumulates linked-placement GUIDs as compilation recurses through LinkedQuestline nodes. Combined with each content
+	 * node's own GUID at instance assignment time so that multiple placements of the same linked asset produce runtime
+	 * instances with distinct QuestContentGuids — required for both rename detection and per-instance save state.
+	 * Zero at top-level; push/pop save-restore around each LinkedQuestline recursion.
+	 */
+	FGuid CurrentOuterGuidChain;
+
+	/** Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). */
+	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
 
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */

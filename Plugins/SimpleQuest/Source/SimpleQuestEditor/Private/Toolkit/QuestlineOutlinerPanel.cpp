@@ -248,6 +248,8 @@ void SQuestlineOutlinerPanel::RebuildTree()
             ItemPair.Value->SourceGraph = QuestlineGraph;
         }
     }
+    // Cycle guard — circular linked-questline references (A→B→A) would otherwise recurse unboundedly.
+    TSet<FSoftObjectPath> VisitedLinkedAssets;
 
     // Linked items need their source asset resolved from the graph's linked questline nodes
     TFunction<void(UEdGraph*, const FString&, UQuestlineGraph*)> ResolveLinkedSources =
@@ -263,6 +265,9 @@ void SQuestlineOutlinerPanel::RebuildTree()
                     UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous();
                     if (!LinkedAsset) continue;
 
+                    const FSoftObjectPath LinkedPath(LinkedAsset);
+                    if (VisitedLinkedAssets.Contains(LinkedPath)) continue;
+
                     const FString LinkedID = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
                         LinkedAsset->GetQuestlineID().IsEmpty() ? LinkedAsset->GetName() : LinkedAsset->GetQuestlineID());
 
@@ -275,14 +280,16 @@ void SQuestlineOutlinerPanel::RebuildTree()
                             ItemPair.Value->SourceGraph = LinkedAsset;
                     }
 
-                    // Stamp ContainingAsset on the header item specifically
                     if (TSharedPtr<FQuestlineOutlinerItem>* Header = ItemMap.Find(FName(*FullLinkedPrefix)))
                     {
                         (*Header)->ContainingAsset = CurrentAsset;
                     }
+
                     if (LinkedAsset->QuestlineEdGraph)
                     {
+                        VisitedLinkedAssets.Add(LinkedPath);
                         ResolveLinkedSources(LinkedAsset->QuestlineEdGraph, LinkedPrefix, LinkedAsset);
+                        VisitedLinkedAssets.Remove(LinkedPath);
                     }
                 }
                 else if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))

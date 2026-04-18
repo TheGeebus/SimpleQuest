@@ -27,25 +27,25 @@ struct SIMPLEQUESTEDITOR_API FIncomingSignalPinSpec
 	 * Asset containing the source node, when the source lives in a different asset than the Entry. Empty for
 	 * same-asset sources (inline Quest inner graph).
 	 */
-	UPROPERTY(EditAnywhere, Category = "Incoming Signal")
+	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal")
 	FSoftObjectPath ParentAsset;
 
 	/**
 	 * Persistent GUID of the specific source content node whose outcome this spec represents. Must be valid —
 	 * unqualified specs are invalid state.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Incoming Signal")
+	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal")
 	FGuid SourceNodeGuid;
 
 	/**
 	 * Display label of the source node, captured at Import time. Used for pin-name disambiguation without requiring
 	 * the parent asset to be loaded at pin-allocation time. Re-run Import to refresh if the source node is renamed.
 	 */
-	UPROPERTY(EditAnywhere, Category = "Incoming Signal")
+	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal")
 	FString CachedSourceLabel;
 
 	/** The specific outcome tag this spec represents. Must be valid. */
-	UPROPERTY(EditAnywhere, Category = "Incoming Signal", meta = (Categories = "Quest.Outcome"))
+	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal", meta = (Categories = "Quest.Outcome"))
 	FGameplayTag Outcome;
 
 	/**

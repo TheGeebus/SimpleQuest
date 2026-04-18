@@ -5,11 +5,47 @@
 #include "Quests/QuestlineGraph.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
+#define LOCTEXT_NAMESPACE "SimpleQuestEditor"
+
 FText UQuestlineNode_LinkedQuestline::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	if (!LinkedGraph.IsNull()) return FText::FromString(LinkedGraph.GetAssetName());
-	if (!NodeLabel.IsEmpty()) return NodeLabel;
-	return NSLOCTEXT("SimpleQuestEditor", "LinkedNodeDefaultTitle", "Linked Questline");
+	/**
+	 * Menu/list views: simple "Linked Questline" category label — no instance exists yet so NodeLabel is not meaningful.
+	 */
+	if (TitleType == ENodeTitleType::MenuTitle || TitleType == ENodeTitleType::ListView)
+	{
+		return LOCTEXT("LinkedQuestlineTitlePrefix", "Linked Questline");
+	}
+
+	/**
+	 * Inline rename (EditableTitle): NodeLabel alone so the rename field pre-populates with only the designer-facing
+	 * portion and typing replaces just that, not the full multi-line title.
+	 */
+	if (TitleType == ENodeTitleType::EditableTitle)
+	{
+		return NodeLabel;
+	}
+
+	/**
+	 * Full/default titles on a placed instance: NodeLabel as the primary line, asset name as a secondary line. Designers
+	 * distinguish multiple placements of the same asset via inline rename and the change is immediately visible in the
+	 * graph. When the inline asset picker widget (Session 22 polish) lands, the asset line drops since the picker will
+	 * render the asset inline on the node body.
+	 */
+	FText AssetNameText;
+	if (!LinkedGraph.IsNull())
+	{
+		AssetNameText = FText::FromString(LinkedGraph.GetAssetName());
+	}
+	else
+	{
+		AssetNameText = LOCTEXT("LinkedQuestlineNone", "(none)");
+	}
+
+	FFormatNamedArguments Args;
+	Args.Add(TEXT("Label"), NodeLabel);
+	Args.Add(TEXT("Asset"), AssetNameText);
+	return FText::Format(LOCTEXT("LinkedQuestlineTitleWithLabelFmt", "{Label}\nLinked Questline: {Asset}"), Args);
 }
 
 FLinearColor UQuestlineNode_LinkedQuestline::GetNodeTitleColor() const
@@ -46,3 +82,5 @@ void UQuestlineNode_LinkedQuestline::RebuildOutcomePinsFromLinkedGraph()
 	const TArray<FName> DesiredOutcomes = USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(Graph);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
+
+#undef LOCTEXT_NAMESPACE

@@ -20,7 +20,6 @@ protected:
 	FGameplayTag GroupTag;
 	
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
-	virtual void DeactivateInternal(FGameplayTag InContextualTag) override;
 
 private:
 	FDelegateHandle SignalSubscriptionHandle;

@@ -17,7 +17,13 @@ void UActivationGroupGetterNode::ActivateInternal(FGameplayTag InContextualTag)
     UWorldStateSubsystem* WS = GI->GetSubsystem<UWorldStateSubsystem>();
     USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>();
     if (!WS || !Signals) return;
-
+    
+    if (SignalSubscriptionHandle.IsValid())
+    {
+        Signals->UnsubscribeMessage(GroupTag, SignalSubscriptionHandle);
+        SignalSubscriptionHandle.Reset();
+    }
+    
     if (WS->HasFact(GroupTag))
     {
         ForwardActivation();
@@ -29,29 +35,6 @@ void UActivationGroupGetterNode::ActivateInternal(FGameplayTag InContextualTag)
 
 void UActivationGroupGetterNode::OnGroupSignalFired(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
-    if (UGameInstance* GI = CachedGameInstance.Get())
-    {
-        if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
-        {
-            Signals->UnsubscribeMessage(GroupTag, SignalSubscriptionHandle);
-            SignalSubscriptionHandle = FDelegateHandle();
-        }
-    }
     ForwardActivation();
 }
 
-void UActivationGroupGetterNode::DeactivateInternal(FGameplayTag InContextualTag)
-{
-    if (SignalSubscriptionHandle.IsValid())
-    {
-        if (UGameInstance* GI = CachedGameInstance.Get())
-        {
-            if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
-            {
-                Signals->UnsubscribeMessage(GroupTag, SignalSubscriptionHandle);
-                SignalSubscriptionHandle = FDelegateHandle();
-            }
-        }
-    }
-    Super::DeactivateInternal(InContextualTag);
-}

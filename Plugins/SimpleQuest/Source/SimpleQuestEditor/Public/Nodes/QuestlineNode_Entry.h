@@ -49,4 +49,26 @@ public:
 
 private:
 	void ImportOutcomePinsFromParent();
+	
+	/**
+	 * True if this pin is a spec-generated incoming signal pin on the Entry node. Spec pins are the QuestOutcome category outputs;
+	 * the "Entered" sentinel is QuestActivation and the "Deactivated" pin is QuestDeactivated, so a simple category+direction check
+	 * distinguishes them without consulting the IncomingSignals array.
+	 */
+	static bool IsIncomingSignalPin(const UEdGraphPin* Pin);
+	
+	/**
+	 * Context-menu handler for "Remove Incoming Pin" on a specific spec pin. Finds the matching IncomingSignals entry by recomputing
+	 * the disambiguated pin name and flips bExposed to false; the spec entry persists so future Import recognizes it. Orphaned
+	 * pins (no matching spec) are removed directly. No-op if PinName doesn't match any spec or orphan pin.
+	 */
+	void RemoveIncomingPinByName(FName PinName);
+
+	/**
+	 * Context-menu handler for "Clear Unused Incoming Pins" on the Entry node body. Sweeps every exposed spec whose generated pin
+	 * has zero LinkedTo connections and flips bExposed to false on each. Toast message reports the count cleared (or "nothing to
+	 * clear" if all exposed pins are wired).
+	 */
+	void ClearUnusedIncomingPins();
+
 };

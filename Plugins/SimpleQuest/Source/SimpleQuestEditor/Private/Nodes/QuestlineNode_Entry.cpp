@@ -224,6 +224,35 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 {
 	Super::GetNodeContextMenuActions(Menu, Context);
 
+	/**
+	 * Two context surfaces: when right-clicking a spec pin, offer Remove Incoming Pin (disabled if wired). When right-clicking
+	 * the node body, offer Import Outcome Pins (existing) and Clear Unused Incoming Pins. The pin surface is gated on
+	 * IsIncomingSignalPin so the Entered sentinel and Deactivated pin don't expose a Remove action.
+	 */
+	if (Context->Pin && IsIncomingSignalPin(Context->Pin))
+	{
+		const UEdGraphPin* Pin = Context->Pin;
+		FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNodePin"), NSLOCTEXT("SimpleQuestEditor", "EntryNodePinSection", "Entry Pin"));
+		Section.AddMenuEntry(
+			TEXT("RemoveIncomingPin"),
+			NSLOCTEXT("SimpleQuestEditor", "RemoveIncomingPin_Label", "Remove Incoming Pin"),
+			NSLOCTEXT("SimpleQuestEditor", "RemoveIncomingPin_Tooltip",
+				"Unexpose this incoming signal pin. The underlying spec is kept so re-running Import can re-expose it. Disabled when the pin is wired."),
+			FSlateIcon(),
+			FUIAction(
+				FExecuteAction::CreateLambda([NodePtr = const_cast<UQuestlineNode_Entry*>(this), PinName = Pin->PinName]()
+				{
+					NodePtr->RemoveIncomingPinByName(PinName);
+				}),
+				FCanExecuteAction::CreateLambda([Pin]()
+				{
+					return Pin && Pin->LinkedTo.Num() == 0;
+				}))
+		);
+		return;
+	}
+
+	// Node-body context — Import and Clear Unused.
 	FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNode"), NSLOCTEXT("SimpleQuestEditor", "EntryNodeSection", "Entry"));
 
 	Section.AddMenuEntry(
@@ -235,6 +264,18 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 		FUIAction(FExecuteAction::CreateLambda([NodePtr = const_cast<UQuestlineNode_Entry*>(this)]()
 		{
 			NodePtr->ImportOutcomePinsFromParent();
+		}))
+	);
+
+	Section.AddMenuEntry(
+		TEXT("ClearUnusedIncomingPins"),
+		NSLOCTEXT("SimpleQuestEditor", "ClearUnusedIncomingPins_Label", "Clear Unused Incoming Pins"),
+		NSLOCTEXT("SimpleQuestEditor", "ClearUnusedIncomingPins_Tooltip",
+			"Unexpose every incoming signal pin that has no downstream wiring. Spec entries are kept — re-run Import to re-expose them."),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([NodePtr = const_cast<UQuestlineNode_Entry*>(this)]()
+		{
+			NodePtr->ClearUnusedIncomingPins();
 		}))
 	);
 }
@@ -408,6 +449,93 @@ void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 		Info.ExpireDuration = 3.0f;
 		FSlateNotificationManager::Get().AddNotification(Info);
 	}
+}
+
+bool UQuestlineNode_Entry::IsIncomingSignalPin(const UEdGraphPin* Pin)
+{
+	return Pin
+		&& Pin->Direction == EGPD_Output
+		&& Pin->PinType.PinCategory == TEXT("QuestOutcome");
+}
+
+void UQuestlineNode_Entry::RemoveIncomingPinByName(FName PinName)
+{
+	UEdGraphPin* Pin = FindPin(PinName, EGPD_Output);
+	if (!Pin) return;
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "RemoveIncomingPin_Undo", "Remove Incoming Pin"));
+	Modify();
+
+	/**
+	 * Two-path resolution: if the pin corresponds to an exposed spec (by recomputed disambiguated name), flip bExposed and let
+	 * RefreshOutcomePins remove the pin cleanly. If no spec matches, this is an orphan pin left from a prior data-shape change —
+	 * remove it directly so the designer can recover a tidy node.
+	 */
+	int32 MatchIndex = INDEX_NONE;
+	for (int32 i = 0; i < IncomingSignals.Num(); ++i)
+	{
+		const FIncomingSignalPinSpec& Spec = IncomingSignals[i];
+		if (!Spec.bExposed) continue;
+		if (!Spec.SourceNodeGuid.IsValid()) continue;
+		if (BuildDisambiguatedPinName(Spec, IncomingSignals) == PinName)
+		{
+			MatchIndex = i;
+			break;
+		}
+	}
+
+	if (MatchIndex != INDEX_NONE)
+	{
+		IncomingSignals[MatchIndex].bExposed = false;
+		RefreshOutcomePins();
+	}
+	else
+	{
+		Pin->BreakAllPinLinks();
+		RemovePin(Pin);
+	}
+
+	if (UEdGraph* Graph = GetGraph()) Graph->NotifyGraphChanged();
+}
+
+void UQuestlineNode_Entry::ClearUnusedIncomingPins()
+{
+	TArray<int32> UnusedIndices;
+	for (int32 i = 0; i < IncomingSignals.Num(); ++i)
+	{
+		const FIncomingSignalPinSpec& Spec = IncomingSignals[i];
+		if (!Spec.bExposed) continue;
+		if (!Spec.SourceNodeGuid.IsValid()) continue;
+
+		const FName PinName = BuildDisambiguatedPinName(Spec, IncomingSignals);
+		const UEdGraphPin* Pin = FindPin(PinName, EGPD_Output);
+		if (!Pin) continue;
+		if (Pin->LinkedTo.Num() > 0) continue;
+
+		UnusedIndices.Add(i);
+	}
+
+	if (UnusedIndices.Num() == 0)
+	{
+		FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "NoUnusedIncomingPins",
+			"No unused incoming pins to clear — every exposed pin has downstream wiring."));
+		Info.ExpireDuration = 3.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+		return;
+	}
+
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ClearUnusedIncomingPins_Undo", "Clear Unused Incoming Pins"));
+	Modify();
+	for (int32 Index : UnusedIndices) IncomingSignals[Index].bExposed = false;
+	RefreshOutcomePins();
+
+	if (UEdGraph* Graph = GetGraph()) Graph->NotifyGraphChanged();
+
+	FNotificationInfo Info(FText::Format(
+		NSLOCTEXT("SimpleQuestEditor", "ClearedUnusedIncomingPins", "Cleared {0} unused incoming pin(s)"),
+		FText::AsNumber(UnusedIndices.Num())));
+	Info.ExpireDuration = 3.0f;
+	FSlateNotificationManager::Get().AddNotification(Info);
 }
 
 FText UQuestlineNode_Entry::GetNodeTitle(ENodeTitleType::Type TitleType) const

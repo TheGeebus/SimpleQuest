@@ -110,6 +110,13 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CurrentOuterGuidChain = FGuid();
     DetectedTagRenames.Empty();
 
+	// Clear parallel-path tracking so a fresh compile doesn't inherit stale data from a prior compile.
+	DirectReachesByDest.Empty();
+	GroupSetterSourcesByTag.Empty();
+	GroupGetterDestsByTag.Empty();
+	SetterEdNodesByGroupTag.Empty();
+	GetterEdNodesByGroupTag.Empty();
+	
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
     InGraph->EntryNodeTags.Empty();
@@ -1368,5 +1375,18 @@ void FQuestlineGraphCompiler::AddNodeNavigationToken(TSharedRef<FTokenizedMessag
             }
         })
     ));
+}
+
+bool FQuestlineGraphCompiler::ParallelPathKeysCollide(const FSourceOutcomeKey& A, const FSourceOutcomeKey& B)
+{
+	if (A.SourceTag != B.SourceTag) return false;
+	// AnyOutcome (invalid) on either side absorbs the specific outcome on the other.
+	if (!A.Outcome.IsValid() || !B.Outcome.IsValid()) return true;
+	return A.Outcome == B.Outcome;
+}
+
+void FQuestlineGraphCompiler::EmitParallelPathWarnings()
+{
+	// Piece D4 will fill this in. Placeholder ensures a clean build after D1 lands.
 }
 

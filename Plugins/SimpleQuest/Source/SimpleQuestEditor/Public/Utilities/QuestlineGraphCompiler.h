@@ -203,7 +203,49 @@ private:
 
 	/** Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). */
 	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
+	
+	/**
+	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
+	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
+	 * the compiler uses. Cleared at Compile() start.
+	 */
+	struct FSourceOutcomeKey
+	{
+		FName SourceTag;       // compiled tag of the source content node
+		FGameplayTag Outcome;  // invalid = "any outcome from this source"
 
+		bool operator==(const FSourceOutcomeKey& Other) const
+		{
+			return SourceTag == Other.SourceTag && Outcome == Other.Outcome;
+		}
+		friend uint32 GetTypeHash(const FSourceOutcomeKey& Key)
+		{
+			return HashCombine(GetTypeHash(Key.SourceTag), GetTypeHash(Key.Outcome));
+		}
+	};
+
+	/** (source, outcome) pairs that reach each destination via direct outcome→Activate wiring (through utilities and Setter.Forward chains). */
+	TMap<FName, TSet<FSourceOutcomeKey>> DirectReachesByDest;
+
+	/** (source, outcome) pairs feeding ActivationGroupSetters of each group tag. */
+	TMap<FGameplayTag, TSet<FSourceOutcomeKey>> GroupSetterSourcesByTag;
+
+	/** Destinations reached by ActivationGroupGetters of each group tag (via the getter's Forward output chain). */
+	TMap<FGameplayTag, TSet<FName>> GroupGetterDestsByTag;
+
+	/** Editor-node refs captured during collection so tokenized warnings can link to the offending nodes. */
+	TMap<FGameplayTag, TArray<UEdGraphNode*>> SetterEdNodesByGroupTag;
+	TMap<FGameplayTag, TArray<UEdGraphNode*>> GetterEdNodesByGroupTag;
+
+	/**
+	 * Collision test with AnyOutcome absorption: two keys collide when their sources match AND their outcomes match OR either
+	 * outcome is invalid (the "any outcome" sentinel). Mirrors UQuestlineGraphSchema::PinsRepresentSameSignal semantics.
+	 */
+	static bool ParallelPathKeysCollide(const FSourceOutcomeKey& A, const FSourceOutcomeKey& B);
+
+	/** Runs at the end of Compile() to analyze collected data and emit parallel-path warnings. */
+	void EmitParallelPathWarnings();
+	
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */
 	const TArray<TSharedRef<FTokenizedMessage>>& GetMessages() const { return Messages; }

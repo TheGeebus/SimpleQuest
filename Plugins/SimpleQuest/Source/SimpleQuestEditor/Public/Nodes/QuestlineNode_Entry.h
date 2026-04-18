@@ -22,27 +22,27 @@ public:
 	virtual bool CanDuplicateNode() const override { return false; }
 
 	/**
-	 * New-model incoming signal specs. Each spec with bExposed=true generates an output pin. Session 19: raw EditAnywhere
-	 * array for interim editing until Session 20's custom details panel tree lands. Migrated from IncomingOutcomeTags on
-	 * first load post-upgrade.
+	 * Source-qualified incoming signal specs. Each spec with bExposed=true generates an output pin whose name is
+	 * disambiguated against sibling specs. Session 20: raw EditAnywhere array for interim editing; Session 20b
+	 * replaces with a custom details panel tree grouped by source.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	TArray<FIncomingSignalPinSpec> IncomingSignals;
-
-	/**
-	 * DEPRECATED — migrated to IncomingSignals on PostLoad. Do not modify directly. This property is kept as a hidden field
-	 * solely for deserialization of pre-migration assets; once PostLoad runs, it is cleared and stays empty.
-	 */
-	UPROPERTY()
-	TArray<FGameplayTag> IncomingOutcomeTags_DEPRECATED;
 
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
 
 	/**
-	 * Surgically adds/removes outcome output pins to match IncomingSignals (exposed entries only) without disturbing existing wiring.
+	 * Surgically adds/removes outcome output pins to match IncomingSignals (exposed specs only) without disturbing
+	 * existing wiring.
 	 */
 	void RefreshOutcomePins();
+
+	/**
+	 * Computes the disambiguated output pin name for an exposed spec given all exposed specs on this Entry. Public so the compiler
+	 * can resolve pins deterministically. See implementation for the graded disambiguation rules.
+	 */
+	static FName BuildDisambiguatedPinName(const FIncomingSignalPinSpec& Spec, const TArray<FIncomingSignalPinSpec>& AllSpecs);
 
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;

@@ -6,6 +6,8 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/PrerequisiteExpression.h"
 
+struct FIncomingSignalPinSpec;
+struct FQuestEntryRouteList;
 class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
 class UQuestlineNode_UtilityBase;
@@ -51,7 +53,7 @@ protected:
 	 *								Questline child graphs 
 	 * @return						Returns the tags connected to an Any Outcome graph entry pin
 	 */
-	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome = nullptr);	
+	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome = nullptr);	
 
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
@@ -82,6 +84,30 @@ protected:
 	
 	/** Constructs the FName used to register and look up a node's gameplay tag. */
 	virtual FName MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const;
+
+	/**
+	 * Rules for moving between nodes. Subclass and register via ISimpleQuestEditorModule interface to override classification logic.
+	 * 
+	 * For creating new node types, prefer to subclass UQuestlineNodeBase and override internal classification methods such as IsExitNode, etc.
+	 */
+	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
+	
+	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
+	
+private:
+	/**
+	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled QuestTag of the source content node. Used as the
+	 * SourceFilter on entry destinations so runtime routing can discriminate per-source. Returns NAME_None when the source
+	 * cannot be located (unresolvable asset, missing node, etc.) — caller emits a warning and skips the spec.
+	 */
+	FName ResolveSourceFilterTag(const FIncomingSignalPinSpec& Spec, const UQuestlineGraph* ChildAsset) const;
+
+	/**
+	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
+	 * the compiled QuestTag: Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass ordering — uses
+	 * editor-time data only.
+	 */
+	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;
 
 	/** Logs a compile error and sets the internal error flag. */
 	void AddError(const FString& Message, const UEdGraphNode* Node = nullptr);
@@ -118,20 +144,9 @@ protected:
 	 * not tracked quest states.
 	 */
 	TMap<UEdGraphNode*, FName> UtilityNodeKeyMap;
-
-	/**
-	 * Rules for moving between nodes. Subclass and register via ISimpleQuestEditorModule interface to override classification logic.
-	 * 
-	 * For creating new node types, prefer to subclass UQuestlineNodeBase and override internal classification methods such as IsExitNode, etc.
-	 */
-	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;
 	
-	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
-
 	/** Renames detected during the most recent Compile(), keyed as FName (old → new). */
 	TMap<FName, FName> DetectedTagRenames;
-	
-private:
 
 	/**
 	 * Recursive helper. Walks one output pin in the prerequisite expression sub-graph and appends the corresponding node(s) to 
@@ -168,7 +183,7 @@ private:
 	void CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
 
 	/** Resolve entry tags from the graph's Entry node, splitting per-outcome when applicable. */
-	TArray<FName> ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome);
+	TArray<FName> ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome);
 
 	/** GUID-bridge rename detection: chain-collapse existing ledger, add new renames, prune identities. */
 	void DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid);

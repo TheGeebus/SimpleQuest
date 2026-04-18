@@ -1,7 +1,6 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Nodes/QuestlineNode_Entry.h"
-#include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -9,24 +8,84 @@
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Widgets/Notifications/SNotificationList.h"
+#include "Nodes/QuestlineNode_ContentBase.h"
+#include "SimpleQuestLog.h"
+#include "Utilities/QuestlineGraphTraversalPolicy.h"
 
+
+/*------------------------------------------------------------------------------------------------*
+ * Helpers
+ *------------------------------------------------------------------------------------------------*/
+
+/**
+ * Builds the disambiguated display/pin name for an exposed spec, given all exposed specs on the same Entry node.
+ * Graded: bare outcome name when unique; source-qualified when the outcome appears on multiple specs; cross-asset-qualified
+ * when the source label also collides across different parent assets. The returned name is used BOTH as the internal
+ * FName for the pin and as its human-readable label — runtime routing uses the FName form.
+ */
+FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSpec& Spec, const TArray<FIncomingSignalPinSpec>& AllSpecs)
+{
+	const FName OutcomeName = Spec.Outcome.GetTagName();
+	const FString OutcomeLeaf = [&OutcomeName]()
+	{
+		const FString Full = OutcomeName.ToString();
+		int32 LastDot; if (Full.FindLastChar(TEXT('.'), LastDot)) return Full.Mid(LastDot + 1); return Full;
+	}();
+
+	// Collect sibling exposed specs sharing the same outcome tag (excluding ourselves).
+	TArray<const FIncomingSignalPinSpec*> Siblings;
+	for (const FIncomingSignalPinSpec& Other : AllSpecs)
+	{
+		if (&Other == &Spec) continue;
+		if (!Other.bExposed) continue;
+		if (Other.Outcome != Spec.Outcome) continue;
+		Siblings.Add(&Other);
+	}
+
+	if (Siblings.Num() == 0) return FName(*OutcomeLeaf);
+
+	// Outcome collides with siblings — qualify by source label.
+	const FString SourceLabel = Spec.CachedSourceLabel.IsEmpty() ? TEXT("Unknown") : Spec.CachedSourceLabel;
+	const FString Qualified = FString::Printf(TEXT("%s (%s)"), *OutcomeLeaf, *SourceLabel);
+
+	// Check whether source-qualified names still collide across the sibling set (different assets, same source label).
+	bool bSourceLabelCollides = false;
+	for (const FIncomingSignalPinSpec* Sibling : Siblings)
+	{
+		const FString SiblingLabel = Sibling->CachedSourceLabel.IsEmpty() ? TEXT("Unknown") : Sibling->CachedSourceLabel;
+		if (SiblingLabel == SourceLabel) { bSourceLabelCollides = true; break; }
+	}
+
+	if (!bSourceLabelCollides) return FName(*Qualified);
+
+	// Still ambiguous — add asset qualifier. Use asset short name; Session 22 can upgrade to FriendlyName when that lands.
+	const FString AssetLabel = Spec.ParentAsset.IsNull() ? TEXT("Local") : Spec.ParentAsset.GetAssetName();
+	const FString DeepQualified = FString::Printf(TEXT("%s (%s / %s)"), *OutcomeLeaf, *SourceLabel, *AssetLabel);
+	return FName(*DeepQualified);
+}
+
+/*------------------------------------------------------------------------------------------------*
+ * End helper section
+ *------------------------------------------------------------------------------------------------*/
 
 void UQuestlineNode_Entry::AllocateDefaultPins()
 {
-	// Named outcome paths — fire only when this graph was entered via that specific outcome. Driven by exposed specs in
-	// IncomingSignals. Specs with bExposed=false are stored but generate no pin (they persist the designer's selection
-	// state across re-imports).
+	/**
+	 * One pin per exposed spec — not per outcome tag. Multiple specs may share an outcome tag when different sources
+	 * produce it; each gets its own pin with a disambiguated name so downstream wiring can be source-specific. Unexposed
+	 * specs are stored but generate no pin (they persist the designer's selection state across re-imports).
+	 */
 	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
 		if (!Spec.bExposed) continue;
 		if (!Spec.Outcome.IsValid()) continue;
-		CreatePin(EGPD_Output, TEXT("QuestOutcome"), Spec.Outcome.GetTagName());
+		CreatePin(EGPD_Output, TEXT("QuestOutcome"), BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
 
-	// Unconditional path — always fires when this graph activates
+	// Unconditional path — always fires when this graph activates, regardless of which outcome (or source) triggered entry.
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
 
-	// Deactivation — fires when the parent Quest node is deactivated
+	// Deactivation — fires when the parent Quest node is deactivated.
 	if (bShowDeactivationPins)
 	{
 		CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
@@ -37,35 +96,23 @@ void UQuestlineNode_Entry::PostLoad()
 {
 	Super::PostLoad();
 
-	// Migrate legacy IncomingOutcomeTags array into IncomingSignals. Pre-Session-19 assets stored incoming outcomes as
-	// a flat tag list with no source qualification; each becomes an exposed spec with no ParentAsset/SourceNodeGuid.
-	// Session 20's source-aware import can enrich these later; in the meantime they function identically to the old pins.
-	if (IncomingOutcomeTags_DEPRECATED.Num() > 0)
+	/**
+	 * Scrub unqualified specs — invalid state in the post-legacy-removal model. Only present on assets authored during
+	 * Session 19 or earlier; a warning surfaces them so the designer knows to re-run Import.
+	 */
+	int32 RemovedCount = 0;
+	for (int32 i = IncomingSignals.Num() - 1; i >= 0; --i)
 	{
-		for (const FGameplayTag& Tag : IncomingOutcomeTags_DEPRECATED)
-		{
-			if (!Tag.IsValid()) continue;
-
-			const bool bAlreadyPresent = IncomingSignals.ContainsByPredicate(
-				[&Tag](const FIncomingSignalPinSpec& Existing)
-				{
-					return !Existing.SourceNodeGuid.IsValid()
-						&& Existing.ParentAsset.IsNull()
-						&& Existing.Outcome == Tag;
-				});
-			if (bAlreadyPresent) continue;
-
-			FIncomingSignalPinSpec Spec;
-			Spec.Outcome = Tag;
-			Spec.bExposed = true;  // preserve existing visible pins; migrated outcomes stay exposed
-			IncomingSignals.Add(Spec);
-		}
-		IncomingOutcomeTags_DEPRECATED.Empty();
+		if (!IncomingSignals[i].SourceNodeGuid.IsValid()) { IncomingSignals.RemoveAt(i); ++RemovedCount; }
 	}
 
-	// Sync pins to IncomingSignals. On fresh post-migration load, AllocateDefaultPins ran with an empty IncomingSignals
-	// (migration hadn't happened yet), so pins need to be created now. SyncPinsByCategory preserves wiring on pins whose
-	// names match (un-orphans wired-survivors that came in from serialization).
+	if (RemovedCount > 0)
+	{
+		UE_LOG(LogSimpleQuest, Warning,
+			TEXT("UQuestlineNode_Entry::PostLoad: scrubbed %d unqualified incoming-signal spec(s) on %s. Re-run Import to populate source-qualified specs."),
+			RemovedCount, *GetName());
+	}
+
 	RefreshOutcomePins();
 }
 
@@ -76,7 +123,7 @@ void UQuestlineNode_Entry::RefreshOutcomePins()
 	{
 		if (!Spec.bExposed) continue;
 		if (!Spec.Outcome.IsValid()) continue;
-		DesiredNames.Add(Spec.Outcome.GetTagName());
+		DesiredNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
 }
@@ -152,115 +199,89 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 
 void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 {
-	TArray<FName> FoundOutcomeNames;
+	if (!GetGraph()) return;
 
-	UObject* GraphOuter = GetGraph() ? GetGraph()->GetOuter() : nullptr;
-	if (!GraphOuter) return;
+	/**
+	 * Determine our own asset so we can mark cross-asset sources. ParentAsset on a spec stays empty when the source
+	 * pin lives in the same asset as this Entry.
+	 */
+	const UQuestlineGraph* OwnAsset = FQuestlineGraphTraversalPolicy::ResolveContainingAsset(GetGraph());
 
+	// Walk parent assets for outcome pins routing into this Entry.
 	FQuestlineGraphTraversalPolicy TraversalPolicy;
+	TSet<FQuestEffectiveSource> ReachingSources;
+	TraversalPolicy.CollectEntryReachingSources(GetGraph(), ReachingSources);
 
-	// Walk back from a container node's Activate input and harvest only the outcome pins that actually feed it. Uses the
-	// unified effective-source walker so indirect routes through knots, utility nodes, and activation group setter/getter
-	// chains are captured too.
-	auto CollectFromActivatePin = [&](const UEdGraphNode* ContainerNode)
+	// Each routed outcome pin maps to one qualified target — the data we want reflected in a spec.
+	struct FQualifiedTarget
 	{
-		const UEdGraphPin* ActivatePin = ContainerNode->FindPin(TEXT("Activate"), EGPD_Input);
-		if (!ActivatePin) return;
+		FGuid SourceNodeGuid;
+		FGameplayTag Outcome;
+		FSoftObjectPath ParentAsset;
+		FString SourceLabel;
 
-		for (const UEdGraphPin* Wire : ActivatePin->LinkedTo)
+		bool MatchesIdentity(const FIncomingSignalPinSpec& Spec) const
 		{
-			TSet<const UEdGraphPin*> Sources;
-			TSet<const UEdGraphNode*> Visited;
-			TraversalPolicy.CollectEffectiveSources(Wire, Sources, Visited);
-			for (const UEdGraphPin* Source : Sources)
-			{
-				// Only import specific named outcomes. AnyOutcome routes cannot distinguish which outcome fired at runtime,
-				// so per-outcome entry pins would be dead; the AnyOutcome entry pin handles that path.
-				if (Source->PinType.PinCategory == TEXT("QuestOutcome") && !Source->PinName.IsNone())
-				{
-					FoundOutcomeNames.AddUnique(Source->PinName);
-				}
-			}
+			return Spec.SourceNodeGuid == SourceNodeGuid && Spec.Outcome == Outcome && Spec.ParentAsset == ParentAsset;
 		}
 	};
 
-	// Case 1: inner graph owned by a Quest node
-	if (const UQuestlineNode_Quest* ParentQuestNode = Cast<UQuestlineNode_Quest>(GraphOuter))
+	TArray<FQualifiedTarget> Targets;
+	for (const FQuestEffectiveSource& Source : ReachingSources)
 	{
-		CollectFromActivatePin(ParentQuestNode);
+		if (!Source.Pin) continue;
+		// Named outcome pins only — AnyOutcome routes lose per-outcome identity at the boundary.
+		if (Source.Pin->PinType.PinCategory != TEXT("QuestOutcome")) continue;
+		if (Source.Pin->PinName.IsNone()) continue;
+
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(Source.Pin->PinName, /*bErrorIfNotFound=*/ false);
+		if (!Tag.IsValid()) continue;
+
+		const UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Source.Pin->GetOwningNode());
+		if (!ContentNode) continue;
+
+		const FGuid SourceGuid = ContentNode->QuestGuid;
+		if (!SourceGuid.IsValid()) continue;
+
+		FQualifiedTarget Target;
+		Target.SourceNodeGuid = SourceGuid;
+		Target.Outcome = Tag;
+		Target.ParentAsset = (Source.Asset && Source.Asset != OwnAsset) ? FSoftObjectPath(Source.Asset) : FSoftObjectPath();
+		Target.SourceLabel = ContentNode->NodeLabel.ToString();
+		Targets.Add(Target);
 	}
-	// Case 2: top-level QuestlineGraph — AR scan for LinkedQuestline refs
-	else if (UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(GraphOuter))
+
+	// Decide per-target action: re-enable existing, refresh label on existing, or append new.
+	TArray<int32> IndicesToReEnable;
+	TArray<int32> IndicesToRefreshLabel;
+	TArray<FQualifiedTarget> SpecsToAdd;
+	for (const FQualifiedTarget& Target : Targets)
 	{
-		const IAssetRegistry& AR =
-			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-
-		TArray<FAssetData> AllGraphAssets;
-		AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), AllGraphAssets);
-
-		const FSoftObjectPath OurPath(QuestlineAsset);
-
-		for (const FAssetData& AssetData : AllGraphAssets)
+		int32 MatchIndex = INDEX_NONE;
+		for (int32 i = 0; i < IncomingSignals.Num(); ++i)
 		{
-			UQuestlineGraph* OtherAsset = Cast<UQuestlineGraph>(AssetData.GetAsset());
-			if (!OtherAsset || OtherAsset == QuestlineAsset || !OtherAsset->QuestlineEdGraph)
-				continue;
-
-			for (const UEdGraphNode* Node : OtherAsset->QuestlineEdGraph->Nodes)
-			{
-				const UQuestlineNode_LinkedQuestline* LinkedNode =
-					Cast<UQuestlineNode_LinkedQuestline>(Node);
-				if (!LinkedNode || LinkedNode->LinkedGraph.ToSoftObjectPath() != OurPath) continue;
-				CollectFromActivatePin(LinkedNode);
-			}
+			if (Target.MatchesIdentity(IncomingSignals[i])) { MatchIndex = i; break; }
 		}
+
+		if (MatchIndex == INDEX_NONE) { SpecsToAdd.Add(Target); continue; }
+
+		if (!IncomingSignals[MatchIndex].bExposed) IndicesToReEnable.Add(MatchIndex);
+		if (IncomingSignals[MatchIndex].CachedSourceLabel != Target.SourceLabel) IndicesToRefreshLabel.Add(MatchIndex);
 	}
 
-	// Identify stale specs: previously-exposed outcomes that are no longer routed into the parent.
+	// Stale pruning: exposed specs whose identity triple no longer appears in Targets.
 	TArray<int32> StaleIndices;
 	for (int32 i = 0; i < IncomingSignals.Num(); ++i)
 	{
 		const FIncomingSignalPinSpec& Spec = IncomingSignals[i];
 		if (!Spec.bExposed) continue;
-		if (!Spec.Outcome.IsValid()) continue;
-		if (!FoundOutcomeNames.Contains(Spec.Outcome.GetTagName()))
-		{
-			StaleIndices.Add(i);
-		}
+		if (!Targets.ContainsByPredicate([&Spec](const FQualifiedTarget& T) { return T.MatchesIdentity(Spec); })) StaleIndices.Add(i);
 	}
 
-	// Identify import actions: truly new tags get fresh specs; tags matching disabled specs get the existing spec re-enabled (no duplicates).
-	TArray<FGameplayTag> NewOutcomeTags;
-	TArray<int32> IndicesToReEnable;
-	for (const FName& OutcomeName : FoundOutcomeNames)
-	{
-		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(OutcomeName, /*bErrorIfNotFound=*/ false);
-		if (!Tag.IsValid()) continue;
-
-		int32 ExistingIndex = INDEX_NONE;
-		for (int32 i = 0; i < IncomingSignals.Num(); ++i)
-		{
-			if (IncomingSignals[i].Outcome == Tag)
-			{
-				ExistingIndex = i;
-				break;
-			}
-		}
-
-		if (ExistingIndex == INDEX_NONE)
-		{
-			NewOutcomeTags.Add(Tag);
-		}
-		else if (!IncomingSignals[ExistingIndex].bExposed)
-		{
-			IndicesToReEnable.Add(ExistingIndex);
-		}
-		// else: already exposed and present — nothing to do
-	}
-
-	const bool bWouldImport = NewOutcomeTags.Num() > 0 || IndicesToReEnable.Num() > 0;
-	const bool bWouldPrune  = StaleIndices.Num() > 0;
-	if (!bWouldImport && !bWouldPrune)
+	const bool bWouldImport       = SpecsToAdd.Num() > 0 || IndicesToReEnable.Num() > 0;
+	const bool bWouldPrune        = StaleIndices.Num() > 0;
+	const bool bWouldRefreshLabel = IndicesToRefreshLabel.Num() > 0;
+	if (!bWouldImport && !bWouldPrune && !bWouldRefreshLabel)
 	{
 		FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "NoParentOutcomes",
 			"No outcome tags are routed into this graph's parent Activate pin"));
@@ -269,60 +290,64 @@ void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 		return;
 	}
 
-	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor",
-		"ImportOutcomePins_Undo", "Import Outcome Pins"));
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ImportOutcomePins_Undo", "Import Outcome Pins"));
 	Modify();
 
-	// Prune stale: demote bExposed so the pin is removed but the spec is retained (designer selection state preserved for future re-imports).
-	for (int32 i = StaleIndices.Num() - 1; i >= 0; --i)
+	for (int32 i = StaleIndices.Num() - 1; i >= 0; --i) IncomingSignals[StaleIndices[i]].bExposed = false;
+	for (int32 Index : IndicesToReEnable) IncomingSignals[Index].bExposed = true;
+	for (int32 Index : IndicesToRefreshLabel)
 	{
-		IncomingSignals[StaleIndices[i]].bExposed = false;
+		// Refresh label from the matching target.
+		for (const FQualifiedTarget& Target : Targets)
+		{
+			if (Target.MatchesIdentity(IncomingSignals[Index])) { IncomingSignals[Index].CachedSourceLabel = Target.SourceLabel; break; }
+		}
 	}
-
-	// Re-enable disabled matches first (no new spec creation for these).
-	for (int32 Index : IndicesToReEnable)
-	{
-		IncomingSignals[Index].bExposed = true;
-	}
-
-	// Append new specs for genuinely new outcomes.
-	for (const FGameplayTag& Tag : NewOutcomeTags)
+	for (const FQualifiedTarget& Target : SpecsToAdd)
 	{
 		FIncomingSignalPinSpec Spec;
-		Spec.Outcome = Tag;
+		Spec.SourceNodeGuid = Target.SourceNodeGuid;
+		Spec.Outcome = Target.Outcome;
+		Spec.ParentAsset = Target.ParentAsset;
+		Spec.CachedSourceLabel = Target.SourceLabel;
 		Spec.bExposed = true;
 		IncomingSignals.Add(Spec);
 	}
 
-	const int32 ImportedCount = NewOutcomeTags.Num() + IndicesToReEnable.Num();
+	const int32 ImportedCount = SpecsToAdd.Num() + IndicesToReEnable.Num();
 
-	if (ImportedCount > 0 || StaleIndices.Num() > 0)
-	{
-		RefreshOutcomePins();
-	}
+	if (ImportedCount > 0 || StaleIndices.Num() > 0 || IndicesToRefreshLabel.Num() > 0) RefreshOutcomePins();
 
+	// Four-way toast matrix. Label-refresh alone falls through to a dedicated message.
 	if (ImportedCount > 0 && StaleIndices.Num() > 0)
 	{
-		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedAndPrunedOutcomes",
-			"Imported {0} outcome pin(s); flagged {1} stale pin(s) for cleanup"),
-			FText::AsNumber(ImportedCount),
-			FText::AsNumber(StaleIndices.Num())));
+		FNotificationInfo Info(FText::Format(
+			NSLOCTEXT("SimpleQuestEditor", "ImportedAndPrunedOutcomes", "Imported {0} outcome pin(s); flagged {1} stale pin(s) for cleanup"),
+			FText::AsNumber(ImportedCount), FText::AsNumber(StaleIndices.Num())));
 		Info.ExpireDuration = 3.5f;
 		FSlateNotificationManager::Get().AddNotification(Info);
 	}
 	else if (ImportedCount > 0)
 	{
-		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "ImportedOutcomes",
-			"Imported {0} outcome pin(s)"),
+		FNotificationInfo Info(FText::Format(
+			NSLOCTEXT("SimpleQuestEditor", "ImportedOutcomes", "Imported {0} outcome pin(s)"),
 			FText::AsNumber(ImportedCount)));
 		Info.ExpireDuration = 3.0f;
 		FSlateNotificationManager::Get().AddNotification(Info);
 	}
 	else if (StaleIndices.Num() > 0)
 	{
-		FNotificationInfo Info(FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrunedOutcomes",
-			"Flagged {0} stale pin(s) for cleanup; no new outcomes to import"),
+		FNotificationInfo Info(FText::Format(
+			NSLOCTEXT("SimpleQuestEditor", "PrunedOutcomes", "Flagged {0} stale pin(s) for cleanup; no new outcomes to import"),
 			FText::AsNumber(StaleIndices.Num())));
+		Info.ExpireDuration = 3.0f;
+		FSlateNotificationManager::Get().AddNotification(Info);
+	}
+	else if (IndicesToRefreshLabel.Num() > 0)
+	{
+		FNotificationInfo Info(FText::Format(
+			NSLOCTEXT("SimpleQuestEditor", "RefreshedSourceLabels", "Refreshed source labels for {0} spec(s)"),
+			FText::AsNumber(IndicesToRefreshLabel.Num())));
 		Info.ExpireDuration = 3.0f;
 		FSlateNotificationManager::Get().AddNotification(Info);
 	}

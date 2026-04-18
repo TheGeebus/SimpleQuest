@@ -155,7 +155,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 // CompileGraph — recursive
 // -------------------------------------------------------------------------------------------------
 
-TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome)	
+TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome)	
 {
     if (!Graph) return {};
 
@@ -257,27 +257,21 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
             if (QuestEdNode->GetInnerGraph())
             {
                 const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-                TMap<FGameplayTag, TArray<FName>> InnerEntryByOutcome;
+                TMap<FGameplayTag, FQuestEntryRouteList> InnerEntryByOutcome;
                 QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, {}, VisitedAssetPaths, &InnerEntryByOutcome);
-
-                for (auto& Pair : InnerEntryByOutcome)
-                {
-                    FQuestOutcomeNodeList& List = QuestInstance->EntryStepTagsByOutcome.FindOrAdd(Pair.Key);
-                    List.NodeTags = MoveTemp(Pair.Value);
-                }
+                QuestInstance->EntryStepTagsByOutcome = MoveTemp(InnerEntryByOutcome);
                 
-                // Register entry outcome fact tags for prerequisite expressions within the inner graph
+                // Register entry outcome fact tags for prerequisite expressions within the inner graph.
                 for (UEdGraphNode* InnerNode : QuestEdNode->GetInnerGraph()->Nodes)
                 {
                     if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
                     {
                         const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
-                        for (const FGameplayTag& OutcomeTag : EntryNode->IncomingOutcomeTags_DEPRECATED)
+                        for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
                         {
-                            if (OutcomeTag.IsValid())
-                            {
-                                AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, OutcomeTag));
-                            }
+                            if (!Spec.bExposed) continue;
+                            if (!Spec.Outcome.IsValid()) continue;
+                            AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
                         }
                         break;
                     }
@@ -570,41 +564,76 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
     }
 }
 
-TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, TArray<FName>>* OutEntryTagsByOutcome)
+TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome)
 {
-    TArray<FName> EntryTags;
-    for (UEdGraphNode* Node : Graph->Nodes)
-    {
-        if (!Cast<UQuestlineNode_Entry>(Node)) continue;
+	TArray<FName> EntryTags;
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(Node);
+		if (!EntryNode) continue;
 
-        for (UEdGraphPin* Pin : Node->Pins)
-        {
-            if (Pin->Direction != EGPD_Output) continue;
-            if (Pin->bOrphanedPin) continue;
+		/**
+		 * Non-outcome output pins (Any Outcome, Deactivated) produce unconditional entry tags — no per-outcome or per-source
+		 * routing, just "fire when this graph enters regardless of context."
+		 */
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction != EGPD_Output) continue;
+			if (Pin->bOrphanedPin) continue;
+			if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
+			ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, EntryTags);
+		}
 
-            // Named outcome pins: route into the per-outcome map when the caller provides one
-            if (Pin->PinType.PinCategory == TEXT("QuestOutcome") && OutEntryTagsByOutcome)
-            {
-                const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(Pin->PinName, false);
-                if (OutcomeTag.IsValid())
-                {
-                    TArray<FName> OutcomeTags;
-                    ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutcomeTags);
-                    for (const FName& Tag : OutcomeTags)
-                    {
-                        OutEntryTagsByOutcome->FindOrAdd(OutcomeTag).AddUnique(Tag);
-                    }
-                }
-            }
-            else
-            {
-                // "Any Outcome" pin (or all pins when no per-outcome map is requested)
-                ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, EntryTags);
-            }
-        }
-        break;
-    }
-    return EntryTags;
+		/**
+		 * Per-spec routing for QuestOutcome pins. Iterate IncomingSignals directly — pin names are disambiguated and not
+		 * parseable as gameplay tags. Each exposed spec produces one FQuestEntryDestination per resolved downstream tag, each
+		 * tagged with the compiled QuestTag of the source content node as SourceFilter.
+		 */
+		if (OutEntryTagsByOutcome)
+		{
+			const UQuestlineGraph* ChildAsset = FQuestlineGraphTraversalPolicy::ResolveContainingAsset(Graph);
+			for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
+			{
+				if (!Spec.bExposed) continue;
+				if (!Spec.Outcome.IsValid()) continue;
+				if (!Spec.SourceNodeGuid.IsValid())
+				{
+					AddWarning(FString::Printf(TEXT("[%s] Entry has unqualified incoming-signal spec for outcome '%s' — skipped. Re-run Import."), *TagPrefix, *Spec.Outcome.ToString()), EntryNode);
+					continue;
+				}
+
+				const FName PinName = UQuestlineNode_Entry::BuildDisambiguatedPinName(Spec, EntryNode->IncomingSignals);
+				UEdGraphPin* SpecPin = EntryNode->FindPin(PinName, EGPD_Output);
+				if (!SpecPin)
+				{
+					AddWarning(FString::Printf(TEXT("[%s] Entry spec for outcome '%s' has no corresponding pin '%s' — skipped."), *TagPrefix, *Spec.Outcome.ToString(), *PinName.ToString()), EntryNode);
+					continue;
+				}
+
+				const FName SourceFilter = ResolveSourceFilterTag(Spec, ChildAsset);
+				if (SourceFilter.IsNone())
+				{
+					AddWarning(FString::Printf(TEXT("[%s] Entry spec for outcome '%s' has unresolvable source (GUID %s) — skipped. Re-run Import to refresh, or verify the parent asset is accessible."), *TagPrefix, *Spec.Outcome.ToString(), *Spec.SourceNodeGuid.ToString()), EntryNode);
+					continue;
+				}
+
+				TArray<FName> DestTags;
+				ResolvePinToTags(SpecPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, DestTags);
+
+				FQuestEntryRouteList& RouteList = OutEntryTagsByOutcome->FindOrAdd(Spec.Outcome);
+				for (const FName& DestTag : DestTags)
+				{
+					FQuestEntryDestination Dest;
+					Dest.DestTag = DestTag;
+					Dest.SourceFilter = SourceFilter;
+					RouteList.Destinations.Add(Dest);
+				}
+			}
+		}
+
+		break;
+	}
+	return EntryTags;
 }
 
 void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid)
@@ -825,6 +854,86 @@ void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
     ISimpleQuestEditorModule::Get().RegisterCompiledTags(
         InGraph->GetPackage()->GetName(),
         InGraph->CompiledQuestTags);
+}
+
+FName FQuestlineGraphCompiler::ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const
+{
+	if (!SourceNode || !ContainingAsset) return NAME_None;
+
+	/**
+	 * Walk up the Outer chain collecting sanitized labels. A content node either lives directly in the top-level asset graph
+	 * or is nested inside one or more Quest node inner graphs. Each level contributes its label to the compiled tag path.
+	 */
+	TArray<FString> LabelsTopDown;
+	const UEdGraphNode* Cursor = SourceNode;
+	while (Cursor)
+	{
+		const UQuestlineNode_ContentBase* CursorContent = Cast<UQuestlineNode_ContentBase>(Cursor);
+		if (!CursorContent) break;
+		LabelsTopDown.Insert(SanitizeTagSegment(CursorContent->NodeLabel.ToString()), 0);
+
+		const UEdGraph* Graph = Cursor->GetGraph();
+		if (!Graph) break;
+		UObject* Outer = Graph->GetOuter();
+		if (const UQuestlineNode_Quest* ContainerQuest = Cast<UQuestlineNode_Quest>(Outer))
+		{
+			Cursor = ContainerQuest;
+			continue;
+		}
+		break; // Reached the top-level asset graph.
+	}
+
+	if (LabelsTopDown.IsEmpty()) return NAME_None;
+
+	const FString AssetPrefix = SanitizeTagSegment(ContainingAsset->GetQuestlineID().IsEmpty() ? ContainingAsset->GetName() : ContainingAsset->GetQuestlineID());
+	FString FullPath = TEXT("Quest.") + AssetPrefix;
+	for (const FString& Segment : LabelsTopDown) FullPath += TEXT(".") + Segment;
+	return FName(*FullPath);
+}
+
+FName FQuestlineGraphCompiler::ResolveSourceFilterTag(const FIncomingSignalPinSpec& Spec, const UQuestlineGraph* ChildAsset) const
+{
+	if (!Spec.SourceNodeGuid.IsValid()) return NAME_None;
+
+	/**
+	 * Determine which asset contains the source. Same-asset (empty ParentAsset) uses ChildAsset; cross-asset sync-loads the
+	 * referenced asset. Then recursively search all graphs in that asset for a content node with matching QuestGuid.
+	 */
+	UQuestlineGraph* SourceAsset = nullptr;
+	if (Spec.ParentAsset.IsNull())
+	{
+		SourceAsset = const_cast<UQuestlineGraph*>(ChildAsset);
+	}
+	else
+	{
+		SourceAsset = Cast<UQuestlineGraph>(Spec.ParentAsset.TryLoad());
+	}
+	if (!SourceAsset || !SourceAsset->QuestlineEdGraph) return NAME_None;
+
+	TFunction<const UQuestlineNode_ContentBase*(const UEdGraph*)> FindByGuid;
+	FindByGuid = [&FindByGuid, &Spec](const UEdGraph* Graph) -> const UQuestlineNode_ContentBase*
+	{
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (const UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node))
+			{
+				if (ContentNode->QuestGuid == Spec.SourceNodeGuid) return ContentNode;
+			}
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
+				{
+					if (const UQuestlineNode_ContentBase* Found = FindByGuid(InnerGraph)) return Found;
+				}
+			}
+		}
+		return nullptr;
+	};
+
+	const UQuestlineNode_ContentBase* SourceNode = FindByGuid(SourceAsset->QuestlineEdGraph);
+	if (!SourceNode) return NAME_None;
+
+	return ComputeCompiledTagForContentNode(SourceNode, SourceAsset);
 }
 
 int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)

@@ -256,36 +256,37 @@ void UQuestManagerSubsystem::HandleAbandonQuestEvent(FGameplayTag Channel, const
     SetQuestDeactivated(QuestTag, EDeactivationSource::External);
 }
 
-void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag)
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag)
 {
     TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
     if (!InstancePtr || !*InstancePtr)
     {
-        UE_LOG(LogSimpleQuest, Warning,
-            TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"),
-            *NodeTagName.ToString());
+        UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
         return;
     }
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
-    // Diamond convergence guard — refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
-    // Completed is intentionally excluded so loops and repeatable quests can re-enter.
+    /**
+     * Diamond convergence guard — refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
+     * Completed is intentionally excluded so loops and repeatable quests can re-enter.
+     */
     if (NodeTag.IsValid() && WorldState)
     {
         if (WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active))       ||
             WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_PendingGiver)) ||
             WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Blocked)))
         {
-            // Already-active Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs
-            // where a Quest node is activated before its incoming outcome arrives.
-            if (IncomingOutcomeTag.IsValid()
-                && WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)))
+            /**
+             * Already-active Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
+             * a Quest node is activated before its incoming outcome arrives. Source filtering applies the same way as first-time activation.
+             */
+            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)))
             {
                 if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
                 {
-                    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' to already-active quest '%s'"),
-                        *IncomingOutcomeTag.ToString(), *NodeTagName.ToString());
+                    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-active quest '%s'"),
+                        *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
 
                     const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
                     if (!EntryFactName.IsNone())
@@ -293,15 +294,15 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                         WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
                     }
 
-                    if (const FQuestOutcomeNodeList* OutcomeEntries = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+                    if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
                     {
-                        for (const FName& StepTag : OutcomeEntries->NodeTags)
+                        for (const FQuestEntryDestination& Entry : RouteList->Destinations)
                         {
-                            ActivateNodeByTag(StepTag);
+                            if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
                         }
                     }
                 }
-            }            
+            }
             UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
                 *NodeTagName.ToString(),
                 WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)) ? TEXT("active") :
@@ -327,11 +328,12 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     }
 
     (*InstancePtr)->Activate(NodeTag);
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated"), *NodeTagName.ToString());
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
+        *NodeTagName.ToString(), *IncomingSourceTag.ToString(), *IncomingOutcomeTag.ToString());
 
     if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
     {
-        // Write entry outcome fact for prerequisite expressions within the inner graph
+        // Write entry outcome fact for prerequisite expressions within the inner graph.
         if (IncomingOutcomeTag.IsValid() && WorldState)
         {
             const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
@@ -342,21 +344,24 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                 WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
             }
         }
-        
-        // Always activate the "Any Outcome" entry paths
+
+        // Always activate the Any-Outcome entry paths — unconditional, no source filter.
         for (const FName& StepTag : QuestNode->GetEntryStepTags())
         {
             ActivateNodeByTag(StepTag);
         }
 
-        // If entered via a specific outcome, also activate that outcome's entry paths
+        /**
+         * Outcome-specific, source-filtered entries. Each destination fires only when its SourceFilter matches the IncomingSourceTag.
+         * This is where the per-source routing protocol discriminates two specs producing the same outcome from different sources.
+         */
         if (IncomingOutcomeTag.IsValid())
         {
-            if (const FQuestOutcomeNodeList* OutcomeEntries = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+            if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
             {
-                for (const FName& StepTag : OutcomeEntries->NodeTags)
+                for (const FQuestEntryDestination& Entry : RouteList->Destinations)
                 {
-                    ActivateNodeByTag(StepTag);
+                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
                 }
             }
         }
@@ -366,14 +371,11 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
 void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
 {
     if (!Node) return;
-    
+
     const int32 OutcomeCount = Node->GetNextNodesForOutcome(OutcomeTag) ? Node->GetNextNodesForOutcome(OutcomeTag)->Num() : 0;
     UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' — %d outcome + %d any-outcome downstream node(s)"),
-        *Node->GetQuestTag().ToString(),
-        *OutcomeTag.ToString(),
-        OutcomeCount,
-        Node->GetNextNodesOnAnyOutcome().Num());
-    
+        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), OutcomeCount, Node->GetNextNodesOnAnyOutcome().Num());
+
     if (Node->GetQuestTag().IsValid())
     {
         SetQuestResolved(Node->GetQuestTag(), OutcomeTag);
@@ -389,16 +391,22 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     PublishQuestEndedEvent(Node, OutcomeTag);
 
+    /**
+     * Thread this node's compiled QuestTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
+     * can filter its source-qualified entries against the originator of this outcome.
+     */
+    const FName SourceTagName = Node->GetQuestTag().GetTagName();
+
     if (const TArray<FName>* OutcomeNodes = Node->GetNextNodesForOutcome(OutcomeTag))
     {
         for (const FName& Tag : *OutcomeNodes)
         {
-            ActivateNodeByTag(Tag, OutcomeTag);
+            ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
         }
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
-        ActivateNodeByTag(Tag, OutcomeTag);
+        ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
     }
 }
 

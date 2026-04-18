@@ -24,13 +24,14 @@ protected:
 	TArray<FName> EntryStepTags;
 
 	/**
-	 * Per-outcome entry routing. When this quest is entered via a specific outcome from the parent graph, the corresponding
-	 * tags are activated in addition to EntryStepTags. Compiler-written from the inner Entry node's named outcome output pins.
+	 * Per-outcome, source-filtered entry routing. When this quest is entered via a specific outcome from a specific source,
+	 * each FQuestEntryDestination in the matching list fires only if its SourceFilter matches the IncomingSourceTag passed
+	 * by the activating parent. Compiler-written from the inner Entry node's exposed specs — one entry per spec.
 	 */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-	TMap<FGameplayTag, FQuestOutcomeNodeList> EntryStepTagsByOutcome;
+	TMap<FGameplayTag, FQuestEntryRouteList> EntryStepTagsByOutcome;
 
 public:
 	FORCEINLINE const TArray<FName>& GetEntryStepTags() const { return EntryStepTags; }
-	FORCEINLINE const TMap<FGameplayTag, FQuestOutcomeNodeList>& GetEntryStepTagsByOutcome() const { return EntryStepTagsByOutcome; }
+	FORCEINLINE const TMap<FGameplayTag, FQuestEntryRouteList>& GetEntryStepTagsByOutcome() const { return EntryStepTagsByOutcome; }
 };

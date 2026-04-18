@@ -11,6 +11,37 @@
 class UQuestReward;
 struct FWorldStateFactAddedEvent;
 
+/**
+ * A single source-filtered entry destination. DestTag is the tag of a step or sub-node to activate when the parent quest
+ * enters via a matching outcome from a matching source. SourceFilter is the compiled QuestTag (as FName) of the specific
+ * source node required to fire this entry; a mismatch skips the entry. No "any source" sentinel, every compiled entry
+ * must carry a concrete SourceFilter.
+ */
+USTRUCT(BlueprintType)
+struct FQuestEntryDestination
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleDefaultsOnly)
+    FName DestTag;
+
+    UPROPERTY(VisibleDefaultsOnly)
+    FName SourceFilter;
+};
+
+/**
+ * Value type for Quest's EntryStepTagsByOutcome map. Wraps a per-outcome list of source-filtered destinations: one
+ * entry per Entry-node output pin that fires for this outcome, each tagged with the parent source required to fire it.
+ */
+USTRUCT(BlueprintType)
+struct FQuestEntryRouteList
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FQuestEntryDestination> Destinations;
+};
+
 USTRUCT(BlueprintType)
 struct FQuestOutcomeNodeList
 {

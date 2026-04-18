@@ -25,6 +25,32 @@
  */
 FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSpec& Spec, const TArray<FIncomingSignalPinSpec>& AllSpecs)
 {
+	/**
+	 * Two spec shapes produce pins: specific-outcome-from-source (Outcome valid) and any-outcome-from-source (Outcome invalid,
+	 * SourceNodeGuid valid). Specific specs use graded disambiguation (bare outcome → source-qualified → cross-asset). Any-outcome
+	 * specs always source-qualify because "Any" alone carries no information about which parent triggered entry.
+	 */
+	const bool bIsAnyOutcome = !Spec.Outcome.IsValid();
+	const FString SourceLabel = Spec.CachedSourceLabel.IsEmpty() ? TEXT("Unknown") : Spec.CachedSourceLabel;
+
+	if (bIsAnyOutcome)
+	{
+		// Source-qualified "Any (Label)" as the base form. Upgrade to cross-asset when two any-outcome specs share source label.
+		bool bSourceLabelCollides = false;
+		for (const FIncomingSignalPinSpec& Other : AllSpecs)
+		{
+			if (&Other == &Spec) continue;
+			if (!Other.bExposed) continue;
+			if (Other.Outcome.IsValid()) continue; // only compare to other any-outcome specs
+			const FString OtherLabel = Other.CachedSourceLabel.IsEmpty() ? TEXT("Unknown") : Other.CachedSourceLabel;
+			if (OtherLabel == SourceLabel && Other.ParentAsset != Spec.ParentAsset) { bSourceLabelCollides = true; break; }
+		}
+		if (!bSourceLabelCollides) return FName(*FString::Printf(TEXT("Any (%s)"), *SourceLabel));
+		const FString AssetLabel = Spec.ParentAsset.IsNull() ? TEXT("Local") : Spec.ParentAsset.GetAssetName();
+		return FName(*FString::Printf(TEXT("Any (%s / %s)"), *SourceLabel, *AssetLabel));
+	}
+
+	// Specific-outcome path (existing graded disambiguation).
 	const FName OutcomeName = Spec.Outcome.GetTagName();
 	const FString OutcomeLeaf = [&OutcomeName]()
 	{
@@ -32,7 +58,6 @@ FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSp
 		int32 LastDot; if (Full.FindLastChar(TEXT('.'), LastDot)) return Full.Mid(LastDot + 1); return Full;
 	}();
 
-	// Collect sibling exposed specs sharing the same outcome tag (excluding ourselves).
 	TArray<const FIncomingSignalPinSpec*> Siblings;
 	for (const FIncomingSignalPinSpec& Other : AllSpecs)
 	{
@@ -44,11 +69,8 @@ FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSp
 
 	if (Siblings.Num() == 0) return FName(*OutcomeLeaf);
 
-	// Outcome collides with siblings — qualify by source label.
-	const FString SourceLabel = Spec.CachedSourceLabel.IsEmpty() ? TEXT("Unknown") : Spec.CachedSourceLabel;
 	const FString Qualified = FString::Printf(TEXT("%s (%s)"), *OutcomeLeaf, *SourceLabel);
 
-	// Check whether source-qualified names still collide across the sibling set (different assets, same source label).
 	bool bSourceLabelCollides = false;
 	for (const FIncomingSignalPinSpec* Sibling : Siblings)
 	{
@@ -58,10 +80,8 @@ FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSp
 
 	if (!bSourceLabelCollides) return FName(*Qualified);
 
-	// Still ambiguous — add asset qualifier. Use asset short name; Session 22 can upgrade to FriendlyName when that lands.
 	const FString AssetLabel = Spec.ParentAsset.IsNull() ? TEXT("Local") : Spec.ParentAsset.GetAssetName();
-	const FString DeepQualified = FString::Printf(TEXT("%s (%s / %s)"), *OutcomeLeaf, *SourceLabel, *AssetLabel);
-	return FName(*DeepQualified);
+	return FName(*FString::Printf(TEXT("%s (%s / %s)"), *OutcomeLeaf, *SourceLabel, *AssetLabel));
 }
 
 /*------------------------------------------------------------------------------------------------*
@@ -71,19 +91,19 @@ FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSp
 void UQuestlineNode_Entry::AllocateDefaultPins()
 {
 	/**
-	 * One pin per exposed spec — not per outcome tag. Multiple specs may share an outcome tag when different sources
-	 * produce it; each gets its own pin with a disambiguated name so downstream wiring can be source-specific. Unexposed
-	 * specs are stored but generate no pin (they persist the designer's selection state across re-imports).
+	 * One pin per exposed spec. Specific-outcome specs have valid Outcome; any-outcome-from-source specs have invalid Outcome
+	 * but valid SourceNodeGuid. Both valid states generate pins — only drop specs with invalid source identity.
 	 */
 	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
 		if (!Spec.bExposed) continue;
-		if (!Spec.Outcome.IsValid()) continue;
+		if (!Spec.SourceNodeGuid.IsValid()) continue;
 		CreatePin(EGPD_Output, TEXT("QuestOutcome"), BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
 
-	// Unconditional path — always fires when this graph activates, regardless of which outcome (or source) triggered entry.
-	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
+	// Per-graph unconditional entry pin. Distinct from content nodes' "Any Outcome" sentinel — this represents "the graph was
+	// entered," not "this node completed with any outcome." Name chosen to reflect graph-level semantics.
+	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Entered"));
 
 	// Deactivation — fires when the parent Quest node is deactivated.
 	if (bShowDeactivationPins)
@@ -95,6 +115,28 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 void UQuestlineNode_Entry::PostLoad()
 {
 	Super::PostLoad();
+
+	/**
+	 * Migration — rename "Any Outcome" to "Entered" on the per-graph unconditional sentinel pin (Session 22 rename).
+	 * Preserves wiring because we mutate the existing pin in place rather than reconstructing.
+	 */
+	int32 RenamedSentinelCount = 0;
+	for (UEdGraphPin* Pin : Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Output
+			&& Pin->PinType.PinCategory == TEXT("QuestActivation")
+			&& Pin->PinName == TEXT("Any Outcome"))
+		{
+			Pin->PinName = TEXT("Entered");
+			++RenamedSentinelCount;
+		}
+	}
+	if (RenamedSentinelCount > 0)
+	{
+		UE_LOG(LogSimpleQuest, Log,
+			TEXT("UQuestlineNode_Entry::PostLoad: migrated '%s' — %d 'Any Outcome' pin(s) renamed to 'Entered'."),
+			*GetName(), RenamedSentinelCount);
+	}
 
 	/**
 	 * Scrub unqualified specs — invalid state in the post-legacy-removal model. Only present on assets authored during
@@ -122,7 +164,7 @@ void UQuestlineNode_Entry::RefreshOutcomePins()
 	for (const FIncomingSignalPinSpec& Spec : IncomingSignals)
 	{
 		if (!Spec.bExposed) continue;
-		if (!Spec.Outcome.IsValid()) continue;
+		if (!Spec.SourceNodeGuid.IsValid()) continue;
 		DesiredNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
@@ -230,12 +272,27 @@ void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 	for (const FQuestEffectiveSource& Source : ReachingSources)
 	{
 		if (!Source.Pin) continue;
-		// Named outcome pins only — AnyOutcome routes lose per-outcome identity at the boundary.
-		if (Source.Pin->PinType.PinCategory != TEXT("QuestOutcome")) continue;
 		if (Source.Pin->PinName.IsNone()) continue;
 
-		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(Source.Pin->PinName, /*bErrorIfNotFound=*/ false);
-		if (!Tag.IsValid()) continue;
+		/**
+		 * Two accepted source-pin shapes: QuestOutcome (specific outcome from a parent node) and QuestActivation with pin name
+		 * "Any Outcome" (unconditional source — any-outcome-from-this-parent spec). Entry "Entered" pins never appear here —
+		 * the walker scopes to parent graphs and doesn't descend into child graphs' own Entry pins.
+		 */
+		FGameplayTag Outcome;
+		if (Source.Pin->PinType.PinCategory == TEXT("QuestOutcome"))
+		{
+			Outcome = FGameplayTag::RequestGameplayTag(Source.Pin->PinName, /*bErrorIfNotFound=*/ false);
+			if (!Outcome.IsValid()) continue;
+		}
+		else if (Source.Pin->PinType.PinCategory == TEXT("QuestActivation") && Source.Pin->PinName == TEXT("Any Outcome"))
+		{
+			// Leave Outcome invalid — marks this as an any-outcome-from-source spec.
+		}
+		else
+		{
+			continue;
+		}
 
 		const UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Source.Pin->GetOwningNode());
 		if (!ContentNode) continue;
@@ -245,7 +302,7 @@ void UQuestlineNode_Entry::ImportOutcomePinsFromParent()
 
 		FQualifiedTarget Target;
 		Target.SourceNodeGuid = SourceGuid;
-		Target.Outcome = Tag;
+		Target.Outcome = Outcome;
 		Target.ParentAsset = (Source.Asset && Source.Asset != OwnAsset) ? FSoftObjectPath(Source.Asset) : FSoftObjectPath();
 		Target.SourceLabel = ContentNode->NodeLabel.ToString();
 		Targets.Add(Target);

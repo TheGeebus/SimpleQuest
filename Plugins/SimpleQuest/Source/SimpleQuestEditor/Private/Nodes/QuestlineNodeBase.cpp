@@ -182,8 +182,10 @@ void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)
 	        {
 	        	ForwardOuts.Add(Pin);
 	        }
-	        else if (PinName == TEXT("Any Outcome") && Cat == TEXT("QuestActivation"))
+	        else if ((PinName == TEXT("Any Outcome") || PinName == TEXT("Entered")) && Cat == TEXT("QuestActivation"))
 	        {
+	        	// Both sentinel names share priority behavior in autowire. Entry nodes rarely land here as "new node"
+	        	// (they're not generally dragged from palettes), but keeping coverage symmetric with IsAnyOutcomeSource.
 	        	AnyOutcomeOuts.Add(Pin);
 	        }
 	        else if (Cat == TEXT("QuestOutcome"))

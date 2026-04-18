@@ -705,8 +705,9 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 		if (!EntryNode) continue;
 
 		/**
-		 * Non-outcome output pins (Any Outcome, Deactivated) produce unconditional entry tags — no per-outcome or per-source
-		 * routing, just "fire when this graph enters regardless of context."
+		 * Non-outcome output pins (Entered sentinel, Deactivated) produce unconditional entry tags — no per-outcome or per-source
+		 * routing, just "fire when this graph enters regardless of context." Iteration gates on category (anything not QuestOutcome),
+		 * so the rename from "Any Outcome" to "Entered" is transparent to this pass.
 		 */
 		for (UEdGraphPin* Pin : Node->Pins)
 		{
@@ -727,10 +728,12 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 			for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
 			{
 				if (!Spec.bExposed) continue;
-				if (!Spec.Outcome.IsValid()) continue;
 				if (!Spec.SourceNodeGuid.IsValid())
 				{
-					AddWarning(FString::Printf(TEXT("[%s] Entry has unqualified incoming-signal spec for outcome '%s' — skipped. Re-run Import."), *TagPrefix, *Spec.Outcome.ToString()), EntryNode);
+					AddWarning(FString::Printf(TEXT("[%s] Entry has unqualified incoming-signal spec (outcome '%s') — skipped. Re-run Import."),
+						*TagPrefix,
+						Spec.Outcome.IsValid() ? *Spec.Outcome.ToString() : TEXT("any")),
+						EntryNode);
 					continue;
 				}
 
@@ -738,20 +741,34 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 				UEdGraphPin* SpecPin = EntryNode->FindPin(PinName, EGPD_Output);
 				if (!SpecPin)
 				{
-					AddWarning(FString::Printf(TEXT("[%s] Entry spec for outcome '%s' has no corresponding pin '%s' — skipped."), *TagPrefix, *Spec.Outcome.ToString(), *PinName.ToString()), EntryNode);
+					AddWarning(FString::Printf(TEXT("[%s] Entry spec (outcome '%s', source '%s') has no corresponding pin '%s' — skipped."),
+						*TagPrefix,
+						Spec.Outcome.IsValid() ? *Spec.Outcome.ToString() : TEXT("any"),
+						*Spec.CachedSourceLabel,
+						*PinName.ToString()),
+						EntryNode);
 					continue;
 				}
 
 				const FName SourceFilter = ResolveSourceFilterTag(Spec, ChildAsset);
 				if (SourceFilter.IsNone())
 				{
-					AddWarning(FString::Printf(TEXT("[%s] Entry spec for outcome '%s' has unresolvable source (GUID %s) — skipped. Re-run Import to refresh, or verify the parent asset is accessible."), *TagPrefix, *Spec.Outcome.ToString(), *Spec.SourceNodeGuid.ToString()), EntryNode);
+					AddWarning(FString::Printf(TEXT("[%s] Entry spec (outcome '%s', source GUID %s) has unresolvable source — skipped. Re-run Import to refresh, or verify the parent asset is accessible."),
+						*TagPrefix,
+						Spec.Outcome.IsValid() ? *Spec.Outcome.ToString() : TEXT("any"),
+						*Spec.SourceNodeGuid.ToString()),
+						EntryNode);
 					continue;
 				}
 
 				TArray<FName> DestTags;
 				ResolvePinToTags(SpecPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, DestTags);
 
+				/**
+				 * Bucket key: specific outcome for specific specs, FGameplayTag() (invalid) for any-outcome specs. The runtime looks
+				 * up both the specific bucket (for matching IncomingOutcomeTag) and the invalid bucket (for source-only matches)
+				 * when activating entry destinations.
+				 */
 				FQuestEntryRouteList& RouteList = OutEntryTagsByOutcome->FindOrAdd(Spec.Outcome);
 				for (const FName& DestTag : DestTags)
 				{
@@ -1108,7 +1125,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     {
         const FName QuestTagName = FName(*(TEXT("Quest.") + TagPrefix));
 
-        if (OutputPin->PinName == TEXT("Any Outcome"))
+        if (OutputPin->PinName == TEXT("Entered"))
         {
             // The parent quest's Active fact is always set when the inner graph is running
             FPrerequisiteExpressionNode LeafNode;

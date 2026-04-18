@@ -469,8 +469,7 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 	}
 	
 	// Non-prereq output to prereq input: only Quest outcome pins
-	const bool bIsQuestOutcome = OutputPin->PinType.PinCategory == TEXT("QuestOutcome")
-		|| (OutputPin->PinType.PinCategory == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
+	const bool bIsQuestOutcome = OutputPin->PinType.PinCategory == TEXT("QuestOutcome")	|| IsAnyOutcomeSource(OutputPin);
 
 	if (bIsQuestOutcome && (TraversalPolicy->IsContentNode(OutputNode) || Cast<const UQuestlineNode_Entry>(OutputNode)))
 	{
@@ -669,9 +668,12 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidateKnotConnection(const UEdGr
 
 bool UQuestlineGraphSchema::IsAnyOutcomeSource(const UEdGraphPin* Pin)
 {
+	// Unconditional source sentinels — content nodes' "Any Outcome" (per-node) and Entry nodes' "Entered" (per-graph). Both
+	// fire unconditionally when their owning node activates, so collision behavior and prereq-eligibility are identical. The
+	// two names exist for designer-facing semantic clarity; connection rules treat them uniformly.
 	return Pin
 		&& Pin->PinType.PinCategory == TEXT("QuestActivation")
-		&& Pin->PinName == TEXT("Any Outcome");
+		&& (Pin->PinName == TEXT("Any Outcome") || Pin->PinName == TEXT("Entered"));
 }
 
 bool UQuestlineGraphSchema::PinsRepresentSameSignal(const UEdGraphPin* A, const UEdGraphPin* B)
@@ -965,10 +967,10 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	                return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqKnotMultipleSources",
 	                    "This reroute node already has a source and leads to a prerequisite input. Use an AND or OR node to combine conditions."));
 	            }
-	            const FName OutCat = OutputPin->PinType.PinCategory;
-	            const bool bCompatible = OutCat == TEXT("QuestOutcome")
-	                                  || OutCat == TEXT("QuestPrerequisite")
-	                                  || (OutCat == TEXT("QuestActivation") && OutputPin->PinName == TEXT("Any Outcome"));
+	        	const FName OutCat = OutputPin->PinType.PinCategory;
+	        	const bool bCompatible = OutCat == TEXT("QuestOutcome")
+									  || OutCat == TEXT("QuestPrerequisite")
+									  || IsAnyOutcomeSource(OutputPin);
 	            if (!bCompatible)
 	            {
 	                return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqKnotBadCategory",

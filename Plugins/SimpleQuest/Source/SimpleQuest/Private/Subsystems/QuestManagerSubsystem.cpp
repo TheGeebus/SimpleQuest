@@ -301,6 +301,17 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                             if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
                         }
                     }
+
+                    if (IncomingSourceTag != NAME_None)
+                    {
+                        if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+                        {
+                            for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
+                            {
+                                if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                            }
+                        }
+                    }
                 }
             }
             UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
@@ -360,6 +371,22 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
             {
                 for (const FQuestEntryDestination& Entry : RouteList->Destinations)
+                {
+                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                }
+            }
+        }
+        
+        /**
+         * Any-outcome-from-source entries — bucket keyed by invalid FGameplayTag. Fires when the incoming source matches,
+         * regardless of which specific outcome triggered entry. Gated on IncomingSourceTag so we don't dispatch any-outcome
+         * routes when no source context exists (e.g., synthetic activation paths).
+         */
+        if (IncomingSourceTag != NAME_None)
+        {
+            if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+            {
+                for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
                 {
                     if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
                 }

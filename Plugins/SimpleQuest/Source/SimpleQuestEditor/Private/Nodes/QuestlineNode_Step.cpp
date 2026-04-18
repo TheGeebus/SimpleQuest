@@ -12,7 +12,7 @@ void UQuestlineNode_Step::AllocateOutcomePins()
 {
 	if (!ObjectiveClass) return;
 
-	TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+	TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
 	for (const FGameplayTag& Tag : Outcomes)
 	{
 		if (Tag.IsValid())
@@ -40,13 +40,13 @@ void UQuestlineNode_Step::RefreshOutcomePins()
 	TArray<FName> DesiredNames;
 	if (ObjectiveClass)
 	{
-		TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+		TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
 		for (const FGameplayTag& Tag : Outcomes)
 		{
 			if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
 		}	
 	}
-	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
+	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

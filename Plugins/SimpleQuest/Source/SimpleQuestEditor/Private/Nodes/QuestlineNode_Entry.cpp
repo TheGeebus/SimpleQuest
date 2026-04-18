@@ -101,7 +101,7 @@ void UQuestlineNode_Entry::AllocateDefaultPins()
 		if (!Spec.SourceNodeGuid.IsValid()) continue;
 		OutcomeNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
-	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(OutcomeNames);
+	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(OutcomeNames);
 	for (const FName& Name : OutcomeNames)
 	{
 		CreatePin(EGPD_Output, TEXT("QuestOutcome"), Name);
@@ -173,7 +173,7 @@ void UQuestlineNode_Entry::RefreshOutcomePins()
 		if (!Spec.SourceNodeGuid.IsValid()) continue;
 		DesiredNames.Add(BuildDisambiguatedPinName(Spec, IncomingSignals));
 	}
-	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
+	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, {});
 }
 

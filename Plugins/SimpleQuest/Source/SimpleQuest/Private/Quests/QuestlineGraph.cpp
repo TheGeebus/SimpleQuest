@@ -48,11 +48,11 @@ void UQuestlineGraph::PostLoad()
 		const FString TagStr = TagName.ToString();
 		if (!TagStr.StartsWith(UQuestStateTagUtils::Namespace) && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
 		{
-			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Active));
-			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Completed));
-			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_PendingGiver));
-			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Deactivated));
-			Add(UQuestStateTagUtils::MakeStateFact(TagName, UQuestStateTagUtils::Leaf_Blocked));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Active));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked));
 		}
 	}
 

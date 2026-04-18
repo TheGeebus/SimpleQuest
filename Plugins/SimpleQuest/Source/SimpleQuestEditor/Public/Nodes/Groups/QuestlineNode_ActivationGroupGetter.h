@@ -15,6 +15,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_ActivationGroupGetter : public UQuest
 public:
 	virtual void AllocateDefaultPins() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }

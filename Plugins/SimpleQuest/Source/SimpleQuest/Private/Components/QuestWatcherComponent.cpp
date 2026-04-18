@@ -164,7 +164,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is waiting for a giver
         if (QuestPair.Value.bWatchActivation)
         {
-            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver), false);
+            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
             if (WorldState->HasFact(PendingFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -175,7 +175,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is currently active
         if (QuestPair.Value.bWatchStart)
         {
-            const FGameplayTag ActiveFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active), false);
+            const FGameplayTag ActiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false);
             if (WorldState->HasFact(ActiveFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -186,7 +186,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     	// Quest has already completed
     	if (QuestPair.Value.bWatchEnd)
     	{
-    		const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed), false);
+    		const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed), false);
     		if (WorldState->HasFact(CompletedFact))
     		{
     			ActiveQuestTags.RemoveTag(QuestTag);
@@ -198,7 +198,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     				// Quest.State.<Path>.Outcome.<Leaf>, which SetQuestResolved writes on completion.
     				for (const FGameplayTag& OutcomeTag : QuestPair.Value.OutcomeFilter.GetGameplayTagArray())
     				{
-    					const FName OutcomeFactName = UQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag);
+    					const FName OutcomeFactName = FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag);
     					const FGameplayTag OutcomeFact = UGameplayTagsManager::Get().RequestGameplayTag(OutcomeFactName, false);
     					if (OutcomeFact.IsValid() && WorldState->HasFact(OutcomeFact))
     					{
@@ -223,7 +223,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     	// Quest has been deactivated
     	if (QuestPair.Value.bWatchDeactivation)
     	{
-    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated), false);
+    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated), false);
     		if (WorldState->HasFact(DeactivatedFact))
     		{
     			ActiveQuestTags.RemoveTag(QuestTag);

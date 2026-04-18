@@ -289,7 +289,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
                         {
                             if (!Spec.bExposed) continue;
                             if (!Spec.Outcome.IsValid()) continue;
-                            AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
+                            AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
                         }
                         break;
                     }
@@ -432,7 +432,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 					{
 						if (!Spec.bExposed) continue;
 						if (!Spec.Outcome.IsValid()) continue;
-						AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
+						AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
 					}
 					break;
 				}
@@ -453,11 +453,11 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         {
             if (QuestStepNode->ObjectiveClass)
             {
-                TArray<FGameplayTag> Outcomes = USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass);
+                TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass);
                 for (const FGameplayTag& OutcomeTag : Outcomes)
                 {
                     AllCompiledQuestTags.AddUnique(OutcomeTag.GetTagName());
-                    AllCompiledQuestTags.AddUnique(UQuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
+                    AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeNodeOutcomeFact(TagName, OutcomeTag));
                 }
             }
         }
@@ -1017,7 +1017,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
 
 FString FQuestlineGraphCompiler::SanitizeTagSegment(const FString& InLabel) const
 {
-    return USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(InLabel);
+    return FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(InLabel);
 }
 
 FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const
@@ -1291,7 +1291,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
             // The parent quest's Active fact is always set when the inner graph is running
             FPrerequisiteExpressionNode LeafNode;
             LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTagName, UQuestStateTagUtils::Leaf_Active), false);
+            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Active), false);
             return OutExpression.Nodes.Add(LeafNode);
         }
 
@@ -1314,7 +1314,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
         FPrerequisiteExpressionNode LeafNode;
         LeafNode.Type = EPrerequisiteExpressionType::Leaf;
         LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-            UQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, OutcomeTag), false);
+            FQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, OutcomeTag), false);
         return OutExpression.Nodes.Add(LeafNode);
     }
 
@@ -1342,7 +1342,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 FPrerequisiteExpressionNode LeafNode;
                 LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
                 LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-                    UQuestStateTagUtils::MakeStateFact(NodeTagName, UQuestStateTagUtils::Leaf_Completed), false);
+                    FQuestStateTagUtils::MakeStateFact(NodeTagName, FQuestStateTagUtils::Leaf_Completed), false);
                 return OutExpression.Nodes.Add(LeafNode);
             }
 
@@ -1358,7 +1358,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 
                 FPrerequisiteExpressionNode LeafNode;
                 LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
+                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
                 OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
             }
 
@@ -1445,7 +1445,7 @@ FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(
         const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(PinName, false);
         if (OutcomeTag.IsValid())
         {
-            return UQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag);
+            return FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag);
         }
     }
     return NAME_None; // Any Outcome or Abandon — caller handles these

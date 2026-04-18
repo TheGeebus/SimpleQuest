@@ -40,6 +40,8 @@
 #include "Brushes/SlateImageBrush.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -97,9 +99,7 @@ void FSimpleQuestEditor::StartupModule()
 	FQuestlineGraphEditorCommands::Register();
 
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
-	PropertyModule.RegisterCustomClassLayout(
-		UQuestlineNode_Entry::StaticClass()->GetFName(),
-		FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineNodeEntryDetailsCustomization::MakeInstance));
+	PropertyModule.RegisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineNodeEntryDetailsCustomization::MakeInstance));
 	PropertyModule.NotifyCustomizationModuleChanged();
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
@@ -369,7 +369,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
             const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
             if (DetectedRenames.Num() > 0)
             {
-                TotalRenamedActors += USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
+                TotalRenamedActors += FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
                 TotalRenames += DetectedRenames.Num();
             }
 
@@ -478,17 +478,17 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
         for (const FName& QuestTag : Pair.Value)
         {
             AllTags.Add(QuestTag);
-            if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace)  && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+            if (!QuestTag.ToString().StartsWith(FQuestStateTagUtils::Namespace)  && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
             {
                 auto AddState = [&](const FString& Leaf)
                 {
-                    AllTags.Add(UQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
+                    AllTags.Add(FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
                 };
-                AddState(UQuestStateTagUtils::Leaf_Active);
-                AddState(UQuestStateTagUtils::Leaf_Completed);
-                AddState(UQuestStateTagUtils::Leaf_PendingGiver);
-                AddState(UQuestStateTagUtils::Leaf_Deactivated);
-                AddState(UQuestStateTagUtils::Leaf_Blocked);
+                AddState(FQuestStateTagUtils::Leaf_Active);
+                AddState(FQuestStateTagUtils::Leaf_Completed);
+                AddState(FQuestStateTagUtils::Leaf_PendingGiver);
+                AddState(FQuestStateTagUtils::Leaf_Deactivated);
+                AddState(FQuestStateTagUtils::Leaf_Blocked);
             }
         }
     }
@@ -551,13 +551,13 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 					TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(UQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+			if (!QuestTag.ToString().StartsWith(FQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
 			{
-				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
-				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
-				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
-				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
-				Add(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked));
 			}
 		}
 	}

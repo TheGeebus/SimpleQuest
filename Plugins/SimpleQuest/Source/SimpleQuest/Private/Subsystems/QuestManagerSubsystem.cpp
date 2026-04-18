@@ -273,22 +273,22 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
      */
     if (NodeTag.IsValid() && WorldState)
     {
-        if (WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active))       ||
-            WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_PendingGiver)) ||
-            WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Blocked)))
+        if (WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active))       ||
+            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_PendingGiver)) ||
+            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Blocked)))
         {
             /**
              * Already-active Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
              * a Quest node is activated before its incoming outcome arrives. Source filtering applies the same way as first-time activation.
              */
-            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)))
+            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active)))
             {
                 if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
                 {
                     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-active quest '%s'"),
                         *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
 
-                    const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+                    const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
                     if (!EntryFactName.IsNone())
                     {
                         WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
@@ -316,13 +316,13 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             }
             UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
                 *NodeTagName.ToString(),
-                WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Active)) ? TEXT("active") :
-                WorldState->HasFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_PendingGiver)) ? TEXT("pending giver") :
+                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active)) ? TEXT("active") :
+                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_PendingGiver)) ? TEXT("pending giver") :
                 TEXT("blocked"));
             return;
         }
         // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
-        WorldState->RemoveFact(MakeQuestStateFact(NodeTag, UQuestStateTagUtils::Leaf_Deactivated));
+        WorldState->RemoveFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Deactivated));
     }
 
     if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
@@ -347,7 +347,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         // Write entry outcome fact for prerequisite expressions within the inner graph.
         if (IncomingOutcomeTag.IsValid() && WorldState)
         {
-            const FName EntryFactName = UQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+            const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
             if (!EntryFactName.IsNone())
             {
                 UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: setting entry outcome fact '%s' for quest '%s'"),
@@ -441,7 +441,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 {
 	if (!QuestTag.IsValid() || !WorldState) return;
 
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed)))
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed)))
 	{
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped — already completed"), *QuestTag.ToString());
 		return;
@@ -460,20 +460,20 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 	}
 
 	// PendingGiver cleanup  (unchanged)
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver)))
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver)))
 	{
 		RegisteredGiverQuestTags.Remove(QuestTag);
 		ClearQuestPendingGiver(QuestTag);
 	}
 
 	// Active node cleanup — use Node instead of redundant lookup
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active)))
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active)))
 	{
 		if (Node)
 		{
 			Node->DeactivateInternal(QuestTag);
 		}
-		WorldState->RemoveFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
+		WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
 
 		if (FDelegateHandle* Handle = ActiveStepTriggerHandles.Find(QuestTag))
 		{
@@ -492,7 +492,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 		DeferredCompletionOutcomes.Remove(QuestTag);
 	}
 
-	WorldState->AddFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
+	WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
 
 	// Publish with context
 	if (QuestSignalSubsystem)
@@ -706,7 +706,7 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
     RegisteredGiverQuestTags.Add(QuestTag);
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
 
-    if (WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active)))
+    if (WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active)))
     {
         UE_LOG(LogSimpleQuest, Warning,
             TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
@@ -728,7 +728,7 @@ int32 UQuestManagerSubsystem::GetQuestCompletionCount(const FGameplayTag QuestTa
 
 FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)
 {
-    const FName FactName = UQuestStateTagUtils::MakeStateFact(QuestTag, Leaf);
+    const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf);
     return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
 }
 
@@ -737,20 +737,20 @@ void UQuestManagerSubsystem::SetQuestActive(FGameplayTag QuestTag)
     if (WorldState && QuestTag.IsValid())
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestActive: '%s'"), *QuestTag.ToString());
-        WorldState->AddFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
+        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
     }
 }
 
 void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
-    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
-    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
-    WorldState->AddFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+    WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
     QuestCompletionCounts.FindOrAdd(QuestTag)++;
     if (OutcomeTag.IsValid())
     {
-        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
+        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
     }
     UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s' (completion #%d)"),
         *QuestTag.ToString(),
@@ -762,7 +762,7 @@ void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
 {
     if (WorldState && QuestTag.IsValid())
     {
-        WorldState->AddFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
+        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
     }
 }
@@ -771,7 +771,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
 {
     if (WorldState && QuestTag.IsValid())
     {
-        WorldState->RemoveFact(MakeQuestStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
+        WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
     }
 }

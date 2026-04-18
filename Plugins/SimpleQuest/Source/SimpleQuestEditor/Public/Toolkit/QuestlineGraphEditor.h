@@ -3,9 +3,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "IDetailsView.h"
 #include "Toolkit/QuestlineBreadcrumbBar.h"
-
 
 
 class SQuestlineGraphPanel;
@@ -13,6 +13,8 @@ struct FQuestlineOutlinerItem;
 class SQuestlineOutlinerPanel;
 class UQuestlineGraph;
 class SGraphEditor;
+class SGroupExaminerPanel;
+
 
 class FQuestlineGraphEditor : public FAssetEditorToolkit
 {
@@ -93,7 +95,24 @@ private:
 
 	TSharedPtr<SQuestlineOutlinerPanel> OutlinerPanel;
 	static const FName OutlinerTabId;
-
+	
+	/*-----------------------------------------------------------------------------------
+	 * Group Examiner Panel
+	 *----------------------------------------------------------------------------------*/
+	
+public:
+	/**
+	 * Opens the Group Examiner tab (if closed), pins the given group tag, and triggers a topology rebuild. Invoked by the
+	 * "Examine Group Connections" context-menu action on activation group nodes.
+	 */
+	void PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight = nullptr) const;
+	
+private:
+	TSharedRef<SDockTab> SpawnGroupExaminerTab(const FSpawnTabArgs& Args);
+	
+	TSharedPtr<SGroupExaminerPanel> GroupExaminerPanel;
+	static const FName GroupExaminerTabId;
+	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation
 	 *----------------------------------------------------------------------------------*/

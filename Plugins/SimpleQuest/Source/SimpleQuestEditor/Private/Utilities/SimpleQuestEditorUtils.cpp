@@ -8,18 +8,27 @@
 #include "Objectives/QuestObjective.h"
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
 #include "Components/QuestTargetComponent.h"
 #include "Components/QuestGiverComponent.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
 #include "Quests/QuestNodeBase.h"
+#include "Toolkit/QuestlineGraphEditor.h"
+#include "Utilities/GroupExaminerTypes.h"
+#include "Utilities/QuestlineGraphTraversalPolicy.h"
+#include "Toolkit/QuestlineGraphEditor.h"
+#include "ToolMenu.h"
+#include "ToolMenus.h"
 
 
 class UQuestlineNode_Exit;
 
 
-FString USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
+FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
 {
 	FString Result = InLabel.TrimStartAndEnd();
 	for (TCHAR& Ch : Result)
@@ -32,7 +41,7 @@ FString USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& 
 	return Result;
 }
 
-TArray<FName> USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)
+TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)
 {
 	TArray<FName> Result;
 	if (!Graph) return Result;
@@ -49,7 +58,7 @@ TArray<FName> USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdG
 	return Result;
 }
 
-TArray<FGameplayTag> USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass)
+TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass)
 {
 	if (!ObjectiveClass) return {};
 
@@ -111,61 +120,57 @@ TArray<FGameplayTag> USimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 	return AllOutcomes;
 }
 
-namespace
+FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode)
 {
-	/** Walks the graph outer chain from any content node to reconstruct its compiled tag. */
-	FGameplayTag ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode)
+	if (!ContentNode) return FGameplayTag();
+
+	const FString NodeLabel = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+		ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	if (NodeLabel.IsEmpty()) return FGameplayTag();
+
+	UEdGraph* CurrentGraph = ContentNode->GetGraph();
+	if (!CurrentGraph) return FGameplayTag();
+
+	TArray<FString> Segments;
+	Segments.Add(NodeLabel);
+
+	UObject* Outer = CurrentGraph->GetOuter();
+
+	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
 	{
-		if (!ContentNode) return FGameplayTag();
+		const FString QuestLabel = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+			QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+		if (QuestLabel.IsEmpty()) return FGameplayTag();
 
-		const FString NodeLabel = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-			ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-		if (NodeLabel.IsEmpty()) return FGameplayTag();
+		Segments.Insert(QuestLabel, 0);
 
-		UEdGraph* CurrentGraph = ContentNode->GetGraph();
-		if (!CurrentGraph) return FGameplayTag();
-
-		TArray<FString> Segments;
-		Segments.Add(NodeLabel);
-
-		UObject* Outer = CurrentGraph->GetOuter();
-
-		while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
-		{
-			const FString QuestLabel = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-				QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-			if (QuestLabel.IsEmpty()) return FGameplayTag();
-
-			Segments.Insert(QuestLabel, 0);
-
-			UEdGraph* QuestGraph = QuestNode->GetGraph();
-			if (!QuestGraph) return FGameplayTag();
-			Outer = QuestGraph->GetOuter();
-		}
-
-		const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
-		if (!QuestlineAsset) return FGameplayTag();
-
-		const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
-		const FString QuestlineSegment = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-			QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
-		Segments.Insert(QuestlineSegment, 0);
-
-		const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
-
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructNodeTag: %s → %s"),
-			*ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
-
-		return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
+		UEdGraph* QuestGraph = QuestNode->GetGraph();
+		if (!QuestGraph) return FGameplayTag();
+		Outer = QuestGraph->GetOuter();
 	}
+
+	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	if (!QuestlineAsset) return FGameplayTag();
+
+	const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
+	const FString QuestlineSegment = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
+	Segments.Insert(QuestlineSegment, 0);
+
+	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructNodeTag: %s → %s"),
+		*ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
+
+	return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
 }
 
-FGameplayTag USimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
+FGameplayTag FSimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
 {
 	return ReconstructNodeTagInternal(StepNode);
 }
 
-FGameplayTag USimpleQuestEditorUtilities::ReconstructParentQuestTag(const UQuestlineNode_Step* StepNode)
+FGameplayTag FSimpleQuestEditorUtilities::ReconstructParentQuestTag(const UQuestlineNode_Step* StepNode)
 {
 	if (!StepNode) return FGameplayTag();
 
@@ -177,7 +182,7 @@ FGameplayTag USimpleQuestEditorUtilities::ReconstructParentQuestTag(const UQuest
 	return ReconstructNodeTagInternal(ParentQuest);
 }
 
-TArray<FString> USimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGameplayTag& StepTag)
+TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGameplayTag& StepTag)
 {
 	TArray<FString> Names;
 	if (!StepTag.IsValid() || !GEditor) return Names;
@@ -203,7 +208,7 @@ TArray<FString> USimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGa
 	return Names;
 }
 
-TArray<FString> USimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGameplayTag& QuestTag)
+TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGameplayTag& QuestTag)
 {
 	TArray<FString> Names;
 	if (!QuestTag.IsValid() || !GEditor) return Names;
@@ -229,7 +234,7 @@ TArray<FString> USimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGame
 	return Names;
 }
 
-int32 USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
 {
 	if (Renames.Num() == 0 || !GEditor) return 0;
 
@@ -271,7 +276,7 @@ int32 USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 	return ModifiedActors;
 }
 
-FGameplayTag USimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_Step* StepNode)
+FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_Step* StepNode)
 {
 	if (!StepNode) return FGameplayTag();
 
@@ -300,7 +305,7 @@ FGameplayTag USimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 	return FGameplayTag();
 }
 
-bool USimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
+bool FSimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
 {
 	const FGameplayTag CompiledTag = FindCompiledTagForNode(StepNode);
 	if (!CompiledTag.IsValid()) return false;
@@ -311,7 +316,7 @@ bool USimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* St
 	return CompiledTag.GetTagName() == ReconstructedTag.GetTagName();
 }
 
-void USimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
+void FSimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
 {
     if (!Node) return;
 
@@ -461,8 +466,170 @@ void USimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGrap
     }
 }
 
-void USimpleQuestEditorUtilities::SortPinNamesAlphabetical(TArray<FName>& PinNames)
+void FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(TArray<FName>& PinNames)
 {
 	PinNames.Sort([](const FName& A, const FName& B) { return A.Compare(B) < 0; });
+}
+
+void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplayTag& InGroupTag, FGroupExaminerTopology& OutTopology)
+{
+	OutTopology.GroupTag = InGroupTag;
+	OutTopology.Setters.Empty();
+	OutTopology.Getters.Empty();
+	if (!InGroupTag.IsValid()) return;
+
+	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+
+	TArray<FAssetData> QuestlineAssets;
+	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+	FQuestlineGraphTraversalPolicy TraversalPolicy;
+
+	for (const FAssetData& AssetData : QuestlineAssets)
+	{
+		UQuestlineGraph* QuestlineGraph = Cast<UQuestlineGraph>(AssetData.GetAsset()); // sync load
+		if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) continue;
+
+		for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
+		{
+			/**
+			 * Setter: backward-walk each LinkedTo of the Activate input. CollectEffectiveSources expects output-side pins
+			 * it can walk through (knots, utility Forward, setter Forward, getter tag dereference). Transitive group-chain
+			 * sources are naturally captured — a getter-dereference chain surfaces the ultimate content-node sources.
+			 */
+			if (UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node))
+			{
+				if (Setter->GetGroupTag() != InGroupTag) continue;
+
+				FGroupExaminerEndpoint Endpoint;
+				Endpoint.Node = Setter;
+				Endpoint.Asset = QuestlineGraph;
+
+				if (UEdGraphPin* ActivatePin = Setter->FindPin(TEXT("Activate"), EGPD_Input))
+				{
+					TSet<const UEdGraphPin*> SourcePins;
+					TSet<const UEdGraphNode*> VisitedNodes;
+					for (const UEdGraphPin* Linked : ActivatePin->LinkedTo)
+					{
+						TraversalPolicy.CollectEffectiveSources(Linked, SourcePins, VisitedNodes);
+					}
+
+					for (const UEdGraphPin* SourcePin : SourcePins)
+					{
+						if (!SourcePin) continue;
+						FGroupExaminerReference Ref;
+						Ref.Node = SourcePin->GetOwningNode();
+						Ref.Asset = QuestlineGraph; // walker stays within-graph — containing asset is the current one
+						Ref.PinLabel = SourcePin->PinName.ToString();
+						Endpoint.References.Add(Ref);
+					}
+				}
+
+				OutTopology.Setters.Add(Endpoint);
+				continue;
+			}
+
+			/**
+			 * Getter: forward-walk from the Forward output. CollectActivationTerminals already iterates LinkedTo internally
+			 * and terminates at content/exit Activate or Deactivate pins, so direct invocation on the Forward pin is correct.
+			 */
+			if (UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node))
+			{
+				if (Getter->GetGroupTag() != InGroupTag) continue;
+
+				FGroupExaminerEndpoint Endpoint;
+				Endpoint.Node = Getter;
+				Endpoint.Asset = QuestlineGraph;
+
+				if (UEdGraphPin* ForwardPin = Getter->FindPin(TEXT("Forward"), EGPD_Output))
+				{
+					TSet<const UEdGraphPin*> Terminals;
+					TSet<const UEdGraphNode*> VisitedNodes;
+					TraversalPolicy.CollectActivationTerminals(ForwardPin, Terminals, VisitedNodes);
+
+					for (const UEdGraphPin* Terminal : Terminals)
+					{
+						if (!Terminal) continue;
+						FGroupExaminerReference Ref;
+						Ref.Node = Terminal->GetOwningNode();
+						Ref.Asset = QuestlineGraph;
+						Ref.PinLabel = Terminal->PinName.ToString();
+						Endpoint.References.Add(Ref);
+					}
+				}
+
+				OutTopology.Getters.Add(Endpoint);
+				continue;
+			}
+		}
+	}
+}
+
+void FSimpleQuestEditorUtilities::NavigateToEdGraphNode(const UEdGraphNode* Node)
+{
+	if (!Node || !Node->GetGraph() || !GEditor) return;
+
+	UQuestlineGraph* QuestlineGraph = nullptr;
+	for (UObject* Outer = Node->GetGraph(); Outer; Outer = Outer->GetOuter())
+	{
+		QuestlineGraph = Cast<UQuestlineGraph>(Outer);
+		if (QuestlineGraph) break;
+	}
+	if (!QuestlineGraph) return;
+
+	UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	EditorSubsystem->OpenEditorForAsset(QuestlineGraph);
+
+	if (IAssetEditorInstance* EditorInstance = EditorSubsystem->FindEditorForAsset(QuestlineGraph, false))
+	{
+		static_cast<FQuestlineGraphEditor*>(EditorInstance)->NavigateToLocation(Node->GetGraph(), const_cast<UEdGraphNode*>(Node));
+	}
+}
+
+FQuestlineGraphEditor* FSimpleQuestEditorUtilities::GetEditorForNode(const UEdGraphNode* Node)
+{
+	if (!Node || !Node->GetGraph() || !GEditor) return nullptr;
+
+	UQuestlineGraph* QuestlineGraph = nullptr;
+	for (UObject* Outer = Node->GetGraph(); Outer; Outer = Outer->GetOuter())
+	{
+		QuestlineGraph = Cast<UQuestlineGraph>(Outer);
+		if (QuestlineGraph) break;
+	}
+	if (!QuestlineGraph) return nullptr;
+
+	UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	if (!EditorSubsystem) return nullptr;
+
+	IAssetEditorInstance* EditorInstance = EditorSubsystem->FindEditorForAsset(QuestlineGraph, /*bFocusIfOpen=*/ false);
+	if (!EditorInstance) return nullptr;
+
+	return static_cast<FQuestlineGraphEditor*>(EditorInstance);
+}
+
+void FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(FToolMenuSection& Section, UEdGraphNode* Node, FGameplayTag GroupTag)
+{
+	Section.AddMenuEntry(
+		TEXT("ExamineGroupConnections"),
+		NSLOCTEXT("SimpleQuestEditor", "ExamineGroupConnections_Label", "Examine Group Connections"),
+		NSLOCTEXT("SimpleQuestEditor", "ExamineGroupConnections_Tooltip",
+			"Open the Group Examiner panel and pin this group — shows all setters, getters, and their connections across the project. Disabled when this node has no group tag set."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([WeakNode = TWeakObjectPtr<UEdGraphNode>(Node), GroupTag]()
+			{
+				UEdGraphNode* PinnedNode = WeakNode.Get();
+				if (!PinnedNode) return;
+				if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(PinnedNode))
+				{
+					Editor->PinGroupExaminer(GroupTag, PinnedNode);
+				}
+			}),
+			FCanExecuteAction::CreateLambda([GroupTag]()
+			{
+				return GroupTag.IsValid();
+			})
+		)
+	);
 }
 

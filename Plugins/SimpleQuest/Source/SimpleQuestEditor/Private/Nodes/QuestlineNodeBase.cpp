@@ -304,6 +304,6 @@ void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)
 void UQuestlineNodeBase::SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
 {
 	// Forward call to utility: preserved for backward compatibility
-	USimpleQuestEditorUtilities::SyncPinsByCategory(this, Direction, PinCategory, DesiredPinNames, InsertBeforeCategories);
+	FSimpleQuestEditorUtilities::SyncPinsByCategory(this, Direction, PinCategory, DesiredPinNames, InsertBeforeCategories);
 }
 

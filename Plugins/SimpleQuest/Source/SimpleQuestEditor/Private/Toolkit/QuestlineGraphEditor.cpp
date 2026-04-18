@@ -21,12 +21,14 @@
 #include "Quests/QuestNodeBase.h"
 #include "Toolkit/QuestlineOutlinerPanel.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Widgets/SGroupExaminerPanel.h"
 #include "Widgets/Navigation/SBreadcrumbTrail.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
 const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Details"));
 const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outliner"));
+const FName FQuestlineGraphEditor::GroupExaminerTabId(TEXT("QuestlineGraphEditor_GroupExaminer"));
 
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
@@ -48,7 +50,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
     QuestlineGraph = InQuestlineGraph;    
     ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
     
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v4")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v9")
         ->AddArea
         (
             FTabManager::NewPrimaryArea()
@@ -57,7 +59,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
             (
                 FTabManager::NewSplitter()
                 ->SetOrientation(Orient_Vertical)
-                ->SetSizeCoefficient(0.15f)
+                ->SetSizeCoefficient(0.18f)
                 ->Split
                 (
                     FTabManager::NewStack()
@@ -69,12 +71,13 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
                     FTabManager::NewStack()
                     ->SetSizeCoefficient(0.4f)
                     ->AddTab(DetailsTabId, ETabState::OpenedTab)
+                    ->AddTab(GroupExaminerTabId, ETabState::OpenedTab)
                 )
             )
             ->Split
             (
                 FTabManager::NewStack()
-                ->SetSizeCoefficient(0.85f)
+                ->SetSizeCoefficient(0.82f)
                 ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
             )
         );
@@ -130,19 +133,28 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         GraphViewportTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnGraphViewportTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GraphViewportTab", "Questline Graph Editor"))
+        .SetIcon(FSlateIcon("SimpleQuestStyle", "ClassIcon.QuestlineGraph"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 
     InTabManager->RegisterTabSpawner(
         DetailsTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnDetailsTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "DetailsTab", "Details"))
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Details"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 
     InTabManager->RegisterTabSpawner(
         OutlinerTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnOutlinerTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "OutlinerTab", "Questline Outliner"))
-        .SetIcon(FSlateIcon("SimpleQuestStyle", "ClassIcon.QuestlineGraph"))
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Outliner"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef());
+
+    InTabManager->RegisterTabSpawner(
+        GroupExaminerTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnGroupExaminerTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GroupExaminerTab", "Group Examiner"))
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.ReferenceViewer"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
 }
 
@@ -151,6 +163,7 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
     InTabManager->UnregisterTabSpawner(GraphViewportTabId);
     InTabManager->UnregisterTabSpawner(DetailsTabId);
     InTabManager->UnregisterTabSpawner(OutlinerTabId);
+    InTabManager->UnregisterTabSpawner(GroupExaminerTabId);
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 }
 
@@ -319,7 +332,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
     if (bSuccess && DetectedRenames.Num() > 0)
     {
-        RenamedActors = USimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
+        RenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
     }
     
     // Flush compiler messages to the Quest Compiler MessageLog panel
@@ -547,6 +560,38 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnOutlinerTab(const FSpawnTabArgs
         [
             OutlinerPanel.ToSharedRef()
         ];
+}
+
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGroupExaminerTab(const FSpawnTabArgs& Args)
+{
+    if (!GroupExaminerPanel.IsValid())
+    {
+        GroupExaminerPanel = SNew(SGroupExaminerPanel);
+    }
+
+    return SNew(SDockTab)
+        .Label(NSLOCTEXT("SimpleQuestEditor", "GroupExaminerTabLabel", "Group Examiner"))
+        [
+            GroupExaminerPanel.ToSharedRef()
+        ];
+}
+
+void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const
+{
+    // Invoke the tab; creates the panel widget via SpawnGroupExaminerTab if not already created.
+    if (TabManager.IsValid())
+    {
+        TabManager->TryInvokeTab(GroupExaminerTabId);
+    }
+
+    if (GroupExaminerPanel.IsValid())
+    {
+        GroupExaminerPanel->PinGroup(GroupTag, PinnedEndpointNode);
+        if (RowToHighlight)
+        {
+            GroupExaminerPanel->SelectRowForNode(RowToHighlight);
+        }
+    }
 }
 
 static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid)

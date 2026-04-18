@@ -82,7 +82,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		// Catch-up: quest may have become giver-gated before this component came online
 		if (WorldState)
 		{
-			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver), false);
+			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
 			if (WorldState->HasFact(PendingFact))
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());

@@ -59,7 +59,7 @@ public:
 	
 protected:
 	/**
-	 * Syncs this node's pins of a category to match DesiredPinNames. See USimpleQuestEditorUtilities::SyncPinsByCategory for
+	 * Syncs this node's pins of a category to match DesiredPinNames. See FSimpleQuestEditorUtilities::SyncPinsByCategory for
 	 * full contract — pins are added/orphaned/removed to converge on the desired set, and the final pin order within the
 	 * category matches DesiredPinNames so toggle-off-then-on returns a pin to its original position. Callers control ordering
 	 * by sorting DesiredPinNames as appropriate (alphabetical for outcome-style pins, ordinal for Condition_N-style pins).

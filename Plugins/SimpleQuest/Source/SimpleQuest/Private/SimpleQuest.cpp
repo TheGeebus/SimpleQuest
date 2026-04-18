@@ -49,14 +49,14 @@ void FSimpleQuest::RegisterCompiledQuestTags()
             ++TotalTags;
 
             // Expand state facts for tags not already in a state or outcome namespace
-            if (!TagStr.StartsWith(UQuestStateTagUtils::Namespace)
+            if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
                 && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
             {
-                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Active));
-                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Completed));
-                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_PendingGiver));
-                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Deactivated));
-                TagsManager.AddNativeGameplayTag(UQuestStateTagUtils::MakeStateFact(QuestTag, UQuestStateTagUtils::Leaf_Blocked));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked));
                 TotalTags += 5;
             }
         }

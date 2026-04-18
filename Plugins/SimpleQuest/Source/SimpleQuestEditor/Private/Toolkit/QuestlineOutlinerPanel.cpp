@@ -142,7 +142,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     // Pass 2 — find missing intermediates (linked graph slots)
     // Any ancestor path that is not itself in CompiledNodes and is not the root prefix
-    const FName RootTagPrefix = FName(*FString::Printf(TEXT("Quest.%s"), *USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID)));
+    const FName RootTagPrefix = FName(*FString::Printf(TEXT("Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID)));
 
     TSet<FName> MissingIntermediates;
     for (const auto& Pair : CompiledNodes)
@@ -268,7 +268,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
                     const FSoftObjectPath LinkedPath(LinkedAsset);
                     if (VisitedLinkedAssets.Contains(LinkedPath)) continue;
 
-                    const FString LinkedID = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
+                    const FString LinkedID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
                         LinkedAsset->GetQuestlineID().IsEmpty() ? LinkedAsset->GetName() : LinkedAsset->GetQuestlineID());
 
                     const FString LinkedPrefix    = TagPrefix + TEXT(".") + LinkedID;
@@ -297,7 +297,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
                     UEdGraph* InnerGraph = QuestNode->GetInnerGraph();
                     if (!InnerGraph) continue;
 
-                    const FString QuestLabel = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+                    const FString QuestLabel = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
                     if (QuestLabel.IsEmpty()) continue;
 
                     ResolveLinkedSources(InnerGraph, TagPrefix + TEXT(".") + QuestLabel, CurrentAsset);
@@ -305,7 +305,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
             }
         };
 
-    const FString RootPrefix = USimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID);
+    const FString RootPrefix = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID);
     ResolveLinkedSources(QuestlineGraph->QuestlineEdGraph, RootPrefix, QuestlineGraph);
 
 }

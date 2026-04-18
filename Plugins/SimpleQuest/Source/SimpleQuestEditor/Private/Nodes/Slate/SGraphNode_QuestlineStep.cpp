@@ -51,21 +51,21 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 	bTagStale = false;
 	if (StepNode)
 	{
-		if (USimpleQuestEditorUtilities::IsStepTagCurrent(StepNode))
+		if (FSimpleQuestEditorUtilities::IsStepTagCurrent(StepNode))
 		{
-			const FGameplayTag StepTag = USimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
-			WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
-			WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
+			const FGameplayTag StepTag = FSimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
+			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
+			WatchingTargetNames = FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(StepTag);
 		}
 		else
 		{
 			bTagStale = true;
 			// Query using the old compiled tag — still valid in the dictionary and still referenced by actors until next compile propagates renames
-			const FGameplayTag CompiledTag = USimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
+			const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
 			if (CompiledTag.IsValid())
 			{
-				WatchingGiverNames = USimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
-				WatchingTargetNames = USimpleQuestEditorUtilities::FindActorNamesWatchingTag(CompiledTag);
+				WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
+				WatchingTargetNames = FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(CompiledTag);
 			}
 		}
 	}

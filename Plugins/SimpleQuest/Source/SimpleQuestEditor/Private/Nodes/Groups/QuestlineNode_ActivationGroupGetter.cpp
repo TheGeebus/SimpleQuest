@@ -14,3 +14,19 @@ FText UQuestlineNode_ActivationGroupGetter::GetNodeTitle(ENodeTitleType::Type Ti
 {
 	return NSLOCTEXT("SimpleQuestEditor", "ActivationGroupGetterTitle", "Activation Group: Get");
 }
+
+void UQuestlineNode_ActivationGroupGetter::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+
+	FToolMenuSection& Section = Menu->AddSection(
+		TEXT("ActivationGroup"),
+		NSLOCTEXT("SimpleQuestEditor", "ActivationGroupSection", "Activation Group")
+	);
+
+	FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(
+		Section,
+		const_cast<UQuestlineNode_ActivationGroupGetter*>(this),
+		GetGroupTag()
+	);
+}

@@ -79,8 +79,8 @@ void UQuestlineNode_LinkedQuestline::RebuildOutcomePinsFromLinkedGraph()
 		}
 	}
 
-	TArray<FName> DesiredOutcomes = USimpleQuestEditorUtilities::CollectExitOutcomeTagNames(Graph);
-	USimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
+	TArray<FName> DesiredOutcomes = FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(Graph);
+	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

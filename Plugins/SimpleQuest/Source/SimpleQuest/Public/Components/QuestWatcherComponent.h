@@ -77,15 +77,15 @@ protected:
 	void RegisterQuestWatcher();	
 private:
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FWatchedQuestEventSettings> WatchedTags;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer WatchedStepTags;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer ActiveQuestTags;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(AllowPrivateAccess=true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer CompletedQuestTags;
 };

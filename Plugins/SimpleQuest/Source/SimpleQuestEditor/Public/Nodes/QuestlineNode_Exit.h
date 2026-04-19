@@ -22,6 +22,6 @@ public
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 
 	/** The outcome this exit represents. Left unset while the graph is being sketched — compiler warns, not errors. */
-	UPROPERTY(EditAnywhere, Category = "Exit", meta = (Categories = "Quest.Outcome"))
+	UPROPERTY(EditAnywhere, Category = "Outcome", meta = (Categories = "Quest.Outcome"))
 	FGameplayTag OutcomeTag;
 };

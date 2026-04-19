@@ -6,6 +6,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "QuestlineNodeBase.generated.h"
 
+enum class EQuestPinRole : uint8;
 /**
  * Abstract base for all questline graph editor nodes. Provides the self-describing classification interface that
  * FQuestlineGraphTraversalPolicy dispatches to.
@@ -21,6 +22,26 @@ class SIMPLEQUESTEDITOR_API UQuestlineNodeBase : public UEdGraphNode
 	GENERATED_BODY()
 
 public:
+
+	/**
+	 * Returns the semantic role played by the given pin on this node. Base-class default maps the codebase's inline
+	 * pin-name literals to roles (Activate→ExecIn, Forward→ExecForwardOut, Condition_N→PrereqIn, etc.). Override on
+	 * node classes whose pin names don't conform to the defaults (e.g., Knot's KnotIn/KnotOut).
+	 */
+	virtual EQuestPinRole GetPinRole(const UEdGraphPin* Pin) const;
+
+	/** Returns the first pin on this node matching the given role, or nullptr. */
+	UEdGraphPin* GetPinByRole(EQuestPinRole Role) const;
+	
+	/** Returns the role of a pin whose owning node is a UQuestlineNodeBase; None otherwise (or on null input). */
+	static EQuestPinRole GetPinRoleOf(const UEdGraphPin* Pin);
+	
+	/** Returns the first pin on Node matching Role if Node is a UQuestlineNodeBase. Null on mismatch or absence. */
+	static UEdGraphPin* FindPinByRole(const UEdGraphNode* Node, EQuestPinRole Role);
+
+	/** Appends every pin on this node matching the given role into OutPins. */
+	void GetPinsByRole(EQuestPinRole Role, TArray<UEdGraphPin*>& OutPins) const;
+	
 	/** Returns true if this node is a questline exit terminal (success or failure). Default: false. */
 	virtual bool IsExitNode() const { return false; }
 

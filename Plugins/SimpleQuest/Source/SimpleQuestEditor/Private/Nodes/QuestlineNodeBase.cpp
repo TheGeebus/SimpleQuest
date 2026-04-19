@@ -2,6 +2,7 @@
 
 #include "Nodes/QuestlineNodeBase.h"
 
+#include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
@@ -31,6 +32,90 @@ FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
 		return FText::FromString(FString::Join(Segments, TEXT(": ")));
 	}
 	return GetTagLeafLabel(TagName);
+}
+
+EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
+{
+	if (!Pin) return EQuestPinRole::None;
+
+	const FName PinName = Pin->PinName;
+	const FName Cat     = Pin->PinType.PinCategory;
+
+	if (Pin->Direction == EGPD_Input)
+	{
+		if ((PinName == TEXT("Activate") || PinName == TEXT("Enter")) && Cat == TEXT("QuestActivation"))
+		{
+			return EQuestPinRole::ExecIn;
+		}
+		if (PinName == TEXT("Deactivate") && Cat == TEXT("QuestDeactivate"))
+		{
+			return EQuestPinRole::DeactivateIn;
+		}
+		if (PinName == TEXT("Enter") && Cat == TEXT("QuestPrerequisite"))
+		{
+			return EQuestPinRole::PrereqIn;
+		}
+		if (Cat == TEXT("QuestPrerequisite") && PinName.ToString().StartsWith(TEXT("Condition_")))
+		{
+			return EQuestPinRole::PrereqIn;
+		}
+	}
+	else if (Pin->Direction == EGPD_Output)
+	{
+		if ((PinName == TEXT("Forward") || PinName == TEXT("Exit"))	&& Cat == TEXT("QuestActivation"))
+		{
+			return EQuestPinRole::ExecForwardOut;
+		}
+		if ((PinName == TEXT("Any Outcome") || PinName == TEXT("Entered")) && Cat == TEXT("QuestActivation"))
+		{
+			return EQuestPinRole::AnyOutcomeOut;
+		}
+		if (Cat == TEXT("QuestOutcome"))
+		{
+			return EQuestPinRole::NamedOutcomeOut;
+		}
+		if (Cat == TEXT("QuestDeactivated"))
+		{
+			return EQuestPinRole::DeactivatedOut;
+		}
+		if ((PinName == TEXT("PrereqOut") || PinName == TEXT("Forward") || PinName == TEXT("Exit")) && Cat == TEXT("QuestPrerequisite"))
+		{
+			return EQuestPinRole::PrereqOut;
+		}
+	}
+
+	return EQuestPinRole::None;
+}
+
+UEdGraphPin* UQuestlineNodeBase::GetPinByRole(EQuestPinRole Role) const
+{
+	for (UEdGraphPin* Pin : Pins)
+	{
+		if (GetPinRole(Pin) == Role) return Pin;
+	}
+	return nullptr;
+}
+
+EQuestPinRole UQuestlineNodeBase::GetPinRoleOf(const UEdGraphPin* Pin)
+{
+	if (!Pin) return EQuestPinRole::None;
+	const UQuestlineNodeBase* Base = Cast<const UQuestlineNodeBase>(Pin->GetOwningNode());
+	return Base ? Base->GetPinRole(Pin) : EQuestPinRole::None;
+}
+
+UEdGraphPin* UQuestlineNodeBase::FindPinByRole(const UEdGraphNode* Node, EQuestPinRole Role)
+{
+	if (!Node) return nullptr;
+	const UQuestlineNodeBase* Base = Cast<const UQuestlineNodeBase>(Node);
+	return Base ? Base->GetPinByRole(Role) : nullptr;
+}
+
+void UQuestlineNodeBase::GetPinsByRole(EQuestPinRole Role, TArray<UEdGraphPin*>& OutPins) const
+{
+	for (UEdGraphPin* Pin : Pins)
+	{
+		if (GetPinRole(Pin) == Role) OutPins.Add(Pin);
+	}
 }
 
 FText UQuestlineNodeBase::GetPinDisplayName(const UEdGraphPin* Pin) const
@@ -119,165 +204,111 @@ void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)
     const UEdGraphSchema* Schema = GetSchema();
     if (!Schema) return;
 
-	// If the drag source is a deactivation-flavored pin, ensure this node's deactivation pins are allocated before the candidate
-	// walk — they default off and would otherwise not be findable, causing the walker to fall through to Activate.
-	const FName FromCat = FromPin->PinType.PinCategory;
-	const bool bDragSourceIsDeactivation =
-		   FromCat == TEXT("QuestDeactivated")
-		|| FromCat == TEXT("QuestDeactivate");
-	if (bDragSourceIsDeactivation)
-	{
-		EnsureDeactivationPinsForAutowire();
-	}
-	
+    // Deactivation-flavored drag source: ensure deactivation pins exist before the role query —
+    // they default off and would otherwise be invisible to the walker (same rationale as before,
+    // now expressed via category since FromPin belongs to a different node).
+    const FName FromCat = FromPin->PinType.PinCategory;
+    const bool bDragSourceIsDeactivation =
+           FromCat == TEXT("QuestDeactivated")
+        || FromCat == TEXT("QuestDeactivate");
+    if (bDragSourceIsDeactivation)
+    {
+        EnsureDeactivationPinsForAutowire();
+    }
+
     const EEdGraphPinDirection DesiredDirection =
         (FromPin->Direction == EGPD_Output) ? EGPD_Input : EGPD_Output;
 
-    // Bucket pins by role so we can order them by natural semantic preference.
-    TArray<UEdGraphPin*> ActivateIns;
-    TArray<UEdGraphPin*> ConditionIns;
-    TArray<UEdGraphPin*> PrereqIns;
-    TArray<UEdGraphPin*> DeactivateIns;
-    TArray<UEdGraphPin*> ForwardOuts;
-    TArray<UEdGraphPin*> AnyOutcomeOuts;
-    TArray<UEdGraphPin*> NamedOutcomeOuts;
-	TArray<UEdGraphPin*> DeactivatedOuts;
-    TArray<UEdGraphPin*> PrereqOuts;
-    TArray<UEdGraphPin*> OtherPins;
+    // Classify this node's candidate-direction pins into role buckets via the virtual role query.
+    TArray<UEdGraphPin*> ExecIns, PrereqIns, DeactivateIns, OtherPins;
+    TArray<UEdGraphPin*> ExecForwardOuts, AnyOutcomeOuts, NamedOutcomeOuts, DeactivatedOuts, PrereqOuts;
 
     for (UEdGraphPin* Pin : Pins)
     {
         if (!Pin || Pin->bHidden) continue;
         if (Pin->Direction != DesiredDirection) continue;
 
-        const FName PinName = Pin->PinName;
-        const FName Cat = Pin->PinType.PinCategory;
-
-        if (DesiredDirection == EGPD_Input)
+        switch (GetPinRole(Pin))
         {
-	        if (PinName == TEXT("Activate") && Cat == TEXT("QuestActivation"))
-	        {
-	        	ActivateIns.Add(Pin);
-	        }
-	        else if (Cat == TEXT("QuestPrerequisite") && PinName.ToString().StartsWith(TEXT("Condition_")))
-	        {
-	        	ConditionIns.Add(Pin);
-	        }
-	        else if (PinName == TEXT("Prerequisites") && Cat == TEXT("QuestPrerequisite"))
-	        {
-	        	PrereqIns.Add(Pin);
-	        }
-	        else if (PinName == TEXT("Deactivate") && Cat == TEXT("QuestDeactivate"))
-	        {
-	        	DeactivateIns.Add(Pin);
-	        }
-	        else
-	        {
-	        	OtherPins.Add(Pin);
-	        }
-        }
-        else  // EGPD_Output
-        {
-	        if (PinName == TEXT("Forward") && Cat == TEXT("QuestActivation"))
-	        {
-	        	ForwardOuts.Add(Pin);
-	        }
-	        else if ((PinName == TEXT("Any Outcome") || PinName == TEXT("Entered")) && Cat == TEXT("QuestActivation"))
-	        {
-	        	// Both sentinel names share priority behavior in autowire. Entry nodes rarely land here as "new node"
-	        	// (they're not generally dragged from palettes), but keeping coverage symmetric with IsAnyOutcomeSource.
-	        	AnyOutcomeOuts.Add(Pin);
-	        }
-	        else if (Cat == TEXT("QuestOutcome"))
-	        {
-	        	NamedOutcomeOuts.Add(Pin);
-	        }
-	        else if (Cat == TEXT("QuestDeactivated"))
-	        {
-		        DeactivatedOuts.Add(Pin);
-	        }
-        	else if (PinName == TEXT("PrereqOut") && Cat == TEXT("QuestPrerequisite"))
-	        {
-	        	PrereqOuts.Add(Pin);
-	        }
-	        else
-	        {
-	        	OtherPins.Add(Pin);
-	        }
+            case EQuestPinRole::ExecIn:            ExecIns.Add(Pin);          break;
+            case EQuestPinRole::PrereqIn:          PrereqIns.Add(Pin);        break;
+            case EQuestPinRole::DeactivateIn:      DeactivateIns.Add(Pin);    break;
+            case EQuestPinRole::ExecForwardOut:    ExecForwardOuts.Add(Pin);  break;
+            case EQuestPinRole::AnyOutcomeOut:     AnyOutcomeOuts.Add(Pin);   break;
+            case EQuestPinRole::NamedOutcomeOut:   NamedOutcomeOuts.Add(Pin); break;
+            case EQuestPinRole::DeactivatedOut:    DeactivatedOuts.Add(Pin);  break;
+            case EQuestPinRole::PrereqOut:         PrereqOuts.Add(Pin);       break;
+            default:                               OtherPins.Add(Pin);        break;
         }
     }
 
-    // Among Condition_N pins, prefer empty ones first — the single-wire rule on prereq inputs
-    // rejects any new connection to an already-wired pin.
-    ConditionIns.Sort([](const UEdGraphPin& A, const UEdGraphPin& B)
+    // Among multi-slot prereq inputs (combinator Condition_N), prefer empty slots — the single-wire
+    // rule on prereq inputs rejects any new connection to an already-wired pin. Single-slot cases
+    // (content's Prerequisites, future Prereq Rule Entry's Enter) sort trivially.
+    PrereqIns.Sort([](const UEdGraphPin& A, const UEdGraphPin& B)
     {
         const bool bAEmpty = A.LinkedTo.Num() == 0;
         const bool bBEmpty = B.LinkedTo.Num() == 0;
-        if (bAEmpty != bBEmpty)
-        {
-	        return bAEmpty;
-        }
+        if (bAEmpty != bBEmpty) return bAEmpty;
         return A.PinName.LexicalLess(B.PinName);
     });
 
-    // Build the priority-ordered candidate list by FromPin's category.
+    // Priority-ordered candidate list by FromPin's category — matches natural semantic pairing.
     TArray<UEdGraphPin*> Candidates;
 
     if (DesiredDirection == EGPD_Input)
     {
-    	if (FromCat == TEXT("QuestDeactivated"))
-    	{
-    		// Deactivation cascades naturally into Deactivate; Activate is a reasonable fallback.
-    		Candidates.Append(DeactivateIns);
-    		Candidates.Append(ActivateIns);
-    		Candidates.Append(ConditionIns);
-    		Candidates.Append(PrereqIns);
-    	}
+        if (FromCat == TEXT("QuestDeactivated"))
+        {
+            // Deactivation cascades naturally into Deactivate; Activate is a reasonable fallback.
+            Candidates.Append(DeactivateIns);
+            Candidates.Append(ExecIns);
+            Candidates.Append(PrereqIns);
+        }
         else if (FromCat == TEXT("QuestPrerequisite"))
         {
             // Prereq output chains into Prerequisites or another combinator Condition pin.
             Candidates.Append(PrereqIns);
-            Candidates.Append(ConditionIns);
-            Candidates.Append(ActivateIns);
+            Candidates.Append(ExecIns);
             Candidates.Append(DeactivateIns);
         }
         else
         {
             // QuestOutcome / QuestActivation — the common case. Activation first.
-            Candidates.Append(ActivateIns);
-            Candidates.Append(ConditionIns);
+            Candidates.Append(ExecIns);
             Candidates.Append(PrereqIns);
             Candidates.Append(DeactivateIns);
         }
     }
-    else  // Output direction on new node — user dragged from an input
+    else
     {
-    	if (FromCat == TEXT("QuestDeactivate"))
-    	{
-    		// Back-drag from a Deactivate input wants a Deactivated output on the new node.
-    		Candidates.Append(DeactivatedOuts);
-    		Candidates.Append(ForwardOuts);
-    		Candidates.Append(AnyOutcomeOuts);
-    		Candidates.Append(NamedOutcomeOuts);
-    		Candidates.Append(PrereqOuts);
-    	}
-    	else if (FromCat == TEXT("QuestPrerequisite"))
-    	{
-    		Candidates.Append(PrereqOuts);
-    		Candidates.Append(NamedOutcomeOuts);
-    		Candidates.Append(AnyOutcomeOuts);
-    		Candidates.Append(ForwardOuts);
-    		Candidates.Append(DeactivatedOuts);
-    	}
-    	else
-    	{
-    		Candidates.Append(ForwardOuts);
-    		Candidates.Append(AnyOutcomeOuts);
-    		Candidates.Append(NamedOutcomeOuts);
-    		Candidates.Append(PrereqOuts);
-    		Candidates.Append(DeactivatedOuts);
-    	}
+        if (FromCat == TEXT("QuestDeactivate"))
+        {
+            // Back-drag from a Deactivate input wants a Deactivated output on the new node.
+            Candidates.Append(DeactivatedOuts);
+            Candidates.Append(ExecForwardOuts);
+            Candidates.Append(AnyOutcomeOuts);
+            Candidates.Append(NamedOutcomeOuts);
+            Candidates.Append(PrereqOuts);
+        }
+        else if (FromCat == TEXT("QuestPrerequisite"))
+        {
+            Candidates.Append(PrereqOuts);
+            Candidates.Append(NamedOutcomeOuts);
+            Candidates.Append(AnyOutcomeOuts);
+            Candidates.Append(ExecForwardOuts);
+            Candidates.Append(DeactivatedOuts);
+        }
+        else
+        {
+            Candidates.Append(ExecForwardOuts);
+            Candidates.Append(AnyOutcomeOuts);
+            Candidates.Append(NamedOutcomeOuts);
+            Candidates.Append(PrereqOuts);
+            Candidates.Append(DeactivatedOuts);
+        }
     }
+
     Candidates.Append(OtherPins);
 
     // Attempt each candidate; the first one CanCreateConnection accepts wins.

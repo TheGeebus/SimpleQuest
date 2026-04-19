@@ -1,8 +1,8 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Nodes/Slate/SGraphNode_GroupNode.h"
-#include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
-#include "Nodes/Groups/QuestlineNode_GroupGetterBase.h"
+#include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
+#include "Nodes/Groups/QuestlineNode_PortalExitBase.h"
 #include "SGraphPin.h"
 #include "SGameplayTagCombo.h"
 #include "ScopedTransaction.h"
@@ -22,8 +22,8 @@
 void SGraphNode_GroupNode::Construct(const FArguments& InArgs, UEdGraphNode* InNode)
 {
 	GraphNode = InNode;
-	SetterNode = Cast<UQuestlineNode_GroupSetterBase>(InNode);
-	GetterNode = Cast<UQuestlineNode_GroupGetterBase>(InNode);
+	SetterNode = Cast<UQuestlineNode_PortalEntryBase>(InNode);
+	GetterNode = Cast<UQuestlineNode_PortalExitBase>(InNode);
 	bIsSetter = (SetterNode != nullptr);
 	SetCursor(EMouseCursor::CardinalCross);
 	UpdateGraphNode();
@@ -372,8 +372,8 @@ void SGraphNode_GroupNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 TSharedRef<SWidget> SGraphNode_GroupNode::CreateTagPickerWidget()
 {
 	FString FilterString;
-	if (SetterNode) FilterString = SetterNode->GetGroupFilterString();
-	else if (GetterNode) FilterString = GetterNode->GetGroupFilterString();
+	if (SetterNode) FilterString = SetterNode->GetTagFilterString();
+	else if (GetterNode) FilterString = GetterNode->GetTagFilterString();
 
 	return SNew(SGameplayTagCombo)
 		.Filter(*FilterString)

@@ -24,8 +24,8 @@
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "Nodes/QuestlineNode_Step.h"
-#include "Nodes/Groups/QuestlineNode_GroupGetterBase.h"
-#include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
+#include "Nodes/Groups/QuestlineNode_PortalExitBase.h"
+#include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
@@ -40,8 +40,8 @@
 #include "Brushes/SlateImageBrush.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -68,7 +68,7 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		{
 			return SNew(SGraphNode_PrerequisiteCombinator, CastChecked<UQuestlineNode_PrerequisiteBase>(Node));
 		}
-		if (Cast<UQuestlineNode_GroupSetterBase>(Node) || Cast<UQuestlineNode_GroupGetterBase>(Node))
+		if (Cast<UQuestlineNode_PortalEntryBase>(Node) || Cast<UQuestlineNode_PortalExitBase>(Node))
 		{
 			return SNew(SGraphNode_GroupNode, Node);
 		}

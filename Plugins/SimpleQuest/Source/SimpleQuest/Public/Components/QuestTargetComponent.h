@@ -49,7 +49,7 @@ protected:
 	
 	// Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
 	// The subsystem publishes step events on the step tag; any target configured with that tag activates.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "Quest"))
 	FGameplayTagContainer StepTagsToWatch;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;

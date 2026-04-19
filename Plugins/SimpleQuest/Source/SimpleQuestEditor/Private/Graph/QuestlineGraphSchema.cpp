@@ -12,17 +12,18 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
-#include "Nodes/Groups/QuestlineNode_GroupSetterBase.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
+#include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
+#include "Types/QuestPinRole.h"
 
 
 /*---------------------------------------------------------------------------------------------------------*
@@ -447,7 +448,7 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 	// Prereq output to non-prereq input: only the Prerequisites pin on a content node
 	if (bOutputIsPrereq)
 	{
-		if (InputPin->PinName == TEXT("Prerequisites") && TraversalPolicy->IsContentNode(InputNode))
+		if (UQuestlineNodeBase::GetPinRoleOf(InputPin) == EQuestPinRole::PrereqIn && TraversalPolicy->IsContentNode(InputNode))
 		{
 			// Check self-prerequisite: does this expression reference the target node's own outcomes?
 			TSet<const UEdGraphPin*> LeafSources;
@@ -482,7 +483,7 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 		// Sibling dedupe: if this is a prereq-combinator input (AND/OR/NOT) or a prereq group setter condition input,
 		// reject if any sibling input on the same node already carries this outcome (direct, via utility, or via group chain).
 		const bool bIsCombinator   = Cast<const UQuestlineNode_PrerequisiteBase>(InputNode) != nullptr;
-		const bool bIsGroupSetter  = Cast<const UQuestlineNode_PrerequisiteGroupSetter>(InputNode) != nullptr;
+		const bool bIsGroupSetter  = Cast<const UQuestlineNode_PrerequisiteRuleEntry>(InputNode) != nullptr;
 		if (bIsCombinator || bIsGroupSetter)
 		{
 			TSet<const UEdGraphPin*> IncomingSources;
@@ -554,7 +555,7 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidateDeactivationConnection(con
 	if (TraversalPolicy->IsExitNode(InputNode) || Cast<const UQuestlineNode_Entry>(InputNode))
 	{
 	    return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "DeactivatedNotToEntryExit",
-	           "Deactivated may not connect to Entry or Exit nodes"));
+	           "Deactivated may not connect to Start or Outcome nodes"));
 	}
 	const FName InputCat = InputPin->PinType.PinCategory;
 	if (InputCat == TEXT("QuestActivation"))
@@ -586,7 +587,7 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidateKnotConnection(const UEdGr
 	if (bOutputIsKnot && !bInputIsKnot && TraversalPolicy->IsContentNode(InputNode))
 	{
 	    const FName InputCat = InputPin->PinType.PinCategory;
-	    if (InputCat == TEXT("QuestActivation") && InputPin->PinName == TEXT("Activate"))
+		if (UQuestlineNodeBase::GetPinRoleOf(InputPin) == EQuestPinRole::ExecIn	&& InputCat == TEXT("QuestActivation"))
 	    {
 	        if (AnySourceReachesCategory(OutputPin, InputNode, TEXT("QuestDeactivate")))
 	        {
@@ -670,10 +671,8 @@ bool UQuestlineGraphSchema::IsAnyOutcomeSource(const UEdGraphPin* Pin)
 {
 	// Unconditional source sentinels — content nodes' "Any Outcome" (per-node) and Entry nodes' "Entered" (per-graph). Both
 	// fire unconditionally when their owning node activates, so collision behavior and prereq-eligibility are identical. The
-	// two names exist for designer-facing semantic clarity; connection rules treat them uniformly.
-	return Pin
-		&& Pin->PinType.PinCategory == TEXT("QuestActivation")
-		&& (Pin->PinName == TEXT("Any Outcome") || Pin->PinName == TEXT("Entered"));
+	// role enum unifies both names under AnyOutcomeOut — schema treats them uniformly.
+	return UQuestlineNodeBase::GetPinRoleOf(Pin) == EQuestPinRole::AnyOutcomeOut;
 }
 
 bool UQuestlineGraphSchema::PinsRepresentSameSignal(const UEdGraphPin* A, const UEdGraphPin* B)
@@ -785,7 +784,7 @@ FPinConnectionResponse UQuestlineGraphSchema::CheckDuplicateSources(const UEdGra
 
 FPinConnectionResponse UQuestlineGraphSchema::CheckGroupSetterForwardReach(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, const UEdGraphNode* InputNode) const
 {
-    const UQuestlineNode_ActivationGroupSetter* Setter = Cast<const UQuestlineNode_ActivationGroupSetter>(InputNode);
+    const UQuestlineNode_ActivationGroupEntry* Setter = Cast<const UQuestlineNode_ActivationGroupEntry>(InputNode);
     if (!Setter) return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 
     const FGameplayTag SetterTag = Setter->GroupTag;
@@ -798,10 +797,10 @@ FPinConnectionResponse UQuestlineGraphSchema::CheckGroupSetterForwardReach(const
     TSet<const UEdGraphPin*> ReachedTerminals;
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        const UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node);
+        const UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node);
         if (!Getter || Getter->GroupTag != SetterTag) continue;
 
-        if (const UEdGraphPin* Forward = Getter->FindPin(TEXT("Forward"), EGPD_Output))
+		if (const UEdGraphPin* Forward = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut))
         {
             TSet<const UEdGraphNode*> Visited;
             TraversalPolicy->CollectActivationTerminals(Forward, ReachedTerminals, Visited);
@@ -904,7 +903,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	{
 		const FName OutputCategory = OutputPin->PinType.PinCategory;
 		if (TraversalPolicy->IsContentNode(OutputNode)
-			&& InputPin->PinName == TEXT("Activate")
+			&& UQuestlineNodeBase::GetPinRoleOf(InputPin) == EQuestPinRole::ExecIn
 			&& (OutputCategory == TEXT("QuestOutcome") || OutputCategory == TEXT("QuestActivation")))
 		{
 			// Self-loop still subject to the same dedupe as any other Activate connection.
@@ -1008,7 +1007,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	
 	// ---- Activate/Deactivate conflict (non-knot, non-deactivation-category) ----
 	if (!bOutputIsKnot && !bInputIsKnot
-		&& InputPin->PinName == TEXT("Activate")
+		&& UQuestlineNodeBase::GetPinRoleOf(InputPin) == EQuestPinRole::ExecIn
 		&& InputPin->PinType.PinCategory == TEXT("QuestActivation")
 		&& TraversalPolicy->IsContentNode(InputNode))
 	{
@@ -1050,7 +1049,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     {
     	const UQuestlineNodeBase* InputBase = Cast<const UQuestlineNodeBase>(InputNode);
     	const bool bIsUtility = InputBase && InputBase->IsUtilityNode();
-    	const bool bIsGroupSetter = Cast<const UQuestlineNode_GroupSetterBase>(InputNode) != nullptr;
+    	const bool bIsGroupSetter = Cast<const UQuestlineNode_PortalEntryBase>(InputNode) != nullptr;
     	if (!TraversalPolicy->IsContentNode(InputNode) && !bIsUtility && !bIsGroupSetter)
     	{
     		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyToQuest", "Quest Start may only connect to a Quest node or utility node"));
@@ -1060,7 +1059,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
     	// but we only allow the Activate_N case from Entry — Entry firing is an activation signal, not a prereq condition.
     	const bool bSetterActivateInput = bIsGroupSetter
 			&& InputPin->PinType.PinCategory == TEXT("QuestActivation");
-    	if (!bSetterActivateInput && InputPin->PinName != TEXT("Activate"))
+		if (!bSetterActivateInput && UQuestlineNodeBase::GetPinRoleOf(InputPin) != EQuestPinRole::ExecIn)
     	{
     		return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "EntryOnlyActivate", "Quest Start may only connect to an Activate pin"));
     	}
@@ -1070,7 +1069,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	if (TraversalPolicy->IsContentNode(OutputNode))
 	{
 		const UQuestlineNodeBase* InputBase = Cast<const UQuestlineNodeBase>(InputNode);
-		const bool bIsGroupSetter = Cast<const UQuestlineNode_GroupSetterBase>(InputNode) != nullptr;
+		const bool bIsGroupSetter = Cast<const UQuestlineNode_PortalEntryBase>(InputNode) != nullptr;
 		const bool bValidInput = TraversalPolicy->IsContentNode(InputNode)
 			|| TraversalPolicy->IsPassThroughNode(InputNode)
 			|| TraversalPolicy->IsExitNode(InputNode)
@@ -1085,7 +1084,7 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	
 	// If the destination is an activation group setter, walk forward from every matching-tag getter to make sure the signal
 	// we're about to pipe through the group doesn't create a parallel path to any destination the group already reaches.
-	if (Cast<const UQuestlineNode_ActivationGroupSetter>(InputNode))
+	if (Cast<const UQuestlineNode_ActivationGroupEntry>(InputNode))
 	{
 		if (const FPinConnectionResponse R = CheckGroupSetterForwardReach(OutputPin, InputPin, InputNode);
 			R.Response != CONNECT_RESPONSE_MAKE)
@@ -1130,8 +1129,8 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 			FText::GetEmpty(),
-			NSLOCTEXT("SimpleQuestEditor", "AddExit", "Add Questline Exit"),
-			NSLOCTEXT("SimpleQuestEditor", "AddExitTooltip", "Add a Questline exit node"),
+			NSLOCTEXT("SimpleQuestEditor", "AddExit", "Add Questline Outcome"),
+			NSLOCTEXT("SimpleQuestEditor", "AddExitTooltip", "Add a Questline outcome node"),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_Exit>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
@@ -1195,10 +1194,10 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	{
 	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqSetter", "Add Prereq Group"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqSetterTooltip", "Define a named prerequisite group from wired conditions"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqRuleEntry", "Add Prerequisite Rule Entry"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqRuleEntryTooltip", "Defines a named rule — its Enter expression publishes a boolean under the rule's tag."),
 	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteGroupSetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteRuleEntry>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 	    ContextMenuBuilder.AddAction(Action);
 	}
 
@@ -1206,14 +1205,15 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	{
 	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 	        NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqGetter", "Get Prereq Group"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqGetterTooltip", "Reference a named prerequisite group"),
+	        NSLOCTEXT("SimpleQuestEditor", "AddPrereqRuleExit", "Add Prerequisite Rule Exit"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqRuleExitTooltip", "Evaluates to the boolean published by a matching Prerequisite Rule Entry, from any graph."),
 	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteGroupGetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteRuleExit>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 	    ContextMenuBuilder.AddAction(Action);
 	}
 	
 	// ---- Flow Control ----
+	// Block
 	{
 	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 	        NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
@@ -1223,6 +1223,7 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	    Action->NodeTemplate = NewObject<UQuestlineNode_SetBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 	    ContextMenuBuilder.AddAction(Action);
 	}
+	// Unblock
 	{
 	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 	        NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
@@ -1234,22 +1235,24 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	}
 
 	// ---- Activation Group ----
+	// Entry
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 			NSLOCTEXT("SimpleQuestEditor", "ActivationGroupCategory", "Activation Group"),
-			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupSetter", "Set Activation Group"),
-			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupSetterTooltip", "Write a named activation signal to world state"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupEntry", "Add Activation Group Entry"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupEntryTooltip", "Publishes the group's activation tag. Every matching Exit in any graph fires in response."),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupSetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupEntry>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
+	// Exit
 	{
 		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
 			NSLOCTEXT("SimpleQuestEditor", "ActivationGroupCategory", "Activation Group"),
-			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupGetter", "Get Activation Group"),
-			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupGetterTooltip", "Listen for a named activation signal then fire output"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupExit", "Add Activation Group Exit"),
+			NSLOCTEXT("SimpleQuestEditor", "AddActivationGroupExitTooltip", "Fires its output when any Entry with a matching group tag publishes, from any graph."),
 			0));
-		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupGetter>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupExit>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}	
 }
@@ -1284,10 +1287,10 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
         if (UQuestlineNodeBase* QuestNode = Cast<UQuestlineNodeBase>(OwningNode))
         {
             const FName OutputCategory = OutputPin->PinType.PinCategory;
-            const bool bIsLegalSelfLoop = QuestNode->IsContentNode()
-                && InputPin->PinName == TEXT("Activate")
-                && (OutputCategory == TEXT("QuestOutcome")
-                    || OutputCategory == TEXT("QuestActivation"));
+        	const bool bIsLegalSelfLoop = QuestNode->IsContentNode()
+				&& UQuestlineNodeBase::GetPinRoleOf(InputPin) == EQuestPinRole::ExecIn
+				&& (OutputCategory == TEXT("QuestOutcome")
+					|| OutputCategory == TEXT("QuestActivation"));
 
             if (!bIsLegalSelfLoop)
             {

@@ -5,10 +5,10 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "QuestlineNode_GroupGetterBase.generated.h"
+#include "QuestlineNode_PortalExitBase.generated.h"
 
 UCLASS(Abstract)
-class SIMPLEQUESTEDITOR_API UQuestlineNode_GroupGetterBase : public UQuestlineNodeBase
+class SIMPLEQUESTEDITOR_API UQuestlineNode_PortalExitBase : public UQuestlineNodeBase
 {
 	GENERATED_BODY()
 
@@ -21,5 +21,5 @@ public:
 	/** Widget accessors — concrete classes implement these. */
 	virtual FGameplayTag GetGroupTag() const { return FGameplayTag(); }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) {}
-	virtual FString GetGroupFilterString() const { return FString(); }
+	virtual FString GetTagFilterString() const { return FString(); }
 };

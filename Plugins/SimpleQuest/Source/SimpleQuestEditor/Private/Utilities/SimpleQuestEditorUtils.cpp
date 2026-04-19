@@ -14,8 +14,8 @@
 #include "Quests/QuestlineGraph.h"
 #include "Components/QuestTargetComponent.h"
 #include "Components/QuestGiverComponent.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Quests/QuestNodeBase.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Utilities/GroupExaminerTypes.h"
@@ -497,7 +497,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 			 * it can walk through (knots, utility Forward, setter Forward, getter tag dereference). Transitive group-chain
 			 * sources are naturally captured — a getter-dereference chain surfaces the ultimate content-node sources.
 			 */
-			if (UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node))
+			if (UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node))
 			{
 				if (Setter->GetGroupTag() != InGroupTag) continue;
 
@@ -533,7 +533,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 			 * Getter: forward-walk from the Forward output. CollectActivationTerminals already iterates LinkedTo internally
 			 * and terminates at content/exit Activate or Deactivate pins, so direct invocation on the Forward pin is correct.
 			 */
-			if (UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node))
+			if (UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node))
 			{
 				if (Getter->GetGroupTag() != InGroupTag) continue;
 

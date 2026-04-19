@@ -5,13 +5,13 @@
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Quests/QuestlineGraph.h"
-
+#include "Types/QuestPinRole.h"
 
 
 // -------------------------------------------------------------------------------------------------
@@ -156,7 +156,7 @@ void FQuestlineGraphTraversalPolicy::CollectActivationTerminals(const UEdGraphPi
         {
             if (Base->IsUtilityNode())
             {
-                if (const UEdGraphPin* Forward = Node->FindPin(TEXT("Forward"), EGPD_Output))
+                if (const UEdGraphPin* Forward = Base->GetPinByRole(EQuestPinRole::ExecForwardOut))
                 {
                     CollectActivationTerminals(Forward, OutTerminals, VisitedNodes);
                 }
@@ -166,9 +166,9 @@ void FQuestlineGraphTraversalPolicy::CollectActivationTerminals(const UEdGraphPi
 
         // Activation group setter: Activate → Forward. Walk Forward output.
         // (Chained setter → setter is unusual but possible; the walker follows it.)
-        if (Cast<const UQuestlineNode_ActivationGroupSetter>(Node))
+        if (const UQuestlineNode_ActivationGroupEntry* Setter = Cast<const UQuestlineNode_ActivationGroupEntry>(Node))
         {
-            if (const UEdGraphPin* Forward = Node->FindPin(TEXT("Forward"), EGPD_Output))
+            if (const UEdGraphPin* Forward = Setter->GetPinByRole(EQuestPinRole::ExecForwardOut))
             {
                 CollectActivationTerminals(Forward, OutTerminals, VisitedNodes);
             }
@@ -263,9 +263,9 @@ void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* 
     // Utility node Forward output: walk through the Activate input to all connections.
     if (const UQuestlineNodeBase* Base = Cast<const UQuestlineNodeBase>(OwnerNode))
     {
-        if (Base->IsUtilityNode() && SourcePin->PinName == TEXT("Forward"))
+        if (Base->IsUtilityNode() && UQuestlineNodeBase::GetPinRoleOf(SourcePin) == EQuestPinRole::ExecForwardOut)
         {
-            if (const UEdGraphPin* ActivatePin = OwnerNode->FindPin(TEXT("Activate"), EGPD_Input))
+            if (const UEdGraphPin* ActivatePin = Base->GetPinByRole(EQuestPinRole::ExecIn))
             {
                 for (const UEdGraphPin* Linked : ActivatePin->LinkedTo)
                 {
@@ -277,9 +277,9 @@ void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* 
     }
 
     // Activation group setter Forward output: walk through every Activate_N input.
-    if (const UQuestlineNode_ActivationGroupSetter* Setter = Cast<const UQuestlineNode_ActivationGroupSetter>(OwnerNode))
+    if (const UQuestlineNode_ActivationGroupEntry* Setter = Cast<const UQuestlineNode_ActivationGroupEntry>(OwnerNode))
     {
-        if (SourcePin->PinName == TEXT("Forward"))
+        if (UQuestlineNodeBase::GetPinRoleOf(SourcePin) == EQuestPinRole::ExecForwardOut)
         {
             for (const UEdGraphPin* Pin : Setter->Pins)
             {
@@ -296,9 +296,9 @@ void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* 
 
     // Activation group getter Forward output: dereference the group tag to find every setter in the same graph with matching
     // GroupTag, recurse into its input wires.
-    if (const UQuestlineNode_ActivationGroupGetter* Getter = Cast<const UQuestlineNode_ActivationGroupGetter>(OwnerNode))
+    if (const UQuestlineNode_ActivationGroupExit* Getter = Cast<const UQuestlineNode_ActivationGroupExit>(OwnerNode))
     {
-        if (SourcePin->PinName == TEXT("Forward"))
+        if (UQuestlineNodeBase::GetPinRoleOf(SourcePin) == EQuestPinRole::ExecForwardOut)
         {
             const FGameplayTag GetterTag = Getter->GroupTag;
             if (!GetterTag.IsValid()) return;
@@ -307,7 +307,7 @@ void FQuestlineGraphTraversalPolicy::CollectEffectiveSources(const UEdGraphPin* 
             {
                 for (UEdGraphNode* Node : Graph->Nodes)
                 {
-                    const UQuestlineNode_ActivationGroupSetter* SiblingSetter = Cast<UQuestlineNode_ActivationGroupSetter>(Node);
+                    const UQuestlineNode_ActivationGroupEntry* SiblingSetter = Cast<UQuestlineNode_ActivationGroupEntry>(Node);
                     if (!SiblingSetter || SiblingSetter->GroupTag != GetterTag) continue;
                     if (VisitedNodes.Contains(SiblingSetter)) continue;
                     VisitedNodes.Add(SiblingSetter);
@@ -363,7 +363,7 @@ void FQuestlineGraphTraversalPolicy::CollectEntryReachingSources(const UEdGraph*
     auto CollectFromActivatePin = [this, &OutSources](const UEdGraphNode* ContainerNode)
     {
         if (!ContainerNode) return;
-        const UEdGraphPin* ActivatePin = ContainerNode->FindPin(TEXT("Activate"), EGPD_Input);
+        const UEdGraphPin* ActivatePin = UQuestlineNodeBase::FindPinByRole(ContainerNode, EQuestPinRole::ExecIn);
         if (!ActivatePin) return;
 
         for (const UEdGraphPin* Wire : ActivatePin->LinkedTo)

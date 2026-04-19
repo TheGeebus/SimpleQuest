@@ -16,7 +16,7 @@ public:
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
 	void AddConditionPin();
-
+	FORCEINLINE int32 GetConditionPinCount() const { return ConditionPinCount; } 
 private:
 	UPROPERTY()
 	int32 ConditionPinCount = 2;

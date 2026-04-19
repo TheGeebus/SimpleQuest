@@ -6,8 +6,8 @@
 #include "SGraphNode.h"
 
 struct FGameplayTag;
-class UQuestlineNode_GroupSetterBase;
-class UQuestlineNode_GroupGetterBase;
+class UQuestlineNode_PortalEntryBase;
+class UQuestlineNode_PortalExitBase;
 
 class SIMPLEQUESTEDITOR_API SGraphNode_GroupNode : public SGraphNode
 {
@@ -29,8 +29,8 @@ private:
 	void OnGroupTagChanged(const FGameplayTag NewTag);
 	FReply OnAddPinClicked();
 
-	UQuestlineNode_GroupSetterBase* SetterNode = nullptr;
-	UQuestlineNode_GroupGetterBase* GetterNode = nullptr;
+	UQuestlineNode_PortalEntryBase* SetterNode = nullptr;
+	UQuestlineNode_PortalExitBase* GetterNode = nullptr;
 
 	bool bIsSetter = false;
 

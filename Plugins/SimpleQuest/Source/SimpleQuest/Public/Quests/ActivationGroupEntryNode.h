@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Quests/QuestNodeBase.h"
-#include "ActivationGroupGetterNode.generated.h"
+#include "ActivationGroupEntryNode.generated.h"
 
 struct FWorldStateFactAddedEvent;
 
 UCLASS()
-class SIMPLEQUEST_API UActivationGroupGetterNode : public UQuestNodeBase
+class SIMPLEQUEST_API UActivationGroupEntryNode : public UQuestNodeBase
 {
 	GENERATED_BODY()
 

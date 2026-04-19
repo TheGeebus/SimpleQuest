@@ -21,7 +21,7 @@ FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 		FText OutText = FText::Format(LOCTEXT("ExitTitleFormat", "{OutcomePrefix} - {LeafTag}"), Args);
 		return OutText;
 	}
-	return NSLOCTEXT("SimpleQuestEditor", "ExitNodeUnset", "Exit (no outcome set)");
+	return NSLOCTEXT("SimpleQuestEditor", "ExitNodeUnset", "Outcome (not set)");
 }
 
 FLinearColor UQuestlineNode_Exit::GetNodeTitleColor() const

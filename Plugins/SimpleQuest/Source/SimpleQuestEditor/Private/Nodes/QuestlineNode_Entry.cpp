@@ -239,7 +239,7 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 	if (Context->Pin && IsIncomingSignalPin(Context->Pin))
 	{
 		const UEdGraphPin* Pin = Context->Pin;
-		FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNodePin"), NSLOCTEXT("SimpleQuestEditor", "EntryNodePinSection", "Entry Pin"));
+		FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNodePin"), NSLOCTEXT("SimpleQuestEditor", "EntryNodePinSection", "Start Pin"));
 		Section.AddMenuEntry(
 			TEXT("RemoveIncomingPin"),
 			NSLOCTEXT("SimpleQuestEditor", "RemoveIncomingPin_Label", "Remove Incoming Pin"),
@@ -260,7 +260,7 @@ void UQuestlineNode_Entry::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNode
 	}
 
 	// Node-body context — Import and Clear Unused.
-	FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNode"), NSLOCTEXT("SimpleQuestEditor", "EntryNodeSection", "Entry"));
+	FToolMenuSection& Section = Menu->AddSection(TEXT("EntryNode"), NSLOCTEXT("SimpleQuestEditor", "EntryNodeSection", "Start"));
 
 	Section.AddMenuEntry(
 		TEXT("ImportOutcomePins"),

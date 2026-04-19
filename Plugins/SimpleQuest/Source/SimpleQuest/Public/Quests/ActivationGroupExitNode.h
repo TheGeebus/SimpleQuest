@@ -4,10 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "Quests/QuestNodeBase.h"
-#include "ActivationGroupSetterNode.generated.h"
+#include "ActivationGroupExitNode.generated.h"
 
 UCLASS()
-class SIMPLEQUEST_API UActivationGroupSetterNode : public UQuestNodeBase
+class SIMPLEQUEST_API UActivationGroupExitNode : public UQuestNodeBase
 {
 	GENERATED_BODY()
 

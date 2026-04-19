@@ -1,10 +1,10 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
-#include "Quests/ActivationGroupGetterNode.h"
+#include "Quests/ActivationGroupEntryNode.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
 
-void UActivationGroupGetterNode::ActivateInternal(FGameplayTag InContextualTag)
+void UActivationGroupEntryNode::ActivateInternal(FGameplayTag InContextualTag)
 {
     // Intentionally skips Super — does not write Active or publish FQuestStartedEvent.
     ContextualTag = InContextualTag;
@@ -30,10 +30,10 @@ void UActivationGroupGetterNode::ActivateInternal(FGameplayTag InContextualTag)
         return;
     }
 
-    SignalSubscriptionHandle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(GroupTag, this, &UActivationGroupGetterNode::OnGroupSignalFired);
+    SignalSubscriptionHandle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(GroupTag, this, &UActivationGroupEntryNode::OnGroupSignalFired);
 }
 
-void UActivationGroupGetterNode::OnGroupSignalFired(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
+void UActivationGroupEntryNode::OnGroupSignalFired(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
     ForwardActivation();
 }

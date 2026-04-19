@@ -13,6 +13,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_UtilityBase : public UQuestlineNodeBa
 	GENERATED_BODY()
 
 public:
+	virtual void PostLoad() override;
 	virtual void AllocateDefaultPins() override;
 	virtual bool IsUtilityNode() const override { return true; }
 	virtual bool CanUserDeleteNode() const override { return true; }

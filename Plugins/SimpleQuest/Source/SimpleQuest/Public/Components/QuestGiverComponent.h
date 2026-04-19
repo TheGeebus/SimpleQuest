@@ -43,10 +43,10 @@ protected:
 	 * New authoritative property — read by the manifest builder and eventually the sole registration mechanism once the
 	 * full tag-based rework is complete.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest"))
 	FGameplayTagContainer QuestTagsToGive;
 	
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(AllowPrivateAccess=true))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer EnabledQuestTags;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;

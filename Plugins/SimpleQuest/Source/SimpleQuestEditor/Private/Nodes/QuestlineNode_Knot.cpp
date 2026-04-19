@@ -2,11 +2,22 @@
 
 #include "Nodes/QuestlineNode_Knot.h"
 
+#include "Types/QuestPinRole.h"
+
+
 // QuestlineNode_Knot.cpp
 void UQuestlineNode_Knot::AllocateDefaultPins()
 {
 	CreatePin(EGPD_Input,  TEXT("QuestActivation"), TEXT("KnotIn"));
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("KnotOut"));
+}
+
+EQuestPinRole UQuestlineNode_Knot::GetPinRole(const UEdGraphPin* Pin) const
+{
+	if (!Pin) return EQuestPinRole::None;
+	if (Pin->PinName == TEXT("KnotIn"))  return EQuestPinRole::ExecIn;
+	if (Pin->PinName == TEXT("KnotOut")) return EQuestPinRole::ExecForwardOut;
+	return EQuestPinRole::None;
 }
 
 void UQuestlineNode_Knot::AutowireNewNode(UEdGraphPin* FromPin)

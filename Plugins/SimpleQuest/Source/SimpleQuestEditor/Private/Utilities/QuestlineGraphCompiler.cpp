@@ -10,11 +10,11 @@
 #include "Quests/QuestStep.h"
 #include "Quests/Quest.h"
 #include "Quests/PrerequisiteExpression.h"
-#include "Quests/QuestPrereqGroupNode.h"
+#include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"
-#include "Quests/ActivationGroupSetterNode.h"
-#include "Quests/ActivationGroupGetterNode.h"
+#include "Quests/ActivationGroupExitNode.h"
+#include "Quests/ActivationGroupEntryNode.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -25,12 +25,12 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupSetter.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupSetter.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupGetter.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
@@ -39,6 +39,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Rewards/QuestReward.h"
 #include "Toolkit/QuestlineGraphEditor.h"
+#include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 
@@ -174,10 +175,10 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
     TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*> NodeInstanceMap;
     CompileNodeRegistration(Graph, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ContentNodes, NodeInstanceMap);
 
-    // ---- Pass 1b: setter nodes — create UQuestPrereqGroupNode monitors ----
+    // ---- Pass 1b: setter nodes — create UQuestPrereqRuleNode monitors ----
     TArray<FName> MonitorTags;
     TArray<FName> GetterEntryTags;
-    CompileGroupSetters(Graph, TagPrefix, MonitorTags, GetterEntryTags);
+    CompileGroupSetters(Graph, TagPrefix, VisitedAssetPaths, MonitorTags, GetterEntryTags);
 
     // ---- Pass 1c: utility nodes ----
     TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
@@ -220,7 +221,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 
         Inst->NextNodesOnForward.Empty();
 
-        if (UEdGraphPin* ForwardPin = EdNode->FindPin(TEXT("Forward"), EGPD_Output))
+		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(EdNode, EQuestPinRole::ExecForwardOut))
         {
             TArray<FName> ForwardTags;
             ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
@@ -390,7 +391,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 					const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
 					if (OutcomeTag.IsValid()) for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(OutcomeTag).AddUnique(Tag);
 				}
-				else if (OutputPin->PinName == TEXT("Any Outcome"))
+				else if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
 				{
 					for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(FGameplayTag()).AddUnique(Tag);
 				}
@@ -468,63 +469,83 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     }
 }
 
-void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags)
+void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags)
 {
-    // ---- Prerequisite group setters: merge conditions per unique GroupTag ----
-    TMap<FGameplayTag, TArray<UQuestlineNode_PrerequisiteGroupSetter*>> PrereqSettersByTag;
+    // ---- Prerequisite Rule Entries: compile each Entry's Enter-pin expression subtree into a runtime Monitor ----
+	TMap<FGameplayTag, TArray<UQuestlineNode_PrerequisiteRuleEntry*>> PrereqEntriesByTag;
 
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+	    if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+	    {
+	        if (!Entry->GroupTag.IsValid())
+	        {
+	            AddWarning(FString::Printf(TEXT("[%s] A Prerequisite Rule Entry has no rule tag set and will be skipped."), *TagPrefix), Entry);
+	            continue;
+	        }
+	        PrereqEntriesByTag.FindOrAdd(Entry->GroupTag).Add(Entry);
+	    }
+	}
+
+	for (auto& [RuleTag, Entries] : PrereqEntriesByTag)
+	{
+		// Duplicate-tag detection: one Entry per tag is the contract. Multiple Entries would create a silent race where only
+		// the first-compiled definition takes effect. Emit a tokenized error with clickable navigation to each offending Entry.
+		if (Entries.Num() > 1)
+		{
+			TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Error);
+			Msg->AddToken(FTextToken::Create(FText::FromString(
+				FString::Printf(TEXT("[%s] Prerequisite Rule tag '%s' is defined by %d Entries — rule names must be unique. Offending Entries:"),
+					*TagPrefix, *RuleTag.GetTagName().ToString(), Entries.Num()))));
+
+			for (UQuestlineNode_PrerequisiteRuleEntry* OffendingEntry : Entries)
+			{
+				AddNodeNavigationToken(Msg, OffendingEntry);
+			}
+
+			Messages.Add(Msg);
+			bHasErrors = true;
+			NumErrors++;
+			UE_LOG(LogSimpleQuest, Error,
+				TEXT("QuestlineGraphCompiler: Prerequisite Rule tag '%s' has %d Entries — rule names must be unique."),
+				*RuleTag.GetTagName().ToString(), Entries.Num());
+
+			continue;  // Skip Monitor creation for this tag — asset is in error state.
+		}
+		
+	    UQuestPrereqRuleNode* Monitor = NewObject<UQuestPrereqRuleNode>(RootGraph);
+	    Monitor->GroupTag = RuleTag;
+
+	    UQuestlineNode_PrerequisiteRuleEntry* PrimaryEntry = Entries[0];
+	    if (Entries.Num() > 1)
+	    {
+	        UE_LOG(LogSimpleQuest, Verbose,
+	            TEXT("CompileGroupSetters: [%s] rule tag '%s' has %d Entries — using first; duplicate detection pass will error in 4.c."),
+	            *TagPrefix, *RuleTag.GetTagName().ToString(), Entries.Num());
+	    }
+
+	    if (UEdGraphPin* EnterPin = PrimaryEntry->GetPinByRole(EQuestPinRole::PrereqIn))
+	    {
+	        if (EnterPin->LinkedTo.Num() > 0)
+	        {
+	            Monitor->Expression = CompilePrerequisiteExpression(EnterPin, TagPrefix, VisitedAssetPaths);
+	        }
+	    }
+
+	    const FName RuleTagName = RuleTag.GetTagName();
+	    AllCompiledNodes.Add(RuleTagName, Monitor);
+	    OutMonitorTags.Add(RuleTagName);
+
+	    TArray<FGameplayTag> LeafTags;
+	    Monitor->Expression.CollectLeafTags(LeafTags);
+	    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] prereq rule '%s' — expression with %d leaf(s)"),
+	        *TagPrefix, *RuleTagName.ToString(), LeafTags.Num());
+	}
+
+    // ---- Activation Group Entries: each Entry publishes a tag when its Activate input arrives; compile to runtime instance ----
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        if (UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node))
-        {
-            if (!Setter->GroupTag.IsValid())
-            {
-                AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
-                continue;
-            }
-            PrereqSettersByTag.FindOrAdd(Setter->GroupTag).Add(Setter);
-        }
-    }
-
-    for (auto& [GroupTag, Setters] : PrereqSettersByTag)
-    {
-        UQuestPrereqGroupNode* Monitor = NewObject<UQuestPrereqGroupNode>(RootGraph);
-        Monitor->GroupTag = GroupTag;
-
-        for (UQuestlineNode_PrerequisiteGroupSetter* Setter : Setters)
-        {
-            for (UEdGraphPin* Pin : Setter->Pins)
-            {
-                if (Pin->Direction != EGPD_Input) continue;
-                if (!Pin->PinName.ToString().StartsWith(TEXT("Condition"))) continue;
-
-                for (UEdGraphPin* LinkedOutputPin : Pin->LinkedTo)
-                {
-                    const FName FactTagName = ResolveOutputPinToStateFact(LinkedOutputPin, TagPrefix);
-                    if (FactTagName.IsNone()) continue;
-
-                    const FGameplayTag FactTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
-                    if (FactTag.IsValid())
-                    {
-                        Monitor->ConditionTags.AddUnique(FactTag);
-                    }
-                }
-            }
-        }
-
-        const FName GroupTagName = GroupTag.GetTagName();
-        AllCompiledNodes.Add(GroupTagName, Monitor);
-        AllCompiledQuestTags.Add(GroupTagName);
-        OutMonitorTags.Add(GroupTagName);
-
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] prereq group '%s' — %d condition(s) from %d setter(s)"),
-            *TagPrefix, *GroupTagName.ToString(), Monitor->ConditionTags.Num(), Setters.Num());
-    }
-
-    // ---- Activation group setters ----
-    for (UEdGraphNode* Node : Graph->Nodes)
-    {
-        UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node);
+        UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node);
         if (!Setter) continue;
 
         if (!Setter->GroupTag.IsValid())
@@ -533,7 +554,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             continue;
         }
 
-        UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
+        UActivationGroupExitNode* Inst = NewObject<UActivationGroupExitNode>(RootGraph);
         Inst->GroupTag = Setter->GroupTag;
 
         const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
@@ -545,10 +566,10 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             *TagPrefix, *Setter->GroupTag.GetTagName().ToString());
     }
 
-    // ---- Activation group getters (source nodes — add to entry tags) ----
+    // ---- Activation Group Exits: source nodes — subscribe to the group tag, add to entry tags for graph-start activation ----
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node);
+        UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node);
         if (!Getter) continue;
 
         if (!Getter->GroupTag.IsValid())
@@ -557,7 +578,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             continue;
         }
 
-        UActivationGroupGetterNode* Inst = NewObject<UActivationGroupGetterNode>(RootGraph);
+        UActivationGroupEntryNode* Inst = NewObject<UActivationGroupEntryNode>(RootGraph);
         Inst->GroupTag = Getter->GroupTag;
 
         const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
@@ -662,7 +683,7 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 	}
                 }
             }
-            else if (Pin->PinName == TEXT("Any Outcome"))
+			else if (UQuestlineNodeBase::GetPinRoleOf(Pin) == EQuestPinRole::AnyOutcomeOut)
             {
                 for (const FName& Tag : ResolvedTags)
                 {
@@ -685,7 +706,7 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 {
                     if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
                     {
-                        if (UEdGraphPin* DeactivatedPin = EntryNode->FindPin(TEXT("Deactivated"), EGPD_Output))
+						if (UEdGraphPin* DeactivatedPin = EntryNode->GetPinByRole(EQuestPinRole::DeactivatedOut))
                         {
                             if (!DeactivatedPin->bOrphanedPin && DeactivatedPin->LinkedTo.Num() > 0)
                             {
@@ -722,7 +743,7 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
             Instance->bCompletesParentGraph = bCompletesParent;
         }
         
-        if (UEdGraphPin* PrereqPin = ContentNode->FindPin(TEXT("Prerequisites"), EGPD_Input))
+    	if (UEdGraphPin* PrereqPin = ContentNode->GetPinByRole(EQuestPinRole::PrereqIn))
         {
             if (PrereqPin->LinkedTo.Num() > 0)
             {
@@ -761,7 +782,7 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const F
 		     * handles AnyOutcome absorption on each enumerated source. Filter by VisitedAssetPaths so AR-scan results from outside
 		     * the current compile tree (unrelated top-level assets that happen to link this graph) don't contaminate the analysis.
 		     */
-		    if (Pin->PinName == TEXT("Entered") && Pin->PinType.PinCategory == TEXT("QuestActivation") && PinDests.Num() > 0)
+			if (UQuestlineNodeBase::GetPinRoleOf(Pin) == EQuestPinRole::AnyOutcomeOut && PinDests.Num() > 0)
 		    {
 		        TSet<FQuestEffectiveSource> ReachingSources;
 		        FQuestlineGraphTraversalPolicy GraphTraversalPolicy;
@@ -1093,7 +1114,7 @@ void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, 
 		if (const UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(SourceNode))
 		{
 			// B1: Entered sentinel — climb to this Entry's graph and gather its parent sources recursively.
-			if (Source.Pin->PinName == TEXT("Entered") && Source.Pin->PinType.PinCategory == TEXT("QuestActivation"))
+			if (UQuestlineNodeBase::GetPinRoleOf(Source.Pin) == EQuestPinRole::AnyOutcomeOut)
 			{
 				CollectTransitiveParentSources(EntryNode->GetGraph(), VisitedAssetPaths, OutKeys, VisitedGraphs);
 				continue;
@@ -1233,13 +1254,13 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     }
     
     // NOT
-    if (Cast<UQuestlineNode_PrerequisiteNot>(Node))
+    if (UQuestlineNode_PrerequisiteNot* NotNode = Cast<UQuestlineNode_PrerequisiteNot>(Node))
     {
         FPrerequisiteExpressionNode ExprNode;
         ExprNode.Type = EPrerequisiteExpressionType::Not;
         const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
 
-        if (UEdGraphPin* CondPin = Node->FindPin(TEXT("Condition_0"), EGPD_Input))
+		if (UEdGraphPin* CondPin = NotNode->GetPinByRole(EQuestPinRole::PrereqIn))
         {
             if (CondPin->LinkedTo.Num() > 0)
             {
@@ -1254,7 +1275,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     }
 
     // Getter: resolves to a Leaf on the group's Satisfied tag
-    if (UQuestlineNode_PrerequisiteGroupGetter* Getter = Cast<UQuestlineNode_PrerequisiteGroupGetter>(Node))
+    if (UQuestlineNode_PrerequisiteRuleExit* Getter = Cast<UQuestlineNode_PrerequisiteRuleExit>(Node))
     {
         if (!Getter->GroupTag.IsValid())
         {
@@ -1267,26 +1288,39 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
         return OutExpression.Nodes.Add(LeafNode);
     }
 
-    // Setter PrereqOut: same leaf as getter — resolves to the group's tag
-    if (UQuestlineNode_PrerequisiteGroupSetter* Setter = Cast<UQuestlineNode_PrerequisiteGroupSetter>(Node))
-    {
-        if (!Setter->GroupTag.IsValid())
-        {
-            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
-            return INDEX_NONE;
-        }
-        FPrerequisiteExpressionNode LeafNode;
-        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-        LeafNode.LeafTag = Setter->GroupTag;
-        return OutExpression.Nodes.Add(LeafNode);
-    }
+	// Rule Entry Forward: direct-eval. Inline the Enter pin's linked expression subtree so a local Forward
+	// consumer avoids the WorldState roundtrip that a cross-graph Exit would use. Behaviorally equivalent
+	// to reading the rule's published tag, but evaluated directly without waiting on the Monitor's publish.
+	if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+	{
+		if (!Entry->GroupTag.IsValid())
+		{
+			AddWarning(FString::Printf(TEXT("[%s] A Prerequisite Rule Entry has no rule tag set and will be skipped."), *TagPrefix), Entry);
+			return INDEX_NONE;
+		}
+
+		if (UEdGraphPin* EnterPin = Entry->GetPinByRole(EQuestPinRole::PrereqIn))
+		{
+			if (EnterPin->LinkedTo.Num() > 0)
+			{
+				return CompilePrerequisiteFromOutputPin(EnterPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+			}
+		}
+
+		// No wired expression on Enter — fall back to the tag-read leaf. Same expression a cross-graph Exit
+		// compiles to; evaluates false at runtime unless the Monitor has somehow published the tag anyway.
+		FPrerequisiteExpressionNode LeafNode;
+		LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
+		LeafNode.LeafTag = Entry->GroupTag;
+		return OutExpression.Nodes.Add(LeafNode);
+	}
     
     // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Active fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {
         const FName QuestTagName = FName(*(TEXT("Quest.") + TagPrefix));
 
-        if (OutputPin->PinName == TEXT("Entered"))
+		if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
         {
             // The parent quest's Active fact is always set when the inner graph is running
             FPrerequisiteExpressionNode LeafNode;
@@ -1322,7 +1356,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     // Content node: Success/Failure becomes single Leaf; Any Outcome builds OR(Succeeded, Failed)
     if (Cast<UQuestlineNode_ContentBase>(Node))
     {
-        if (OutputPin->PinName == TEXT("Any Outcome"))
+		if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
         {
             const UQuestlineNode_ContentBase* CN = Cast<UQuestlineNode_ContentBase>(Node);
             const FString Label = SanitizeTagSegment(CN->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
@@ -1637,12 +1671,12 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 		 * CollectEffectiveSources handles knots, utility Forward, setter-Forward chains, and dereferences getters to their same-graph
 		 * setters — transitive sources are captured so a parallel path through a chained group is still detected as a collision.
 		 */
-		if (UQuestlineNode_ActivationGroupSetter* Setter = Cast<UQuestlineNode_ActivationGroupSetter>(Node))
+		if (UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node))
 		{
 			const FGameplayTag GroupTag = Setter->GetGroupTag();
 			if (!GroupTag.IsValid()) continue;
 
-			UEdGraphPin* ActivatePin = Setter->FindPin(TEXT("Activate"), EGPD_Input);
+			UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 			if (!ActivatePin) continue;
 			
 			/**
@@ -1692,12 +1726,12 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 		 * setter-Forward chains. Destinations are recorded under the group tag so the analysis pass can cross-reference with
 		 * setter sources for the same tag.
 		 */
-		if (UQuestlineNode_ActivationGroupGetter* Getter = Cast<UQuestlineNode_ActivationGroupGetter>(Node))
+		if (UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node))
 		{
 			const FGameplayTag GroupTag = Getter->GetGroupTag();
 			if (!GroupTag.IsValid()) continue;
 
-			UEdGraphPin* ForwardPin = Getter->FindPin(TEXT("Forward"), EGPD_Output);
+			UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
 			if (!ForwardPin) continue;
 
 			TSet<const UEdGraphPin*> Terminals;

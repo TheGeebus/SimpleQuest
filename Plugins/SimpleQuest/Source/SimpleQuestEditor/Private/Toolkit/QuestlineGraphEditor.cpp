@@ -42,6 +42,32 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
             GraphBackwardStack[i]->RemoveOnGraphChangedHandler(GraphChangedHandles[i]);
         }
     }
+
+    /**
+     * Defensive hover-highlight cleanup — if this editor's Group Examiner set highlights on other editors' viewports and
+     * got destroyed before a proper OnMouseLeave could fire (rare, but possible on abrupt editor close), stale borders
+     * would linger. Iterate all currently-open questline editors and clear. Skip self (already being destroyed).
+     */
+    if (GEditor)
+    {
+        if (UAssetEditorSubsystem* EditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>())
+        {
+            TArray<UObject*> EditedAssets = EditorSubsystem->GetAllEditedAssets();
+            for (UObject* Asset : EditedAssets)
+            {
+                UQuestlineGraph* AssetGraph = Cast<UQuestlineGraph>(Asset);
+                if (!AssetGraph) continue;
+
+                IAssetEditorInstance* Instance = EditorSubsystem->FindEditorForAsset(AssetGraph, /*bFocusIfOpen=*/ false);
+                if (!Instance) continue;
+
+                FQuestlineGraphEditor* OtherEditor = static_cast<FQuestlineGraphEditor*>(Instance);
+                if (OtherEditor == this) continue;
+
+                OtherEditor->ClearNodeHighlight();
+            }
+        }
+    }
 }
 
 void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph)
@@ -591,6 +617,22 @@ void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode
         {
             GroupExaminerPanel->SelectRowForNode(RowToHighlight);
         }
+    }
+}
+
+void FQuestlineGraphEditor::HighlightNodesInViewport(const TArray<UEdGraphNode*>& Nodes)
+{
+    if (GraphEditorWidget.IsValid())
+    {
+        GraphEditorWidget->SetHoverHighlightedNodes(Nodes);
+    }
+}
+
+void FQuestlineGraphEditor::ClearNodeHighlight()
+{
+    if (GraphEditorWidget.IsValid())
+    {
+        GraphEditorWidget->ClearHoverHighlight();
     }
 }
 

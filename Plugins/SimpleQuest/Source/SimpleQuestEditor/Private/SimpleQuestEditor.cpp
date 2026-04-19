@@ -157,6 +157,11 @@ void FSimpleQuestEditor::StartupModule()
 			StyleSet->RootToContentDir(TEXT("SimpleQuestClassIconWhite16px"), TEXT(".svg")),
 			FVector2D(16, 16)));
 
+	StyleSet->Set("SimpleQuest.Graph.Node.HoverHalo",
+	new FSlateBoxBrush(
+		StyleSet->RootToContentDir(TEXT("SimpleQuestHoverHalo64"), TEXT(".png")),
+		FMargin(18.0f / 64.0f)));
+
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 }
 

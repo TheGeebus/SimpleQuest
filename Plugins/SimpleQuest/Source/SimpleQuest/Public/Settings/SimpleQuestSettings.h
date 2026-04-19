@@ -72,6 +72,15 @@ public:
 
 	UPROPERTY(Config, EditAnywhere, Category="ExaminerWidgets|ActivationGroup")
 	FLinearColor ExaminerGroupGetterColor = FLinearColor(0.25f, 0.60f, 0.90f);
+
+	/**
+	 * Color used by the Group Examiner (and future examiners) to draw a hover-highlight border around a graph node when
+	 * the designer hovers a corresponding row in the panel. Cross-editor — if the target node lives in another open editor,
+	 * the highlight draws there too. Bright, distinctive colors read best since they need to contrast with arbitrary node
+	 * backgrounds.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "Simple Quest|Colors")
+	FLinearColor HoverHighlightColor = FLinearColor(0.3f, 0.95f, 0.95f);
 	
 #endif
 };

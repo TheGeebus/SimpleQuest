@@ -10,6 +10,9 @@
 #include "ScopedTransaction.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GraphEditorDragDropAction.h"
+#include "SGraphPanel.h"
+#include "Styling/SlateStyleRegistry.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 void SQuestlineGraphPanel::Construct(const FArguments& InArgs,
                                      UEdGraph* InGraph,
@@ -161,6 +164,83 @@ void SQuestlineGraphPanel::JumpToNodeWhenReady(UEdGraphNode* Node)
         GraphEditor->JumpToNode(Node, false, true);
     else
         PendingJumpNode = Node;
+}
+
+/*-------------------------------------------*
+ * Examiner Hover Behaviors
+ *-------------------------------------------*/
+
+void SQuestlineGraphPanel::SetHoverHighlightedNodes(const TArray<UEdGraphNode*>& Nodes)
+{
+	TSet<TWeakObjectPtr<UEdGraphNode>> NewSet;
+	for (UEdGraphNode* Node : Nodes)
+	{
+		if (Node) NewSet.Add(Node);
+	}
+	if (NewSet.Num() != HoverHighlightedNodes.Num() || !NewSet.Includes(HoverHighlightedNodes))
+	{
+		HoverHighlightedNodes = MoveTemp(NewSet);
+		Invalidate(EInvalidateWidget::Paint);
+	}
+}
+
+void SQuestlineGraphPanel::ClearHoverHighlight()
+{
+	if (HoverHighlightedNodes.Num() > 0)
+	{
+		HoverHighlightedNodes.Empty();
+		Invalidate(EInvalidateWidget::Paint);
+	}
+}
+
+int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+    // Paint children first so each node widget's cached paint geometry is fresh when we query it below.
+    const int32 ChildLayer = SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+
+    if (HoverHighlightedNodes.Num() == 0 || !GraphEditor.IsValid())
+    {
+        return ChildLayer;
+    }
+
+    SGraphPanel* Panel = GraphEditor->GetGraphPanel();
+    if (!Panel)
+    {
+        return ChildLayer;
+    }
+
+    const FLinearColor HighlightColor = SQ_ED_HOVER_HIGHLIGHT;
+    // Twice the selected-shadow inflation so the hover halo reads louder than a plain selection.
+    const FVector2f ShadowInflate = UE::Slate::CastToVector2f(GetDefault<UGraphEditorSettings>()->GetShadowDeltaSize()) * 2.f;
+    const int32 HighlightLayer = ChildLayer + 1;
+
+    for (const TWeakObjectPtr<UEdGraphNode>& WeakNode : HoverHighlightedNodes)
+    {
+        UEdGraphNode* Node = WeakNode.Get();
+        if (!Node) continue;
+
+        TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
+        if (!NodeWidget.IsValid()) continue;
+
+        const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
+        if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
+
+        static const ISlateStyle* SimpleQuestStyle = FSlateStyleRegistry::FindSlateStyle("SimpleQuestStyle");
+        const FSlateBrush* HoverHaloBrush = SimpleQuestStyle
+            ? SimpleQuestStyle->GetBrush("SimpleQuest.Graph.Node.HoverHalo")
+            : FAppStyle::GetBrush("Graph.Node.ShadowSelected");  // fallback if style missing
+
+        FSlateDrawElement::MakeBox(
+            OutDrawElements,
+            HighlightLayer,
+            NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
+            HoverHaloBrush,
+            ESlateDrawEffect::None,
+            HighlightColor
+        );
+    }
+
+    return HighlightLayer;
 }
 
 

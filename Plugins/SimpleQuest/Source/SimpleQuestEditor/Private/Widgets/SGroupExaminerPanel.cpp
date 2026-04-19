@@ -18,6 +18,7 @@
 
 #define LOCTEXT_NAMESPACE "SimpleQuestEditor"
 
+// Helpers
 namespace
 {
 	FText BuildEndpointLabel(const FGroupExaminerEndpoint& Endpoint)
@@ -56,6 +57,42 @@ namespace
 			FText::FromString(Reference.PinLabel),
 			Node->GetNodeTitle(ENodeTitleType::ListView)
 		);
+	}
+	
+	/**
+	 * Collects the editor nodes to hover-highlight for a given row. Endpoint and Reference rows highlight their own Node;
+	 * Section rows highlight all endpoint nodes in the section (not their references) — gives the designer an at-a-glance
+	 * view of the breadth of the group across the project. Section rows of sections with no endpoints return empty.
+	 */
+	void GatherHoverTargets(const TSharedPtr<FExaminerTreeItem>& Item, TArray<UEdGraphNode*>& OutNodes)
+	{
+		if (!Item.IsValid()) return;
+
+		if (Item->Kind == EExaminerItemKind::Section)
+		{
+			for (const TSharedPtr<FExaminerTreeItem>& Child : Item->Children)
+			{
+				if (Child.IsValid() && Child->Kind == EExaminerItemKind::Endpoint)
+				{
+					if (UEdGraphNode* Node = Child->Node.Get()) OutNodes.Add(Node);
+				}
+			}
+			return;
+		}
+
+		if (UEdGraphNode* Node = Item->Node.Get()) OutNodes.Add(Node);
+	}
+
+	/** Groups nodes by the editor currently hosting each, so cross-editor highlight can dispatch per-editor. */
+	void GroupNodesByEditor(const TArray<UEdGraphNode*>& Nodes, TMap<FQuestlineGraphEditor*, TArray<UEdGraphNode*>>& OutByEditor)
+	{
+		for (UEdGraphNode* Node : Nodes)
+		{
+			if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
+			{
+				OutByEditor.FindOrAdd(Editor).Add(Node);
+			}
+		}
 	}
 }
 
@@ -124,6 +161,50 @@ void SGroupExaminerRow::ConstructChildren(ETableViewMode::Type InOwnerTableMode,
 					.Font(Font)
 			]
 	];
+}
+
+void SGroupExaminerRow::OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
+{
+	STableRow<TSharedPtr<FExaminerTreeItem>>::OnMouseEnter(MyGeometry, MouseEvent);
+
+	TArray<UEdGraphNode*> Targets;
+	GatherHoverTargets(Item, Targets);
+	if (Targets.IsEmpty()) return;
+
+	TMap<FQuestlineGraphEditor*, TArray<UEdGraphNode*>> ByEditor;
+	GroupNodesByEditor(Targets, ByEditor);
+	for (const auto& Pair : ByEditor)
+	{
+		Pair.Key->HighlightNodesInViewport(Pair.Value);
+	}
+}
+
+void SGroupExaminerRow::OnMouseLeave(const FPointerEvent& MouseEvent)
+{
+	STableRow<TSharedPtr<FExaminerTreeItem>>::OnMouseLeave(MouseEvent);
+
+	/**
+	 * Clear by re-resolving which editors we set highlights on. Re-enumeration beats state caching because the row's Item
+	 * stays stable during hover, and editor lookup is O(1). Clearing the whole editor's highlight set (rather than only
+	 * our nodes) is intentional — a hover-leave should cleanly reset, and any other simultaneously-active hover will
+	 * re-set its own targets on its next OnMouseEnter.
+	 */
+	TArray<UEdGraphNode*> Targets;
+	GatherHoverTargets(Item, Targets);
+	if (Targets.IsEmpty()) return;
+
+	TSet<FQuestlineGraphEditor*> Editors;
+	for (UEdGraphNode* Node : Targets)
+	{
+		if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
+		{
+			Editors.Add(Editor);
+		}
+	}
+	for (FQuestlineGraphEditor* Editor : Editors)
+	{
+		Editor->ClearNodeHighlight();
+	}
 }
 
 void SGroupExaminerPanel::Construct(const FArguments& InArgs)

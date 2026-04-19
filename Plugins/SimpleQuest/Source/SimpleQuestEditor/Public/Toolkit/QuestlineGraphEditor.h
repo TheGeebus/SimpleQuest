@@ -37,6 +37,16 @@ public:
 		bool IsValid() const { return HostGraph && EdNode; }
 	};
 
+	/**
+	 * Sets hover-highlight borders on the given nodes in this editor's active graph panel. Called by the Group Examiner's
+	 * row hover handlers — cross-editor because any examiner can resolve any open editor via GetEditorForNode and dispatch
+	 * here. Pass an empty array or use ClearNodeHighlight() to clear. Silent no-op if the panel isn't constructed yet.
+	 */
+	void HighlightNodesInViewport(const TArray<UEdGraphNode*>& Nodes);
+
+	/** Clears the active graph panel's hover-highlight set. */
+	void ClearNodeHighlight();
+	
 private:
 	TSharedRef<SDockTab> SpawnGraphViewportTab(const FSpawnTabArgs& Args);
 	SGraphEditor::FGraphEditorEvents MakeGraphEvents();

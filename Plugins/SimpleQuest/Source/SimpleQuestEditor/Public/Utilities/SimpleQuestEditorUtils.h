@@ -30,6 +30,8 @@
 #define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupSetterColor)
 #define SQ_ED_EXAMINER_GROUP_GETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupGetterColor)
 
+#define SQ_ED_HOVER_HIGHLIGHT       (GetDefault<USimpleQuestSettings>()->HoverHighlightColor)
+
 
 class UQuestObjective;
 class UQuestlineNode_Step;

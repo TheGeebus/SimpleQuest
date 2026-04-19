@@ -54,7 +54,9 @@ void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwn
 
 protected:
 	virtual void ConstructChildren(ETableViewMode::Type InOwnerTableMode, const TAttribute<FMargin>& InPadding, const TSharedRef<SWidget>& InContent) override;
-
+	virtual void OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
+	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override;
+	
 private:
 	TSharedPtr<FExaminerTreeItem> Item;
 };

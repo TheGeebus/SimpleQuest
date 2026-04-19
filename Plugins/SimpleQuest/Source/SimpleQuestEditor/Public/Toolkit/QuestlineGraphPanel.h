@@ -29,8 +29,23 @@ public:
 
 	/** Schedules a JumpToNode after the SGraphEditor's first render pass clears its initial ZoomToFit. */
 	void JumpToNodeWhenReady(UEdGraphNode* Node);
+
+	/**
+	 * Sets the nodes to draw hover-highlight borders around on this panel's next paint. Replaces the previous set; pass an
+	 * empty array to clear. Triggers a paint invalidation so the visual updates on the owning window's next tick — works
+	 * across windows and monitors because each editor's panel paints on its own window independently.
+	 */
+	void SetHoverHighlightedNodes(const TArray<UEdGraphNode*>& Nodes);
+
+	/** Convenience: clears the hover-highlight set. */
+	void ClearHoverHighlight();
+
+protected:
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override;
 	
 private:
+	TSet<TWeakObjectPtr<UEdGraphNode>> HoverHighlightedNodes;
+
 	static bool IsHotkey(FKey Key);
 	FVector2D ToGraphCoords(const FGeometry& Geometry, FVector2D ScreenPos) const;
 

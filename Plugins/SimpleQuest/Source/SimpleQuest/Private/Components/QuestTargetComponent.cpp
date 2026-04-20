@@ -108,37 +108,48 @@ void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
     OnQuestTargetActivated.Broadcast(bIsActivated);
 }
 
-void UQuestTargetComponent::SendTriggeredEvent()
+void UQuestTargetComponent::SendTriggeredEvent(const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendTriggeredEvent : '%s' fanning out to %d watched step(s); CustomData %s"),
+        *GetOwner()->GetActorNameOrLabel(), ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     TMap<FGameplayTag, FDelegateHandle> HandlesCopy = ActiveStepEndHandles;
     for (const auto& Pair : HandlesCopy)
     {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveTriggered(GetOwner()));
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveTriggered(GetOwner(), nullptr, CustomData));
     }
 }
 
-void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor)
+void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendKilledEvent : '%s' killed by '%s', fanning out to %d watched step(s); CustomData %s"),
+        *GetOwner()->GetActorNameOrLabel(), KillerActor ? *KillerActor->GetActorNameOrLabel() : TEXT("(none)"),
+        ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+
     for (const auto& Pair : ActiveStepEndHandles)
     {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveKilled(GetOwner(), KillerActor));
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveKilled(GetOwner(), KillerActor, CustomData));
     }
 }
 
-void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor)
+void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendInteractedEvent : '%s' interacted by '%s', fanning out to %d watched step(s); CustomData %s"),
+        *GetOwner()->GetActorNameOrLabel(), InteractingActor ? *InteractingActor->GetActorNameOrLabel() : TEXT("(none)"),
+        ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+
     for (const auto& Pair : ActiveStepEndHandles)
     {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveInteracted(GetOwner(), InteractingActor));
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveInteracted(GetOwner(), InteractingActor, CustomData));
     }
 }
 

@@ -124,7 +124,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     FQuestObjectiveContext Context;
     Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
     Context.Instigator = Cast<AActor>(Event->Instigator);
-    Context.CustomData = RawEvent;
+    Context.CustomData = Event->CustomData;
     Step->GetActiveObjective()->TryCompleteObjective(Context);
 }
 

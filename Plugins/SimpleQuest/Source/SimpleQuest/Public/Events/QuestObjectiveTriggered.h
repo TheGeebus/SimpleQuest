@@ -14,8 +14,8 @@ struct FQuestObjectiveTriggered
 
 	FQuestObjectiveTriggered() = default;
 
-	explicit FQuestObjectiveTriggered(UObject* InTriggeredActor, UObject* InInstigator = nullptr)
-		: TriggeredActor(InTriggeredActor), Instigator(InInstigator)
+	explicit FQuestObjectiveTriggered(UObject* InTriggeredActor, UObject* InInstigator = nullptr, const FInstancedStruct& InCustomData = FInstancedStruct())
+		: TriggeredActor(InTriggeredActor), Instigator(InInstigator), CustomData(InCustomData)
 	{}
 
 	/** The target actor that was triggered (victim, interact point, waypoint). */
@@ -25,5 +25,11 @@ struct FQuestObjectiveTriggered
 	/** The actor that caused the trigger (killer, interactor). Null for passive triggers. */
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<UObject> Instigator;
+
+	/** Type-erased extension point for designer-supplied trigger data. Routed through to FQuestObjectiveContext::CustomData
+	by UQuestManagerSubsystem::CheckQuestObjectives so objectives can read game-specific context without bypassing the
+	typed event pipeline. Empty by default. */
+	UPROPERTY(BlueprintReadWrite)
+	FInstancedStruct CustomData;
 };
 

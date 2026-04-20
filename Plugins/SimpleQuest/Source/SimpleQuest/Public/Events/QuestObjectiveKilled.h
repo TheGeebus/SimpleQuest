@@ -11,8 +11,9 @@ struct FQuestObjectiveKilled : public FQuestObjectiveTriggered
 
 	FQuestObjectiveKilled() = default;
 
-	FQuestObjectiveKilled(AActor* InVictimActor, AActor* InKillerActor)
-		: FQuestObjectiveTriggered(InVictimActor, InKillerActor), KillerActor(InKillerActor) {}
+	FQuestObjectiveKilled(AActor* InVictimActor, AActor* InKillerActor, const FInstancedStruct& InCustomData = FInstancedStruct())
+		: FQuestObjectiveTriggered(InVictimActor, InKillerActor, InCustomData), KillerActor(InKillerActor)
+	{}
 
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<AActor> KillerActor;

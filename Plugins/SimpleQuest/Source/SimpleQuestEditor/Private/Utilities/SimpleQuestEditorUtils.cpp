@@ -511,7 +511,13 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				Endpoint.Node = Setter;
 				Endpoint.Asset = QuestlineGraph;
 
-				if (UEdGraphPin* ActivatePin = Setter->FindPin(TEXT("Activate"), EGPD_Input))
+				UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
+				if (!ActivatePin)
+				{
+					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
+						*Setter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
+				}
+				else
 				{
 					TSet<const UEdGraphPin*> SourcePins;
 					TSet<const UEdGraphNode*> VisitedNodes;
@@ -547,7 +553,13 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				Endpoint.Node = Getter;
 				Endpoint.Asset = QuestlineGraph;
 
-				if (UEdGraphPin* ForwardPin = Getter->FindPin(TEXT("Forward"), EGPD_Output))
+				UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
+				if (!ForwardPin)
+				{
+					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
+						*Getter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
+				}
+				else
 				{
 					TSet<const UEdGraphPin*> Terminals;
 					TSet<const UEdGraphNode*> VisitedNodes;

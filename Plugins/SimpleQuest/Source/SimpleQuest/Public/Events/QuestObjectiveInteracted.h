@@ -11,8 +11,9 @@ struct FQuestObjectiveInteracted : public FQuestObjectiveTriggered
 
 	FQuestObjectiveInteracted() = default;
 
-	FQuestObjectiveInteracted(AActor* InQuestingActor, AActor* InInteractingActor)
-		: FQuestObjectiveTriggered(InQuestingActor, InInteractingActor), InteractingActor(InInteractingActor) {}
+	FQuestObjectiveInteracted(AActor* InQuestingActor, AActor* InInteractingActor,
+		const FInstancedStruct& InCustomData = FInstancedStruct())
+		: FQuestObjectiveTriggered(InQuestingActor, InInteractingActor, InCustomData), InteractingActor(InInteractingActor) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<AActor> InteractingActor;

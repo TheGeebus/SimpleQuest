@@ -32,14 +32,19 @@ public:
 	UFUNCTION(BlueprintCallable)
 	virtual void SetActivated_Implementation(bool bIsActivated) override;
 
-	UFUNCTION(BlueprintCallable)
-	virtual void SendTriggeredEvent();
-	
-	UFUNCTION(BlueprintCallable)
-	virtual void SendKilledEvent(AActor* KillerActor);
+	/**
+	 * Publish an objective-triggered event on every watched step channel. CustomData, if supplied, flows through to the
+	 * objective's FQuestObjectiveContext::CustomData — designer-visible game-specific payload. BP pin is optional via
+	 * AutoCreateRefTerm; C++ callers can omit to publish an empty CustomData.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
+	virtual void SendTriggeredEvent(const FInstancedStruct& CustomData = FInstancedStruct());
 
-	UFUNCTION(BlueprintCallable)
-	virtual void SendInteractedEvent(AActor* InteractingActor);
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
+	virtual void SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData = FInstancedStruct());
+
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
+	virtual void SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData = FInstancedStruct());
 
 protected:
 	virtual void BeginPlay() override;

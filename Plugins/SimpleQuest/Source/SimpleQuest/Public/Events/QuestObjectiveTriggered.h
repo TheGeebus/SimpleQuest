@@ -26,9 +26,11 @@ struct FQuestObjectiveTriggered
 	UPROPERTY(BlueprintReadWrite)
 	TObjectPtr<UObject> Instigator;
 
-	/** Type-erased extension point for designer-supplied trigger data. Routed through to FQuestObjectiveContext::CustomData
-	by UQuestManagerSubsystem::CheckQuestObjectives so objectives can read game-specific context without bypassing the
-	typed event pipeline. Empty by default. */
+	/**
+	 * Type-erased extension point for designer-supplied trigger data. Routed through to FQuestObjectiveContext::CustomData
+	 * by UQuestManagerSubsystem::CheckQuestObjectives so objectives can read game-specific context without bypassing the
+	 * typed event pipeline. Empty by default.
+	 */
 	UPROPERTY(BlueprintReadWrite)
 	FInstancedStruct CustomData;
 };

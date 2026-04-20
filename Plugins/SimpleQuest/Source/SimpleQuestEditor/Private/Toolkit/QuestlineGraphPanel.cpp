@@ -11,8 +11,37 @@
 #include "Framework/Application/SlateApplication.h"
 #include "GraphEditorDragDropAction.h"
 #include "SGraphPanel.h"
+#include "SimpleQuestEditor.h"
+#include "Debug/QuestNodeDebugState.h"
+#include "Debug/QuestPIEDebugChannel.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+
+
+namespace PIEOverlay_Style
+{
+    // sRGB-correct per-state tints. FColor → FLinearColor constructor does sRGB→linear conversion so authored values match
+    // their on-screen appearance. Priority order matches FQuestPIEDebugChannel::QueryNodeState's selection logic.
+    static const FLinearColor Blocked      = FLinearColor(FColor(230,  60,  60));  // red — highest urgency
+    static const FLinearColor PendingGiver = FLinearColor(FColor( 80, 180, 230));  // cyan — waiting
+    static const FLinearColor Active       = FLinearColor(FColor(250, 200,  60));  // amber — running
+    static const FLinearColor Completed    = FLinearColor(FColor( 90, 210, 110));  // green — done
+    static const FLinearColor Deactivated  = FLinearColor(FColor(150, 150, 150));  // grey — inert
+    static const FLinearColor DebugBadge   = FLinearColor(FColor(250, 200,  60));  // badge text color when overlay active
+
+    const FLinearColor& ColorForState(EQuestNodeDebugState State)
+    {
+        switch (State)
+        {
+        case EQuestNodeDebugState::Blocked:       return Blocked;
+        case EQuestNodeDebugState::PendingGiver:  return PendingGiver;
+        case EQuestNodeDebugState::Active:        return Active;
+        case EQuestNodeDebugState::Completed:     return Completed;
+        case EQuestNodeDebugState::Deactivated:   return Deactivated;
+        default:                                  return Deactivated; // unused — Unknown returns early before this is called
+        }
+    }
+}
 
 void SQuestlineGraphPanel::Construct(const FArguments& InArgs,
                                      UEdGraph* InGraph,
@@ -37,6 +66,17 @@ void SQuestlineGraphPanel::Tick(const FGeometry& AllottedGeometry, const double 
         PendingJumpNode = nullptr;
     }
     bHasTicked = true;
+
+    // Poll paint invalidation while the PIE debug channel is active so the overlay stays live as WorldState facts change
+    // mid-game. Low cost — Invalidate(Paint) coalesces with Slate's per-frame paint pass; OnPaint's debug-overlay block
+    // only does real work when IsActive() is true, so the cost outside PIE is zero.
+    if (FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel())
+    {
+        if (Channel->IsActive())
+        {
+            Invalidate(EInvalidateWidget::Paint);
+        }
+    }
 }
 
 
@@ -198,7 +238,7 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
     // Paint children first so each node widget's cached paint geometry is fresh when we query it below.
     const int32 ChildLayer = SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 
-    if (HoverHighlightedNodes.Num() == 0 || !GraphEditor.IsValid())
+    if (!GraphEditor.IsValid())
     {
         return ChildLayer;
     }
@@ -266,7 +306,67 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
         );
     }
 
-    return HighlightLayer;
+    // ---- PIE debug overlay pass ------------------------------------------------------------------------------------
+    // Runs only when PIE is active and the channel has resolved subsystems. Iterates the same viewport-culled node set
+    // as the hover halo above and paints a state-colored border halo per content node. Layered above the hover halo so
+    // a hovered node that's also in a state shows both (hover reads as saturation; state reads as the color).
+    int32 TopLayer = HighlightLayer;
+    if (FQuestPIEDebugChannel* DebugChannel = FSimpleQuestEditor::GetPIEDebugChannel())
+    {
+        if (DebugChannel->IsActive())
+        {
+            const int32 DebugOverlayLayer = HighlightLayer + 1;
+            static const ISlateStyle* SimpleQuestStyle = FSlateStyleRegistry::FindSlateStyle("SimpleQuestStyle");
+            const FSlateBrush* DebugBrush = SimpleQuestStyle
+                ? SimpleQuestStyle->GetBrush("SimpleQuest.Graph.Node.HoverHalo")
+                : FAppStyle::GetBrush("Graph.Node.ShadowSelected");
+
+            for (UEdGraphNode* Node : Panel->GetGraphObj()->Nodes)
+            {
+                if (!Node) continue;
+
+                const EQuestNodeDebugState State = DebugChannel->QueryNodeState(Node);
+                if (State == EQuestNodeDebugState::Unknown) continue;
+
+                TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
+                if (!NodeWidget.IsValid()) continue;
+
+                const FVector2D NodeGraphPos(Node->NodePosX, Node->NodePosY);
+                const FVector2D NodeGraphSize = NodeWidget->GetDesiredSize();
+                const FSlateRect NodeGraphRect(NodeGraphPos.X, NodeGraphPos.Y, NodeGraphPos.X + NodeGraphSize.X, NodeGraphPos.Y + NodeGraphSize.Y);
+                if (!FSlateRect::DoRectanglesIntersect(NodeGraphRect, ViewGraphRect)) continue;
+
+                const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
+                if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
+
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    DebugOverlayLayer,
+                    NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
+                    DebugBrush,
+                    ESlateDrawEffect::None,
+                    PIEOverlay_Style::ColorForState(State)
+                );
+            }
+            TopLayer = DebugOverlayLayer;
+
+            // ---- "DEBUG (PIE)" badge in the panel's top-left corner ---------------------------------------------------
+            const FSlateFontInfo BadgeFont = FCoreStyle::GetDefaultFontStyle("Bold", 10);
+            const FVector2D BadgePos(12.f, 8.f);
+            FSlateDrawElement::MakeText(
+                OutDrawElements,
+                DebugOverlayLayer + 1,
+                AllottedGeometry.ToOffsetPaintGeometry(BadgePos),
+                FString(TEXT("DEBUG (PIE)")),
+                BadgeFont,
+                ESlateDrawEffect::None,
+                PIEOverlay_Style::DebugBadge
+            );
+            TopLayer = DebugOverlayLayer + 1;
+        }
+    }
+
+    return TopLayer;
 }
 
 

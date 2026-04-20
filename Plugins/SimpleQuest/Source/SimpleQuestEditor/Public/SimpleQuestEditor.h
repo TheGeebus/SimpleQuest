@@ -11,6 +11,7 @@ struct FGraphPanelPinFactory;
 struct FGraphPanelPinConnectionFactory;
 class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
+class FQuestPIEDebugChannel;
 class FSlateStyleSet;
 
 class FSimpleQuestEditor : public ISimpleQuestEditorModule
@@ -31,15 +32,21 @@ public:
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
 
+	/** Editor-side PIE debug channel (agenda item 7). Lifetime managed by this module. Access via GetPIEDebugChannel(). */
+	static FQuestPIEDebugChannel* GetPIEDebugChannel();
+
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
 	TSharedPtr<FQuestlineGraphNodeFactory> QuestlineGraphNodeFactory;
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
+	
 	TSharedPtr<FSlateStyleSet> StyleSet;
 	
 	FQuestlineCompilerFactoryDelegate CompilerFactory;
 	
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
+
+	TUniquePtr<FQuestPIEDebugChannel> PIEDebugChannel;
 
 	void LoadCompiledTagsFromIni();
 	void MigrateLegacyTagsIni();

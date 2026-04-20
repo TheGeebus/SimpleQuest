@@ -38,6 +38,7 @@
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
+#include "Debug/QuestPIEDebugChannel.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
@@ -163,6 +164,20 @@ void FSimpleQuestEditor::StartupModule()
 		FMargin(18.0f / 64.0f)));
 
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
+
+	// PIE debug channel. Subscribes to editor PIE delegates; graph panels query it during OnPaint to drive per-node state overlays.
+	// No-op unless PIE is running.
+	PIEDebugChannel = MakeUnique<FQuestPIEDebugChannel>();
+	PIEDebugChannel->Initialize();
+}
+
+FQuestPIEDebugChannel* FSimpleQuestEditor::GetPIEDebugChannel()
+{
+	if (FSimpleQuestEditor* Module = FModuleManager::GetModulePtr<FSimpleQuestEditor>("SimpleQuestEditor"))
+	{
+		return Module->PIEDebugChannel.Get();
+	}
+	return nullptr;
 }
 
 void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
@@ -235,7 +250,12 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 void FSimpleQuestEditor::ShutdownModule()
 {
 	FEditorDelegates::MapChange.RemoveAll(this);
-	FEditorDelegates::PreBeginPIE.RemoveAll(this);
+
+	if (PIEDebugChannel.IsValid())
+	{
+		PIEDebugChannel->Shutdown();
+		PIEDebugChannel.Reset();
+	}
 	
 	if (FModuleManager::Get().IsModuleLoaded("AssetRegistry"))
 	{

@@ -16,5 +16,6 @@ public:
 	virtual FText GetConditionPinLabel(int32 Index) const;
 	virtual FText GetPinDisplayName(const UEdGraphPin* Pin) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
 };

@@ -38,11 +38,13 @@ class UQuestlineNode_Step;
 class UQuestlineNode_ContentBase;
 class UK2Node_CompleteObjectiveWithOutcome; 
 class FQuestlineGraphEditor;
+
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
 struct FToolMenuSection;
 struct FGameplayTag;
 struct FGroupExaminerTopology;
+struct FPrereqExaminerTree;
 
 
 class FSimpleQuestEditorUtilities
@@ -128,8 +130,6 @@ public:
 	 */
 	static void SortPinNamesAlphabetical(TArray<FName>& PinNames);
 	
-	// ...inside the USimpleQuestEditorUtilities class, near the other static helpers:
-
 	/**
 	 * Scans all UQuestlineGraph assets in the project (AR scan + sync load) for ActivationGroup setters and getters whose
 	 * GroupTag matches InGroupTag, and builds a full topology: for each setter, content-node sources feeding its Activate
@@ -139,6 +139,27 @@ public:
 	 */
 	static void CollectActivationGroupTopology(const FGameplayTag& InGroupTag, FGroupExaminerTopology& OutTopology);
 
+	/**
+	 * Builds a prerequisite expression tree for SPrereqExaminerPanel, dispatched by ContextNode's type. Handles four
+	 * entry points:
+	 *   Content node (Quest / Step / LinkedQuestline / Outcome terminal) — walks the node's Prerequisites input pin.
+	 *   Combinator (AND / OR / NOT) — emits the combinator as the root, walks each condition input.
+	 *   Rule Entry — walks the Entry's Enter input; tree's RuleTag + RuleEntryNode populated for the header.
+	 *   Rule Exit — resolves the Exit's tag to its defining Entry (local graph first, cross-asset AR fallback), walks that
+	 *     Entry's Enter input; tree's RuleTag + RuleEntryNode populated.
+	 * Knots are traversed transparently. Rule Exit references encountered during the walk emit RuleRef nodes with the
+	 * referenced Entry's Enter expression eagerly attached as children (cycle-guarded against mutually referenced rules).
+	 * Rule Entry Forward pins are inlined directly (direct-eval — no RuleRef boundary). Returns a tree with
+	 * RootIndex == INDEX_NONE when the context has no wired expression.
+	 */
+	static FPrereqExaminerTree CollectPrereqExpressionTopology(UEdGraphNode* ContextNode);
+
+	/**
+	 * Appends an "Examine Prerequisite Expression" entry to a right-click context menu section. Resolves the owning editor
+	 * via GetEditorForNode and calls PinPrereqExaminer.
+	 */
+	static void AddExaminePrereqExpressionEntry(FToolMenuSection& Section, UEdGraphNode* ContextNode);
+	
 	/**
 	 * Opens the node's containing UQuestlineGraph asset in the Graph Editor and focuses the node. No-op if the node has no
 	 * resolvable UQuestlineGraph outer or if GEditor is unavailable. Extracted from the compiler's AddNodeNavigationToken

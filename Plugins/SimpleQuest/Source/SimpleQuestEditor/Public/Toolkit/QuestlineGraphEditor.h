@@ -14,6 +14,7 @@ class SQuestlineOutlinerPanel;
 class UQuestlineGraph;
 class SGraphEditor;
 class SGroupExaminerPanel;
+class SPrereqExaminerPanel;
 
 
 class FQuestlineGraphEditor : public FAssetEditorToolkit
@@ -105,11 +106,24 @@ private:
 
 	TSharedPtr<SQuestlineOutlinerPanel> OutlinerPanel;
 	static const FName OutlinerTabId;
+
+	/*-----------------------------------------------------------------------------------
+	 * Prerequisite Examiner Panel
+	 *----------------------------------------------------------------------------------*/
+public:	
+	/** Pins the Prerequisite Expression Examiner panel to the expression implied by ContextNode. Context node type
+		determines what's shown — content nodes surface their Prerequisites input expression, combinators surface what
+		feeds their output, Rule Entry/Exit surface the rule's Enter expression with rule-info header populated. */
+	void PinPrereqExaminer(UEdGraphNode* ContextNode);
+	
+private:
+	TSharedRef<SDockTab> SpawnPrereqExaminerTab(const FSpawnTabArgs& Args);
+	TSharedPtr<SPrereqExaminerPanel> PrereqExaminerPanel;
+	static const FName PrereqExaminerTabId;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Group Examiner Panel
 	 *----------------------------------------------------------------------------------*/
-	
 public:
 	/**
 	 * Opens the Group Examiner tab (if closed), pins the given group tag, and triggers a topology rebuild. Invoked by the

@@ -23,6 +23,7 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
 	virtual void EnsureDeactivationPinsForAutowire() override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")

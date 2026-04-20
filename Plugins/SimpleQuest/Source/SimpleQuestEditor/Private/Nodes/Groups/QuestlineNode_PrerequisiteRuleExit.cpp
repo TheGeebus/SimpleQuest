@@ -32,7 +32,7 @@ void UQuestlineNode_PrerequisiteRuleExit::PostLoad()
 
 void UQuestlineNode_PrerequisiteRuleExit::AllocateDefaultPins()
 {
-	CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("PrereqOut"));
+	CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("Exit"));
 }
 
 FText UQuestlineNode_PrerequisiteRuleExit::GetNodeTitle(ENodeTitleType::Type TitleType) const
@@ -58,4 +58,13 @@ void UQuestlineNode_PrerequisiteRuleExit::GetPinHoverText(const UEdGraphPin& Pin
 		return;
 	}
 	Super::GetPinHoverText(Pin, HoverTextOut);
+}
+
+void UQuestlineNode_PrerequisiteRuleExit::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+
+	FToolMenuSection& Section = Menu->AddSection(TEXT("PrerequisiteRule"), NSLOCTEXT("SimpleQuestEditor", "PrerequisiteRuleSection", "Prerequisite Rule"));
+
+	FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section, const_cast<UQuestlineNode_PrerequisiteRuleExit*>(this));
 }

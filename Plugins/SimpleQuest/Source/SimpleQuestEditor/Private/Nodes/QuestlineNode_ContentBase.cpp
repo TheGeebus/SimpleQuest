@@ -1,5 +1,7 @@
 ﻿#include "Nodes/QuestlineNode_ContentBase.h"
 
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
 {
 	bCanRenameNode = true;
@@ -159,4 +161,13 @@ void UQuestlineNode_ContentBase::EnsureDeactivationPinsForAutowire()
 	{
 		Graph->NotifyGraphChanged();
 	}
+}
+
+void UQuestlineNode_ContentBase::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+
+	FToolMenuSection& Section = Menu->AddSection(TEXT("ContentExaminer"), NSLOCTEXT("SimpleQuestEditor", "ContentExaminerSection", "Prerequisite"));
+
+	FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section, const_cast<UQuestlineNode_ContentBase*>(this));
 }

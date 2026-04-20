@@ -27,16 +27,9 @@ void UQuestlineNode_PrerequisiteRuleEntry::GetNodeContextMenuActions(UToolMenu* 
 {
     Super::GetNodeContextMenuActions(Menu, Context);
 
-    FToolMenuSection& Section = Menu->AddSection(
-        TEXT("PrerequisiteRule"),
-        NSLOCTEXT("SimpleQuestEditor", "PrerequisiteRuleSection", "Prerequisite Rule")
-    );
+    FToolMenuSection& Section = Menu->AddSection(TEXT("PrerequisiteRule"), NSLOCTEXT("SimpleQuestEditor", "PrerequisiteRuleSection", "Prerequisite Rule"));
 
-    FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(
-        Section,
-        const_cast<UQuestlineNode_PrerequisiteRuleEntry*>(this),
-        GetGroupTag()
-    );
+    FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section, const_cast<UQuestlineNode_PrerequisiteRuleEntry*>(this));
 }
 
 void UQuestlineNode_PrerequisiteRuleEntry::GetPinHoverText(const UEdGraphPin& Pin, FString& HoverTextOut) const
@@ -73,98 +66,10 @@ void UQuestlineNode_PrerequisiteRuleEntry::PostLoad()
 {
     Super::PostLoad();
 
-    // Wave 4.b migration: legacy layout had multiple Condition_N inputs + a PrereqOut output.
-    // New layout has a single Enter input + a Forward output. Collect legacy sources, then:
-    //   - Zero wired conditions: log and leave Enter unwired.
-    //   - One wired condition: wire source directly into Enter.
-    //   - Multi wired conditions: spawn an AND combinator, wire sources into it, AND output into Enter.
-    // Also rename legacy PrereqOut output pin to Forward (same role, new name).
-
-    UEdGraph* OwnerGraph = GetGraph();
-    if (!OwnerGraph) return;
-
-    // Gather legacy Condition_N input pins with their LinkedTo sources.
-    TArray<UEdGraphPin*> LegacyConditionPins;
-    TArray<UEdGraphPin*> LegacySources;
-    for (UEdGraphPin* Pin : Pins)
-    {
-        if (!Pin || Pin->Direction != EGPD_Input) continue;
-        if (Pin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
-        if (!Pin->PinName.ToString().StartsWith(TEXT("Condition_"))) continue;
-        LegacyConditionPins.Add(Pin);
-        for (UEdGraphPin* Linked : Pin->LinkedTo)
-        {
-            if (Linked) LegacySources.Add(Linked);
-        }
-    }
-
-    const bool bHasLegacyLayout = LegacyConditionPins.Num() > 0;
-
-    // Ensure the new Enter pin exists (AllocateDefaultPins may not have been called for a legacy-serialized node).
-    UEdGraphPin* EnterPin = GetPinByRole(EQuestPinRole::PrereqIn);
-    if (!EnterPin && bHasLegacyLayout)
-    {
-        EnterPin = CreatePin(EGPD_Input, TEXT("QuestPrerequisite"), TEXT("Enter"));
-    }
-
-    // Migrate sources into Enter.
-    if (bHasLegacyLayout && EnterPin)
-    {
-        if (LegacySources.Num() == 0)
-        {
-            UE_LOG(LogSimpleQuest, Warning,
-                TEXT("UQuestlineNode_PrerequisiteRuleEntry::PostLoad: '%s' (GUID %s) had legacy layout with zero wired conditions; Enter remains unwired."),
-                *GetName(), *NodeGuid.ToString());
-        }
-        else if (LegacySources.Num() == 1)
-        {
-            EnterPin->MakeLinkTo(LegacySources[0]);
-            UE_LOG(LogSimpleQuest, Log,
-                TEXT("UQuestlineNode_PrerequisiteRuleEntry::PostLoad: '%s' (GUID %s) migrated — single legacy source wired directly into Enter."),
-                *GetName(), *NodeGuid.ToString());
-        }
-        else
-        {
-            // Spawn an AND combinator adjacent to this Entry.
-            FGraphNodeCreator<UQuestlineNode_PrerequisiteAnd> Creator(*OwnerGraph);
-            UQuestlineNode_PrerequisiteAnd* AndNode = Creator.CreateNode(false);
-            AndNode->NodePosX = NodePosX - 200;
-            AndNode->NodePosY = NodePosY;
-            Creator.Finalize();
-
-            // Ensure AND has enough condition pins to accept all legacy sources (AllocateDefaultPins typically creates 2).
-            while (AndNode->GetConditionPinCount() < LegacySources.Num())
-            {
-                AndNode->AddConditionPin();
-            }
-
-            // Wire each legacy source into a unique AND condition pin (by index).
-            int32 CondIndex = 0;
-            for (UEdGraphPin* Source : LegacySources)
-            {
-                UEdGraphPin* AndCondPin = AndNode->FindPin(*FString::Printf(TEXT("Condition_%d"), CondIndex++), EGPD_Input);
-                if (AndCondPin && Source) AndCondPin->MakeLinkTo(Source);
-            }
-
-            // Wire AND's output into Enter.
-            UEdGraphPin* AndOut = AndNode->GetPinByRole(EQuestPinRole::PrereqOut);
-            if (AndOut) AndOut->MakeLinkTo(EnterPin);
-
-            UE_LOG(LogSimpleQuest, Log,
-                TEXT("UQuestlineNode_PrerequisiteRuleEntry::PostLoad: '%s' (GUID %s) migrated — %d legacy sources wired through new AND combinator (GUID %s) into Enter."),
-                *GetName(), *NodeGuid.ToString(), LegacySources.Num(), *AndNode->NodeGuid.ToString());
-        }
-
-        // Break remaining links on legacy Condition_N pins and remove them.
-        for (UEdGraphPin* LegacyPin : LegacyConditionPins)
-        {
-            LegacyPin->BreakAllPinLinks();
-            RemovePin(LegacyPin);
-        }
-    }
-
-    // Rename legacy PrereqOut output pin to Forward (preserves LinkedTo via in-place mutation).
-    int32 RenamedOutputs = 0;
+    // Minimal migration: rename legacy PrereqOut output → Forward in place (preserves LinkedTo).
+    // No pin creation, no pin removal, no structural changes. Legacy multi-condition authoring
+    // must be re-wired manually by the designer — the automatic AND-combinator migration proved
+    // unsafe and introduced double-pin / missing-pin regressions.
     for (UEdGraphPin* Pin : Pins)
     {
         if (Pin && Pin->Direction == EGPD_Output
@@ -172,14 +77,7 @@ void UQuestlineNode_PrerequisiteRuleEntry::PostLoad()
             && Pin->PinName == TEXT("PrereqOut"))
         {
             Pin->PinName = TEXT("Forward");
-            ++RenamedOutputs;
         }
-    }
-    if (RenamedOutputs > 0)
-    {
-        UE_LOG(LogSimpleQuest, Log,
-            TEXT("UQuestlineNode_PrerequisiteRuleEntry::PostLoad: '%s' — %d 'PrereqOut' output pin(s) renamed to 'Forward'."),
-            *GetName(), RenamedOutputs);
     }
 }
 

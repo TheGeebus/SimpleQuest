@@ -39,7 +39,7 @@ EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
 	if (!Pin) return EQuestPinRole::None;
 
 	const FName PinName = Pin->PinName;
-	const FName Cat     = Pin->PinType.PinCategory;
+	const FName Cat = Pin->PinType.PinCategory;
 
 	if (Pin->Direction == EGPD_Input)
 	{
@@ -50,6 +50,10 @@ EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
 		if (PinName == TEXT("Deactivate") && Cat == TEXT("QuestDeactivate"))
 		{
 			return EQuestPinRole::DeactivateIn;
+		}
+		if (PinName == TEXT("Prerequisites") && Cat == TEXT("QuestPrerequisite"))
+		{
+			return EQuestPinRole::PrereqIn;
 		}
 		if (PinName == TEXT("Enter") && Cat == TEXT("QuestPrerequisite"))
 		{

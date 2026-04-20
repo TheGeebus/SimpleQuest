@@ -35,3 +35,14 @@ FLinearColor UQuestlineNode_PrerequisiteBase::GetNodeTitleColor() const
 	return SQ_ED_NODE_PREREQ_GROUP;
 }
 
+void UQuestlineNode_PrerequisiteBase::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+	Super::GetNodeContextMenuActions(Menu, Context);
+
+	FToolMenuSection& Section = Menu->AddSection(TEXT("PrereqExaminer"),
+		NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerSection", "Prerequisite"));
+
+	FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section,
+		const_cast<UQuestlineNode_PrerequisiteBase*>(this));
+}
+

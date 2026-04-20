@@ -17,6 +17,7 @@ public:
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void GetPinHoverText(const UEdGraphPin& Pin, FString& HoverTextOut) const override;
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }

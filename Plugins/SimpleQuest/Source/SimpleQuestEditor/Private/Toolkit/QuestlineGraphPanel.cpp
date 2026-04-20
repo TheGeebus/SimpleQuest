@@ -214,6 +214,18 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
     const FVector2f ShadowInflate = UE::Slate::CastToVector2f(GetDefault<UGraphEditorSettings>()->GetShadowDeltaSize()) * 2.f;
     const int32 HighlightLayer = ChildLayer + 1;
 
+    // Graph-space viewport rect — derived from the panel's view offset, size, and zoom. Used to cull halos for nodes
+    // that are currently off-screen in graph coordinates, independent of their (possibly stale) paint-space geometry.
+    // SGraphPanel applies zoom as a render transform, so SGraphNode::GetDesiredSize() is 1:1 with graph units.
+    const float Zoom = FMath::Max(Panel->GetZoomAmount(), KINDA_SMALL_NUMBER);
+    const FVector2D ViewOffset = Panel->GetViewOffset();
+    const FVector2D PanelLocalSize = Panel->GetTickSpaceGeometry().GetLocalSize();
+    const FSlateRect ViewGraphRect(
+        ViewOffset.X,
+        ViewOffset.Y,
+        ViewOffset.X + PanelLocalSize.X / Zoom,
+        ViewOffset.Y + PanelLocalSize.Y / Zoom);
+
     for (const TWeakObjectPtr<UEdGraphNode>& WeakNode : HoverHighlightedNodes)
     {
         UEdGraphNode* Node = WeakNode.Get();
@@ -222,6 +234,20 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
         TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
         if (!NodeWidget.IsValid()) continue;
 
+        // Cull in graph space — skip nodes outside the current viewport. Paint-space geometry goes stale for culled
+        // nodes (SGraphPanel stops painting them, so their cached geometry stays at the last visible position near an
+        // edge). Testing the authoritative NodePosX/Y against ViewGraphRect avoids relying on the stale cache.
+        const FVector2D NodeGraphPos(Node->NodePosX, Node->NodePosY);
+        const FVector2D NodeGraphSize = NodeWidget->GetDesiredSize();
+        const FSlateRect NodeGraphRect(
+            NodeGraphPos.X,
+            NodeGraphPos.Y,
+            NodeGraphPos.X + NodeGraphSize.X,
+            NodeGraphPos.Y + NodeGraphSize.Y);
+        if (!FSlateRect::DoRectanglesIntersect(NodeGraphRect, ViewGraphRect)) continue;
+
+        // For on-screen nodes, paint-space is fresh (children were just painted by the SCompoundWidget::OnPaint call
+        // at the top of this method) — use it to position the halo exactly where the node was drawn.
         const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
         if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
 

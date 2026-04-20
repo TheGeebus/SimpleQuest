@@ -23,9 +23,15 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
+#include "Nodes/QuestlineNode_Knot.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Types/PrereqExaminerTypes.h"
+#include "Types/QuestPinRole.h"
 
-
-class UQuestlineNode_Exit;
 
 
 FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
@@ -563,6 +569,282 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 			}
 		}
 	}
+}
+
+namespace PrereqExaminer_Internal
+{
+    /** Finds the Prerequisite Rule Entry in Graph whose GroupTag matches RuleTag, or nullptr. */
+    UQuestlineNode_PrerequisiteRuleEntry* FindRuleEntryInGraph(const UEdGraph* Graph, const FGameplayTag& RuleTag)
+    {
+        if (!Graph || !RuleTag.IsValid()) return nullptr;
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+            {
+                if (Entry->GroupTag == RuleTag) return Entry;
+            }
+        }
+        return nullptr;
+    }
+
+    /**
+     * Project-wide lookup for the Rule Entry defining a given tag. Local graph first (common case); AR scan + sync-load
+     * fallback for cross-asset references. Relies on the compile-time duplicate-tag detection pass to guarantee one
+     * authoritative Entry per tag at compile; if two exist at authoring time this returns the first match.
+     */
+    UQuestlineNode_PrerequisiteRuleEntry* ResolveRuleEntry(const UEdGraph* LocalGraph, const FGameplayTag& RuleTag)
+    {
+        if (!RuleTag.IsValid()) return nullptr;
+
+        if (UQuestlineNode_PrerequisiteRuleEntry* Local = FindRuleEntryInGraph(LocalGraph, RuleTag)) return Local;
+
+        const FAssetRegistryModule& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+        TArray<FAssetData> Assets;
+        AR.Get().GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), Assets);
+        for (const FAssetData& Data : Assets)
+        {
+            UQuestlineGraph* Loaded = Cast<UQuestlineGraph>(Data.GetAsset());
+            if (!Loaded || Loaded->QuestlineEdGraph == LocalGraph) continue;
+            if (UQuestlineNode_PrerequisiteRuleEntry* Found = FindRuleEntryInGraph(Loaded->QuestlineEdGraph, RuleTag))
+            {
+                return Found;
+            }
+        }
+        return nullptr;
+    }
+
+    /** Forward declaration — recursion inside the namespace. */
+    int32 WalkFromOutputPin(const UEdGraphPin* OutputPin, FPrereqExaminerTree& Tree, TSet<const UEdGraphNode*>& RuleEntriesVisited);
+
+    /** Adds a combinator node (And/Or/Not) and recursively walks its PrereqIn pins into ChildIndices. */
+    int32 EmitCombinator(UEdGraphNode* CombinatorNode, EPrereqExaminerNodeType Type, const FText& Label,
+        FPrereqExaminerTree& Tree, TSet<const UEdGraphNode*>& RuleEntriesVisited)
+    {
+        FPrereqExaminerNode NewNode;
+        NewNode.Type = Type;
+        NewNode.DisplayLabel = Label;
+        NewNode.SourceNode = CombinatorNode;
+        const int32 Index = Tree.Nodes.Add(NewNode);
+
+        if (const UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(CombinatorNode))
+        {
+            TArray<UEdGraphPin*> Inputs;
+            Base->GetPinsByRole(EQuestPinRole::PrereqIn, Inputs);
+            for (UEdGraphPin* InPin : Inputs)
+            {
+                if (!InPin || InPin->LinkedTo.Num() == 0) continue;
+                const int32 ChildIdx = WalkFromOutputPin(InPin->LinkedTo[0], Tree, RuleEntriesVisited);
+                if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
+            }
+        }
+        return Index;
+    }
+
+    int32 WalkFromOutputPin(const UEdGraphPin* OutputPin, FPrereqExaminerTree& Tree, TSet<const UEdGraphNode*>& RuleEntriesVisited)
+    {
+        if (!OutputPin) return INDEX_NONE;
+        UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
+        if (!OwningNode) return INDEX_NONE;
+
+        // Knots: transparent passthrough — walk through KnotIn's upstream.
+        if (UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(OwningNode))
+        {
+            if (UEdGraphPin* KnotIn = Knot->FindPin(TEXT("KnotIn"), EGPD_Input))
+            {
+                if (KnotIn->LinkedTo.Num() > 0) return WalkFromOutputPin(KnotIn->LinkedTo[0], Tree, RuleEntriesVisited);
+            }
+            return INDEX_NONE;
+        }
+
+        // Combinators.
+        if (Cast<UQuestlineNode_PrerequisiteAnd>(OwningNode))
+        {
+            return EmitCombinator(OwningNode, EPrereqExaminerNodeType::And,
+                NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerAnd", "AND"), Tree, RuleEntriesVisited);
+        }
+        if (Cast<UQuestlineNode_PrerequisiteOr>(OwningNode))
+        {
+            return EmitCombinator(OwningNode, EPrereqExaminerNodeType::Or,
+                NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOr", "OR"), Tree, RuleEntriesVisited);
+        }
+        if (Cast<UQuestlineNode_PrerequisiteNot>(OwningNode))
+        {
+            return EmitCombinator(OwningNode, EPrereqExaminerNodeType::Not,
+                NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNot", "NOT"), Tree, RuleEntriesVisited);
+        }
+
+        // Rule Entry Forward: direct-eval — inline the Entry's Enter expression (no RuleRef emitted).
+        if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(OwningNode))
+        {
+            if (UEdGraphPin* EnterPin = Entry->GetPinByRole(EQuestPinRole::PrereqIn))
+            {
+                if (EnterPin->LinkedTo.Num() > 0) return WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+            }
+            return INDEX_NONE;
+        }
+
+        // Rule Exit: emit a RuleRef, drill into the defining Entry's Enter expression.
+        if (UQuestlineNode_PrerequisiteRuleExit* Exit = Cast<UQuestlineNode_PrerequisiteRuleExit>(OwningNode))
+        {
+            FPrereqExaminerNode Ref;
+            Ref.Type = EPrereqExaminerNodeType::RuleRef;
+            Ref.LeafTag = Exit->GroupTag;
+            Ref.SourceNode = Exit;
+            const FString RuleName = Exit->GroupTag.IsValid() ? Exit->GroupTag.GetTagName().ToString() : TEXT("(unset)");
+            Ref.DisplayLabel = FText::FromString(FString::Printf(TEXT("Rule: %s"), *RuleName));
+
+            UQuestlineNode_PrerequisiteRuleEntry* DefiningEntry =
+                ResolveRuleEntry(OwningNode->GetGraph(), Exit->GroupTag);
+            Ref.RuleEntryNode = DefiningEntry;
+
+            const int32 Index = Tree.Nodes.Add(Ref);
+
+            // Cycle-guarded eager drill-down into the rule's Enter expression.
+            if (DefiningEntry && !RuleEntriesVisited.Contains(DefiningEntry))
+            {
+                RuleEntriesVisited.Add(DefiningEntry);
+                if (UEdGraphPin* EnterPin = DefiningEntry->GetPinByRole(EQuestPinRole::PrereqIn))
+                {
+                    if (EnterPin->LinkedTo.Num() > 0)
+                    {
+                        const int32 ChildIdx = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+                        if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
+                    }
+                }
+            }
+            return Index;
+        }
+
+    	// Everything else (content nodes, Start terminal, etc.) compiles to a Leaf under the compiler's semantics.
+    	FPrereqExaminerNode Leaf;
+    	Leaf.Type = EPrereqExaminerNodeType::Leaf;
+    	Leaf.SourceNode = OwningNode;
+
+    	// Split source + outcome labels so the leaf widget can render each on its own row with a bold header.
+    	Leaf.LeafSourceLabel = FText::FromString(OwningNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+    	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
+    	if (Role == EQuestPinRole::AnyOutcomeOut)
+    	{
+    		Leaf.LeafOutcomeLabel = FText::FromString(TEXT("Any Outcome"));
+    	}
+    	else
+    	{
+    		// Tag-picker syntax: strip the Quest.Outcome. root (present on all named outcome pins), then split the remainder
+    		// into category prefix + leaf so the widget can render the hierarchy deemphasized above the leaf segment.
+    		static const FString OutcomePrefix = TEXT("Quest.Outcome.");
+    		FString Remainder = OutputPin->PinName.ToString();
+    		if (Remainder.StartsWith(OutcomePrefix)) Remainder = Remainder.RightChop(OutcomePrefix.Len());
+
+    		int32 LastDot = INDEX_NONE;
+    		if (Remainder.FindLastChar(TEXT('.'), LastDot))
+    		{
+    			Leaf.LeafOutcomeCategory = FText::FromString(Remainder.Left(LastDot + 1)); // includes trailing dot
+    			Leaf.LeafOutcomeLabel    = FText::FromString(Remainder.Mid(LastDot + 1));
+    		}
+    		else
+    		{
+    			Leaf.LeafOutcomeLabel = FText::FromString(Remainder);
+    		}
+    	}
+
+    	// DisplayLabel retained for any legacy consumers (currently none for Leaf — pills filter by type — but kept
+    	// populated for diagnostics / future reuse).
+    	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafOutcomeCategory.ToString(), *Leaf.LeafOutcomeLabel.ToString()));
+
+    	// LeafTag left invalid — Wave 3 will populate for PIE coloring via compiler-adjacent resolution.
+    	return Tree.Nodes.Add(Leaf);
+    }
+}
+
+FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology(UEdGraphNode* ContextNode)
+{
+	
+    FPrereqExaminerTree Tree;
+    Tree.ContextNode = ContextNode;
+    if (!ContextNode) return Tree;
+
+    using namespace PrereqExaminer_Internal;
+    TSet<const UEdGraphNode*> RuleEntriesVisited;
+
+	// Rule Entry: header populated; walk its own Enter expression.
+	if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(ContextNode))
+	{
+		Tree.RuleTag = Entry->GroupTag;
+		Tree.RuleEntryNode = Entry;
+		RuleEntriesVisited.Add(Entry);
+
+		UEdGraphPin* EnterPin = Entry->GetPinByRole(EQuestPinRole::PrereqIn);
+		if (EnterPin && EnterPin->LinkedTo.Num() > 0)
+		{
+			Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+		}
+		return Tree;
+	}
+
+    // Rule Exit: header populated; resolve to the defining Entry, walk ITS Enter expression.
+    if (UQuestlineNode_PrerequisiteRuleExit* Exit = Cast<UQuestlineNode_PrerequisiteRuleExit>(ContextNode))
+    {
+        Tree.RuleTag = Exit->GroupTag;
+        if (UQuestlineNode_PrerequisiteRuleEntry* Defining = ResolveRuleEntry(ContextNode->GetGraph(), Exit->GroupTag))
+        {
+            Tree.RuleEntryNode = Defining;
+            RuleEntriesVisited.Add(Defining);
+            if (UEdGraphPin* EnterPin = Defining->GetPinByRole(EQuestPinRole::PrereqIn))
+            {
+                if (EnterPin->LinkedTo.Num() > 0)
+                    Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+            }
+        }
+        return Tree;
+    }
+
+    // Combinator context: emit the combinator itself as root, walking its inputs.
+    if (Cast<UQuestlineNode_PrerequisiteAnd>(ContextNode))
+    {
+        Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::And,
+            NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerAnd", "AND"), Tree, RuleEntriesVisited);
+        return Tree;
+    }
+    if (Cast<UQuestlineNode_PrerequisiteOr>(ContextNode))
+    {
+        Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Or,
+            NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOr", "OR"), Tree, RuleEntriesVisited);
+        return Tree;
+    }
+    if (Cast<UQuestlineNode_PrerequisiteNot>(ContextNode))
+    {
+        Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Not,
+            NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNot", "NOT"), Tree, RuleEntriesVisited);
+        return Tree;
+    }
+
+    // Content node context: walk the Prerequisites input.
+	if (UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(ContextNode))
+	{
+		if (UEdGraphPin* PrereqPin = Base->GetPinByRole(EQuestPinRole::PrereqIn))
+		{
+			if (PrereqPin->LinkedTo.Num() > 0) Tree.RootIndex = WalkFromOutputPin(PrereqPin->LinkedTo[0], Tree, RuleEntriesVisited);
+		}
+	}
+	return Tree;
+}
+
+void FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(FToolMenuSection& Section, UEdGraphNode* ContextNode)
+{
+    Section.AddMenuEntry(
+        TEXT("ExaminePrereqExpression"),
+        NSLOCTEXT("SimpleQuestEditor", "ExaminePrereqExpression_Label", "Examine Prerequisite Expression"),
+        NSLOCTEXT("SimpleQuestEditor", "ExaminePrereqExpression_Tooltip",
+            "Pin this node's prerequisite expression to the Prerequisite Examiner panel for real-time inspection as you edit."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateLambda([ContextNode]()
+        {
+            if (FQuestlineGraphEditor* Editor = GetEditorForNode(ContextNode))
+            {
+                Editor->PinPrereqExaminer(ContextNode);
+            }
+        }))
+    );
 }
 
 void FSimpleQuestEditorUtilities::NavigateToEdGraphNode(const UEdGraphNode* Node)

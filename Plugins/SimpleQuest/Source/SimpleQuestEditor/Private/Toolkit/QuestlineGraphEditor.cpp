@@ -22,13 +22,15 @@
 #include "Toolkit/QuestlineOutlinerPanel.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/SGroupExaminerPanel.h"
-#include "Widgets/Navigation/SBreadcrumbTrail.h"
+#include "Widgets/SPrereqExaminerPanel.h"
+
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
 const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Details"));
 const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outliner"));
 const FName FQuestlineGraphEditor::GroupExaminerTabId(TEXT("QuestlineGraphEditor_GroupExaminer"));
+const FName FQuestlineGraphEditor::PrereqExaminerTabId(TEXT("QuestlineGraphEditor_PrereqExaminer"));
 
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
@@ -55,6 +57,11 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
             TArray<UObject*> EditedAssets = EditorSubsystem->GetAllEditedAssets();
             for (UObject* Asset : EditedAssets)
             {
+                if (PrereqExaminerPanel.IsValid())
+                {
+                    PrereqExaminerPanel->PinContextNode(nullptr);
+                }
+                
                 UQuestlineGraph* AssetGraph = Cast<UQuestlineGraph>(Asset);
                 if (!AssetGraph) continue;
 
@@ -76,7 +83,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
     QuestlineGraph = InQuestlineGraph;    
     ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
     
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v9")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v10")
         ->AddArea
         (
             FTabManager::NewPrimaryArea()
@@ -85,25 +92,31 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
             (
                 FTabManager::NewSplitter()
                 ->SetOrientation(Orient_Vertical)
-                ->SetSizeCoefficient(0.18f)
+                ->SetSizeCoefficient(0.2f)
                 ->Split
                 (
                     FTabManager::NewStack()
-                    ->SetSizeCoefficient(0.6f)
+                    ->SetSizeCoefficient(0.4f)
                     ->AddTab(OutlinerTabId, ETabState::OpenedTab)
                 )
                 ->Split
                 (
                     FTabManager::NewStack()
-                    ->SetSizeCoefficient(0.4f)
-                    ->AddTab(DetailsTabId, ETabState::OpenedTab)
+                    ->SetSizeCoefficient(0.3f)
                     ->AddTab(GroupExaminerTabId, ETabState::OpenedTab)
+                    ->AddTab(PrereqExaminerTabId, ETabState::OpenedTab)
+                )
+                ->Split
+                (
+                    FTabManager::NewStack()
+                    ->SetSizeCoefficient(0.3f)
+                    ->AddTab(DetailsTabId, ETabState::OpenedTab)
                 )
             )
             ->Split
             (
                 FTabManager::NewStack()
-                ->SetSizeCoefficient(0.82f)
+                ->SetSizeCoefficient(0.80f)
                 ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
             )
         );
@@ -182,6 +195,12 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "GroupExaminerTab", "Group Examiner"))
         .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.ReferenceViewer"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef());
+
+    InTabManager->RegisterTabSpawner(PrereqExaminerTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPrereqExaminerTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerTabLabel", "Prereq Examiner"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef())
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint")); /* "Kismet.Tabs.FindResults" "Kismet.FindInBlueprints.MenuIcon" "BlueprintEditor.FindInBlueprint" */
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -190,6 +209,7 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
     InTabManager->UnregisterTabSpawner(DetailsTabId);
     InTabManager->UnregisterTabSpawner(OutlinerTabId);
     InTabManager->UnregisterTabSpawner(GroupExaminerTabId);
+    InTabManager->UnregisterTabSpawner(PrereqExaminerTabId);
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 }
 
@@ -706,6 +726,28 @@ FQuestlineGraphEditor::FEdNodeLocation FQuestlineGraphEditor::FindEdNodeLocation
     return FindEdNodeInGraph(QuestlineGraph->QuestlineEdGraph, ContentGuid);
 }
 
+void FQuestlineGraphEditor::PinPrereqExaminer(UEdGraphNode* ContextNode)
+{
+    // Invoke the tab (creates it lazily if closed); SpawnPrereqExaminerTab caches the panel instance.
+    TabManager->TryInvokeTab(PrereqExaminerTabId);
+    if (PrereqExaminerPanel.IsValid())
+    {
+        PrereqExaminerPanel->PinContextNode(ContextNode);
+    }
+}
+
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPrereqExaminerTab(const FSpawnTabArgs& Args)
+{
+    if (!PrereqExaminerPanel.IsValid())
+    {
+        PrereqExaminerPanel = SNew(SPrereqExaminerPanel);
+    }
+    return SNew(SDockTab)
+        .Label(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerTabLabel", "Prereq Examiner"))
+        [
+            PrereqExaminerPanel.ToSharedRef()
+        ];
+}
 
 void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutlinerItem> Item)
 {

@@ -1096,6 +1096,27 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	return CheckDuplicateSources(OutputPin, InputPin, bOutputIsKnot);
 }
 
+void UQuestlineGraphSchema::BreakSinglePinLink(UEdGraphPin* SourcePin, UEdGraphPin* TargetPin) const
+{
+	Super::BreakSinglePinLink(SourcePin, TargetPin);
+	if (SourcePin)
+	{
+		if (UEdGraph* Graph = SourcePin->GetOwningNode() ? SourcePin->GetOwningNode()->GetGraph() : nullptr)
+		{
+			Graph->NotifyGraphChanged();
+		}
+	}
+}
+
+void UQuestlineGraphSchema::BreakPinLinks(UEdGraphPin& TargetPin, bool bSendsNodeNotification) const
+{
+	Super::BreakPinLinks(TargetPin, bSendsNodeNotification);
+	if (UEdGraph* Graph = TargetPin.GetOwningNode() ? TargetPin.GetOwningNode()->GetGraph() : nullptr)
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
 void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& ContextMenuBuilder) const
 {
 	const FText AddQuestLabel = NSLOCTEXT("SimpleQuestEditor", "AddQuestNode", "Add Quest");
@@ -1292,10 +1313,15 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
 				&& (OutputCategory == TEXT("QuestOutcome")
 					|| OutputCategory == TEXT("QuestActivation"));
 
-            if (!bIsLegalSelfLoop)
-            {
-                return Super::TryCreateConnection(A, B);
-            }
+        	if (!bIsLegalSelfLoop)
+        	{
+        		const bool bOk = Super::TryCreateConnection(A, B);
+        		if (bOk)
+        		{
+        			if (UEdGraph* Graph = A->GetOwningNode()->GetGraph()) Graph->NotifyGraphChanged();
+        		}
+        		return bOk;
+        	}
 
             // Run full connection validation before placing anything — the self-loop guard inside CanCreateConnection runs
             // dedupe via CheckDuplicateSources, so an AnyOutcome-vs-specific collision on the node's own Activate will be caught here
@@ -1338,11 +1364,12 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
                 if (ReuseKnotInPin) break;
             }
 
-            if (ReuseKnotInPin)
-            {
-                // Arch exists — just plumb the new outcome into its upstream-side KnotIn.
-                return Super::TryCreateConnection(OutputPin, ReuseKnotInPin);
-            }
+        	if (ReuseKnotInPin)
+        	{
+        		const bool bOk = Super::TryCreateConnection(OutputPin, ReuseKnotInPin);
+        		if (bOk && Graph) Graph->NotifyGraphChanged();
+        		return bOk;
+        	}
 
             // No existing arch — build one.
             const float NodeWidth = 200.f;
@@ -1369,14 +1396,20 @@ bool UQuestlineGraphSchema::TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) 
             UQuestlineNode_Knot* KnotRight = MakeKnot(OwningNode->NodePosX + NodeWidth, OwningNode->NodePosY - KnotOffset);
             UQuestlineNode_Knot* KnotLeft = MakeKnot(OwningNode->NodePosX, OwningNode->NodePosY - KnotOffset);
 
-            Super::TryCreateConnection(OutputPin, KnotRight->FindPin(TEXT("KnotIn")));
-            Super::TryCreateConnection(KnotRight->FindPin(TEXT("KnotOut")), KnotLeft->FindPin(TEXT("KnotIn")));
-            Super::TryCreateConnection(KnotLeft->FindPin(TEXT("KnotOut")), InputPin);
+        	Super::TryCreateConnection(OutputPin, KnotRight->FindPin(TEXT("KnotIn")));
+        	Super::TryCreateConnection(KnotRight->FindPin(TEXT("KnotOut")), KnotLeft->FindPin(TEXT("KnotIn")));
+        	Super::TryCreateConnection(KnotLeft->FindPin(TEXT("KnotOut")), InputPin);
 
-            return true;
+        	if (Graph) Graph->NotifyGraphChanged();
+        	return true;
         }
     }
-    return Super::TryCreateConnection(A, B);
+	const bool bOk = Super::TryCreateConnection(A, B);
+	if (bOk)
+	{
+		if (UEdGraph* Graph = A->GetOwningNode()->GetGraph()) Graph->NotifyGraphChanged();
+	}
+	return bOk;
 }
 
 // File-local storage — never crosses DLL boundaries

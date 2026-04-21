@@ -20,9 +20,10 @@ class FQuestlineGraphTraversalPolicy;
 /**
  * Compiles a UQuestlineGraph asset, walking the graph structure and writing derived data to each quest/step CDO.
  *
- * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node objects.
- * LinkedQuestline graph nodes are compiler-only scaffolding: the compiler inlines their wiring into the parent graph's tag
- * relationships and the nodes themselves are erased with no corresponding runtime class.
+ * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
+ * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
+ * (Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner routing
+ * but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
  *

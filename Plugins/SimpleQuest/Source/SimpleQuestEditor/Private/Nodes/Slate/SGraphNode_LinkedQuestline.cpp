@@ -11,6 +11,7 @@
 #include "ScopedTransaction.h"
 #include "TutorialMetaData.h"
 #include "PropertyCustomizationHelpers.h"
+#include "SimpleQuestLog.h"
 #include "Styling/AppStyle.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Images/SImage.h"
@@ -32,9 +33,8 @@ void SGraphNode_LinkedQuestline::Construct(const FArguments& InArgs, UQuestlineN
 
 void SGraphNode_LinkedQuestline::UpdateGraphNode()
 {
-	// Refresh watching-givers cache. LinkedQuestline has no runtime tag of its own so this is typically empty;
-	// FindCompiledTagForNode gracefully returns an invalid tag and we skip the query. Consistent code path with
-	// other content-node widgets.
+	// Standard content-node giver path — LinkedQuestline now has its own compiled tag in CompiledNodes (item 9
+	// Session A runtime participation).
 	WatchingGiverNames.Reset();
 	if (LinkedNode)
 	{
@@ -123,7 +123,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		]
 
-		// Asset picker — the entire body of this node.
+		// Asset picker — the primary body of this node.
 		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
 			CreateAssetPickerWidget()
@@ -133,6 +133,17 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		[
 			CreateNodeContentArea()
+		]
+
+		// Givers section — empty-list collapses to SNullWidget automatically via the helper.
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(14.f, 2.f, 10.f, 10.f))
+		[
+			FQuestNodeSlateHelpers::BuildLabeledExpandableList(
+				LOCTEXT("GiversLabel", "Givers"),
+				WatchingGiverNames,
+				LINKED_GIVER_COLOR,
+				[this]() { return LinkedNode && LinkedNode->bGiversExpanded; },
+				[this]() { if (LinkedNode) LinkedNode->bGiversExpanded = !LinkedNode->bGiversExpanded; })
 		];
 
 	TSharedPtr<SWidget> EnabledStateWidget = GetEnabledStateWidget();

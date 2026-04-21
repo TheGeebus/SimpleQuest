@@ -9,6 +9,7 @@
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
+#include "SimpleQuestLog.h"
 #include "TutorialMetaData.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"

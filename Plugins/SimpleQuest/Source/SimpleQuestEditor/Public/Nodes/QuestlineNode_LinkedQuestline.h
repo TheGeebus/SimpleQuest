@@ -22,12 +22,11 @@ public:
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostLoad() override;
-	virtual void PostPlacedNewNode() override;
 
-	/** LinkedQuestline identity is the referenced asset's FriendlyName (or short name). No per-instance label — the
-		title is fully derived, so inline rename is disabled to prevent designer confusion from edits that have no
-		visible effect on GetNodeTitle. To change the displayed name, edit FriendlyName on the referenced asset. */
-	virtual bool GetCanRenameNode() const override { return false; }
+	/** NodeLabel is LinkedQuestline's compiled-tag segment (Quest.<ParentID>.<NodeLabel>) — same role Step and Quest
+		give to NodeLabel. Inline rename stays enabled; GUID-based rename detection in the compiler propagates to
+		actors in loaded worlds on recompile via FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds. */
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("LinkedQuestline"); }
 	
 	/** The external questline graph asset this node references. */
 	UPROPERTY(EditAnywhere, Category = "Quest")

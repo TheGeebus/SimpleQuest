@@ -39,9 +39,8 @@ private:
 
 	UQuestlineNode_LinkedQuestline* LinkedNode = nullptr;
 
-	// Givers watching this node's compiled tag. Refreshed each UpdateGraphNode. LinkedQuestline has no runtime
-	// tag of its own (compiler erases it via bidirectional wiring), so FindCompiledTagForNode typically returns
-	// invalid and this list stays empty — designers would attach givers to nodes inside the linked graph instead.
-	// Display section is still wired so the widget stays consistent with other content-node widgets.
+	// Givers watching this node's compiled tag. Refreshed each UpdateGraphNode via the standard
+	// FindCompiledTagForNode path — same flow as Step and Quest widgets now that LinkedQuestline has
+	// first-class runtime participation.
 	TArray<FString> WatchingGiverNames;
 };

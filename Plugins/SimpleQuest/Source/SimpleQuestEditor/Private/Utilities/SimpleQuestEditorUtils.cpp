@@ -285,33 +285,56 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 
 FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)
 {
-	if (!ContentNode) return FGameplayTag();
+	if (!ContentNode)
+	{
+		return FGameplayTag();
+	}
 
 	UEdGraph* Graph = ContentNode->GetGraph();
-	if (!Graph) return FGameplayTag();
+	if (!Graph)
+	{
+		return FGameplayTag();
+	}
 
-	// Walk up through any Quest-container graphs (Step nests inside Quest's InnerGraph). Flat placements
-	// — Quest / LinkedQuestline directly on the questline graph — skip this loop entirely since the immediate
-	// Outer is already the questline asset.
 	UObject* Outer = Graph->GetOuter();
 	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
 	{
 		UEdGraph* QuestGraph = QuestNode->GetGraph();
-		if (!QuestGraph) return FGameplayTag();
+		if (!QuestGraph)
+		{
+			return FGameplayTag();
+		}
 		Outer = QuestGraph->GetOuter();
 	}
 
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
-	if (!QuestlineAsset) return FGameplayTag();
-
-	for (const auto& [TagName, NodeInstance] : QuestlineAsset->GetCompiledNodes())
+	if (!QuestlineAsset)
 	{
-		if (NodeInstance && NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
+		UE_LOG(LogSimpleQuest, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
+			*ContentNode->NodeLabel.ToString(), Outer ? *Outer->GetClass()->GetName() : TEXT("null"));
+		return FGameplayTag();
+	}
+
+	const auto& CompiledNodes = QuestlineAsset->GetCompiledNodes();
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("FindCompiledTagForNode: Searching for Node '%s' QuestGuid=%s in %s's %d compiled nodes"),
+		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString(), *QuestlineAsset->GetName(), CompiledNodes.Num());
+
+	for (const auto& [TagName, NodeInstance] : CompiledNodes)
+	{
+		if (!NodeInstance)
+		{
+			continue;
+		}
+		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("  Slot '%s': instance QuestGuid=%s class=%s"),
+			*TagName.ToString(), *NodeInstance->GetQuestGuid().ToString(), *NodeInstance->GetClass()->GetName());
+		if (NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
 		{
 			return FGameplayTag::RequestGameplayTag(TagName, false);
 		}
 	}
 
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
+		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString());
 	return FGameplayTag();
 }
 

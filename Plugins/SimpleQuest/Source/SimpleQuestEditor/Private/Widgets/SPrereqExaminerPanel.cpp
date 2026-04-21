@@ -5,7 +5,6 @@
 #include "Brushes/SlateRoundedBoxBrush.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
-#include "GraphEditAction.h"
 #include "SimpleQuestEditor.h"
 #include "Debug/QuestPIEDebugChannel.h"
 #include "Debug/QuestPrereqDebugState.h"
@@ -34,34 +33,44 @@
 namespace PrereqExaminer_Style
 {
     // Default tints for the operators, rule reference header text and border, and text for content nodes 
-    const FLinearColor AndTint              = FLinearColor(FColor(150,  255,  150));    // green
-    const FLinearColor OrTint               = FLinearColor(FColor(51,  178, 255));      // cyan
-    const FLinearColor NotTint              = FLinearColor(FColor(255,  90,  90));      // red
-    const FLinearColor RuleRefTint          = FLinearColor(FColor(242, 178,  51));      // amber
+    const FLinearColor AndTint              = FLinearColor(FColor(100,  170,  100));    // green
+    const FLinearColor OrTint               = FLinearColor(FColor(44,  140, 190));      // cyan
+    const FLinearColor NotTint              = FLinearColor(FColor(170,  60,  60));      // red
+    const FLinearColor RuleRefTint          = FLinearColor(FColor(162, 122,  34));      // amber
     const FLinearColor LeafTint             = FLinearColor(FColor(199, 199, 199));      // neutral text
     const FLinearColor LeafCategoryTint     = FLinearColor(FColor(130, 130, 130));      // muted — category prefix above leaf
 
+    // Debug-state fill colors — opaque, used by the two-layer fill SImage's ColorAndOpacity. These are full-alpha; the
+    // previous semi-transparent wash values in PrereqDebug_Style can be removed once this refactor is clean.
+    const FLinearColor DebugNotStartedTint  = FLinearColor(FColor( 42, 42, 42));      // muted neutral grey — barely differentiated
+    const FLinearColor DebugInProgressTint  = FLinearColor(FColor( 54,  44,  23));      // muted amber
+    const FLinearColor DebugUnsatisfiedTint = FLinearColor(FColor( 60,  42,  42));      // muted red / rust
+    const FLinearColor DebugSatisfiedTint   = FLinearColor(FColor( 44, 52, 44));      // muted green
+
     // Saturated variants applied when the corresponding operator's labels are hovered — boosts the parent operator + its
     // immediate children together so the visual group reads as one emphasized cluster.
-    const FLinearColor AndTintSaturated     = FLinearColor(FColor(  0, 255,   0));
-    const FLinearColor OrTintSaturated      = FLinearColor(FColor( 40,  40, 255));
-    const FLinearColor NotTintSaturated     = FLinearColor(FColor(255,  13,  13));
-    const FLinearColor RuleRefTintSaturated = FLinearColor(FColor(255, 230, 10));
+    const FLinearColor AndTintSaturated     = FLinearColor(FColor(  0, 180,   0));
+    const FLinearColor OrTintSaturated      = FLinearColor(FColor( 38,  120, 220));
+    const FLinearColor NotTintSaturated     = FLinearColor(FColor(190,  35,  35));
+    const FLinearColor RuleRefTintSaturated = FLinearColor(FColor(180, 160, 6));
 
     // Operator-box fill is near black; leaf fill is a shade lighter so content cells read as distinct from their container
     // frames even without contrasting outlines. Hover fill is shared — applied to leaves + pills on direct hover.
-    const FLinearColor OperatorBoxFill = FLinearColor(FColor(28,28,28));
-    const FLinearColor LeafBoxFill     = FLinearColor(FColor(42, 42, 42));
-    const FLinearColor BoxHoverFill    = FLinearColor(FColor(56, 56, 56));
-    const FLinearColor HeaderBoxFill   = FLinearColor(FColor(30, 22,  6));
-    const FLinearColor HeaderHoverFill = FLinearColor(FColor(60, 44,  12));
+    const FLinearColor OperatorBoxFill      = FLinearColor(FColor(26,26,26));
+    const FLinearColor OperatorBoxHoverFill = FLinearColor(FColor(30, 30, 30));
+    const FLinearColor LeafBoxFill          = FLinearColor(FColor(42, 42, 42));
+    const FLinearColor LeafBoxHoverFill     = FLinearColor(FColor(56, 56, 56));
+    const FLinearColor HeaderBoxFill        = FLinearColor(FColor(30, 22,  6));
+    const FLinearColor HeaderHoverFill      = FLinearColor(FColor(60, 44,  12));
 
     // Uniform layer padding — applied to every SVerticalBox/SHorizontalBox slot inside the expression tree so every
     // nested layer has the same spacing. Widget-intrinsic paddings (SPrereqExaminerBox::Padding,
     // SPrereqExaminerOperatorButton::ContentPadding) are 0; all layer padding flows from this one value.
-    const FMargin LayerPadding = FMargin(4.f, 2.f);
-    constexpr float BorderThickness = 1.f;
-    constexpr float BoostedThickness = 2.0f;
+    const FMargin BorderLayerPadding = FMargin(4.f, 8.f);
+    constexpr float BorderThickness = 1.5f;
+    constexpr float BoostedThickness = 2.5f;
+
+    const FMargin OperatorLabelPadding = FMargin(4.f, 2.f);
     
     // ---- Leaf brushes (4.f radius, leaf fill, kind outline) ----
     const FSlateBrush* GetLeafBrush(EPrereqBoxOutline Kind)
@@ -84,13 +93,13 @@ namespace PrereqExaminer_Style
         switch (Kind)
         {
             case EPrereqBoxOutline::AndChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, AndTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, AndTint, BorderThickness); return &B; }
             case EPrereqBoxOutline::OrChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, OrTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, OrTint, BorderThickness); return &B; }
             case EPrereqBoxOutline::NotChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, NotTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, NotTint, BorderThickness); return &B; }
             default:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f); return &B; }
         }
     }
     
@@ -191,13 +200,13 @@ namespace PrereqExaminer_Style
         switch (Kind)
         {
             case EPrereqBoxOutline::AndChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, AndTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, AndTint, BorderThickness); return &B; }
             case EPrereqBoxOutline::OrChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, OrTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, OrTint, BorderThickness); return &B; }
             case EPrereqBoxOutline::NotChild:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f, NotTint, BorderThickness); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f, NotTint, BorderThickness); return &B; }
             default:
-                { static const FSlateRoundedBoxBrush B(BoxHoverFill, 4.0f); return &B; }
+                { static const FSlateRoundedBoxBrush B(LeafBoxHoverFill, 4.0f); return &B; }
         }
     }
     
@@ -231,6 +240,139 @@ namespace PrereqExaminer_Style
     {
         static const FSlateRoundedBoxBrush Brush(FLinearColor::Transparent, 0.0f);
         return &Brush;
+    }
+
+        // ---- Two-layer refactor (agenda item 7 Session B) -------------------------------------------------------------
+    // Each widget now renders as stacked layers: fill (rounded-box SImage with dynamic ColorAndOpacity) + outline
+    // (SBorder/SPrereqExaminerBox/SPrereqExaminerOperatorButton with transparent-fill + colored-outline brush). The
+    // tint for PIE debug state lives on the fill layer; the outline stays parent-color-coded. Corner radii match so the
+    // two layers align cleanly.
+
+    // ---- Fill brushes (white, tinted via SImage.ColorAndOpacity). One per corner-radius shape. ----
+    const FSlateBrush* GetFillBrush_Standard()
+    {
+        static const FSlateRoundedBoxBrush B(FLinearColor::White, 4.0f);
+        return &B;
+    }
+
+    const FSlateBrush* GetFillBrush_RuleRefHeader()
+    {
+        static const FSlateRoundedBoxBrush B(FLinearColor::White, FVector4(4.f, 4.f, 0.f, 0.f));
+        return &B;
+    }
+
+    // ---- Outline-only brushes (transparent fill + kind-colored outline). ----
+    const FSlateBrush* GetLeafOutlineBrush(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+            case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTint, BorderThickness); return &B; }
+            case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTint,  BorderThickness); return &B; }
+            case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTint, BorderThickness); return &B; }
+            default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    const FSlateBrush* GetLeafOutlineBrushParentHover(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+            case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTintSaturated, BoostedThickness); return &B; }
+            case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTintSaturated,  BoostedThickness); return &B; }
+            case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTintSaturated, BoostedThickness); return &B; }
+            default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    const FSlateBrush* GetOperatorOuterOutlineBrush(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+            case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTint, BorderThickness); return &B; }
+            case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTint,  BorderThickness); return &B; }
+            case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTint, BorderThickness); return &B; }
+            default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    const FSlateBrush* GetOperatorOuterOutlineBrushParentHover(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+            case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTintSaturated, BoostedThickness); return &B; }
+            case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTintSaturated,  BoostedThickness); return &B; }
+            case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTintSaturated, BoostedThickness); return &B; }
+            default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    const FSlateBrush* GetRuleRefHeaderOutlineBrush()
+    {
+        static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, FVector4(4.f, 4.f, 0.f, 0.f), RuleRefTint, BorderThickness);
+        return &B;
+    }
+
+    const FSlateBrush* GetRuleRefHeaderOutlineBrushParentHover()
+    {
+        static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, FVector4(4.f, 4.f, 0.f, 0.f), RuleRefTintSaturated, BoostedThickness);
+        return &B;
+    }
+
+    const FSlateBrush* GetPillOutlineBrush(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+        case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTint, BorderThickness); return &B; }
+        case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTint,  BorderThickness); return &B; }
+        case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTint, BorderThickness); return &B; }
+        default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    const FSlateBrush* GetPillOutlineBrushParentHover(EPrereqBoxOutline Kind)
+    {
+        switch (Kind)
+        {
+        case EPrereqBoxOutline::AndChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, AndTintSaturated, BoostedThickness); return &B; }
+        case EPrereqBoxOutline::OrChild:  { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, OrTintSaturated,  BoostedThickness); return &B; }
+        case EPrereqBoxOutline::NotChild: { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f, NotTintSaturated, BoostedThickness); return &B; }
+        default:                          { static const FSlateRoundedBoxBrush B(FLinearColor::Transparent, 4.0f); return &B; }
+        }
+    }
+
+    // ---- Fill-color picker for the SImage.ColorAndOpacity lambda. PIE + resolved state returns the state color;
+    // non-PIE / Unknown returns the caller-supplied default (the widget's original fill — OperatorBoxFill, LeafBoxFill,
+    // HeaderBoxFill, pill fill, etc.). Hover-fill lightening outside PIE is out of scope for this pass — see agenda
+    // note on future hover-emphasis-during-PIE state. ----
+    FLinearColor GetFillColorForState(EPrereqDebugState State, const FLinearColor& DefaultFill)
+    {
+        switch (State)
+        {
+        case EPrereqDebugState::NotStarted:  return DebugNotStartedTint;
+        case EPrereqDebugState::InProgress:  return DebugInProgressTint;
+        case EPrereqDebugState::Unsatisfied: return DebugUnsatisfiedTint;
+        case EPrereqDebugState::Satisfied:   return DebugSatisfiedTint;
+        default:                             return DefaultFill;
+        }
+    }
+
+    /**
+     * Picks fill color considering both PIE debug state and hover state. State takes priority when the channel has
+     * resolved a state; otherwise returns HoverFill when hovered (direct or parent-operator cascade), DefaultFill when
+     * not. Non-PIE hover emphasis matches the pre-refactor behavior of DirectHoverBrush, with the addition that
+     * parent-operator hover also cascades to children.
+     */
+    FLinearColor GetFillColorForStateAndHover(
+        EPrereqDebugState State,
+        bool bIsHovered,
+        const FLinearColor& DefaultFill,
+        const FLinearColor& HoverFill)
+    {
+        if (State != EPrereqDebugState::Unknown)
+        {
+            return GetFillColorForState(State, DefaultFill);
+        }
+        return bIsHovered ? HoverFill : DefaultFill;
     }
 }
 
@@ -764,8 +906,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildHeader()
     return Header;
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildExpressionWidget(
-    int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildExpressionWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     if (!Tree.Nodes.IsValidIndex(NodeIndex))
     {
@@ -774,59 +915,66 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildExpressionWidget(
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     if (Node.Type == EPrereqExaminerNodeType::Leaf)
     {
-        return BuildLeafWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind);
+        return BuildLeafWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind, bSuppressFillLayer);
     }
 
     UEdGraphNode* SourceNode = Node.SourceNode.Get();
     if (SourceNode && IsCollapsed(SourceNode->NodeGuid))
     {
-        return BuildCollapsedPill(NodeIndex, ParentOperatorGuid, ParentOutlineKind);
+        return BuildCollapsedPill(NodeIndex, ParentOperatorGuid, ParentOutlineKind, bSuppressFillLayer);
     }
 
     switch (Node.Type)
     {
-        case EPrereqExaminerNodeType::Not:      return BuildNotWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind);
-        case EPrereqExaminerNodeType::RuleRef:  return BuildRuleRefWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind);
+        case EPrereqExaminerNodeType::Not:      return BuildNotWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind, bSuppressFillLayer);
+        case EPrereqExaminerNodeType::RuleRef:  return BuildRuleRefWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind, bSuppressFillLayer);
         case EPrereqExaminerNodeType::And:
-        case EPrereqExaminerNodeType::Or:       return BuildCombinatorWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind);
+        case EPrereqExaminerNodeType::Or:       return BuildCombinatorWidget(NodeIndex, ParentOperatorGuid, ParentOutlineKind, bSuppressFillLayer);
         default:                                return SNullWidget::NullWidget;
     }
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     const FSlateColor LeafColor = FSlateColor(PrereqExaminer_Style::LeafTint);
     const FSlateFontInfo HeaderFont = FCoreStyle::GetDefaultFontStyle("Bold", 8);
     const FSlateFontInfo ValueFont  = FCoreStyle::GetDefaultFontStyle("Regular", 8);
 
-    return SNew(SPrereqExaminerBox)
-        .NormalBrush(PrereqExaminer_Style::GetLeafBrush(ParentOutlineKind))
-        .DirectHoverBrush(PrereqExaminer_Style::GetLeafBrushDirectHover(ParentOutlineKind))
-        .ParentHoverBrush(PrereqExaminer_Style::GetLeafBrushParentHover(ParentOutlineKind))
-        .PanelWeak(SharedThis(this))
-        .ParentOperatorGuid(ParentOperatorGuid)
-        .HighlightNode(Node.SourceNode)
-        .NavigateNode(Node.SourceNode)
-        [
-            SNew(SOverlay)
-            + SOverlay::Slot()
-            [
-                // PIE debug leaf tint — renders as a background wash behind the Source/Outcome rows. SOverlay paints
-                // slots in declaration order, so this first slot sits BEHIND the content that follows. HitTestInvisible
-                // so the tint doesn't absorb clicks from the surrounding SPrereqExaminerBox's nav/highlight handling.
-                SNew(SImage)
-                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
-                    {
-                        return FSlateColor(PrereqDebug_Style::ColorForLeafState(ComputeDebugState(NodeIndex)));
-                    })
-                    .Visibility(EVisibility::HitTestInvisible)
-            ]
-            + SOverlay::Slot()
+    // Two-layer rendering — fill SImage with rounded-box brush at matching radii sits behind the outline-only
+    // SPrereqExaminerBox. Fill color is state-tinted during PIE; LeafBoxFill otherwise. Content sits inside the
+    // SPrereqExaminerBox's Padding, on top of both layers. Outline stays parent-color-coded via kind-specific brush.
+    TSharedRef<SOverlay> Root = SNew(SOverlay);
+    TWeakPtr<SOverlay> RootWeak(Root);
+
+    Root->AddSlot()
+    [
+        SNew(SImage)
+            .Image(PrereqExaminer_Style::GetFillBrush_Standard())
+            .ColorAndOpacity_Lambda([this, NodeIndex, ParentOperatorGuid, RootWeak]() -> FSlateColor
+            {
+                const bool bHovered = RootWeak.IsValid() && RootWeak.Pin()->IsHovered();
+                return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                    ComputeDebugState(NodeIndex),
+                    bHovered,
+                    PrereqExaminer_Style::LeafBoxFill,
+                    PrereqExaminer_Style::LeafBoxHoverFill));
+            })
+            .Visibility(EVisibility::HitTestInvisible)
+    ];
+    Root->AddSlot()
+    [
+        SNew(SPrereqExaminerBox)
+            .NormalBrush(PrereqExaminer_Style::GetLeafOutlineBrush(ParentOutlineKind))
+            .DirectHoverBrush(PrereqExaminer_Style::GetLeafOutlineBrush(ParentOutlineKind))   // outline-only; direct-hover fill effect deferred
+            .ParentHoverBrush(PrereqExaminer_Style::GetLeafOutlineBrushParentHover(ParentOutlineKind))
+            .PanelWeak(SharedThis(this))
+            .ParentOperatorGuid(ParentOperatorGuid)
+            .HighlightNode(Node.SourceNode)
+            .NavigateNode(Node.SourceNode)
             [
                 SNew(SVerticalBox)
-                + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+                + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::BorderLayerPadding)
                 [
                     SNew(SVerticalBox)
                     + SVerticalBox::Slot().AutoHeight()
@@ -875,10 +1023,11 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const
                     ]
                 ]
             ]
-        ];
+    ];
+    return Root;
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildCombinatorWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildCombinatorWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     const bool bIsAnd = (Node.Type == EPrereqExaminerNodeType::And);
@@ -894,87 +1043,105 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildCombinatorWidget(int32 NodeIndex,
     const int32 ChildCount = Node.ChildIndices.Num();
     for (int32 i = 0; i < ChildCount; ++i)
     {
-        Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+        FMargin Padding = FMargin(PrereqExaminer_Style::BorderLayerPadding.Left, PrereqExaminer_Style::OperatorLabelPadding.Top);
+        if (i == 0) Padding.Top = PrereqExaminer_Style::BorderLayerPadding.Top;
+        if (i == ChildCount - 1) Padding.Bottom = PrereqExaminer_Style::BorderLayerPadding.Bottom;
+        Body->AddSlot().AutoHeight().Padding(Padding)
             [ BuildExpressionWidget(Node.ChildIndices[i], MyOperatorGuid, ChildKind) ];
         if (i < ChildCount - 1)
         {
-            Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+            Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::OperatorLabelPadding)
                 [ BuildOperatorLabel(NodeIndex, OperatorText, FSlateColor(NormalTextColor), FSlateColor(SaturatedTextColor)) ];
         }
     }
 
-    // PIE debug tint fills the combinator's full inner content rect (inside the outer SBorder's border + padding). Tint
-    // is the BOTTOM overlay slot so the operator labels and operand children paint on top of the wash — labels are never
-    // tinted. Transparent when the debug channel isn't active.
-    return SNew(SBorder)
-        .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
-        .Padding(PrereqExaminer_Style::LayerPadding)
-        .Visibility(EVisibility::SelfHitTestInvisible)
+    // Two-layer rendering — fill SImage behind, outline-only SBorder + Body content on top. Fill color is state-tinted
+    // during PIE (combinator's rolled-up state via ComputeDebugState), OperatorBoxFill otherwise.
+    TSharedRef<SOverlay> Root = SNew(SOverlay);
+    if (!bSuppressFillLayer)
+    {
+        Root->AddSlot()
         [
-            SNew(SOverlay)
-            + SOverlay::Slot()
-            [
-                SNew(SImage)
-                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
-                    {
-                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
-                    })
-                    .Visibility(EVisibility::HitTestInvisible)
-            ]
-            + SOverlay::Slot()
-            [ Body ]
+            SNew(SImage)
+                .Image(PrereqExaminer_Style::GetFillBrush_Standard())
+                .ColorAndOpacity_Lambda([this, NodeIndex, MyOperatorGuid]() -> FSlateColor
+                {
+                    const bool bHovered = MyOperatorGuid.IsValid() && GetHoveredOperatorGuid() == MyOperatorGuid;
+                    return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                        ComputeDebugState(NodeIndex),
+                        bHovered,
+                        PrereqExaminer_Style::OperatorBoxFill,
+                        PrereqExaminer_Style::OperatorBoxHoverFill));
+                })
+                .Visibility(EVisibility::HitTestInvisible)
         ];
+    }
+    Root->AddSlot()
+    [
+        SNew(SBorder)
+            .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
+            .Padding(PrereqExaminer_Style::BorderLayerPadding)
+            .Visibility(EVisibility::SelfHitTestInvisible)
+            [ Body ]
+    ];
+    return Root;
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildNotWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildNotWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     UEdGraphNode* MyNode = Node.SourceNode.Get();
     const FGuid MyOperatorGuid = MyNode ? MyNode->NodeGuid : FGuid();
 
     TSharedRef<SVerticalBox> Body = SNew(SVerticalBox);
-    Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+    Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::OperatorLabelPadding)
         [ BuildOperatorLabel(NodeIndex, LOCTEXT("NotLabel", "NOT"),
             FSlateColor(PrereqExaminer_Style::NotTint),
             FSlateColor(PrereqExaminer_Style::NotTintSaturated)) ];
     if (Node.ChildIndices.Num() > 0)
     {
         // Child gets NotChild outline — the red border on the operand IS the negation signal, so NOT doesn't need its
-        // own outer frame to mark itself visually.
-        Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+        // own outer frame to mark itself visually. Fill-suppression flag does NOT propagate to NOT's operand — the
+        // operand is a regular expression child and paints its own fill normally.
+        Body->AddSlot().AutoHeight().Padding(PrereqExaminer_Style::BorderLayerPadding.Left, PrereqExaminer_Style::OperatorLabelPadding.Top, PrereqExaminer_Style::BorderLayerPadding.Right, PrereqExaminer_Style::BorderLayerPadding.Bottom)
             [ BuildExpressionWidget(Node.ChildIndices[0], MyOperatorGuid, EPrereqBoxOutline::NotChild) ];
     }
 
-    // Outer SBorder matches the structure AND/OR/RuleRef use — kind-colored outline via MakeOuterBrushAttribute, so a
-    // NOT child of AND/OR renders like any other kind-colored child. Padding keeps the outline tight against the VBox,
-    // minimizing the gap between NOT's outline and its contents. The red NotChild outline on the operand below is what
-    // signals negation; this outer frame only reflects NOT's relationship to its parent.
-    //
-    // PIE debug tint fills NOT's full inner content rect as the bottom overlay slot so the "NOT" label and operand
-    // child render on top of the wash — label color stays unaffected.
-    return SNew(SBorder)
-        .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
-        .Padding(PrereqExaminer_Style::LayerPadding)
-        .Visibility(EVisibility::SelfHitTestInvisible)
+    // Two-layer rendering — fill SImage behind, outline-only SBorder + Body on top. Fill color reflects NOT's rolled-up
+    // (inverted) debug state during PIE, OperatorBoxFill otherwise. Fill slot is skipped when this NOT is itself the
+    // Inner of a RuleRef (bSuppressFillLayer=true) so the RuleRef's outer color-coded outline stays unobscured at its
+    // rounded corners.
+    TSharedRef<SOverlay> Root = SNew(SOverlay);
+    if (!bSuppressFillLayer)
+    {
+        Root->AddSlot()
         [
-            SNew(SOverlay)
-            + SOverlay::Slot()
-            [
-                SNew(SImage)
-                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
-                    {
-                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
-                    })
-                    .Visibility(EVisibility::HitTestInvisible)
-            ]
-            + SOverlay::Slot()
-            [ Body ]
+            SNew(SImage)
+                .Image(PrereqExaminer_Style::GetFillBrush_Standard())
+                .ColorAndOpacity_Lambda([this, NodeIndex, MyOperatorGuid]() -> FSlateColor
+                {
+                    const bool bHovered = MyOperatorGuid.IsValid() && GetHoveredOperatorGuid() == MyOperatorGuid;
+                    return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                        ComputeDebugState(NodeIndex),
+                        bHovered,
+                        PrereqExaminer_Style::OperatorBoxFill,
+                        PrereqExaminer_Style::OperatorBoxHoverFill));
+                })
+                .Visibility(EVisibility::HitTestInvisible)
         ];
+    }
+    Root->AddSlot()
+    [
+        SNew(SBorder)
+            .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
+            .Padding(PrereqExaminer_Style::BorderLayerPadding)
+            .Visibility(EVisibility::SelfHitTestInvisible)
+            [ Body ]
+    ];
+    return Root;
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     UEdGraphNode* ExitNode = Node.SourceNode.Get();
@@ -982,17 +1149,19 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, co
     const FGuid NodeGuid = ExitNode ? ExitNode->NodeGuid : FGuid();
     const TWeakObjectPtr<UEdGraphNode> EntryWeak = EntryNode;
 
-    // Header text color saturates when the RuleRef's parent operator is hovered — mirrors the saturation the outer
-    // outline already picks up via MakeOuterBrushAttribute, so the whole RuleRef reads as "emphasized" together.
+    // Header text + chevron color saturate on self-hover (NodeGuid match) — when the header itself is hovered, the
+    // label and expansion arrow brighten together. The header's amber outline (HeaderAmberOutlineAttr below) is
+    // intentionally driven off parent-hover instead, so the border and text decouple: cursor on the header brightens
+    // the text; cursor on the RuleRef's parent operator brightens the border.
     TWeakPtr<SPrereqExaminerPanel> WeakPanel = SharedThis(this);
     TAttribute<FSlateColor> HeaderTextColorAttr = TAttribute<FSlateColor>::CreateLambda(
-        [WeakPanel, ParentOperatorGuid]() -> FSlateColor
+        [WeakPanel, NodeGuid]() -> FSlateColor
         {
-            if (ParentOperatorGuid.IsValid())
+            if (NodeGuid.IsValid())
             {
                 if (TSharedPtr<SPrereqExaminerPanel> Panel = WeakPanel.Pin())
                 {
-                    if (Panel->GetHoveredOperatorGuid() == ParentOperatorGuid)
+                    if (Panel->GetHoveredOperatorGuid() == NodeGuid)
                     {
                         return FSlateColor(PrereqExaminer_Style::RuleRefTintSaturated);
                     }
@@ -1001,61 +1170,133 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, co
             return FSlateColor(PrereqExaminer_Style::RuleRefTint);
         });
     
-    TSharedRef<SWidget> Header = SNew(SPrereqExaminerOperatorButton)
-        .NormalBrush(PrereqExaminer_Style::GetRuleRefHeaderBrush())
-        .DirectHoverBrush(PrereqExaminer_Style::GetRuleRefHeaderBrushHover())
-        .ParentHoverBrush(PrereqExaminer_Style::GetRuleRefHeaderBrushParentHover())   // thicker + saturated on parent-hover
-        .PanelWeak(SharedThis(this))
-        .ParentOperatorGuid(ParentOperatorGuid)                                       // enables parent-hover brush swap
-        .NavigateNode(Node.SourceNode)
-        .HighlightNode(Node.SourceNode)
-        .bShowChevron(true)
-        .bChevronExpanded(true)                                                       // this widget only builds when NOT collapsed
-        .ChevronColor(HeaderTextColorAttr)                                            // amber, saturates on parent-operator hover
-        .OnChevronClicked_Lambda([this, NodeGuid]() -> FReply
+    // Two-layer header — fill SImage with top-rounded brush (matching header radii) behind the outline-only
+    // SPrereqExaminerOperatorButton. Fill color tints to state during PIE, HeaderBoxFill (dark amber) otherwise.
+    // Three-layer Header: fill (state-tinted SImage) → button with TRANSPARENT brush carrying content and click/chevron
+    // handling (no outline painted by the button itself) → amber outline SImage as the top slot. This ordering means the
+    // amber outline is the LAST thing painted in the Header, so it sits on top of the outer widget's parent-color-coded
+    // outline (drawn by the outer SBorder before content in the 2-layer outer structure). Net visual at the widget top:
+    // outer outline → header fill covers it → header content → amber outline wins.
+    const FSlateBrush* TransparentBrush = FAppStyle::Get().GetBrush("NoBorder");
+
+    TAttribute<const FSlateBrush*> HeaderAmberOutlineAttr = TAttribute<const FSlateBrush*>::CreateLambda(
+        [WeakPanel, ParentOperatorGuid]() -> const FSlateBrush*
         {
-            if (NodeGuid.IsValid()) ToggleCollapsed(NodeGuid);
-            return FReply::Handled();
-        })
-        [
-            SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+            if (ParentOperatorGuid.IsValid())
+            {
+                if (TSharedPtr<SPrereqExaminerPanel> Panel = WeakPanel.Pin())
+                {
+                    if (Panel->GetHoveredOperatorGuid() == ParentOperatorGuid)
+                    {
+                        return PrereqExaminer_Style::GetRuleRefHeaderOutlineBrushParentHover();
+                    }
+                }
+            }
+            return PrereqExaminer_Style::GetRuleRefHeaderOutlineBrush();
+        });
+
+    TSharedRef<SOverlay> HeaderOverlay = SNew(SOverlay);
+    TWeakPtr<SOverlay> HeaderWeak(HeaderOverlay);
+
+    HeaderOverlay->AddSlot()
+    [
+        SNew(SImage)
+            .Image(PrereqExaminer_Style::GetFillBrush_RuleRefHeader())
+            .ColorAndOpacity_Lambda([this, NodeIndex, NodeGuid]() -> FSlateColor
+            {
+                const bool bSelf = NodeGuid.IsValid() && GetHoveredOperatorGuid() == NodeGuid;
+                return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                    ComputeDebugState(NodeIndex),
+                    bSelf,
+                    PrereqExaminer_Style::HeaderBoxFill,
+                    PrereqExaminer_Style::HeaderHoverFill));
+            })
+            .Visibility(EVisibility::HitTestInvisible)
+    ];
+    HeaderOverlay->AddSlot()
+    [
+        SNew(SPrereqExaminerOperatorButton)
+            .NormalBrush(TransparentBrush)
+            .DirectHoverBrush(TransparentBrush)
+            .ParentHoverBrush(TransparentBrush)
+            .PanelWeak(SharedThis(this))
+            .OperatorGuid(NodeGuid)                          // RuleRef header acts as the RuleRef's "operator label" — publish on hover so self-hover tinting fires
+            .ParentOperatorGuid(ParentOperatorGuid)
+            .NavigateNode(Node.SourceNode)
+            .HighlightNode(Node.SourceNode)
+            .bShowChevron(true)
+            .bChevronExpanded(true)
+            .ChevronColor(HeaderTextColorAttr)
+            .OnChevronClicked_Lambda([this, NodeGuid]() -> FReply
+            {
+                if (NodeGuid.IsValid()) ToggleCollapsed(NodeGuid);
+                return FReply::Handled();
+            })
             [
-                SNew(SHorizontalBox)
-                + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-                    [
-                        SNew(STextBlock)
-                            .Text(Node.DisplayLabel)
-                            .ColorAndOpacity(HeaderTextColorAttr)
-                            .Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-                    ]
-                + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                    [
-                        SNew(SButton)
-                            .ButtonStyle(FAppStyle::Get(), "SimpleButton")
-                            .ToolTipText(LOCTEXT("GotoRuleEntryTooltip", "Navigate to this rule's defining Entry node."))
-                            .IsEnabled(EntryNode != nullptr)
-                            .OnClicked_Lambda([EntryWeak]() -> FReply
-                            {
-                                if (UEdGraphNode* Target = EntryWeak.Get())
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::BorderLayerPadding)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+                        [
+                            SNew(STextBlock)
+                                .Text(Node.DisplayLabel)
+                                .ColorAndOpacity(HeaderTextColorAttr)
+                                .Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+                        ]
+                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                        [
+                            SNew(SButton)
+                                .ButtonStyle(FAppStyle::Get(), "SimpleButton")
+                                .ToolTipText(LOCTEXT("GotoRuleEntryTooltip", "Navigate to this rule's defining Entry node."))
+                                .IsEnabled(EntryNode != nullptr)
+                                .OnClicked_Lambda([EntryWeak]() -> FReply
                                 {
-                                    FSimpleQuestEditorUtilities::NavigateToEdGraphNode(Target);
-                                }
-                                return FReply::Handled();
-                            })
-                            .ContentPadding(FMargin(3.f, 1.f))
-                            [ SNew(STextBlock).Text(FText::FromString(TEXT("→"))) ]
-                    ]
+                                    if (UEdGraphNode* Target = EntryWeak.Get())
+                                    {
+                                        FSimpleQuestEditorUtilities::NavigateToEdGraphNode(Target);
+                                    }
+                                    return FReply::Handled();
+                                })
+                                .ContentPadding(FMargin(3.f, 1.f))
+                                [ SNew(STextBlock).Text(FText::FromString(TEXT("→"))) ]
+                        ]
+                ]
             ]
-        ];
+    ];
+    HeaderOverlay->AddSlot()
+    [
+        // Amber outline on top — paints AFTER the button's content, and (combined with the 2-layer outer below)
+        // after the outer's parent-color-coded outline too. Always sits at the Header's bounds since SOverlay
+        // slots default to Fill/Fill.
+        SNew(SImage)
+            .Image(HeaderAmberOutlineAttr)
+            .Visibility(EVisibility::HitTestInvisible)
+    ];
+
+    TSharedRef<SWidget> Header = HeaderOverlay;
 
     TSharedRef<SWidget> Inner = (Node.ChildIndices.Num() > 0)
-        ? BuildExpressionWidget(Node.ChildIndices[0], FGuid(), EPrereqBoxOutline::Default)   // rule boundary — no propagation
+        ? BuildExpressionWidget(Node.ChildIndices[0], FGuid(), EPrereqBoxOutline::Default, true)   // rule boundary — no propagation; suppress Inner's fill so its rounded-corner pull-away doesn't expose gaps over the RuleRef's outer color-coded outline
         : StaticCastSharedRef<SWidget>(
             SNew(STextBlock)
                 .Text(LOCTEXT("RuleRefNoEnterExpr", "(rule has no Enter expression wired)"))
                 .ColorAndOpacity(FSlateColor::UseSubduedForeground())
                 .Margin(FMargin(8.f, 4.f)));
+
+    // Direct-child operator GUID — the outer/content-area fill saturates only when the child's operator label publishes its
+    // own hover (AND/OR, NOT, nested RuleRef header). Leaves and collapsed pills don't publish, so they deliberately don't
+    // trigger the emphasis — matching the "fill emphasis follows the halo'd node on the graph" mental model. Border boost
+    // on the child's outline still handles its own inputs' emphasis separately.
+    FGuid ChildOperatorGuid;
+    if (Node.ChildIndices.Num() > 0)
+    {
+        const FPrereqExaminerNode& ChildNode = Tree.Nodes[Node.ChildIndices[0]];
+        if (UEdGraphNode* ChildSourceNode = ChildNode.SourceNode.Get())
+        {
+            ChildOperatorGuid = ChildSourceNode->NodeGuid;
+        }
+    }
 
     // Inner-slot padding depends on whether the Inner will render as a collapsed pill. A pill has no visible outer
     // frame of its own, so sitting flush against the Header stripe looks squashed; give it LayerPadding breathing
@@ -1074,30 +1315,42 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, co
         }
     }
     const FMargin InnerSlotPadding = bInnerIsCollapsedPill
-        ? PrereqExaminer_Style::LayerPadding
+        ? PrereqExaminer_Style::BorderLayerPadding
         : FMargin(0.f);
     
-    // PIE debug tint fills the RuleRef's full inner content rect as the bottom overlay slot — covers header + inner
-    // drilled-in expression area. Header's amber brush is opaque and mostly occludes the tint within its strip; the
-    // tint reads most strongly in the inner area's padding gaps around drilled-in children (which paint their own
-    // tints on top). Header and Inner content render above the tint so the amber header + any text stays unaffected.
-    return SNew(SBorder)
-        .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
-        .Padding(FMargin(0.f))
-        .Visibility(EVisibility::SelfHitTestInvisible)
+    // Two-layer outer: fill SImage behind + SBorder-with-outline wrapping content. Paint sequence at widget top:
+    //   1. Outer fill (OperatorBoxFill, no PIE tint on outer — RuleRef state lives on the Header)
+    //   2. Outer SBorder brush (parent-color-coded outline)
+    //   3. Header fill (covers outer outline at top edge — state-tinted during PIE, HeaderBoxFill otherwise)
+    //   4. Header content (text, chevron, → button)
+    //   5. Header amber outline (Header's third SOverlay slot, painted last — sits on top of the outer outline)
+    //   6. Inner expression widget (below, inset by InnerSlotPadding from the outer outline)
+    // Amber wins at the header bounds; parent-color wins everywhere else.
+    TSharedRef<SOverlay> Root = SNew(SOverlay);
+    if (!bSuppressFillLayer)
+    {
+        Root->AddSlot()
         [
-            SNew(SOverlay)
-            + SOverlay::Slot()
-            [
-                SNew(SImage)
-                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
-                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
-                    {
-                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
-                    })
-                    .Visibility(EVisibility::HitTestInvisible)
-            ]
-            + SOverlay::Slot()
+            SNew(SImage)
+                .Image(PrereqExaminer_Style::GetFillBrush_Standard())
+                .ColorAndOpacity_Lambda([this, NodeIndex, ChildOperatorGuid]() -> FSlateColor
+                {
+                    const bool bChild = ChildOperatorGuid.IsValid() && GetHoveredOperatorGuid() == ChildOperatorGuid;
+                    return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                        ComputeDebugState(NodeIndex),
+                        bChild,
+                        PrereqExaminer_Style::OperatorBoxFill,
+                        PrereqExaminer_Style::OperatorBoxHoverFill));
+                })
+                .Visibility(EVisibility::HitTestInvisible)
+        ];
+    }
+    Root->AddSlot()
+    [
+        SNew(SBorder)
+            .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
+            .Padding(FMargin(0.f))
+            .Visibility(EVisibility::SelfHitTestInvisible)
             [
                 SNew(SVerticalBox)
                 + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f))
@@ -1105,7 +1358,8 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, co
                 + SVerticalBox::Slot().AutoHeight().Padding(InnerSlotPadding)
                     [ Inner ]
             ]
-        ];
+    ];
+    return Root;
 }
 
 TSharedRef<SWidget> SPrereqExaminerPanel::BuildOperatorLabel(int32 NodeIndex, FText OperatorText, FSlateColor NormalColor, FSlateColor SaturatedColor)
@@ -1157,7 +1411,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildOperatorLabel(int32 NodeIndex, FT
                 })
                 [
                     SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+                    + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::OperatorLabelPadding)
                     [
                         SNew(STextBlock)
                             .Text(OperatorText)
@@ -1168,7 +1422,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildOperatorLabel(int32 NodeIndex, FT
         ];
 }
 
-TSharedRef<SWidget> SPrereqExaminerPanel::BuildCollapsedPill(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
+TSharedRef<SWidget> SPrereqExaminerPanel::BuildCollapsedPill(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer)
 {
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
     const FGuid NodeGuid = Node.SourceNode.IsValid() ? Node.SourceNode->NodeGuid : FGuid();
@@ -1219,32 +1473,61 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildCollapsedPill(int32 NodeIndex, co
         break;
     }
 
-    return SNew(SPrereqExaminerOperatorButton)
-        .NormalBrush(PrereqExaminer_Style::GetPillBrush(ParentOutlineKind))
-        .DirectHoverBrush(PrereqExaminer_Style::GetPillBrushDirectHover(ParentOutlineKind))
-        .ParentHoverBrush(PrereqExaminer_Style::GetPillBrushParentHover(ParentOutlineKind))
-        .PanelWeak(SharedThis(this))
-        .ParentOperatorGuid(ParentOperatorGuid)      // pill is a child of parent operator — track for parent-hover
-        .NavigateNode(Node.SourceNode)
-        .HighlightNode(Node.SourceNode)
-        .bShowChevron(true)
-        .bChevronExpanded(false)                     // pill is the collapsed state — chevron is ▸ (expand on click)
-        .ChevronColor(LabelColor)                    // chevron tint matches the pill text tint (AND green / OR cyan / NOT red / RuleRef amber)
-        .OnChevronClicked_Lambda([this, NodeGuid]() -> FReply
-        {
-            if (NodeGuid.IsValid()) ToggleCollapsed(NodeGuid);
-            return FReply::Handled();
-        })
+    // Two-layer rendering — fill SImage behind, outline-only SPrereqExaminerOperatorButton on top. Fill color is
+    // state-tinted during PIE (pill represents the collapsed combinator / RuleRef; its state is the rolled-up state
+    // of the collapsed subtree via ComputeDebugState), LeafBoxFill otherwise. Fill slot is skipped when this pill is
+    // itself the Inner of a RuleRef (bSuppressFillLayer=true) so the RuleRef's outer color-coded outline stays
+    // unobscured at its rounded corners.
+    TSharedRef<SOverlay> Root = SNew(SOverlay);
+    TWeakPtr<SOverlay> RootWeak(Root);
+    if (!bSuppressFillLayer)
+    {
+        Root->AddSlot()
         [
-            SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
-            [
-                SNew(STextBlock)
-                    .Text(Label)
-                    .ColorAndOpacity(LabelColor)
-                    .Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
-            ]
+            SNew(SImage)
+                .Image(PrereqExaminer_Style::GetFillBrush_Standard())
+                .ColorAndOpacity_Lambda([this, NodeIndex, RootWeak]() -> FSlateColor
+                {
+                    const bool bSelf = RootWeak.IsValid() && RootWeak.Pin()->IsHovered();
+                    return FSlateColor(PrereqExaminer_Style::GetFillColorForStateAndHover(
+                        ComputeDebugState(NodeIndex),
+                        bSelf,
+                        PrereqExaminer_Style::LeafBoxFill,
+                        PrereqExaminer_Style::LeafBoxHoverFill));
+                })
+                .Visibility(EVisibility::HitTestInvisible)
         ];
+    }
+    Root->AddSlot()
+    [
+        SNew(SPrereqExaminerOperatorButton)
+            .NormalBrush(PrereqExaminer_Style::GetPillOutlineBrush(ParentOutlineKind))
+            .DirectHoverBrush(PrereqExaminer_Style::GetPillOutlineBrush(ParentOutlineKind))   // outline-only; direct-hover fill deferred
+            .ParentHoverBrush(PrereqExaminer_Style::GetPillOutlineBrushParentHover(ParentOutlineKind))
+            .PanelWeak(SharedThis(this))
+            .ParentOperatorGuid(ParentOperatorGuid)      // pill is a child of parent operator — track for parent-hover
+            .NavigateNode(Node.SourceNode)
+            .HighlightNode(Node.SourceNode)
+            .bShowChevron(true)
+            .bChevronExpanded(false)                     // pill is the collapsed state — chevron is ▸ (expand on click)
+            .ChevronColor(LabelColor)                    // chevron tint matches the pill text tint (AND green / OR cyan / NOT red / RuleRef amber)
+            .OnChevronClicked_Lambda([this, NodeGuid]() -> FReply
+            {
+                if (NodeGuid.IsValid()) ToggleCollapsed(NodeGuid);
+                return FReply::Handled();
+            })
+            [
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::BorderLayerPadding)
+                [
+                    SNew(STextBlock)
+                        .Text(Label)
+                        .ColorAndOpacity(LabelColor)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+                ]
+            ]
+    ];
+    return Root;
 }
 
 bool SPrereqExaminerPanel::IsCollapsed(const FGuid& NodeGuid) const
@@ -1303,8 +1586,10 @@ void SPrereqExaminerPanel::SetHoveredOperator(const FGuid& Guid)
 
 TAttribute<const FSlateBrush*> SPrereqExaminerPanel::MakeOuterBrushAttribute(const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
 {
-    const FSlateBrush* Normal = PrereqExaminer_Style::GetOperatorOuterBrush(ParentOutlineKind);
-    const FSlateBrush* Hover  = PrereqExaminer_Style::GetOperatorOuterBrushParentHover(ParentOutlineKind);
+    // Two-layer refactor: outer SBorders now use outline-only brushes (transparent fill + kind-colored outline). Fill
+    // lives on a separate SImage layer behind the SBorder, colored dynamically per PIE debug state.
+    const FSlateBrush* Normal = PrereqExaminer_Style::GetOperatorOuterOutlineBrush(ParentOutlineKind);
+    const FSlateBrush* Hover  = PrereqExaminer_Style::GetOperatorOuterOutlineBrushParentHover(ParentOutlineKind);
     TWeakPtr<SPrereqExaminerPanel> WeakPanel = SharedThis(this);
 
     return TAttribute<const FSlateBrush*>::CreateLambda(

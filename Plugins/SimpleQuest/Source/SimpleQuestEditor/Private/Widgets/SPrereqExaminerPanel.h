@@ -61,12 +61,12 @@ public:
 private:
     // ---- Composition ----
     TSharedRef<SWidget> BuildHeader();
-    TSharedRef<SWidget> BuildExpressionWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
-    TSharedRef<SWidget> BuildLeafWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
-    TSharedRef<SWidget> BuildCombinatorWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
-    TSharedRef<SWidget> BuildNotWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
-    TSharedRef<SWidget> BuildRuleRefWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
-    TSharedRef<SWidget> BuildCollapsedPill(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind);
+    TSharedRef<SWidget> BuildExpressionWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
+    TSharedRef<SWidget> BuildLeafWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
+    TSharedRef<SWidget> BuildCombinatorWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
+    TSharedRef<SWidget> BuildNotWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
+    TSharedRef<SWidget> BuildRuleRefWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
+    TSharedRef<SWidget> BuildCollapsedPill(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind, bool bSuppressFillLayer = false);
     TSharedRef<SWidget> BuildOperatorLabel(int32 NodeIndex, FText OperatorText, FSlateColor NormalColor, FSlateColor SaturatedColor);
 
     /** Shared brush-attribute builder for outer SBorder wrappers (combinator, NOT, RuleRef). Returns an attribute that

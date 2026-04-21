@@ -29,7 +29,7 @@ public class SimpleQuestEditor: ModuleRules
 			"KismetCompiler", 
 			"GameplayTagsEditor",
 			"PropertyEditor",
-			"Projects"
+			"Projects",
 		});
 
 		if (Target.bBuildEditor)

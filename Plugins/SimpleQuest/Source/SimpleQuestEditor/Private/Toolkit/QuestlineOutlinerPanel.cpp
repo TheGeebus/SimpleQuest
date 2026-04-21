@@ -111,11 +111,13 @@ void SQuestlineOutlinerPanel::RebuildTree()
     RootItems.Empty();
     if (!QuestlineGraph) return;
 
+    // Technical tag prefix — still sourced from QuestlineID so tag-matching downstream stays stable across renames.
     const FString QuestlineID = QuestlineGraph->GetQuestlineID().IsEmpty() ? QuestlineGraph->GetName() : QuestlineGraph->GetQuestlineID();
 
     auto RootItem = MakeShared<FQuestlineOutlinerItem>();
     RootItem->Tag = FName(*QuestlineID);
-    RootItem->DisplayName = QuestlineID;
+    // Display label — prefer FriendlyName via the canonical accessor, falls back to the asset short name when empty.
+    RootItem->DisplayName = QuestlineGraph->GetDisplayName().ToString();
     RootItem->ItemType = EOutlinerItemType::Root;
 
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& CompiledNodes = QuestlineGraph->GetCompiledNodes();

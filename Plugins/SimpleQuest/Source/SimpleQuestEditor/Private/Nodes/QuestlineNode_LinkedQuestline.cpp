@@ -9,43 +9,33 @@
 
 FText UQuestlineNode_LinkedQuestline::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	/**
-	 * Menu/list views: simple "Linked Questline" category label — no instance exists yet so NodeLabel is not meaningful.
-	 */
+	// Palette / menu contexts — no instance exists yet, show the generic category label.
 	if (TitleType == ENodeTitleType::MenuTitle || TitleType == ENodeTitleType::ListView)
 	{
 		return LOCTEXT("LinkedQuestlineTitlePrefix", "Linked Questline");
 	}
 
-	/**
-	 * Inline rename (EditableTitle): NodeLabel alone so the rename field pre-populates with only the designer-facing
-	 * portion and typing replaces just that, not the full multi-line title.
-	 */
-	if (TitleType == ENodeTitleType::EditableTitle)
+	// Placed / editable contexts. Resolve a human-readable name via the standard fallback chain:
+	//   FriendlyName (if set on the linked asset and the asset is resident), then
+	//   asset short name (from the soft path, no load), then
+	//   "(none)" (when LinkedGraph is null).
+	// Avoids LoadSynchronous on paint: if the asset isn't already resident, we take the cheap short-name path.
+	// The inline asset picker flow (item 3b, future session) keeps the asset resident on selection.
+	FText Name;
+	if (UQuestlineGraph* Resident = LinkedGraph.Get())
 	{
-		return NodeLabel;
+		Name = Resident->GetDisplayName();
 	}
-
-	/**
-	 * Full/default titles on a placed instance: NodeLabel as the primary line, asset name as a secondary line. Designers
-	 * distinguish multiple placements of the same asset via inline rename and the change is immediately visible in the
-	 * graph. When the inline asset picker widget (Session 22 polish) lands, the asset line drops since the picker will
-	 * render the asset inline on the node body.
-	 */
-	FText AssetNameText;
-	if (!LinkedGraph.IsNull())
+	else if (!LinkedGraph.IsNull())
 	{
-		AssetNameText = FText::FromString(LinkedGraph.GetAssetName());
+		Name = FText::FromString(LinkedGraph.GetAssetName());
 	}
 	else
 	{
-		AssetNameText = LOCTEXT("LinkedQuestlineNone", "(none)");
+		Name = LOCTEXT("LinkedQuestlineNone", "(none)");
 	}
 
-	FFormatNamedArguments Args;
-	Args.Add(TEXT("Label"), NodeLabel);
-	Args.Add(TEXT("Asset"), AssetNameText);
-	return FText::Format(LOCTEXT("LinkedQuestlineTitleWithLabelFmt", "{Label}\nLinked Questline: {Asset}"), Args);
+	return FText::Format(LOCTEXT("LinkedQuestlineTitleFmt", "Linked Questline - {0}"), Name);
 }
 
 FLinearColor UQuestlineNode_LinkedQuestline::GetNodeTitleColor() const
@@ -82,6 +72,15 @@ void UQuestlineNode_LinkedQuestline::RebuildOutcomePinsFromLinkedGraph()
 	TArray<FName> DesiredOutcomes = FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(Graph);
 	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
+}
+
+void UQuestlineNode_LinkedQuestline::PostPlacedNewNode()
+{
+	// Run the base sweep (assigns QuestGuid, labels via the collision-avoiding candidate walk), then clear NodeLabel.
+	// LinkedQuestline's identity is the referenced asset, not a per-instance label — the baseline "Node_N" fallback
+	// ContentBase produces leaks into the title otherwise, since GetNodeTitle no longer fronts NodeLabel anywhere.
+	Super::PostPlacedNewNode();
+	NodeLabel = FText::GetEmpty();
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -78,7 +78,15 @@ private:
      */
     UPROPERTY(EditAnywhere)
     FString QuestlineID;
-    
+
+    /**
+     * Designer-facing display name shown in editor surfaces that need a human-readable label — LinkedQuestline node
+     * titles, outliner roots, asset tooltips. Falls back to the asset short name when empty. Unlike QuestlineID, this
+     * is purely presentational — changing it never affects compiled tag identity, so designers can rename freely.
+     */
+    UPROPERTY(EditAnywhere)
+    FText FriendlyName;
+
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 #if !WITH_EDITOR
@@ -94,6 +102,11 @@ public:
     const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
     void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
 
+    /**
+     * FriendlyName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
+     * label for this questline — avoids scattered "is FriendlyName empty?" checks.
+     */
+    FText GetDisplayName() const;
 
     // Editor-only: the actual UEdGraph object is only needed in the editor. The data it represents is compiled in-editor for use at runtime
 #if WITH_EDITORONLY_DATA

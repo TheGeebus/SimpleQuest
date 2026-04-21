@@ -56,8 +56,4 @@ public:
 
 	UPROPERTY(Transient)
 	bool bTargetClassesExpanded = false;
-
-	UPROPERTY(Transient)
-	bool bGiversExpanded = false;
-	
 };

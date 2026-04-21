@@ -283,13 +283,16 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 	return ModifiedActors;
 }
 
-FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_Step* StepNode)
+FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)
 {
-	if (!StepNode) return FGameplayTag();
+	if (!ContentNode) return FGameplayTag();
 
-	UEdGraph* Graph = StepNode->GetGraph();
+	UEdGraph* Graph = ContentNode->GetGraph();
 	if (!Graph) return FGameplayTag();
 
+	// Walk up through any Quest-container graphs (Step nests inside Quest's InnerGraph). Flat placements
+	// — Quest / LinkedQuestline directly on the questline graph — skip this loop entirely since the immediate
+	// Outer is already the questline asset.
 	UObject* Outer = Graph->GetOuter();
 	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
 	{
@@ -303,7 +306,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 
 	for (const auto& [TagName, NodeInstance] : QuestlineAsset->GetCompiledNodes())
 	{
-		if (NodeInstance && NodeInstance->GetQuestGuid() == StepNode->QuestGuid)
+		if (NodeInstance && NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
 		{
 			return FGameplayTag::RequestGameplayTag(TagName, false);
 		}

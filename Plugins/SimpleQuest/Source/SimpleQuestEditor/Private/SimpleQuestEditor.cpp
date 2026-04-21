@@ -31,7 +31,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
-#include "Nodes/Slate/SGRaphNode_GroupNode.h"
+#include "Nodes/Slate/SGraphNode_GroupNode.h"
 #include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
@@ -42,9 +42,11 @@
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
+#include "Nodes/Slate/SGraphNode_QuestlineQuest.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -86,6 +88,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
 		{
 			return SNew(SGraphNode_LinkedQuestline, LinkedNode);
+		}
+		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			return SNew(SGraphNode_QuestlineQuest, QuestNode);
 		}
 		return nullptr;
 	}

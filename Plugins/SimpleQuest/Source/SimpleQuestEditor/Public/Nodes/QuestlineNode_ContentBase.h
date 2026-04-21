@@ -37,6 +37,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
 
+	/** Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
+	the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating
+	the flag on every subclass that ends up with a giver affordance. */
+	UPROPERTY(Transient)
+	bool bGiversExpanded = false;
+
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }
 

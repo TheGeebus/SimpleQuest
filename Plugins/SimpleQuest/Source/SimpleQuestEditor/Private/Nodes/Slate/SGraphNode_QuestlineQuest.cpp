@@ -1,44 +1,42 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
-#include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
+#include "Nodes/Slate/SGraphNode_QuestlineQuest.h"
+
+#include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "GameplayTagContainer.h"
-#include "Nodes/QuestlineNode_LinkedQuestline.h"
-#include "Quests/QuestlineGraph.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
-#include "ScopedTransaction.h"
 #include "TutorialMetaData.h"
-#include "PropertyCustomizationHelpers.h"
 #include "Styling/AppStyle.h"
-#include "Utilities/SimpleQuestEditorUtils.h"
+#include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SSpacer.h"
 #include "Widgets/Text/STextBlock.h"
 
-#define LOCTEXT_NAMESPACE "SGraphNode_LinkedQuestline"
+#define QUEST_GIVER_COLOR FLinearColor(0.75f, 0.4f, 1.f)   // matches Step's STEP_GIVER_COLOR so givers read consistently across widgets
 
-#define LINKED_GIVER_COLOR FLinearColor(0.75f, 0.4f, 1.f)
+#define LOCTEXT_NAMESPACE "SGraphNode_QuestlineQuest"
 
-void SGraphNode_LinkedQuestline::Construct(const FArguments& InArgs, UQuestlineNode_LinkedQuestline* InNode)
+void SGraphNode_QuestlineQuest::Construct(const FArguments& InArgs, UQuestlineNode_Quest* InNode)
 {
-	LinkedNode = InNode;
+	QuestNode = InNode;
 	GraphNode = InNode;
 	SetCursor(EMouseCursor::CardinalCross);
 	UpdateGraphNode();
 }
 
-void SGraphNode_LinkedQuestline::UpdateGraphNode()
+void SGraphNode_QuestlineQuest::UpdateGraphNode()
 {
-	// Refresh watching-givers cache. LinkedQuestline has no runtime tag of its own so this is typically empty;
-	// FindCompiledTagForNode gracefully returns an invalid tag and we skip the query. Consistent code path with
-	// other content-node widgets.
+	// Refresh watching-givers cache. FindCompiledTagForNode returns invalid before first compile or when no
+	// compiled entry exists for this node's QuestGuid; empty list collapses the display gracefully.
 	WatchingGiverNames.Reset();
-	if (LinkedNode)
+	if (QuestNode)
 	{
-		const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(LinkedNode);
+		const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(QuestNode);
 		if (CompiledTag.IsValid())
 		{
 			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
@@ -55,8 +53,8 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 	const FSlateBrush* NodeBodyBrush = GetNodeBodyBrush();
 
 	// ── Title area ─────────────────────────────────────────────
-	// Mirrors SGraphNode_QuestlineStep's title boilerplate so custom content nodes share a consistent look.
-	// Factoring this into a shared helper becomes worthwhile once a third consumer lands — premature now.
+	// Same boilerplate as Step / LinkedQuestline. Factoring into a shared helper makes sense once there's a fourth
+	// consumer; premature with three.
 	TSharedPtr<SNodeTitle> NodeTitle = SNew(SNodeTitle, GraphNode);
 
 	IconColor = FLinearColor::White;
@@ -123,16 +121,21 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		]
 
-		// Asset picker — the entire body of this node.
-		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(10.f, 4.f, 10.f, 4.f))
-		[
-			CreateAssetPickerWidget()
-		]
-
-		// Pin content area
+		// Pin content area — Quest pins (Activate input, outcome outputs, Deactivate if enabled).
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		[
 			CreateNodeContentArea()
+		]
+
+		// Givers section — empty-list collapses to SNullWidget automatically via the helper.
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(14.f, 2.f, 10.f, 8.f))
+		[
+			FQuestNodeSlateHelpers::BuildLabeledExpandableList(
+				LOCTEXT("GiversLabel", "Givers"),
+				WatchingGiverNames,
+				QUEST_GIVER_COLOR,
+				[this]() { return QuestNode && QuestNode->bGiversExpanded; },
+				[this]() { if (QuestNode) QuestNode->bGiversExpanded = !QuestNode->bGiversExpanded; })
 		];
 
 	TSharedPtr<SWidget> EnabledStateWidget = GetEnabledStateWidget();
@@ -196,88 +199,5 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 	CreateBelowPinControls(InnerVerticalBox);
 }
 
-TSharedRef<SWidget> SGraphNode_LinkedQuestline::CreateAssetPickerWidget()
-{
-	// SObjectPropertyEntryBox filtered to UQuestlineGraph. Displays the current asset's short name + a browse-to-asset
-	// button + a "use current content browser selection" pull-in. Self-reference filtered at the picker level; deeper
-	// cycle detection is a compile-time concern, already handled by the compiler.
-	return SNew(SObjectPropertyEntryBox)
-		.AllowedClass(UQuestlineGraph::StaticClass())
-		.ObjectPath(this, &SGraphNode_LinkedQuestline::GetAssetPath)
-		.OnObjectChanged(this, &SGraphNode_LinkedQuestline::OnAssetChanged)
-		.OnShouldFilterAsset(this, &SGraphNode_LinkedQuestline::OnShouldFilterAsset)
-		.AllowClear(true)
-		.DisplayThumbnail(false)
-		.DisplayBrowse(true)
-		.DisplayUseSelected(true);
-}
-
-FString SGraphNode_LinkedQuestline::GetAssetPath() const
-{
-	if (LinkedNode && !LinkedNode->LinkedGraph.IsNull())
-	{
-		return LinkedNode->LinkedGraph.ToSoftObjectPath().ToString();
-	}
-	return FString();
-}
-
-void SGraphNode_LinkedQuestline::OnAssetChanged(const FAssetData& NewAsset)
-{
-	if (!LinkedNode) return;
-
-	const FScopedTransaction Transaction(LOCTEXT("ChangeLinkedQuestline", "Change Linked Questline"));
-	LinkedNode->Modify();
-
-	// NewAsset.GetAsset() sync-loads on first access — expected when the designer is actively selecting.
-	UQuestlineGraph* NewGraph = Cast<UQuestlineGraph>(NewAsset.GetAsset());
-	LinkedNode->LinkedGraph = NewGraph;
-	LinkedNode->RebuildOutcomePinsFromLinkedGraph();
-
-	// NotifyGraphChanged drives SNodeTitle to re-query GetNodeTitle, so "Linked Questline - <name>" reflects the
-	// new asset's FriendlyName immediately.
-	if (UEdGraph* Graph = LinkedNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
-}
-
-bool SGraphNode_LinkedQuestline::OnShouldFilterAsset(const FAssetData& AssetData) const
-{
-	// Reject self-reference (this node's owning questline asset picking itself). Deeper cycle detection — chains
-	// that route back to the same asset through one or more intermediate LinkedQuestlines — is a compile-time concern.
-	if (!LinkedNode) return false;
-	UEdGraph* MyGraph = LinkedNode->GetGraph();
-	if (!MyGraph) return false;
-	UObject* Outer = MyGraph->GetOuter();
-	while (Outer && !Outer->IsA<UQuestlineGraph>())
-	{
-		Outer = Outer->GetOuter();
-	}
-	if (!Outer) return false;
-	return AssetData.GetSoftObjectPath() == FSoftObjectPath(Outer);
-}
-
-int32 SGraphNode_LinkedQuestline::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
-	FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
-{
-	// Red shadow outline when no asset is assigned — matches Step's ObjectiveClass-null affordance so incomplete
-	// configuration reads as a visible error at a glance.
-	if (LinkedNode && LinkedNode->LinkedGraph.IsNull())
-	{
-		const FVector2f ShadowInflate = UE::Slate::CastToVector2f(
-			GetDefault<UGraphEditorSettings>()->GetShadowDeltaSize());
-
-		FSlateDrawElement::MakeBox(
-			OutDrawElements,
-			LayerId,
-			AllottedGeometry.ToInflatedPaintGeometry(ShadowInflate),
-			FAppStyle::GetBrush(TEXT("Graph.Node.ShadowSelected")),
-			ESlateDrawEffect::None,
-			FLinearColor(1.0f, 0.0f, 0.0f, 0.75f)
-		);
-	}
-
-	return SGraphNode::OnPaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
-}
-
 #undef LOCTEXT_NAMESPACE
+#undef QUEST_GIVER_COLOR

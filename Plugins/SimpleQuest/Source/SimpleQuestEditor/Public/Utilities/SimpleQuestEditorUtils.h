@@ -100,10 +100,12 @@ public:
 	static int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 
 	/**
-	 * Returns the last-compiled gameplay tag for this step node via GUID lookup in CompiledNodes. The tag remains valid even
-	 * after a rename (INI preservation) — useful for preserving giver/target queries while awaiting recompile.
+	 * Walks the node's Outer chain (through any Quest container graphs) to the owning UQuestlineGraph asset, then
+	 * matches the node's QuestGuid against CompiledNodes to resolve its compiled runtime tag. Works for any
+	 * UQuestlineNode_ContentBase descendant (Quest, Step, LinkedQuestline). Returns an invalid tag when the node
+	 * hasn't been compiled yet or the graph Outer chain is broken.
 	 */
-	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_Step* StepNode);
+	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
 	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check

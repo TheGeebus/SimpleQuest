@@ -148,7 +148,7 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 	return EQuestNodeDebugState::Unknown;
 }
 
-FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* EditorNode) const
+FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* EditorNode)
 {
 	if (!EditorNode) return FGameplayTag();
 
@@ -166,8 +166,52 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 	{
 		if (NodeInstance && NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
 		{
-			return FGameplayTag::RequestGameplayTag(TagName, /*ErrorIfNotFound*/ false);
+			return FGameplayTag::RequestGameplayTag(TagName, false);
 		}
 	}
 	return FGameplayTag();
+}
+
+EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag) const
+{
+	if (!IsActive() || !LeafFact.IsValid() || !SourceRuntimeTag.IsValid()) return EPrereqDebugState::Unknown;
+	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
+	if (!WorldState) return EPrereqDebugState::Unknown;
+
+	// Satisfied wins regardless of source state — the fact is present, the leaf evaluates true.
+	if (WorldState->HasFact(LeafFact)) return EPrereqDebugState::Satisfied;
+
+	// Classify based on the source content node's state facts. Resolve each QuestState.<SourceTag>.<Leaf> lazily; the
+	// ones we actually check short-circuit on first hit.
+	const FName SourceTagName = SourceRuntimeTag.GetTagName();
+	auto LookupSourceFact = [&](const FString& Leaf) -> bool
+	{
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(SourceTagName, Leaf), /*ErrorIfNotFound*/ false);
+		return Tag.IsValid() && WorldState->HasFact(Tag);
+	};
+
+	const bool bSourceActive       = LookupSourceFact(FQuestStateTagUtils::Leaf_Active);
+	const bool bSourcePendingGiver = LookupSourceFact(FQuestStateTagUtils::Leaf_PendingGiver);
+	const bool bSourceCompleted    = LookupSourceFact(FQuestStateTagUtils::Leaf_Completed);
+	const bool bSourceDeactivated  = LookupSourceFact(FQuestStateTagUtils::Leaf_Deactivated);
+
+	if (bSourceCompleted || bSourceDeactivated)
+	{
+		// Source resolved but the leaf's specific fact isn't present — the leaf's required outcome won't happen.
+		return EPrereqDebugState::Unsatisfied;
+	}
+	if (bSourceActive || bSourcePendingGiver)
+	{
+		// Source running, outcome not yet resolved — still in flight.
+		return EPrereqDebugState::InProgress;
+	}
+	// No state facts at all — source hasn't activated in this PIE session.
+	return EPrereqDebugState::NotStarted;
+}
+
+bool FQuestPIEDebugChannel::HasFact(const FGameplayTag& FactTag) const
+{
+	if (!IsActive() || !FactTag.IsValid()) return false;
+	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
+	return WorldState && WorldState->HasFact(FactTag);
 }

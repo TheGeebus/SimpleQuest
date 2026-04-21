@@ -6,6 +6,9 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "GraphEditAction.h"
+#include "SimpleQuestEditor.h"
+#include "Debug/QuestPIEDebugChannel.h"
+#include "Debug/QuestPrereqDebugState.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Styling/AppStyle.h"
@@ -230,6 +233,42 @@ namespace PrereqExaminer_Style
         return &Brush;
     }
 }
+
+namespace PrereqDebug_Style
+{
+    // Leaf fills — full 5-state range. Alpha ~0.35 so the tint reads as a wash over the existing leaf visuals without
+    // drowning out the Source/Outcome text or the colored outline.
+    static const FLinearColor Unknown      = FLinearColor(0.f, 0.f, 0.f, 0.f);                      // transparent — no tint
+    static const FLinearColor NotStarted   = FLinearColor(FColor(120, 120, 120, 90));               // grey
+    static const FLinearColor InProgress   = FLinearColor(FColor(250, 200,  60, 90));               // amber
+    static const FLinearColor Unsatisfied  = FLinearColor(FColor(230,  60,  60, 90));               // red
+    static const FLinearColor Satisfied    = FLinearColor(FColor( 90, 210, 110, 90));               // green
+
+    // Combinator tint — same colors as leaves but binary (Unknown / Unsatisfied / Satisfied only). InProgress and
+    // NotStarted aren't produced for combinators; the runtime boolean eval collapses those to Unsatisfied.
+    const FLinearColor& ColorForLeafState(EPrereqDebugState State)
+    {
+        switch (State)
+        {
+        case EPrereqDebugState::NotStarted:   return NotStarted;
+        case EPrereqDebugState::InProgress:   return InProgress;
+        case EPrereqDebugState::Unsatisfied:  return Unsatisfied;
+        case EPrereqDebugState::Satisfied:    return Satisfied;
+        default:                              return Unknown;
+        }
+    }
+
+    const FLinearColor& ColorForCombinatorState(EPrereqDebugState State)
+    {
+        switch (State)
+        {
+        case EPrereqDebugState::Satisfied:    return Satisfied;
+        case EPrereqDebugState::Unsatisfied:  return Unsatisfied;
+        default:                              return Unknown;
+        }
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // SPrereqExaminerBox — non-clickable hover/double-click wrapper for leaf cells.
@@ -770,53 +809,70 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const
         .HighlightNode(Node.SourceNode)
         .NavigateNode(Node.SourceNode)
         [
-            SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
+            SNew(SOverlay)
+            + SOverlay::Slot()
+            [
+                // PIE debug leaf tint — renders as a background wash behind the Source/Outcome rows. SOverlay paints
+                // slots in declaration order, so this first slot sits BEHIND the content that follows. HitTestInvisible
+                // so the tint doesn't absorb clicks from the surrounding SPrereqExaminerBox's nav/highlight handling.
+                SNew(SImage)
+                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
+                    {
+                        return FSlateColor(PrereqDebug_Style::ColorForLeafState(ComputeDebugState(NodeIndex)));
+                    })
+                    .Visibility(EVisibility::HitTestInvisible)
+            ]
+            + SOverlay::Slot()
             [
                 SNew(SVerticalBox)
-                + SVerticalBox::Slot().AutoHeight()
+                + SVerticalBox::Slot().AutoHeight().Padding(PrereqExaminer_Style::LayerPadding)
                 [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                                .Text(LOCTEXT("LeafSourceHeader", "Source: "))
-                                .Font(HeaderFont)
-                                .ColorAndOpacity(LeafColor)
-                        ]
-                    + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                                .Text(Node.LeafSourceLabel)
-                                .Font(ValueFont)
-                                .ColorAndOpacity(LeafColor)
-                        ]
-                ]
-                + SVerticalBox::Slot().AutoHeight()
-                [
-                    SNew(SHorizontalBox)
-                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                                .Text(LOCTEXT("LeafOutcomeHeader", "Outcome: "))
-                                .Font(HeaderFont)
-                                .ColorAndOpacity(LeafColor)
-                        ]
-                    + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                                .Text(Node.LeafOutcomeCategory)
-                                .Font(ValueFont)
-                                .ColorAndOpacity(FSlateColor(PrereqExaminer_Style::LeafCategoryTint))
-                                .Visibility(Node.LeafOutcomeCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
-                        ]
-                    + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-                        [
-                            SNew(STextBlock)
-                                .Text(Node.LeafOutcomeLabel)
-                                .Font(ValueFont)
-                                .ColorAndOpacity(LeafColor)
-                        ]
+                    SNew(SVerticalBox)
+                    + SVerticalBox::Slot().AutoHeight()
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(LOCTEXT("LeafSourceHeader", "Source: "))
+                                    .Font(HeaderFont)
+                                    .ColorAndOpacity(LeafColor)
+                            ]
+                        + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(Node.LeafSourceLabel)
+                                    .Font(ValueFont)
+                                    .ColorAndOpacity(LeafColor)
+                            ]
+                    ]
+                    + SVerticalBox::Slot().AutoHeight()
+                    [
+                        SNew(SHorizontalBox)
+                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(LOCTEXT("LeafOutcomeHeader", "Outcome: "))
+                                    .Font(HeaderFont)
+                                    .ColorAndOpacity(LeafColor)
+                            ]
+                        + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(Node.LeafOutcomeCategory)
+                                    .Font(ValueFont)
+                                    .ColorAndOpacity(FSlateColor(PrereqExaminer_Style::LeafCategoryTint))
+                                    .Visibility(Node.LeafOutcomeCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+                            ]
+                        + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+                            [
+                                SNew(STextBlock)
+                                    .Text(Node.LeafOutcomeLabel)
+                                    .Font(ValueFont)
+                                    .ColorAndOpacity(LeafColor)
+                            ]
+                    ]
                 ]
             ]
         ];
@@ -847,11 +903,28 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildCombinatorWidget(int32 NodeIndex,
         }
     }
 
+    // PIE debug tint fills the combinator's full inner content rect (inside the outer SBorder's border + padding). Tint
+    // is the BOTTOM overlay slot so the operator labels and operand children paint on top of the wash — labels are never
+    // tinted. Transparent when the debug channel isn't active.
     return SNew(SBorder)
         .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
         .Padding(PrereqExaminer_Style::LayerPadding)
         .Visibility(EVisibility::SelfHitTestInvisible)
-        [ Body ];
+        [
+            SNew(SOverlay)
+            + SOverlay::Slot()
+            [
+                SNew(SImage)
+                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
+                    {
+                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
+                    })
+                    .Visibility(EVisibility::HitTestInvisible)
+            ]
+            + SOverlay::Slot()
+            [ Body ]
+        ];
 }
 
 TSharedRef<SWidget> SPrereqExaminerPanel::BuildNotWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
@@ -874,14 +947,31 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildNotWidget(int32 NodeIndex, const 
     }
 
     // Outer SBorder matches the structure AND/OR/RuleRef use — kind-colored outline via MakeOuterBrushAttribute, so a
-    // NOT child of AND/OR renders like any other kind-colored child. Padding(0) keeps the outline tight against the
-    // VBox, minimizing the gap between NOT's outline and its contents. The red NotChild outline on the operand below
-    // is what signals negation; this outer frame only reflects NOT's relationship to its parent.
+    // NOT child of AND/OR renders like any other kind-colored child. Padding keeps the outline tight against the VBox,
+    // minimizing the gap between NOT's outline and its contents. The red NotChild outline on the operand below is what
+    // signals negation; this outer frame only reflects NOT's relationship to its parent.
+    //
+    // PIE debug tint fills NOT's full inner content rect as the bottom overlay slot so the "NOT" label and operand
+    // child render on top of the wash — label color stays unaffected.
     return SNew(SBorder)
         .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
         .Padding(PrereqExaminer_Style::LayerPadding)
         .Visibility(EVisibility::SelfHitTestInvisible)
-        [ Body ];
+        [
+            SNew(SOverlay)
+            + SOverlay::Slot()
+            [
+                SNew(SImage)
+                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
+                    {
+                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
+                    })
+                    .Visibility(EVisibility::HitTestInvisible)
+            ]
+            + SOverlay::Slot()
+            [ Body ]
+        ];
 }
 
 TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, const FGuid& ParentOperatorGuid, EPrereqBoxOutline ParentOutlineKind)
@@ -987,16 +1077,34 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildRuleRefWidget(int32 NodeIndex, co
         ? PrereqExaminer_Style::LayerPadding
         : FMargin(0.f);
     
+    // PIE debug tint fills the RuleRef's full inner content rect as the bottom overlay slot — covers header + inner
+    // drilled-in expression area. Header's amber brush is opaque and mostly occludes the tint within its strip; the
+    // tint reads most strongly in the inner area's padding gaps around drilled-in children (which paint their own
+    // tints on top). Header and Inner content render above the tint so the amber header + any text stays unaffected.
     return SNew(SBorder)
         .BorderImage(MakeOuterBrushAttribute(ParentOperatorGuid, ParentOutlineKind))
         .Padding(FMargin(0.f))
         .Visibility(EVisibility::SelfHitTestInvisible)
         [
-            SNew(SVerticalBox)
-            + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f))
-                [ Header ]
-            + SVerticalBox::Slot().AutoHeight().Padding(InnerSlotPadding)
-                [ Inner ]
+            SNew(SOverlay)
+            + SOverlay::Slot()
+            [
+                SNew(SImage)
+                    .Image(FCoreStyle::Get().GetBrush("WhiteBrush"))
+                    .ColorAndOpacity_Lambda([this, NodeIndex]() -> FSlateColor
+                    {
+                        return FSlateColor(PrereqDebug_Style::ColorForCombinatorState(ComputeDebugState(NodeIndex)));
+                    })
+                    .Visibility(EVisibility::HitTestInvisible)
+            ]
+            + SOverlay::Slot()
+            [
+                SNew(SVerticalBox)
+                + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f))
+                    [ Header ]
+                + SVerticalBox::Slot().AutoHeight().Padding(InnerSlotPadding)
+                    [ Inner ]
+            ]
         ];
 }
 
@@ -1277,6 +1385,78 @@ FReply SPrereqExaminerPanel::HandleHeaderEntryNavigationClicked()
         FSimpleQuestEditorUtilities::NavigateToEdGraphNode(Target);
     }
     return FReply::Handled();
+}
+
+void SPrereqExaminerPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+{
+    SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+
+    if (FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel())
+    {
+        if (Channel->IsActive())
+        {
+            Invalidate(EInvalidateWidget::Paint);
+        }
+    }
+}
+
+EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
+{
+    if (!Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
+
+    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
+    if (!Channel || !Channel->IsActive()) return EPrereqDebugState::Unknown;
+
+    const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
+    switch (Node.Type)
+    {
+    case EPrereqExaminerNodeType::Leaf:
+        return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag);
+
+    case EPrereqExaminerNodeType::And:
+    {
+        // True iff every child Satisfied. Any Unknown propagates up (we can't confidently paint the combinator).
+        bool bAllSatisfied = true;
+        for (int32 ChildIdx : Node.ChildIndices)
+        {
+            const EPrereqDebugState ChildState = ComputeDebugState(ChildIdx);
+            if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+            if (ChildState != EPrereqDebugState::Satisfied) bAllSatisfied = false;
+        }
+        return (Node.ChildIndices.Num() > 0 && bAllSatisfied) ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+    }
+
+    case EPrereqExaminerNodeType::Or:
+    {
+        // True iff any child Satisfied.
+        for (int32 ChildIdx : Node.ChildIndices)
+        {
+            const EPrereqDebugState ChildState = ComputeDebugState(ChildIdx);
+            if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+            if (ChildState == EPrereqDebugState::Satisfied) return EPrereqDebugState::Satisfied;
+        }
+        return EPrereqDebugState::Unsatisfied;
+    }
+
+    case EPrereqExaminerNodeType::Not:
+    {
+        if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
+        const EPrereqDebugState ChildState = ComputeDebugState(Node.ChildIndices[0]);
+        if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+        return (ChildState == EPrereqDebugState::Satisfied) ? EPrereqDebugState::Unsatisfied : EPrereqDebugState::Satisfied;
+    }
+
+    case EPrereqExaminerNodeType::RuleRef:
+    {
+        // Option B: recurse into the drilled-in child subtree. Single child carrying the rule's expression; its state
+        // IS the RuleRef's state.
+        if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
+        return ComputeDebugState(Node.ChildIndices[0]);
+    }
+
+    default:
+        return EPrereqDebugState::Unknown;
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

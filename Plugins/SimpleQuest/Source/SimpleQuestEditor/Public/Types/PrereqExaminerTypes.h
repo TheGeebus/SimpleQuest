@@ -45,9 +45,16 @@ struct FPrereqExaminerNode
         Row-2 primary value in the leaf's two-row display. */
     UPROPERTY() FText LeafOutcomeLabel;
 
-    /** WorldState fact tag — Leaf + RuleRef nodes. Invalid on combinator nodes. Populated opportunistically for PIE
-        leaf-state coloring later (Wave 3); may be invalid on Wave 1 static display. */
+    /** WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
+        (MakeNodeOutcomeFact for named outcomes, MakeStateFact(Completed) for Any Outcome). For RuleRef: the rule's
+        group tag. Invalid on combinator nodes and on leaves whose source pin role isn't covered by
+        ResolveLeafFactForOutputPin (rare — Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
     UPROPERTY() FGameplayTag LeafTag;
+
+    /** Source content node's compiled runtime tag (e.g., "Quest.Demo.Step1"). Paired with LeafTag so the debug channel
+        can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
+        Leaf-only; invalid on other node types. */
+    UPROPERTY() FGameplayTag LeafSourceTag;
 
     /** Navigation target on double-click — the editor node that sources this leaf or owns this rule reference. */
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> SourceNode;

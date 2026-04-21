@@ -104,6 +104,16 @@ public:
 	 * after a rename (INI preservation) — useful for preserving giver/target queries while awaiting recompile.
 	 */
 	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_Step* StepNode);
+
+	/**
+	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
+	 * at runtime, plus the source node's compiled runtime tag (OutSourceTag). Mirrors the content-node branches of
+	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
+	 * NamedOutcomeOut resolves to QuestState.<src>.Outcome.<leaf>. Returns invalid tags for pin roles the examiner treats
+	 * as drill-through (Rule Entry Forward) or RuleRef (Rule Exit); those code paths don't flatten to leaves in the
+	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring (agenda item 7 Session B).
+	 */
+	static FGameplayTag ResolveLeafFactForOutputPin(const UEdGraphPin* OutputPin, FGameplayTag& OutSourceTag);
 	
 	/**
 	 * Returns true if the step node's current label matches its last compiled tag. False if the node has been renamed since

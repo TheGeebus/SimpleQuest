@@ -8,6 +8,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Editor.h"
 #include "EngineUtils.h"
+#include "GameplayTagsManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
@@ -31,7 +32,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
-
+#include "Utilities/QuestStateTagUtils.h"
 
 
 FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
@@ -309,6 +310,51 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 	}
 
 	return FGameplayTag();
+}
+
+FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdGraphPin* OutputPin, FGameplayTag& OutSourceTag)
+{
+	OutSourceTag = FGameplayTag();
+	if (!OutputPin) return FGameplayTag();
+
+	UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
+	const UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(OwningNode);
+	if (!ContentNode) return FGameplayTag(); // Entry/Rule nodes / combinators not covered in Session B's MVP.
+
+	// Walk Outer chain to the containing UQuestlineGraph, then look up the source node's compiled runtime tag via
+	// QuestGuid — same resolution path used by FQuestPIEDebugChannel::ResolveRuntimeTag and FindCompiledTagForNode.
+	UObject* Outer = OwningNode->GetGraph() ? OwningNode->GetGraph()->GetOuter() : nullptr;
+	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
+	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	if (!QuestlineAsset) return FGameplayTag();
+
+	FName SourceTagName = NAME_None;
+	for (const auto& [TagName, NodeInstance] : QuestlineAsset->GetCompiledNodes())
+	{
+		if (NodeInstance && NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
+		{
+			SourceTagName = TagName;
+			break;
+		}
+	}
+	if (SourceTagName.IsNone()) return FGameplayTag();
+
+	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, /*ErrorIfNotFound*/ false);
+
+	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
+	// branch. AnyOutcome → QuestState.<src>.Completed (source done, regardless of outcome). Named outcome →
+	// QuestState.<src>.Outcome.<leaf>.
+	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
+	if (Role == EQuestPinRole::AnyOutcomeOut)
+	{
+		const FName FactName = FQuestStateTagUtils::MakeStateFact(SourceTagName, FQuestStateTagUtils::Leaf_Completed);
+		return FGameplayTag::RequestGameplayTag(FactName, false);
+	}
+
+	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
+	if (!OutcomeTag.IsValid()) return FGameplayTag();
+	const FName FactName = FQuestStateTagUtils::MakeNodeOutcomeFact(SourceTagName, OutcomeTag);
+	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
 
 bool FSimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
@@ -732,6 +778,11 @@ namespace PrereqExaminer_Internal
     	Leaf.Type = EPrereqExaminerNodeType::Leaf;
     	Leaf.SourceNode = OwningNode;
 
+    	// Populate the compiler-equivalent fact tag + source runtime tag so the panel can query PIE state per leaf.
+    	// Both stay invalid for node types the helper doesn't cover (Entry outcome leaves, etc.) — the panel then
+    	// renders neutral for those leaves rather than a misleading "NotStarted" grey.
+    	Leaf.LeafTag = FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(OutputPin, Leaf.LeafSourceTag);
+
     	// Split source + outcome labels so the leaf widget can render each on its own row with a bold header.
     	Leaf.LeafSourceLabel = FText::FromString(OwningNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
     	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
@@ -763,7 +814,6 @@ namespace PrereqExaminer_Internal
     	// populated for diagnostics / future reuse).
     	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafOutcomeCategory.ToString(), *Leaf.LeafOutcomeLabel.ToString()));
 
-    	// LeafTag left invalid — Wave 3 will populate for PIE coloring via compiler-adjacent resolution.
     	return Tree.Nodes.Add(Leaf);
     }
 }

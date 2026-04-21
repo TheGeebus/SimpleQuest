@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Debug/QuestPrereqDebugState.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Types/PrereqExaminerTypes.h"
 
@@ -105,4 +106,13 @@ private:
     // ---- Subscription ----
     TWeakObjectPtr<UEdGraph> SubscribedGraph;
     FDelegateHandle GraphChangedHandle;
+
+    // ---- Debug ----
+
+    /** While PIE debug channel is active, invalidates paint every tick so leaf/combinator tints reflect live fact changes. */
+    virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
+    
+    /** Recursively computes a debug state for the given tree node. Leaves query FQuestPIEDebugChannel directly;
+    combinators / RuleRefs roll up from their children. Returns Unknown when not in PIE. */
+    EPrereqDebugState ComputeDebugState(int32 NodeIndex) const;
 };

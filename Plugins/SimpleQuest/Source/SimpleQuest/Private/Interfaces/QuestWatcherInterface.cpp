@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 
 #include "Interfaces/QuestWatcherInterface.h"

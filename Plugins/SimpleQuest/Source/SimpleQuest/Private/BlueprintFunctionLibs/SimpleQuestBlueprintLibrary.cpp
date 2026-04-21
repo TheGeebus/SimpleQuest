@@ -1,0 +1,111 @@
+﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+
+#include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
+#include "WorldState/WorldStateSubsystem.h"
+#include "Signals/SignalSubsystem.h"
+#include "Events/AbandonQuestEvent.h"
+#include "Utilities/QuestStateTagUtils.h"
+#include "GameplayTagsManager.h"
+#include "Engine/GameInstance.h"
+#include "Events/QuestGivenEvent.h"
+#include "Subsystems/QuestManagerSubsystem.h"
+
+// -------------------------------------------------------------------------
+// Private helpers
+// -------------------------------------------------------------------------
+
+UWorldStateSubsystem* USimpleQuestBlueprintLibrary::GetWorldState(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+}
+
+USignalSubsystem* USimpleQuestBlueprintLibrary::GetSignalSubsystem(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;
+}
+
+UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<UQuestManagerSubsystem>() : nullptr;
+}
+
+// -------------------------------------------------------------------------
+// Quest state queries
+// -------------------------------------------------------------------------
+
+bool USimpleQuestBlueprintLibrary::IsQuestActive(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false));
+}
+
+bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed), false));
+}
+
+bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false));
+}
+
+bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
+{
+    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
+    if (!WS || !OutcomeTag.IsValid()) return false;
+    return WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false));
+}
+
+int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)
+{
+    UQuestManagerSubsystem* QM = GetQuestManager(WorldContext);
+    return QM ? QM->GetQuestCompletionCount(QuestTag) : 0;
+}
+
+// -------------------------------------------------------------------------
+// Quest actions
+// -------------------------------------------------------------------------
+
+void USimpleQuestBlueprintLibrary::AbandonQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(QuestTag, FAbandonQuestEvent(QuestTag));
+}
+
+void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+}
+
+// -------------------------------------------------------------------------
+// World state
+// -------------------------------------------------------------------------
+
+void USimpleQuestBlueprintLibrary::AddWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
+{
+    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->AddFact(FactTag);
+}
+
+void USimpleQuestBlueprintLibrary::RemoveWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
+{
+    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->RemoveFact(FactTag);
+}
+
+bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
+{
+    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
+    return WS && WS->HasFact(FactTag);
+}

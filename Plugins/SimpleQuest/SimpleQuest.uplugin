@@ -23,23 +23,21 @@
 		},
 		{
 			"Name": "SimpleQuestEditor",
-			"Type": "Editor",
-			"LoadingPhase": "PreDefault",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "Default",
 			"AdditionalDependencies": [
 				"Settings"
 			]
-		},
-		{
-			"Name": "SimpleQuestEditorEN",
-			"Type": "Editor",
-			"LoadingPhase": "PostDefault"
 		}
 	],
 	"Plugins": [
 		{
-			"Name": "ElectronicNodes",
-			"Enabled": true,
-			"Optional": true
+			"Name": "SimpleCore",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayTagsEditor",
+			"Enabled": true
 		}
 	],
 	"AdditionalPluginConfig": [

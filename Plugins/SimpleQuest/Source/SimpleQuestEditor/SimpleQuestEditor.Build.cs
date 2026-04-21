@@ -1,10 +1,12 @@
-﻿using UnrealBuildTool;
+﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+
+using UnrealBuildTool;
 
 public class SimpleQuestEditor: ModuleRules
 {
 	public SimpleQuestEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
-		PublicDependencyModuleNames.AddRange(new string[] { "GameplayTags" });
+		PublicDependencyModuleNames.AddRange(new string[] { "GameplayTags", "SimpleQuest" });
 		
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
@@ -13,12 +15,21 @@ public class SimpleQuestEditor: ModuleRules
 			"Engine", 
 			"UnrealEd", 
 			"Settings", 
-			"SimpleQuest", 
+			"SimpleQuest",
+			"SimpleCore",
 			"AssetTools", 
 			"GraphEditor",
 			"Slate",
 			"SlateCore",
 			"InputCore",
+			"BlueprintGraph",
+			"ToolMenus",
+			"AssetRegistry", 
+			"MessageLog",
+			"KismetCompiler", 
+			"GameplayTagsEditor",
+			"PropertyEditor",
+			"Projects",
 		});
 
 		if (Target.bBuildEditor)

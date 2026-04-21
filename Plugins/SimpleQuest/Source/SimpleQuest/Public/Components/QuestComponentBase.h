@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #pragma once
 
@@ -8,7 +8,8 @@
 #include "QuestComponentBase.generated.h"
 
 
-class UQuestSignalSubsystem;
+struct FGameplayTag;
+class USignalSubsystem;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -19,18 +20,15 @@ class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent, public IQues
 public:	
 	UQuestComponentBase();
 
+	/**
+	 * Applies tag renames to designer-configured tag containers. Called by the editor rename propagation system. Returns the
+	 * number of individual tag swaps performed.
+	 */
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames);
+	
 protected:
-	virtual void PostInitProperties() override;
 	virtual void BeginPlay() override;
 
-	//bool CheckQuestManager();
-	bool CheckQuestSignalSubsystem();
-
-	// void RegisterForQuestClass(UClass* LoadedQuestClass);
-		
-	//UPROPERTY(VisibleAnywhere)
-	//TObjectPtr<UQuestManagerSubsystem> QuestManager;
-
 	UPROPERTY(VisibleAnywhere)
-	TObjectPtr<UQuestSignalSubsystem> QuestSignalSubsystem;	
+	TObjectPtr<USignalSubsystem> SignalSubsystem;
 };

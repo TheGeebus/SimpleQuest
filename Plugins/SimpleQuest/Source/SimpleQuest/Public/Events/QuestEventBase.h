@@ -1,21 +1,31 @@
+// Copyright 2026, Greg Bussell, All Rights Reserved.
+
 #pragma once
 
-#include "SignalEventBase.h"
-
+#include "Quests/Types/QuestEventContext.h"
 #include "QuestEventBase.generated.h"
 
-class UQuest;
-
 USTRUCT(BlueprintType)
-struct FQuestEventBase : public FSignalEventBase
+struct FQuestEventBase
 {
 	GENERATED_BODY()
 
 	FQuestEventBase() = default;
 
-	FQuestEventBase(const FName InQuestID, const TSubclassOf<UQuest>& InQuestClass)
-		: FSignalEventBase(InQuestID), QuestClass(InQuestClass) {}
+	explicit FQuestEventBase(const FGameplayTag InQuestTag)
+		: QuestTag(InQuestTag)
+	{}
+
+	FQuestEventBase(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+		: QuestTag(InQuestTag)
+		, Context(InContext)
+	{}
 	
-	UPROPERTY()
-	TSubclassOf<UQuest> QuestClass;	
+	UPROPERTY(BlueprintReadWrite)
+	FGameplayTag QuestTag;
+
+	UPROPERTY(BlueprintReadOnly)
+	FQuestEventContext Context;
+	
+	FGameplayTag GetQuestTag() const { return QuestTag; }
 };

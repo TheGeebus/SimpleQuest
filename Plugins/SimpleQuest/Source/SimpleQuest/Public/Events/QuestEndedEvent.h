@@ -11,9 +11,12 @@ struct FQuestEndedEvent : public FQuestEventBase
 
 	FQuestEndedEvent() = default;
 
-	FQuestEndedEvent(const FName InQuestID, const TSubclassOf<UQuest>& InQuestClass, const bool bInDidSucceed)
-		: FQuestEventBase(InQuestID, InQuestClass), bDidSucceed(bInDidSucceed) {}
+	FQuestEndedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag)
+		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag) {}
+
+	FQuestEndedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag, const FQuestEventContext& InContext)
+		: FQuestEventBase(InQuestTag, InContext), OutcomeTag(InOutcomeTag) {}
 
 	UPROPERTY(BlueprintReadWrite)
-	bool bDidSucceed = false;
+	FGameplayTag OutcomeTag;
 };

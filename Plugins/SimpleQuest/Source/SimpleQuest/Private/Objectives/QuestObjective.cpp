@@ -1,74 +1,57 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 
 #include "Objectives/QuestObjective.h"
 
+#include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Interfaces/QuestTargetInterface.h"
 
 
-void UQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
+void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
+	/*-------------------------------------------------------------------------------------------------------------------*
+	 * Set fields on an FQuestObjectiveContext and pass it to CompleteObjectiveWithOutcome.
+	 * Common fields:
+	 *   InContext can be forwarded directly for pass-through, or build a new one:
+	 *   FQuestObjectiveContext OutContext;
+	 *   OutContext.TriggeredActor = InContext.TriggeredActor;
+	 *   OutContext.Instigator = InContext.Instigator;
+	 * Game-specific extension:
+	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType);
+	 *-------------------------------------------------------------------------------------------------------------------*/
+
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::SetObjectiveTarget_Implementation(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass,
-	int32 NumElementsRequired, bool bUseCounter)
+void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
-	StepID = InStepID;
 	TargetActors = InTargetActors;
-	TargetClass = InTargetClass;
-	MaxElements = NumElementsRequired;
-	bUseQuestCounter = bUseCounter;
-	SetCurrentElements(0);
+	TargetClasses = InTargetClasses;
 }
 
-bool UQuestObjective::IsObjectRelevant_Implementation(UObject* InTargetObject)
+TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 {
-	bool bIsTargetRelevant = false;
-	const bool bHasTargetClass = IsValid(TargetClass);
-	if (bHasTargetClass)
-	{
-		if (InTargetObject->IsA(TargetClass))
-		{
-			bIsTargetRelevant = true; 
-		}
-	}
-	
-	if (!TargetActors.IsEmpty())
-	{
-		if (const AActor* AsActor = Cast<AActor>(InTargetObject))
-		{
-			for (const TSoftObjectPtr<AActor>& SoftTarget : TargetActors)
-			{
-				if (SoftTarget.Get() == AsActor)
-				{
-					bIsTargetRelevant = true;
-					break;
-				}
-			}
-		}
-	}
-	else if (!bHasTargetClass)
-	{
-		bIsTargetRelevant = true; // Neither TargetActors nor TargetClass filters are set, anything is relevant
-	}
-	
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::IsObjectRelevant_Implementation : %s is relevant to %s: %hs"), *InTargetObject->GetName(), *this->GetName(), bIsTargetRelevant ? "true" : "false");
-	return bIsTargetRelevant;
+	return {};
 }
 
-void UQuestObjective::CompleteObjective(bool bDidSucceed)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData)
 {
-	bStepCompleted = true;
-	OnQuestObjectiveComplete.Broadcast(StepID, bDidSucceed);
+	CompletionData = InCompletionData;
+	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
 	ConditionalBeginDestroy();
+}
+
+void UQuestObjective::ReportProgress(const FQuestObjectiveContext& InProgressData)
+{
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), InProgressData.CurrentCount, InProgressData.RequiredCount, *GetFullName());
+	OnQuestObjectiveProgress.Broadcast(InProgressData);
 }
 
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
 {
-	OnEnableTarget.Broadcast(Target, GetStepID(), bIsTargetEnabled);
+	OnEnableTarget.Broadcast(Target, bIsTargetEnabled);
 }
 
 void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
@@ -83,16 +66,11 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 	}
 }
 
-void UQuestObjective::EnableQuestTargetClass(bool bIsTargetEnabled) const
+void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 {
-	OnEnableTarget.Broadcast(GetTargetClass(), GetStepID(), bIsTargetEnabled);
-}
-
-void UQuestObjective::SetCurrentElements(const int32 NewAmount)
-{
-	if (CurrentElements != NewAmount && NewAmount <= MaxElements)
+	for (const TSubclassOf<AActor>& Class : TargetClasses)
 	{
-		CurrentElements = NewAmount;
+		if (Class) OnEnableTarget.Broadcast(Class.Get(), bIsTargetEnabled);
 	}
 }
 

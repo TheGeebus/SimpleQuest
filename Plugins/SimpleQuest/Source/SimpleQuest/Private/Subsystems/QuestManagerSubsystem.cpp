@@ -1,519 +1,777 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Subsystems/QuestManagerSubsystem.h"
-
-#include "Components/AudioComponent.h"
-#include "Interfaces/QuestGiverInterface.h"
-#include "Kismet/GameplayStatics.h"
-#include "Quests/Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
 #include "Events/QuestEndedEvent.h"
-#include "Events/QuestlineEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
-#include "Events/QuestRegistrationEvent.h"
-#include "Events/QuestRewardEvent.h"
-#include "Events/QuestStepCompletedEvent.h"
-#include "Events/QuestStepStartedEvent.h"
+#include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
-#include "Events/QuestTryStartEvent.h"
 #include "Events/QuestEnabledEvent.h"
-#include "Events/QuestStepPrereqCheckFailed.h"
-#include "Interfaces/QuestTargetInterface.h"
-#include "Interfaces/QuestWatcherInterface.h"
-#include "Settings/SimpleQuestSettings.h"
-#include "Subsystems/QuestSignalSubsystem.h"
-
+#include "Events/AbandonQuestEvent.h"
+#include "Events/QuestDeactivatedEvent.h"
+#include "Signals/SignalSubsystem.h"
+#include "GameplayTagsManager.h"
+#include "SimpleQuestLog.h"
+#include "Events/QuestDeactivateRequestEvent.h"
+#include "Events/QuestGivenEvent.h"
+#include "Events/QuestGiverRegisteredEvent.h"
+#include "Objectives/QuestObjective.h"
+#include "Quests/Quest.h"
+#include "Quests/QuestStep.h"
+#include "WorldState/WorldStateSubsystem.h"
+#include "Utilities/QuestStateTagUtils.h"
+#include "Quests/Types/QuestEventContext.h"
+#include "Quests/Types/QuestObjectiveContext.h"
+#include "StructUtils/InstancedStruct.h"
+#if WITH_EDITOR
+#include "Components/QuestGiverComponent.h"
+#else
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#endif
 
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	Super::Initialize(Collection);
+    Super::Initialize(Collection);
 
-	if (UGameInstance* GameInstance = GetGameInstance())
-	{
-		QuestSignalSubsystem = GameInstance->GetSubsystem<UQuestSignalSubsystem>();
-		if (QuestSignalSubsystem)
-		{
-			QuestWatcherRegistrationDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestRegistrationEvent>(UQuestWatcherInterface::StaticClass(), this, &UQuestManagerSubsystem::RegisterQuestWatcher);
-			QuestGiverRegistrationDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestRegistrationEvent>(UQuestGiverInterface::StaticClass(), this, &UQuestManagerSubsystem::RegisterQuestGiver);
-			ObjectiveTriggeredDelegateHandle = QuestSignalSubsystem->SubscribeTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
-		}
-	}
-	UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
-	if (const UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimerForNextTick(this, &UQuestManagerSubsystem::StartInitialQuests);
-	}
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
+        WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
+        if (QuestSignalSubsystem)
+        {
+            AbandonDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FAbandonQuestEvent>(Tag_Channel_QuestAbandoned, this, &UQuestManagerSubsystem::HandleAbandonQuestEvent);
+            GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
+            GiverRegisteredDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGiverRegisteredEvent>(Tag_Channel_QuestGiverRegistered, this, &UQuestManagerSubsystem::HandleGiverRegisteredEvent);
+            DeactivateEventDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivateRequestEvent>(Tag_Channel_QuestDeactivateRequest, this, &UQuestManagerSubsystem::HandleNodeDeactivationRequest);   
+        }
+    }
+
+    RegisterGiversFromAssetRegistry();
+    
+    UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
+    if (const UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().SetTimerForNextTick(this, &UQuestManagerSubsystem::StartInitialQuests);
+    }
 }
 
 void UQuestManagerSubsystem::Deinitialize()
 {
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->UnsubscribeTyped<FQuestRegistrationEvent>(UQuestGiverInterface::StaticClass(), QuestGiverRegistrationDelegateHandle);
-		QuestSignalSubsystem->UnsubscribeTyped<FQuestObjectiveTriggered>(UQuestTargetInterface::StaticClass(), ObjectiveTriggeredDelegateHandle);
-	}
-	Super::Deinitialize();
+    if (QuestSignalSubsystem)
+    {
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestAbandoned, AbandonDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiven, GivenDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiverRegistered, GiverRegisteredDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestDeactivateRequest, DeactivateEventDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestTarget, ClassBridgeHandle);
+
+        for (auto& Pair : DeactivationSubscriptionHandles)
+        {
+            QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
+        }
+        DeactivationSubscriptionHandles.Reset();
+
+        for (auto& Pair : DeferredCompletionPrereqHandles)
+        {
+            for (auto& Item : Pair.Value)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value);
+            }
+        }
+        DeferredCompletionPrereqHandles.Reset();
+    }
+    Super::Deinitialize();
 }
 
 void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 {
-	if (!InitialQuests.IsEmpty())
-	{
-		for (const TSoftClassPtr<UQuest>& QuestSoftClass : InitialQuests)
-		{
-			if (const UClass* QuestClass = QuestSoftClass.LoadSynchronous())
-			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::HandleWorldBeginPlay : Quest loading: %s"), *QuestClass->GetFullName());
-				ActivateQuestClass(QuestClass);
-			}
-			else
-			{
-				UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::Initialize : soft reference to class was invalid, loading failed"));
-			}
-		}
-	}
+    if (!InitialQuestlines.IsEmpty())
+    {
+        for (const TSoftObjectPtr<UQuestlineGraph>& GraphPtr : InitialQuestlines)
+        {
+            if (UQuestlineGraph* Graph = GraphPtr.LoadSynchronous())
+            {
+                ActivateQuestlineGraph(Graph);
+            }
+            else
+            {
+                UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartInitialQuestlines : failed to load questline graph asset"));
+            }
+        }
+    }
 }
 
-void UQuestManagerSubsystem::RegisterQuestGiver(const FQuestRegistrationEvent& Event)
+void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)
 {
-	if (!Event.QuestClass)
+    const FQuestObjectiveTriggered* Event = RawEvent.GetPtr<FQuestObjectiveTriggered>();
+    if (!Event) return;
+
+    TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(Channel.GetTagName());
+    if (!NodePtr) return;
+
+    UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
+    if (!Step || !Step->GetActiveObjective()) return;
+
+    if (Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesProgression
+        && !Step->IsGiverGated()
+        && !Step->PrerequisiteExpression.IsAlways())
+    {
+        if (!Step->PrerequisiteExpression.Evaluate(WorldState)) return;
+    }
+
+    FQuestObjectiveContext Context;
+    Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
+    Context.Instigator = Cast<AActor>(Event->Instigator);
+    Context.CustomData = Event->CustomData;
+    Step->GetActiveObjective()->TryCompleteObjective(Context);
+}
+
+void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
+{
+    if (!Graph) return;
+
+    for (const auto& Pair : Graph->GetCompiledNodes())
+    {
+        if (UQuestNodeBase* Instance = Pair.Value)
+        {
+            if (!Pair.Key.ToString().StartsWith(TEXT("Util_")))
+            {
+                Instance->ResolveQuestTag(Pair.Key);
+            }
+            LoadedNodeInstances.Add(Pair.Key, Instance);
+            Instance->RegisterWithGameInstance(GetGameInstance());
+            Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
+            Instance->OnNodeActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeActivated);
+            Instance->OnNodeForwardActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeForwardActivated);
+            const FGameplayTag ResolvedTag = Instance->GetQuestTag();
+            if (ResolvedTag.IsValid() && QuestSignalSubsystem)
+            {
+                FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(ResolvedTag, this, &UQuestManagerSubsystem::HandleNodeDeactivatedEvent);
+                DeactivationSubscriptionHandles.Add(ResolvedTag, Handle);
+            }
+            if (UQuestStep* Step = Cast<UQuestStep>(Instance))
+            {
+                Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
+            }
+        }
+    }
+    
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — loaded %d node(s), activating %d entry tag(s)"),
+        *Graph->GetName(), Graph->GetCompiledNodes().Num(), Graph->GetEntryNodeTags().Num());
+
+    for (const FName& EntryTagName : Graph->GetEntryNodeTags())
+    {
+        ActivateNodeByTag(EntryTagName);
+    }
+}
+
+FQuestEventContext UQuestManagerSubsystem::AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionData) const
+{
+    FQuestEventContext Context;
+    Context.NodeInfo = Node->GetNodeInfo();
+    Context.CompletionData = InCompletionData;
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionData=%s"),
+        *Context.NodeInfo.QuestTag.ToString(),
+        *Context.NodeInfo.DisplayName.ToString(),
+        Context.CompletionData.TriggeredActor ? TEXT("set") : TEXT("empty"));
+
+    return Context;
+}
+
+void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
+{
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s'"), *Node->GetQuestTag().ToString(), *OutcomeTag.ToString());    
+    UQuestStep* Step = Cast<UQuestStep>(Node);
+    if (Step
+        && !Step->IsGiverGated()
+        && Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesCompletion
+        && !Step->PrerequisiteExpression.IsAlways()
+        && !Step->PrerequisiteExpression.Evaluate(WorldState))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetQuestTag().ToString());
+        DeferChainToNextNodes(Step, OutcomeTag);
+        return;
+    }
+
+    ChainToNextNodes(Node, OutcomeTag);
+}
+
+void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeProgress: '%s' — %d/%d"),
+        *Step->GetQuestTag().ToString(),
+        ProgressData.CurrentCount,
+        ProgressData.RequiredCount);
+
+    FQuestEventContext Context = AssembleEventContext(Step, ProgressData);
+    QuestSignalSubsystem->PublishMessage(Step->GetQuestTag(), FQuestProgressEvent(Step->GetQuestTag(), Context));
+}
+
+void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag)
+{
+    if (Node->GetQuestTag().IsValid())
+    {
+        SetQuestActive(Node->GetQuestTag());
+    }
+    if (QuestSignalSubsystem)
+    {
+        FQuestEventContext Context = AssembleEventContext(Node, FQuestObjectiveContext());
+        QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag(), Context));
+        if (UQuestStep* Step = Cast<UQuestStep>(Node))
+        {
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Node->GetQuestTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
+            ActiveStepTriggerHandles.Add(Node->GetQuestTag(), Handle);
+            if (!Step->GetTargetClasses().IsEmpty())
+            {
+                for (const TSubclassOf<AActor>& Class : Step->GetTargetClasses())
+                {
+                    ClassFilteredSteps.Add(Node->GetQuestTag(), Class);
+                }
+
+                // Subscribe once to global channel if this is the first class-filtered step
+                if (!ClassBridgeHandle.IsValid())
+                {
+                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);                }
+            }
+        }
+    }
+}
+
+void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
+{
+    if (!Node) return;
+    for (const FName& Tag : Node->GetNextNodesOnForward())
+        ActivateNodeByTag(Tag);
+}
+
+void UQuestManagerSubsystem::HandleAbandonQuestEvent(FGameplayTag Channel, const FAbandonQuestEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid()) return;
+    SetQuestDeactivated(QuestTag, EDeactivationSource::External);
+}
+
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag)
+{
+    TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
+    if (!InstancePtr || !*InstancePtr)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
+        return;
+    }
+
+    const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+
+    /**
+     * Diamond convergence guard — refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
+     * Completed is intentionally excluded so loops and repeatable quests can re-enter.
+     */
+    if (NodeTag.IsValid() && WorldState)
+    {
+        if (WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active))       ||
+            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_PendingGiver)) ||
+            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Blocked)))
+        {
+            /**
+             * Already-active Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
+             * a Quest node is activated before its incoming outcome arrives. Source filtering applies the same way as first-time activation.
+             */
+            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active)))
+            {
+                if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
+                {
+                    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-active quest '%s'"),
+                        *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
+
+                    const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+                    if (!EntryFactName.IsNone())
+                    {
+                        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+                    }
+
+                    if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+                    {
+                        for (const FQuestEntryDestination& Entry : RouteList->Destinations)
+                        {
+                            if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                        }
+                    }
+
+                    if (IncomingSourceTag != NAME_None)
+                    {
+                        if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+                        {
+                            for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
+                            {
+                                if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                            }
+                        }
+                    }
+                }
+            }
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
+                *NodeTagName.ToString(),
+                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Active)) ? TEXT("active") :
+                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_PendingGiver)) ? TEXT("pending giver") :
+                TEXT("blocked"));
+            return;
+        }
+        // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
+        WorldState->RemoveFact(MakeQuestStateFact(NodeTag, FQuestStateTagUtils::Leaf_Deactivated));
+    }
+
+    if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
+    {
+        (*InstancePtr)->bWasGiverGated = true;
+        SetQuestPendingGiver(NodeTag);
+        if (QuestSignalSubsystem)
+        {
+            FQuestEventContext Context = AssembleEventContext(*InstancePtr, FQuestObjectiveContext());
+            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+        }
+        UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — set PendingGiver"), *NodeTagName.ToString());
+        return;
+    }
+
+    (*InstancePtr)->Activate(NodeTag);
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
+        *NodeTagName.ToString(), *IncomingSourceTag.ToString(), *IncomingOutcomeTag.ToString());
+
+    if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
+    {
+        // Write entry outcome fact for prerequisite expressions within the inner graph.
+        if (IncomingOutcomeTag.IsValid() && WorldState)
+        {
+            const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+            if (!EntryFactName.IsNone())
+            {
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: setting entry outcome fact '%s' for quest '%s'"),
+                    *EntryFactName.ToString(), *NodeTagName.ToString());
+                WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+            }
+        }
+
+        // Always activate the Any-Outcome entry paths — unconditional, no source filter.
+        for (const FName& StepTag : QuestNode->GetEntryStepTags())
+        {
+            ActivateNodeByTag(StepTag);
+        }
+
+        /**
+         * Outcome-specific, source-filtered entries. Each destination fires only when its SourceFilter matches the IncomingSourceTag.
+         * This is where the per-source routing protocol discriminates two specs producing the same outcome from different sources.
+         */
+        if (IncomingOutcomeTag.IsValid())
+        {
+            if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+            {
+                for (const FQuestEntryDestination& Entry : RouteList->Destinations)
+                {
+                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                }
+            }
+        }
+        
+        /**
+         * Any-outcome-from-source entries — bucket keyed by invalid FGameplayTag. Fires when the incoming source matches,
+         * regardless of which specific outcome triggered entry. Gated on IncomingSourceTag so we don't dispatch any-outcome
+         * routes when no source context exists (e.g., synthetic activation paths).
+         */
+        if (IncomingSourceTag != NAME_None)
+        {
+            if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+            {
+                for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
+                {
+                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                }
+            }
+        }
+    }
+}
+
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
+{
+    if (!Node) return;
+
+    const int32 OutcomeCount = Node->GetNextNodesForOutcome(OutcomeTag) ? Node->GetNextNodesForOutcome(OutcomeTag)->Num() : 0;
+    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' — %d outcome + %d any-outcome downstream node(s)"),
+        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), OutcomeCount, Node->GetNextNodesOnAnyOutcome().Num());
+
+    if (Node->GetQuestTag().IsValid())
+    {
+        SetQuestResolved(Node->GetQuestTag(), OutcomeTag);
+        if (QuestSignalSubsystem)
+        {
+            if (FDelegateHandle* Handle = ActiveStepTriggerHandles.Find(Node->GetQuestTag()))
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Node->GetQuestTag(), *Handle);
+                ActiveStepTriggerHandles.Remove(Node->GetQuestTag());
+            }
+        }
+    }
+
+    PublishQuestEndedEvent(Node, OutcomeTag);
+
+    /**
+     * Thread this node's compiled QuestTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
+     * can filter its source-qualified entries against the originator of this outcome.
+     */
+    const FName SourceTagName = Node->GetQuestTag().GetTagName();
+
+    if (const TArray<FName>* OutcomeNodes = Node->GetNextNodesForOutcome(OutcomeTag))
+    {
+        for (const FName& Tag : *OutcomeNodes)
+        {
+            ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
+        }
+    }
+    for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
+    {
+        ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
+    }
+}
+
+void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source)
+{
+	if (!QuestTag.IsValid() || !WorldState) return;
+
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed)))
 	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : aborted, Quest was null."))
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped — already completed"), *QuestTag.ToString());
 		return;
 	}
-	UClass* QuestClass = Event.QuestClass;
-	UObject* QuestGiverObject = Event.OwningActor;
-	
-	if (LoadedQuestClasses.Contains(QuestClass))
-	{
-		UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : enabling quest: %s"), *QuestClass->GetFName().ToString());
-		SetQuestEnabled(Event.ChannelObjectID, QuestClass, true);
-	}
-	if (!QuestGiverMap.Contains(QuestClass))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : Adding to QuestGiverMap, added quest giver: %s"), *Event.OwningActor->GetActorNameOrLabel());
-		FQuestGivers QuestGiverStruct;
-		QuestGiverStruct.QuestGiverSet.Add(QuestGiverObject);
-		QuestGiverMap.Add(QuestClass, QuestGiverStruct);
-	}
-	else
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : Adding to QuestGiverMap, quest already exists, added quest giver: %s"), *Event.OwningActor->GetActorNameOrLabel());
-		QuestGiverMap.Find(QuestClass)->QuestGiverSet.Add(QuestGiverObject);
-	}
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestManagerSubsystem::RegisterQuestGiver : Channel Object ID: %s : Quest giver: %s : Owner: %s"), *Event.ChannelObjectID.ToString(), *Event.OwningActor->GetFullName(), *Event.OwningActor->GetActorNameOrLabel());
+	const FName TagName = QuestTag.GetTagName();
 
-}
+	UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestDeactivated: '%s' source=%s"),
+		*QuestTag.ToString(),
+		Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 
-void UQuestManagerSubsystem::RegisterQuestWatcher(const FQuestRegistrationEvent& QuestWatcherRegistrationEvent)
-{
-	if (!QuestSignalSubsystem) { return; }
-	if (UClass* QuestClass = QuestWatcherRegistrationEvent.QuestClass)
+	// Look up node instance early — needed for DeactivateInternal and context assembly.
+	UQuestNodeBase* Node = nullptr;
+	if (TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(TagName))
 	{
-		if (CompletedQuestClasses.Contains(QuestClass))
+		Node = *NodePtr;
+	}
+
+	// PendingGiver cleanup  (unchanged)
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver)))
+	{
+		RegisteredGiverQuestTags.Remove(QuestTag);
+		ClearQuestPendingGiver(QuestTag);
+	}
+
+	// Active node cleanup — use Node instead of redundant lookup
+	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active)))
+	{
+		if (Node)
 		{
-			QuestSignalSubsystem->PublishTyped(QuestWatcherRegistrationEvent.OwningActor, FQuestEndedEvent(QuestClass->GetFName(), QuestClass, CompletedQuestClasses[QuestClass]));
+			Node->DeactivateInternal(QuestTag);
 		}
-		if (LoadedQuestClasses.Contains(QuestClass))
-		{
-			QuestSignalSubsystem->PublishTyped(QuestWatcherRegistrationEvent.OwningActor, FQuestStartedEvent(QuestClass->GetFName(), QuestClass));
-			UQuest* Quest = FindLoadedQuestByClass(QuestClass);
-			if (!Quest->GetCurrentActiveSteps().IsEmpty())
-			{
-				for (const auto QuestStepID : Quest->GetCurrentActiveSteps())
-				{
-					QuestSignalSubsystem->PublishTyped(QuestClass, FQuestStepStartedEvent(QuestClass->GetFName(), QuestClass, QuestStepID));
-				}
-			}
-		}
-	}
-}
+		WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
 
-void UQuestManagerSubsystem::OnTryQuestStartEvent(const FTryQuestStartEvent& Event)
-{
-	StartQuest(Event.QuestClass.Get());
-}
-
-UQuest* UQuestManagerSubsystem::LoadQuest(const TSoftClassPtr<UQuest>& QuestClass) 
-{
-	UClass* NewClass = QuestClass.LoadSynchronous();
-	if (!NewClass)
-	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestManagerSubsystem::LoadQuest : QuestClass was not set, LoadQuest will return null"))
-		return nullptr;
-	}
-	if (LoadedQuestClasses.Contains(NewClass))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::LoadQuest : QuestClass is already loaded, finding: %s"), *NewClass->GetClass()->GetFName().ToString());
-		for (auto Quest : LoadedQuests)
+		if (FDelegateHandle* Handle = ActiveStepTriggerHandles.Find(QuestTag))
 		{
-			if (Quest.IsA(NewClass))
-			{
-				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::LoadQuest : QuestClass found: %s"), *Quest->GetClass()->GetFName().ToString());
-				return Quest;
-			}
-		}
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestManagerSubsystem::LoadQuest : aborting, failed to find: %s"), *NewClass->GetClass()->GetFName().ToString());
-		return nullptr;
-	}
-	
-	UQuest* NewQuest = NewObject<UQuest>(this, NewClass);
-	if (NewQuest != nullptr)
-	{
-		const FName NewID = NewQuest->GetQuestID();
-		for (const UQuest* Existing : LoadedQuests)
-		{
-			if (Existing->GetQuestID() == NewID)
-			{
-				UE_LOG(LogSimpleQuest, Error,
-					TEXT("QuestID '%s' collision: '%s' and '%s' share the same ID. Save data may be corrupted."),
-					*NewID.ToString(),
-					*Existing->GetClass()->GetPathName(),
-					*NewClass->GetPathName());
-			}
+			if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
+			ActiveStepTriggerHandles.Remove(QuestTag);
 		}
 		
-		LoadedQuestClasses.Add(NewQuest->GetClass());
-		LoadedQuests.Add(NewQuest);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::LoadQuest : Quest Loaded, class: %s"), *QuestClass->GetName());
-		for (auto Pair : QuestGiverMap)
+		if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
 		{
-			if (Pair.Key.IsValid())
+			for (const auto& Pair : *Handles)
 			{
-				UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestManagerSubsystem::LoadQuest : QuestGiverMap contains quest: %s"), *Pair.Key->GetName());
+				QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
 			}
+			DeferredCompletionPrereqHandles.Remove(QuestTag);
 		}
-
-		NewQuest->OnUpdateQuestText.BindDynamic(this, &UQuestManagerSubsystem::UpdateQuestText);
-		NewQuest->OnSetQuestTextVisibility.BindDynamic(this, &UQuestManagerSubsystem::UpdateQuestTextVisibility);
-		NewQuest->OnQueueCommsEvent.BindDynamic(this, &UQuestManagerSubsystem::QueueCommsEvent);
-		NewQuest->OnQuestStepStarted.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepStartedEvent);
-		NewQuest->OnQuestStepPrereqsFail.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepPrereqCheckFail);
-		NewQuest->OnQuestStepComplete.BindDynamic(this, &UQuestManagerSubsystem::OnQuestStepEndedEvent);
-		NewQuest->OnQuestComplete.BindDynamic(this, &UQuestManagerSubsystem::CompleteQuest);
-		NewQuest->OnObjectiveEnabled.BindUObject(this, &UQuestManagerSubsystem::OnQuestTargetEnabledEvent);
-		if (NewQuest->DoesCompleteQuestline())
-		{
-			NewQuest->OnQuestlineComplete.BindDynamic(this, &UQuestManagerSubsystem::CompleteQuestline);
-		}
+		DeferredCompletionOutcomes.Remove(QuestTag);
 	}
-	else
-	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestManagerSubsystem::LoadQuest : Quest not instantiated correctly, LoadQuest will return null"));
-	}
-	return NewQuest;
-}
 
-void UQuestManagerSubsystem::OnQuestStepStartedEvent(UQuest* ActiveQuest, int32 StartedQuestStepID)
-{
+	WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
+
+	// Publish with context
 	if (QuestSignalSubsystem)
 	{
-		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepStartedEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StartedQuestStepID));
-	}
-}
-
-void UQuestManagerSubsystem::OnQuestStepPrereqCheckFail(UQuest* ActiveQuest, int32 StepWithPrereqsID)
-{
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepPrereqCheckFailed(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), StepWithPrereqsID));
-	}
-}
-
-void UQuestManagerSubsystem::OnQuestStepEndedEvent(UQuest* ActiveQuest, int32 CompletedQuestStep, bool bDidSucceed, bool bEndedQuest, UQuestReward* Reward)
-{
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestStepCompletedEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), CompletedQuestStep, bDidSucceed, bEndedQuest, Reward));
-		QuestSignalSubsystem->PublishTyped(ActiveQuest->GetClass(), FQuestRewardEvent(ActiveQuest->GetQuestID(), ActiveQuest->GetClass(), Reward));
-	}
-}
-
-void UQuestManagerSubsystem::PublishQuestEndEvent(const UQuest* EndedQuest, bool bDidSucceed) const
-{
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->PublishTyped(EndedQuest->GetClass(), FQuestEndedEvent(EndedQuest->GetQuestID(), EndedQuest->GetClass(), bDidSucceed));
-	}
-}
-
-void UQuestManagerSubsystem::SetQuestEnabled(const FName LoadedQuestID, const TSubclassOf<UQuest>& LoadedQuestClass, const bool bIsEnabled)
-{
-	if (QuestSignalSubsystem)
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::SetQuestEnabled : publishing FQuestEnabledEvent for: %s"), *LoadedQuestClass->GetFName().ToString());
-
-		QuestSignalSubsystem->PublishTyped(LoadedQuestClass, FQuestEnabledEvent(LoadedQuestID, LoadedQuestClass, bIsEnabled));
-		QuestSignalSubsystem->SubscribeTyped<FTryQuestStartEvent>(LoadedQuestClass, this, &UQuestManagerSubsystem::OnTryQuestStartEvent);
-	}
-}
-
-void UQuestManagerSubsystem::ActivateQuestClass(const TSoftClassPtr<UQuest>& InQuestClass)
-{
-	UQuest* LoadedQuest = LoadQuest(InQuestClass);
-	if (LoadedQuest != nullptr && !StartedQuestClasses.Contains(LoadedQuest->GetClass()))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::ActivateQuestClass : enabling quest: %s"), *LoadedQuest->GetQuestID().ToString());
-		SetQuestEnabled(LoadedQuest->GetQuestID(), LoadedQuest->GetClass(), true);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::ActivateQuestClass : Quest loaded: %s"), *LoadedQuest->GetQuestID().ToString());
-		if (!QuestGiverMap.Contains(LoadedQuest->GetClass()))
+		FQuestDeactivatedEvent Event(QuestTag, Source);
+		if (Node)
 		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::ActivateQuestClass : no quest givers found, starting: %s"), *LoadedQuest->GetClass()->GetName());
-			StartQuest(LoadedQuest->GetClass());
+			Event = FQuestDeactivatedEvent(QuestTag, Source, AssembleEventContext(Node, FQuestObjectiveContext()));
 		}
-		else
-		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::ActivateQuestClass : quest givers found, activated but did not start: %s"), *LoadedQuest->GetClass()->GetName());
-		}
+		QuestSignalSubsystem->PublishMessage(QuestTag, Event);
 	}
 }
 
-UQuest* UQuestManagerSubsystem::FindLoadedQuestByClass(const TSubclassOf<UQuest>& InQuest)
+void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
-	for (auto Quest : LoadedQuests)
-	{
-		bool bMatched = false;
-		if (Quest->IsA(InQuest))
-		{
-			bMatched = true;
-		}
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::FindLoadedQuest : Checked %s against %s. Matched: %s"), *InQuest->GetName(), *Quest->GetClass()->GetName(), bMatched ? TEXT("true") : TEXT("false"));
-		if (bMatched)
-		{
-			return Quest;
-		}
-	}
-	return nullptr;
+    const FName TagName = Channel.GetTagName();
+    TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(TagName);
+    if (!NodePtr) return;
+
+    UQuestNodeBase* Node = *NodePtr;
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleNodeDeactivatedEvent: '%s' — activating %d, cascading deactivation to %d"),
+        *Channel.ToString(),
+        Node->GetNextNodesOnDeactivation().Num(),
+        Node->GetNextNodesToDeactivateOnDeactivation().Num());
+    
+    // Activate downstream nodes wired to the Deactivated output → Activate input.
+    for (const FName& Tag : Node->GetNextNodesOnDeactivation())
+    {
+        ActivateNodeByTag(Tag);
+    }
+    
+    // Cascade deactivation to nodes wired to the Deactivated output → Deactivate input.
+    for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
+    {
+        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+        if (TargetTag.IsValid()) SetQuestDeactivated(TargetTag, Event.Source);
+    }
 }
 
-bool UQuestManagerSubsystem::StartQuest_Implementation(const TSoftClassPtr<UQuest>& InQuestClass) // TODO: Don't reenable quests that are already enabled
+void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag) const
 {
-	if (StartedQuestClasses.Contains(InQuestClass.LoadSynchronous()))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::StartQuest : Quest is already loaded, aborting..."));
-		return false;
-	}
-	UQuest* StartedQuest = LoadQuest(InQuestClass);
-	if (StartedQuest == nullptr)
-	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestManagerSubsystem::StartQuest : LoadQuest returned nullptr in StartQuest, aborting..."));
-		return false;
-	}
-	
-	if (!ArePrerequisitesComplete(StartedQuest))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::StartQuest : Prerequisites are not complete, aborting..."));
-		if (QuestSignalSubsystem)
-		{
-			QuestSignalSubsystem->PublishTyped(InQuestClass.Get(), FQuestPrerequisiteCheckFailed(StartedQuest->GetQuestID(), InQuestClass.Get()));
-		}
-		return false;
-	}
+    if (!QuestSignalSubsystem || !Node->GetQuestTag().IsValid()) return;
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::StartQuest : Starting quest: %s"), *StartedQuest->GetName());
-	StartedQuestClasses.Add(StartedQuest->GetClass());
-	DeactivateQuestGivers(StartedQuest);
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->PublishTyped(StartedQuest->GetClass(), FQuestStartedEvent(StartedQuest->GetQuestID(), StartedQuest->GetClass()));
-	}
-	StartedQuest->OnUpdateQuestText.BindDynamic(this, &UQuestManagerSubsystem::UpdateQuestText); // redundant?
-	StartedQuest->StartQuestStep(0);
-	return true;
+    FQuestObjectiveContext CompletionCtx;
+    if (const UQuestStep* Step = Cast<UQuestStep>(Node))
+    {
+        CompletionCtx = Step->GetCompletionData();
+    }
+
+    FQuestEventContext Context = AssembleEventContext(Node, CompletionCtx);
+    QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestEndedEvent(Node->GetQuestTag(), OutcomeTag, Context));
 }
 
-// Remove the quest from the quest giver map and deactivate all mapped quest givers
-void UQuestManagerSubsystem::DeactivateQuestGivers(const UQuest* DeactivatedQuest) const
+void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event)
 {
-	if (QuestGiverMap.Contains(DeactivatedQuest->GetClass()))
-	{
-		if (QuestSignalSubsystem != nullptr)
-		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::DeactivateQuestGivers : publishing FQuestEnabledEvent for: %s"), *DeactivatedQuest->GetQuestID().ToString());
-			QuestSignalSubsystem->PublishTyped(DeactivatedQuest->GetClass(), FQuestEnabledEvent(DeactivatedQuest->GetQuestID(), DeactivatedQuest->GetClass(), false));
-		}
-	}
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid()) return;
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating"), *QuestTag.ToString());
+    
+    RegisteredGiverQuestTags.Remove(QuestTag);
+    ClearQuestPendingGiver(QuestTag);
+    ActivateNodeByTag(QuestTag.GetTagName());
 }
 
-bool UQuestManagerSubsystem::ArePrerequisitesComplete(UQuest* QuestToCheck) const
+void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
 {
-	const bool bCheckForSuccess = QuestToCheck->ShouldQuestPrerequisitesSucceed();
-	for (auto PrereqClass : QuestToCheck->GetPrerequisiteQuests())
-	{
-		if (PrereqClass.IsValid())
-		{
-			if (const bool* ValuePtr = CompletedQuestClasses.Find(PrereqClass.Get()))
-			{
-				if (bCheckForSuccess && !*ValuePtr)
-				{
-					return false; // if prereqs must succeed, check the value from the map and return early if it is false
-				}
-			}
-			else
-			{
-				return false; // any uncompleted prerequisite will return early from this function
-			}
-		}
-		else
-		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartQuest : Prerequisite class is not valid. Does it need to be loaded first?"));
-			return false;
-		}
-	}
-	return true;
+#if WITH_EDITOR
+    for (TObjectIterator<UBlueprint> It; It; ++It)
+    {
+        const UBlueprint* Blueprint = *It;
+        if (!Blueprint->GeneratedClass) continue;
+
+        const AActor* CDO = Cast<AActor>(Blueprint->GeneratedClass->GetDefaultObject());
+        if (!CDO) continue;
+
+        const UQuestGiverComponent* GiverComp = CDO->FindComponentByClass<UQuestGiverComponent>();
+        if (!GiverComp) continue;
+
+        for (const FGameplayTag& Tag : GiverComp->GetQuestTagsToGive())
+        {
+            if (!Tag.IsValid()) continue;
+            RegisteredGiverQuestTags.Add(Tag);
+            UE_LOG(LogSimpleQuest, Verbose,
+                TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (in-memory)"),
+                *Tag.ToString(), *Blueprint->GetName());
+        }
+    }
+#else
+    IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
+
+    FARFilter Filter;
+    Filter.ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("Blueprint")));
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> Blueprints;
+    AR.GetAssets(Filter, Blueprints);
+
+    for (const FAssetData& Asset : Blueprints)
+    {
+        FString TagValue;
+        if (!Asset.GetTagValue(TEXT("QuestTagsToGive"), TagValue) || TagValue.IsEmpty())
+            continue;
+
+        TArray<FString> TagStrings;
+        TagValue.ParseIntoArray(TagStrings, TEXT(","));
+
+        for (const FString& TagStr : TagStrings)
+        {
+            const FGameplayTag QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
+            if (!QuestTag.IsValid())
+            {
+                UE_LOG(LogSimpleQuest, Warning,
+                    TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : tag '%s' is not registered — has the questline been compiled?"),
+                    *TagStr);
+                continue;
+            }
+            RegisteredGiverQuestTags.Add(QuestTag);
+            UE_LOG(LogSimpleQuest, Verbose,
+                TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (asset registry)"),
+                *QuestTag.ToString(), *Asset.AssetName.ToString());
+        }
+    }
+#endif
 }
 
-void UQuestManagerSubsystem::CountQuestElement_Implementation(UObject* InQuestElement)
+void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)
 {
-	for (auto Quest : LoadedQuests)
-	{
-		if (Quest)
-		{
-			Quest->CheckQuestTarget(InQuestElement);
-		}
-	}
+    const FQuestObjectiveTriggered* Event = RawEvent.GetPtr<FQuestObjectiveTriggered>();
+    if (!Event || !Event->TriggeredActor || !QuestSignalSubsystem) return;
+
+    for (const auto& Pair : ClassFilteredSteps)
+    {
+        if (Event->TriggeredActor->IsA(Pair.Value))
+        {
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("CheckClassObjectives: actor '%s' (%s) matches class filter — forwarding to step '%s'"),
+                *Event->TriggeredActor->GetName(),
+                *Pair.Value->GetName(),
+                *Pair.Key.ToString());
+
+            // Re-publish on the step's channel, preserving the full derived struct
+            QuestSignalSubsystem->PublishRawMessage(Pair.Key, RawEvent);
+        }
+    }
 }
 
-void UQuestManagerSubsystem::CheckQuestObjectives(const FQuestObjectiveTriggered& QuestObjectiveEvent)
+void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag)
 {
-	TArray<UQuest*> LoadedQuestsCopy = LoadedQuests;
-	for (const auto Quest : LoadedQuestsCopy)
-	{
-		if (Quest)
-		{
-			Quest->CheckQuestTarget(QuestObjectiveEvent.TriggeredActor);
-		}
-	}
+    const FGameplayTag StepTag = Step->GetQuestTag();
+    DeferredCompletionOutcomes.Add(StepTag, OutcomeTag);
+
+    TArray<FGameplayTag> LeafTags;
+    Step->PrerequisiteExpression.CollectLeafTags(LeafTags);
+
+    TMap<FGameplayTag, FDelegateHandle>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
+    for (const FGameplayTag& LeafTag : LeafTags)
+    {
+        FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded);
+        Handles.Add(LeafTag, Handle);
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' — subscribed to %d prereq leaf tag(s)"),
+        *StepTag.ToString(),
+        *OutcomeTag.ToString(),
+        LeafTags.Num());
 }
 
-void UQuestManagerSubsystem::QueueCommsEvent(const FCommsEvent& InCommsEvent)
+void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
-	const FCommsEvent NewEvent = InCommsEvent;
-	CommsEventQueue.Add(NewEvent);
-	if (GetWorld() && !GetWorld()->GetTimerManager().IsTimerActive(CommsEventTimerHandle))
-	{
-		StartCommsEvent();
-	}
+    // Check all deferred steps — the fact that changed could satisfy any of them
+    TArray<FGameplayTag> StepTags;
+    DeferredCompletionOutcomes.GetKeys(StepTags);
+    for (const FGameplayTag& StepTag : StepTags)
+    {
+        TryFireDeferredCompletion(StepTag);
+    }
 }
 
-void UQuestManagerSubsystem::StartCommsEvent()
+void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
 {
-	if (CommsEventQueue.Num() <= 0) { return; }
-	const FCommsEvent& CommsEvent = CommsEventQueue[0];
-	USoundBase* Sound = CommsEvent.Sound.LoadSynchronous();
-	float Duration = CommsEvent.ViewDuration;
-	if (Sound != nullptr)
-	{
-		AudioComponent = UGameplayStatics::CreateSound2D(this, Sound);
-		if (AudioComponent != nullptr)
-		{
-			AudioComponent->Play();
-			if (!CommsEvent.bOverrideDuration)
-			{
-				Duration = Sound->GetDuration() + CommsEventSubtitleDelay;
-			}
-		}
-		else
-		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartCommsEvent : Quest manager could not create audio component"))
-		}
-	}
-	else
-	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartCommsEvent : Quest manager cannot play sound as it is null"))
-	}
-		
-	FTimerDelegate TimerDelegate = FTimerDelegate::CreateUObject(this, &UQuestManagerSubsystem::CommsEventTimerEnd);
-	GetWorld()->GetTimerManager().SetTimer(CommsEventTimerHandle,
-		TimerDelegate,
-		Duration,
-		false);
-	if (OnCommsEventStart.IsBound())
-	{
-		OnCommsEventStart.Broadcast(CommsEventQueue[0]);
-	}
+    TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(StepTag.GetTagName());
+    if (!NodePtr) return;
+
+    UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
+    if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState)) return;
+    
+    UE_LOG(LogSimpleQuest, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
+    
+    // Clean up subscriptions
+    if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
+    {
+        for (auto& Pair : *Handles)
+        {
+            QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
+        }
+        DeferredCompletionPrereqHandles.Remove(StepTag);
+    }
+
+    FGameplayTag OutcomeTag;
+    DeferredCompletionOutcomes.RemoveAndCopyValue(StepTag, OutcomeTag);
+
+    ChainToNextNodes(Step, OutcomeTag);
 }
 
-void UQuestManagerSubsystem::CommsEventTimerEnd()
+void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event)
 {
-	if (OnCommsEventEnd.IsBound())
-	{
-		OnCommsEventEnd.Broadcast();
-	}
-	CommsEventQueue.RemoveAt(0);
-	StartCommsEvent();
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid()) return;
+
+    RegisteredGiverQuestTags.Add(QuestTag);
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
+
+    if (WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active)))
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
+            *QuestTag.ToString());
+    }
 }
 
-void UQuestManagerSubsystem::UpdateQuestText(const FQuestText& InQuestText)
+void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event)
 {
-	if (OnQuestTextUpdated.IsBound())
-	{
-		OnQuestTextUpdated.Broadcast(InQuestText);
-	}
+    FGameplayTag EventTag = Event.GetQuestTag();
+    if (EventTag.IsValid()) SetQuestDeactivated(EventTag, EDeactivationSource::Internal);
 }
 
-void UQuestManagerSubsystem::UpdateQuestTextVisibility(bool bIsVisible, bool bUseCounter)
+int32 UQuestManagerSubsystem::GetQuestCompletionCount(const FGameplayTag QuestTag) const
 {
-	if (OnQuestTextVisibilityUpdated.IsBound())
-	{
-		OnQuestTextVisibilityUpdated.Broadcast(bIsVisible, bUseCounter);
-	}
+    const int32* Count = QuestCompletionCounts.Find(QuestTag);
+    return Count ? *Count : 0;
 }
 
-void UQuestManagerSubsystem::CompleteQuest(UQuest* CompletedQuest, bool bDidSucceed)
+FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)
 {
-	CompletedQuestClasses.Add(CompletedQuest->GetClass());
-	PublishQuestEndEvent(CompletedQuest, bDidSucceed);
-	if (OnQuestEnd.IsBound())
-	{
-		OnQuestEnd.Broadcast();
-	}
-	StartedQuestClasses.Remove(CompletedQuest->GetClass());
-	LoadedQuests.Remove(CompletedQuest);
-	LoadedQuestClasses.Remove(CompletedQuest->GetClass());
-
-	for (auto Quest : CompletedQuest->GetPrerequisitesToReset())
-	{
-		CompletedQuestClasses.Remove(Quest.LoadSynchronous());
-	}
-	
-	for (auto NewQuest : CompletedQuest->GetNextQuests())
-	{
-		ActivateQuestClass(NewQuest);
-	}
+    const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf);
+    return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
 }
 
-void UQuestManagerSubsystem::CompleteQuestline(UQuest* CompletedQuest, bool bDidSucceed)
+void UQuestManagerSubsystem::SetQuestActive(FGameplayTag QuestTag)
 {
-	if (QuestSignalSubsystem)
-	{
-		QuestSignalSubsystem->PublishTyped(CompletedQuest->GetClass(), FQuestlineEndedEvent(CompletedQuest->GetQuestID(), CompletedQuest->GetClass(), bDidSucceed));
-	}
-	if (OnQuestlineEnd.IsBound())
-	{
-		OnQuestlineEnd.Broadcast();
-	}
+    if (WorldState && QuestTag.IsValid())
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestActive: '%s'"), *QuestTag.ToString());
+        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+    }
 }
 
-void UQuestManagerSubsystem::OnQuestTargetEnabledEvent(UQuest* InQuest, UObject* TargetObject, int32 InStepID,
-	bool bNewIsEnabled)
+void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
-	if (QuestSignalSubsystem)
-	{
-		if (bNewIsEnabled)
-		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::OnQuestTargetEnabledEvent : publishing quest step started event: %s"), *InQuest->GetQuestID().ToString());
-			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepStartedEvent(InQuest->GetQuestID(), InQuest->GetClass(), InStepID));
-		}
-		else
-		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::OnQuestTargetEnabledEvent : publishing quest step ended event: %s"), *InQuest->GetQuestID().ToString());
-			QuestSignalSubsystem->PublishTyped(TargetObject, FQuestStepCompletedEvent(InQuest->GetQuestID(), InQuest->GetClass(), InStepID, true, false, nullptr));
-		}
-	}
+    if (!WorldState || !QuestTag.IsValid()) return;
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+    WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
+    QuestCompletionCounts.FindOrAdd(QuestTag)++;
+    if (OutcomeTag.IsValid())
+    {
+        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
+    }
+    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s' (completion #%d)"),
+        *QuestTag.ToString(),
+        *OutcomeTag.ToString(),
+        QuestCompletionCounts.FindRef(QuestTag));
 }
 
-const USimpleQuestSettings* UQuestManagerSubsystem::GetSimpleQuestSettings() const
+void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
 {
-	return GetDefault<USimpleQuestSettings>();
+    if (WorldState && QuestTag.IsValid())
+    {
+        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
+    }
+}
+
+void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
+{
+    if (WorldState && QuestTag.IsValid())
+    {
+        WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
+    }
 }

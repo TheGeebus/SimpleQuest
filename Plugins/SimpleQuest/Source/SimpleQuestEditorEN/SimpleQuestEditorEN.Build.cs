@@ -1,4 +1,5 @@
-﻿using UnrealBuildTool;
+﻿using System;
+using UnrealBuildTool;
 using System.IO;
 
 public class SimpleQuestEditorEN : ModuleRules
@@ -19,7 +20,7 @@ public class SimpleQuestEditorEN : ModuleRules
 
         string EngineDir = Path.GetFullPath(Target.RelativeEnginePath);
 
-        if (FindElectronicNodes(EngineDir, ModuleDirectory, out string ENSourceDir))
+        if (FindElectronicNodes(EngineDir, ModuleDirectory, Target, out string ENSourceDir))
         {
             PrivateDependencyModuleNames.Add("ElectronicNodes");
             PrivateIncludePaths.Add(Path.Combine(ENSourceDir, "Private"));
@@ -27,12 +28,10 @@ public class SimpleQuestEditorEN : ModuleRules
         }
     }
 
-    static bool FindElectronicNodes(string EngineDir, string ModuleDir, out string ENSourceDir)
+    static bool FindElectronicNodes(string EngineDir, string ModuleDir, ReadOnlyTargetRules Target, out string ENSourceDir)
     {
         ENSourceDir = "";
 
-        // ModuleDir = {ProjectRoot}/Plugins/SimpleQuest/Source/SimpleQuestEditorEN
-        // Three levels up = {ProjectRoot}/Plugins
         string ProjectPluginsDir = Path.GetFullPath(Path.Combine(ModuleDir, "../../.."));
 
         string[] Roots =
@@ -51,6 +50,23 @@ public class SimpleQuestEditorEN : ModuleRules
                 string Candidate = Path.Combine(Dir, "Source", "ElectronicNodes", "ElectronicNodes.Build.cs");
                 if (File.Exists(Candidate))
                 {
+                    // EN is installed — check it isn't explicitly disabled in the .uproject
+                    if (Target.ProjectFile != null && File.Exists(Target.ProjectFile.FullName))
+                    {
+                        string uproject = File.ReadAllText(Target.ProjectFile.FullName);
+                        int nameIdx = uproject.IndexOf("\"ElectronicNodes\"", StringComparison.Ordinal);
+                        if (nameIdx >= 0)
+                        {
+                            int braceEnd = uproject.IndexOf('}', nameIdx);
+                            if (braceEnd > nameIdx)
+                            {
+                                string entry = uproject.Substring(nameIdx, braceEnd - nameIdx);
+                                if (entry.Contains("\"Enabled\": false") || entry.Contains("\"Enabled\":false"))
+                                    return false;
+                            }
+                        }
+                    }
+
                     ENSourceDir = Path.Combine(Dir, "Source", "ElectronicNodes");
                     return true;
                 }

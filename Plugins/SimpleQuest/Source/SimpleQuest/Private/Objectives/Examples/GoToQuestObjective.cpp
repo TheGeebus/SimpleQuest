@@ -1,24 +1,23 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Objectives/Examples/GoToQuestObjective.h"
 
-#include "SimpleQuestLog.h"
-#include "Interfaces/QuestTargetDelegateWrapper.h"
-#include "Interfaces/QuestTargetInterface.h"
 
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "Quest.Outcome.Reached")
 
-void UGoToQuestObjective::TryCompleteObjective_Implementation(UObject* InTargetObject)
+UGoToQuestObjective::UGoToQuestObjective()
 {
-	UE_LOG(LogSimpleQuest, Log, TEXT("UGoToQuestObjective::TryCompleteObjective_Implementation : finished objective: %s"), *GetFullName());
-	EnableTargetObject(InTargetObject, false);
-	CompleteObjective(true);
+	ReachedOutcomeTag = Tag_Outcome_GoTo_Reached;
 }
 
-void UGoToQuestObjective::SetObjectiveTarget_Implementation(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass,
-	int32 NumElementsRequired, bool bUseCounter)
+void UGoToQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
-	Super::SetObjectiveTarget_Implementation(InStepID, InTargetActors, InTargetClass, NumElementsRequired, bUseCounter);
+	EnableTargetObject(InContext.TriggeredActor, false);
+	CompleteObjectiveWithOutcome(ReachedOutcomeTag, InContext);
+}
 
+void UGoToQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
+{
+	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClasses, NumElementsRequired);
 	EnableQuestTargetActors(true);
 }

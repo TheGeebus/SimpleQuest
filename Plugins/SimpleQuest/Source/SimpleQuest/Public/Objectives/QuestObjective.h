@@ -1,16 +1,22 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
+#include "Quests/Types/QuestObjectiveContext.h"
+#include "StructUtils/InstancedStruct.h"
 #include "QuestObjective.generated.h"
 
-class UQuestSignalSubsystem;
 class UQuestTargetInterface;
 class IQuestTargetInterface;
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
+ *
+ * Outcome tags are discovered automatically by the editor from two primary sources on subclasses:
+ * K2 node scan (Blueprint) and UPROPERTY reflection (C++). A virtual fallback (GetPossibleOutcomes)
+ * is available for programmatic or dynamic cases. See GetPossibleOutcomes for full documentation.
  */
 UCLASS(Blueprintable)
 class SIMPLEQUEST_API UQuestObjective : public UObject
@@ -18,41 +24,25 @@ class SIMPLEQUEST_API UQuestObjective : public UObject
 	GENERATED_BODY()
 
 public:
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnEnableTarget, UObject*, InTargetObject, int32, InStepID, bool, bNewIsEnabled);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnableTarget, UObject*, InTargetObject, bool, bNewIsEnabled);
 	FOnEnableTarget OnEnableTarget;
-		
-	DECLARE_DELEGATE_TwoParams(FSetCounterDelegate, int32, int32);
-	FSetCounterDelegate OnTargetTriggered;
-	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, int32, InStepID, bool, bDidSucceed);
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuestObjectiveComplete, FGameplayTag, OutcomeTag);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
+	
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressData);
+	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
 	
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
 	 * to bind additional delegates. (see: UGoToQuestObjective)
 	 * 
-	 * @param InStepID numeric ID of the current quest step
 	 * @param InTargetActors a set of specific target actors in the scene
-	 * @param InTargetClass a generic class to target (as for kills or pickups)
+	 * @param InTargetClasses a set of classes to target (as for kills or pickups)
 	 * @param NumElementsRequired the number of elements required to complete the step
-	 * @param bUseCounter use a quest counter widget to track the status of this step
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void SetObjectiveTarget(int32 InStepID, const TSet<TSoftObjectPtr<AActor>>& InTargetActors, UClass* InTargetClass = nullptr, int32 NumElementsRequired = 0, bool bUseCounter = false);
-
-	/**
-	 * Determine if the InTargetObject is relevant to the completion of this quest and logic should proceed to TryCompleteObjective.
-	 * Should be overriden by child classes to define what objects are relevant to the completion of the objective through
-	 * either success or failure. This allows quests to check for both relevancy and prerequisite completion when triggering
-	 * a quest objective so that the system may signal that progress is still gated by another quest objective.
-	 * 
-	 * @param InTargetObject The quest target that was triggered. By default, this is checked against both the TargetClass and
-	 * any TargetActors. Override this event to define custom conditions for relevancy.
-	 * @return TRUE if the object is relevant to the completion of this quest objective, whether by success or failure.
-	 * @see UQuestObjective::TryCompleteObjective()
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	bool IsObjectRelevant(UObject* InTargetObject);
+	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
 	
 	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
@@ -65,17 +55,72 @@ public:
 	 * default implementation, but this can be overridden in C++ or Blueprint subclasses.
 	 *
 	 * Example child objectives: UGoToQuestObjective and UKillClassQuestObjective
-	 * @param InTargetObject The quest target that was triggered. Will be checked against IsObjectRelevant prior to calling
-	 * this function
- 	 * @see UQuestObjective::IsObjectRelevant()
+	 * @param InContext the context of this trigger event containing the triggered actor, any relevant instigator, and an
+	 *					optional designer-defined instanced struct that may contain additional fields as needed.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void TryCompleteObjective(UObject* InTargetObject);
-	
-protected:
-	UFUNCTION(BlueprintCallable)
-	void CompleteObjective(bool bDidSucceed);
+	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
 
+	/**
+	 * Outcome Tag Discovery																						<br>
+	 * ---------------------																						<br>
+	 * The editor discovers outcome tags from two primary sources. All results merge
+	 * into a single deduplicated set — pins on the Step node reflect the union.
+	 *
+	 * 1. K2 Node Scan (Blueprint subclasses):																		
+	 *    - Place UK2Node_CompleteObjectiveWithOutcome nodes in event graphs.							
+	 *    - Each node's OutcomeTag is discovered automatically.
+	 *
+	 * 2. UPROPERTY Reflection (C++ subclasses):																	
+	 *    - Declare FGameplayTag properties with the ObjectiveOutcome metadata specifier.				
+	 *    - Back each tag with UE_DEFINE_GAMEPLAY_TAG to guarantee registration before CDO
+	 *      construction. Bare RequestGameplayTag in a constructor will fail if the tag
+	 *      is not yet loaded from INI at module init time.
+	 *    - The editor discovers tagged properties via TFieldIterator reflection scan.
+	 *																									
+	 *        - In the header:																						<br>
+	 *			   UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))				<br>
+	 *			   FGameplayTag Outcome_Reached;	
+	 *																									
+	 *        - In the .cpp (file scope):																			<br>
+	 *			   UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "Quest.Outcome.Reached")
+	 *
+	 *        - In the constructor:																					<br>
+	 *			   Outcome_Reached = Tag_Outcome_Reached;
+	 *
+	 *        - In TryCompleteObjective:																			<br>
+	 *			   CompleteObjectiveWithOutcome(Outcome_Reached);											
+	 *																									
+	 *    - Categories="Quest.Outcome" filters the tag picker to the outcome namespace.					
+	 *    - ObjectiveOutcome marks the property for discovery — no value needed,
+	 *      presence is sufficient.
+	 *
+	 * Both sources are additive across the inheritance chain. A Blueprint subclass of a
+	 * C++ class that declares ObjectiveOutcome properties will produce pins for both sets combined.
+	 * Use 'Add Call to Parent Function' context menu option by right-clicking the event node to add a
+	 * call to any C++ implementation on the appropriate branch in the child Objective blueprint.
+	 *
+	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
+	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes
+	 * computed at CDO construction time. Tags returned here are not constrained to the
+	 * Quest.Outcome namespace. Base implementation returns an empty array.
+	 *
+	 * @see FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes
+	 * @see UK2Node_CompleteObjectiveWithOutcome
+	 */
+	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
+	
+protected:	
+	UFUNCTION(BlueprintCallable)
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
+
+	/**
+	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
+	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
+	void ReportProgress(const FQuestObjectiveContext& InProgressData);
+	
 	UFUNCTION(BlueprintCallable)
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
 
@@ -83,30 +128,20 @@ protected:
 	void EnableQuestTargetActors(bool bIsTargetEnabled);
 
 	UFUNCTION(BlueprintCallable)
-	void EnableQuestTargetClass(bool bIsTargetEnabled) const;
-
+	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
+	
+private:
+	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionData. */
+	UPROPERTY()
+	FQuestObjectiveContext CompletionData;
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
-	TObjectPtr<UClass> TargetClass = nullptr;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
-	int32 MaxElements = 0;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
-	int32 CurrentElements = 0;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	bool bStepCompleted = false;
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true))
-	int32 StepID = -1;
-	UPROPERTY()
-	bool bUseQuestCounter = false;
+	TSet<TSubclassOf<AActor>> TargetClasses;
 	
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
-	FORCEINLINE UClass* GetTargetClass() const { return TargetClass; }
-	FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
-	FORCEINLINE int32 GetStepID() const { return StepID; }
-	// Broadcasts OnSetCounter when changing the value 
-	UFUNCTION(BlueprintCallable, BlueprintSetter=SetCurrentElements)
-	void SetCurrentElements(const int32 NewAmount);
-	FORCEINLINE int32 GetCurrentElements() const { return CurrentElements; }
+	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
+	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
 };

@@ -1,4 +1,6 @@
 #include "Settings/SimpleQuestSettings.h"
+
+#include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 
 void UGameInstanceSubsystemInitializer::Initialize(FSubsystemCollectionBase& Collection)

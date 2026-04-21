@@ -5,11 +5,13 @@
 #include "CoreMinimal.h"
 #include "Modules/ModuleManager.h"
 
-class FSimpleQuestModule : public IModuleInterface
+class FSimpleQuest : public IModuleInterface
 {
 public:
 
 	/** IModuleInterface implementation */
 	virtual void StartupModule() override;
 	virtual void ShutdownModule() override;
+
+	static void RegisterCompiledQuestTags();
 };

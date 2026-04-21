@@ -3,28 +3,38 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "EdGraph/EdGraphNode.h"
+#include "QuestlineNode_ContentBase.h"
+#include "Misc/Guid.h"
 #include "QuestlineNode_Quest.generated.h"
 
-class UQuest;
 
 UCLASS()
-class UQuestlineNode_Quest : public UEdGraphNode
+class SIMPLEQUESTEDITOR_API UQuestlineNode_Quest : public UQuestlineNode_ContentBase
 {
 	GENERATED_BODY()
 
 public:
 	virtual void AllocateDefaultPins() override;
+	
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
-	virtual bool CanUserDeleteNode() const override { return true; }
-	virtual bool CanDuplicateNode() const override { return true; }
-	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
+	virtual FLinearColor GetNodeTitleColor() const override;
+	virtual void PostPlacedNewNode() override;
+	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+	virtual void PostLoad() override;
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }
+	
+	void RebuildOutcomePinsFromInnerGraph();
 
-	// The quest class this node represents
-	UPROPERTY(EditAnywhere, Category = "Quest")
-	TSubclassOf<UQuest> QuestClass;
+private:
+	void CreateInnerGraph();
+	void SubscribeToInnerGraphChanges();
+	void OnInnerGraphChanged(const FEdGraphEditAction& Action);
 
-	// Display name set by the designer in the graph
-	UPROPERTY(EditAnywhere, Category = "Quest")
-	FText NodeLabel;
+	UPROPERTY()
+	TObjectPtr<UEdGraph> InnerGraph;
+
+	FDelegateHandle InnerGraphChangedHandle;
+
+public:
+	FORCEINLINE UEdGraph* GetInnerGraph() const { return InnerGraph; }
 };

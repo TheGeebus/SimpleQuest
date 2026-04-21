@@ -1,0 +1,61 @@
+﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "ISimpleQuestEditorModule.h"
+#include "Modules/ModuleInterface.h"
+#include "NativeGameplayTags.h"
+
+struct FGraphPanelPinFactory;
+struct FGraphPanelPinConnectionFactory;
+class FQuestlineGraphAssetTypeActions;
+class FQuestlineGraphNodeFactory;
+class FQuestPIEDebugChannel;
+class FSlateStyleSet;
+
+class FSimpleQuestEditor : public ISimpleQuestEditorModule
+{
+public:
+	virtual void StartupModule() override;
+	virtual void ShutdownModule() override;
+
+	virtual void RegisterCompilerFactory(FQuestlineCompilerFactoryDelegate InFactory) override;
+	virtual void UnregisterCompilerFactory() override;
+	virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const override;
+	virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) override;
+
+	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
+	
+	virtual void CompileAllQuestlineGraphs() override;
+	
+	FOnQuestlineCompiled QuestlineCompiledDelegate;
+	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
+
+	/** Editor-side PIE debug channel (agenda item 7). Lifetime managed by this module. Access via GetPIEDebugChannel(). */
+	static FQuestPIEDebugChannel* GetPIEDebugChannel();
+
+private:
+	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
+	TSharedPtr<FQuestlineGraphNodeFactory> QuestlineGraphNodeFactory;
+	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
+	
+	TSharedPtr<FSlateStyleSet> StyleSet;
+	
+	FQuestlineCompilerFactoryDelegate CompilerFactory;
+	
+	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
+
+	TUniquePtr<FQuestPIEDebugChannel> PIEDebugChannel;
+
+	void LoadCompiledTagsFromIni();
+	void MigrateLegacyTagsIni();
+	static FString GetCompiledTagsIniPath();
+	
+	void RegisterTagsFromAssetRegistry();
+	void OnAssetRemoved(const FAssetData& AssetData);
+	void WriteCompiledTagsIni() const;
+	void RebuildNativeTags(bool bRefreshTree = false);
+	
+	bool bIsRegisteringTags = false;
+};

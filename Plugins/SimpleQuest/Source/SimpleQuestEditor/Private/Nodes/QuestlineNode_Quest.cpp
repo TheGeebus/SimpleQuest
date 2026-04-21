@@ -1,60 +1,73 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Nodes/QuestlineNode_Quest.h"
-#include "Quests/Quest.h"
+
+#include "Graph/QuestlineGraphSchema.h"
+#include "Nodes/QuestlineNode_Exit.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 
 void UQuestlineNode_Quest::AllocateDefaultPins()
 {
-	// Input pins
-	CreatePin(EGPD_Input, TEXT("QuestActivation"), TEXT("Activate"));
-	CreatePin(EGPD_Input, TEXT("QuestActivation"), TEXT("Prerequisites"));
-
-	// Output pins
-	CreatePin(EGPD_Output, TEXT("QuestSuccess"), TEXT("Success"));
-	CreatePin(EGPD_Output, TEXT("QuestFailure"), TEXT("Failure"));
-	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Any Outcome"));
+	RebuildOutcomePinsFromInnerGraph();
+	Super::AllocateDefaultPins();
 }
 
 FText UQuestlineNode_Quest::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	if (!NodeLabel.IsEmpty())
-	{
-		return NodeLabel;
-	}
-	if (QuestClass)
-	{
-		return FText::FromString(QuestClass->GetName());
-	}
+	if (!NodeLabel.IsEmpty()) return NodeLabel;
 	return NSLOCTEXT("SimpleQuestEditor", "QuestNodeDefaultTitle", "Quest");
 }
 
-void UQuestlineNode_Quest::AutowireNewNode(UEdGraphPin* FromPin)
+FLinearColor UQuestlineNode_Quest::GetNodeTitleColor() const
 {
-	if (!FromPin) return;
+	return SQ_ED_NODE_QUEST;
+}
 
-	const UEdGraphSchema* Schema = GetSchema();
+void UQuestlineNode_Quest::PostPlacedNewNode()
+{
+	Super::PostPlacedNewNode();
+	CreateInnerGraph();
+}
 
-	if (FromPin->Direction == EGPD_Output)
+void UQuestlineNode_Quest::PostDuplicate(bool bDuplicateForPIE)
+{
+	Super::PostDuplicate(bDuplicateForPIE);
+	CreateInnerGraph();  // fresh graph, not a copy of the original
+}
+
+void UQuestlineNode_Quest::PostLoad()
+{
+	Super::PostLoad();
+	SubscribeToInnerGraphChanges();
+}
+
+void UQuestlineNode_Quest::CreateInnerGraph()
+{
+	InnerGraph = NewObject<UEdGraph>(this, UEdGraph::StaticClass(), NAME_None, RF_Transactional);
+	InnerGraph->Schema = UQuestlineGraphSchema::StaticClass();
+	const UQuestlineGraphSchema* Schema = GetDefault<UQuestlineGraphSchema>();
+	Schema->CreateDefaultNodesForGraph(*InnerGraph);
+	SubscribeToInnerGraphChanges();
+}
+
+void UQuestlineNode_Quest::SubscribeToInnerGraphChanges()
+{
+	if (InnerGraph && !InnerGraphChangedHandle.IsValid())
 	{
-		// Dragged from an output pin — connect to our Activate input
-		if (UEdGraphPin* ActivatePin = FindPin(TEXT("Activate")))
-		{
-			if (Schema->TryCreateConnection(FromPin, ActivatePin))
-			{
-				FromPin->GetOwningNode()->NodeConnectionListChanged();
-			}
-		}
+		InnerGraphChangedHandle = InnerGraph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateUObject(this, &UQuestlineNode_Quest::OnInnerGraphChanged));
 	}
-	else if (FromPin->Direction == EGPD_Input)
-	{
-		// Dragged from an input pin — connect our AnyOutcome output to it
-		if (UEdGraphPin* AnyOutcomePin = FindPin(TEXT("Any Outcome")))
-		{
-			if (Schema->TryCreateConnection(AnyOutcomePin, FromPin))
-			{
-				FromPin->GetOwningNode()->NodeConnectionListChanged();
-			}
-		}
-	}
+}
+
+void UQuestlineNode_Quest::OnInnerGraphChanged(const FEdGraphEditAction& Action)
+{
+	RebuildOutcomePinsFromInnerGraph();
+}
+
+void UQuestlineNode_Quest::RebuildOutcomePinsFromInnerGraph()
+{
+	TArray<FName> DesiredOutcomes = FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(InnerGraph);
+	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
+	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
 

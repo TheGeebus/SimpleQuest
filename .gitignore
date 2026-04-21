@@ -36,6 +36,10 @@ Plugins/SimpleQuest/Binaries/
 
 # Claude Code
 .claude/
+CLAUDE.md
+
+# Dev notes and reference files
+Notes/
 
 # Dev notes and reference files
 Notes/
@@ -46,3 +50,4 @@ Thumbs.db
 
 Plugins/SpeechCraft/
 Plugins/ElectronicNodes/
+Packaged/

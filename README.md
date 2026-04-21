@@ -1,8 +1,9 @@
+
 # SimpleQuest
 
 A source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data. Currently free for non-commercial use, with an MIT-licensed free-use release planned following a future funding milestone.
 
-![SimpleQuestDemo-v0 3](https://github.com/user-attachments/assets/4c800c0e-f417-4e22-941d-824b321b7cfc)
+<img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
 This version is for Unreal Engine 5.6.
 

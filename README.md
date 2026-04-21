@@ -1,6 +1,6 @@
 # SimpleQuest
 
-A source-available Unreal Engine plugin for non-linear, branching quest systems. SimpleQuest is built on a directed acyclic graph of quest steps with a typed publish/subscribe event bus, giving designers the freedom to craft questlines that feel alive rather than scripted. Currently free for non-commercial use, an upcoming MIT licensed free-use release is planned following a future funding milestone.
+A source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data. Currently free for non-commercial use, with an MIT-licensed free-use release planned following a future funding milestone.
 
 ![SimpleQuestDemo-v0 3](https://github.com/user-attachments/assets/4c800c0e-f417-4e22-941d-824b321b7cfc)
 
@@ -13,63 +13,39 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ---
 
-## Dev Branch — Upcoming Pre-Release
+## Highlights
 
-> **The `dev` branch contains a ground-up rewrite of SimpleQuest and introduces SimpleCore, a new foundational plugin.** Everything below describes work that is feature-complete on `dev` and targeting a pre-release in the near future. The `main` branch still reflects the older class-based system described in the rest of this README.
-
-### SimpleCore — Free Coordination Layer
-
-SimpleQuest now sits on top of **SimpleCore**, a standalone plugin providing general-purpose game infrastructure that any system can use — not just quests.
-
-- **Hierarchical Tag Router** — A signal bus where subscribing to a parent gameplay tag receives events from all descendant tags. Designed to complement (not replace) Epic's GameplayMessageRouter. Decoupled from actors — any system can publish or subscribe.
-- **World State Subsystem** — A persistent, queryable fact store keyed by gameplay tags with integer counts. Boundary-transition broadcasting, bulk operations, and fact-added/removed events. Think GAS tag counting without the ability system coupling.
-
-### Visual Graph Editor
-
-The headline feature. Quest authoring moves from data arrays to a full node-based graph editor inside the Unreal editor.
+- **Visual graph editor** — author questlines as a composable node graph. Custom Slate widgets for combinator, group, utility, and step nodes; inline tag pickers; dynamic pin management; in-editor compile with clickable diagnostics that navigate to the offending node.
+- **Nested prerequisite expressions** — AND / OR / NOT combinators plus reusable Prerequisite Rule portals. Any content node can gate activation, progression, or completion on an arbitrarily deep boolean expression authored inline.
+- **Named outcomes** — nodes resolve with designer-authored outcome tags. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently. No binary success/failure constraint.
+- **Linked questlines** — reference external questline graph assets inline. The compiler inlines the linked graph with bidirectional tag resolution and dual-tag (contextual + standalone) subscription support.
+- **Live PIE inspection** — per-state colored halos on graph nodes, live leaf satisfaction tinting in the Prereq Examiner, and a searchable WorldState Facts panel showing every asserted fact. No log-diving required to understand the running state.
+- **Two-plugin architecture** — SimpleQuest sits on top of **SimpleCore**, a standalone coordination layer any system can use independently.
 
 ![SimpleQuestDemo-slate-node-preview-v2](https://github.com/user-attachments/assets/9cc8e4f9-ee60-46fc-881a-5c45e38ff9d4)
 
-- **Recursive graph model** — Quests and steps can nest to any depth in any combination. No fixed "questline > quest > step" hierarchy — the graph structure is whatever the design requires.
-- **Named outcomes** — Nodes resolve with designer-authored outcome tags (not binary success/failure). A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently.
-- **Prerequisite combinators** — AND, OR, and NOT operator nodes wire into any content node's prerequisite input. Prerequisites can gate activation, gate progression, or defer completion depending on the gate mode.
-- **Deactivation system** — Nodes can be externally deactivated, blocked, and unblocked. Deactivation cascades, block/clear utility nodes, and group signal nodes enable complex quest state machines.
-- **Linked questline nodes** — Reference external questline graph assets inline. The compiler inlines the linked graph's wiring with bidirectional tag resolution and dual-tag (contextual + standalone) support.
-- **Live editing feedback** — Step nodes display objective class, target actors/classes, watching givers and targets from loaded levels, gate mode, reward class, and named outcomes at a glance. Expand for full detail. Red border when configuration is incomplete.
-- **Multi-pass compiler** — Compiles the full graph tree into flat runtime data with clickable error and warning messages that navigate directly to the offending node.
-- **Tag rename propagation** — Rename a node, recompile, and all quest components in loaded levels are automatically updated. No broken references.
-
-### Runtime Overhaul
-
-The runtime has been rebuilt from scratch around gameplay tags and UObject instances.
-
-- **Tag-addressed, instance-based** — Every quest node is a `UObject` instance addressed by gameplay tag. No class-per-quest, no struct arrays. The subsystem, components, and signal bus all route by tag.
-- **Pull-based prerequisite activation** — Deferred activation subscribes to world state changes per prerequisite leaf tag. When all conditions are met, the node activates. No polling, no ticking.
-- **Component catch-up** — Givers, watchers, and targets that register after quest events have already fired (streaming, late spawn, join-in-progress) receive the current state immediately on registration.
-- **Outcome-filtered watchers** — Watcher components can filter which outcomes they respond to. Empty filter = all outcomes (backward compatible).
-
-### What's Left Before Pre-Release
-
-The graph and runtime are feature-complete. Remaining work before the first external testing round:
-
-- Stale pin preservation (prevent silent wire breakage on node config changes)
-- Stale tag cleanup on compilation
-- Self-loop connection rule tightening
-- Packaged build tag registration
-- Logging pass and readability pass for external contributors
-
 ---
 
-## Features (Main Branch)
+## Two-Plugin Architecture
 
-- **Non-linear quest graph** -- Quest steps form a DAG with bidirectional prerequisite and next-step edges. Multiple steps can be active simultaneously, branches can converge, and completing one path can permanently close or re-enable another.
-- **Typed publish/subscribe event bus** -- Channels keyed by `(UObject*, EventType)` pairs guarantee that events are structurally unreachable by unintended subscribers. No conditional filtering required at any call site.
-- **Blueprint/C++ parity** -- All objectives, rewards, and components are fully accessible from Blueprint. Core systems are implemented in C++ with `BlueprintNativeEvent` override points throughout.
-- **Late-registration state replay** -- Components that register after quest events have already fired receive the current in-flight state automatically. Safe for streaming levels, dynamically spawned actors, and multiplayer join-in-progress scenarios.
-- **Editor-time validation** -- Asset validation via `IAssetRegistry` detects duplicate Quest IDs across the entire project at cook time. Runtime collision detection provides a second pass on load.
-- **Extensible without forking** -- Subclass `UQuestManagerSubsystem` and inject it via project settings to add custom orchestration logic without modifying plugin source.
-- **Save-ready by design** -- Each quest asset carries a stable `QuestID` property intended as a save key. Compatible with `USaveGame` out of the box.
-- **CoreRedirects included** -- `Config/DefaultSimpleQuest.ini` maintains backward compatibility when classes or properties are renamed.
+SimpleQuest is a quest and narrative system built on SimpleCore. SimpleCore has zero knowledge of quests — it's a standalone coordination layer that any plugin or project system can use. Future suite plugins (dialogue, progression, inventory) will depend only on SimpleCore, inheriting automatic interoperability with SimpleQuest.
+
+### SimpleCore
+
+Foundational coordination layer. Runtime + editor modules. Free and unrestricted.
+
+- **`USignalSubsystem`** — hierarchical tag router. Subscribers on a parent gameplay tag receive events from every descendant tag. Channels keyed by tag and payload type; payloads are plain USTRUCTs delivered via `FInstancedStruct`. Designed to complement `GameplayMessageRouter`, not replace it.
+- **`UWorldStateSubsystem`** — persistent queryable fact store keyed by gameplay tag with integer counts. Boundary-transition broadcasting, bulk operations, and fact-added/removed events. Late-registering components read current truth directly — safe for streaming, dynamic spawn, and multiplayer join-in-progress.
+- **`SimpleCoreEditor`** — editor module. Provides the WorldState Facts inspector nomad tab and PIE debug channel. Usable without SimpleQuest.
+
+### SimpleQuest
+
+Quest and narrative system. Runtime + editor modules, with an optional Electronic Nodes integration module.
+
+- Tag-addressed, instance-based runtime. Every compiled quest node is a `UObject` addressed by gameplay tag. The manager subsystem, components, and signal bus all route by tag.
+- Pull-based prerequisite activation. Deferred nodes subscribe to WorldState changes per leaf tag. When all conditions are met the node activates — no polling, no ticking.
+- Component catch-up. Givers, watchers, and targets that register after quest events have already fired receive the current state immediately.
+- Outcome-filtered watchers. A watcher component can filter which outcomes it responds to; empty filter = all outcomes.
 
 ---
 
@@ -82,43 +58,44 @@ The graph and runtime are feature-complete. Remaining work before the first exte
 
 ## Installation
 
-1. Copy the `SimpleQuest` folder into your project's `Plugins/` directory.
+1. Copy the `SimpleCore` and `SimpleQuest` folders into your project's `Plugins/` directory.
 2. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
 3. Open the solution and build the **Development Editor** target.
-4. Enable the plugin in **Edit > Plugins** if it is not already active.
+4. Enable both plugins in **Edit > Plugins** if they are not already active.
 
-To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"` to your `.uplugin` or `Build.cs` dependencies.
+To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"` (and `"SimpleCore"` where coordination APIs are consumed directly) to your `.uplugin` or `Build.cs` dependencies.
 
 ---
 
 ## Quick Start
-_(Soon to be replaced with visual graph questline authoring)_
 
-### 1. Create a Quest asset
+### 1. Create a Questline Graph asset
 
-Right-click in the Content Browser, select **Blueprint Class**, and choose `Quest` as the class. Open the asset and assign a unique **Quest ID**.
+Right-click in the Content Browser and select **Quest > Questline Graph**. This creates a `UQuestlineGraph` asset containing an empty editor graph with only an Entry node and a default Outcome terminal.
 
-### 2. Add steps
+### 2. Author the graph
 
-Each `FQuestStep` in the `Steps` array carries:
+Open the asset to launch the graph editor. From Entry, drag off a wire and place a **Quest** node. Quests are composed of ordered **Step** nodes with inline objective class pickers — drop the objective type from the Step widget, assign targets and parameters, and wire outcomes to downstream paths.
 
-- **ObjectiveClass** -- the `UQuestObjective` subclass to instantiate when this step activates
-- **PrerequisiteStepIDs** -- indices of steps that must complete before this one activates
-- **NextStepIDs** -- indices of steps to unlock when this one completes
-- **TargetActors / TargetClass** -- optional actor references passed to the objective on activation
+Useful constructs as your graph grows:
+- **AND / OR / NOT combinators** — wire into any node's `Prerequisites` pin to gate activation on a boolean expression.
+- **Prerequisite Rule Entry / Exit** — define a named rule once; reference it from multiple content nodes without duplication.
+- **Activation Group Entry / Exit** — many-to-many node activation topology without per-wire bookkeeping.
+- **LinkedQuestline** — reference another questline asset inline; the compiler expands it with full outcome pin synchronization.
 
-Steps with no prerequisites activate immediately when the quest starts. Steps with prerequisites activate the moment all of their prerequisites are satisfied, without any polling.
+The Questline Outliner tab, Group Examiner, and Prereq Expression Examiner panels all provide read-only inspection of the graph's structure — particularly useful as graphs grow beyond a single screen.
 
-### 3. Start the quest
+### 3. Compile the graph
 
-```cpp
-UQuestManagerSubsystem* QuestManager = GetGameInstance()->GetSubsystem<UQuestManagerSubsystem>();
-QuestManager->StartQuest(UMyQuest::StaticClass());
-```
+Hit the **Compile** button on the graph editor toolbar (or **Compile All** from the editor's main menu). The compiler generates runtime node instances and registers the required Gameplay Tags. Errors and warnings appear in the message log with clickable navigation to the offending node.
 
-From Blueprint, call **Start Quest** on the **Quest Manager Subsystem** node and pass your quest class.
+### 4. Register at game start
 
-### 4. Attach components to actors
+Subclass `UQuestManagerSubsystem` (Blueprint or C++), add your compiled questline to the subclass's `InitialQuestlines` array, and register the subclass in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. The subsystem activates everything in `InitialQuestlines` on game start.
+
+For programmatic activation (e.g. from a dialogue trigger, save-load handler, or level streaming callback), call `ActivateQuestlineGraph(UQuestlineGraph*)` on the running subsystem instance.
+
+### 5. Attach components to actors
 
 | Component | Attach to | Purpose |
 |---|---|---|
@@ -127,80 +104,104 @@ From Blueprint, call **Start Quest** on the **Quest Manager Subsystem** node and
 | `UQuestTargetComponent` | Enemy, item, or location Actor | Responds to trigger, kill, and interact events |
 | `UQuestWatcherComponent` | Any Actor | Receives lifecycle events for one or more quests |
 
+### 6. Inspect during PIE
+
+Start Play In Editor. The graph panel shows per-state colored halos on content nodes (active, completed, blocked, etc.). Open the **Window > Developer Tools > Debug > World State Facts** panel for a searchable live view of every asserted fact. Hover any leaf in the Prereq Examiner to see whether it's satisfied, unsatisfied, or in-progress.
+
 ---
 
 ## Architecture
 
 ```
-UQuest (data asset)
-  └─ UQuestManagerSubsystem.StartQuest()
-       └─ Activates FQuestSteps with no unmet prerequisites
-            └─ Instantiates UQuestObjective per step
-                 └─ Notifies registered UQuestTargetComponents
-                      via UQuestSignalSubsystem
-                          └─ Player interaction calls
-                               QuestManagerSubsystem.CountQuestElement()
-                                   └─ Objective.TryCompleteObjective()
-                                        └─ Unlocks next steps,
-                                             ends quest, or
-                                             starts next quest
+UQuestlineGraph (asset, authored in the graph editor)
+  │
+  │  (FQuestlineGraphCompiler)
+  ▼
+Compiled nodes + Gameplay Tags (registered as native at game start)
+  │
+  ▼
+UQuestManagerSubsystem.ActivateQuestlineGraph()
+  │
+  ▼
+UQuestNodeBase instances (Quest, Step, portals) — keyed by compiled tag
+  │
+  │  (USignalSubsystem — tag-hierarchy publish)
+  │  (UWorldStateSubsystem — persistent fact store)
+  ▼
+Subscribers: watchers, givers, targets, UI
 ```
-Steps within a quest form a directed acyclic graph. The broader quest network supports cycles to enable replayability and conditional re-activation.
 
-### UQuestManagerSubsystem
+### Compiler
 
-The orchestration hub. Maintains maps of registered givers and watchers, validates prerequisites, progresses steps, and publishes lifecycle events. Scoped to the `GameInstance` so quest state persists across level transitions.
+Editor-side compilation translates authored graphs into runtime node instances and compiled Gameplay Tags. The compiler is factory-registered via `ISimpleQuestEditorModule::RegisterCompilerFactory` — subclass `FQuestlineGraphCompiler` and register your factory to replace the pipeline wholesale. The default compiler supports LinkedQuestline expansion, named outcomes, prerequisite expression flattening, and cross-graph signal resolution.
 
-### UQuestSignalSubsystem
+### Runtime
 
-A typed pub/sub event bus. Channels are keyed by `(UObject*, UScriptStruct*)` pairs. Subscribers capture weak object pointers and are silently dropped on broadcast if the subscriber has been garbage collected. C++20 `derived_from` concept constraints enforce type safety at compile time.
+`UQuestManagerSubsystem` orchestrates activation, deactivation, prerequisite monitoring, and quest lifecycle events. Scoped to `GameInstance` so quest state persists across level transitions. Every quest node carries a stable `QuestGuid` (save identity) and `QuestTag` (routing identity) — GUIDs survive rename operations, tags resolve to specific nodes on load.
+
+### Coordination layer (SimpleCore)
+
+`USignalSubsystem` and `UWorldStateSubsystem` provide the underlying tag routing and fact storage. SimpleQuest is a consumer of these subsystems — it does not implement its own event bus or state store. Any system in your project can use the same coordination primitives without touching SimpleQuest.
 
 ---
 
 ## Extending the Plugin
 
-### Custom Objective
+Three tiers of extensibility, matched to the scope of the change:
 
-Subclass `UQuestObjective` and override `TryCompleteObjective`. The subsystem calls this each time `CountQuestElement` is invoked for the relevant step.
+### Tier 1 — Self-describing node types (subclass + override)
+
+Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals — no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
+
+### Tier 2 — Replaceable policies (subclass + register)
+
+`FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide — useful for projects with bespoke node-type behavior that differs from the defaults.
+
+### Tier 3 — Factory-registered algorithms (subclass + register factory)
+
+For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
+
+### Custom Objectives
+
+Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives) and override `TryCompleteObjective`:
 
 ```cpp
 UCLASS(Blueprintable)
-class UMyObjective : public UQuestObjective
+class UMyObjective : public UCountingQuestObjective
 {
     GENERATED_BODY()
 
 public:
-    virtual bool TryCompleteObjective() override
+    virtual bool TryCompleteObjective(const FQuestObjectiveContext& Context) override
     {
-        return CurrentElements >= MaxElements;
+        return Context.CurrentCount >= Context.RequiredCount;
     }
 };
 ```
 
-Override `SetObjectiveTarget` to receive the target actor assigned in the step definition.
-
-### Custom Reward
-
-Subclass `UQuestReward` and implement your reward grant logic. Assign the class to the `RewardClass` field on any `FQuestStep`.
+Your objective class appears in the inline objective picker on any Step node.
 
 ### Custom Orchestration
 
-Subclass `UQuestManagerSubsystem` and register it in **Project Settings > SimpleQuest** via `UGameInstanceSubsystemInitializer`. Use this to add analytics hooks, custom prerequisite logic, or save system integration without touching plugin source.
+Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
 
 ---
 
 ## Configuration
 
-**Log verbosity** -- SimpleQuest logs under the `LogSimpleQuest` category. Set verbosity in `DefaultEngine.ini`:
+**Project Settings > Plugins > Simple Quest** — configure the runtime quest manager class, wire/pin/node color schemes, and hover highlight color.
+
+**Log verbosity** — SimpleQuest logs under the `LogSimpleQuest` category and SimpleCore under `LogSimpleCore`. Set verbosity in `DefaultEngine.ini`:
 
 ```ini
 [Core.Log]
 LogSimpleQuest=Verbose
+LogSimpleCore=Verbose
 ```
 
 Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
-**CoreRedirects** -- When renaming any public class or property, add a redirect to `Config/DefaultSimpleQuest.ini` to avoid breaking existing consumers.
+**Compiled tags INI** — the compiler persists registered Gameplay Tags to `Config/SimpleQuest/CompiledTags.ini` for startup availability before the Asset Registry finishes loading. This file is auto-generated; manual edits are overwritten on each compile.
 
 ---
 
@@ -208,9 +209,9 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
 | Quarter | Deliverable | Status |
 |---|---|---|
-| ~~Q3 2026~~ **Q2 2026** | Visual graph editor + SimpleCore foundation | **Feature-complete** — in pre-release testing |
+| Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
-| Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress support | Planned |
+| Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |
 | Q1 2027 | Expanded objective library — timed, escort, collection, and conversation objectives | Planned |
 | Q1 2027 | Example project and full API documentation | Planned |
@@ -223,7 +224,7 @@ Community feedback is welcome and valuable at this stage. If you encounter a bug
 
 Code contributions via pull request are not being accepted during the current pre-release phase while licensing terms are being finalized. This will be revisited ahead of the first public release. Watch the repository for updates.
 
-For bug reports, include the engine version, a minimal reproduction case, and any relevant output from the `LogSimpleQuest` log category.
+For bug reports, include the engine version, a minimal reproduction case, and any relevant output from the `LogSimpleQuest` and `LogSimpleCore` log categories.
 
 ---
 

@@ -376,40 +376,6 @@ namespace PrereqExaminer_Style
     }
 }
 
-namespace PrereqDebug_Style
-{
-    // Leaf fills — full 5-state range. Alpha ~0.35 so the tint reads as a wash over the existing leaf visuals without
-    // drowning out the Source/Outcome text or the colored outline.
-    static const FLinearColor Unknown      = FLinearColor(0.f, 0.f, 0.f, 0.f);                      // transparent — no tint
-    static const FLinearColor NotStarted   = FLinearColor(FColor(120, 120, 120, 90));               // grey
-    static const FLinearColor InProgress   = FLinearColor(FColor(250, 200,  60, 90));               // amber
-    static const FLinearColor Unsatisfied  = FLinearColor(FColor(230,  60,  60, 90));               // red
-    static const FLinearColor Satisfied    = FLinearColor(FColor( 90, 210, 110, 90));               // green
-
-    // Combinator tint — same colors as leaves but binary (Unknown / Unsatisfied / Satisfied only). InProgress and
-    // NotStarted aren't produced for combinators; the runtime boolean eval collapses those to Unsatisfied.
-    const FLinearColor& ColorForLeafState(EPrereqDebugState State)
-    {
-        switch (State)
-        {
-        case EPrereqDebugState::NotStarted:   return NotStarted;
-        case EPrereqDebugState::InProgress:   return InProgress;
-        case EPrereqDebugState::Unsatisfied:  return Unsatisfied;
-        case EPrereqDebugState::Satisfied:    return Satisfied;
-        default:                              return Unknown;
-        }
-    }
-
-    const FLinearColor& ColorForCombinatorState(EPrereqDebugState State)
-    {
-        switch (State)
-        {
-        case EPrereqDebugState::Satisfied:    return Satisfied;
-        case EPrereqDebugState::Unsatisfied:  return Unsatisfied;
-        default:                              return Unknown;
-        }
-    }
-}
 
 
 // ---------------------------------------------------------------------------

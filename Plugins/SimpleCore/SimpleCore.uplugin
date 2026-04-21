@@ -20,6 +20,11 @@
             "Name": "SimpleCore",
             "Type": "Runtime",
             "LoadingPhase": "Default"
+        },
+        {
+            "Name": "SimpleCoreEditor",
+            "Type": "Editor",
+            "LoadingPhase": "Default"
         }
     ]
 }

@@ -80,6 +80,13 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure)
     int32 GetFactValue(FGameplayTag Tag) const;
 
+    /**
+     * Read-only view of all current facts. Intended for debug / inspection surfaces (editor panels during PIE, save-game
+     * serializers). Returns a const reference to the internal map — no copy, no allocation. Callers must not mutate;
+     * fact mutation always goes through AddFact / RemoveFact / ClearFact to keep broadcast semantics intact.
+     */
+    const TMap<FGameplayTag, int32>& GetAllFacts() const { return WorldFacts; }
+
 private:
     /** Live game world state. Keys are gameplay tags; values are assertion counts. A fact is considered present when its
      * count > 0. Use AddFact/RemoveFact for paired patterns; ClearFact for hard resets.
@@ -87,3 +94,4 @@ private:
     UPROPERTY()
     TMap<FGameplayTag, int32> WorldFacts;
 };
+

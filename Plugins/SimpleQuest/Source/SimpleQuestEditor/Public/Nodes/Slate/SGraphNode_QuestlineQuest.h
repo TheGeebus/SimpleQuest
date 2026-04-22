@@ -26,7 +26,7 @@ public:
 	void Construct(const FArguments& InArgs, UQuestlineNode_Quest* InNode);
 
 	virtual void UpdateGraphNode() override;
-
+	
 private:
 	UQuestlineNode_Quest* QuestNode = nullptr;
 

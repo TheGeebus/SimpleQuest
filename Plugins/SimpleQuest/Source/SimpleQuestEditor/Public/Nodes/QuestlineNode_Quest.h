@@ -15,7 +15,8 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_Quest : public UQuestlineNode_Content
 
 public:
 	virtual void AllocateDefaultPins() override;
-	
+	void RebuildOutcomePinsFromInnerGraph();
+
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FLinearColor GetNodeTitleColor() const override;
 	virtual void PostPlacedNewNode() override;
@@ -23,8 +24,9 @@ public:
 	virtual void PostLoad() override;
 	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }
 	
-	void RebuildOutcomePinsFromInnerGraph();
-
+protected:
+	virtual void NotifyInnerGraphsOfRename() override;
+	
 private:
 	void CreateInnerGraph();
 	void SubscribeToInnerGraphChanges();

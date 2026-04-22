@@ -58,4 +58,13 @@ protected:
 	 */
 	virtual void AllocateOutcomePins() {}
 
+	/** Notify graph + owned inner graphs recursively so widgets re-evaluate stale tag state. Container subclasses
+	(Quest) override to walk their inner graph; default is no-op. */
+	virtual void NotifyInnerGraphsOfRename() {}
+
+	/** Shared side-effect for both inline rename (OnRenameNode) and Details-panel NodeLabel edit
+	(PostEditChangeProperty). Fires NotifyGraphChanged on this node's graph plus any owned inner graphs. */
+	void NotifyRenameSideEffects();
+	
+
 };

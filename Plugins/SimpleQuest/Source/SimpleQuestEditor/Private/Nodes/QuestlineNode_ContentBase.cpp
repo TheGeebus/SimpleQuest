@@ -63,7 +63,19 @@ void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
 void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
-	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bShowDeactivationPins))
+
+	const FName PropName = PropertyChangedEvent.GetPropertyName();
+
+	if (PropName == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, NodeLabel))
+	{
+		// Details-panel rename goes through UPROPERTY change, not OnRenameNode. Route through the shared
+		// notify path so the stale-tag warning appears on this widget AND on descendant widgets whose paths
+		// include this label.
+		NotifyRenameSideEffects();
+		return;
+	}
+
+	if (PropName == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, bShowDeactivationPins))
 	{
 		Modify();
 
@@ -125,11 +137,15 @@ void UQuestlineNode_ContentBase::OnRenameNode(const FString& NewName)
 {
 	Modify();
 	NodeLabel = FText::FromString(NewName);
+	NotifyRenameSideEffects();
+}
 
-	if (UEdGraph* Graph = GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}	
+void UQuestlineNode_ContentBase::NotifyRenameSideEffects()
+{
+	if (UEdGraph* Graph = GetGraph()) Graph->NotifyGraphChanged();
+	// Container nodes (Quest) override NotifyInnerGraphsOfRename to walk descendants — a Step inside Inner sees
+	// its reconstructed tag path change whenever Inner's label changes, so its widget needs to re-evaluate too.
+	NotifyInnerGraphsOfRename();
 }
 
 void UQuestlineNode_ContentBase::EnsureDeactivationPinsForAutowire()

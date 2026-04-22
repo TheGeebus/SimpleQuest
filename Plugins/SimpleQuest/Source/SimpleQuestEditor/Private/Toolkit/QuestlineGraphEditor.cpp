@@ -425,12 +425,11 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
-    // Rebuild node widgets — live queries (watching actors) depend on compiled tags. Must set CompileStatus AFTER this:
-    // NotifyGraphChanged fires OnGraphChanged which resets status to Unknown.
-    if (bSuccess) RefreshAllNodeWidgets();
-
-    CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
-    if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
+    // Unified refresh + status update via broadcast. Fires OnExternalCompile on THIS editor (bIsOwnAsset=true:
+    // refresh widgets + status + outliner) AND every other open questline editor (bIsOwnAsset=false: refresh
+    // widgets so cross-asset contextual displays pick up the new state without a close-and-reopen workaround).
+    // Single-asset Compile now shares the same signalling path that Compile All uses per-asset.
+    ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(QuestlineGraph->GetOutermost()->GetName(), bSuccess);
 }
 
 void FQuestlineGraphEditor::SaveAsset_Execute()
@@ -507,13 +506,20 @@ TSharedRef<SWidget> FQuestlineGraphEditor::GenerateCompileOptionsMenu()
 void FQuestlineGraphEditor::OnExternalCompile(const FString& PackagePath, bool bSuccess)
 {
     if (!QuestlineGraph) return;
-    if (QuestlineGraph->GetOutermost()->GetName() != PackagePath) return;
 
+    const bool bIsOwnAsset = (QuestlineGraph->GetOutermost()->GetName() == PackagePath);
+
+    // Any successful compile (this asset OR any other) may change the state this editor displays — contextual
+    // givers in particular pull from other assets' CompiledQuestTags AR entries. Refresh unconditionally on
+    // success so node widgets re-query and contextual entries resync without a close-and-reopen workaround.
     if (bSuccess) RefreshAllNodeWidgets();
 
-    CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
-    if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
-
+    // Compile status and outliner are this-editor-specific — only update for OUR asset.
+    if (bIsOwnAsset)
+    {
+        CompileStatus = bSuccess ? EQuestlineCompileStatus::UpToDate : EQuestlineCompileStatus::Error;
+        if (bSuccess && OutlinerPanel.IsValid()) OutlinerPanel->Refresh();
+    }
 }
 
 static void RefreshNodeWidgetsRecursive(UEdGraph* Graph)

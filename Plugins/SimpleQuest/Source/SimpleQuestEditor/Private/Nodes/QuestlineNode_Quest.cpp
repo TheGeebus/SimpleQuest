@@ -42,6 +42,27 @@ void UQuestlineNode_Quest::PostLoad()
 	SubscribeToInnerGraphChanges();
 }
 
+static void NotifyGraphAndDescendants(UEdGraph* Graph)
+{
+	if (!Graph) return;
+	Graph->NotifyGraphChanged();
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
+			{
+				NotifyGraphAndDescendants(InnerGraph);
+			}
+		}
+	}
+}
+
+void UQuestlineNode_Quest::NotifyInnerGraphsOfRename()
+{
+	NotifyGraphAndDescendants(GetInnerGraph());
+}
+
 void UQuestlineNode_Quest::CreateInnerGraph()
 {
 	InnerGraph = NewObject<UEdGraph>(this, UEdGraph::StaticClass(), NAME_None, RF_Transactional);

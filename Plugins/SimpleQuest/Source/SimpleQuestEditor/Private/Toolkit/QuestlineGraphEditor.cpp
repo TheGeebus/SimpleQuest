@@ -516,22 +516,28 @@ void FQuestlineGraphEditor::OnExternalCompile(const FString& PackagePath, bool b
 
 }
 
-void FQuestlineGraphEditor::RefreshAllNodeWidgets()
+static void RefreshNodeWidgetsRecursive(UEdGraph* Graph)
 {
-    if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) return;
-
-    QuestlineGraph->QuestlineEdGraph->NotifyGraphChanged();
-
-    for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
+    if (!Graph) return;
+    Graph->NotifyGraphChanged();
+    for (UEdGraphNode* Node : Graph->Nodes)
     {
         if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
         {
             if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
             {
-                InnerGraph->NotifyGraphChanged();
+                RefreshNodeWidgetsRecursive(InnerGraph);
             }
         }
     }
+    // LinkedQuestline's linked asset is handled by that asset's own editor (if open) via the OnQuestlineCompiled
+    // broadcast to OnExternalCompile path. Don't recurse into it here.
+}
+
+void FQuestlineGraphEditor::RefreshAllNodeWidgets()
+{
+    if (!QuestlineGraph) return;
+    RefreshNodeWidgetsRecursive(QuestlineGraph->QuestlineEdGraph);
 }
 
 FText FQuestlineGraphEditor::GetGraphDisplayName(UEdGraph* Graph) const

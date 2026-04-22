@@ -32,12 +32,6 @@
 
 #define LOCTEXT_NAMESPACE "SGraphNode_QuestlineStep"
 
-static const FSlateBrush* GetStaleWarningBrush()
-{
-	static FSlateRoundedBoxBrush Brush(FLinearColor(1.f, 0.8f, 0.0f, .85f), 4.0f);
-	return &Brush;
-}
-
 void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNode_Step* InNode)
 {
 	StepNode = InNode;
@@ -48,10 +42,13 @@ void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNod
 
 void SGraphNode_QuestlineStep::UpdateGraphNode()
 {
-	bTagStale = false;
+	WatchingGiverNames.Reset();
+	WatchingTargetNames.Reset();
 	if (StepNode)
 	{
-		if (FSimpleQuestEditorUtilities::IsStepTagCurrent(StepNode))
+		StepNode->bTagStale = !FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(StepNode);
+
+		if (!StepNode->bTagStale)
 		{
 			const FGameplayTag StepTag = FSimpleQuestEditorUtilities::ReconstructStepTag(StepNode);
 			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(StepTag);
@@ -59,7 +56,6 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		}
 		else
 		{
-			bTagStale = true;
 			// Query using the old compiled tag — still valid in the dictionary and still referenced by actors until next compile propagates renames
 			const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
 			if (CompiledTag.IsValid())
@@ -68,11 +64,14 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 				WatchingTargetNames = FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(CompiledTag);
 			}
 		}
-	}
-	else
-	{
-		WatchingGiverNames.Reset();
-		WatchingTargetNames.Reset();
+
+		// Contextual givers (attached via OUTER-asset inlinings of this Step) append with "(via OuterAssetName)" annotation.
+		for (const FSimpleQuestEditorUtilities::FQuestContextualGiver& Entry
+			: FSimpleQuestEditorUtilities::FindContextualGiversForNode(StepNode))
+		{
+			WatchingGiverNames.Add(FString::Printf(TEXT("%s (via %s)"),
+				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
+		}
 	}
 
 	InputPins.Empty();
@@ -207,69 +206,15 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			CreateNodeContentArea()
 		]
 		
-		// Stale tag warning bar (visible after rename, before recompile)
+		// Stale tag warning bar (visible after rename, before recompile) — shared helper, flag on the node.
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(FMargin(4.f, 2.f, 4.f, 0.f))
 		[
-			SNew(SBorder)
-			.BorderImage(GetStaleWarningBrush())
-			.Padding(FMargin(8.f, 2.f))
-			.HAlign(HAlign_Center)
-			.Visibility_Lambda([this]()
-			{
-				return bTagStale ? EVisibility::Visible : EVisibility::Collapsed;
-			})
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.f, 1.f, 8.f, 1.f)
-				[
-					SNew(SOverlay)
-					+ SOverlay::Slot()
-					.Padding(FMargin(1.f, 0.5f, 0.f, 0.f))
-					[
-						SNew(SImage)
-						.Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
-						.DesiredSizeOverride(FVector2D(20.0, 20.0))
-						.ColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.65f))
-					]
-					+ SOverlay::Slot()
-					.Padding(FMargin(0.f, 0.f, 0.5f, 0.5f))
-					[
-						SNew(SImage)
-						.Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
-						.DesiredSizeOverride(FVector2D(20.0, 20.0))
-						.ColorAndOpacity(FLinearColor(1.f, 0.2f, 0.f, 1.f))
-					]
-				]
-				+ SHorizontalBox::Slot()
-				.VAlign(VAlign_Center)
-				[
-					SNew(SOverlay)
-							
-					+ SOverlay::Slot()
-					.Padding(FMargin(1.f, 1.f, 0.f, 0.f))
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
-						.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 0.6f, 1.f)))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-					]
-							
-					+ SOverlay::Slot()
-					.Padding(FMargin(0.f, 0.f, 0.f, 0.f))
-					[
-						SNew(STextBlock)
-						.Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
-						.ColorAndOpacity(FSlateColor(FLinearColor(0.0f, 0.0f, 0.0f)))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-					]
-				]
-			]
+			FQuestNodeSlateHelpers::BuildStaleTagWarningBar(
+				TAttribute<bool>::CreateLambda([this]() { return StepNode && StepNode->bTagStale; }))
 		]
+		
 		// Separator between pins and expanded info
 		+ SVerticalBox::Slot()
 		.AutoHeight()

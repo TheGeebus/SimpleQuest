@@ -241,6 +241,105 @@ TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGame
 	return Names;
 }
 
+TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUtilities::FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	TArray<FQuestContextualGiver> Result;
+	if (!ContentNode) return Result;
+
+	// ── Home asset + compiled tag ─────────────────────────────────────────────────────────────────────────
+	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
+	if (!CompiledTag.IsValid()) return Result;
+
+	UEdGraph* Graph = ContentNode->GetGraph();
+	if (!Graph) return Result;
+
+	UObject* Outer = Graph->GetOuter();
+	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+	{
+		UEdGraph* QuestGraph = QuestNode->GetGraph();
+		if (!QuestGraph) return Result;
+		Outer = QuestGraph->GetOuter();
+	}
+	const UQuestlineGraph* HomeAsset = Cast<UQuestlineGraph>(Outer);
+	if (!HomeAsset) return Result;
+
+	const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
+
+	// Relative path = the portion of the compiled tag after "Quest.<HomeQuestlineID>." Sanitized to match what the
+	// compiler emits. Stripping the known prefix keeps this resilient against hierarchy shape (Quest containers can
+	// nest arbitrarily deep; relative path captures the whole remainder).
+	const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
+	const FString ExpectedPrefix = FString::Printf(TEXT("Quest.%s."), *SanitizeQuestlineTagSegment(HomeID));
+	const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
+	if (!CompiledTagStr.StartsWith(ExpectedPrefix))
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("FindContextualGiversForNode: compiled tag '%s' does not begin with expected prefix '%s' — home/ID mismatch; skipping"),
+			*CompiledTagStr, *ExpectedPrefix);
+		return Result;
+	}
+	const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len()); // e.g. "Fruit.Apple"
+	// Literal-dot-prefixed suffix prevents false positives across word boundaries — "Pineapple" can't match ".Apple".
+	const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
+
+	// ── AR walk ──────────────────────────────────────────────────────────────────────────────────────────
+	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> QuestlineAssets;
+	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+	for (const FAssetData& AssetData : QuestlineAssets)
+	{
+		if (AssetData.PackageName == HomePackageName) continue; // home asset — standalone path already covers its givers
+
+		const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
+		if (CompiledTagsJoined.IsEmpty()) continue;
+
+		// Outer display — prefer FriendlyName AR tag, fall back to short asset name. No sync-load either way.
+		const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
+		const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
+
+		TArray<FString> CompiledTagStrs;
+		CompiledTagsJoined.ParseIntoArray(CompiledTagStrs, TEXT("|"));
+
+		for (const FString& TagStr : CompiledTagStrs)
+		{
+			if (TagStr.Len() <= SuffixToMatch.Len()) continue; // cheap guard — suffix requires at least one segment before it
+			if (!TagStr.EndsWith(SuffixToMatch)) continue;
+
+			const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), /*bErrorIfNotFound=*/ false);
+			if (!ContextualTag.IsValid()) continue;
+
+			for (const FString& ActorName : FindActorNamesGivingTag(ContextualTag))
+			{
+				FQuestContextualGiver Entry;
+				Entry.ActorName = ActorName;
+				Entry.OuterAssetDisplayName = OuterDisplay;
+				Result.Add(Entry);
+			}
+		}
+	}
+
+	// Sort + dedupe on (Outer, Actor) — same pair can arise when multiple tags in one outer asset match the suffix.
+	Result.Sort([](const FQuestContextualGiver& A, const FQuestContextualGiver& B)
+	{
+		const int32 Cmp = A.OuterAssetDisplayName.ToString().Compare(B.OuterAssetDisplayName.ToString());
+		if (Cmp != 0) return Cmp < 0;
+		return A.ActorName < B.ActorName;
+	});
+	for (int32 i = Result.Num() - 1; i > 0; --i)
+	{
+		if (Result[i].ActorName == Result[i - 1].ActorName
+			&& Result[i].OuterAssetDisplayName.ToString() == Result[i - 1].OuterAssetDisplayName.ToString())
+		{
+			Result.RemoveAt(i, 1, EAllowShrinking::No);
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindContextualGiversForNode: Node '%s' relative='%s' — %d contextual giver(s) across OUTER assets"),
+		*ContentNode->NodeLabel.ToString(), *RelativePath, Result.Num());
+
+	return Result;
+}
+
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
 {
 	if (Renames.Num() == 0 || !GEditor) return 0;
@@ -383,15 +482,34 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
 
+bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_ContentBase* ContentNode)
+{
+	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
+	if (!CompiledTag.IsValid())
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
+			ContentNode ? *ContentNode->NodeLabel.ToString() : TEXT("(null)"));
+		return false;
+	}
+
+	const FGameplayTag ReconstructedTag = ReconstructNodeTagInternal(ContentNode);
+	if (!ReconstructedTag.IsValid())
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
+			*ContentNode->NodeLabel.ToString());
+		return false;
+	}
+
+	const bool bMatch = (CompiledTag.GetTagName() == ReconstructedTag.GetTagName());
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("IsContentNodeTagCurrent: '%s' — Compiled='%s' Reconstructed='%s' → %s"),
+		*ContentNode->NodeLabel.ToString(), *CompiledTag.GetTagName().ToString(), *ReconstructedTag.GetTagName().ToString(),
+		bMatch ? TEXT("CURRENT") : TEXT("STALE"));
+	return bMatch;
+}
+
 bool FSimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
 {
-	const FGameplayTag CompiledTag = FindCompiledTagForNode(StepNode);
-	if (!CompiledTag.IsValid()) return false;
-
-	const FGameplayTag ReconstructedTag = ReconstructStepTag(StepNode);
-	if (!ReconstructedTag.IsValid()) return false;
-
-	return CompiledTag.GetTagName() == ReconstructedTag.GetTagName();
+	return IsContentNodeTagCurrent(StepNode);
 }
 
 void FSimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)

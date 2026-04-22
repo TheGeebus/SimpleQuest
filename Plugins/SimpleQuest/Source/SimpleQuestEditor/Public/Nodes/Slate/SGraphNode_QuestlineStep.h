@@ -50,7 +50,4 @@ private:
 	// Populated at the start of UpdateGraphNode() and consumed by summary + expanded content.
 	TArray<FString> WatchingGiverNames;
 
-	// Flags the tag for this node as stale following a rename to allow a visual warning   
-	bool bTagStale = false;
-
 };

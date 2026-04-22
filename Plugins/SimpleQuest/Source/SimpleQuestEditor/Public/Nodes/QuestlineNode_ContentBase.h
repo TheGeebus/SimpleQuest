@@ -43,6 +43,12 @@ public:
 	UPROPERTY(Transient)
 	bool bGiversExpanded = false;
 
+	/** Set by content-node Slate widgets when the reconstructed tag from current labels diverges from the last
+	compiled tag. Lifts Step's original widget-local flag to the base so every content-node widget can display the
+	same "Recompile to update tags" affordance. Cleared on first matching refresh post-compile. */
+	UPROPERTY(Transient)
+	bool bTagStale = false;
+
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }
 

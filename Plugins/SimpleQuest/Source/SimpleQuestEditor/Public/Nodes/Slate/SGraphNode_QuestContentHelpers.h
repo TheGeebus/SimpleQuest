@@ -23,4 +23,12 @@ namespace FQuestNodeSlateHelpers
 	 * widget rebuilds and saves with the asset).
 	 */
 	TSharedRef<SWidget> BuildLabeledExpandableList(const FText& Label, const TArray<FString>& Items, const FLinearColor& Color,	TFunction<bool()> IsExpanded, TFunction<void()> ToggleExpanded);
+
+	/**
+	 * Build the yellow "Recompile to update tags" warning bar used by every content-node widget to surface a stale
+	 * tag state after a rename. Visibility tracks IsVisible, so callers keep authoritative stale-state storage
+	 * (typically UQuestlineNode_ContentBase::bTagStale) and the widget only renders when the caller says so.
+	 */
+	TSharedRef<SWidget> BuildStaleTagWarningBar(TAttribute<bool> IsVisible);
 }
+

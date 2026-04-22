@@ -32,15 +32,23 @@ void SGraphNode_QuestlineQuest::Construct(const FArguments& InArgs, UQuestlineNo
 
 void SGraphNode_QuestlineQuest::UpdateGraphNode()
 {
-	// Refresh watching-givers cache. FindCompiledTagForNode returns invalid before first compile or when no
-	// compiled entry exists for this node's QuestGuid; empty list collapses the display gracefully.
+	// Refresh watching-givers cache + stale-tag flag. Empty giver list collapses the display via BuildLabeledExpandableList.
+	// Contextual givers (attached via OUTER-asset inlinings) append with "(via OuterAssetName)" annotation.
 	WatchingGiverNames.Reset();
 	if (QuestNode)
 	{
+		QuestNode->bTagStale = !FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(QuestNode);
+
 		const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(QuestNode);
 		if (CompiledTag.IsValid())
 		{
 			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
+		}
+		for (const FSimpleQuestEditorUtilities::FQuestContextualGiver& Entry
+			: FSimpleQuestEditorUtilities::FindContextualGiversForNode(QuestNode))
+		{
+			WatchingGiverNames.Add(FString::Printf(TEXT("%s (via %s)"),
+				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
 		}
 	}
 
@@ -126,6 +134,13 @@ void SGraphNode_QuestlineQuest::UpdateGraphNode()
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		[
 			CreateNodeContentArea()
+		]
+
+		// Stale tag warning bar (visible after rename, before recompile).
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 2.f, 4.f, 0.f))
+		[
+			FQuestNodeSlateHelpers::BuildStaleTagWarningBar(
+				TAttribute<bool>::CreateLambda([this]() { return QuestNode && QuestNode->bTagStale; }))
 		]
 
 		// Givers section — empty-list collapses to SNullWidget automatically via the helper.

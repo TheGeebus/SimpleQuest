@@ -33,15 +33,22 @@ void SGraphNode_LinkedQuestline::Construct(const FArguments& InArgs, UQuestlineN
 
 void SGraphNode_LinkedQuestline::UpdateGraphNode()
 {
-	// Standard content-node giver path — LinkedQuestline now has its own compiled tag in CompiledNodes (item 9
-	// Session A runtime participation).
+	// Standard content-node giver path + stale-tag flag. Contextual givers append with "(via OuterAssetName)" annotation.
 	WatchingGiverNames.Reset();
 	if (LinkedNode)
 	{
+		LinkedNode->bTagStale = !FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(LinkedNode);
+
 		const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(LinkedNode);
 		if (CompiledTag.IsValid())
 		{
 			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
+		}
+		for (const FSimpleQuestEditorUtilities::FQuestContextualGiver& Entry
+			: FSimpleQuestEditorUtilities::FindContextualGiversForNode(LinkedNode))
+		{
+			WatchingGiverNames.Add(FString::Printf(TEXT("%s (via %s)"),
+				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
 		}
 	}
 
@@ -133,6 +140,13 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		[
 			CreateNodeContentArea()
+		]
+
+		// Stale tag warning bar (visible after rename, before recompile).
+		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(4.f, 2.f, 4.f, 0.f))
+		[
+			FQuestNodeSlateHelpers::BuildStaleTagWarningBar(
+				TAttribute<bool>::CreateLambda([this]() { return LinkedNode && LinkedNode->bTagStale; }))
 		]
 
 		// Givers section — empty-list collapses to SNullWidget automatically via the helper.

@@ -100,6 +100,56 @@ namespace FQuestNodeSlateHelpers
 				ItemsColumn
 			];
 	}
+	static const FSlateBrush* GetStaleWarningBrush()
+	{
+		static FSlateRoundedBoxBrush Brush(FLinearColor(1.f, 0.8f, 0.0f, .85f), 4.0f);
+		return &Brush;
+	}
+
+	TSharedRef<SWidget> BuildStaleTagWarningBar(TAttribute<bool> IsVisible)
+	{
+		return SNew(SBorder)
+			.BorderImage(GetStaleWarningBrush())
+			.Padding(FMargin(8.f, 2.f))
+			.HAlign(HAlign_Center)
+			.Visibility_Lambda([IsVisible]() { return IsVisible.Get() ? EVisibility::Visible : EVisibility::Collapsed; })
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 1.f, 8.f, 1.f)
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot().Padding(FMargin(1.f, 0.5f, 0.f, 0.f))
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
+							.DesiredSizeOverride(FVector2D(20.0, 20.0))
+							.ColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.65f))
+					]
+					+ SOverlay::Slot().Padding(FMargin(0.f, 0.f, 0.5f, 0.5f))
+					[
+						SNew(SImage).Image(FAppStyle::GetBrush("Icons.WarningWithColor"))
+							.DesiredSizeOverride(FVector2D(20.0, 20.0))
+							.ColorAndOpacity(FLinearColor(1.f, 0.2f, 0.f, 1.f))
+					]
+				]
+				+ SHorizontalBox::Slot().VAlign(VAlign_Center)
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot().Padding(FMargin(1.f, 1.f, 0.f, 0.f))
+					[
+						SNew(STextBlock).Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
+							.ColorAndOpacity(FSlateColor(FLinearColor(1.f, 1.f, 0.6f, 1.f)))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+					]
+					+ SOverlay::Slot().Padding(FMargin(0.f, 0.f, 0.f, 0.f))
+					[
+						SNew(STextBlock).Text(LOCTEXT("StaleTagWarning", "Recompile to update tags"))
+							.ColorAndOpacity(FSlateColor(FLinearColor(0.0f, 0.0f, 0.0f)))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+					]
+				]
+			];
+	}
 }
 
 #undef LOCTEXT_NAMESPACE
+

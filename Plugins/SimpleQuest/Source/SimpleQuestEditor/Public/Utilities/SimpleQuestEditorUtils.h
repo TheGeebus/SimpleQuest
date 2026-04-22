@@ -57,7 +57,6 @@ public:
 	 */
 	static FString SanitizeQuestlineTagSegment(const FString& InLabel);
 
-
 	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.
 	 */
@@ -94,6 +93,30 @@ public:
 	static TArray<FString> FindActorNamesGivingTag(const FGameplayTag& QuestTag);
 
 	/**
+	 * Paired entry produced by FindContextualGiversForNode: a giver actor and the display name of the outer questline
+	 * asset whose contextual inlining of this node the giver targets.
+	 */
+	struct FQuestContextualGiver
+	{
+		FString ActorName;
+		FText OuterAssetDisplayName;
+	};
+
+	/**
+	 * Finds givers attached to this node's CONTEXTUAL inlined compiled tags, i.e., tags emitted by OUTER questline assets
+	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
+	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
+	 * (everything past "Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
+	 * givers already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag. Returns empty for
+	 * uncompiled nodes or nodes with no cross-graph contextual inlinings.
+	 *
+	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.
+	 *
+	 * Results sorted by (OuterAssetDisplayName, ActorName) and deduped on that pair.
+	 */
+	static TArray<FQuestContextualGiver> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);
+
+	/**
 	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
 	 * Returns the number of actors modified.
 	 */
@@ -113,14 +136,18 @@ public:
 	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
 	 * NamedOutcomeOut resolves to QuestState.<src>.Outcome.<leaf>. Returns invalid tags for pin roles the examiner treats
 	 * as drill-through (Rule Entry Forward) or RuleRef (Rule Exit); those code paths don't flatten to leaves in the
-	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring (agenda item 7 Session B).
+	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring.
 	 */
 	static FGameplayTag ResolveLeafFactForOutputPin(const UEdGraphPin* OutputPin, FGameplayTag& OutSourceTag);
 	
 	/**
-	 * Returns true if the step node's current label matches its last compiled tag. False if the node has been renamed since
-	 * last compile, or was never compiled.
+	 * Returns true if the content node's reconstructed tag (from current labels) matches its last compiled tag. False when
+	 * renamed since last compile, never compiled, or the Outer chain is broken. Works for any UQuestlineNode_ContentBase
+	 * descendant — widgets displaying a "Recompile to update tags" warning use this as the source of truth.
 	 */
+	static bool IsContentNodeTagCurrent(const UQuestlineNode_ContentBase* ContentNode);
+
+	/** Back-compat thin wrapper — prefer IsContentNodeTagCurrent. Same semantics, Step-typed argument. */
 	static bool IsStepTagCurrent(const UQuestlineNode_Step* StepNode);
 
 	/**

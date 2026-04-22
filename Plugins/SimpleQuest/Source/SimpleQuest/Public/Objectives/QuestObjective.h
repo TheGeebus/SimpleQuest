@@ -111,7 +111,7 @@ public:
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
 	
 protected:	
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION()
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
 
 	/**

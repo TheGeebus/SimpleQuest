@@ -125,7 +125,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
     Context.Instigator = Cast<AActor>(Event->Instigator);
     Context.CustomData = Event->CustomData;
-    Step->GetActiveObjective()->TryCompleteObjective(Context);
+    Step->GetActiveObjective()->DispatchTryCompleteObjective(Context);
 }
 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)

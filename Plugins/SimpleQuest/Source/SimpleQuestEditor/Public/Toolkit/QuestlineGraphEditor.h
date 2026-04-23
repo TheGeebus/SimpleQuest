@@ -61,6 +61,18 @@ private:
 	void ExtendToolbar();
 	void FillToolbar(FToolBarBuilder& ToolbarBuilder);
 
+	/**
+	 * Toggles the Details panel between node-selection tracking and a pinned asset view — the Questline Graph's own
+	 * properties (QuestlineID, FriendlyName, etc.). Mirror of Blueprint's Class Defaults button. Click to pin; click
+	 * again to restore normal selection tracking. When pinned, OnGraphSelectionChanged short-circuits to the asset
+	 * regardless of node selection.
+	 */
+	void ToggleGraphDefaults();
+	bool IsGraphDefaultsPinned() const { return bGraphDefaultsPinned; }
+
+	/** Session-scoped; not serialized. Drives the toolbar toggle's checked state + OnGraphSelectionChanged's bypass. */
+	bool bGraphDefaultsPinned = false;
+	
 	FText GetGraphDisplayName(UEdGraph* Graph) const;
 
 	enum class EQuestlineCompileStatus : uint8 { Unknown, UpToDate, Error };
@@ -156,6 +168,11 @@ private:
 	TSharedPtr<SQuestlineBreadcrumbBar> BreadcrumbBar;			// updated by NavigateTo
 	TWeakPtr<FQuestlineGraphEditor> CrossAssetBackEditor;		// manages navigation to and from linked questline assets 
 	bool bIsNavigatingHistory = false;
+
+	bool bSuppressDirtyOnGraphChange = false;					// set true across RefreshAllNodeWidgets — a compile-triggered
+																// refresh fires NotifyGraphChanged on every descendant graph, but
+																// it's NOT a user edit; without this guard the status icon bounces
+																// to Unknown when neighbor-asset broadcasts pass through our refresh.
 
 public:
 	void NavigateTo(UEdGraph* Graph);

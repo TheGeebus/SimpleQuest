@@ -23,4 +23,5 @@ public:
 	TSharedPtr<FUICommandInfo> CompileAllQuestlineGraphs;
 	TSharedPtr<FUICommandInfo> NavigateBack;
 	TSharedPtr<FUICommandInfo> NavigateForward;
+	TSharedPtr<FUICommandInfo> ToggleGraphDefaults;
 };

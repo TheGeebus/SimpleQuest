@@ -14,6 +14,7 @@
 #include "Toolkit/QuestlineGraphEditorCommands.h"
 #include "Widgets/Notifications/SNotificationList.h"
 #include "PropertyEditorModule.h"
+#include "SimpleQuestLog.h"
 #include "Modules/ModuleManager.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
@@ -340,6 +341,12 @@ void FQuestlineGraphEditor::BindGraphCommands()
         {
             ISimpleQuestEditorModule::Get().CompileAllQuestlineGraphs();
         }));
+        
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().ToggleGraphDefaults,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::ToggleGraphDefaults),
+        FCanExecuteAction(),
+        FIsActionChecked::CreateSP(this, &FQuestlineGraphEditor::IsGraphDefaultsPinned));
     
     GetToolkitCommands()->MapAction(
         FQuestlineGraphEditorCommands::Get().NavigateBack,
@@ -377,59 +384,115 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
 
 void FQuestlineGraphEditor::CompileQuestlineGraph()
 {
-    TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
-    const bool bSuccess = Compiler->Compile(QuestlineGraph);
+    // Aggregate state across primary + linked neighborhood.
+    int32 TotalErrors = 0;
+    int32 TotalWarnings = 0;
+    int32 TotalRenames = 0;
+    int32 TotalRenamedActors = 0;
+    int32 NeighborSuccessCount = 0;
+    int32 NeighborFailCount = 0;
 
-    // Apply detected tag renames to loaded worlds
-    int32 RenamedActors = 0;
-    const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
-    if (bSuccess && DetectedRenames.Num() > 0)
+    FMessageLog CompilerLog("QuestCompiler");
+    bool bLogPageOpen = false;
+    auto EnsurePage = [&]()
     {
-        RenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
-    }
-    
-    // Flush compiler messages to the Quest Compiler MessageLog panel
-    if (Compiler->GetMessages().Num() > 0)
-    {
-        FMessageLog CompilerLog("QuestCompiler");
-        CompilerLog.NewPage(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompilePageLabel", "{0}"), FText::FromString(QuestlineGraph->GetName())));
-        CompilerLog.AddMessages(Compiler->GetMessages());
+        if (bLogPageOpen) return;
+        CompilerLog.NewPage(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompilePageLabel", "{0}"),
+            FText::FromString(QuestlineGraph->GetName())));
+        bLogPageOpen = true;
+    };
 
-        if (Compiler->GetNumErrors() > 0)
+    // Per-asset compile body — runs for primary and each neighbor. Broadcasts OnQuestlineCompiled per asset so
+    // every open editor (this one + any others) refreshes via the existing OnExternalCompile path.
+    auto CompileAsset = [&](UQuestlineGraph* Graph, bool bIsPrimary)
+    {
+        if (!Graph) return;
+
+        TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
+        const bool bSuccess = Compiler->Compile(Graph);
+
+        if (bSuccess)
         {
-            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileErrors", "Quest compilation: {0} error(s)"), Compiler->GetNumErrors()));
+            if (!bIsPrimary) ++NeighborSuccessCount;
+            const TMap<FName, FName>& Renames = Compiler->GetDetectedRenames();
+            if (Renames.Num() > 0)
+            {
+                TotalRenames       += Renames.Num();
+                TotalRenamedActors += FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(Renames);
+            }
         }
-        else if (Compiler->GetNumWarnings() > 0)
+        else if (!bIsPrimary)
         {
-            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileWarnings", "Quest compilation: {0} warning(s)"), Compiler->GetNumWarnings()));
+            ++NeighborFailCount;
+        }
+        TotalErrors   += Compiler->GetNumErrors();
+        TotalWarnings += Compiler->GetNumWarnings();
+
+        if (Compiler->GetMessages().Num() > 0)
+        {
+            EnsurePage();
+            CompilerLog.AddMessages(Compiler->GetMessages());
+        }
+
+        ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(
+            Graph->GetOutermost()->GetName(), bSuccess);
+    };
+
+    // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
+    CompileAsset(QuestlineGraph, /*bIsPrimary=*/ true);
+
+    // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references. See
+    // ISimpleQuestEditorModule::CollectLinkedNeighborhood.
+    TArray<UQuestlineGraph*> Neighborhood;
+    ISimpleQuestEditorModule::Get().CollectLinkedNeighborhood(QuestlineGraph, Neighborhood);
+
+    if (Neighborhood.Num() > 0)
+    {
+        UE_LOG(LogSimpleQuest, Log, TEXT("Compile: auto-compiling %d linked neighbor(s) of '%s'"), Neighborhood.Num(), *QuestlineGraph->GetName());
+    }
+
+    for (UQuestlineGraph* Neighbor : Neighborhood)
+    {
+        CompileAsset(Neighbor, /*bIsPrimary=*/ false);
+    }
+
+    // Notifications — MessageLog already shows pages if anything wrote to them. Emit a notify summary for
+    // errors/warnings, or a clean toast when everything succeeded. Clean toast includes the linked count
+    // so designers see at a glance that the neighborhood recompiled.
+    if (bLogPageOpen)
+    {
+        if (TotalErrors > 0)
+        {
+            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileErrors", "Quest compilation: {0} error(s)"), TotalErrors));
+        }
+        else if (TotalWarnings > 0)
+        {
+            CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileWarnings", "Quest compilation: {0} warning(s)"), TotalWarnings));
         }
     }
     else
     {
-        // Clean compile — simple success toast
-        FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "CompileSuccess", "Questline compiled successfully."));
+        const FText SuccessText = (NeighborSuccessCount > 0)
+            ? FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileSuccessWithLinked",
+                "Questline compiled successfully. {0} linked graph(s) also compiled."), NeighborSuccessCount)
+            : NSLOCTEXT("SimpleQuestEditor", "CompileSuccess", "Questline compiled successfully.");
+
+        FNotificationInfo Info(SuccessText);
         Info.ExpireDuration = 3.f;
         Info.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
-    // Tag rename toast message
-    if (DetectedRenames.Num() > 0)
+    if (TotalRenames > 0)
     {
         FNotificationInfo RenameInfo(FText::Format(
             NSLOCTEXT("SimpleQuestEditor", "TagRenames",
                 "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
-            DetectedRenames.Num(), RenamedActors));
+            TotalRenames, TotalRenamedActors));
         RenameInfo.ExpireDuration = 5.f;
         RenameInfo.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
     }
-
-    // Unified refresh + status update via broadcast. Fires OnExternalCompile on THIS editor (bIsOwnAsset=true:
-    // refresh widgets + status + outliner) AND every other open questline editor (bIsOwnAsset=false: refresh
-    // widgets so cross-asset contextual displays pick up the new state without a close-and-reopen workaround).
-    // Single-asset Compile now shares the same signalling path that Compile All uses per-asset.
-    ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(QuestlineGraph->GetOutermost()->GetName(), bSuccess);
 }
 
 void FQuestlineGraphEditor::SaveAsset_Execute()
@@ -481,6 +544,17 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
         NSLOCTEXT("SimpleQuestEditor", "CompileAll_Tooltip", "Compile and save every questline graph in the project"),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "Blueprint.CompileStatus.Background"));
 
+    ToolbarBuilder.EndSection();
+
+    ToolbarBuilder.BeginSection("GraphDefaults");
+
+    // Graph Defaults — pins the Details panel to the asset's own properties. Toggle button, mirrors BP's Class Defaults.
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().ToggleGraphDefaults,
+        NAME_None,
+        TAttribute<FText>(),
+        TAttribute<FText>(),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), "FullBlueprintEditor.EditClassDefaults"));
 
     ToolbarBuilder.EndSection();
 }
@@ -543,6 +617,10 @@ static void RefreshNodeWidgetsRecursive(UEdGraph* Graph)
 void FQuestlineGraphEditor::RefreshAllNodeWidgets()
 {
     if (!QuestlineGraph) return;
+    // The recursive walker calls NotifyGraphChanged on every graph, which fires OnGraphChanged. Guard the
+    // dirty-reset across the refresh: compile-triggered refreshes (including neighbor-asset broadcasts during
+    // auto-compile-linked fan-out) are not user edits and shouldn't drop the status icon to Unknown.
+    TGuardValue<bool> Guard(bSuppressDirtyOnGraphChange, true);
     RefreshNodeWidgetsRecursive(QuestlineGraph->QuestlineEdGraph);
 }
 
@@ -563,6 +641,9 @@ FText FQuestlineGraphEditor::GetGraphDisplayName(UEdGraph* Graph) const
 
 void FQuestlineGraphEditor::OnGraphChanged(const FEdGraphEditAction&)
 {
+    // Refreshes from compile broadcasts shouldn't drop the status back to Unknown — a user-driven graph edit
+    // should. RefreshAllNodeWidgets sets bSuppressDirtyOnGraphChange to distinguish the two call origins.
+    if (bSuppressDirtyOnGraphChange) return;
     CompileStatus = EQuestlineCompileStatus::Unknown;
 }
 
@@ -608,6 +689,14 @@ void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSe
 {
     if (!DetailsView.IsValid()) return;
 
+    // Graph Defaults pinned — selection changes are ignored; Details stays locked on the asset. Mirror of BP's
+    // Class Defaults button.
+    if (bGraphDefaultsPinned)
+    {
+        if (QuestlineGraph) DetailsView->SetObject(QuestlineGraph);
+        return;
+    }
+
     // Empty selection — restore the asset view so graph-level metadata (QuestlineID, FriendlyName) stays reachable
     // without forcing the designer to go through content browser → Properties for every edit.
     if (SelectedNodes.IsEmpty())
@@ -628,6 +717,24 @@ void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSe
         Selected.Add(Obj);
 
     DetailsView->SetObjects(Selected);
+}
+
+void FQuestlineGraphEditor::ToggleGraphDefaults()
+{
+    bGraphDefaultsPinned = !bGraphDefaultsPinned;
+
+    if (!DetailsView.IsValid()) return;
+
+    if (bGraphDefaultsPinned)
+    {
+        // Pin — swap Details to the asset regardless of current selection.
+        if (QuestlineGraph) DetailsView->SetObject(QuestlineGraph);
+    }
+    else if (GraphEditorWidget.IsValid())
+    {
+        // Unpin — re-run selection logic so whatever is selected takes over; empty fall-back puts the asset back.
+        OnGraphSelectionChanged(GraphEditorWidget->GetGraphEditor()->GetSelectedNodes());
+    }
 }
 
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnOutlinerTab(const FSpawnTabArgs& Args)

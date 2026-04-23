@@ -28,6 +28,7 @@ public:
 	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
 	
 	virtual void CompileAllQuestlineGraphs() override;
+	virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const override;
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }

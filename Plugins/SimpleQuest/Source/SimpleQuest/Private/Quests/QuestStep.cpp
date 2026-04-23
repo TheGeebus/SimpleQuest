@@ -29,7 +29,7 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
-	ActiveObjective->SetObjectiveTarget(TargetActors, TargetClasses, NumberOfElements);
+	ActiveObjective->DispatchSetObjectiveTarget(TargetActors, TargetClasses, NumberOfElements);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)

@@ -6,6 +6,7 @@
 #include "Modules/ModuleInterface.h"
 #include "Modules/ModuleManager.h"
 
+class UQuestlineGraph;
 class FQuestlineGraphCompiler;
 
 // Factory delegate type. Must return a valid non-null compiler instance.
@@ -64,6 +65,18 @@ public:
      */
     virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) = 0;
 
+    /**
+     * Collects every UQuestlineGraph asset connected to Primary via LinkedQuestline references — both forward
+     * (assets Primary references) and backward (assets that reference Primary), transitively closed with a
+     * visited set to handle cycles. Walks the Asset Registry's package dependency graph (EDependencyCategory::Package,
+     * covers hard + soft refs; LinkedGraph is TSoftObjectPtr). Sync-loads each neighbor on first discovery.
+     * Output excludes Primary itself — caller compiles Primary separately.
+     *
+     * Used by single-asset Compile to auto-compile the linked neighborhood so contextual tags across assets
+     * stay in sync without requiring Compile All.
+     */
+    virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const = 0;
+    
     virtual void CompileAllQuestlineGraphs() = 0;
 
     virtual FOnQuestlineCompiled& OnQuestlineCompiled() = 0;

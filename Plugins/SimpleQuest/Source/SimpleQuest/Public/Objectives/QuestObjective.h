@@ -34,34 +34,6 @@ public:
 	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
 	
 	/**
-	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
-	 * to bind additional delegates. (see: UGoToQuestObjective)
-	 * 
-	 * @param InTargetActors a set of specific target actors in the scene
-	 * @param InTargetClasses a set of classes to target (as for kills or pickups)
-	 * @param NumElementsRequired the number of elements required to complete the step
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
-	
-	/**
-	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
-	 * to be overridden by child classes to provide the logic for quest step completion. When a quest target is triggered,
-	 * this will automatically be called if InTargetObject passes the relevancy check determined by the logic contained
-	 * in the IsObjectRelevant override.
-	 *
-	 * This function should be used to count elements or perform additional logic after relevancy has been confirmed
-	 * and call CompleteObjective to signal this objective has ended in either success or failure. Base class has no
-	 * default implementation, but this can be overridden in C++ or Blueprint subclasses.
-	 *
-	 * Example child objectives: UGoToQuestObjective and UKillClassQuestObjective
-	 * @param InContext the context of this trigger event containing the triggered actor, any relevant instigator, and an
-	 *					optional designer-defined instanced struct that may contain additional fields as needed.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
-
-	/**
 	 * Outcome Tag Discovery																						<br>
 	 * ---------------------																						<br>
 	 * The editor discovers outcome tags from two primary sources. All results merge
@@ -109,9 +81,56 @@ public:
 	 * @see UK2Node_CompleteObjectiveWithOutcome
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
+
+	/**
+	 * Step-facing entry point for initializing objective target parameters. Thin C++ forwarder to the protected
+	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
+	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
+	 */
+	void DispatchSetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
+
+	/**
+	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
+	 * BlueprintNativeEvent TryCompleteObjective. Same thunk-routing behavior as DispatchSetObjectiveTarget.
+	 */
+	void DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext);
 	
-protected:	
-	UFUNCTION()
+protected:
+	/**
+	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
+	 * to bind additional delegates. (see: UGoToQuestObjective)
+	 *
+	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
+	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
+	 *
+	 * @param InTargetActors a set of specific target actors in the scene
+	 * @param InTargetClasses a set of classes to target (as for kills or pickups)
+	 * @param NumElementsRequired the number of elements required to complete the step
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
+	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
+
+	/**
+	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
+	 * to be overridden by child classes to provide the logic for quest step completion. When a quest target is triggered,
+	 * this will automatically be called if InTargetObject passes the relevancy check determined by the logic contained
+	 * in the IsObjectRelevant override.
+	 *
+	 * This function should be used to count elements or perform additional logic after relevancy has been confirmed
+	 * and call CompleteObjectiveWithOutcome (via the K2 Complete Objective node in BP) to signal completion. Base class
+	 * has no default implementation; override in C++ or Blueprint subclasses.
+	 *
+	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
+	 * DispatchTryCompleteObjective from C++; subclass BPs override normally.
+	 *
+	 * Example child objectives: UGoToQuestObjective and UKillClassQuestObjective
+	 * @param InContext the context of this trigger event containing the triggered actor, any relevant instigator, and an
+	 *					optional designer-defined instanced struct that may contain additional fields as needed.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
+	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
+
+	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"), Category = "Quest|Objectives" )
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
 
 	/**
@@ -121,13 +140,13 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void ReportProgress(const FQuestObjectiveContext& InProgressData);
 	
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableQuestTargetActors(bool bIsTargetEnabled);
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
 	
 private:

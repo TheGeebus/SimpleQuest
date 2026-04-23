@@ -196,6 +196,40 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   (`ShouldCreateSubsystem` override checks `USimpleQuestSettings`);
   other subclasses are silently suppressed so signal-bus handlers
   don't double-fire
+- Prerequisite Rule monitors latched permanently on first
+  satisfaction, breaking any expression with a `NOT` — the rule
+  would publish immediately at activation time if the negated leaf
+  wasn't yet asserted, then unsubscribe and never re-evaluate when
+  the leaf actually fired. Rule monitors are now dynamic: they
+  stay subscribed for the rule's lifetime and mirror the
+  expression's current truth value, adding or retracting the
+  group fact as leaves transition
+- Cross-PIE-session state leak on compiled node instances — the
+  instances live on the `UQuestlineGraph` asset and survive PIE
+  transitions, but their subscription handles, deferred-prereq
+  state, giver-gated flags, and Piece D scratch slots were from
+  the prior session's dead subsystems. Session 2 would skip
+  re-subscription (handles map already populated), silently
+  disconnecting rule monitors from the live signal bus. New
+  `UQuestNodeBase::ResetTransientState` virtual wipes this state;
+  called per compiled node by `ActivateQuestlineGraph` before any
+  other wiring
+- Linked-asset PIE debug visualization was blind to cross-graph
+  context — halos and the Prerequisite Examiner both queried
+  `WorldState` with the standalone-compile tag (e.g.
+  `Quest.SideQuestQL.Near.Left`) while live facts were nested
+  under the active parent (`Quest.NewTest.Secret_Level.Near.Left`).
+  Viewing a linked questline asset during PIE showed no feedback
+  on any inner node. `FQuestPIEDebugChannel::ResolveRuntimeTag`
+  and `QueryLeafState` now fall back to contextual tags via a new
+  `CollectContextualNodeTagsForEditorNode` Asset Registry walk
+  (extracted from the existing contextual-giver/watcher machinery)
+- Diagnostic-log volume under `LogSimpleQuest VeryVerbose` —
+  `FindCompiledTagForNode` was printing a per-slot iteration dump
+  on every call from editor paints, reaching ~260 lines per tick.
+  `IsContentNodeTagCurrent` and `ReconstructNodeTag` similarly
+  logged per-invocation on the hot path. All three are now silent
+  on the success path; misses retain their Warning/Verbose logs
 
 ### Breaking Changes
 - `UQuestObjective::SetObjectiveTarget` renamed to

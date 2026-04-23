@@ -18,6 +18,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Visual graph editor** — author questlines as a composable node graph. Custom Slate widgets for combinator, group, utility, and step nodes; inline tag pickers; dynamic pin management; in-editor compile with clickable diagnostics that navigate to the offending node.
 - **Nested prerequisite expressions** — AND / OR / NOT combinators plus reusable Prerequisite Rule portals. Any content node can gate activation, progression, or completion on an arbitrarily deep boolean expression authored inline.
 - **Named outcomes** — nodes resolve with designer-authored outcome tags. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently. No binary success/failure constraint.
+- **Structured objective activation** — activation delivers a typed `FQuestObjectiveActivationParams` struct (target actors, classes, element counts, typed CustomData, ActivationSource). Designer-authored step defaults, giver components, event-bus publishers, and step-to-step handoff all merge additively. An OriginTag and OriginChain track the cascade path across Quest and LinkedQuestline boundaries so objectives can branch on "who activated me" without glue code.
 - **Linked questlines** — reference external questline graph assets inline. The compiler inlines the linked graph with bidirectional tag resolution and dual-tag (contextual + standalone) subscription support.
 - **Live PIE inspection** — per-state colored halos on graph nodes, live leaf satisfaction tinting in the Prereq Examiner, and a searchable WorldState Facts panel showing every asserted fact. No log-diving required to understand the running state.
 - **Two-plugin architecture** — SimpleQuest sits on top of **SimpleCore**, a standalone coordination layer any system can use independently.
@@ -163,18 +164,27 @@ For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and registe
 
 ### Custom Objectives
 
-Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives) and override `TryCompleteObjective`:
+Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives). Override `OnObjectiveActivated_Implementation` to consume the typed activation params, and `TryCompleteObjective_Implementation` to decide when to resolve — calling `CompleteObjectiveWithOutcome` with the named outcome tag:
 
 ```cpp
 UCLASS(Blueprintable)
-class UMyObjective : public UCountingQuestObjective
+class UMyObjective : public UQuestObjective
 {
     GENERATED_BODY()
 
-public:
-    virtual bool TryCompleteObjective(const FQuestObjectiveContext& Context) override
+protected:
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override
     {
-        return Context.CurrentCount >= Context.RequiredCount;
+        // Read Params.TargetActors, Params.NumElementsRequired, Params.CustomData (FInstancedStruct), Params.OriginTag, etc.
+        // Wire up listeners, store local tracking state, spawn UI, and so on.
+    }
+
+    virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& Context) override
+    {
+        if (/* your completion condition */)
+        {
+            CompleteObjectiveWithOutcome(MyOutcomeTag, Context);
+        }
     }
 };
 ```
@@ -210,6 +220,7 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Quarter | Deliverable | Status |
 |---|---|---|
 | Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
+| Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
 | Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |

@@ -36,6 +36,16 @@ void UQuestlineNode_Quest::PostDuplicate(bool bDuplicateForPIE)
 	CreateInnerGraph();  // fresh graph, not a copy of the original
 }
 
+void UQuestlineNode_Quest::PostPasteNode()
+{
+	Super::PostPasteNode();
+	// Paste deserialized the source's inner graph (deep copy, complete with source's inner-node QuestGuids).
+	// PostPasteNode doesn't cascade to child-graph nodes in SGraphEditor's paste flow, so those inner nodes would
+	// keep duplicate identities. Discard the deserialized inner graph and create a fresh empty one — matches the
+	// "duplicate = fresh empty Quest" design choice already encoded in PostDuplicate.
+	CreateInnerGraph();
+}
+
 void UQuestlineNode_Quest::PostLoad()
 {
 	Super::PostLoad();

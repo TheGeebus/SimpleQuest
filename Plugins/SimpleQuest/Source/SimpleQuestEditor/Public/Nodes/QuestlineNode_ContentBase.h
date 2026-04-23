@@ -20,6 +20,7 @@ public:
 	virtual bool CanDuplicateNode() const override { return true; }
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+	virtual void PostPasteNode() override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
 	virtual void EnsureDeactivationPinsForAutowire() override;
@@ -52,6 +53,17 @@ public:
 protected:
 	virtual FString GetDefaultNodeBaseName() const { return TEXT("Node"); }
 
+	/**
+	 * Regenerate QuestGuid and sweep NodeLabel for uniqueness within the current graph. Shared body used by
+	 * PostPlacedNewNode (fresh placement), PostDuplicate (programmatic StaticDuplicateObject paths), and
+	 * PostPasteNode (user Ctrl-D / copy-paste via SGraphEditor's ExportText/ImportText round-trip).
+	 *
+	 * Strips any trailing "_N" counter on the current label to get a root name, then sweeps from counter+1
+	 * upward — so "GetBook_1" re-duplicated becomes "GetBook_2", not "GetBook_1_1". Fresh placements where
+	 * NodeLabel is empty fall back to GetDefaultNodeBaseName().
+	 */
+	void EnsureFreshIdentityAndUniqueLabel();
+	
 	/**
 	 * Override to insert custom output pins between Prerequisites and Any Outcome. Do NOT override AllocateDefaultPins — the
 	 * base class controls pin ordering to guarantee Deactivate always appears at the bottom.

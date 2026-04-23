@@ -1,6 +1,8 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Toolkit/QuestlineGraphEditor.h"
+
+#include "EdGraphUtilities.h"
 #include "Toolkit/QuestlineGraphPanel.h"
 #include "Quests/QuestlineGraph.h"
 #include "GraphEditor.h"
@@ -15,6 +17,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "PropertyEditorModule.h"
 #include "SimpleQuestLog.h"
+#include "SNodePanel.h"
 #include "Modules/ModuleManager.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
@@ -24,7 +27,7 @@
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/SGroupExaminerPanel.h"
 #include "Widgets/SPrereqExaminerPanel.h"
-
+#include "HAL/PlatformApplicationMisc.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -329,7 +332,28 @@ void FQuestlineGraphEditor::BindGraphCommands()
     
     GraphEditorCommands->MapAction(
         FGenericCommands::Get().Delete,
-        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DeleteSelectedNodes));
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DeleteSelectedNodes),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanDeleteNodes));
+
+    GraphEditorCommands->MapAction(
+        FGenericCommands::Get().Copy,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CopySelectedNodes),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanCopyNodes));
+
+    GraphEditorCommands->MapAction(
+        FGenericCommands::Get().Cut,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CutSelectedNodes),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanCutNodes));
+
+    GraphEditorCommands->MapAction(
+        FGenericCommands::Get().Paste,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::PasteNodes),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanPasteNodes));
+
+    GraphEditorCommands->MapAction(
+        FGenericCommands::Get().Duplicate,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DuplicateNodes),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanDuplicateNodes));
     
     GraphEditorCommands->MapAction(
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
@@ -380,6 +404,136 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
             CurrentGraph->RemoveNode(Node);
         }
     }
+}
+
+bool FQuestlineGraphEditor::CanDeleteNodes() const
+{
+    if (!GraphEditorWidget.IsValid()) return false;
+    for (UObject* Obj : GraphEditorWidget->GetGraphEditor()->GetSelectedNodes())
+    {
+        if (const UEdGraphNode* Node = Cast<UEdGraphNode>(Obj))
+        {
+            if (Node->CanUserDeleteNode()) return true;
+        }
+    }
+    return false;
+}
+
+void FQuestlineGraphEditor::CopySelectedNodes()
+{
+    if (!GraphEditorWidget.IsValid()) return;
+    const FGraphPanelSelectionSet SelectedNodes = GraphEditorWidget->GetGraphEditor()->GetSelectedNodes();
+
+    for (UObject* Obj : SelectedNodes)
+    {
+        if (UEdGraphNode* Node = Cast<UEdGraphNode>(Obj))
+        {
+            Node->PrepareForCopying();
+        }
+    }
+
+    FString ExportedText;
+    FEdGraphUtilities::ExportNodesToText(SelectedNodes, ExportedText);
+    FPlatformApplicationMisc::ClipboardCopy(*ExportedText);
+}
+
+bool FQuestlineGraphEditor::CanCopyNodes() const
+{
+    if (!GraphEditorWidget.IsValid()) return false;
+    for (UObject* Obj : GraphEditorWidget->GetGraphEditor()->GetSelectedNodes())
+    {
+        if (const UEdGraphNode* Node = Cast<UEdGraphNode>(Obj))
+        {
+            if (Node->CanDuplicateNode()) return true;
+        }
+    }
+    return false;
+}
+
+void FQuestlineGraphEditor::CutSelectedNodes()
+{
+    CopySelectedNodes();
+    // Existing DeleteSelectedNodes already gates per-node on CanUserDeleteNode, so nothing uncuttable gets removed.
+    DeleteSelectedNodes();
+}
+
+bool FQuestlineGraphEditor::CanCutNodes() const
+{
+    return CanCopyNodes() && CanDeleteNodes();
+}
+
+void FQuestlineGraphEditor::PasteNodes()
+{
+    if (!GraphEditorWidget.IsValid()) return;
+    const TSharedPtr<SGraphEditor> GraphEd = GraphEditorWidget->GetGraphEditor();
+    if (!GraphEd.IsValid()) return;
+    PasteNodesHere(GraphEd->GetCurrentGraph(), GraphEd->GetPasteLocation2f());
+}
+
+void FQuestlineGraphEditor::PasteNodesHere(UEdGraph* DestinationGraph, const FVector2f& GraphLocation)
+{
+    if (!DestinationGraph || !GraphEditorWidget.IsValid()) return;
+    const TSharedPtr<SGraphEditor> GraphEd = GraphEditorWidget->GetGraphEditor();
+    if (!GraphEd.IsValid()) return;
+
+    const FScopedTransaction Transaction(FGenericCommands::Get().Paste->GetDescription());
+    DestinationGraph->Modify();
+
+    // Newly-pasted nodes become the selection.
+    GraphEd->ClearSelectionSet();
+
+    FString TextToImport;
+    FPlatformApplicationMisc::ClipboardPaste(TextToImport);
+
+    TSet<UEdGraphNode*> PastedNodes;
+    FEdGraphUtilities::ImportNodesFromText(DestinationGraph, TextToImport, PastedNodes);
+    if (PastedNodes.Num() == 0) return;
+
+    // Average original position so we can recentre at GraphLocation while preserving relative offsets.
+    FVector2f AvgNodePosition(0.f, 0.f);
+    for (UEdGraphNode* Node : PastedNodes)
+    {
+        AvgNodePosition.X += Node->NodePosX;
+        AvgNodePosition.Y += Node->NodePosY;
+    }
+    const float InvNumNodes = 1.0f / PastedNodes.Num();
+    AvgNodePosition.X *= InvNumNodes;
+    AvgNodePosition.Y *= InvNumNodes;
+
+    for (UEdGraphNode* Node : PastedNodes)
+    {
+        GraphEd->SetNodeSelection(Node, true);
+
+        Node->NodePosX = static_cast<int32>((Node->NodePosX - AvgNodePosition.X) + GraphLocation.X);
+        Node->NodePosY = static_cast<int32>((Node->NodePosY - AvgNodePosition.Y) + GraphLocation.Y);
+        Node->SnapToGrid(SNodePanel::GetSnapGridSize());
+
+        // UEdGraphNode::NodeGuid is separate from our QuestGuid (handled inside PostPasteNode). Both need refresh.
+        Node->CreateNewGuid();
+    }
+
+    DestinationGraph->NotifyGraphChanged();
+}
+
+bool FQuestlineGraphEditor::CanPasteNodes() const
+{
+    if (!GraphEditorWidget.IsValid()) return false;
+    const TSharedPtr<SGraphEditor> GraphEd = GraphEditorWidget->GetGraphEditor();
+    if (!GraphEd.IsValid()) return false;
+    FString ClipboardContent;
+    FPlatformApplicationMisc::ClipboardPaste(ClipboardContent);
+    return FEdGraphUtilities::CanImportNodesFromText(GraphEd->GetCurrentGraph(), ClipboardContent);
+}
+
+void FQuestlineGraphEditor::DuplicateNodes()
+{
+    CopySelectedNodes();
+    PasteNodes();
+}
+
+bool FQuestlineGraphEditor::CanDuplicateNodes() const
+{
+    return CanCopyNodes();
 }
 
 void FQuestlineGraphEditor::CompileQuestlineGraph()

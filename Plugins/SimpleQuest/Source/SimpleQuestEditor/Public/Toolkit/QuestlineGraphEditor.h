@@ -54,6 +54,18 @@ private:
 	TSharedRef<SQuestlineGraphPanel> CreateGraphEditorWidget();
 	void BindGraphCommands();
 	void DeleteSelectedNodes();
+	bool CanDeleteNodes() const;
+
+	// Standard edit commands — SGraphEditor doesn't wire these by default; each editor has to bind and implement.
+	void CopySelectedNodes();
+	bool CanCopyNodes() const;
+	void CutSelectedNodes();
+	bool CanCutNodes() const;
+	void PasteNodes();
+	void PasteNodesHere(UEdGraph* DestinationGraph, const FVector2f& GraphLocation);
+	bool CanPasteNodes() const;
+	void DuplicateNodes();
+	bool CanDuplicateNodes() const;
 
 	// Compile and save graph data layer
 	void CompileQuestlineGraph();

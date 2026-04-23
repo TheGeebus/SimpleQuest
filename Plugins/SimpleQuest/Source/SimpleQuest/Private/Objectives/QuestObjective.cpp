@@ -47,9 +47,10 @@ TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 	return {};
 }
 
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData, const FQuestObjectiveActivationParams& InForwardParams)
 {
 	CompletionData = InCompletionData;
+	ForwardActivationParams = InForwardParams;
 	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
 	ConditionalBeginDestroy();
 }

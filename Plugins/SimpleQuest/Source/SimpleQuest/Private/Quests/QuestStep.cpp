@@ -51,6 +51,10 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	Params.OriginTag = PendingActivationParams.OriginTag;
 	Params.OriginChain = PendingActivationParams.OriginChain;
 
+	// Snapshot the composed params for Piece D chain propagation — ChainToNextNodes needs OriginChain to extend the
+	// forwarded chain with this step's tag when the chain reaches a downstream step.
+	ReceivedActivationParams = Params;
+
 	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationParams = FQuestObjectiveActivationParams{};
 
@@ -65,7 +69,8 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		ActiveObjective = nullptr;
 	}
-
+	ReceivedActivationParams = FQuestObjectiveActivationParams{};
+	CompletionForwardParams = FQuestObjectiveActivationParams{};
 	Super::DeactivateInternal(InContextualTag);
 }
 
@@ -74,6 +79,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 	if (ActiveObjective)
 	{
 		CompletionData = ActiveObjective->TakeCompletionData();
+		CompletionForwardParams = ActiveObjective->TakeForwardActivationParams();
 		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		ActiveObjective = nullptr;

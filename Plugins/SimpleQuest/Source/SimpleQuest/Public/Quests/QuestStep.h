@@ -50,13 +50,19 @@ protected:
 
 public:
 	/**
-	 * Transient scratch slot for runtime activation params handed in by an FQuestActivationRequestEvent publisher.
-	 * Set by UQuestManagerSubsystem::HandleActivationRequest before ActivateNodeByTag; consumed and cleared by this
-	 * step's ActivateInternal during params composition. Not serialized — save/load restoration republishes the
-	 * activation event rather than persisting the stash directly.
+	 * Snapshot of the final composed params delivered to the objective at activation. Retained for Piece D chain
+	 * propagation — ChainToNextNodes reads OriginChain to build the forwarded chain for downstream steps. Populated
+	 * in ActivateInternal; cleared in DeactivateInternal.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationParams PendingActivationParams;
+	FQuestObjectiveActivationParams ReceivedActivationParams;
+
+	/**
+	 * Populated from the objective's forward-params at completion. Read by ChainToNextNodes to pre-stamp
+	 * downstream PendingActivationParams before activation. Transient across step activations.
+	 */
+	UPROPERTY(Transient)
+	FQuestObjectiveActivationParams CompletionForwardParams;
 	
 private:
 	UPROPERTY()
@@ -79,5 +85,6 @@ public:
 	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }
-	
+	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }
+	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }	
 };

@@ -341,19 +341,20 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         return;
     }
 
-    // Cascade origin: if we arrived here via a step-to-step activation, stamp the upstream step's tag onto the
-    // target step's PendingActivationParams.OriginTag + extend OriginChain. Empty/unregistered IncomingSourceTag
-    // resolves to an empty FGameplayTag (see RequestGameplayTag's false flag); the stamp silently no-ops in that
-    // case which is the correct behavior for sources without a registered tag.
+    // Cascade origin fallback: ChainToNextNodes pre-stamps OriginTag + OriginChain for every cascade destination as
+    // of Piece D, so this block is effectively a no-op on the normal cascade path. Retained as a safety net for any
+    // direct caller that passes IncomingSourceTag without pre-stamping. Guard on empty OriginChain so the chain
+    // propagation built by ChainToNextNodes isn't stomped with a double-append.
     if (IncomingSourceTag != NAME_None)
     {
-        const FGameplayTag SourceTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
-        if (SourceTag.IsValid())
+        UQuestNodeBase* Instance = *InstancePtr;
+        if (Instance && Instance->PendingActivationParams.OriginChain.Num() == 0)
         {
-            if (UQuestStep* Step = Cast<UQuestStep>(*InstancePtr))
+            const FGameplayTag SourceTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
+            if (SourceTag.IsValid())
             {
-                Step->PendingActivationParams.OriginTag = SourceTag;
-                Step->PendingActivationParams.OriginChain.Add(SourceTag);
+                Instance->PendingActivationParams.OriginTag = SourceTag;
+                Instance->PendingActivationParams.OriginChain.Add(SourceTag);
             }
         }
     }
@@ -376,9 +377,32 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             }
         }
 
+        // Quest-boundary origin forwarding: take the chain that was stamped on the Quest by whoever cascaded into it
+        // (outer ChainToNextNodes, a Piece B/C event, or a manual ActivateNodeByTag call), extend it with this Quest's
+        // own tag, and pre-stamp every inner entry destination so they receive the full history rather than starting
+        // fresh. Consume + clear so re-entering the Quest later starts from a fresh stamp.
+        FQuestObjectiveActivationParams InnerForwardPayload = QuestNode->PendingActivationParams;
+        TArray<FGameplayTag> InnerForwardChain = InnerForwardPayload.OriginChain;
+        if (QuestNode->GetQuestTag().IsValid())
+        {
+            InnerForwardChain.Add(QuestNode->GetQuestTag());
+        }
+        QuestNode->PendingActivationParams = FQuestObjectiveActivationParams{};
+
+        auto StampInnerEntry = [this, &InnerForwardPayload, &InnerForwardChain, &QuestNode](const FName& DestTagName)
+        {
+            if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
+            {
+                DestInstance->PendingActivationParams = InnerForwardPayload;
+                DestInstance->PendingActivationParams.OriginTag = QuestNode->GetQuestTag();
+                DestInstance->PendingActivationParams.OriginChain = InnerForwardChain;
+            }
+        };
+
         // Always activate the Any-Outcome entry paths — unconditional, no source filter.
         for (const FName& StepTag : QuestNode->GetEntryStepTags())
         {
+            StampInnerEntry(StepTag);
             ActivateNodeByTag(StepTag);
         }
 
@@ -392,11 +416,15 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             {
                 for (const FQuestEntryDestination& Entry : RouteList->Destinations)
                 {
-                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                    if (Entry.SourceFilter == IncomingSourceTag)
+                    {
+                        StampInnerEntry(Entry.DestTag);
+                        ActivateNodeByTag(Entry.DestTag);
+                    }
                 }
             }
         }
-        
+
         /**
          * Any-outcome-from-source entries — bucket keyed by invalid FGameplayTag. Fires when the incoming source matches,
          * regardless of which specific outcome triggered entry. Gated on IncomingSourceTag so we don't dispatch any-outcome
@@ -408,7 +436,11 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             {
                 for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
                 {
-                    if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
+                    if (Entry.SourceFilter == IncomingSourceTag)
+                    {
+                        StampInnerEntry(Entry.DestTag);
+                        ActivateNodeByTag(Entry.DestTag);
+                    }
                 }
             }
         }
@@ -444,16 +476,41 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
      */
     const FName SourceTagName = Node->GetQuestTag().GetTagName();
 
+    // Piece D handoff: gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
+    // and build the OriginChain extension (received chain + this step's tag) so downstream steps see the full history.
+    FQuestObjectiveActivationParams ForwardPayload;
+    TArray<FGameplayTag> ForwardChain;
+    if (const UQuestStep* CompletingStep = Cast<UQuestStep>(Node))
+    {
+        ForwardPayload = CompletingStep->GetCompletionForwardParams();
+        ForwardChain = CompletingStep->GetReceivedActivationParams().OriginChain;
+    }
+    if (Node->GetQuestTag().IsValid())
+    {
+        ForwardChain.Add(Node->GetQuestTag());
+    }
+
+    auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node](const FName& DestTagName)
+    {
+        if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
+        {
+            DestInstance->PendingActivationParams = ForwardPayload;
+            DestInstance->PendingActivationParams.OriginTag = Node->GetQuestTag();
+            DestInstance->PendingActivationParams.OriginChain = ForwardChain;
+        }
+        ActivateNodeByTag(DestTagName, OutcomeTag, SourceTagName);
+    };
+
     if (const TArray<FName>* OutcomeNodes = Node->GetNextNodesForOutcome(OutcomeTag))
     {
         for (const FName& Tag : *OutcomeNodes)
         {
-            ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
+            StampAndActivate(Tag);
         }
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
-        ActivateNodeByTag(Tag, OutcomeTag, SourceTagName);
+        StampAndActivate(Tag);
     }
 }
 

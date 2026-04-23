@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "EdGraph/EdGraphNodeUtils.h"
 #include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "K2Node_CompleteObjectiveWithOutcome.generated.h"
 
 /**

@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "PrerequisiteExpression.h"
 #include "Quests/Types/QuestNodeInfo.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestNodeBase.generated.h"
 
 class UQuestReward;
@@ -125,6 +126,16 @@ protected:
      */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly)
     FGameplayTag ContextualTag;
+    
+    /**
+     * Transient scratch slot for activation-time params stamped by the manager before Activate runs. Populated by
+     * ChainToNextNodes (cascade pre-stamp), HandleGiveQuestEvent, HandleActivationRequest, and ActivateNodeByTag's
+     * Quest-boundary forwarder. Consumed and cleared by the concrete subclass during its activation (UQuestStep merges
+     * additively with authored defaults; UQuest forwards to inner entries). Not serialized — save/load restoration
+     * republishes the activation event rather than persisting this stash.
+     */
+    UPROPERTY(Transient)
+    FQuestObjectiveActivationParams PendingActivationParams;
 
     /**
      * Map of tags representing each discrete outcome possible as set on either the UQuestObjective or by the exit nodes on the

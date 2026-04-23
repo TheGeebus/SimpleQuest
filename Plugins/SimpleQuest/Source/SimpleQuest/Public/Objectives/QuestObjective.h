@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "StructUtils/InstancedStruct.h"
 #include "QuestObjective.generated.h"
@@ -111,13 +112,11 @@ protected:
 
 	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
-	 * to be overridden by child classes to provide the logic for quest step completion. When a quest target is triggered,
-	 * this will automatically be called if InTargetObject passes the relevancy check determined by the logic contained
-	 * in the IsObjectRelevant override.
+	 * to be overridden by child classes to provide the logic for quest step completion.
 	 *
-	 * This function should be used to count elements or perform additional logic after relevancy has been confirmed
-	 * and call CompleteObjectiveWithOutcome (via the K2 Complete Objective node in BP) to signal completion. Base class
-	 * has no default implementation; override in C++ or Blueprint subclasses.
+	 * This function should be used to count elements or perform additional logic and call CompleteObjectiveWithOutcome
+	 * (via the K2 Complete Objective node in BP) to signal completion. Base class has no default implementation; override
+	 * in C++ or Blueprint subclasses.
 	 *
 	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchTryCompleteObjective from C++; subclass BPs override normally.
@@ -129,8 +128,8 @@ protected:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
 	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
 
-	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true"), Category = "Quest|Objectives" )
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData);
+	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionData,InForwardParams"), Category = "Quest|Objectives")
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData = FQuestObjectiveContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
 
 	/**
 	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
@@ -153,6 +152,14 @@ private:
 	UPROPERTY()
 	FQuestObjectiveContext CompletionData;
 	
+	/**
+	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step
+	 * via TakeForwardActivationParams. Empty (default) is the common case — in which only the chain propagation
+	 * fields get forwarded on handoff.
+	 */
+	UPROPERTY()
+	FQuestObjectiveActivationParams ForwardActivationParams;
+	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
@@ -162,4 +169,5 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
+	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 };

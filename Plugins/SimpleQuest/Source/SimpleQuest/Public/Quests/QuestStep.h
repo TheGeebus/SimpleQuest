@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
+#include "Types/QuestObjectiveActivationParams.h"
 #include "Types/QuestObjectiveContext.h"
 #include "Types/QuestStepEnums.h"
 #include "QuestStep.generated.h"
@@ -44,11 +45,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 	int32 NumberOfElements = 0;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
-	FVector TargetVector = FVector::ZeroVector;
-
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
+
+public:
+	/**
+	 * Transient scratch slot for runtime activation params handed in by an FQuestActivationRequestEvent publisher.
+	 * Set by UQuestManagerSubsystem::HandleActivationRequest before ActivateNodeByTag; consumed and cleared by this
+	 * step's ActivateInternal during params composition. Not serialized — save/load restoration republishes the
+	 * activation event rather than persisting the stash directly.
+	 */
+	UPROPERTY(Transient)
+	FQuestObjectiveActivationParams PendingActivationParams;
 	
 private:
 	UPROPERTY()
@@ -68,7 +76,6 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
-	FORCEINLINE FVector GetTargetVector() const { return TargetVector; }
 	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }

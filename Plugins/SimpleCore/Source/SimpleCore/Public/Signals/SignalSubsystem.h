@@ -32,6 +32,7 @@ public:
      * Publish a pre-packed FInstancedStruct on Channel. Same tag-hierarchy walk as PublishMessage. Use when forwarding an event
      * received from another subscription without re-packing (avoids type-slicing).
      */
+    UFUNCTION(BlueprintCallable)
     void PublishRawMessage(FGameplayTag Channel, const FInstancedStruct& Payload);
     
     /**

@@ -310,7 +310,6 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
             StepInstance->Reward = StepNode->RewardClass;
             StepInstance->TargetClasses = StepNode->TargetClasses;
             StepInstance->NumberOfElements = StepNode->NumberOfElements;
-            StepInstance->TargetVector = StepNode->TargetVector;
             StepInstance->TargetActors.Append(StepNode->TargetActors);
             StepInstance->PrerequisiteGateMode = StepNode->PrerequisiteGateMode;
             Instance = StepInstance;

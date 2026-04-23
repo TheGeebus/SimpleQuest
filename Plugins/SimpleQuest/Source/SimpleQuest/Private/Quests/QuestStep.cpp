@@ -30,13 +30,29 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
+
+	// Compose activation params — Step's authored defaults plus any external params from a
+	// Tag_Channel_QuestActivationRequest publisher. Additive for compound fields (sets union, count sums);
+	// ActivationSource + CustomData come straight from external since Step has no equivalents. Position
+	// data (if any) goes through CustomData — no first-class TargetVector field on the Step anymore.
 	FQuestObjectiveActivationParams Params;
+
 	Params.TargetActors = TargetActors;
+	Params.TargetActors.Append(PendingActivationParams.TargetActors);
+
 	Params.TargetClasses = TargetClasses;
-	Params.TargetVector = TargetVector;
-	Params.NumElementsRequired = NumberOfElements;
-	// ActivationSource and CustomData remain default for Piece A. Pieces B / C / D will populate them.
-	ActiveObjective->DispatchOnObjectiveActivated(Params);}
+	Params.TargetClasses.Append(PendingActivationParams.TargetClasses);
+
+	Params.NumElementsRequired = NumberOfElements + PendingActivationParams.NumElementsRequired;
+
+	Params.ActivationSource = PendingActivationParams.ActivationSource;
+	Params.CustomData = PendingActivationParams.CustomData;
+
+	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
+	PendingActivationParams = FQuestObjectiveActivationParams{};
+
+	ActiveObjective->DispatchOnObjectiveActivated(Params);
+}
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {

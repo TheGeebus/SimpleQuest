@@ -13,6 +13,7 @@
 #include "Signals/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestActivationRequestEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
@@ -44,7 +45,8 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
             AbandonDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FAbandonQuestEvent>(Tag_Channel_QuestAbandoned, this, &UQuestManagerSubsystem::HandleAbandonQuestEvent);
             GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
             GiverRegisteredDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGiverRegisteredEvent>(Tag_Channel_QuestGiverRegistered, this, &UQuestManagerSubsystem::HandleGiverRegisteredEvent);
-            DeactivateEventDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivateRequestEvent>(Tag_Channel_QuestDeactivateRequest, this, &UQuestManagerSubsystem::HandleNodeDeactivationRequest);   
+            DeactivateEventDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivateRequestEvent>(Tag_Channel_QuestDeactivateRequest, this, &UQuestManagerSubsystem::HandleNodeDeactivationRequest);
+            ActivationRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestActivationRequestEvent>(Tag_Channel_QuestActivationRequest, this, &UQuestManagerSubsystem::HandleActivationRequest);
         }
     }
 
@@ -66,6 +68,7 @@ void UQuestManagerSubsystem::Deinitialize()
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiverRegistered, GiverRegisteredDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestDeactivateRequest, DeactivateEventDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestTarget, ClassBridgeHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestActivationRequest, ActivationRequestDelegateHandle);
 
         for (auto& Pair : DeactivationSubscriptionHandles)
         {
@@ -556,6 +559,29 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     
     RegisteredGiverQuestTags.Remove(QuestTag);
     ClearQuestPendingGiver(QuestTag);
+    ActivateNodeByTag(QuestTag.GetTagName());
+}
+
+void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid()) return;
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — activating with external params (CustomData %s)"),
+        *QuestTag.ToString(),
+        Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+
+    // Stash params on the target step (if it IS a step) before activation, so ActivateInternal merges them with
+    // the Step's authored defaults. Quest / LinkedQuestline / utility targets are out of scope for Piece B —
+    // Piece D (step-to-step handoff) will cover propagation into downstream steps via completion chains.
+    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    {
+        if (UQuestStep* Step = Cast<UQuestStep>(Instance))
+        {
+            Step->PendingActivationParams = Event.Params;
+        }
+    }
+
     ActivateNodeByTag(QuestTag.GetTagName());
 }
 

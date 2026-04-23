@@ -551,27 +551,6 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 			})
 			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-		]
-
-		// Target vector (only when non-zero)
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
-		[
-			SNew(STextBlock)
-			.Text_Lambda([this]()
-			{
-				if (!StepNode) return FText::GetEmpty();
-				const FVector& V = StepNode->TargetVector;
-				return FText::FromString(FString::Printf(TEXT("Vector: (%g, %g, %g)"), V.X, V.Y, V.Z));
-			})
-			.Visibility_Lambda([this]()
-			{
-				return (StepNode && !StepNode->TargetVector.IsZero())
-					? EVisibility::Visible : EVisibility::Collapsed;
-			})
-			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
-			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 		];
 }
 

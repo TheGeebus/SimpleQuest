@@ -42,9 +42,6 @@ public:
 	int32 NumberOfElements = 0;
 
 	UPROPERTY(EditAnywhere, Category = "Step")
-	FVector TargetVector = FVector::ZeroVector;
-
-	UPROPERTY(EditAnywhere, Category = "Step")
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
 
 	/** Transient widget state — preserves expanded/collapsed detail view across widget rebuilds. Not serialized. */

@@ -32,10 +32,6 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationParams
 	UPROPERTY(BlueprintReadWrite)
 	TSet<TSubclassOf<AActor>> TargetClasses;
 
-	/** Scene-position target (for position-based objectives like GoTo). */
-	UPROPERTY(BlueprintReadWrite)
-	FVector TargetVector = FVector::ZeroVector;
-
 	/** Element count required to complete (for counting objectives). */
 	UPROPERTY(BlueprintReadWrite)
 	int32 NumElementsRequired = 0;

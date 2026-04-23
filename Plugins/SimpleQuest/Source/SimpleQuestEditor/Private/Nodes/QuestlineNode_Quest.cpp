@@ -39,17 +39,74 @@ void UQuestlineNode_Quest::PostDuplicate(bool bDuplicateForPIE)
 void UQuestlineNode_Quest::PostPasteNode()
 {
 	Super::PostPasteNode();
-	// Paste deserialized the source's inner graph (deep copy, complete with source's inner-node QuestGuids).
-	// PostPasteNode doesn't cascade to child-graph nodes in SGraphEditor's paste flow, so those inner nodes would
-	// keep duplicate identities. Discard the deserialized inner graph and create a fresh empty one — matches the
-	// "duplicate = fresh empty Quest" design choice already encoded in PostDuplicate.
-	CreateInnerGraph();
+
+	// Deep-copy path. Paste serialized the source's inner graph along with its descendants — labels + topology
+	// + pin connections are all carried through intact. Regenerate identity on every descendant content node so
+	// they don't collide with the source's compiled tags. For nested Quest nodes, also re-wire subscriptions
+	// and rebuild outcome pins (normally done inside CreateInnerGraph, which we're NOT calling here since we
+	// want to keep the deep-copied content).
+	if (InnerGraph)
+	{
+		InnerGraph->Modify();
+		if (!InnerGraph->Schema)
+		{
+			InnerGraph->Schema = UQuestlineGraphSchema::StaticClass();
+		}
+		RegenerateInnerGraphIdentitiesRecursive(InnerGraph);
+
+		SubscribeToInnerGraphChanges();
+		RebuildOutcomePinsFromInnerGraph();
+	}
+	else
+	{
+		// Defensive fallback: serialization somehow didn't produce an inner graph. Create a fresh empty one.
+		CreateInnerGraph();
+	}
 }
 
 void UQuestlineNode_Quest::PostLoad()
 {
 	Super::PostLoad();
 	SubscribeToInnerGraphChanges();
+}
+
+void UQuestlineNode_Quest::RegenerateInnerGraphIdentitiesRecursive(UEdGraph* Graph)
+{
+	if (!Graph) return;
+
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (!Node) continue;
+
+		Node->Modify();
+		Node->CreateNewGuid(); // UEdGraphNode::NodeGuid — separate from our compiler-level QuestGuid below.
+
+		if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node))
+		{
+			ContentNode->QuestGuid = FGuid::NewGuid();
+		}
+
+		// Recurse into nested Quest's inner graph + re-wire subscription and outcome pins.
+		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			if (UEdGraph* NestedInner = QuestNode->GetInnerGraph())
+			{
+				NestedInner->Modify();
+				if (!NestedInner->Schema)
+				{
+					NestedInner->Schema = UQuestlineGraphSchema::StaticClass();
+				}
+				RegenerateInnerGraphIdentitiesRecursive(NestedInner);
+
+				// These are private on UQuestlineNode_Quest but accessible here because
+				// RegenerateInnerGraphIdentitiesRecursive is a static member of the same class.
+				QuestNode->SubscribeToInnerGraphChanges();
+				QuestNode->RebuildOutcomePinsFromInnerGraph();
+			}
+		}
+		// LinkedQuestline nodes inside the inner graph: QuestGuid is regenerated above via the ContentBase cast,
+		// but we don't recurse — LinkedGraph is a soft-ref to an external asset we aren't duplicating.
+	}
 }
 
 static void NotifyGraphAndDescendants(UEdGraph* Graph)

@@ -213,21 +213,27 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 	// ---- Collect activation group metadata for parallel-path analysis ----
 	CollectActivationGroupMetadata(Graph, TagPrefix);
 
-	// ---- Pass 2b: Forward output wiring for all utility-keyed nodes ----
-    for (auto& [EdNode, UtilKey] : UtilityNodeKeyMap)
-    {
-        UQuestNodeBase* Inst = AllCompiledNodes.FindRef(UtilKey);
-        if (!Inst) continue;
+	// ---- Pass 2b: Forward output wiring for utility-keyed nodes that live in THIS graph ----
+	// UtilityNodeKeyMap is a compiler-wide map accumulated across recursion; iterating it unconditionally would
+	// rewrite nested utility nodes with the outer graph's TagPrefix each time recursion unwinds. Scope the loop
+	// to this graph's nodes so each utility node's forward wiring is resolved against the prefix it was born with.
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		const FName* UtilKey = UtilityNodeKeyMap.Find(Node);
+		if (!UtilKey) continue;
 
-        Inst->NextNodesOnForward.Empty();
+		UQuestNodeBase* Inst = AllCompiledNodes.FindRef(*UtilKey);
+		if (!Inst) continue;
 
-		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(EdNode, EQuestPinRole::ExecForwardOut))
-        {
-            TArray<FName> ForwardTags;
-            ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
-            for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
-        }
-    }
+		Inst->NextNodesOnForward.Empty();
+
+		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(Node, EQuestPinRole::ExecForwardOut))
+		{
+			TArray<FName> ForwardTags;
+			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
+			for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
+		}
+	}
 
     // ---- Resolve entry tags from the graph's Entry node ----
     TArray<FName> EntryTags = ResolveEntryTags(Graph, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutEntryTagsByOutcome);
@@ -1394,10 +1400,13 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
                 if (!OutcomeTag.IsValid()) continue;
 
-                FPrerequisiteExpressionNode LeafNode;
-                LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
-                OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
+            	FPrerequisiteExpressionNode LeafNode;
+            	LeafNode.Type = EPrerequisiteExpressionType::Leaf;
+            	LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
+            	// Sequence the Add-to-Nodes (which may reallocate the TArray) BEFORE indexing back into Nodes —
+            	// otherwise OutExpression.Nodes[OrIndex].ChildIndices holds a dangling reference when a grow happens.
+            	const int32 LeafIdx = OutExpression.Nodes.Add(LeafNode);
+            	OutExpression.Nodes[OrIndex].ChildIndices.Add(LeafIdx);
             }
 
             return OrIndex;

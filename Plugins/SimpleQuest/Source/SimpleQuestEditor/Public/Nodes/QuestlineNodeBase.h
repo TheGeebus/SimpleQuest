@@ -58,6 +58,7 @@ public:
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 	virtual void PostEditUndo() override;
 
+
 	/**
 	 * Auto-wire a newly-placed node to the pin the user dragged from. Walks candidate pins on this node in priority order matching
 	 * natural semantic pairing — outcome output prefers Activate input, prereq output prefers Prerequisites, deactivated output

@@ -116,6 +116,14 @@ public:
 	static TArray<FQuestContextualActor> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
+	 * Scans the Asset Registry for other questline assets whose CompiledQuestTags list contains an entry that ends with
+	 * this node's relative path (post home-ID prefix strip). Returns the matching runtime tags — i.e., the contextual
+	 * nested variants of this node's tag under every OUTER asset that LinkedQuestline-references the home. Empty when
+	 * the node is used only in its own asset.
+	 */
+	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
+	
+	/**
 	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent watchers per contextual tag instead of
 	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
 	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.

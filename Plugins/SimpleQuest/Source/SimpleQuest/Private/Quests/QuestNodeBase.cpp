@@ -46,6 +46,17 @@ void UQuestNodeBase::ForwardActivation()
     OnNodeForwardActivated.ExecuteIfBound(this);
 }
 
+void UQuestNodeBase::ResetTransientState()
+{
+    // Handles reference a SignalSubsystem from the previous PIE session — now dead. Clearing the map without
+    // unsubscribing is safe: the owning subsystem is gone, there's nothing left to unsubscribe from.
+    PrereqSubscriptionHandles.Reset();
+    DeferredContextualTag = FGameplayTag::EmptyTag;
+    ContextualTag = FGameplayTag::EmptyTag;
+    bWasGiverGated = false;
+    PendingActivationParams = FQuestObjectiveActivationParams{};
+}
+
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 {
     DeferredContextualTag = InContextualTag;
@@ -55,7 +66,7 @@ void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 
     TArray<FGameplayTag> LeafTags;
     PrerequisiteExpression.CollectLeafTags(LeafTags);
-
+    
     for (const FGameplayTag& LeafTag : LeafTags)
     {
         FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestNodeBase::OnPrereqFactAdded);

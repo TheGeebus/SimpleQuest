@@ -103,6 +103,15 @@ protected:
      * so the manager can chain NextNodesOnForward. Utility nodes call this after completing their utility action.
      */
     virtual void ForwardActivation();
+
+    /**
+     * Clears every member set during an earlier Activate / Deactivate cycle. Called by
+     * UQuestManagerSubsystem::ActivateQuestlineGraph before each PIE session wires the node back into a live subsystem —
+     * the compiled instances persist across PIE sessions (they live on the UQuestlineGraph asset), so any delegate
+     * handles or scratch state from a prior session are stale and must be dropped. Override on subclasses that add
+     * their own transient members; always call Super first.
+     */
+    virtual void ResetTransientState();
     
     /**
      * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID

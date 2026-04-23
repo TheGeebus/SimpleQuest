@@ -74,6 +74,17 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 	Super::DeactivateInternal(InContextualTag);
 }
 
+void UQuestStep::ResetTransientState()
+{
+	Super::ResetTransientState();
+	// ActiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
+	// drop the reference. CompletionData + Piece D params are pure value types; reset to empty.
+	ActiveObjective = nullptr;
+	CompletionData = FQuestObjectiveContext{};
+	ReceivedActivationParams = FQuestObjectiveActivationParams{};
+	CompletionForwardParams = FQuestObjectiveActivationParams{};
+}
+
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
 	if (ActiveObjective)

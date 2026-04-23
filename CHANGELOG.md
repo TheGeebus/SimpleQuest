@@ -8,11 +8,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Active Development
-- Node editor polish pass: `FriendlyName` field on `UQuestlineGraph`,
-  LinkedQuestline title format + inline asset picker, Graph Defaults
-  toolbar button, Outcome node inline tag picker
 - Project-wide Validate-all-prereq-tags scanner
 - `BindToQuestEvent` convenience wrapper (C++ template + BP K2 node)
+- Duplicate-Exit-routing compile warning
+- Event-driven LinkedQuestline ref-index cache (incremental cross-asset
+  dependency tracking to replace current Asset Registry scans on compile)
 
 ### Upcoming
 - Tag namespace consolidation under a single `SimpleQuest.*` root
@@ -22,10 +22,189 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   subscription, prioritized synchronous fallback for critical paths)
 
 ### Known Issues
-- Node duplication (Ctrl-D / copy-paste) leaves `NodeLabel` collisions
-  with the source; duplicate-resolve auto-suffix helper not yet
-  implemented. Compile warning fires on collision but designer
-  intervention is still required.
+- Giver "why can't activate" query API (Item 23) still deferred until
+  deactivation system stabilizes
+
+---
+
+## [0.3.1] — 2026-04-23 — Objective Activation Lifecycle + Structured Payloads
+
+Dominant feature: a restructuring of the objective activation surface.
+Activation now delivers a typed `FQuestObjectiveActivationParams`
+struct to objectives, with named fields + `FInstancedStruct CustomData`
+extension — symmetric with the existing `FQuestObjectiveContext` on
+the completion side. Four entry points feed the struct (authored step
+defaults, external event bus, quest giver components, step-to-step
+handoff), all merging additively. New `OriginTag` + `OriginChain` give
+objectives first-class "who activated me" tagging and full activation-
+history awareness across cascades, Quest containers, and
+LinkedQuestline boundaries.
+
+Also bundled: the graph editor polish pass — cross-graph giver display,
+auto-compile for linked questlines, copy/paste/duplicate/cut command
+wiring, Quest inner-graph deep-copy on paste, toolbar and picker
+conveniences, plus a batch of rename- and compile-refresh fixes.
+
+### Added
+
+#### Activation Params Struct (dominant feature)
+- `FQuestObjectiveActivationParams` — named activation-time fields
+  (`TargetActors`, `TargetClasses`, `NumElementsRequired`,
+  `ActivationSource`, `OriginTag`, `OriginChain`) plus
+  `FInstancedStruct CustomData` for game-specific runtime extension.
+  Symmetric with `FQuestObjectiveContext` on the completion side
+- `UQuestObjective::OnObjectiveActivated` replaces `SetObjectiveTarget`
+  — `BlueprintNativeEvent` taking the full params struct, accessed
+  via `BlueprintProtected` + public `DispatchOnObjectiveActivated`
+  wrapper. Subclasses override to read authored fields or typed
+  `CustomData`
+
+#### External Activation Entry Point (Piece B)
+- `FQuestActivationRequestEvent` published on
+  `Tag_Channel_QuestActivationRequest` — programmatic activation
+  entry for procedural generators, dialogue systems, save/load
+  rehydration, test harnesses. Manager subscribes and routes without
+  exposing a new public method on the subsystem (black-box preserved)
+
+#### Giver-Authored Params (Piece C)
+- `UQuestGiverComponent::ActivationParams` — designer-authored
+  `FQuestObjectiveActivationParams` carried with every give. Placed
+  world singletons (shrines, dungeon-entrance actors) author their
+  specific `TargetActors`, counts, `CustomData`, `OriginTag` directly
+  in the Details panel
+- `UQuestGiverComponent::GiveQuestByTag(QuestTag, Params)` promoted
+  signature — optional runtime `Params` arg (`AutoCreateRefTerm`
+  makes the BP pin truly optional). Merges additively with the
+  component's authored `ActivationParams` using the same rules as
+  the step-side merge
+- `ActivationSource` defaults to `GetOwner()` when neither authored
+  nor caller sets it; designer-authored `OriginTag` seeds the
+  initial `OriginChain`
+
+#### Step-to-Step Forward Params (Piece D)
+- `UQuestObjective::CompleteObjectiveWithOutcome` gains optional
+  `InForwardParams` arg (`AutoCreateRefTerm`) — completing objective
+  specifies an `FQuestObjectiveActivationParams` to carry forward
+  into the next step's activation. Merges additively with the
+  downstream step's authored defaults. Both `InCompletionData` and
+  `InForwardParams` are BP-optional via `AutoCreateRefTerm`
+- `K2Node_CompleteObjectiveWithOutcome` — new `Forward Params`
+  input pin with per-pin tooltip explaining the additive merge
+  rules + common uses. `Completion Data` pin now also carries a
+  full per-pin tooltip. Node-level tooltip rewritten to cover all
+  three authored inputs
+
+#### Chain Propagation
+- `OriginTag` — immediate-origin tag stamped onto the activating
+  node; designer escape hatch for "who activated me?" BP branching
+- `OriginChain` — full activation history array, oldest-first.
+  Extended at every hop: step-to-step via `ChainToNextNodes`, across
+  `UQuest` boundaries via `ActivateNodeByTag`'s Quest branch,
+  across `LinkedQuestline` boundaries automatically (LinkedQuestline
+  inlines as a `UQuest` at compile time). Every hop contributes
+  exactly one entry — no gaps, no duplicates across boundaries
+
+#### Graph Editor Polish
+- Copy / paste / duplicate / cut command wiring on the questline
+  graph editor (`FGenericCommands::Copy` / `Paste` / `Duplicate` /
+  `Cut` + handlers modeled on `FBlueprintEditor`, clipboard via
+  `FPlatformApplicationMisc` with `ApplicationCore` module dep)
+- Quest inner-graph deep-copy on paste — pasted Quest nodes carry
+  a full deep copy of their inner graph, labels + topology + pin
+  connections intact, with fresh compiler-level identities
+  (`RegenerateInnerGraphIdentitiesRecursive` + `PostPasteNode`)
+- Graph Defaults toolbar button — jumps to the graph's root
+  properties (FriendlyName, metadata) without hunting in the
+  Details panel
+- Outcome node inline tag picker — outcome tag pickable directly
+  on the Outcome node widget rather than via the Details panel
+- Auto-compile linked questlines — compiling a graph automatically
+  recompiles any graphs that link into it, keeping cross-graph
+  state consistent without manual compile cycles
+- Cross-graph contextual giver display on all content nodes —
+  Quest / LinkedQuestline / Step nodes show their associated giver
+  actors with context-aware resolution across linked graph
+  boundaries; `bGiversExpanded` lifted to component base
+- `FriendlyName` `FText` on `UQuestlineGraph` — preferred over
+  asset name in titles, tooltips, and outliner root display
+- LinkedQuestline title format + inline asset picker (title lock
+  when an asset is picked)
+
+### Changed
+
+#### Struct Promotions
+- `PendingActivationParams` promoted from `UQuestStep` to
+  `UQuestNodeBase` so any node type can be pre-stamped by cascade
+  routing — unblocks `UQuest` / LinkedQuestline boundary chain
+  preservation
+
+#### Authoring
+- Details-panel rename propagation — editing a node's name from
+  the Details panel triggers the same propagation + compile-
+  invalidation flow as in-graph rename
+- Container rename propagation — renaming a Quest container
+  updates all inner-graph-contained node tags and downstream
+  references
+- Stale-warning banner generalization in the Details panel —
+  previously hardcoded to a single case; now covers all content-
+  node kinds uniformly
+
+### Removed
+- `UQuestStep::TargetVector` + `UQuestlineNode_Step::TargetVector`
+  — positional data now routes through `CustomData` (vectors have
+  no sensible additive merge semantic; dropped during Piece B
+  design review)
+
+### Fixed
+- Compile-status icon regression after auto-compile-linked landed
+  — neighbor-broadcast refreshes were resetting status to Unknown;
+  fixed with `bSuppressDirtyOnGraphChange` guard across
+  `RefreshAllNodeWidgets`
+- Cross-asset compile refresh — when a linked questline recompiles,
+  parent assets that reference it now refresh their compile status
+  without a manual re-open
+- Refresh recursion — graph-change notification loops through
+  nested Quest inner graphs without duplicate work
+- Objective BP visibility lockdown — internal objective lifecycle
+  methods (`TryCompleteObjective`, `ReportProgress` et al.)
+  properly `BlueprintProtected` + public C++ dispatcher wrappers;
+  no longer leak into arbitrary BP call menus
+- Linked-questline runtime participation — previously a
+  LinkedQuestline node could fail to wire into the runtime graph
+  depending on load order; fixed by normalizing the compile-time
+  inline handoff
+- Prerequisite expression compilation dropped leaves on multi-input
+  AND / OR when the AnyOutcome branch fired — a chained
+  `OutExpression.Nodes[Idx].ChildIndices.Add(OutExpression.Nodes.Add(...))`
+  held a dangling reference when the `TArray` reallocated mid-loop,
+  silently losing every child after the first. Symptoms: AND(Left, Right)
+  prereqs that only checked Left; unreleasable steps in deep graphs.
+  Fix sequences the `Nodes.Add` before the back-index
+- Utility node (ActivationGroup Entry/Exit, GroupSetter/Getter,
+  PrereqRule monitor) output-pin wiring resolved with the wrong
+  `TagPrefix` when compile recursion unwound — Pass 2b iterated the
+  shared `UtilityNodeKeyMap` unconditionally and rewrote nested
+  utility nodes' `NextNodesOnForward` using each outer graph's prefix.
+  Symptoms: group-entry cascades targeting shallow tags like
+  `Quest.NewTest.Left_Two` when destinations lived at
+  `Quest.NewTest.Secret_Level.Near.Left_Two`. Pass 2b now iterates
+  only utility nodes belonging to the current graph
+- `UQuestManagerSubsystem` subclass arbitration — every concrete
+  subclass was being instantiated by UE's default
+  `ShouldCreateSubsystem`, not just the one designated in project
+  settings. Designated quest manager class now gates creation
+  (`ShouldCreateSubsystem` override checks `USimpleQuestSettings`);
+  other subclasses are silently suppressed so signal-bus handlers
+  don't double-fire
+
+### Breaking Changes
+- `UQuestObjective::SetObjectiveTarget` renamed to
+  `OnObjectiveActivated` with a new signature taking
+  `FQuestObjectiveActivationParams` instead of `TSet<AActor*>`.
+  BP subclasses that overrode the old event need to re-implement
+  as `OnObjectiveActivated` — mechanical migration (break the
+  struct param in the BP editor to access sub-fields). Pre-release,
+  no shipped content affected
 
 ---
 

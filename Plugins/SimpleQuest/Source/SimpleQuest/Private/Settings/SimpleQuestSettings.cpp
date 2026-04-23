@@ -15,7 +15,7 @@ void UGameInstanceSubsystemInitializer::Initialize(FSubsystemCollectionBase& Col
 		return;
 	}
 
-	// initialize the quest manager
-	UE_LOG(LogSimpleQuest, Log, TEXT("UGameInstanceSubsystemInitializer::Initialize : Initializing quest manager: %s"), *NewManagerClass->GetFullName());
+	// Register the quest manager
+	UE_LOG(LogSimpleQuest, Log, TEXT("Designated quest manager class: %s (creation gated by ShouldCreateSubsystem)"), *NewManagerClass->GetFullName());
 	Collection.InitializeDependency(NewManagerClass);
 }

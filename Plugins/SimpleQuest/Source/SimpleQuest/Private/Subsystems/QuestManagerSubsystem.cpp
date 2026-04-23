@@ -24,6 +24,7 @@
 #include "Utilities/QuestStateTagUtils.h"
 #include "Quests/Types/QuestEventContext.h"
 #include "Quests/Types/QuestObjectiveContext.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
@@ -57,6 +58,22 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     {
         World->GetTimerManager().SetTimerForNextTick(this, &UQuestManagerSubsystem::StartInitialQuests);
     }
+}
+
+bool UQuestManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+    if (!Super::ShouldCreateSubsystem(Outer)) return false;
+
+    // Only the class designated in project settings gets instantiated. Every other concrete UQuestManagerSubsystem
+    // subclass discovered by UE is skipped here. InitializeDependency in the initializer force-loads the designated
+    // class; this gate suppresses the rest.
+    const USimpleQuestSettings* Settings = GetDefault<USimpleQuestSettings>();
+    UClass* DesignatedClass = Settings ? Settings->QuestManagerClass.LoadSynchronous() : nullptr;
+
+    // No designated class in settings — fall back to the base class only, so the system still functions out of the box.
+    if (!DesignatedClass) return GetClass() == UQuestManagerSubsystem::StaticClass();
+
+    return GetClass() == DesignatedClass;
 }
 
 void UQuestManagerSubsystem::Deinitialize()
@@ -139,6 +156,11 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
     {
         if (UQuestNodeBase* Instance = Pair.Value)
         {
+            // Compiled node instances live on the UQuestlineGraph asset and persist across PIE sessions. Wipe any
+            // state the prior session left on them — subscription handles to a dead SignalSubsystem, deferred
+            // contextual tags, activation scratch, completion snapshots — so this session starts clean.
+            Instance->ResetTransientState();
+
             if (!Pair.Key.ToString().StartsWith(TEXT("Util_")))
             {
                 Instance->ResolveQuestTag(Pair.Key);
@@ -160,10 +182,9 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
             }
         }
     }
-    
     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — loaded %d node(s), activating %d entry tag(s)"),
         *Graph->GetName(), Graph->GetCompiledNodes().Num(), Graph->GetEntryNodeTags().Num());
-
+    
     for (const FName& EntryTagName : Graph->GetEntryNodeTags())
     {
         ActivateNodeByTag(EntryTagName);

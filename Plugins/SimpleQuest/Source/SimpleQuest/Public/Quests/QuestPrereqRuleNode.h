@@ -17,6 +17,9 @@ class SIMPLEQUEST_API UQuestPrereqRuleNode : public UQuestNodeBase
 public:
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
+protected:
+	virtual void ResetTransientState() override;
+
 private:
 	/** The fact written to WorldState when Expression evaluates true. */
 	UPROPERTY() FGameplayTag GroupTag;

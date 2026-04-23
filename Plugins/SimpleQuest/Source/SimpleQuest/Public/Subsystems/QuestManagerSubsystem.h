@@ -48,6 +48,7 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 

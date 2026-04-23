@@ -47,4 +47,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 private:
 	bool EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState) const;
 	void CollectLeafTagsFromNode(int32 NodeIndex, TArray<FGameplayTag>& OutTags) const;
+
+public:
+	void DebugDumpTo(TArray<FString>& OutLines, int32 NodeIndex = -1, int32 Depth = 0) const;
 };

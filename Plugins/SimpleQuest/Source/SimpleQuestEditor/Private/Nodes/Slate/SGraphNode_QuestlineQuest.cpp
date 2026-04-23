@@ -44,7 +44,7 @@ void SGraphNode_QuestlineQuest::UpdateGraphNode()
 		{
 			WatchingGiverNames = FSimpleQuestEditorUtilities::FindActorNamesGivingTag(CompiledTag);
 		}
-		for (const FSimpleQuestEditorUtilities::FQuestContextualGiver& Entry
+		for (const FSimpleQuestEditorUtilities::FQuestContextualActor& Entry
 			: FSimpleQuestEditorUtilities::FindContextualGiversForNode(QuestNode))
 		{
 			WatchingGiverNames.Add(FString::Printf(TEXT("%s (via %s)"),

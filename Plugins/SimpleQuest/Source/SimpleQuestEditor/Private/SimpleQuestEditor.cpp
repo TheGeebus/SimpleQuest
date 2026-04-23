@@ -41,10 +41,12 @@
 #include "Debug/QuestPIEDebugChannel.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
+#include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Slate/SGraphNode_Exit.h"
 #include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
 #include "Nodes/Slate/SGraphNode_QuestlineQuest.h"
 #include "UObject/SavePackage.h"
@@ -92,6 +94,10 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
 		{
 			return SNew(SGraphNode_QuestlineQuest, QuestNode);
+		}
+		if (UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
+		{
+			return SNew(SGraphNode_Exit, ExitNode);
 		}
 		return nullptr;
 	}

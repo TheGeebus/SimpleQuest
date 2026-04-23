@@ -93,10 +93,11 @@ public:
 	static TArray<FString> FindActorNamesGivingTag(const FGameplayTag& QuestTag);
 
 	/**
-	 * Paired entry produced by FindContextualGiversForNode: a giver actor and the display name of the outer questline
-	 * asset whose contextual inlining of this node the giver targets.
+	 * Paired entry produced by the contextual-query helpers: an actor name + the display name of the outer questline
+	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, watchers, or any future
+	 * actor-per-tag contextual surface.
 	 */
-	struct FQuestContextualGiver
+	struct FQuestContextualActor
 	{
 		FString ActorName;
 		FText OuterAssetDisplayName;
@@ -107,14 +108,19 @@ public:
 	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
 	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
 	 * (everything past "Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
-	 * givers already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag. Returns empty for
-	 * uncompiled nodes or nodes with no cross-graph contextual inlinings.
+	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
 	 *
 	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.
-	 *
 	 * Results sorted by (OuterAssetDisplayName, ActorName) and deduped on that pair.
 	 */
-	static TArray<FQuestContextualGiver> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);
+	static TArray<FQuestContextualActor> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);
+
+	/**
+	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent watchers per contextual tag instead of
+	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
+	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
+	 */
+	static TArray<FQuestContextualActor> FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
 	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
@@ -224,4 +230,12 @@ private:
 	/** Walks the graph outer chain from any content node to reconstruct its compiled tag. */
 	static FGameplayTag ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode);
 
+	/**
+	 * Shared contextual-query body. Walks the Asset Registry for non-home questline packages, suffix-matches on the node's
+	 * relative path, and invokes TagToActorNames() per contextual tag to resolve the actor list. Both
+	 * FindContextualGiversForNode and FindContextualWatchersForNode are thin wrappers around this. LogLabel is emitted in
+	 * the Verbose diagnostic line for trace clarity.
+	 */
+	static TArray<FQuestContextualActor> CollectContextualActorEntries(const UQuestlineNode_ContentBase* ContentNode,
+		TFunctionRef<TArray<FString>(const FGameplayTag&)> TagToActorNames, const TCHAR* LogLabel);
 };

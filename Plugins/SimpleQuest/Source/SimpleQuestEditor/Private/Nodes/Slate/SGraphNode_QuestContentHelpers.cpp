@@ -23,7 +23,10 @@ namespace FQuestNodeSlateHelpers
 	{
 		if (Items.Num() == 0)
 		{
-			return SNullWidget::NullWidget;
+			// Collapsed visibility — SVerticalBox skips the whole slot (padding included) rather than reserving
+			// slot padding around a zero-size child. SNullWidget is Visible by default, which left an empty row's
+			// padding contributing vertical gap to the node body. One SBox per rebuild is cheap.
+			return SNew(SBox).Visibility(EVisibility::Collapsed);
 		}
 
 		// Items column: first item always visible, rest expand below it.

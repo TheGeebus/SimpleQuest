@@ -241,9 +241,12 @@ TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGame
 	return Names;
 }
 
-TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUtilities::FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode)
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::CollectContextualActorEntries(
+	const UQuestlineNode_ContentBase* ContentNode,
+	TFunctionRef<TArray<FString>(const FGameplayTag&)> TagToActorNames,
+	const TCHAR* LogLabel)
 {
-	TArray<FQuestContextualGiver> Result;
+	TArray<FQuestContextualActor> Result;
 	if (!ContentNode) return Result;
 
 	// ── Home asset + compiled tag ─────────────────────────────────────────────────────────────────────────
@@ -273,11 +276,11 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUti
 	const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
 	if (!CompiledTagStr.StartsWith(ExpectedPrefix))
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("FindContextualGiversForNode: compiled tag '%s' does not begin with expected prefix '%s' — home/ID mismatch; skipping"),
-			*CompiledTagStr, *ExpectedPrefix);
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("%s: compiled tag '%s' does not begin with expected prefix '%s' — home/ID mismatch; skipping"),
+			LogLabel, *CompiledTagStr, *ExpectedPrefix);
 		return Result;
 	}
-	const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len()); // e.g. "Fruit.Apple"
+	const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
 	// Literal-dot-prefixed suffix prevents false positives across word boundaries — "Pineapple" can't match ".Apple".
 	const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
 
@@ -288,12 +291,11 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUti
 
 	for (const FAssetData& AssetData : QuestlineAssets)
 	{
-		if (AssetData.PackageName == HomePackageName) continue; // home asset — standalone path already covers its givers
+		if (AssetData.PackageName == HomePackageName) continue; // home asset — standalone path already covers it
 
 		const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
 		if (CompiledTagsJoined.IsEmpty()) continue;
 
-		// Outer display — prefer FriendlyName AR tag, fall back to short asset name. No sync-load either way.
 		const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
 		const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
 
@@ -302,15 +304,15 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUti
 
 		for (const FString& TagStr : CompiledTagStrs)
 		{
-			if (TagStr.Len() <= SuffixToMatch.Len()) continue; // cheap guard — suffix requires at least one segment before it
+			if (TagStr.Len() <= SuffixToMatch.Len()) continue;
 			if (!TagStr.EndsWith(SuffixToMatch)) continue;
 
 			const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), /*bErrorIfNotFound=*/ false);
 			if (!ContextualTag.IsValid()) continue;
 
-			for (const FString& ActorName : FindActorNamesGivingTag(ContextualTag))
+			for (const FString& ActorName : TagToActorNames(ContextualTag))
 			{
-				FQuestContextualGiver Entry;
+				FQuestContextualActor Entry;
 				Entry.ActorName = ActorName;
 				Entry.OuterAssetDisplayName = OuterDisplay;
 				Result.Add(Entry);
@@ -318,8 +320,8 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUti
 		}
 	}
 
-	// Sort + dedupe on (Outer, Actor) — same pair can arise when multiple tags in one outer asset match the suffix.
-	Result.Sort([](const FQuestContextualGiver& A, const FQuestContextualGiver& B)
+	// Sort + dedupe on (Outer, Actor).
+	Result.Sort([](const FQuestContextualActor& A, const FQuestContextualActor& B)
 	{
 		const int32 Cmp = A.OuterAssetDisplayName.ToString().Compare(B.OuterAssetDisplayName.ToString());
 		if (Cmp != 0) return Cmp < 0;
@@ -334,10 +336,20 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualGiver> FSimpleQuestEditorUti
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindContextualGiversForNode: Node '%s' relative='%s' — %d contextual giver(s) across OUTER assets"),
-		*ContentNode->NodeLabel.ToString(), *RelativePath, Result.Num());
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("%s: Node '%s' relative='%s' — %d contextual match(es) across OUTER assets"),
+		LogLabel, *ContentNode->NodeLabel.ToString(), *RelativePath, Result.Num());
 
 	return Result;
+}
+
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesGivingTag, TEXT("FindContextualGiversForNode"));
+}
+
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualWatchersForNode"));
 }
 
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)

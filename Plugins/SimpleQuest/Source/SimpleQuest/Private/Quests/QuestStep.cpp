@@ -4,6 +4,7 @@
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 void UQuestStep::Activate(FGameplayTag InContextualTag)
@@ -29,8 +30,13 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
-	ActiveObjective->DispatchSetObjectiveTarget(TargetActors, TargetClasses, NumberOfElements);
-}
+	FQuestObjectiveActivationParams Params;
+	Params.TargetActors = TargetActors;
+	Params.TargetClasses = TargetClasses;
+	Params.TargetVector = TargetVector;
+	Params.NumElementsRequired = NumberOfElements;
+	// ActivationSource and CustomData remain default for Piece A. Pieces B / C / D will populate them.
+	ActiveObjective->DispatchOnObjectiveActivated(Params);}
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {

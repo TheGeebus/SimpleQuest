@@ -1,13 +1,14 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Objectives/CountingQuestObjective.h"
-
 #include "SimpleQuestLog.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 
-void UCountingQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
+
+void UCountingQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params)
 {
-	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClasses, NumElementsRequired);
-	MaxElements = NumElementsRequired;
+	Super::OnObjectiveActivated_Implementation(Params);
+	MaxElements = Params.NumElementsRequired;
 	CurrentElements = 0;
 }
 

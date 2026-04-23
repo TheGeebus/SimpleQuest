@@ -10,6 +10,7 @@
 
 class UQuestTargetInterface;
 class IQuestTargetInterface;
+struct FQuestObjectiveActivationParams;
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
@@ -87,7 +88,7 @@ public:
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchSetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
@@ -103,12 +104,10 @@ protected:
 	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
 	 *
-	 * @param InTargetActors a set of specific target actors in the scene
-	 * @param InTargetClasses a set of classes to target (as for kills or pickups)
-	 * @param NumElementsRequired the number of elements required to complete the step
+	 * @param Params a set of specific target actors in the scene
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void SetObjectiveTarget(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0);
+	void OnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
 
 	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended

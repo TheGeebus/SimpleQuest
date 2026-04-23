@@ -341,6 +341,23 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         return;
     }
 
+    // Cascade origin: if we arrived here via a step-to-step activation, stamp the upstream step's tag onto the
+    // target step's PendingActivationParams.OriginTag + extend OriginChain. Empty/unregistered IncomingSourceTag
+    // resolves to an empty FGameplayTag (see RequestGameplayTag's false flag); the stamp silently no-ops in that
+    // case which is the correct behavior for sources without a registered tag.
+    if (IncomingSourceTag != NAME_None)
+    {
+        const FGameplayTag SourceTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
+        if (SourceTag.IsValid())
+        {
+            if (UQuestStep* Step = Cast<UQuestStep>(*InstancePtr))
+            {
+                Step->PendingActivationParams.OriginTag = SourceTag;
+                Step->PendingActivationParams.OriginChain.Add(SourceTag);
+            }
+        }
+    }
+
     (*InstancePtr)->Activate(NodeTag);
     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
         *NodeTagName.ToString(), *IncomingSourceTag.ToString(), *IncomingOutcomeTag.ToString());
@@ -555,10 +572,25 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid()) return;
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating"), *QuestTag.ToString());
-    
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating (CustomData %s, ActivationSource %s)"),
+        *QuestTag.ToString(),
+        Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
+        Event.Params.ActivationSource ? *Event.Params.ActivationSource->GetName() : TEXT("null"));
+
     RegisteredGiverQuestTags.Remove(QuestTag);
     ClearQuestPendingGiver(QuestTag);
+
+    // Mirror of HandleActivationRequest: stash the giver-authored params on the target step so ActivateInternal
+    // merges them with the step's authored defaults. Empty Params stamps cleanly — additive merge preserves the
+    // step's defaults in that case.
+    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    {
+        if (UQuestStep* Step = Cast<UQuestStep>(Instance))
+        {
+            Step->PendingActivationParams = Event.Params;
+        }
+    }
+
     ActivateNodeByTag(QuestTag.GetTagName());
 }
 

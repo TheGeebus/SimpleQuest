@@ -48,6 +48,9 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	Params.ActivationSource = PendingActivationParams.ActivationSource;
 	Params.CustomData = PendingActivationParams.CustomData;
 
+	Params.OriginTag = PendingActivationParams.OriginTag;
+	Params.OriginChain = PendingActivationParams.OriginChain;
+
 	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationParams = FQuestObjectiveActivationParams{};
 

@@ -13,6 +13,7 @@
 #include "GameplayTagsManager.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestStartedEvent.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
 
@@ -125,11 +126,35 @@ void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Contex
 	}
 }
 
-void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag)
+void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params)
 {
 	if (QuestTag.IsValid() && SignalSubsystem)
 	{
-		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+		// Start from the designer-authored baseline, then additively merge the caller-supplied Params on top. Matches
+		// the step-side merge rule so composition semantics are uniform across the activation pipeline.
+		FQuestObjectiveActivationParams OutgoingParams = ActivationParams;
+		OutgoingParams.TargetActors.Append(Params.TargetActors);
+		OutgoingParams.TargetClasses.Append(Params.TargetClasses);
+		OutgoingParams.NumElementsRequired += Params.NumElementsRequired;
+
+		// Single-valued fields: caller wins if set, else keep the authored baseline.
+		if (Params.ActivationSource) OutgoingParams.ActivationSource = Params.ActivationSource;
+		if (Params.CustomData.IsValid()) OutgoingParams.CustomData = Params.CustomData;
+		if (Params.OriginTag.IsValid()) OutgoingParams.OriginTag = Params.OriginTag;
+		if (Params.OriginChain.Num() > 0) OutgoingParams.OriginChain = Params.OriginChain;
+
+		// Default ActivationSource to the giver's owner when neither authored nor caller set it.
+		if (!OutgoingParams.ActivationSource)
+		{
+			OutgoingParams.ActivationSource = GetOwner();
+		}
+		// Seed OriginChain from OriginTag if the designer authored a tag but the chain is still empty.
+		if (OutgoingParams.OriginTag.IsValid() && OutgoingParams.OriginChain.Num() == 0)
+		{
+			OutgoingParams.OriginChain.Add(OutgoingParams.OriginTag);
+		}
+
+		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingParams));
 	}
 }
 

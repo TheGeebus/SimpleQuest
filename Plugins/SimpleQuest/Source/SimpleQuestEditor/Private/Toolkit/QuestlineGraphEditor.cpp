@@ -28,6 +28,9 @@
 #include "Widgets/SGroupExaminerPanel.h"
 #include "Widgets/SPrereqExaminerPanel.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "EdGraphNode_Comment.h"
+#include "GraphEditorActions.h"
+#include "ScopedTransaction.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -41,6 +44,8 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
 {
     ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Remove(ExternalCompileHandle);
 
+    if (GEditor) GEditor->UnregisterForUndo(this);
+    
     for (int32 i = 0; i < GraphBackwardStack.Num(); ++i)
     {
         if (GraphBackwardStack[i])
@@ -150,6 +155,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
         true,  // bCreateDefaultToolbar
         InQuestlineGraph);
 
+    if (GEditor) GEditor->RegisterForUndo(this);
 }
 
 FName FQuestlineGraphEditor::GetToolkitFName() const
@@ -222,6 +228,30 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
     InTabManager->UnregisterTabSpawner(GroupExaminerTabId);
     InTabManager->UnregisterTabSpawner(PrereqExaminerTabId);
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
+}
+
+void FQuestlineGraphEditor::PostUndo(bool bSuccess)
+{
+    // Force the current graph panel to rebuild its node widgets after any undo. UE's per-UObject PostEditUndo
+    // mechanism is fine for nodes that inherit from UQuestlineNodeBase (they explicitly broadcast NotifyGraphChanged),
+    // but third-party node classes like UEdGraphNode_Comment don't, so their widgets can linger after the underlying
+    // Nodes-array entry has been rolled back. A blanket NotifyGraphChanged from here covers every case uniformly.
+    if (GraphEditorWidget.IsValid())
+    {
+        if (TSharedPtr<SGraphEditor> Inner = GraphEditorWidget->GetGraphEditor())
+        {
+            if (UEdGraph* Graph = Inner->GetCurrentGraph())
+            {
+                Graph->NotifyGraphChanged();
+            }
+        }
+    }
+}
+
+void FQuestlineGraphEditor::PostRedo(bool bSuccess)
+{
+    // Redo runs through the same refresh path as undo — identical invalidation concern in both directions.
+    PostUndo(bSuccess);
 }
 
 TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGraphViewportTab(const FSpawnTabArgs& Args)
@@ -354,7 +384,11 @@ void FQuestlineGraphEditor::BindGraphCommands()
         FGenericCommands::Get().Duplicate,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::DuplicateNodes),
         FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanDuplicateNodes));
-    
+
+    GraphEditorCommands->MapAction(
+        FGraphEditorCommands::Get().CreateComment,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::OnCreateComment));
+
     GraphEditorCommands->MapAction(
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
@@ -538,6 +572,42 @@ void FQuestlineGraphEditor::DuplicateNodes()
 bool FQuestlineGraphEditor::CanDuplicateNodes() const
 {
     return CanCopyNodes();
+}
+
+void FQuestlineGraphEditor::OnCreateComment()
+{
+    if (!GraphEditorWidget.IsValid()) return;
+    TSharedPtr<SGraphEditor> Inner = GraphEditorWidget->GetGraphEditor();
+    if (!Inner.IsValid()) return;
+
+    UEdGraph* Graph = Inner->GetCurrentGraph();
+    if (!Graph) return;
+
+    const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "CreateCommentNode", "Create Comment"));
+    Graph->Modify();
+
+    // If nodes are selected, size the new comment to enclose their bounds with standard 50px padding.
+    // Otherwise, spawn a small default-sized comment at the cursor / last paste location.
+    FSlateRect SelBounds;
+    const bool bHasSelection = Inner->GetBoundsForSelectedNodes(SelBounds, /*InPadding*/ 50.0f);
+
+    const FVector2D SpawnPos = bHasSelection
+        ? FVector2D(SelBounds.Left, SelBounds.Top)
+        : Inner->GetPasteLocation();
+
+    UEdGraphNode_Comment* Comment = NewObject<UEdGraphNode_Comment>(Graph);
+    Comment->SetFlags(RF_Transactional);
+    Graph->AddNode(Comment, /*bUserAction*/ true, /*bSelectNewNode*/ true);
+    Comment->CreateNewGuid();
+    Comment->PostPlacedNewNode();
+    Comment->AllocateDefaultPins();
+
+    Comment->NodePosX = FMath::RoundToInt(SpawnPos.X);
+    Comment->NodePosY = FMath::RoundToInt(SpawnPos.Y);
+    Comment->NodeWidth  = bHasSelection ? FMath::RoundToInt(SelBounds.Right - SelBounds.Left) : 400;
+    Comment->NodeHeight = bHasSelection ? FMath::RoundToInt(SelBounds.Bottom - SelBounds.Top) : 100;
+
+    Graph->NotifyGraphChanged();
 }
 
 void FQuestlineGraphEditor::CompileQuestlineGraph()

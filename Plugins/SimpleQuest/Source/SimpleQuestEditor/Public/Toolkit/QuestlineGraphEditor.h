@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "IDetailsView.h"
+#include "EditorUndoClient.h"
 #include "Toolkit/QuestlineBreadcrumbBar.h"
 
 
@@ -17,7 +18,7 @@ class SGroupExaminerPanel;
 class SPrereqExaminerPanel;
 
 
-class FQuestlineGraphEditor : public FAssetEditorToolkit
+class FQuestlineGraphEditor : public FAssetEditorToolkit, public FEditorUndoClient
 {
 public:
 	virtual ~FQuestlineGraphEditor() override;
@@ -30,6 +31,12 @@ public:
 	virtual FLinearColor GetWorldCentricTabColorScale() const override;
 	virtual void RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override;
 	virtual void UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override;
+
+	// FEditorUndoClient interface — GEditor calls these after any undo/redo affecting anything we've registered to watch.
+	// Used here to force a full panel refresh; UE's per-UObject PostEditUndo propagation doesn't reliably invalidate
+	// SGraphPanel's widget cache for all node types (UEdGraphNode_Comment in particular hangs on).
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
 	
 	struct FEdNodeLocation
 	{
@@ -67,6 +74,8 @@ private:
 	void DuplicateNodes();
 	bool CanDuplicateNodes() const;
 
+	void OnCreateComment();
+	
 	// Compile and save graph data layer
 	void CompileQuestlineGraph();
 	void ValidatePrereqTags();

@@ -252,9 +252,14 @@ void UQuestManagerSubsystem::HandleOnNodeActivated(UQuestNodeBase* Node, FGamepl
             ActiveStepTriggerHandles.Add(Node->GetQuestTag(), Handle);
             if (!Step->GetTargetClasses().IsEmpty())
             {
-                for (const TSubclassOf<AActor>& Class : Step->GetTargetClasses())
+                for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
                 {
-                    ClassFilteredSteps.Add(Node->GetQuestTag(), Class);
+                    // LoadSynchronous at step activation — pay the load cost once per target class when the step goes live,
+                    // keep runtime event-dispatch checks fast by caching the loaded UClass in ClassFilteredSteps (TMultiMap<FGameplayTag, UClass*>).
+                    if (UClass* Loaded = SoftClass.LoadSynchronous())
+                    {
+                        ClassFilteredSteps.Add(Node->GetQuestTag(), Loaded);
+                    }
                 }
 
                 // Subscribe once to global channel if this is the first class-filtered step

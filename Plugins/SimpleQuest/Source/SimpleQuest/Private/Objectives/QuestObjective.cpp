@@ -80,9 +80,13 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 
 void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 {
-	for (const TSubclassOf<AActor>& Class : TargetClasses)
+	for (const TSoftClassPtr<AActor>& SoftClass  : TargetClasses)
 	{
-		if (Class) OnEnableTarget.Broadcast(Class.Get(), bIsTargetEnabled);
+		// Synchronous load at use time — designer authored a soft ref, hard UClass is only needed here.
+		if (UClass* Loaded = SoftClass.LoadSynchronous())
+		{
+			OnEnableTarget.Broadcast(Loaded, bIsTargetEnabled);
+		}
 	}
 }
 

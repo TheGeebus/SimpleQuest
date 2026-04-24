@@ -41,8 +41,8 @@ protected:
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
-	TSet<TSubclassOf<AActor>> TargetClasses;
-
+	TSet<TSoftClassPtr<AActor>> TargetClasses;
+	
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 	int32 NumberOfElements = 0;
 
@@ -81,7 +81,7 @@ private:
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
-	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
+	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
 	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }

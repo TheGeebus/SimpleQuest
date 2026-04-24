@@ -306,7 +306,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         }
         else if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
-            if (!StepNode->ObjectiveClass)
+            if (StepNode->ObjectiveClass.IsNull())
             {
                 AddError(FString::Printf(TEXT("[%s] Step node '%s' has no Objective Class assigned."), *TagPrefix, *Label), ContentNode);
                 continue;
@@ -462,9 +462,9 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         // Register outcome tags: both the raw Quest.Outcome.* tag and the per-node fact tag
         if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
-            if (QuestStepNode->ObjectiveClass)
+            if (!QuestStepNode->ObjectiveClass.IsNull())
             {
-                TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass);
+                TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass.LoadSynchronous());
                 for (const FGameplayTag& OutcomeTag : Outcomes)
                 {
                     AllCompiledQuestTags.AddUnique(OutcomeTag.GetTagName());

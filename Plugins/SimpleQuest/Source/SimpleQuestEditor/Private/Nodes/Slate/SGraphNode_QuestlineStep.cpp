@@ -357,9 +357,10 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 	const int32 GiverCount = WatchingGiverNames.Num();
 
 	int32 ClassCount = 0;
-	for (const TSubclassOf<AActor>& Class : StepNode->TargetClasses)
+	for (const TSoftClassPtr<AActor>& SoftClass : StepNode->TargetClasses)
 	{
-		if (Class) ClassCount++;
+		// IsNull checks the path without loading — count authored entries, ignore the ones designer cleared
+		if (!SoftClass.IsNull()) ClassCount++;
 	}
 
 	const int32 ElementCount = StepNode->NumberOfElements;
@@ -453,11 +454,12 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 	TArray<FString> ClassNames;
 	if (StepNode)
 	{
-		for (const TSubclassOf<AActor>& Class : StepNode->TargetClasses)
+		for (const TSoftClassPtr<AActor>& SoftClass : StepNode->TargetClasses)
 		{
-			if (Class)
+			if (!SoftClass.IsNull())
 			{
-				FString Name = Class->GetName();
+				// GetAssetName returns the short class name without loading the class asset — ideal for node-header display
+				FString Name = SoftClass.GetAssetName();
 				Name.RemoveFromEnd(TEXT("_C"));
 				ClassNames.Add(Name);
 			}
@@ -515,15 +517,16 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 			SNew(STextBlock)
 			.Text_Lambda([this]()
 			{
-				if (!StepNode || !StepNode->RewardClass) return FText::GetEmpty();
-				FString Name = StepNode->RewardClass->GetName();
+				if (!StepNode || StepNode->RewardClass.IsNull()) return FText::GetEmpty();
+				// GetAssetName returns the short class name without loading the reward asset — safe for display.
+				FString Name = StepNode->RewardClass.GetAssetName();
 				Name.RemoveFromEnd(TEXT("_C"));
 				return FText::Format(LOCTEXT("RewardFmt", "Reward: {0}"),
 					FText::FromString(Name));
 			})
 			.Visibility_Lambda([this]()
 			{
-				return (StepNode && StepNode->RewardClass)
+				return (StepNode && !StepNode->RewardClass.IsNull())
 					? EVisibility::Visible : EVisibility::Collapsed;
 			})
 			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
@@ -626,7 +629,7 @@ int32 SGraphNode_QuestlineStep::OnPaint(
 	const FWidgetStyle& InWidgetStyle,
 	bool bParentEnabled) const
 {
-	if (StepNode && !StepNode->ObjectiveClass)
+	if (StepNode && StepNode->ObjectiveClass.IsNull())
 	{
 		const FVector2f ShadowInflate = UE::Slate::CastToVector2f(
 			GetDefault<UGraphEditorSettings>()->GetShadowDeltaSize());

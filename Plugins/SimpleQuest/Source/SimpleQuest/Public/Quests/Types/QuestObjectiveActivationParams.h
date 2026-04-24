@@ -37,8 +37,8 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationParams
 
 	/** Actor classes to target (for kill/pickup-class objectives). */
 	UPROPERTY(BlueprintReadWrite)
-	TSet<TSubclassOf<AActor>> TargetClasses;
-
+	TSet<TSoftClassPtr<AActor>> TargetClasses;
+	
 	/** Element count required to complete (for counting objectives). */
 	UPROPERTY(BlueprintReadWrite)
 	int32 NumElementsRequired = 0;

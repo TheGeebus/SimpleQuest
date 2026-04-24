@@ -163,11 +163,11 @@ private:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
-	TSet<TSubclassOf<AActor>> TargetClasses;
+	TSet<TSoftClassPtr<AActor>> TargetClasses;
 	
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
-	FORCEINLINE const TSet<TSubclassOf<AActor>>& GetTargetClasses() const { return TargetClasses; }
+	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
 	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 };

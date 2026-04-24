@@ -26,18 +26,18 @@ public:
 	
 	/** The objective that defines how this step is completed. Required for compilation. */
 	UPROPERTY(EditAnywhere, Category = "Step")
-	TSubclassOf<UQuestObjective> ObjectiveClass;
+	TSoftClassPtr<UQuestObjective> ObjectiveClass;
 
 	/** Optional reward granted on step completion. */
 	UPROPERTY(EditAnywhere, Category = "Step")
-	TSubclassOf<UQuestReward> RewardClass;
+	TSoftClassPtr<UQuestReward> RewardClass;
 
 	UPROPERTY(EditAnywhere, Category = "Step")
 	TArray<TSoftObjectPtr<AActor>> TargetActors;
 
 	UPROPERTY(EditAnywhere, Category = "Step")
-	TSet<TSubclassOf<AActor>> TargetClasses;
-
+	TSet<TSoftClassPtr<AActor>> TargetClasses;
+	
 	UPROPERTY(EditAnywhere, Category = "Step")
 	int32 NumberOfElements = 0;
 

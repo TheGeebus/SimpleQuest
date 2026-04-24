@@ -6,6 +6,7 @@
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SListView.h"
+#include "EditorUndoClient.h"
 
 class ITableRow;
 class STableViewBase;
@@ -15,18 +16,24 @@ class STableViewBase;
  * UQuestComponentBase::RemoveTags on the offending component; per-row Dismiss hides the row for the current editor
  * session (non-persistent). Read-only unless the designer explicitly clicks Clear.
  */
-class SStaleQuestTagsPanel : public SCompoundWidget
+class SStaleQuestTagsPanel : public SCompoundWidget, public FEditorUndoClient
 {
 public:
 	SLATE_BEGIN_ARGS(SStaleQuestTagsPanel) {}
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
+	virtual ~SStaleQuestTagsPanel();
 
 	using FEntryPtr = TSharedPtr<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>;
 
 	/** Exposed so the row widget can bind its STextBlock::HighlightText attribute. */
 	FText GetHighlightText() const { return FilterText; }
+
+	// FEditorUndoClient interface — GEditor fires these after any undo/redo so the panel re-scans and
+	// any rows restored by Ctrl+Z reappear (or re-hide on Ctrl+Y).
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
 	
 private:
 	TSharedRef<ITableRow> HandleGenerateRow(FEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable);

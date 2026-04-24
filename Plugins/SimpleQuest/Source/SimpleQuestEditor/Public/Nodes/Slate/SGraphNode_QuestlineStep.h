@@ -39,6 +39,10 @@ private:
 	const UClass* GetObjectiveClass() const;
 	void OnObjectiveClassChanged(const UClass* NewClass);
 
+	// Asset-picker affordances next to the objective picker
+	void OnUseSelectedObjectiveClass();
+	void OnBrowseToObjectiveClass();
+
 	// Cached reference
 	UQuestlineNode_Step* StepNode = nullptr;
 

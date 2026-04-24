@@ -4,6 +4,7 @@
 
 #include "Components/QuestComponentBase.h"
 #include "SimpleQuestLog.h"
+#include "ScopedTransaction.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -123,6 +124,8 @@ private:
 
 void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 {
+	if (GEditor) GEditor->RegisterForUndo(this);
+
 	CurrentSortColumn = Col_Actor;
 
 	ChildSlot
@@ -192,6 +195,25 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 	Refresh();
 }
 
+SStaleQuestTagsPanel::~SStaleQuestTagsPanel()
+{
+	if (GEditor) GEditor->UnregisterForUndo(this);
+}
+
+void SStaleQuestTagsPanel::PostUndo(bool bSuccess)
+{
+	// A Clear action just got reversed — the stale tag is back on the component. Re-scan so the row
+	// reappears. Equally handles the edge case where an unrelated undo ran and nothing changed for us
+	// (Refresh is idempotent).
+	Refresh();
+}
+
+void SStaleQuestTagsPanel::PostRedo(bool bSuccess)
+{
+	// Redo re-applies the Clear — row vanishes again. Same refresh path.
+	PostUndo(bSuccess);
+}
+
 TSharedRef<ITableRow> SStaleQuestTagsPanel::HandleGenerateRow(FEntryPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
 	return SNew(SStaleQuestTagRow, OwnerTable)
@@ -225,7 +247,14 @@ FReply SStaleQuestTagsPanel::HandleClearClicked(FEntryPtr Entry)
 {
 	if (!Entry.IsValid() || !Entry->Component.IsValid()) return FReply::Handled();
 
-	const int32 Removed = Entry->Component->RemoveTags({ Entry->StaleTag });
+	int32 Removed = 0;
+	{
+		// Scoped transaction so Ctrl+Z restores the cleared tag. Component->Modify() inside RemoveTags captures
+		// the pre-change container state for the undo buffer.
+		const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ClearStaleTag", "Clear Stale Quest Tag"));
+		Removed = Entry->Component->RemoveTags({ Entry->StaleTag });
+	}
+
 	UE_LOG(LogSimpleQuest, Log, TEXT("SStaleQuestTagsPanel: cleared stale tag '%s' from %s on '%s' (%d removal(s))"),
 		*Entry->StaleTag.ToString(),
 		*Entry->Component->GetClass()->GetName(),

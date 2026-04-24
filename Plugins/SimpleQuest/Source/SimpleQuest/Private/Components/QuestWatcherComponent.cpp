@@ -132,12 +132,15 @@ int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
 	{
 		if (WatchedStepTags.HasTagExact(Tag))
 		{
+			if (Count == 0) Modify();
 			WatchedStepTags.RemoveTag(Tag);
 			++Count;
 		}
-		if (WatchedTags.Remove(Tag) > 0)
+		const int32 MapRemoved = WatchedTags.Remove(Tag);
+		if (MapRemoved > 0)
 		{
-			++Count;
+			if (Count == 0) Modify();
+			Count += MapRemoved;
 		}
 	}
 	if (Count > 0 && GetOwner())

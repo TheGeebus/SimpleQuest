@@ -2,10 +2,12 @@
 
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 
+#include "ContentBrowserModule.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Types/QuestStepEnums.h"
 #include "GraphEditorSettings.h"
+#include "IContentBrowserSingleton.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
 #include "TutorialMetaData.h"
@@ -340,13 +342,29 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 
 TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateObjectiveInfoWidget()
 {
-	return SNew(SClassPropertyEntryBox)
-		.MetaClass(UQuestObjective::StaticClass())
-		.AllowNone(true)
-		.AllowAbstract(false)
-		.IsBlueprintBaseOnly(false)
-		.SelectedClass(this, &SGraphNode_QuestlineStep::GetObjectiveClass)
-		.OnSetClass(this, &SGraphNode_QuestlineStep::OnObjectiveClassChanged);
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().FillWidth(1.f)
+		[
+			SNew(SClassPropertyEntryBox)
+				.MetaClass(UQuestObjective::StaticClass())
+				.AllowNone(true)
+				.AllowAbstract(false)
+				.IsBlueprintBaseOnly(false)
+				.SelectedClass(this, &SGraphNode_QuestlineStep::GetObjectiveClass)
+				.OnSetClass(this, &SGraphNode_QuestlineStep::OnObjectiveClassChanged)
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+		[
+			PropertyCustomizationHelpers::MakeUseSelectedButton(
+				FSimpleDelegate::CreateSP(this, &SGraphNode_QuestlineStep::OnUseSelectedObjectiveClass),
+				LOCTEXT("UseSelectedObjective", "Use the currently-selected UQuestObjective Blueprint from the Content Browser."))
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f, 0.f, 0.f).VAlign(VAlign_Center)
+		[
+			PropertyCustomizationHelpers::MakeBrowseButton(
+				FSimpleDelegate::CreateSP(this, &SGraphNode_QuestlineStep::OnBrowseToObjectiveClass),
+				LOCTEXT("BrowseObjective", "Find the assigned Objective Blueprint in the Content Browser."))
+		];
 }
 
 TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
@@ -672,6 +690,57 @@ void SGraphNode_QuestlineStep::OnObjectiveClassChanged(const UClass* NewClass)
 	{
 		Graph->NotifyGraphChanged();
 	}
+}
+
+void SGraphNode_QuestlineStep::OnUseSelectedObjectiveClass()
+{
+	if (!StepNode) return;
+
+	FContentBrowserModule& ContentBrowser = FModuleManager::LoadModuleChecked<FContentBrowserModule>("ContentBrowser");
+	TArray<FAssetData> SelectedAssets;
+	ContentBrowser.Get().GetSelectedAssets(SelectedAssets);
+	if (SelectedAssets.Num() == 0) return;
+
+	// Accept either a Blueprint asset (use its GeneratedClass) or a direct UClass reference (e.g., a C++ class
+	// browsed via the class viewer). First match that derives from UQuestObjective wins.
+	for (const FAssetData& Asset : SelectedAssets)
+	{
+		UClass* CandidateClass = nullptr;
+
+		if (UBlueprint* BP = Cast<UBlueprint>(Asset.GetAsset()))
+		{
+			CandidateClass = BP->GeneratedClass;
+		}
+		else if (UClass* DirectClass = Cast<UClass>(Asset.GetAsset()))
+		{
+			CandidateClass = DirectClass;
+		}
+
+		if (CandidateClass && CandidateClass->IsChildOf(UQuestObjective::StaticClass()))
+		{
+			// Delegate to the existing picker handler so picker-driven and use-selected paths stay consistent.
+			OnObjectiveClassChanged(CandidateClass);
+			return;
+		}
+	}
+}
+
+void SGraphNode_QuestlineStep::OnBrowseToObjectiveClass()
+{
+	if (!StepNode || StepNode->ObjectiveClass.IsNull() || !GEditor) return;
+
+	// LoadSynchronous on the soft ref — the designer just asked to browse to the asset, so loading now is expected.
+	UClass* Loaded = StepNode->ObjectiveClass.LoadSynchronous();
+	if (!Loaded) return;
+
+	// If the class is BP-generated, we want to focus the BP asset in the Content Browser, not the UClass itself.
+	UObject* AssetToBrowse = Loaded;
+	if (UBlueprint* GeneratingBP = Cast<UBlueprint>(Loaded->ClassGeneratedBy))
+	{
+		AssetToBrowse = GeneratingBP;
+	}
+
+	GEditor->SyncBrowserToObjects(TArray<UObject*>{ AssetToBrowse });
 }
 
 #undef LOCTEXT_NAMESPACE

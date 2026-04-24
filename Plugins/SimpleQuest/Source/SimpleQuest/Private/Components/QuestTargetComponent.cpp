@@ -117,6 +117,7 @@ int32 UQuestTargetComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove
     {
         if (StepTagsToWatch.HasTagExact(Tag))
         {
+            if (Count == 0) Modify();
             StepTagsToWatch.RemoveTag(Tag);
             ++Count;
         }

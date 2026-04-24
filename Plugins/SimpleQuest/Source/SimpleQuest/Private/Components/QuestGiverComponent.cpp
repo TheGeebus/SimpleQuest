@@ -64,6 +64,8 @@ int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 	{
 		if (QuestTagsToGive.HasTagExact(Tag))
 		{
+			// Lazy Modify — only snapshot on first actual removal. No-op when no transaction active.
+			if (Count == 0) Modify();
 			QuestTagsToGive.RemoveTag(Tag);
 			++Count;
 		}

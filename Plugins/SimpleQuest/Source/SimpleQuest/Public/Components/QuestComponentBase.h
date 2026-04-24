@@ -25,6 +25,13 @@ public:
 	 * number of individual tag swaps performed.
 	 */
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames);
+
+	/**
+	 * Removes the listed tags from every designer-configured tag container on this component. Called by the Stale Quest Tags
+	 * panel's per-row Clear action. Each concrete component override is responsible for dirtying the owning actor after
+	 * modification so the change survives a save. Returns the number of individual tag removals performed.
+	 */
+	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove);
 	
 protected:
 	virtual void BeginPlay() override;

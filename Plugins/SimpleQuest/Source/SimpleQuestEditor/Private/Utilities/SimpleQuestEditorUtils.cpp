@@ -24,6 +24,7 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
+#include "Components/QuestWatcherComponent.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
@@ -1148,5 +1149,257 @@ void FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(FToolMenuSecti
 			})
 		)
 	);
+}
+
+namespace
+{
+	/** Builds the project-wide compiled-tag universe via Asset Registry scan — no sync-load. */
+	TSet<FName> BuildCompiledTagUniverse()
+	{
+		TSet<FName> Universe;
+
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> QuestlineAssets;
+		AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+		for (const FAssetData& AssetData : QuestlineAssets)
+		{
+			const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
+			if (CompiledTagsJoined.IsEmpty()) continue;
+
+			TArray<FString> TagStrs;
+			CompiledTagsJoined.ParseIntoArray(TagStrs, TEXT("|"));
+			for (const FString& TagStr : TagStrs) Universe.Add(FName(*TagStr));
+		}
+		return Universe;
+	}
+
+	/** Creates a tokenized diagnostic with a clickable node-navigation action token appended. */
+	TSharedRef<FTokenizedMessage> BuildValidationMessage(EMessageSeverity::Type Severity, const FText& LeadingText, const UEdGraphNode* TargetNode)
+	{
+		TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(Severity);
+		Msg->AddToken(FTextToken::Create(LeadingText));
+
+		if (TargetNode)
+		{
+			TWeakObjectPtr<const UEdGraphNode> WeakNode = TargetNode;
+			Msg->AddToken(FActionToken::Create(
+				FText::FromString(TargetNode->GetNodeTitle(ENodeTitleType::ListView).ToString()),
+				NSLOCTEXT("SimpleQuestEditor", "ValidateNavigateTooltip", "Navigate to this node in the graph editor"),
+				FOnActionTokenExecuted::CreateLambda([WeakNode]()
+				{
+					if (const UEdGraphNode* Node = WeakNode.Get())
+					{
+						FSimpleQuestEditorUtilities::NavigateToEdGraphNode(Node);
+					}
+				})));
+		}
+		return Msg;
+	}
+
+	/** Recursively collects every UEdGraphNode reachable from this graph — through Quest inner graphs, etc. */
+	void CollectAllNodesRecursive(const UEdGraph* Graph, TArray<UEdGraphNode*>& OutNodes)
+	{
+		if (!Graph) return;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+			OutNodes.Add(Node);
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				CollectAllNodesRecursive(QuestNode->GetInnerGraph(), OutNodes);
+			}
+		}
+	}
+}
+
+FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtilities::ValidateProjectPrereqTags()
+{
+	FQuestTagValidationResult Result;
+
+	// Collected project-wide so we can cross-reference Rule Entries vs Rule Exits after the main walk.
+	// Values: the emitting node, for FActionToken navigation on the unused-entry warning.
+	TMap<FName, TWeakObjectPtr<const UEdGraphNode>> RuleEntryTags;
+	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>> RuleExitsByTag;
+
+	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> QuestlineAssets;
+	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+	for (const FAssetData& AssetData : QuestlineAssets)
+	{
+		UQuestlineGraph* Asset = Cast<UQuestlineGraph>(AssetData.GetAsset());
+		if (!Asset || !Asset->QuestlineEdGraph) continue;
+
+		TArray<UEdGraphNode*> AllNodes;
+		CollectAllNodesRecursive(Asset->QuestlineEdGraph, AllNodes);
+
+		for (UEdGraphNode* Node : AllNodes)
+		{
+			// Rule Entry: stash the GroupTag + weak node ref; cross-referenced post-scan.
+			if (UQuestlineNode_PrerequisiteRuleEntry* RuleEntry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+			{
+				const FGameplayTag GroupTag = RuleEntry->GetGroupTag();
+				if (GroupTag.IsValid())
+				{
+					RuleEntryTags.Add(GroupTag.GetTagName(), RuleEntry);
+				}
+				continue;
+			}
+
+			// Rule Exit: stash per-tag + unset-tag guard. Entry/Exit cross-reference happens post-walk so we catch stale-registered
+			// tags too (the case where the Entry was deleted but its GroupTag lingers in the runtime tag manager).
+			if (UQuestlineNode_PrerequisiteRuleExit* RuleExit = Cast<UQuestlineNode_PrerequisiteRuleExit>(Node))
+			{
+				const FGameplayTag GroupTag = RuleExit->GetGroupTag();
+				if (GroupTag.IsValid())
+				{
+					RuleExitsByTag.FindOrAdd(GroupTag.GetTagName()).Add(RuleExit);
+				}
+				else
+				{
+					const FText Lead = FText::Format(
+						NSLOCTEXT("SimpleQuestEditor", "ValidateRuleExitUnsetLead",
+							"[{0}] Rule Exit has no GroupTag set:"),
+						FText::FromString(Asset->GetName()));
+					Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Error, Lead, RuleExit), EMessageSeverity::Error);
+					++Result.ErrorCount;
+				}
+				continue;
+			}
+
+			// Content node: walk the prereq expression tree and check each leaf's fact tag against the runtime tag manager.
+			UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node);
+			if (!ContentNode) continue;
+
+			const FPrereqExaminerTree Tree = CollectPrereqExpressionTopology(ContentNode);
+			if (Tree.IsEmpty()) continue;
+
+			for (const FPrereqExaminerNode& ExamNode : Tree.Nodes)
+			{
+				if (ExamNode.Type != EPrereqExaminerNodeType::Leaf) continue;
+				if (FQuestStateTagUtils::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
+
+				const UEdGraphNode* SourceForJump = ExamNode.SourceNode.IsValid() ? ExamNode.SourceNode.Get() : ContentNode;
+				const FText Lead = FText::Format(
+					NSLOCTEXT("SimpleQuestEditor", "ValidateLeafBrokenLead",
+						"[{0}] Prereq leaf on '{1}' references missing fact '{2}':"),
+					FText::FromString(Asset->GetName()),
+					FText::FromString(ContentNode->GetNodeTitle(ENodeTitleType::ListView).ToString()),
+					FText::FromString(ExamNode.LeafTag.IsValid() ? ExamNode.LeafTag.ToString() : TEXT("(unresolvable)")));
+
+				Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Warning, Lead, SourceForJump), EMessageSeverity::Warning);
+				++Result.WarningCount;
+			}
+		}
+	}
+
+	// Helper: resolve the owning UQuestlineGraph asset name from any emitting node, for the "[<Asset>]" prefix in leads.
+	auto AssetNameForNode = [](const UEdGraphNode* Node) -> FString
+	{
+	    if (!Node || !Node->GetGraph()) return TEXT("<unknown asset>");
+	    UObject* Outer = Node->GetGraph();
+	    while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
+	    const UQuestlineGraph* Asset = Cast<UQuestlineGraph>(Outer);
+	    return Asset ? Asset->GetName() : TEXT("<unknown asset>");
+	};
+
+	// Post-scan pass 1: Rule Exits whose GroupTag isn't produced by any Rule Entry in the project → Error per Exit.
+	// This subsumes both "tag completely unregistered" and "tag still registered but Entry was deleted" cases.
+	for (const auto& ExitPair : RuleExitsByTag)
+	{
+	    if (RuleEntryTags.Contains(ExitPair.Key)) continue;
+
+	    for (const TWeakObjectPtr<const UEdGraphNode>& WeakExit : ExitPair.Value)
+	    {
+	        const UEdGraphNode* ExitNode = WeakExit.Get();
+	        if (!ExitNode) continue;
+
+	        const FText Lead = FText::Format(
+	            NSLOCTEXT("SimpleQuestEditor", "ValidateRuleExitOrphanLead",
+	                "[{0}] Rule Exit references rule '{1}' — no Rule Entry in the project provides this tag:"),
+	            FText::FromString(AssetNameForNode(ExitNode)),
+	            FText::FromName(ExitPair.Key));
+
+	        Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Error, Lead, ExitNode), EMessageSeverity::Error);
+	        ++Result.ErrorCount;
+	    }
+	}
+
+	// Post-scan pass 2: Rule Entries that nobody references project-wide → Warning per Entry.
+	for (const auto& EntryPair : RuleEntryTags)
+	{
+	    if (RuleExitsByTag.Contains(EntryPair.Key)) continue;
+
+	    const UEdGraphNode* EntryNode = EntryPair.Value.Get();
+	    if (!EntryNode) continue;
+
+	    const FText Lead = FText::Format(
+	        NSLOCTEXT("SimpleQuestEditor", "ValidateUnusedRuleEntryLead",
+	            "[{0}] Rule Entry '{1}' is not referenced by any Rule Exit in the project. Remove it, or use Stale Quest Tags (Window → Developer Tools → Debug) to sweep unused rules alongside other stale references:"),
+	        FText::FromString(AssetNameForNode(EntryNode)),
+	        FText::FromName(EntryPair.Key));
+
+	    Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Warning, Lead, EntryNode), EMessageSeverity::Warning);
+	    ++Result.WarningCount;
+	}
+
+	UE_LOG(LogSimpleQuest, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
+		QuestlineAssets.Num(), Result.ErrorCount, Result.WarningCount);
+
+	return Result;
+}
+
+TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries()
+{
+	TArray<FStaleQuestTagEntry> Result;
+	if (!GEditor) return Result;
+
+	auto EmitIfStale = [&Result](AActor* Owner, UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
+	{
+		if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
+		FStaleQuestTagEntry Entry;
+		Entry.Actor = Owner;
+		Entry.Component = Component;
+		Entry.FieldLabel = FieldLabel;
+		Entry.StaleTag = Tag;
+		Result.Add(MoveTemp(Entry));
+	};
+
+	for (const FWorldContext& Context : GEditor->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* Actor = *It;
+
+			TArray<UQuestGiverComponent*> Givers;
+			Actor->GetComponents<UQuestGiverComponent>(Givers);
+			for (UQuestGiverComponent* Giver : Givers)
+			{
+				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive()) EmitIfStale(Actor, Giver, TEXT("QuestTagsToGive"), Tag);
+			}
+
+			TArray<UQuestTargetComponent*> Targets;
+			Actor->GetComponents<UQuestTargetComponent>(Targets);
+			for (UQuestTargetComponent* Target : Targets)
+			{
+				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch()) EmitIfStale(Actor, Target, TEXT("StepTagsToWatch"), Tag);
+			}
+
+			TArray<UQuestWatcherComponent*> Watchers;
+			Actor->GetComponents<UQuestWatcherComponent>(Watchers);
+			for (UQuestWatcherComponent* Watcher : Watchers)
+			{
+				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedStepTags"), Tag);
+				for (const auto& Pair : Watcher->GetWatchedTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedTags"), Pair.Key);
+			}
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found across loaded levels"), Result.Num());
+	return Result;
 }
 

@@ -27,3 +27,8 @@ int32 UQuestComponentBase::ApplyTagRenames(const TMap<FName, FName>& Renames)
 	return 0;
 }
 
+int32 UQuestComponentBase::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+{
+	return 0;
+}
+

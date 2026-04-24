@@ -52,6 +52,12 @@
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
+#include "Widgets/SStaleQuestTagsPanel.h"
+
+
+const FName FSimpleQuestEditor::StaleQuestTagsTabId(TEXT("SimpleQuest.StaleQuestTags"));
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -123,7 +129,20 @@ void FSimpleQuestEditor::StartupModule()
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
+	MessageLogModule.RegisterLogListing("QuestValidator", NSLOCTEXT("SimpleQuestEditor", "QuestValidatorLog", "Quest Validator"));
 
+#define LOCTEXT_NAMESPACE "SimpleQuestEditor"
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		StaleQuestTagsTabId,
+		FOnSpawnTab::CreateRaw(this, &FSimpleQuestEditor::SpawnStaleQuestTagsTab))
+		.SetDisplayName(LOCTEXT("StaleQuestTagsTabTitle", "Stale Quest Tags"))
+		.SetTooltipText(LOCTEXT("StaleQuestTagsTabTooltip",
+			"Lists components in loaded levels whose authored quest-tag fields reference tags no longer registered\n"
+			"in the runtime tag manager. Per-row Clear removes the stale tag from the component."))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsDebugCategory())
+		.SetMenuType(ETabSpawnerMenuType::Enabled);
+#undef LOCTEXT_NAMESPACE
+	
 	// ── Early tag registration from compiled INI ──────────────────────
 	// Creates native tags BEFORE the Asset Registry finishes loading, ensuring quest tags are available for asset deserialization.
 	// The INI lives outside Config/Tags/ so the Gameplay Tag editor's save picker never sees it.
@@ -281,9 +300,15 @@ void FSimpleQuestEditor::ShutdownModule()
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnAssetRemoved().RemoveAll(this);
 	}
 
+	if (FSlateApplication::IsInitialized())
+	{
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(StaleQuestTagsTabId);
+	}
+	
 	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
 	{
 		FMessageLogModule& MessageLogModule = FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog");
+		MessageLogModule.UnregisterLogListing("QuestValidator");
 		MessageLogModule.UnregisterLogListing("QuestCompiler");
 	}
 
@@ -733,5 +758,14 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 
 	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
 		CompiledNativeTags.Num(), bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
+}
+
+TSharedRef<SDockTab> FSimpleQuestEditor::SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SStaleQuestTagsPanel)
+		];
 }
 

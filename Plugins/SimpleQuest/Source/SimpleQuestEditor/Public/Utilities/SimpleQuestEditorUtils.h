@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "GameplayTagContainer.h"
+#include "Components/QuestComponentBase.h"
 #include "Settings/SimpleQuestSettings.h"
 
 // ---- Wire colors ----
@@ -38,6 +40,7 @@ class UQuestlineNode_Step;
 class UQuestlineNode_ContentBase;
 class UK2Node_CompleteObjectiveWithOutcome; 
 class FQuestlineGraphEditor;
+class UQuestComponentBase;
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
@@ -101,6 +104,42 @@ public:
 	{
 		FString ActorName;
 		FText OuterAssetDisplayName;
+	};
+
+	/**
+	 * One stale tag reference surfaced by the Stale Quest Tags panel. Carries everything the panel needs to render the row
+	 * (labels), perform the Clear action (weak component + tag), and uniquely key for session-scoped Dismiss tracking.
+	 */
+	struct FStaleQuestTagEntry
+	{
+		TWeakObjectPtr<AActor>					Actor;
+		TWeakObjectPtr<UQuestComponentBase>		Component;
+		FString									FieldLabel;
+		FGameplayTag							StaleTag;
+	};
+
+	/**
+	 * One tokenized diagnostic from a project validation pass. Owns its own FTokenizedMessage so the editor can batch
+	 * results into a MessageLog page without having to re-run the scan per opener.
+	 */
+	struct FQuestTagValidationDiagnostic
+	{
+		TSharedRef<FTokenizedMessage> Message;
+		EMessageSeverity::Type Severity;
+
+		FQuestTagValidationDiagnostic(TSharedRef<FTokenizedMessage> InMessage, EMessageSeverity::Type InSeverity)
+			: Message(MoveTemp(InMessage)), Severity(InSeverity) {}
+	};
+
+	/**
+	 * Aggregate return from ValidateProjectPrereqTags. ErrorCount / WarningCount map 1:1 to Diagnostics' severities —
+	 * callers use them for toast formatting without re-iterating the message list.
+	 */
+	struct FQuestTagValidationResult
+	{
+		TArray<FQuestTagValidationDiagnostic> Diagnostics;
+		int32 ErrorCount = 0;
+		int32 WarningCount = 0;
 	};
 
 	/**
@@ -207,6 +246,23 @@ public:
 	 */
 	static FPrereqExaminerTree CollectPrereqExpressionTopology(UEdGraphNode* ContextNode);
 
+	/**
+	 * Project-wide prerequisite reference validator. Scans every UQuestlineGraph asset and emits diagnostics for:
+	 *   Error   — prereq leaves whose resolved fact tag isn't in the union of all compiled-tag sets.
+	 *   Error   — Rule Exits whose referenced GroupTag isn't in the compiled-tag universe.
+	 *   Warning — Rule Entries whose GroupTag isn't referenced by any Rule Exit in the project.
+	 * Sync-loads assets (explicit designer action; matches Compile All's cost model). Read-only. Each diagnostic
+	 * carries an FActionToken that navigates to the offending node on click.
+	 */
+	static FQuestTagValidationResult ValidateProjectPrereqTags();
+
+	/**
+	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
+	 * UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent that fails IsTagRegisteredInRuntime.
+	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
+	 */
+	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries();
+	
 	/**
 	 * Appends an "Examine Prerequisite Expression" entry to a right-click context menu section. Resolves the owning editor
 	 * via GetEditorForNode and calls PinPrereqExaminer.

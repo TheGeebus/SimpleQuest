@@ -102,8 +102,16 @@ void UQuestNodeBase::TryActivateDeferred()
 
 void UQuestNodeBase::ResolveQuestTag(FName TagName)
 {
-    QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName);
+    QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName, /*ErrorIfNotFound*/ false);
     NodeInfo.QuestTag = QuestTag;
+    if (!QuestTag.IsValid())
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("ResolveQuestTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
+            TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
+            *TagName.ToString());
+        return;
+    }
     UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveQuestTag: %s → DisplayName='%s'"), *QuestTag.ToString(), *NodeInfo.DisplayName.ToString());
 }
 

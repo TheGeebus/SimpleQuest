@@ -289,20 +289,21 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 	{
 		// Getter: tag picker inline with output pin on same row for flat layout.
 		PinOverlay->AddSlot()
-			.HAlign(HAlign_Right)
 			.VAlign(VAlign_Center)
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
 				.AutoWidth()
 				.VAlign(VAlign_Center)
+				.HAlign(HAlign_Left)
 				.Padding(14.f, 0.f, 4.f, 0.f)
 				[
 					CreateTagPickerWidget()
 				]
 				+ SHorizontalBox::Slot()
-				.AutoWidth()
+				.FillWidth(1.f)
 				.VAlign(VAlign_Center)
+				.HAlign(HAlign_Right)
 				[
 					SAssignNew(RightNodeBox, SVerticalBox)
 				]

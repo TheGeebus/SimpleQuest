@@ -81,6 +81,8 @@ protected:
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 
+	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
+	
 private:
 
 	UFUNCTION(BlueprintCallable)
@@ -93,8 +95,22 @@ private:
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 public:
+	/**
+	 * Returns the authored QuestTagsToGive container verbatim. May contain stale (unregistered) tags if the designer hasn't
+	 * recompiled after removing a referenced node. Feed into tag-library Filter / HasAny / MatchesAny calls via
+	 * GetRegisteredQuestTagsToGive() instead — raw stale entries assert inside UE's FGameplayTag::MatchesAny.
+	 */
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetQuestTagsToGive() const { return QuestTagsToGive; }
+
+	/**
+	 * Registration-filtered view of QuestTagsToGive. Every returned tag is guaranteed registered in the runtime tag
+	 * manager, making this safe to pass into FGameplayTagContainer::Filter / HasAny / MatchesAny. Stale entries are
+	 * dropped (with a Warning log naming each one) but preserved on the underlying authored container.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
+	
 	UFUNCTION(BlueprintCallable)
 	bool CanGiveAnyQuests() const;
 	UFUNCTION(BlueprintCallable)

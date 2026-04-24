@@ -69,6 +69,7 @@ private:
 
 	// Compile and save graph data layer
 	void CompileQuestlineGraph();
+	void ValidatePrereqTags();
 	virtual void SaveAsset_Execute() override;
 	void ExtendToolbar();
 	void FillToolbar(FToolBarBuilder& ToolbarBuilder);

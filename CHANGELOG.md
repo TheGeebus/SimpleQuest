@@ -59,14 +59,14 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   wrapper. Subclasses override to read authored fields or typed
   `CustomData`
 
-#### External Activation Entry Point (Piece B)
+#### External Activation Entry Point 
 - `FQuestActivationRequestEvent` published on
   `Tag_Channel_QuestActivationRequest` — programmatic activation
   entry for procedural generators, dialogue systems, save/load
   rehydration, test harnesses. Manager subscribes and routes without
   exposing a new public method on the subsystem (black-box preserved)
 
-#### Giver-Authored Params (Piece C)
+#### Giver-Authored Params 
 - `UQuestGiverComponent::ActivationParams` — designer-authored
   `FQuestObjectiveActivationParams` carried with every give. Placed
   world singletons (shrines, dungeon-entrance actors) author their
@@ -81,7 +81,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   nor caller sets it; designer-authored `OriginTag` seeds the
   initial `OriginChain`
 
-#### Step-to-Step Forward Params (Piece D)
+#### Step-to-Step Forward Params 
 - `UQuestObjective::CompleteObjectiveWithOutcome` gains optional
   `InForwardParams` arg (`AutoCreateRefTerm`) — completing objective
   specifies an `FQuestObjectiveActivationParams` to carry forward
@@ -152,8 +152,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
 ### Removed
 - `UQuestStep::TargetVector` + `UQuestlineNode_Step::TargetVector`
   — positional data now routes through `CustomData` (vectors have
-  no sensible additive merge semantic; dropped during Piece B
-  design review)
+  no sensible additive merge semantic)
 
 ### Fixed
 - Compile-status icon regression after auto-compile-linked landed
@@ -230,15 +229,6 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   `IsContentNodeTagCurrent` and `ReconstructNodeTag` similarly
   logged per-invocation on the hot path. All three are now silent
   on the success path; misses retain their Warning/Verbose logs
-
-### Breaking Changes
-- `UQuestObjective::SetObjectiveTarget` renamed to
-  `OnObjectiveActivated` with a new signature taking
-  `FQuestObjectiveActivationParams` instead of `TSet<AActor*>`.
-  BP subclasses that overrode the old event need to re-implement
-  as `OnObjectiveActivated` — mechanical migration (break the
-  struct param in the BP editor to access sub-fields). Pre-release,
-  no shipped content affected
 
 ---
 

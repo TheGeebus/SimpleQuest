@@ -58,6 +58,8 @@ protected:
 	FGameplayTagContainer StepTagsToWatch;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+
+	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 	
 private:
 	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
@@ -66,6 +68,18 @@ private:
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
 
 public:
+	/**
+	 * Raw authored StepTagsToWatch. May contain stale tags — feed into tag-library calls via GetRegisteredStepTagsToWatch()
+	 * instead to avoid UE's stale-tag ensure.
+	 */
 	const FGameplayTagContainer& GetStepTagsToWatch() const { return StepTagsToWatch; }
 
+	/**
+	 * Registration-filtered view of StepTagsToWatch — safe to pass into FGameplayTagContainer::Filter / HasAny /
+	 * MatchesAny. Stale entries are dropped with a Warning log; authored container is unchanged.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredStepTagsToWatch() const;
+
 };
+

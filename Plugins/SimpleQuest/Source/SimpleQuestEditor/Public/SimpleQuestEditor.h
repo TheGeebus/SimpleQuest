@@ -13,6 +13,8 @@ class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
 class FQuestPIEDebugChannel;
 class FSlateStyleSet;
+class FSpawnTabArgs;
+class SDockTab;
 
 class FSimpleQuestEditor : public ISimpleQuestEditorModule
 {
@@ -59,4 +61,8 @@ private:
 	void RebuildNativeTags(bool bRefreshTree = false);
 	
 	bool bIsRegisteringTags = false;
+
+	TSharedRef<SDockTab> SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args);
+
+	static const FName StaleQuestTagsTabId;
 };

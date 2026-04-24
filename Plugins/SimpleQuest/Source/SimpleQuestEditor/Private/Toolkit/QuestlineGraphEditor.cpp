@@ -365,7 +365,11 @@ void FQuestlineGraphEditor::BindGraphCommands()
         {
             ISimpleQuestEditorModule::Get().CompileAllQuestlineGraphs();
         }));
-        
+    
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().ValidatePrereqTags,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::ValidatePrereqTags));
+    
     GraphEditorCommands->MapAction(
         FQuestlineGraphEditorCommands::Get().ToggleGraphDefaults,
         FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::ToggleGraphDefaults),
@@ -649,6 +653,37 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     }
 }
 
+void FQuestlineGraphEditor::ValidatePrereqTags()
+{
+    FSimpleQuestEditorUtilities::FQuestTagValidationResult Result = FSimpleQuestEditorUtilities::ValidateProjectPrereqTags();
+
+    FMessageLog ValidatorLog("QuestValidator");
+    ValidatorLog.NewPage(FText::Format(
+        NSLOCTEXT("SimpleQuestEditor", "ValidatePageLabel", "Validate: {0}"),
+        FText::FromString(FDateTime::Now().ToString())));
+
+    for (const FSimpleQuestEditorUtilities::FQuestTagValidationDiagnostic& Diag : Result.Diagnostics)
+    {
+        ValidatorLog.AddMessage(Diag.Message);
+    }
+
+    if (Result.ErrorCount + Result.WarningCount > 0)
+    {
+        ValidatorLog.Notify(FText::Format(
+            NSLOCTEXT("SimpleQuestEditor", "ValidateFoundIssues",
+                "Tag validation: {0} error(s), {1} warning(s)"),
+            Result.ErrorCount, Result.WarningCount));
+    }
+    else
+    {
+        FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "ValidateClean",
+            "Tag validation: no broken references found."));
+        Info.ExpireDuration = 3.f;
+        Info.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+    }
+}
+
 void FQuestlineGraphEditor::SaveAsset_Execute()
 {
     CompileQuestlineGraph();
@@ -709,6 +744,18 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
         TAttribute<FText>(),
         TAttribute<FText>(),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "FullBlueprintEditor.EditClassDefaults"));
+
+    ToolbarBuilder.EndSection();
+
+    ToolbarBuilder.BeginSection("Validate");
+
+    // Validate Tags — project-wide scan for broken prereq leaf / rule references + unused Rule Entries.
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().ValidatePrereqTags,
+        NAME_None,
+        TAttribute<FText>(),
+        TAttribute<FText>(),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
 
     ToolbarBuilder.EndSection();
 }

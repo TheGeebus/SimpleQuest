@@ -8,9 +8,6 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Active Development
-- Duplicate-Outcome-routing compile warning (single Outcome pin reaching
-  two identically-tagged Outcome terminals)
-- `BindToQuestEvent` convenience wrapper (C++ template + BP K2 node)
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
 - Utility B Tier 2 — commandlet-capable project-wide stale-tag scan
@@ -27,18 +24,37 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Known Issues
 - Giver "why can't activate" query API (Item 23) still deferred until
   deactivation system stabilizes
+- Async-action K2 node icon customization is impractical — UE's
+  `UK2Node_AsyncAction` uses a hardcoded icon and its base
+  `GetMenuActions` iterates every `UBlueprintAsyncActionBase` subclass
+  into a default-icon spawner registration. Subclassing to override
+  `GetIconAndTint` works for the title-bar icon but produces a duplicate
+  palette entry. Moving the factory function off the async-action class
+  fixes the duplicate but shifts significant glue code into the BP
+  library. Current stance: ship the default async icon, accept the
+  visual inconsistency with other SimpleQuest K2 nodes
 
 ---
 
-## [0.3.2] — 2026-04-24 — Pre-Ship Hardening + Authoring-Tag Tooling
+## [0.3.2] — 2026-04-24 — Authoring Diagnostics + Runtime Hardening
 
-Three adjacent items targeting stale-tag drift across the project. A
-user-reported ensure from a Blueprint overlap handler pulled in a
-runtime hardening pass, which surfaced the need for authoring-side
-diagnostics and level-side cleanup surfaces. Ships with defense-in-
-depth guards so the ensure path is unreachable regardless of authoring
-state, plus a toolbar-driven project-wide validator and a nomad tab for
-component-side tag cleanup.
+A full authoring-diagnostics pass plus the runtime safety net that
+surfaced the need for it. Started from a user-reported ensure in a
+Blueprint overlap handler — a stale gameplay tag tripped UE's
+`FGameplayTag::MatchesAny` container iteration and hung the editor for
+~10 seconds via `FDebug::EnsureFailed`. The fix layered out into
+sanitized component getters, defense-in-depth publish/subscribe guards,
+and a shared `IsTagRegisteredInRuntime` helper. Surfacing and cleaning
+up the stale references needed its own tools, so the release also ships
+a project-wide prereq validator and a component-side stale-tag cleanup
+panel.
+
+Rounded out with four additional authoring + runtime conveniences:
+a duplicate-Outcome-routing compile warning, comment block support on
+the questline graphs, a blueprint async action for subscribing to
+quest lifecycle events, and a `FEditorUndoClient` hook on the graph
+editor that fixes undo for any third-party node type (discovered while
+investigating comment-node undo specifically).
 
 ### Added
 
@@ -107,7 +123,61 @@ component-side tag cleanup.
   `GetWatchedTags`) — const-ref views of the authored containers, for
   the editor-side stale-tag scan
 
+#### Duplicate-Outcome-Routing Compile Warning
+- The compiler now emits a tokenized warning when a single content-node
+  output pin reaches two or more distinct Outcome terminals that share
+  an `OutcomeTag`. Authoring is ambiguous in that configuration — the
+  compiler accepts the union of reached destinations, but one outcome
+  should route through exactly one terminal. Navigation tokens on the
+  source node and every duplicate terminal
+- `FQuestlineGraphCompiler::ResolvePinToTags` threads an optional
+  per-tag visited-exits collector through the forward walk (defaults to
+  `nullptr`; existing call sites unchanged). The outcome-routing loop
+  passes a collector, inspects it post-walk for duplicates, emits one
+  warning per (OutcomeTag, set-of-Exits) group
+
+#### Comment Blocks
+- `UEdGraphNode_Comment` support on all questline graph tiers (top-level,
+  Quest inner, LinkedQuestline view). Press `C` with nodes selected to
+  wrap them in a comment box with standard 50px padding; press `C` with
+  no selection to drop a blank comment at the cursor. Right-click the
+  graph background → "Add Comment…" in the action palette as an
+  alternative entry point
+- `FGraphEditorCommands::CreateComment` mapped on the questline graph
+  editor's `GraphEditorCommands` list; schema contributes the palette
+  entry via `GetGraphContextActions` (suppressed when dragging from a
+  pin since comments don't participate in wiring)
+
+#### Bind To Quest Event (BP async action + C++ helpers)
+- `UQuestEventSubscription` — new `UBlueprintAsyncActionBase` subclass
+  with four output delegates: `OnActivated`, `OnStarted`, `OnCompleted`
+  (carrying the `OutcomeTag`), `OnDeactivated`. Subscribes to all four
+  lifecycle event channels on a single quest tag and stays bound until
+  `Cancel()` is called or the `UGameInstance` tears down. Designed for
+  hierarchical tag subscriptions — subscribing on a parent tag
+  (e.g. `Quest.MyLine`) receives events for every descendant quest
+- Catch-up on activation: any already-asserted quest-state fact fires
+  the corresponding pin immediately, mirroring
+  `UQuestWatcherComponent::RegisterQuestWatcher`
+- BP factory `UQuestEventSubscription::BindToQuestEvent(WorldContext, QuestTag)`
+  — DisplayName "Bind To Quest Event", `BlueprintInternalUseOnly` +
+  `HidePin`/`DefaultToSelf` on `WorldContextObject` so the pin is
+  auto-wired to Self in BP graphs
+- C++ one-liner template on the BP library for direct handle-based
+  subscriptions: `USimpleQuestBlueprintLibrary::SubscribeToQuestEvent<TEvent>`
+  resolves the signal subsystem, guards the tag against
+  `IsTagRegisteredInRuntime`, and returns an `FDelegateHandle`.
+  Companion `UnsubscribeFromQuestEvent(WorldContext, QuestTag, Handle)`
+  for teardown
+
 ### Fixed
+
+- Undo failure for `UEdGraphNode_Comment` placement — `FQuestlineGraphEditor`
+  now inherits `FEditorUndoClient` and forces `NotifyGraphChanged` on
+  the current graph from `PostUndo` / `PostRedo`. `UK2Node_AsyncAction`
+  and other third-party node types whose `PostEditUndo` doesn't
+  broadcast graph-change now get a reliable post-undo refresh. Covers
+  every node type uniformly, not just comments
 
 - Runtime ensure hang on stale-tag Blueprint iteration — UE's
   `FGameplayTag::MatchesAny` ensures when iterating a container

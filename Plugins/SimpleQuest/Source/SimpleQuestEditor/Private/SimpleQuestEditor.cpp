@@ -193,7 +193,7 @@ void FSimpleQuestEditor::StartupModule()
 	StyleSet->Set("ClassIcon.QuestlineGraph",
 		new FSlateVectorImageBrush(
 			StyleSet->RootToContentDir(TEXT("SimpleQuestClassIconWhite16px"), TEXT(".svg")),
-			FVector2D(16, 16)));
+			FVector2D(16, 16)));	
 
 	StyleSet->Set("SimpleQuest.Graph.Node.HoverHalo",
 	new FSlateBoxBrush(

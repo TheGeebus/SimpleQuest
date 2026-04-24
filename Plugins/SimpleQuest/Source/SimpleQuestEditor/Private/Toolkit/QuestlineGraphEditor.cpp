@@ -589,15 +589,15 @@ void FQuestlineGraphEditor::OnCreateComment()
     // If nodes are selected, size the new comment to enclose their bounds with standard 50px padding.
     // Otherwise, spawn a small default-sized comment at the cursor / last paste location.
     FSlateRect SelBounds;
-    const bool bHasSelection = Inner->GetBoundsForSelectedNodes(SelBounds, /*InPadding*/ 50.0f);
+    const bool bHasSelection = Inner->GetBoundsForSelectedNodes(SelBounds, 50.0f);
 
-    const FVector2D SpawnPos = bHasSelection
-        ? FVector2D(SelBounds.Left, SelBounds.Top)
-        : Inner->GetPasteLocation();
+    const FVector2f SpawnPos = bHasSelection
+        ? FVector2f(SelBounds.Left, SelBounds.Top)
+        : Inner->GetPasteLocation2f();
 
     UEdGraphNode_Comment* Comment = NewObject<UEdGraphNode_Comment>(Graph);
     Comment->SetFlags(RF_Transactional);
-    Graph->AddNode(Comment, /*bUserAction*/ true, /*bSelectNewNode*/ true);
+    Graph->AddNode(Comment, true, true);
     Comment->CreateNewGuid();
     Comment->PostPlacedNewNode();
     Comment->AllocateDefaultPins();

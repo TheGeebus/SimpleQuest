@@ -5,6 +5,8 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestStateTagUtils.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 UCLASS()
@@ -60,5 +62,30 @@ private:
     static class UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);
     static class USignalSubsystem* GetSignalSubsystem(const UObject* WorldContext);
     static class UQuestManagerSubsystem* GetQuestManager(const UObject* WorldContext);
+
+public:
+    
+    /**
+     * C++ one-liner for subscribing to a quest event. Resolves the SignalSubsystem from the world context, subscribes
+     * the listener/callback on QuestTag, returns the FDelegateHandle for explicit unbind. Returns an invalid handle if
+     * the subsystem can't be resolved or the tag isn't registered — same silent-failure contract as the BP async action.
+     *
+     * TEvent must be a FQuestEventBase-derived struct published on the quest's tag channel — FQuestStartedEvent,
+     * FQuestEndedEvent, FQuestEnabledEvent, FQuestDeactivatedEvent, etc.
+     */
+    template<typename TEvent, typename TObject>
+    static FDelegateHandle SubscribeToQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, TObject* Listener,
+        void (TObject::* Callback)(FGameplayTag, const TEvent&))
+    {
+        if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag)) return FDelegateHandle();
+        if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+        {
+            return Signals->SubscribeMessage<TEvent>(QuestTag, Listener, Callback);
+        }
+        return FDelegateHandle();
+    }
+
+    /** Companion unbind — pairs with BindToQuestEvent's returned handle. Safe no-op if the handle is invalid. */
+    static void UnsubscribeFromQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, FDelegateHandle Handle);
 
 };

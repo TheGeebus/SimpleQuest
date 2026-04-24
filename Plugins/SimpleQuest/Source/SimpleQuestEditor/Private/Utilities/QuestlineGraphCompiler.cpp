@@ -671,9 +671,23 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 continue;
             }
 
-            TArray<FName> ResolvedTags;
-            ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags);
-            if (ResolvedTags.IsEmpty()) continue;
+        	TArray<FName> ResolvedTags;
+        	TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>> VisitedExitsByOutcome;
+        	ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags, &VisitedExitsByOutcome);
+
+        	// Duplicate-Outcome-routing check: one outcome pin reaching multiple distinct Outcome terminals that share
+        	// an OutcomeTag is almost always an authoring mistake. The compiler accepts the union of their destinations
+        	// (each Exit's BoundaryTags are independently merged into ResolvedTags), but the authoring intent is
+        	// ambiguous — each outcome should route through exactly one terminal.
+        	for (const auto& Pair : VisitedExitsByOutcome)
+        	{
+        		if (Pair.Value.Num() > 1)
+        		{
+        			EmitDuplicateOutcomeRoutingWarning(ContentNode, Pin, Pair.Key, Pair.Value, TagPrefix);
+        		}
+        	}
+
+        	if (ResolvedTags.IsEmpty()) continue;
 
             if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
             {
@@ -980,7 +994,7 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
 // ResolvePinToTags - the node traversal engine
 // -------------------------------------------------------------------------------------------------
 
-void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
+void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags, TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByOutcome)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
@@ -991,7 +1005,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         {
             if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
             {
-                ResolvePinToTags(KnotOut, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutTags);
+                ResolvePinToTags(KnotOut, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutTags, OutVisitedExitsByOutcome);
             }
         }
 
@@ -999,6 +1013,14 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         // Passed to children when compilation recurses into the child graph.
         else if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
         {
+            // Record this Exit visit for duplicate-Outcome detection in the caller (when requested). AddUnique on the node
+            // pointer dedupes multiple-path reaches of the same Exit — only distinct Exit nodes sharing an OutcomeTag
+            // constitute a duplicate-routing case.
+            if (OutVisitedExitsByOutcome && ExitNode->OutcomeTag.IsValid())
+            {
+                OutVisitedExitsByOutcome->FindOrAdd(ExitNode->OutcomeTag).AddUnique(ExitNode);
+            }
+
             if (const TArray<FName>* BoundaryTags = BoundaryTagsByOutcome.Find(ExitNode->OutcomeTag))
             {
                 for (const FName& Tag : *BoundaryTags) OutTags.AddUnique(Tag);
@@ -1616,6 +1638,42 @@ void FQuestlineGraphCompiler::EmitParallelPathWarnings()
 			}
 		}
 	}
+}
+
+void FQuestlineGraphCompiler::EmitDuplicateOutcomeRoutingWarning(const UEdGraphNode* SourceNode, const UEdGraphPin* SourcePin,
+	const FGameplayTag& DuplicatedOutcomeTag, const TArray<TWeakObjectPtr<const UEdGraphNode>>& DuplicateExits, const FString& TagPrefix)
+{
+	TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning);
+
+	const FString PinDisplay = SourcePin ? SourcePin->PinName.ToString() : TEXT("<unknown pin>");
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(
+		TEXT("[%s] Output pin '%s' on"), *TagPrefix, *PinDisplay))));
+
+	if (SourceNode) AddNodeNavigationToken(Msg, SourceNode);
+	else Msg->AddToken(FTextToken::Create(FText::FromString(TEXT("<unknown source>"))));
+
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(
+		TEXT("reaches %d Outcome terminals sharing tag '%s':"), DuplicateExits.Num(), *DuplicatedOutcomeTag.ToString()))));
+
+	for (const TWeakObjectPtr<const UEdGraphNode>& WeakExit : DuplicateExits)
+	{
+		if (const UEdGraphNode* ExitNode = WeakExit.Get())
+		{
+			AddNodeNavigationToken(Msg, ExitNode);
+		}
+	}
+
+	Msg->AddToken(FTextToken::Create(FText::FromString(
+		TEXT("(Ambiguous authoring: route each distinct outcome through a single terminal, or change the terminals' tags to be distinct.)"))));
+
+	Messages.Add(Msg);
+	NumWarnings++;
+
+	UE_LOG(LogSimpleQuest, Warning, TEXT("Duplicate outcome routing: pin '%s' on '%s' reaches %d terminals tagged '%s'"),
+		*PinDisplay,
+		SourceNode ? *SourceNode->GetNodeTitle(ENodeTitleType::ListView).ToString() : TEXT("<unknown>"),
+		DuplicateExits.Num(),
+		*DuplicatedOutcomeTag.ToString());
 }
 
 void FQuestlineGraphCompiler::EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourceOutcomeKey& SetterSource, const FSourceOutcomeKey& DirectSource, const FName& DestTag)

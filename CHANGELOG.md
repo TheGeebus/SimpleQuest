@@ -8,11 +8,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Active Development
-- Project-wide Validate-all-prereq-tags scanner
+- Duplicate-Outcome-routing compile warning (single Outcome pin reaching
+  two identically-tagged Outcome terminals)
 - `BindToQuestEvent` convenience wrapper (C++ template + BP K2 node)
-- Duplicate-Exit-routing compile warning
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
+- Utility B Tier 2 — commandlet-capable project-wide stale-tag scan
+  covering Actor Blueprint CDOs + unloaded levels (ships-pipeline hook
+  for pre-ship validation)
 
 ### Upcoming
 - Tag namespace consolidation under a single `SimpleQuest.*` root
@@ -24,6 +27,111 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Known Issues
 - Giver "why can't activate" query API (Item 23) still deferred until
   deactivation system stabilizes
+
+---
+
+## [0.3.2] — 2026-04-24 — Pre-Ship Hardening + Authoring-Tag Tooling
+
+Three adjacent items targeting stale-tag drift across the project. A
+user-reported ensure from a Blueprint overlap handler pulled in a
+runtime hardening pass, which surfaced the need for authoring-side
+diagnostics and level-side cleanup surfaces. Ships with defense-in-
+depth guards so the ensure path is unreachable regardless of authoring
+state, plus a toolbar-driven project-wide validator and a nomad tab for
+component-side tag cleanup.
+
+### Added
+
+#### Prereq Tag Validator (new toolbar action)
+- `Validate Tags` toolbar button on the Questline Graph Editor —
+  scans every `UQuestlineGraph` in the project, emits tokenized
+  diagnostics to a new `QuestValidator` MessageLog listing with
+  clickable per-node navigation. Read-only; never modifies assets
+- Four diagnostic categories:
+  - **Error**: prereq leaf references a missing fact tag
+  - **Error**: Rule Exit with no GroupTag set
+  - **Error**: Rule Exit references a rule that no Rule Entry in the
+    project provides (authoring cross-reference; catches both
+    unregistered tags and stale-registered orphans)
+  - **Warning**: unused Rule Entry — no Rule Exit references it;
+    message points at the Stale Quest Tags panel as the sweep path
+- Validation is independent of the compiler: flags cross-graph drift
+  and authoring hygiene the per-graph compile can't see. Validates
+  against the runtime tag manager rather than the Asset Registry's
+  `CompiledQuestTags` cache — catches `.Completed` state facts and
+  `QuestPrereqRule.*` group tags that don't serialize into the AR tag
+
+#### Stale Quest Tags panel (new nomad tab)
+- Window → Developer Tools → Debug → Stale Quest Tags — sibling to
+  the World State Facts panel. Lists quest-component tag references
+  whose target isn't registered in the runtime tag manager. Pull-
+  based; never auto-runs
+- Scans loaded editor worlds, walks every
+  `UQuestGiverComponent` / `UQuestTargetComponent` /
+  `UQuestWatcherComponent` across `GEditor->GetWorldContexts`. One row
+  per stale tag reference
+- Per-row surfaces: Find (magnifying-glass icon, selects + frames the
+  actor in its level viewport) and Clear (removes the stale tag from
+  the component, marks actor dirty)
+- Filter bar with case-insensitive substring match + live highlighting
+  across Actor / Component / Field / Stale Tag columns
+- Per-column sortable (ascending/descending toggle via header arrows)
+- Alternating zebra row backgrounds + vertical-centered text
+- Tier 1 scope: loaded levels only. Tier 2 (unloaded + Actor Blueprint
+  CDOs, commandlet-capable) logged as follow-up
+
+#### Runtime Helpers
+- `FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)` — true iff
+  `Tag` is well-formed AND currently registered in
+  `UGameplayTagsManager`. Foundation for every stale-tag check across
+  the runtime and editor surfaces
+- `FQuestStateTagUtils::FilterToRegisteredTags(Container, ContextLabel)`
+  — returns a copy of `Container` with unregistered tags stripped, with
+  Warning logs per stale tag naming the context. Used by the new BP-
+  facing sanitized getters
+- `UQuestComponentBase::RemoveTags(TagsToRemove)` — new virtual,
+  parallels `ApplyTagRenames`. Concrete overrides on giver / target /
+  watcher remove matching tags from authored containers and mark the
+  owning actor dirty. Powers the Stale Quest Tags panel's Clear action
+
+#### BP-Safe Sanitized Getters
+- `UQuestGiverComponent::GetRegisteredQuestTagsToGive()` — registration-
+  filtered view of `QuestTagsToGive`. Safe to pass to tag-library
+  `Filter` / `HasAny` / `MatchesAny` calls that assert on stale entries
+- `UQuestTargetComponent::GetRegisteredStepTagsToWatch()` — same pattern
+  for `StepTagsToWatch`
+- `UQuestWatcherComponent::GetRegisteredWatchedStepTags()` and
+  `GetRegisteredWatchedQuestKeys()` — for `WatchedStepTags` and the keys
+  of the `WatchedTags` TMap
+- Raw accessors on `UQuestWatcherComponent` (`GetWatchedStepTags` /
+  `GetWatchedTags`) — const-ref views of the authored containers, for
+  the editor-side stale-tag scan
+
+### Fixed
+
+- Runtime ensure hang on stale-tag Blueprint iteration — UE's
+  `FGameplayTag::MatchesAny` ensures when iterating a container
+  holding an unregistered tag. Demo `BP_QuestGiverActor`'s overlap
+  handler was passing the giver's raw `QuestTagsToGive` into
+  `FGameplayTagContainer::Filter`, producing a ~10 second `EnsureFailed`
+  hang (stack walk + crash report). Fixed via the sanitized getters
+  above + BP node swap on the demo actor. No more ensure; stale tags
+  skipped silently with a Warning log pointing at the Stale Quest Tags
+  panel
+- `UQuestNodeBase::ResolveQuestTag` was calling `RequestGameplayTag`
+  without `ErrorIfNotFound=false` — the one outlier across the whole
+  plugin. Latent foot-gun that would ensure on any path passing an
+  unregistered `TagName`. Now passes `false` explicitly with a Warning
+  log + early return on invalid
+
+### Changed
+
+- `UQuestGiverComponent::GiveQuestByTag` and `RegisterQuestGiver` loop
+  guards upgraded from `IsValid` to `IsTagRegisteredInRuntime` — stale
+  tags skipped with a Warning log naming the stale tag and the actor
+- `UQuestTargetComponent::BeginPlay` subscribe loop — same upgrade
+- `UQuestWatcherComponent::RegisterQuestWatcher` subscribe loop — same
+  upgrade
 
 ---
 

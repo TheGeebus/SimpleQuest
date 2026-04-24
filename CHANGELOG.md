@@ -203,6 +203,32 @@ investigating comment-node undo specifically).
 - `UQuestWatcherComponent::RegisterQuestWatcher` subscribe loop — same
   upgrade
 
+#### Soft class references across authoring + runtime
+- `UQuestlineNode_Step::ObjectiveClass`, `::RewardClass`, `::TargetClasses`
+  flipped from `TSubclassOf` / `TSet<TSubclassOf<>>` to `TSoftClassPtr` /
+  `TSet<TSoftClassPtr<>>`. The runtime counterparts
+  (`UQuestStep::QuestObjective`, `UQuestNodeBase::Reward`) were already
+  `TSoftClassPtr`; runtime `UQuestStep::TargetClasses`,
+  `FQuestObjectiveActivationParams::TargetClasses`, and
+  `UQuestObjective::TargetClasses` all flipped to match
+- Questline asset packages no longer record hard dependencies on
+  designer-authored Objective / Reward / target Actor BP classes.
+  Measured impact: a populated test questline dropped from ~500 MB
+  to ~54 KiB package footprint
+- Soft→hard resolution happens at well-defined boundaries:
+  `UQuestObjective::EnableQuestTargetClasses` and
+  `UQuestManagerSubsystem::ActivateNodeByTag`'s Step branch call
+  `LoadSynchronous` at step activation time; the already-loaded
+  `UClass*` is cached in the runtime `ClassFilteredSteps` multimap so
+  event-dispatch checks stay fast
+- Slate widget display in `SGraphNode_QuestlineStep` uses
+  `TSoftClassPtr::GetAssetName()` for class-name rendering without
+  forcing the class asset to load
+- Existing assets migrate on resave — `TSubclassOf` and `TSoftClassPtr`
+  share the same `FSoftObjectPath` serialization shape, so UE
+  transparently reinterprets older data. Resave each affected
+  questline to drop the stale hard-dep records from its package
+
 ---
 
 ## [0.3.1] — 2026-04-23 — Objective Activation Lifecycle + Structured Payloads

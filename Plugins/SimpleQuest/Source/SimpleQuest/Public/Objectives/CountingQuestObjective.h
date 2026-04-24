@@ -7,8 +7,8 @@
 #include "CountingQuestObjective.generated.h"
 
 /**
- * Objective subclass that provides a built-in counter (CurrentElements / MaxElements). Initializes MaxElements from the
- * NumElementsRequired parameter in SetObjectiveTarget.
+ * Objective subclass that provides a built-in counter (CurrentElements / MaxElements). Initializes MaxElements from
+ * the NumElementsRequired parameter in OnObjectiveActivated.
  *
  * Designers have two paths:
  *   - AddProgress: one-call convenience — increments, checks threshold, fires progress or completion.
@@ -23,7 +23,7 @@ class SIMPLEQUEST_API UCountingQuestObjective : public UQuestObjective
     GENERATED_BODY()
 
 protected:
-    virtual void SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired = 0) override;
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override;
 
     /**
      * Increments CurrentElements by Amount, then either completes (if threshold met) or reports progress. Fires exactly

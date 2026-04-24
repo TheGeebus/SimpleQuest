@@ -2,11 +2,10 @@
 
 #include "Debug/SimpleCorePIEDebugChannel.h"
 #include "Editor.h"
+#include "SimpleCoreEditorLog.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "WorldState/WorldStateSubsystem.h"
-
-DEFINE_LOG_CATEGORY_STATIC(LogSimpleCoreEditor, Log, All);
 
 void FSimpleCorePIEDebugChannel::Initialize()
 {

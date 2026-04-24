@@ -8,6 +8,7 @@
 #include "SimpleQuestEditor.h"
 #include "Debug/QuestPIEDebugChannel.h"
 #include "Debug/QuestPrereqDebugState.h"
+#include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Styling/AppStyle.h"
@@ -1662,8 +1663,7 @@ EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
     switch (Node.Type)
     {
     case EPrereqExaminerNodeType::Leaf:
-        return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag);
-
+        return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag, Cast<UQuestlineNode_ContentBase>(Node.SourceNode.Get()));
     case EPrereqExaminerNodeType::And:
     {
         // True iff every child Satisfied. Any Unknown propagates up (we can't confidently paint the combinator).

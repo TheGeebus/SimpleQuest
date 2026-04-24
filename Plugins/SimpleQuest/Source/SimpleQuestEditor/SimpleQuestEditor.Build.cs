@@ -30,6 +30,8 @@ public class SimpleQuestEditor: ModuleRules
 			"GameplayTagsEditor",
 			"PropertyEditor",
 			"Projects",
+			"ApplicationCore", 
+			"WorkspaceMenuStructure"
 		});
 
 		if (Target.bBuildEditor)

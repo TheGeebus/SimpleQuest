@@ -17,6 +17,10 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 	const FString EffectiveID = QuestlineID.IsEmpty() ? GetName() : QuestlineID;
 	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"), EffectiveID, FAssetRegistryTag::TT_Alphabetical));
 
+	// Publish FriendlyName so content-browser tooltips and similar surfaces can show it without loading the asset.
+	// Empty when no FriendlyName is set — consumers fall back to the asset's short name.
+	Context.AddTag(FAssetRegistryTag(TEXT("FriendlyName"), FriendlyName.ToString(), FAssetRegistryTag::TT_Alphabetical));
+
 	if (!CompiledQuestTags.IsEmpty())
 	{
 		TArray<FString> TagStrings;
@@ -29,6 +33,15 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 	}
 
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
+}
+
+FText UQuestlineGraph::GetDisplayName() const
+{
+	if (!FriendlyName.IsEmpty())
+	{
+		return FriendlyName;
+	}
+	return FText::FromString(GetName());
 }
 
 void UQuestlineGraph::PostLoad()

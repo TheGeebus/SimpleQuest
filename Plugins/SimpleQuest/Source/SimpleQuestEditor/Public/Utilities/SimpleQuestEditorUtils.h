@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include "GameplayTagContainer.h"
+#include "Components/QuestComponentBase.h"
 #include "Settings/SimpleQuestSettings.h"
 
 // ---- Wire colors ----
@@ -38,6 +40,7 @@ class UQuestlineNode_Step;
 class UQuestlineNode_ContentBase;
 class UK2Node_CompleteObjectiveWithOutcome; 
 class FQuestlineGraphEditor;
+class UQuestComponentBase;
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
@@ -56,7 +59,6 @@ public:
 	 * alphanumeric or underscore with an underscore.
 	 */
 	static FString SanitizeQuestlineTagSegment(const FString& InLabel);
-
 
 	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.
@@ -94,16 +96,92 @@ public:
 	static TArray<FString> FindActorNamesGivingTag(const FGameplayTag& QuestTag);
 
 	/**
+	 * Paired entry produced by the contextual-query helpers: an actor name + the display name of the outer questline
+	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, watchers, or any future
+	 * actor-per-tag contextual surface.
+	 */
+	struct FQuestContextualActor
+	{
+		FString ActorName;
+		FText OuterAssetDisplayName;
+	};
+
+	/**
+	 * One stale tag reference surfaced by the Stale Quest Tags panel. Carries everything the panel needs to render the row
+	 * (labels), perform the Clear action (weak component + tag), and uniquely key for session-scoped Dismiss tracking.
+	 */
+	struct FStaleQuestTagEntry
+	{
+		TWeakObjectPtr<AActor>					Actor;
+		TWeakObjectPtr<UQuestComponentBase>		Component;
+		FString									FieldLabel;
+		FGameplayTag							StaleTag;
+	};
+
+	/**
+	 * One tokenized diagnostic from a project validation pass. Owns its own FTokenizedMessage so the editor can batch
+	 * results into a MessageLog page without having to re-run the scan per opener.
+	 */
+	struct FQuestTagValidationDiagnostic
+	{
+		TSharedRef<FTokenizedMessage> Message;
+		EMessageSeverity::Type Severity;
+
+		FQuestTagValidationDiagnostic(TSharedRef<FTokenizedMessage> InMessage, EMessageSeverity::Type InSeverity)
+			: Message(MoveTemp(InMessage)), Severity(InSeverity) {}
+	};
+
+	/**
+	 * Aggregate return from ValidateProjectPrereqTags. ErrorCount / WarningCount map 1:1 to Diagnostics' severities —
+	 * callers use them for toast formatting without re-iterating the message list.
+	 */
+	struct FQuestTagValidationResult
+	{
+		TArray<FQuestTagValidationDiagnostic> Diagnostics;
+		int32 ErrorCount = 0;
+		int32 WarningCount = 0;
+	};
+
+	/**
+	 * Finds givers attached to this node's CONTEXTUAL inlined compiled tags, i.e., tags emitted by OUTER questline assets
+	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
+	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
+	 * (everything past "Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
+	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
+	 *
+	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.
+	 * Results sorted by (OuterAssetDisplayName, ActorName) and deduped on that pair.
+	 */
+	static TArray<FQuestContextualActor> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);
+
+	/**
+	 * Scans the Asset Registry for other questline assets whose CompiledQuestTags list contains an entry that ends with
+	 * this node's relative path (post home-ID prefix strip). Returns the matching runtime tags — i.e., the contextual
+	 * nested variants of this node's tag under every OUTER asset that LinkedQuestline-references the home. Empty when
+	 * the node is used only in its own asset.
+	 */
+	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
+	
+	/**
+	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent watchers per contextual tag instead of
+	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
+	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
+	 */
+	static TArray<FQuestContextualActor> FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode);
+
+	/**
 	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
 	 * Returns the number of actors modified.
 	 */
 	static int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 
 	/**
-	 * Returns the last-compiled gameplay tag for this step node via GUID lookup in CompiledNodes. The tag remains valid even
-	 * after a rename (INI preservation) — useful for preserving giver/target queries while awaiting recompile.
+	 * Walks the node's Outer chain (through any Quest container graphs) to the owning UQuestlineGraph asset, then
+	 * matches the node's QuestGuid against CompiledNodes to resolve its compiled runtime tag. Works for any
+	 * UQuestlineNode_ContentBase descendant (Quest, Step, LinkedQuestline). Returns an invalid tag when the node
+	 * hasn't been compiled yet or the graph Outer chain is broken.
 	 */
-	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_Step* StepNode);
+	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
 	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
@@ -111,14 +189,18 @@ public:
 	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
 	 * NamedOutcomeOut resolves to QuestState.<src>.Outcome.<leaf>. Returns invalid tags for pin roles the examiner treats
 	 * as drill-through (Rule Entry Forward) or RuleRef (Rule Exit); those code paths don't flatten to leaves in the
-	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring (agenda item 7 Session B).
+	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring.
 	 */
 	static FGameplayTag ResolveLeafFactForOutputPin(const UEdGraphPin* OutputPin, FGameplayTag& OutSourceTag);
 	
 	/**
-	 * Returns true if the step node's current label matches its last compiled tag. False if the node has been renamed since
-	 * last compile, or was never compiled.
+	 * Returns true if the content node's reconstructed tag (from current labels) matches its last compiled tag. False when
+	 * renamed since last compile, never compiled, or the Outer chain is broken. Works for any UQuestlineNode_ContentBase
+	 * descendant — widgets displaying a "Recompile to update tags" warning use this as the source of truth.
 	 */
+	static bool IsContentNodeTagCurrent(const UQuestlineNode_ContentBase* ContentNode);
+
+	/** Back-compat thin wrapper — prefer IsContentNodeTagCurrent. Same semantics, Step-typed argument. */
 	static bool IsStepTagCurrent(const UQuestlineNode_Step* StepNode);
 
 	/**
@@ -165,6 +247,23 @@ public:
 	static FPrereqExaminerTree CollectPrereqExpressionTopology(UEdGraphNode* ContextNode);
 
 	/**
+	 * Project-wide prerequisite reference validator. Scans every UQuestlineGraph asset and emits diagnostics for:
+	 *   Error   — prereq leaves whose resolved fact tag isn't in the union of all compiled-tag sets.
+	 *   Error   — Rule Exits whose referenced GroupTag isn't in the compiled-tag universe.
+	 *   Warning — Rule Entries whose GroupTag isn't referenced by any Rule Exit in the project.
+	 * Sync-loads assets (explicit designer action; matches Compile All's cost model). Read-only. Each diagnostic
+	 * carries an FActionToken that navigates to the offending node on click.
+	 */
+	static FQuestTagValidationResult ValidateProjectPrereqTags();
+
+	/**
+	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
+	 * UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent that fails IsTagRegisteredInRuntime.
+	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
+	 */
+	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries();
+	
+	/**
 	 * Appends an "Examine Prerequisite Expression" entry to a right-click context menu section. Resolves the owning editor
 	 * via GetEditorForNode and calls PinPrereqExaminer.
 	 */
@@ -195,4 +294,12 @@ private:
 	/** Walks the graph outer chain from any content node to reconstruct its compiled tag. */
 	static FGameplayTag ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode);
 
+	/**
+	 * Shared contextual-query body. Walks the Asset Registry for non-home questline packages, suffix-matches on the node's
+	 * relative path, and invokes TagToActorNames() per contextual tag to resolve the actor list. Both
+	 * FindContextualGiversForNode and FindContextualWatchersForNode are thin wrappers around this. LogLabel is emitted in
+	 * the Verbose diagnostic line for trace clarity.
+	 */
+	static TArray<FQuestContextualActor> CollectContextualActorEntries(const UQuestlineNode_ContentBase* ContentNode,
+		TFunctionRef<TArray<FString>(const FGameplayTag&)> TagToActorNames, const TCHAR* LogLabel);
 };

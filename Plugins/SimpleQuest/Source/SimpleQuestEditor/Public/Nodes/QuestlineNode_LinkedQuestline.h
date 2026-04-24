@@ -23,6 +23,11 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostLoad() override;
 
+	/** NodeLabel is LinkedQuestline's compiled-tag segment (Quest.<ParentID>.<NodeLabel>) — same role Step and Quest
+		give to NodeLabel. Inline rename stays enabled; GUID-based rename detection in the compiler propagates to
+		actors in loaded worlds on recompile via FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds. */
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("LinkedQuestline"); }
+	
 	/** The external questline graph asset this node references. */
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	TSoftObjectPtr<UQuestlineGraph> LinkedGraph;

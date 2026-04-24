@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Interfaces/QuestTargetInterface.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 
 
 void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
@@ -17,18 +18,28 @@ void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveC
 	 *   FQuestObjectiveContext OutContext;
 	 *   OutContext.TriggeredActor = InContext.TriggeredActor;
 	 *   OutContext.Instigator = InContext.Instigator;
-	 * Game-specific extension:
-	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType);
+	 * Game-specific extension - any desired struct type, such as example user-defined struct FMyKillData:
+	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType, ...);
 	 *-------------------------------------------------------------------------------------------------------------------*/
 
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
+void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params)
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("Called parent UQuestObjective::SetObjectiveTarget_Implementation. Set default values."))
-	TargetActors = InTargetActors;
-	TargetClasses = InTargetClasses;
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::OnObjectiveActivated_Implementation — storing base target fields from activation params."));
+	TargetActors = Params.TargetActors;
+	TargetClasses = Params.TargetClasses;
+}
+
+void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationParams& Params)
+{
+	OnObjectiveActivated(Params);
+}
+
+void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext)
+{
+	TryCompleteObjective(InContext);
 }
 
 TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
@@ -36,9 +47,10 @@ TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 	return {};
 }
 
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData, const FQuestObjectiveActivationParams& InForwardParams)
 {
 	CompletionData = InCompletionData;
+	ForwardActivationParams = InForwardParams;
 	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
 	ConditionalBeginDestroy();
 }
@@ -68,9 +80,13 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 
 void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 {
-	for (const TSubclassOf<AActor>& Class : TargetClasses)
+	for (const TSoftClassPtr<AActor>& SoftClass  : TargetClasses)
 	{
-		if (Class) OnEnableTarget.Broadcast(Class.Get(), bIsTargetEnabled);
+		// Synchronous load at use time — designer authored a soft ref, hard UClass is only needed here.
+		if (UClass* Loaded = SoftClass.LoadSynchronous())
+		{
+			OnEnableTarget.Broadcast(Loaded, bIsTargetEnabled);
+		}
 	}
 }
 

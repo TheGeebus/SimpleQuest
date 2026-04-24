@@ -20,9 +20,10 @@ class FQuestlineGraphTraversalPolicy;
 /**
  * Compiles a UQuestlineGraph asset, walking the graph structure and writing derived data to each quest/step CDO.
  *
- * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node objects.
- * LinkedQuestline graph nodes are compiler-only scaffolding: the compiler inlines their wiring into the parent graph's tag
- * relationships and the nodes themselves are erased with no corresponding runtime class.
+ * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
+ * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
+ * (Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner routing
+ * but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
  *
@@ -61,14 +62,15 @@ protected:
 	 * content nodes. Exit nodes return the appropriate boundary tag set. LinkedQuestline nodes are compiled recursively and
 	 * their entry tags are returned in their place.
 	 *
-	 * @param FromPin				The output pin to trace.
-	 * @param TagPrefix				Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
-	 *								connections before recursing into the linked asset.
-	 * @param BoundaryTagsByOutcome	Forwarded to Exit_Success resolution.
-	 * @param VisitedAssetPaths		Cycle detection stack, shared with CompileGraph.
-	 * @param OutTags				Accumulates the resolved tags.
+	 * @param FromPin					The output pin to trace.
+	 * @param TagPrefix					Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
+	 *									connections before recursing into the linked asset.
+	 * @param BoundaryTagsByOutcome		Forwarded to Exit_Success resolution.
+	 * @param VisitedAssetPaths			Cycle detection stack, shared with CompileGraph.
+	 * @param OutTags					Accumulates the resolved tags.
+	 * @param OutVisitedExitsByOutcome	Outcome deduplication detection stack.
 	 */
-	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags);
+	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags, TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByOutcome = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -197,6 +199,14 @@ private:
 	 */
 	void ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags);
 
+	/**
+	 * Emits a tokenized compile-time warning when a single content-node output pin reaches two or more distinct Outcome
+	 * terminals sharing the same OutcomeTag. The compiler accepts the union of reached destinations, but the authoring
+	 * is ambiguous — one outcome should route through one terminal. Called from the outcome-routing pass after
+	 * ResolvePinToTags returns the visited-exits collection.
+	 */
+	void EmitDuplicateOutcomeRoutingWarning(const UEdGraphNode* SourceNode, const UEdGraphPin* SourcePin, const FGameplayTag& DuplicatedOutcomeTag,	const TArray<TWeakObjectPtr<const UEdGraphNode>>& DuplicateExits, const FString& TagPrefix);
+	
 	/** Appends a clickable action token that navigates to the given node in the graph editor. */
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
 

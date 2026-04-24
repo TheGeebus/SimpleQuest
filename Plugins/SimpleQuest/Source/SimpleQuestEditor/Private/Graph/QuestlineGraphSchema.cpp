@@ -1275,7 +1275,19 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_ActivationGroupExit>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
-	}	
+	}
+	
+	// Add Comment — only when no pin is being dragged (comments don't participate in wiring).
+	if (!ContextMenuBuilder.FromPin)
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			FText::GetEmpty(),
+			NSLOCTEXT("SimpleQuestEditor", "AddComment", "Add Comment..."),
+			NSLOCTEXT("SimpleQuestEditor", "AddCommentTooltip", "Create a comment box to group and annotate nodes"),
+			0));
+		Action->NodeTemplate = NewObject<UEdGraphNode_Comment>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
 }
 
 void UQuestlineGraphSchema::GetContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const

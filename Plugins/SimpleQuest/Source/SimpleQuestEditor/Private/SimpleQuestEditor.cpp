@@ -31,7 +31,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
-#include "Nodes/Slate/SGRaphNode_GroupNode.h"
+#include "Nodes/Slate/SGraphNode_GroupNode.h"
 #include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
@@ -41,11 +41,23 @@
 #include "Debug/QuestPIEDebugChannel.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
+#include "Nodes/QuestlineNode_Exit.h"
+#include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Slate/SGraphNode_Exit.h"
+#include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
+#include "Nodes/Slate/SGraphNode_QuestlineQuest.h"
 #include "UObject/SavePackage.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Notifications/SNotificationList.h"
+#include "WorkspaceMenuStructure.h"
+#include "WorkspaceMenuStructureModule.h"
+#include "Widgets/SStaleQuestTagsPanel.h"
+
+
+const FName FSimpleQuestEditor::StaleQuestTagsTabId(TEXT("SimpleQuest.StaleQuestTags"));
 
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
@@ -81,6 +93,18 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 		{
 			return SNew(SGraphNode_QuestlineStep, StepNode);
 		}
+		if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
+		{
+			return SNew(SGraphNode_LinkedQuestline, LinkedNode);
+		}
+		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			return SNew(SGraphNode_QuestlineQuest, QuestNode);
+		}
+		if (UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
+		{
+			return SNew(SGraphNode_Exit, ExitNode);
+		}
 		return nullptr;
 	}
 };
@@ -105,7 +129,20 @@ void FSimpleQuestEditor::StartupModule()
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
+	MessageLogModule.RegisterLogListing("QuestValidator", NSLOCTEXT("SimpleQuestEditor", "QuestValidatorLog", "Quest Validator"));
 
+#define LOCTEXT_NAMESPACE "SimpleQuestEditor"
+	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+		StaleQuestTagsTabId,
+		FOnSpawnTab::CreateRaw(this, &FSimpleQuestEditor::SpawnStaleQuestTagsTab))
+		.SetDisplayName(LOCTEXT("StaleQuestTagsTabTitle", "Stale Quest Tags"))
+		.SetTooltipText(LOCTEXT("StaleQuestTagsTabTooltip",
+			"Lists components in loaded levels whose authored quest-tag fields reference tags no longer registered\n"
+			"in the runtime tag manager. Per-row Clear removes the stale tag from the component."))
+		.SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsDebugCategory())
+		.SetMenuType(ETabSpawnerMenuType::Enabled);
+#undef LOCTEXT_NAMESPACE
+	
 	// ── Early tag registration from compiled INI ──────────────────────
 	// Creates native tags BEFORE the Asset Registry finishes loading, ensuring quest tags are available for asset deserialization.
 	// The INI lives outside Config/Tags/ so the Gameplay Tag editor's save picker never sees it.
@@ -156,7 +193,7 @@ void FSimpleQuestEditor::StartupModule()
 	StyleSet->Set("ClassIcon.QuestlineGraph",
 		new FSlateVectorImageBrush(
 			StyleSet->RootToContentDir(TEXT("SimpleQuestClassIconWhite16px"), TEXT(".svg")),
-			FVector2D(16, 16)));
+			FVector2D(16, 16)));	
 
 	StyleSet->Set("SimpleQuest.Graph.Node.HoverHalo",
 	new FSlateBoxBrush(
@@ -263,9 +300,15 @@ void FSimpleQuestEditor::ShutdownModule()
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnAssetRemoved().RemoveAll(this);
 	}
 
+	if (FSlateApplication::IsInitialized())
+	{
+		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(StaleQuestTagsTabId);
+	}
+	
 	if (FModuleManager::Get().IsModuleLoaded("MessageLog"))
 	{
 		FMessageLogModule& MessageLogModule = FModuleManager::GetModuleChecked<FMessageLogModule>("MessageLog");
+		MessageLogModule.UnregisterLogListing("QuestValidator");
 		MessageLogModule.UnregisterLogListing("QuestCompiler");
 	}
 
@@ -448,6 +491,119 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	}
 }
 
+namespace
+{
+    /** Walks an asset's editor graph (recursive through Quest inner graphs) and collects every LinkedGraph target
+     it finds on LinkedQuestline nodes. Reads in-memory authoring state — current, not last-saved. */
+    static void CollectLinkedQuestlineTargets(UQuestlineGraph* Asset, TSet<UQuestlineGraph*>& OutTargets)
+    {
+        if (!Asset || !Asset->QuestlineEdGraph) return;
+
+        TFunction<void(UEdGraph*)> Walk;
+        Walk = [&](UEdGraph* Graph)
+        {
+            if (!Graph) return;
+            for (UEdGraphNode* Node : Graph->Nodes)
+            {
+                if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
+                {
+                    if (!LinkedNode->LinkedGraph.IsNull())
+                    {
+                        // LoadSynchronous resolves the soft-ref; typically a no-op in editor since the target is resident.
+                        if (UQuestlineGraph* Target = LinkedNode->LinkedGraph.LoadSynchronous())
+                        {
+                            OutTargets.Add(Target);
+                        }
+                    }
+                }
+                else if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+                {
+                    Walk(QuestNode->GetInnerGraph());
+                }
+            }
+        };
+
+        Walk(Asset->QuestlineEdGraph);
+    }
+}
+
+void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const
+{
+    OutNeighborhood.Reset();
+    if (!Primary) return;
+
+    // Walks in-memory node graphs rather than AR dependencies. AR's package dependency graph is rebuilt from the
+    // package ImportTable on save; it lags in-memory LinkedQuestline edits (add/remove/retarget) until the package
+    // is written to disk. Scanning authored nodes directly reflects current state.
+    IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+    TArray<FAssetData> QuestlineAssets;
+    AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+    // Forward-ref index: source asset → set of assets it LinkedQuestlines into (from in-memory authoring).
+    // O(total assets × nodes per asset) — matches the cost profile of CollectActivationGroupTopology.
+    TMap<UQuestlineGraph*, TSet<UQuestlineGraph*>> ForwardRefs;
+    for (const FAssetData& Data : QuestlineAssets)
+    {
+        UQuestlineGraph* Asset = Cast<UQuestlineGraph>(Data.GetAsset()); // sync-load if not resident
+        if (!Asset) continue;
+
+        TSet<UQuestlineGraph*> Targets;
+        CollectLinkedQuestlineTargets(Asset, Targets);
+        if (Targets.Num() > 0)
+        {
+            ForwardRefs.Add(Asset, MoveTemp(Targets));
+        }
+    }
+
+    // Transitive BFS from Primary, bidirectional. Primary pre-seeded into Visited so it's never an output entry.
+    TSet<UQuestlineGraph*> Visited;
+    Visited.Add(Primary);
+
+    TArray<UQuestlineGraph*> Frontier;
+    Frontier.Add(Primary);
+
+    while (Frontier.Num() > 0)
+    {
+        UQuestlineGraph* Current = Frontier.Pop(EAllowShrinking::No);
+
+        // Forward: assets Current references via LinkedQuestline.
+        if (const TSet<UQuestlineGraph*>* CurrentTargets = ForwardRefs.Find(Current))
+        {
+            for (UQuestlineGraph* Target : *CurrentTargets)
+            {
+                if (!Target || Visited.Contains(Target)) continue;
+                Visited.Add(Target);
+                Frontier.Add(Target);
+                OutNeighborhood.Add(Target);
+            }
+        }
+
+        // Backward: assets that reference Current. Scan the forward map for Current as a target.
+        for (const auto& [Source, Targets] : ForwardRefs)
+        {
+            if (!Source || Visited.Contains(Source)) continue;
+            if (Targets.Contains(Current))
+            {
+                Visited.Add(Source);
+                Frontier.Add(Source);
+                OutNeighborhood.Add(Source);
+            }
+        }
+    }
+
+    if (UE_LOG_ACTIVE(LogSimpleQuest, Verbose))
+    {
+        TStringBuilder<256> NeighborList;
+        for (int32 i = 0; i < OutNeighborhood.Num(); ++i)
+        {
+            if (i > 0) NeighborList << TEXT(", ");
+            NeighborList << OutNeighborhood[i]->GetName();
+        }
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("CollectLinkedNeighborhood: Primary '%s' → %d linked asset(s) [%s]"),
+            *Primary->GetName(), OutNeighborhood.Num(), *FString(NeighborList));
+    }
+}
+
 void FSimpleQuestEditor::LoadCompiledTagsFromIni()
 {
 	const FString IniPath = GetCompiledTagsIniPath();
@@ -602,5 +758,14 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 
 	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
 		CompiledNativeTags.Num(), bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
+}
+
+TSharedRef<SDockTab> FSimpleQuestEditor::SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args)
+{
+	return SNew(SDockTab)
+		.TabRole(ETabRole::NomadTab)
+		[
+			SNew(SStaleQuestTagsPanel)
+		];
 }
 

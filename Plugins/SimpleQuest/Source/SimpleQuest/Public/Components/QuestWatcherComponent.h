@@ -72,6 +72,8 @@ protected:
 	virtual void WatchedQuestDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& QuestDeactivatedEvent);
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+
+	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 	
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestWatcher();	
@@ -88,4 +90,22 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer CompletedQuestTags;
+
+public:
+	/**
+	 * Registration-filtered view of WatchedStepTags — safe to pass into FGameplayTagContainer::Filter / HasAny /
+	 * MatchesAny. Stale entries dropped with Warning log; authored container unchanged.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredWatchedStepTags() const;
+
+	/**
+	 * Returns WatchedTags' keys as a registration-filtered FGameplayTagContainer. Safe to feed into tag-library
+	 * operations. Stale keys dropped with Warning log; authored WatchedTags map unchanged.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredWatchedQuestKeys() const;
+
+	const FGameplayTagContainer& GetWatchedStepTags() const { return WatchedStepTags; }
+	const TMap<FGameplayTag, FWatchedQuestEventSettings>& GetWatchedTags() const { return WatchedTags; }
 };

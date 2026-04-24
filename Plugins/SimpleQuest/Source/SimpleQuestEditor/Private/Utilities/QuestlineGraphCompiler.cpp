@@ -213,21 +213,27 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(UEdGraph* Graph, const FStri
 	// ---- Collect activation group metadata for parallel-path analysis ----
 	CollectActivationGroupMetadata(Graph, TagPrefix);
 
-	// ---- Pass 2b: Forward output wiring for all utility-keyed nodes ----
-    for (auto& [EdNode, UtilKey] : UtilityNodeKeyMap)
-    {
-        UQuestNodeBase* Inst = AllCompiledNodes.FindRef(UtilKey);
-        if (!Inst) continue;
+	// ---- Pass 2b: Forward output wiring for utility-keyed nodes that live in THIS graph ----
+	// UtilityNodeKeyMap is a compiler-wide map accumulated across recursion; iterating it unconditionally would
+	// rewrite nested utility nodes with the outer graph's TagPrefix each time recursion unwinds. Scope the loop
+	// to this graph's nodes so each utility node's forward wiring is resolved against the prefix it was born with.
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		const FName* UtilKey = UtilityNodeKeyMap.Find(Node);
+		if (!UtilKey) continue;
 
-        Inst->NextNodesOnForward.Empty();
+		UQuestNodeBase* Inst = AllCompiledNodes.FindRef(*UtilKey);
+		if (!Inst) continue;
 
-		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(EdNode, EQuestPinRole::ExecForwardOut))
-        {
-            TArray<FName> ForwardTags;
-            ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
-            for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
-        }
-    }
+		Inst->NextNodesOnForward.Empty();
+
+		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(Node, EQuestPinRole::ExecForwardOut))
+		{
+			TArray<FName> ForwardTags;
+			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ForwardTags);
+			for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
+		}
+	}
 
     // ---- Resolve entry tags from the graph's Entry node ----
     TArray<FName> EntryTags = ResolveEntryTags(Graph, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutEntryTagsByOutcome);
@@ -300,7 +306,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         }
         else if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
-            if (!StepNode->ObjectiveClass)
+            if (StepNode->ObjectiveClass.IsNull())
             {
                 AddError(FString::Printf(TEXT("[%s] Step node '%s' has no Objective Class assigned."), *TagPrefix, *Label), ContentNode);
                 continue;
@@ -310,7 +316,6 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
             StepInstance->Reward = StepNode->RewardClass;
             StepInstance->TargetClasses = StepNode->TargetClasses;
             StepInstance->NumberOfElements = StepNode->NumberOfElements;
-            StepInstance->TargetVector = StepNode->TargetVector;
             StepInstance->TargetActors.Append(StepNode->TargetActors);
             StepInstance->PrerequisiteGateMode = StepNode->PrerequisiteGateMode;
             Instance = StepInstance;
@@ -319,127 +324,132 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 		{
 			if (LinkedNode->LinkedGraph.IsNull())
 			{
-				AddWarning(FString::Printf(TEXT("[%s] LinkedQuestline node '%s' has no asset assigned — skipped."),
+				// Null LinkedGraph is valid — emit a UQuest instance with the node's own compiled tag so designers can
+				// attach givers and reference the LinkedQuestline by tag before picking an asset. No inner routing
+				// populates (empty EntryStepTags / NextNodesByOutcome); the instance behaves as an empty container
+				// until an asset is picked and the graph recompiled. Warning is still issued so designers know the
+				// compile is effectively incomplete.
+				AddWarning(FString::Printf(TEXT("[%s] LinkedQuestline node '%s' has no asset assigned — runtime instance emitted with no inner routing; pick an asset to populate."),
 					*TagPrefix,
 					*Label),
 					LinkedNode);
-				continue;
+				Instance = NewObject<UQuest>(RootGraph);
 			}
-
-			UQuestlineGraph* LinkedGraph = LinkedNode->LinkedGraph.LoadSynchronous();
-			if (!LinkedGraph || !LinkedGraph->QuestlineEdGraph)
+			else
 			{
-				AddError(FString::Printf(TEXT("[%s] LinkedQuestline '%s' failed to load asset '%s'."),
-					*TagPrefix,
-					*Label,
-					*LinkedNode->LinkedGraph.ToString()),
-					LinkedNode);
-				continue;
-			}
-
-			// Refresh outcome pins before reading them — the linked graph's Exit tags may have changed since this node was last
-			// edited or loaded, without triggering PostLoad/PostEditChangeProperty on the parent. Runs once per compile, per
-			// placement, which is cheap.
-			LinkedNode->RebuildOutcomePinsFromLinkedGraph();
-
-
-			const FString LinkedPath = LinkedGraph->GetPathName();
-			if (VisitedAssetPaths.Contains(LinkedPath))
-			{
-				/**
-				 * Reconstruct the cycle path for the error: slice VisitedAssetPaths from the cycling asset's prior entry to the end, then
-				 * close with the cycling asset name again. The cycle is a property of the chain as a whole — this link is not uniquely at
-				 * fault, it just happens to be the one that closes the loop during recursion. Message is worded to make that explicit so
-				 * designers don't assume the highlighted link is the error.
-				 */
-				const int32 CycleStart = VisitedAssetPaths.IndexOfByKey(LinkedPath);
-				FString CyclePath;
-				for (int32 i = CycleStart; i < VisitedAssetPaths.Num(); ++i)
+				UQuestlineGraph* LinkedGraph = LinkedNode->LinkedGraph.LoadSynchronous();
+				if (!LinkedGraph || !LinkedGraph->QuestlineEdGraph)
 				{
-					CyclePath += FPackageName::ObjectPathToObjectName(VisitedAssetPaths[i]);
-					CyclePath += TEXT(" → ");
+					AddError(FString::Printf(TEXT("[%s] LinkedQuestline '%s' failed to load asset '%s'."),
+						*TagPrefix,
+						*Label,
+						*LinkedNode->LinkedGraph.ToString()),
+						LinkedNode);
+					continue;
 				}
-				CyclePath += FPackageName::ObjectPathToObjectName(LinkedPath);
 
-				AddError(FString::Printf(
-					TEXT("LinkedQuestline cycle detected: compile chain [%s]. This link closes the cycle; it is valid in isolation, "
-					"but any link in this chain must be removed for compilation to succeed. Use activation group setter/getter pairs for runtime "
-					"loops across assets."),
-					*CyclePath),
-					LinkedNode);
-				continue;
-			}
+				// Refresh outcome pins before reading them — the linked graph's Exit tags may have changed since this node
+				// was last edited or loaded, without triggering PostLoad/PostEditChangeProperty on the parent. Runs once
+				// per compile, per placement, which is cheap.
+				LinkedNode->RebuildOutcomePinsFromLinkedGraph();
 
-			UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
-
-			/**
-			 * Build the boundary map: each LinkedQuestline output pin represents an exit outcome of the linked asset, and its
-			 * downstream wires in THIS (parent) graph are the destinations the linked Exit nodes should route to. Named outcome
-			 * pins keyed by outcome tag; "Any Outcome" pin stored under the invalid tag as a catch-all.
-			 */
-			TMap<FGameplayTag, TArray<FName>> LinkedBoundaryByOutcome;
-			for (UEdGraphPin* OutputPin : LinkedNode->Pins)
-			{
-				if (OutputPin->Direction != EGPD_Output) continue;
-
-				TArray<FName> PinTags;
-				ResolvePinToTags(OutputPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, PinTags);
-				if (PinTags.IsEmpty()) continue;
-
-				if (OutputPin->PinType.PinCategory == TEXT("QuestOutcome"))
+				const FString LinkedPath = LinkedGraph->GetPathName();
+				if (VisitedAssetPaths.Contains(LinkedPath))
 				{
-					const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
-					if (OutcomeTag.IsValid()) for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(OutcomeTag).AddUnique(Tag);
-				}
-				else if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
-				{
-					for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(FGameplayTag()).AddUnique(Tag);
-				}
-			}
-
-			/**
-			 * Compile the linked asset's graph as the UQuest's inner graph. TagPrefix for the inner compile is the LinkedQuestline's
-			 * own compiled path — same pattern as inline Quest. The linked content nodes' compiled tags thus nest under this
-			 * LinkedQuestline's tag, keeping a stable per-parent namespace when the same linked asset is referenced from multiple
-			 * places.
-			 */
-			VisitedAssetPaths.Add(LinkedPath);
-
-			/**
-			 * Push the linked placement's GUID onto the chain so inner content nodes produce placement-unique compound GUIDs.
-			 * Save/restore with local so nested LinkedQuestlines accumulate correctly through multiple levels.
-			 */
-			const FGuid PreviousGuidChain = CurrentOuterGuidChain;
-			CurrentOuterGuidChain = CombineGuids(CurrentOuterGuidChain, LinkedNode->QuestGuid);
-
-			const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-			TMap<FGameplayTag, FQuestEntryRouteList> InnerEntryByOutcome;
-			QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, LinkedBoundaryByOutcome, VisitedAssetPaths, &InnerEntryByOutcome);
-			QuestInstance->EntryStepTagsByOutcome = MoveTemp(InnerEntryByOutcome);
-
-			CurrentOuterGuidChain = PreviousGuidChain;
-			VisitedAssetPaths.RemoveSingleSwap(LinkedPath);
-
-			/**
-			 * Register entry outcome fact tags for prerequisite expressions inside the linked graph — same pattern as the inline
-			 * Quest branch. Iterates the linked graph's Entry node specs.
-			 */
-			for (UEdGraphNode* InnerNode : LinkedGraph->QuestlineEdGraph->Nodes)
-			{
-				if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
-				{
-					const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
-					for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
+					/**
+					 * Reconstruct the cycle path for the error: slice VisitedAssetPaths from the cycling asset's prior entry to
+					 * the end, then close with the cycling asset name again. The cycle is a property of the chain as a whole —
+					 * this link is not uniquely at fault, it just happens to be the one that closes the loop during recursion.
+					 */
+					const int32 CycleStart = VisitedAssetPaths.IndexOfByKey(LinkedPath);
+					FString CyclePath;
+					for (int32 i = CycleStart; i < VisitedAssetPaths.Num(); ++i)
 					{
-						if (!Spec.bExposed) continue;
-						if (!Spec.Outcome.IsValid()) continue;
-						AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
+						CyclePath += FPackageName::ObjectPathToObjectName(VisitedAssetPaths[i]);
+						CyclePath += TEXT(" → ");
 					}
-					break;
-				}
-			}
+					CyclePath += FPackageName::ObjectPathToObjectName(LinkedPath);
 
-			Instance = QuestInstance;
+					AddError(FString::Printf(
+						TEXT("LinkedQuestline cycle detected: compile chain [%s]. This link closes the cycle; it is valid in isolation, "
+						"but any link in this chain must be removed for compilation to succeed. Use activation group setter/getter pairs for runtime "
+						"loops across assets."),
+						*CyclePath),
+						LinkedNode);
+					continue;
+				}
+
+				UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
+
+				/**
+				 * Build the boundary map: each LinkedQuestline output pin represents an exit outcome of the linked asset, and its
+				 * downstream wires in THIS (parent) graph are the destinations the linked Exit nodes should route to. Named outcome
+				 * pins keyed by outcome tag; "Any Outcome" pin stored under the invalid tag as a catch-all.
+				 */
+				TMap<FGameplayTag, TArray<FName>> LinkedBoundaryByOutcome;
+				for (UEdGraphPin* OutputPin : LinkedNode->Pins)
+				{
+					if (OutputPin->Direction != EGPD_Output) continue;
+
+					TArray<FName> PinTags;
+					ResolvePinToTags(OutputPin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, PinTags);
+					if (PinTags.IsEmpty()) continue;
+
+					if (OutputPin->PinType.PinCategory == TEXT("QuestOutcome"))
+					{
+						const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
+						if (OutcomeTag.IsValid()) for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(OutcomeTag).AddUnique(Tag);
+					}
+					else if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
+					{
+						for (const FName& Tag : PinTags) LinkedBoundaryByOutcome.FindOrAdd(FGameplayTag()).AddUnique(Tag);
+					}
+				}
+
+				/**
+				 * Compile the linked asset's graph as the UQuest's inner graph. TagPrefix for the inner compile is the
+				 * LinkedQuestline's own compiled path — same pattern as inline Quest. Linked content nodes' compiled tags
+				 * thus nest under this LinkedQuestline's tag (Quest.<ParentID>.<NodeLabel>.<InnerNodeLabel>), keeping a
+				 * stable per-parent namespace when the same linked asset is referenced from multiple places.
+				 */
+				VisitedAssetPaths.Add(LinkedPath);
+
+				/**
+				 * Push the linked placement's GUID onto the chain so inner content nodes produce placement-unique compound
+				 * GUIDs. Save/restore with local so nested LinkedQuestlines accumulate correctly through multiple levels.
+				 */
+				const FGuid PreviousGuidChain = CurrentOuterGuidChain;
+				CurrentOuterGuidChain = CombineGuids(CurrentOuterGuidChain, LinkedNode->QuestGuid);
+
+				const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
+				TMap<FGameplayTag, FQuestEntryRouteList> InnerEntryByOutcome;
+				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, LinkedBoundaryByOutcome, VisitedAssetPaths, &InnerEntryByOutcome);
+				QuestInstance->EntryStepTagsByOutcome = MoveTemp(InnerEntryByOutcome);
+
+				CurrentOuterGuidChain = PreviousGuidChain;
+				VisitedAssetPaths.RemoveSingleSwap(LinkedPath);
+
+				/**
+				 * Register entry outcome fact tags for prerequisite expressions inside the linked graph — same pattern as the
+				 * inline Quest branch. Iterates the linked graph's Entry node specs.
+				 */
+				for (UEdGraphNode* InnerNode : LinkedGraph->QuestlineEdGraph->Nodes)
+				{
+					if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
+					{
+						const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
+						for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
+						{
+							if (!Spec.bExposed) continue;
+							if (!Spec.Outcome.IsValid()) continue;
+							AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryOutcomeFact(QuestTagName, Spec.Outcome));
+						}
+						break;
+					}
+				}
+
+				Instance = QuestInstance;
+			}
 		}
         
         if (!Instance) continue;
@@ -452,9 +462,9 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         // Register outcome tags: both the raw Quest.Outcome.* tag and the per-node fact tag
         if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
-            if (QuestStepNode->ObjectiveClass)
+            if (!QuestStepNode->ObjectiveClass.IsNull())
             {
-                TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass);
+                TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(QuestStepNode->ObjectiveClass.LoadSynchronous());
                 for (const FGameplayTag& OutcomeTag : Outcomes)
                 {
                     AllCompiledQuestTags.AddUnique(OutcomeTag.GetTagName());
@@ -661,9 +671,23 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 continue;
             }
 
-            TArray<FName> ResolvedTags;
-            ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags);
-            if (ResolvedTags.IsEmpty()) continue;
+        	TArray<FName> ResolvedTags;
+        	TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>> VisitedExitsByOutcome;
+        	ResolvePinToTags(Pin, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, ResolvedTags, &VisitedExitsByOutcome);
+
+        	// Duplicate-Outcome-routing check: one outcome pin reaching multiple distinct Outcome terminals that share
+        	// an OutcomeTag is almost always an authoring mistake. The compiler accepts the union of their destinations
+        	// (each Exit's BoundaryTags are independently merged into ResolvedTags), but the authoring intent is
+        	// ambiguous — each outcome should route through exactly one terminal.
+        	for (const auto& Pair : VisitedExitsByOutcome)
+        	{
+        		if (Pair.Value.Num() > 1)
+        		{
+        			EmitDuplicateOutcomeRoutingWarning(ContentNode, Pin, Pair.Key, Pair.Value, TagPrefix);
+        		}
+        	}
+
+        	if (ResolvedTags.IsEmpty()) continue;
 
             if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
             {
@@ -970,7 +994,7 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
 // ResolvePinToTags - the node traversal engine
 // -------------------------------------------------------------------------------------------------
 
-void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags)
+void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags, TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByOutcome)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
@@ -981,7 +1005,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         {
             if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
             {
-                ResolvePinToTags(KnotOut, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutTags);
+                ResolvePinToTags(KnotOut, TagPrefix, BoundaryTagsByOutcome, VisitedAssetPaths, OutTags, OutVisitedExitsByOutcome);
             }
         }
 
@@ -989,6 +1013,14 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         // Passed to children when compilation recurses into the child graph.
         else if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
         {
+            // Record this Exit visit for duplicate-Outcome detection in the caller (when requested). AddUnique on the node
+            // pointer dedupes multiple-path reaches of the same Exit — only distinct Exit nodes sharing an OutcomeTag
+            // constitute a duplicate-routing case.
+            if (OutVisitedExitsByOutcome && ExitNode->OutcomeTag.IsValid())
+            {
+                OutVisitedExitsByOutcome->FindOrAdd(ExitNode->OutcomeTag).AddUnique(ExitNode);
+            }
+
             if (const TArray<FName>* BoundaryTags = BoundaryTagsByOutcome.Find(ExitNode->OutcomeTag))
             {
                 for (const FName& Tag : *BoundaryTags) OutTags.AddUnique(Tag);
@@ -1390,10 +1422,13 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                 const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
                 if (!OutcomeTag.IsValid()) continue;
 
-                FPrerequisiteExpressionNode LeafNode;
-                LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
-                OutExpression.Nodes[OrIndex].ChildIndices.Add(OutExpression.Nodes.Add(LeafNode));
+            	FPrerequisiteExpressionNode LeafNode;
+            	LeafNode.Type = EPrerequisiteExpressionType::Leaf;
+            	LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(NodeTagName, OutcomeTag), false);
+            	// Sequence the Add-to-Nodes (which may reallocate the TArray) BEFORE indexing back into Nodes —
+            	// otherwise OutExpression.Nodes[OrIndex].ChildIndices holds a dangling reference when a grow happens.
+            	const int32 LeafIdx = OutExpression.Nodes.Add(LeafNode);
+            	OutExpression.Nodes[OrIndex].ChildIndices.Add(LeafIdx);
             }
 
             return OrIndex;
@@ -1603,6 +1638,42 @@ void FQuestlineGraphCompiler::EmitParallelPathWarnings()
 			}
 		}
 	}
+}
+
+void FQuestlineGraphCompiler::EmitDuplicateOutcomeRoutingWarning(const UEdGraphNode* SourceNode, const UEdGraphPin* SourcePin,
+	const FGameplayTag& DuplicatedOutcomeTag, const TArray<TWeakObjectPtr<const UEdGraphNode>>& DuplicateExits, const FString& TagPrefix)
+{
+	TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning);
+
+	const FString PinDisplay = SourcePin ? SourcePin->PinName.ToString() : TEXT("<unknown pin>");
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(
+		TEXT("[%s] Output pin '%s' on"), *TagPrefix, *PinDisplay))));
+
+	if (SourceNode) AddNodeNavigationToken(Msg, SourceNode);
+	else Msg->AddToken(FTextToken::Create(FText::FromString(TEXT("<unknown source>"))));
+
+	Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(
+		TEXT("reaches %d Outcome terminals sharing tag '%s':"), DuplicateExits.Num(), *DuplicatedOutcomeTag.ToString()))));
+
+	for (const TWeakObjectPtr<const UEdGraphNode>& WeakExit : DuplicateExits)
+	{
+		if (const UEdGraphNode* ExitNode = WeakExit.Get())
+		{
+			AddNodeNavigationToken(Msg, ExitNode);
+		}
+	}
+
+	Msg->AddToken(FTextToken::Create(FText::FromString(
+		TEXT("(Ambiguous authoring: route each distinct outcome through a single terminal, or change the terminals' tags to be distinct.)"))));
+
+	Messages.Add(Msg);
+	NumWarnings++;
+
+	UE_LOG(LogSimpleQuest, Warning, TEXT("Duplicate outcome routing: pin '%s' on '%s' reaches %d terminals tagged '%s'"),
+		*PinDisplay,
+		SourceNode ? *SourceNode->GetNodeTitle(ENodeTitleType::ListView).ToString() : TEXT("<unknown>"),
+		DuplicateExits.Num(),
+		*DuplicatedOutcomeTag.ToString());
 }
 
 void FQuestlineGraphCompiler::EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourceOutcomeKey& SetterSource, const FSourceOutcomeKey& DirectSource, const FName& DestTag)

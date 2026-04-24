@@ -9,43 +9,16 @@
 
 FText UQuestlineNode_LinkedQuestline::GetNodeTitle(ENodeTitleType::Type TitleType) const
 {
-	/**
-	 * Menu/list views: simple "Linked Questline" category label — no instance exists yet so NodeLabel is not meaningful.
-	 */
+	// Palette / menu contexts show the type label only — no instance exists yet.
 	if (TitleType == ENodeTitleType::MenuTitle || TitleType == ENodeTitleType::ListView)
 	{
-		return LOCTEXT("LinkedQuestlineTitlePrefix", "Linked Questline");
+		return LOCTEXT("LinkedQuestlineMenuTitle", "Linked Questline");
 	}
 
-	/**
-	 * Inline rename (EditableTitle): NodeLabel alone so the rename field pre-populates with only the designer-facing
-	 * portion and typing replaces just that, not the full multi-line title.
-	 */
-	if (TitleType == ENodeTitleType::EditableTitle)
-	{
-		return NodeLabel;
-	}
-
-	/**
-	 * Full/default titles on a placed instance: NodeLabel as the primary line, asset name as a secondary line. Designers
-	 * distinguish multiple placements of the same asset via inline rename and the change is immediately visible in the
-	 * graph. When the inline asset picker widget (Session 22 polish) lands, the asset line drops since the picker will
-	 * render the asset inline on the node body.
-	 */
-	FText AssetNameText;
-	if (!LinkedGraph.IsNull())
-	{
-		AssetNameText = FText::FromString(LinkedGraph.GetAssetName());
-	}
-	else
-	{
-		AssetNameText = LOCTEXT("LinkedQuestlineNone", "(none)");
-	}
-
-	FFormatNamedArguments Args;
-	Args.Add(TEXT("Label"), NodeLabel);
-	Args.Add(TEXT("Asset"), AssetNameText);
-	return FText::Format(LOCTEXT("LinkedQuestlineTitleWithLabelFmt", "{Label}\nLinked Questline: {Asset}"), Args);
+	// Placed / editable contexts show NodeLabel — the designer-authored identity that drives the compiled tag
+	// segment (Quest.<ParentID>.<NodeLabel>). Same convention as Step and Quest. The linked asset reference is
+	// displayed prominently in the inline picker widget on the node body, so no redundant header decoration.
+	return NodeLabel;
 }
 
 FLinearColor UQuestlineNode_LinkedQuestline::GetNodeTitleColor() const
@@ -83,5 +56,6 @@ void UQuestlineNode_LinkedQuestline::RebuildOutcomePinsFromLinkedGraph()
 	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredOutcomes);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredOutcomes, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });
 }
+
 
 #undef LOCTEXT_NAMESPACE

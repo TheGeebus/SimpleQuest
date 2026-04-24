@@ -10,6 +10,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestStateTagUtils.h"
 
 UQuestTargetComponent::UQuestTargetComponent()
 {
@@ -23,7 +24,14 @@ void UQuestTargetComponent::BeginPlay()
 
     for (const FGameplayTag& StepTag : StepTagsToWatch)
     {
-        if (!StepTag.IsValid()) continue;
+        if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(StepTag))
+        {
+            UE_LOG(LogSimpleQuest, Warning,
+                TEXT("UQuestTargetComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
+                TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+                *GetOwner()->GetActorNameOrLabel(), *StepTag.ToString());
+            continue;
+        }
         FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTargetComponent::OnTargetActivated);
         StepStartedHandles.Add(StepTag, Handle);
         UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
@@ -102,6 +110,24 @@ int32 UQuestTargetComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
     return Count;
 }
 
+int32 UQuestTargetComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+{
+    int32 Count = 0;
+    for (const FGameplayTag& Tag : TagsToRemove)
+    {
+        if (StepTagsToWatch.HasTagExact(Tag))
+        {
+            StepTagsToWatch.RemoveTag(Tag);
+            ++Count;
+        }
+    }
+    if (Count > 0 && GetOwner())
+    {
+        GetOwner()->MarkPackageDirty();
+    }
+    return Count;
+}
+
 void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
 {
     IQuestTargetInterface::SetActivated_Implementation(bIsActivated);
@@ -151,5 +177,13 @@ void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const 
     {
         SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveInteracted(GetOwner(), InteractingActor, CustomData));
     }
+}
+
+FGameplayTagContainer UQuestTargetComponent::GetRegisteredStepTagsToWatch() const
+{
+    return FQuestStateTagUtils::FilterToRegisteredTags(
+        StepTagsToWatch,
+        FString::Printf(TEXT("UQuestTargetComponent::GetRegisteredStepTagsToWatch ('%s')"),
+            GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
 

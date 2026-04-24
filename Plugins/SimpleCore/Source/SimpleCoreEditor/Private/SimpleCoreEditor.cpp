@@ -1,6 +1,8 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "SimpleCoreEditor.h"
+
+#include "SimpleCoreEditorLog.h"
 #include "Debug/SimpleCorePIEDebugChannel.h"
 #include "Widgets/SWorldStateFactsPanel.h"
 #include "Framework/Application/SlateApplication.h"
@@ -12,7 +14,7 @@
 
 #define LOCTEXT_NAMESPACE "FSimpleCoreEditorModule"
 
-DEFINE_LOG_CATEGORY_STATIC(LogSimpleCoreEditor, Log, All);
+DEFINE_LOG_CATEGORY(LogSimpleCoreEditor);
 
 const FName FSimpleCoreEditorModule::WorldStateFactsTabId(TEXT("SimpleCore.WorldStateFacts"));
 

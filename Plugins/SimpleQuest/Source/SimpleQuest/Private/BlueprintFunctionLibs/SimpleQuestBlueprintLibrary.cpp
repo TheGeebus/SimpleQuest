@@ -6,6 +6,7 @@
 #include "Events/AbandonQuestEvent.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
+#include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestGivenEvent.h"
 #include "Subsystems/QuestManagerSubsystem.h"
@@ -40,6 +41,7 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
     UGameInstance* GI = World->GetGameInstance();
     return GI ? GI->GetSubsystem<UQuestManagerSubsystem>() : nullptr;
 }
+
 
 // -------------------------------------------------------------------------
 // Quest state queries
@@ -109,3 +111,13 @@ bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
     return WS && WS->HasFact(FactTag);
 }
+
+void USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, FDelegateHandle Handle)
+{
+    if (!Handle.IsValid()) return;
+    if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+    {
+        Signals->UnsubscribeMessage(QuestTag, Handle);
+    }
+}
+

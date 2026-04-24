@@ -19,8 +19,10 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Visual graph editor** — author questlines as a composable node graph. Custom Slate widgets for combinator, group, utility, and step nodes; inline tag pickers; dynamic pin management; in-editor compile with clickable diagnostics that navigate to the offending node.
 - **Nested prerequisite expressions** — AND / OR / NOT combinators plus reusable Prerequisite Rule portals. Any content node can gate activation, progression, or completion on an arbitrarily deep boolean expression authored inline.
 - **Named outcomes** — nodes resolve with designer-authored outcome tags. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently. No binary success/failure constraint.
+- **Structured objective activation** — activation delivers a typed `FQuestObjectiveActivationParams` struct (target actors, classes, element counts, typed CustomData, ActivationSource). Designer-authored step defaults, giver components, event-bus publishers, and step-to-step handoff all merge additively. An OriginTag and OriginChain track the cascade path across Quest and LinkedQuestline boundaries so objectives can branch on "who activated me" without glue code.
 - **Linked questlines** — reference external questline graph assets inline. The compiler inlines the linked graph with bidirectional tag resolution and dual-tag (contextual + standalone) subscription support.
 - **Live PIE inspection** — per-state colored halos on graph nodes, live leaf satisfaction tinting in the Prereq Examiner, and a searchable WorldState Facts panel showing every asserted fact. No log-diving required to understand the running state.
+- **Authoring diagnostics** — project-wide **Prereq Tag Validator** toolbar action flags broken cross-graph references (orphaned leaves, Rule Exits pointing at missing Rule Entries, unused Rule Entries); **Stale Quest Tags** nomad tab scans loaded levels for quest-component fields referencing unregistered tags with one-click Clear. Together they catch authoring drift the compiler can't see.
 - **Two-plugin architecture** — SimpleQuest sits on top of **SimpleCore**, a standalone coordination layer any system can use independently.
 
 ![SimpleQuestDemo-slate-node-preview-v2](https://github.com/user-attachments/assets/9cc8e4f9-ee60-46fc-881a-5c45e38ff9d4)
@@ -109,6 +111,15 @@ For programmatic activation (e.g. from a dialogue trigger, save-load handler, or
 
 Start Play In Editor. The graph panel shows per-state colored halos on content nodes (active, completed, blocked, etc.). Open the **Window > Developer Tools > Debug > World State Facts** panel for a searchable live view of every asserted fact. Hover any leaf in the Prereq Examiner to see whether it's satisfied, unsatisfied, or in-progress.
 
+### 7. Catch authoring drift
+
+Two additional surfaces surface broken or stale tag references the compiler can't flag on its own:
+
+- **Validate Tags** (questline graph editor toolbar) — project-wide scan for prereq leaves pointing at missing fact tags, Rule Exits pointing at missing Rule Entries, and unused Rule Entries. Results go to the **Quest Validator** message log with per-node navigation tokens. Read-only; never modifies assets.
+- **Stale Quest Tags** (Window > Developer Tools > Debug) — nomad tab listing quest-component tag references in loaded levels whose target isn't registered in the runtime tag manager. Per-row Find (selects and frames the actor) and Clear (removes the stale tag, marks the actor dirty). Filter bar + sortable columns.
+
+Both are pull-based: you open them, review, decide. Neither runs automatically or modifies data without an explicit click.
+
 ---
 
 ## Architecture
@@ -164,18 +175,27 @@ For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and registe
 
 ### Custom Objectives
 
-Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives) and override `TryCompleteObjective`:
+Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives). Override `OnObjectiveActivated_Implementation` to consume the typed activation params, and `TryCompleteObjective_Implementation` to decide when to resolve — calling `CompleteObjectiveWithOutcome` with the named outcome tag:
 
 ```cpp
 UCLASS(Blueprintable)
-class UMyObjective : public UCountingQuestObjective
+class UMyObjective : public UQuestObjective
 {
     GENERATED_BODY()
 
-public:
-    virtual bool TryCompleteObjective(const FQuestObjectiveContext& Context) override
+protected:
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override
     {
-        return Context.CurrentCount >= Context.RequiredCount;
+        // Read Params.TargetActors, Params.NumElementsRequired, Params.CustomData (FInstancedStruct), Params.OriginTag, etc.
+        // Wire up listeners, store local tracking state, spawn UI, and so on.
+    }
+
+    virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& Context) override
+    {
+        if (/* your completion condition */)
+        {
+            CompleteObjectiveWithOutcome(MyOutcomeTag, Context);
+        }
     }
 };
 ```
@@ -185,6 +205,25 @@ Your objective class appears in the inline objective picker on any Step node.
 ### Custom Orchestration
 
 Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
+
+### Reacting to Quest Events
+
+**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and wire any of the four output exec pins you care about: `On Activated`, `On Started`, `On Completed` (with `OutcomeTag`), `On Deactivated`. The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `Quest.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventContext` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData`. Call `Cancel` on the returned subscription when you're done, or let the GameInstance tear it down.
+
+**C++** — use the library template for direct handle-based subscriptions:
+
+```cpp
+#include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
+#include "Events/QuestStartedEvent.h"
+
+FDelegateHandle Handle = USimpleQuestBlueprintLibrary::SubscribeToQuestEvent<FQuestStartedEvent>(
+    this, QuestTag, this, &AMyActor::HandleQuestStarted);
+
+// ... later, to unsubscribe:
+USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(this, QuestTag, Handle);
+```
+
+Same semantics as the async action, but returns a raw `FDelegateHandle` for caller-managed lifetime. Guards against stale tags via `IsTagRegisteredInRuntime` and returns an invalid handle if the subsystem or tag can't be resolved.
 
 ---
 
@@ -211,6 +250,8 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Quarter | Deliverable | Status |
 |---|---|---|
 | Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
+| Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
+| Q2 2026 | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references) | **Shipped** (v0.3.2) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
 | Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |

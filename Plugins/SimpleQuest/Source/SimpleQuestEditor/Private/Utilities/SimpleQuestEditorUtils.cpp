@@ -24,6 +24,7 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
+#include "Components/QuestWatcherComponent.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
@@ -34,6 +35,85 @@
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestStateTagUtils.h"
 
+
+namespace
+{
+    /** (ContextualTag, ParentAssetDisplayName) pairs — shared output of the AR walk for a single editor node. */
+    struct FQuestContextualTagMatch
+    {
+        FGameplayTag Tag;
+        FText ParentAssetDisplayName;
+    };
+
+    /**
+     * Scans the Asset Registry for questline assets (other than this node's home) whose CompiledQuestTags contain an
+     * entry ending with this node's relative path. Returns one match per compiled-tag hit, with the parent asset's
+     * display name (FriendlyName override if present, otherwise asset name). Used by both the tag-only and
+     * actor-entry public accessors below.
+     */
+    TArray<FQuestContextualTagMatch> CollectContextualTagMatchesForEditorNode(const UQuestlineNode_ContentBase* ContentNode)
+    {
+        TArray<FQuestContextualTagMatch> Result;
+        if (!ContentNode) return Result;
+
+        const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(ContentNode);
+        if (!CompiledTag.IsValid()) return Result;
+
+        UEdGraph* Graph = ContentNode->GetGraph();
+        if (!Graph) return Result;
+
+        UObject* Outer = Graph->GetOuter();
+        while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+        {
+            UEdGraph* QuestGraph = QuestNode->GetGraph();
+            if (!QuestGraph) return Result;
+            Outer = QuestGraph->GetOuter();
+        }
+        const UQuestlineGraph* HomeAsset = Cast<UQuestlineGraph>(Outer);
+        if (!HomeAsset) return Result;
+
+        const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
+        const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
+        const FString ExpectedPrefix = FString::Printf(TEXT("Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));
+        const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
+        if (!CompiledTagStr.StartsWith(ExpectedPrefix)) return Result;
+        const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
+        const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
+
+        IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+        TArray<FAssetData> QuestlineAssets;
+        AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+        for (const FAssetData& AssetData : QuestlineAssets)
+        {
+            if (AssetData.PackageName == HomePackageName) continue;
+
+            const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
+            if (CompiledTagsJoined.IsEmpty()) continue;
+
+            const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
+            const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
+
+            TArray<FString> CompiledTagStrs;
+            CompiledTagsJoined.ParseIntoArray(CompiledTagStrs, TEXT("|"));
+
+            for (const FString& TagStr : CompiledTagStrs)
+            {
+                if (TagStr.Len() <= SuffixToMatch.Len()) continue;
+                if (!TagStr.EndsWith(SuffixToMatch)) continue;
+
+                const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), false);
+                if (!ContextualTag.IsValid()) continue;
+
+                FQuestContextualTagMatch Match;
+                Match.Tag = ContextualTag;
+                Match.ParentAssetDisplayName = OuterDisplay;
+                Result.Add(Match);
+            }
+        }
+        return Result;
+    }
+}
 
 FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& InLabel)
 {
@@ -165,11 +245,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQues
 	Segments.Insert(QuestlineSegment, 0);
 
 	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
-
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReconstructNodeTag: %s → %s"),
-		*ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), *TagName);
-
-	return FGameplayTag::RequestGameplayTag(FName(*TagName), /*bErrorIfNotFound=*/ false);
+	return FGameplayTag::RequestGameplayTag(FName(*TagName), false);
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
@@ -241,6 +317,67 @@ TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesGivingTag(const FGame
 	return Names;
 }
 
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::CollectContextualActorEntries(
+	const UQuestlineNode_ContentBase* ContentNode,
+	TFunctionRef<TArray<FString>(const FGameplayTag&)> TagToActorNames,
+	const TCHAR* LogLabel)
+{
+	TArray<FQuestContextualActor> Result;
+	const TArray<FQuestContextualTagMatch> Matches = CollectContextualTagMatchesForEditorNode(ContentNode);
+
+	for (const FQuestContextualTagMatch& Match : Matches)
+	{
+		for (const FString& ActorName : TagToActorNames(Match.Tag))
+		{
+			FQuestContextualActor Entry;
+			Entry.ActorName = ActorName;
+			Entry.OuterAssetDisplayName = Match.ParentAssetDisplayName;
+			Result.Add(Entry);
+		}
+	}
+
+	// Sort + dedupe on (Outer, Actor).
+	Result.Sort([](const FQuestContextualActor& A, const FQuestContextualActor& B)
+	{
+		const int32 Cmp = A.OuterAssetDisplayName.ToString().Compare(B.OuterAssetDisplayName.ToString());
+		if (Cmp != 0) return Cmp < 0;
+		return A.ActorName < B.ActorName;
+	});
+	for (int32 i = Result.Num() - 1; i > 0; --i)
+	{
+		if (Result[i].ActorName == Result[i - 1].ActorName
+			&& Result[i].OuterAssetDisplayName.ToString() == Result[i - 1].OuterAssetDisplayName.ToString())
+		{
+			Result.RemoveAt(i, 1, EAllowShrinking::No);
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
+		LogLabel, *ContentNode->NodeLabel.ToString(), Result.Num());
+
+	return Result;
+}
+
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesGivingTag, TEXT("FindContextualGiversForNode"));
+}
+
+TArray<FGameplayTag> FSimpleQuestEditorUtilities::CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	TArray<FGameplayTag> Result;
+	for (const FQuestContextualTagMatch& Match : CollectContextualTagMatchesForEditorNode(ContentNode))
+	{
+		Result.AddUnique(Match.Tag);
+	}
+	return Result;
+}
+
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode)
+{
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualWatchersForNode"));
+}
+
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
 {
 	if (Renames.Num() == 0 || !GEditor) return 0;
@@ -283,32 +420,53 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 	return ModifiedActors;
 }
 
-FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_Step* StepNode)
+FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)
 {
-	if (!StepNode) return FGameplayTag();
+	if (!ContentNode)
+	{
+		return FGameplayTag();
+	}
 
-	UEdGraph* Graph = StepNode->GetGraph();
-	if (!Graph) return FGameplayTag();
+	UEdGraph* Graph = ContentNode->GetGraph();
+	if (!Graph)
+	{
+		return FGameplayTag();
+	}
 
 	UObject* Outer = Graph->GetOuter();
 	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
 	{
 		UEdGraph* QuestGraph = QuestNode->GetGraph();
-		if (!QuestGraph) return FGameplayTag();
+		if (!QuestGraph)
+		{
+			return FGameplayTag();
+		}
 		Outer = QuestGraph->GetOuter();
 	}
 
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
-	if (!QuestlineAsset) return FGameplayTag();
-
-	for (const auto& [TagName, NodeInstance] : QuestlineAsset->GetCompiledNodes())
+	if (!QuestlineAsset)
 	{
-		if (NodeInstance && NodeInstance->GetQuestGuid() == StepNode->QuestGuid)
+		UE_LOG(LogSimpleQuest, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
+			*ContentNode->NodeLabel.ToString(), Outer ? *Outer->GetClass()->GetName() : TEXT("null"));
+		return FGameplayTag();
+	}
+
+	const auto& CompiledNodes = QuestlineAsset->GetCompiledNodes();
+	for (const auto& [TagName, NodeInstance] : CompiledNodes)
+	{
+		if (!NodeInstance)
+		{
+			continue;
+		}
+		if (NodeInstance->GetQuestGuid() == ContentNode->QuestGuid)
 		{
 			return FGameplayTag::RequestGameplayTag(TagName, false);
 		}
 	}
 
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
+		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString());
 	return FGameplayTag();
 }
 
@@ -357,15 +515,31 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
 
+bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_ContentBase* ContentNode)
+{
+	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
+	if (!CompiledTag.IsValid())
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
+			ContentNode ? *ContentNode->NodeLabel.ToString() : TEXT("(null)"));
+		return false;
+	}
+
+	const FGameplayTag ReconstructedTag = ReconstructNodeTagInternal(ContentNode);
+	if (!ReconstructedTag.IsValid())
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
+			*ContentNode->NodeLabel.ToString());
+		return false;
+	}
+
+	const bool bMatch = (CompiledTag.GetTagName() == ReconstructedTag.GetTagName());
+	return bMatch;
+}
+
 bool FSimpleQuestEditorUtilities::IsStepTagCurrent(const UQuestlineNode_Step* StepNode)
 {
-	const FGameplayTag CompiledTag = FindCompiledTagForNode(StepNode);
-	if (!CompiledTag.IsValid()) return false;
-
-	const FGameplayTag ReconstructedTag = ReconstructStepTag(StepNode);
-	if (!ReconstructedTag.IsValid()) return false;
-
-	return CompiledTag.GetTagName() == ReconstructedTag.GetTagName();
+	return IsContentNodeTagCurrent(StepNode);
 }
 
 void FSimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories)
@@ -975,5 +1149,257 @@ void FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(FToolMenuSecti
 			})
 		)
 	);
+}
+
+namespace
+{
+	/** Builds the project-wide compiled-tag universe via Asset Registry scan — no sync-load. */
+	TSet<FName> BuildCompiledTagUniverse()
+	{
+		TSet<FName> Universe;
+
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FAssetData> QuestlineAssets;
+		AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+		for (const FAssetData& AssetData : QuestlineAssets)
+		{
+			const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
+			if (CompiledTagsJoined.IsEmpty()) continue;
+
+			TArray<FString> TagStrs;
+			CompiledTagsJoined.ParseIntoArray(TagStrs, TEXT("|"));
+			for (const FString& TagStr : TagStrs) Universe.Add(FName(*TagStr));
+		}
+		return Universe;
+	}
+
+	/** Creates a tokenized diagnostic with a clickable node-navigation action token appended. */
+	TSharedRef<FTokenizedMessage> BuildValidationMessage(EMessageSeverity::Type Severity, const FText& LeadingText, const UEdGraphNode* TargetNode)
+	{
+		TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(Severity);
+		Msg->AddToken(FTextToken::Create(LeadingText));
+
+		if (TargetNode)
+		{
+			TWeakObjectPtr<const UEdGraphNode> WeakNode = TargetNode;
+			Msg->AddToken(FActionToken::Create(
+				FText::FromString(TargetNode->GetNodeTitle(ENodeTitleType::ListView).ToString()),
+				NSLOCTEXT("SimpleQuestEditor", "ValidateNavigateTooltip", "Navigate to this node in the graph editor"),
+				FOnActionTokenExecuted::CreateLambda([WeakNode]()
+				{
+					if (const UEdGraphNode* Node = WeakNode.Get())
+					{
+						FSimpleQuestEditorUtilities::NavigateToEdGraphNode(Node);
+					}
+				})));
+		}
+		return Msg;
+	}
+
+	/** Recursively collects every UEdGraphNode reachable from this graph — through Quest inner graphs, etc. */
+	void CollectAllNodesRecursive(const UEdGraph* Graph, TArray<UEdGraphNode*>& OutNodes)
+	{
+		if (!Graph) return;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (!Node) continue;
+			OutNodes.Add(Node);
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				CollectAllNodesRecursive(QuestNode->GetInnerGraph(), OutNodes);
+			}
+		}
+	}
+}
+
+FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtilities::ValidateProjectPrereqTags()
+{
+	FQuestTagValidationResult Result;
+
+	// Collected project-wide so we can cross-reference Rule Entries vs Rule Exits after the main walk.
+	// Values: the emitting node, for FActionToken navigation on the unused-entry warning.
+	TMap<FName, TWeakObjectPtr<const UEdGraphNode>> RuleEntryTags;
+	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>> RuleExitsByTag;
+
+	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+	TArray<FAssetData> QuestlineAssets;
+	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+
+	for (const FAssetData& AssetData : QuestlineAssets)
+	{
+		UQuestlineGraph* Asset = Cast<UQuestlineGraph>(AssetData.GetAsset());
+		if (!Asset || !Asset->QuestlineEdGraph) continue;
+
+		TArray<UEdGraphNode*> AllNodes;
+		CollectAllNodesRecursive(Asset->QuestlineEdGraph, AllNodes);
+
+		for (UEdGraphNode* Node : AllNodes)
+		{
+			// Rule Entry: stash the GroupTag + weak node ref; cross-referenced post-scan.
+			if (UQuestlineNode_PrerequisiteRuleEntry* RuleEntry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+			{
+				const FGameplayTag GroupTag = RuleEntry->GetGroupTag();
+				if (GroupTag.IsValid())
+				{
+					RuleEntryTags.Add(GroupTag.GetTagName(), RuleEntry);
+				}
+				continue;
+			}
+
+			// Rule Exit: stash per-tag + unset-tag guard. Entry/Exit cross-reference happens post-walk so we catch stale-registered
+			// tags too (the case where the Entry was deleted but its GroupTag lingers in the runtime tag manager).
+			if (UQuestlineNode_PrerequisiteRuleExit* RuleExit = Cast<UQuestlineNode_PrerequisiteRuleExit>(Node))
+			{
+				const FGameplayTag GroupTag = RuleExit->GetGroupTag();
+				if (GroupTag.IsValid())
+				{
+					RuleExitsByTag.FindOrAdd(GroupTag.GetTagName()).Add(RuleExit);
+				}
+				else
+				{
+					const FText Lead = FText::Format(
+						NSLOCTEXT("SimpleQuestEditor", "ValidateRuleExitUnsetLead",
+							"[{0}] Rule Exit has no GroupTag set:"),
+						FText::FromString(Asset->GetName()));
+					Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Error, Lead, RuleExit), EMessageSeverity::Error);
+					++Result.ErrorCount;
+				}
+				continue;
+			}
+
+			// Content node: walk the prereq expression tree and check each leaf's fact tag against the runtime tag manager.
+			UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node);
+			if (!ContentNode) continue;
+
+			const FPrereqExaminerTree Tree = CollectPrereqExpressionTopology(ContentNode);
+			if (Tree.IsEmpty()) continue;
+
+			for (const FPrereqExaminerNode& ExamNode : Tree.Nodes)
+			{
+				if (ExamNode.Type != EPrereqExaminerNodeType::Leaf) continue;
+				if (FQuestStateTagUtils::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
+
+				const UEdGraphNode* SourceForJump = ExamNode.SourceNode.IsValid() ? ExamNode.SourceNode.Get() : ContentNode;
+				const FText Lead = FText::Format(
+					NSLOCTEXT("SimpleQuestEditor", "ValidateLeafBrokenLead",
+						"[{0}] Prereq leaf on '{1}' references missing fact '{2}':"),
+					FText::FromString(Asset->GetName()),
+					FText::FromString(ContentNode->GetNodeTitle(ENodeTitleType::ListView).ToString()),
+					FText::FromString(ExamNode.LeafTag.IsValid() ? ExamNode.LeafTag.ToString() : TEXT("(unresolvable)")));
+
+				Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Warning, Lead, SourceForJump), EMessageSeverity::Warning);
+				++Result.WarningCount;
+			}
+		}
+	}
+
+	// Helper: resolve the owning UQuestlineGraph asset name from any emitting node, for the "[<Asset>]" prefix in leads.
+	auto AssetNameForNode = [](const UEdGraphNode* Node) -> FString
+	{
+	    if (!Node || !Node->GetGraph()) return TEXT("<unknown asset>");
+	    UObject* Outer = Node->GetGraph();
+	    while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
+	    const UQuestlineGraph* Asset = Cast<UQuestlineGraph>(Outer);
+	    return Asset ? Asset->GetName() : TEXT("<unknown asset>");
+	};
+
+	// Post-scan pass 1: Rule Exits whose GroupTag isn't produced by any Rule Entry in the project → Error per Exit.
+	// This subsumes both "tag completely unregistered" and "tag still registered but Entry was deleted" cases.
+	for (const auto& ExitPair : RuleExitsByTag)
+	{
+	    if (RuleEntryTags.Contains(ExitPair.Key)) continue;
+
+	    for (const TWeakObjectPtr<const UEdGraphNode>& WeakExit : ExitPair.Value)
+	    {
+	        const UEdGraphNode* ExitNode = WeakExit.Get();
+	        if (!ExitNode) continue;
+
+	        const FText Lead = FText::Format(
+	            NSLOCTEXT("SimpleQuestEditor", "ValidateRuleExitOrphanLead",
+	                "[{0}] Rule Exit references rule '{1}' — no Rule Entry in the project provides this tag:"),
+	            FText::FromString(AssetNameForNode(ExitNode)),
+	            FText::FromName(ExitPair.Key));
+
+	        Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Error, Lead, ExitNode), EMessageSeverity::Error);
+	        ++Result.ErrorCount;
+	    }
+	}
+
+	// Post-scan pass 2: Rule Entries that nobody references project-wide → Warning per Entry.
+	for (const auto& EntryPair : RuleEntryTags)
+	{
+	    if (RuleExitsByTag.Contains(EntryPair.Key)) continue;
+
+	    const UEdGraphNode* EntryNode = EntryPair.Value.Get();
+	    if (!EntryNode) continue;
+
+	    const FText Lead = FText::Format(
+	        NSLOCTEXT("SimpleQuestEditor", "ValidateUnusedRuleEntryLead",
+	            "[{0}] Rule Entry '{1}' is not referenced by any Rule Exit in the project. Remove it, or use Stale Quest Tags (Window → Developer Tools → Debug) to sweep unused rules alongside other stale references:"),
+	        FText::FromString(AssetNameForNode(EntryNode)),
+	        FText::FromName(EntryPair.Key));
+
+	    Result.Diagnostics.Emplace(BuildValidationMessage(EMessageSeverity::Warning, Lead, EntryNode), EMessageSeverity::Warning);
+	    ++Result.WarningCount;
+	}
+
+	UE_LOG(LogSimpleQuest, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
+		QuestlineAssets.Num(), Result.ErrorCount, Result.WarningCount);
+
+	return Result;
+}
+
+TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries()
+{
+	TArray<FStaleQuestTagEntry> Result;
+	if (!GEditor) return Result;
+
+	auto EmitIfStale = [&Result](AActor* Owner, UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
+	{
+		if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
+		FStaleQuestTagEntry Entry;
+		Entry.Actor = Owner;
+		Entry.Component = Component;
+		Entry.FieldLabel = FieldLabel;
+		Entry.StaleTag = Tag;
+		Result.Add(MoveTemp(Entry));
+	};
+
+	for (const FWorldContext& Context : GEditor->GetWorldContexts())
+	{
+		UWorld* World = Context.World();
+		if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* Actor = *It;
+
+			TArray<UQuestGiverComponent*> Givers;
+			Actor->GetComponents<UQuestGiverComponent>(Givers);
+			for (UQuestGiverComponent* Giver : Givers)
+			{
+				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive()) EmitIfStale(Actor, Giver, TEXT("QuestTagsToGive"), Tag);
+			}
+
+			TArray<UQuestTargetComponent*> Targets;
+			Actor->GetComponents<UQuestTargetComponent>(Targets);
+			for (UQuestTargetComponent* Target : Targets)
+			{
+				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch()) EmitIfStale(Actor, Target, TEXT("StepTagsToWatch"), Tag);
+			}
+
+			TArray<UQuestWatcherComponent*> Watchers;
+			Actor->GetComponents<UQuestWatcherComponent>(Watchers);
+			for (UQuestWatcherComponent* Watcher : Watchers)
+			{
+				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedStepTags"), Tag);
+				for (const auto& Pair : Watcher->GetWatchedTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedTags"), Pair.Key);
+			}
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found across loaded levels"), Result.Num());
+	return Result;
 }
 

@@ -8,6 +8,7 @@
 #include "Components/ActorComponent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Interfaces/QuestGiverInterface.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestGiverComponent.generated.h"
 
 
@@ -30,14 +31,34 @@ public:
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
 	FOnQuestGiverActivated OnQuestGiverActivated;
 	
+private:
+	/**
+	 * Give the quest identified by QuestTag to this component's owner. Publishes FQuestGivenEvent on Tag_Channel_QuestGiven;
+	 * UQuestManagerSubsystem picks it up, clears any PendingGiver state, stamps the merged params onto the target step, and
+	 * routes into the normal activation pipeline (prereq / gate checks unchanged).
+	 *
+	 * The outgoing params are built by additively merging two sources, in this order:
+	 *   1. This component's authored ActivationParams (baseline per placed instance).
+	 *   2. The caller-supplied Params argument (per-call runtime data).
+	 * Merge rules match UQuestStep::ActivateInternal: TargetActors / TargetClasses union, NumElementsRequired sums,
+	 * and the single-valued fields (ActivationSource, CustomData, OriginTag, OriginChain) take the caller's value when
+	 * set, otherwise the authored baseline. If neither source sets ActivationSource, it defaults to GetOwner() so
+	 * objectives always have a "who activated me" reference.
+	 *
+	 * Blueprint: the Params pin is optional thanks to AutoCreateRefTerm — leave it unconnected and the authored
+	 * ActivationParams (if any) carries alone. Wire a Make FQuestObjectiveActivationParams node to supply runtime data
+	 * (dialogue choices, procedural targets, typed CustomData). 
+	 *
+	 * C++: pass an empty struct literal (or omit the argument) for the authored-only path; fill fields to add on top.
+	 *
+	 * @param QuestTag  Compiled quest tag identifying which step to activate. Must be a registered tag; no-op otherwise.
+	 * @param Params    Optional per-call activation payload. Merged additively with the component's ActivationParams.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Params", AllowPrivateAccess = "true"))
+	void GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
+	
 protected:
 	virtual void BeginPlay() override;
-	/**
-	 * Transitional — internal subscription and registration still uses this.
-	 * Will be removed when QuestTagsToGive drives the full component lifecycle.
-	 */
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	//TArray<TSoftClassPtr<UQuest>> QuestClassesToGive;
 	
 	/**
 	 * New authoritative property — read by the manifest builder and eventually the sole registration mechanism once the
@@ -45,19 +66,24 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest"))
 	FGameplayTagContainer QuestTagsToGive;
+
+	/**
+	 * Designer-authored activation payload published with every give. Full FQuestObjectiveActivationParams struct —
+	 * placed-actor givers can pre-wire TargetActors (the specific enemies / items this giver's quest is about), counts,
+	 * typed CustomData, etc. Merged additively with the step's authored defaults in UQuestStep::ActivateInternal. Empty
+	 * (default-constructed) is the common case and incurs no behavior change vs. pre-Piece-C.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest")
+	FQuestObjectiveActivationParams ActivationParams;
 	
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	FGameplayTagContainer EnabledQuestTags;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 
-private:
+	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 	
-	//UFUNCTION(BlueprintCallable)
-	//void GiveQuest(UQuest* QuestToStart);
-
-	UFUNCTION(BlueprintCallable)
-	void GiveQuestByTag(const FGameplayTag& QuestTag);
+private:
 
 	UFUNCTION(BlueprintCallable)
 	virtual void SetQuestGiverActivated(const FGameplayTag& QuestTag, bool bIsQuestActive) override;
@@ -69,8 +95,22 @@ private:
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 public:
+	/**
+	 * Returns the authored QuestTagsToGive container verbatim. May contain stale (unregistered) tags if the designer hasn't
+	 * recompiled after removing a referenced node. Feed into tag-library Filter / HasAny / MatchesAny calls via
+	 * GetRegisteredQuestTagsToGive() instead — raw stale entries assert inside UE's FGameplayTag::MatchesAny.
+	 */
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetQuestTagsToGive() const { return QuestTagsToGive; }
+
+	/**
+	 * Registration-filtered view of QuestTagsToGive. Every returned tag is guaranteed registered in the runtime tag
+	 * manager, making this safe to pass into FGameplayTagContainer::Filter / HasAny / MatchesAny. Stale entries are
+	 * dropped (with a Warning log naming each one) but preserved on the underlying authored container.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
+	
 	UFUNCTION(BlueprintCallable)
 	bool CanGiveAnyQuests() const;
 	UFUNCTION(BlueprintCallable)

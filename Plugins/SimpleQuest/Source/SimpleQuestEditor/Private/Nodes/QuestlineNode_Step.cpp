@@ -10,9 +10,9 @@
 
 void UQuestlineNode_Step::AllocateOutcomePins()
 {
-	if (!ObjectiveClass) return;
+	if (ObjectiveClass.IsNull()) return;
 
-	TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+	TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass.LoadSynchronous());
 	for (const FGameplayTag& Tag : Outcomes)
 	{
 		if (Tag.IsValid())
@@ -38,9 +38,9 @@ void UQuestlineNode_Step::PostEditChangeProperty(FPropertyChangedEvent& Property
 void UQuestlineNode_Step::RefreshOutcomePins()
 {
 	TArray<FName> DesiredNames;
-	if (ObjectiveClass)
+	if (!ObjectiveClass.IsNull())
 	{
-		TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass);
+		TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass.LoadSynchronous());
 		for (const FGameplayTag& Tag : Outcomes)
 		{
 			if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());

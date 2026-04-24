@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "SimpleQuestLog.h"
+#include "GameplayTagsManager.h"
 
 /**
  * Static utility class for composing the per-node / per-quest state-fact gameplay tag strings used throughout the quest
@@ -13,12 +15,12 @@ class FQuestStateTagUtils
 {
 public:
 	// ---- Constants ----
-	inline static const FString Namespace       = TEXT("QuestState.");
-	inline static const FString Leaf_Active     = TEXT("Active");
-	inline static const FString Leaf_Completed  = TEXT("Completed");
+	inline static const FString Namespace = TEXT("QuestState.");
+	inline static const FString Leaf_Active = TEXT("Active");
+	inline static const FString Leaf_Completed = TEXT("Completed");
 	inline static const FString Leaf_PendingGiver = TEXT("PendingGiver");
 	inline static const FString Leaf_Deactivated = TEXT("Deactivated");
-	inline static const FString Leaf_Blocked    = TEXT("Blocked");
+	inline static const FString Leaf_Blocked = TEXT("Blocked");
 
 	// ---- Static methods ----
 
@@ -87,6 +89,37 @@ public:
 
 		FString OutcomeLeaf = OutcomeStr.Mid(OutcomePos + 8);
 		return FName(*(NodeStr + TEXT(".EntryOutcome.") + OutcomeLeaf));
+	}
+
+	/**
+	 * True iff Tag is well-formed AND currently registered in the runtime UGameplayTagsManager. Defensive — an FGameplayTag
+	 * can pass IsValid() (non-NAME_None) while holding a stale reference whose source compiled tag no longer exists in the
+	 * registry. Stale tags ensure inside UE's FGameplayTag::MatchesAny whenever any tag-container operation iterates them,
+	 * so this helper is the foundation for the container-sanitizing accessors on the three quest components.
+	 */
+	static bool IsTagRegisteredInRuntime(const FGameplayTag& Tag)
+	{
+		if (!Tag.IsValid()) return false;
+		return UGameplayTagsManager::Get().RequestGameplayTag(Tag.GetTagName(), /*ErrorIfNotFound*/ false).IsValid();
+	}
+
+	/**
+	 * Returns a copy of Container with every unregistered (stale) tag filtered out. O(N) in container size; a Warning is
+	 * logged per stale tag so designers see exactly which references need cleanup via the Stale Quest Tags panel. Intended
+	 * for BP callsites that feed the result into tag-library operations (Filter, HasAny, MatchesAny) that assert on stale.
+	 */
+	static FGameplayTagContainer FilterToRegisteredTags(const FGameplayTagContainer& Container, const FString& ContextLabel)
+	{
+		FGameplayTagContainer Result;
+		for (const FGameplayTag& Tag : Container)
+		{
+			if (IsTagRegisteredInRuntime(Tag)) { Result.AddTag(Tag); continue; }
+			UE_LOG(LogSimpleQuest, Warning,
+				TEXT("%s : filtering stale tag '%s' — no longer registered. ")
+				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+				*ContextLabel, *Tag.ToString());
+		}
+		return Result;
 	}
 
 private:

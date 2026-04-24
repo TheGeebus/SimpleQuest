@@ -12,25 +12,26 @@ struct FWorldStateFactAddedEvent;
 struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
+struct FQuestActivationRequestEvent;
 struct FAbandonQuestEvent;
 struct FQuestDeactivatedEvent;
-enum class EDeactivationSource : uint8;
-class UQuestStep;
+struct FQuestEventContext;
+struct FInstancedStruct;
+struct FQuestText;
 struct FGameplayTag;
 struct FQuestStartedEvent;
 struct FQuestEnabledEvent;
 struct FQuestObjectiveTriggered;
+enum class EDeactivationSource : uint8;
+class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
 class IQuestTargetInterface;
 class UQuestGiverInterface;
-struct FQuestText;
 class UQuestReward;
 class UQuestlineGraph;
 class UQuestNodeBase;
-class UQuestStep;
-struct FQuestEventContext;
-struct FInstancedStruct;
+
 
 
 /**
@@ -47,6 +48,7 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
@@ -114,6 +116,7 @@ private:
 	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
 	void HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event);
 	void HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+	void HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event);
 
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestActive(FGameplayTag QuestTag);
@@ -137,6 +140,7 @@ private:
 	TSet<FGameplayTag> RegisteredGiverQuestTags;
 	FDelegateHandle GiverRegisteredDelegateHandle;
 	FDelegateHandle DeactivateEventDelegateHandle;
+	FDelegateHandle ActivationRequestDelegateHandle;
 	
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepTriggerHandles;
 

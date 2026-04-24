@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "IDetailsView.h"
+#include "EditorUndoClient.h"
 #include "Toolkit/QuestlineBreadcrumbBar.h"
 
 
@@ -17,7 +18,7 @@ class SGroupExaminerPanel;
 class SPrereqExaminerPanel;
 
 
-class FQuestlineGraphEditor : public FAssetEditorToolkit
+class FQuestlineGraphEditor : public FAssetEditorToolkit, public FEditorUndoClient
 {
 public:
 	virtual ~FQuestlineGraphEditor() override;
@@ -30,6 +31,12 @@ public:
 	virtual FLinearColor GetWorldCentricTabColorScale() const override;
 	virtual void RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override;
 	virtual void UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override;
+
+	// FEditorUndoClient interface — GEditor calls these after any undo/redo affecting anything we've registered to watch.
+	// Used here to force a full panel refresh; UE's per-UObject PostEditUndo propagation doesn't reliably invalidate
+	// SGraphPanel's widget cache for all node types (UEdGraphNode_Comment in particular hangs on).
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
 	
 	struct FEdNodeLocation
 	{
@@ -54,13 +61,40 @@ private:
 	TSharedRef<SQuestlineGraphPanel> CreateGraphEditorWidget();
 	void BindGraphCommands();
 	void DeleteSelectedNodes();
+	bool CanDeleteNodes() const;
 
+	// Standard edit commands — SGraphEditor doesn't wire these by default; each editor has to bind and implement.
+	void CopySelectedNodes();
+	bool CanCopyNodes() const;
+	void CutSelectedNodes();
+	bool CanCutNodes() const;
+	void PasteNodes();
+	void PasteNodesHere(UEdGraph* DestinationGraph, const FVector2f& GraphLocation);
+	bool CanPasteNodes() const;
+	void DuplicateNodes();
+	bool CanDuplicateNodes() const;
+
+	void OnCreateComment();
+	
 	// Compile and save graph data layer
 	void CompileQuestlineGraph();
+	void ValidatePrereqTags();
 	virtual void SaveAsset_Execute() override;
 	void ExtendToolbar();
 	void FillToolbar(FToolBarBuilder& ToolbarBuilder);
 
+	/**
+	 * Toggles the Details panel between node-selection tracking and a pinned asset view — the Questline Graph's own
+	 * properties (QuestlineID, FriendlyName, etc.). Mirror of Blueprint's Class Defaults button. Click to pin; click
+	 * again to restore normal selection tracking. When pinned, OnGraphSelectionChanged short-circuits to the asset
+	 * regardless of node selection.
+	 */
+	void ToggleGraphDefaults();
+	bool IsGraphDefaultsPinned() const { return bGraphDefaultsPinned; }
+
+	/** Session-scoped; not serialized. Drives the toolbar toggle's checked state + OnGraphSelectionChanged's bypass. */
+	bool bGraphDefaultsPinned = false;
+	
 	FText GetGraphDisplayName(UEdGraph* Graph) const;
 
 	enum class EQuestlineCompileStatus : uint8 { Unknown, UpToDate, Error };
@@ -156,6 +190,11 @@ private:
 	TSharedPtr<SQuestlineBreadcrumbBar> BreadcrumbBar;			// updated by NavigateTo
 	TWeakPtr<FQuestlineGraphEditor> CrossAssetBackEditor;		// manages navigation to and from linked questline assets 
 	bool bIsNavigatingHistory = false;
+
+	bool bSuppressDirtyOnGraphChange = false;					// set true across RefreshAllNodeWidgets — a compile-triggered
+																// refresh fires NotifyGraphChanged on every descendant graph, but
+																// it's NOT a user edit; without this guard the status icon bounces
+																// to Unknown when neighbor-asset broadcasts pass through our refresh.
 
 public:
 	void NavigateTo(UEdGraph* Graph);

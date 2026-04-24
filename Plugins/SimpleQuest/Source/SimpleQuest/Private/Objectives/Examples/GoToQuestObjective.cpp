@@ -16,8 +16,8 @@ void UGoToQuestObjective::TryCompleteObjective_Implementation(const FQuestObject
 	CompleteObjectiveWithOutcome(ReachedOutcomeTag, InContext);
 }
 
-void UGoToQuestObjective::SetObjectiveTarget_Implementation(const TSet<TSoftObjectPtr<AActor>>& InTargetActors, const TSet<TSubclassOf<AActor>>& InTargetClasses, int32 NumElementsRequired)
+void UGoToQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params)
 {
-	Super::SetObjectiveTarget_Implementation(InTargetActors, InTargetClasses, NumElementsRequired);
+	Super::OnObjectiveActivated_Implementation(Params);
 	EnableQuestTargetActors(true);
 }

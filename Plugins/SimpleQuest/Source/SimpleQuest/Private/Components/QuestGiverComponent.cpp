@@ -13,6 +13,7 @@
 #include "GameplayTagsManager.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestStartedEvent.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
 
@@ -56,6 +57,24 @@ int32 UQuestGiverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 	return Count;
 }
 
+int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+{
+	int32 Count = 0;
+	for (const FGameplayTag& Tag : TagsToRemove)
+	{
+		if (QuestTagsToGive.HasTagExact(Tag))
+		{
+			QuestTagsToGive.RemoveTag(Tag);
+			++Count;
+		}
+	}
+	if (Count > 0 && GetOwner())
+	{
+		GetOwner()->MarkPackageDirty();
+	}
+	return Count;
+}
+
 void UQuestGiverComponent::RegisterQuestGiver()
 {
 	if (QuestTagsToGive.IsEmpty())
@@ -68,7 +87,14 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 	for (const FGameplayTag& QuestTag : QuestTagsToGive)
 	{
-		if (!QuestTag.IsValid()) continue;
+		if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+		{
+			UE_LOG(LogSimpleQuest, Warning,
+				TEXT("UQuestGiverComponent::RegisterQuestGiver : '%s' holds stale tag '%s' — skipping subscribe. ")
+				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
+			continue;
+		}
 
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"), *QuestTag.ToString(), *GetOwner()->GetName());
 
@@ -125,11 +151,43 @@ void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Contex
 	}
 }
 
-void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag)
+void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params)
 {
-	if (QuestTag.IsValid() && SignalSubsystem)
+	if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
 	{
-		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+		UE_LOG(LogSimpleQuest, Warning,
+			TEXT("UQuestGiverComponent::GiveQuestByTag : '%s' on '%s' tried to give stale tag '%s' — skipping publish. ")
+			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to sweep this reference."),
+			*GetClass()->GetName(), *GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
+		return;
+	}
+	if (SignalSubsystem)
+	{
+		// Start from the designer-authored baseline, then additively merge the caller-supplied Params on top. Matches
+		// the step-side merge rule so composition semantics are uniform across the activation pipeline.
+		FQuestObjectiveActivationParams OutgoingParams = ActivationParams;
+		OutgoingParams.TargetActors.Append(Params.TargetActors);
+		OutgoingParams.TargetClasses.Append(Params.TargetClasses);
+		OutgoingParams.NumElementsRequired += Params.NumElementsRequired;
+
+		// Single-valued fields: caller wins if set, else keep the authored baseline.
+		if (Params.ActivationSource) OutgoingParams.ActivationSource = Params.ActivationSource;
+		if (Params.CustomData.IsValid()) OutgoingParams.CustomData = Params.CustomData;
+		if (Params.OriginTag.IsValid()) OutgoingParams.OriginTag = Params.OriginTag;
+		if (Params.OriginChain.Num() > 0) OutgoingParams.OriginChain = Params.OriginChain;
+
+		// Default ActivationSource to the giver's owner when neither authored nor caller set it.
+		if (!OutgoingParams.ActivationSource)
+		{
+			OutgoingParams.ActivationSource = GetOwner();
+		}
+		// Seed OriginChain from OriginTag if the designer authored a tag but the chain is still empty.
+		if (OutgoingParams.OriginTag.IsValid() && OutgoingParams.OriginChain.Num() == 0)
+		{
+			OutgoingParams.OriginChain.Add(OutgoingParams.OriginTag);
+		}
+
+		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingParams));
 	}
 }
 
@@ -151,6 +209,14 @@ void UQuestGiverComponent::SetQuestGiverActivated(const FGameplayTag& QuestTag, 
 bool UQuestGiverComponent::CanGiveAnyQuests() const
 {
 	return !EnabledQuestTags.IsEmpty();
+}
+
+FGameplayTagContainer UQuestGiverComponent::GetRegisteredQuestTagsToGive() const
+{
+	return FQuestStateTagUtils::FilterToRegisteredTags(
+		QuestTagsToGive,
+		FString::Printf(TEXT("UQuestGiverComponent::GetRegisteredQuestTagsToGive ('%s')"),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
 
 bool UQuestGiverComponent::IsQuestEnabled(FGameplayTag QuestTag)

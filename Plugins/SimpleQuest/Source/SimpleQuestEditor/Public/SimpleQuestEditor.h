@@ -13,6 +13,8 @@ class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
 class FQuestPIEDebugChannel;
 class FSlateStyleSet;
+class FSpawnTabArgs;
+class SDockTab;
 
 class FSimpleQuestEditor : public ISimpleQuestEditorModule
 {
@@ -28,6 +30,7 @@ public:
 	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
 	
 	virtual void CompileAllQuestlineGraphs() override;
+	virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const override;
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
@@ -58,4 +61,8 @@ private:
 	void RebuildNativeTags(bool bRefreshTree = false);
 	
 	bool bIsRegisteringTags = false;
+
+	TSharedRef<SDockTab> SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args);
+
+	static const FName StaleQuestTagsTabId;
 };

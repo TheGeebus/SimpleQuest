@@ -125,6 +125,28 @@ int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 	return Count;
 }
 
+int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+{
+	int32 Count = 0;
+	for (const FGameplayTag& Tag : TagsToRemove)
+	{
+		if (WatchedStepTags.HasTagExact(Tag))
+		{
+			WatchedStepTags.RemoveTag(Tag);
+			++Count;
+		}
+		if (WatchedTags.Remove(Tag) > 0)
+		{
+			++Count;
+		}
+	}
+	if (Count > 0 && GetOwner())
+	{
+		GetOwner()->MarkPackageDirty();
+	}
+	return Count;
+}
+
 void UQuestWatcherComponent::RegisterQuestWatcher()
 {
     if (!SignalSubsystem)
@@ -144,10 +166,17 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     UWorldStateSubsystem* WorldState = GetWorld() && GetWorld()->GetGameInstance()
         ? GetWorld()->GetGameInstance()->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 
-    for (auto& QuestPair : WatchedTags)
-    {
-        const FGameplayTag& QuestTag = QuestPair.Key;
-        if (!QuestTag.IsValid()) continue;
+	for (auto& QuestPair : WatchedTags)
+	{
+		const FGameplayTag& QuestTag = QuestPair.Key;
+		if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+		{
+			UE_LOG(LogSimpleQuest, Warning,
+				TEXT("UQuestWatcherComponent::RegisterQuestWatcher : '%s' holds stale tag '%s' — skipping subscribe. ")
+				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
+			continue;
+		}
 
         UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered watcher for tag: %s"), *QuestTag.ToString());
 
@@ -233,4 +262,21 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     }
 }
 
+FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedStepTags() const
+{
+	return FQuestStateTagUtils::FilterToRegisteredTags(
+		WatchedStepTags,
+		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedStepTags ('%s')"),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
+}
+
+FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedQuestKeys() const
+{
+	FGameplayTagContainer KeysContainer;
+	for (const auto& Pair : WatchedTags) KeysContainer.AddTag(Pair.Key);
+	return FQuestStateTagUtils::FilterToRegisteredTags(
+		KeysContainer,
+		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedQuestKeys ('%s')"),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
+}
 

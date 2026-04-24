@@ -39,9 +39,6 @@ private:
 	const UClass* GetObjectiveClass() const;
 	void OnObjectiveClassChanged(const UClass* NewClass);
 
-	// Expandable target list builder
-	TSharedRef<SWidget> BuildTargetList(const FText& Label, const TArray<FString>& Items, const FLinearColor& Color, TFunction<bool()> IsExpanded, TFunction<void()> ToggleExpanded);
-	
 	// Cached reference
 	UQuestlineNode_Step* StepNode = nullptr;
 
@@ -52,8 +49,5 @@ private:
 	// Actors in all levels whose QuestGiverComponent watches this step's tag.
 	// Populated at the start of UpdateGraphNode() and consumed by summary + expanded content.
 	TArray<FString> WatchingGiverNames;
-
-	// Flags the tag for this node as stale following a rename to allow a visual warning   
-	bool bTagStale = false;
 
 };

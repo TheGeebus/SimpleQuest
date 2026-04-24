@@ -7,6 +7,7 @@
 #include "Debug/QuestNodeDebugState.h"
 #include "Debug/QuestPrereqDebugState.h"
 
+class UQuestlineNode_ContentBase;
 class UEdGraphNode;
 class UWorldStateSubsystem;
 class UQuestManagerSubsystem;
@@ -52,7 +53,7 @@ public:
 	 * the source content node it reads from. Returns Unknown when not in PIE or when either tag is invalid. See
 	 * EPrereqDebugState for the classification semantics.
 	 */
-	EPrereqDebugState QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag) const;
+	EPrereqDebugState QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag, const UQuestlineNode_ContentBase* LeafSourceNode = nullptr) const;
 
 	/** Convenience raw-fact lookup — returns true if the PIE world's WorldState has the given fact asserted. False otherwise
 		(including when not in PIE). */
@@ -69,9 +70,10 @@ private:
 	bool ResolvePIESubsystems();
 
 	/** Walks editor node → containing UQuestlineGraph → CompiledNodes lookup by QuestGuid. Returns invalid tag if not resolvable. */
-	static FGameplayTag ResolveRuntimeTag(const UEdGraphNode* EditorNode);
+	FGameplayTag ResolveRuntimeTag(const UEdGraphNode* EditorNode) const;
 
 	TWeakObjectPtr<UWorldStateSubsystem> CachedWorldState;
+
 	TWeakObjectPtr<UQuestManagerSubsystem> CachedQuestManager;
 
 	FDelegateHandle PostPIEStartedHandle;

@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "PrerequisiteExpression.h"
 #include "Quests/Types/QuestNodeInfo.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestNodeBase.generated.h"
 
 class UQuestReward;
@@ -102,6 +103,15 @@ protected:
      * so the manager can chain NextNodesOnForward. Utility nodes call this after completing their utility action.
      */
     virtual void ForwardActivation();
+
+    /**
+     * Clears every member set during an earlier Activate / Deactivate cycle. Called by
+     * UQuestManagerSubsystem::ActivateQuestlineGraph before each PIE session wires the node back into a live subsystem —
+     * the compiled instances persist across PIE sessions (they live on the UQuestlineGraph asset), so any delegate
+     * handles or scratch state from a prior session are stale and must be dropped. Override on subclasses that add
+     * their own transient members; always call Super first.
+     */
+    virtual void ResetTransientState();
     
     /**
      * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID
@@ -125,6 +135,16 @@ protected:
      */
     UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly)
     FGameplayTag ContextualTag;
+    
+    /**
+     * Transient scratch slot for activation-time params stamped by the manager before Activate runs. Populated by
+     * ChainToNextNodes (cascade pre-stamp), HandleGiveQuestEvent, HandleActivationRequest, and ActivateNodeByTag's
+     * Quest-boundary forwarder. Consumed and cleared by the concrete subclass during its activation (UQuestStep merges
+     * additively with authored defaults; UQuest forwards to inner entries). Not serialized — save/load restoration
+     * republishes the activation event rather than persisting this stash.
+     */
+    UPROPERTY(Transient)
+    FQuestObjectiveActivationParams PendingActivationParams;
 
     /**
      * Map of tags representing each discrete outcome possible as set on either the UQuestObjective or by the exit nodes on the

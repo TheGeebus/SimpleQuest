@@ -8,11 +8,11 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Active Development
-- Node editor polish pass: `FriendlyName` field on `UQuestlineGraph`,
-  LinkedQuestline title format + inline asset picker, Graph Defaults
-  toolbar button, Outcome node inline tag picker
-- Project-wide Validate-all-prereq-tags scanner
-- `BindToQuestEvent` convenience wrapper (C++ template + BP K2 node)
+- Event-driven LinkedQuestline ref-index cache (incremental cross-asset
+  dependency tracking to replace current Asset Registry scans on compile)
+- Utility B Tier 2 — commandlet-capable project-wide stale-tag scan
+  covering Actor Blueprint CDOs + unloaded levels (ships-pipeline hook
+  for pre-ship validation)
 
 ### Upcoming
 - Tag namespace consolidation under a single `SimpleQuest.*` root
@@ -22,10 +22,417 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   subscription, prioritized synchronous fallback for critical paths)
 
 ### Known Issues
-- Node duplication (Ctrl-D / copy-paste) leaves `NodeLabel` collisions
-  with the source; duplicate-resolve auto-suffix helper not yet
-  implemented. Compile warning fires on collision but designer
-  intervention is still required.
+- Giver "why can't activate" query API (Item 23) still deferred until
+  deactivation system stabilizes
+- Async-action K2 node icon customization is impractical — UE's
+  `UK2Node_AsyncAction` uses a hardcoded icon and its base
+  `GetMenuActions` iterates every `UBlueprintAsyncActionBase` subclass
+  into a default-icon spawner registration. Subclassing to override
+  `GetIconAndTint` works for the title-bar icon but produces a duplicate
+  palette entry. Moving the factory function off the async-action class
+  fixes the duplicate but shifts significant glue code into the BP
+  library. Current stance: ship the default async icon, accept the
+  visual inconsistency with other SimpleQuest K2 nodes
+
+---
+
+## [0.3.2] — 2026-04-24 — Authoring Diagnostics + Runtime Hardening
+
+A full authoring-diagnostics pass plus the runtime safety net that
+surfaced the need for it. Started from a user-reported ensure in a
+Blueprint overlap handler — a stale gameplay tag tripped UE's
+`FGameplayTag::MatchesAny` container iteration and hung the editor for
+~10 seconds via `FDebug::EnsureFailed`. The fix layered out into
+sanitized component getters, defense-in-depth publish/subscribe guards,
+and a shared `IsTagRegisteredInRuntime` helper. Surfacing and cleaning
+up the stale references needed its own tools, so the release also ships
+a project-wide prereq validator and a component-side stale-tag cleanup
+panel.
+
+Rounded out with four additional authoring + runtime conveniences:
+a duplicate-Outcome-routing compile warning, comment block support on
+the questline graphs, a blueprint async action for subscribing to
+quest lifecycle events, and a `FEditorUndoClient` hook on the graph
+editor that fixes undo for any third-party node type (discovered while
+investigating comment-node undo specifically).
+
+### Added
+
+#### Prereq Tag Validator (new toolbar action)
+- `Validate Tags` toolbar button on the Questline Graph Editor —
+  scans every `UQuestlineGraph` in the project, emits tokenized
+  diagnostics to a new `QuestValidator` MessageLog listing with
+  clickable per-node navigation. Read-only; never modifies assets
+- Four diagnostic categories:
+  - **Error**: prereq leaf references a missing fact tag
+  - **Error**: Rule Exit with no GroupTag set
+  - **Error**: Rule Exit references a rule that no Rule Entry in the
+    project provides (authoring cross-reference; catches both
+    unregistered tags and stale-registered orphans)
+  - **Warning**: unused Rule Entry — no Rule Exit references it;
+    message points at the Stale Quest Tags panel as the sweep path
+- Validation is independent of the compiler: flags cross-graph drift
+  and authoring hygiene the per-graph compile can't see. Validates
+  against the runtime tag manager rather than the Asset Registry's
+  `CompiledQuestTags` cache — catches `.Completed` state facts and
+  `QuestPrereqRule.*` group tags that don't serialize into the AR tag
+
+#### Stale Quest Tags panel (new nomad tab)
+- Window → Developer Tools → Debug → Stale Quest Tags — sibling to
+  the World State Facts panel. Lists quest-component tag references
+  whose target isn't registered in the runtime tag manager. Pull-
+  based; never auto-runs
+- Scans loaded editor worlds, walks every
+  `UQuestGiverComponent` / `UQuestTargetComponent` /
+  `UQuestWatcherComponent` across `GEditor->GetWorldContexts`. One row
+  per stale tag reference
+- Per-row surfaces: Find (magnifying-glass icon, selects + frames the
+  actor in its level viewport) and Clear (removes the stale tag from
+  the component, marks actor dirty)
+- Filter bar with case-insensitive substring match + live highlighting
+  across Actor / Component / Field / Stale Tag columns
+- Per-column sortable (ascending/descending toggle via header arrows)
+- Alternating zebra row backgrounds + vertical-centered text
+- Tier 1 scope: loaded levels only. Tier 2 (unloaded + Actor Blueprint
+  CDOs, commandlet-capable) logged as follow-up
+
+#### Runtime Helpers
+- `FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)` — true iff
+  `Tag` is well-formed AND currently registered in
+  `UGameplayTagsManager`. Foundation for every stale-tag check across
+  the runtime and editor surfaces
+- `FQuestStateTagUtils::FilterToRegisteredTags(Container, ContextLabel)`
+  — returns a copy of `Container` with unregistered tags stripped, with
+  Warning logs per stale tag naming the context. Used by the new BP-
+  facing sanitized getters
+- `UQuestComponentBase::RemoveTags(TagsToRemove)` — new virtual,
+  parallels `ApplyTagRenames`. Concrete overrides on giver / target /
+  watcher remove matching tags from authored containers and mark the
+  owning actor dirty. Powers the Stale Quest Tags panel's Clear action
+
+#### BP-Safe Sanitized Getters
+- `UQuestGiverComponent::GetRegisteredQuestTagsToGive()` — registration-
+  filtered view of `QuestTagsToGive`. Safe to pass to tag-library
+  `Filter` / `HasAny` / `MatchesAny` calls that assert on stale entries
+- `UQuestTargetComponent::GetRegisteredStepTagsToWatch()` — same pattern
+  for `StepTagsToWatch`
+- `UQuestWatcherComponent::GetRegisteredWatchedStepTags()` and
+  `GetRegisteredWatchedQuestKeys()` — for `WatchedStepTags` and the keys
+  of the `WatchedTags` TMap
+- Raw accessors on `UQuestWatcherComponent` (`GetWatchedStepTags` /
+  `GetWatchedTags`) — const-ref views of the authored containers, for
+  the editor-side stale-tag scan
+
+#### Duplicate-Outcome-Routing Compile Warning
+- The compiler now emits a tokenized warning when a single content-node
+  output pin reaches two or more distinct Outcome terminals that share
+  an `OutcomeTag`. Authoring is ambiguous in that configuration — the
+  compiler accepts the union of reached destinations, but one outcome
+  should route through exactly one terminal. Navigation tokens on the
+  source node and every duplicate terminal
+- `FQuestlineGraphCompiler::ResolvePinToTags` threads an optional
+  per-tag visited-exits collector through the forward walk (defaults to
+  `nullptr`; existing call sites unchanged). The outcome-routing loop
+  passes a collector, inspects it post-walk for duplicates, emits one
+  warning per (OutcomeTag, set-of-Exits) group
+
+#### Comment Blocks
+- `UEdGraphNode_Comment` support on all questline graph tiers (top-level,
+  Quest inner, LinkedQuestline view). Press `C` with nodes selected to
+  wrap them in a comment box with standard 50px padding; press `C` with
+  no selection to drop a blank comment at the cursor. Right-click the
+  graph background → "Add Comment…" in the action palette as an
+  alternative entry point
+- `FGraphEditorCommands::CreateComment` mapped on the questline graph
+  editor's `GraphEditorCommands` list; schema contributes the palette
+  entry via `GetGraphContextActions` (suppressed when dragging from a
+  pin since comments don't participate in wiring)
+
+#### Bind To Quest Event (BP async action + C++ helpers)
+- `UQuestEventSubscription` — new `UBlueprintAsyncActionBase` subclass
+  with four output delegates: `OnActivated`, `OnStarted`, `OnCompleted`
+  (carrying the `OutcomeTag`), `OnDeactivated`. Subscribes to all four
+  lifecycle event channels on a single quest tag and stays bound until
+  `Cancel()` is called or the `UGameInstance` tears down. Designed for
+  hierarchical tag subscriptions — subscribing on a parent tag
+  (e.g. `Quest.MyLine`) receives events for every descendant quest
+- Catch-up on activation: any already-asserted quest-state fact fires
+  the corresponding pin immediately, mirroring
+  `UQuestWatcherComponent::RegisterQuestWatcher`
+- BP factory `UQuestEventSubscription::BindToQuestEvent(WorldContext, QuestTag)`
+  — DisplayName "Bind To Quest Event", `BlueprintInternalUseOnly` +
+  `HidePin`/`DefaultToSelf` on `WorldContextObject` so the pin is
+  auto-wired to Self in BP graphs
+- C++ one-liner template on the BP library for direct handle-based
+  subscriptions: `USimpleQuestBlueprintLibrary::SubscribeToQuestEvent<TEvent>`
+  resolves the signal subsystem, guards the tag against
+  `IsTagRegisteredInRuntime`, and returns an `FDelegateHandle`.
+  Companion `UnsubscribeFromQuestEvent(WorldContext, QuestTag, Handle)`
+  for teardown
+
+### Fixed
+
+- Undo failure for `UEdGraphNode_Comment` placement — `FQuestlineGraphEditor`
+  now inherits `FEditorUndoClient` and forces `NotifyGraphChanged` on
+  the current graph from `PostUndo` / `PostRedo`. `UK2Node_AsyncAction`
+  and other third-party node types whose `PostEditUndo` doesn't
+  broadcast graph-change now get a reliable post-undo refresh. Covers
+  every node type uniformly, not just comments
+
+- Runtime ensure hang on stale-tag Blueprint iteration — UE's
+  `FGameplayTag::MatchesAny` ensures when iterating a container
+  holding an unregistered tag. Demo `BP_QuestGiverActor`'s overlap
+  handler was passing the giver's raw `QuestTagsToGive` into
+  `FGameplayTagContainer::Filter`, producing a ~10 second `EnsureFailed`
+  hang (stack walk + crash report). Fixed via the sanitized getters
+  above + BP node swap on the demo actor. No more ensure; stale tags
+  skipped silently with a Warning log pointing at the Stale Quest Tags
+  panel
+- `UQuestNodeBase::ResolveQuestTag` was calling `RequestGameplayTag`
+  without `ErrorIfNotFound=false` — the one outlier across the whole
+  plugin. Latent foot-gun that would ensure on any path passing an
+  unregistered `TagName`. Now passes `false` explicitly with a Warning
+  log + early return on invalid
+
+### Changed
+
+- `UQuestGiverComponent::GiveQuestByTag` and `RegisterQuestGiver` loop
+  guards upgraded from `IsValid` to `IsTagRegisteredInRuntime` — stale
+  tags skipped with a Warning log naming the stale tag and the actor
+- `UQuestTargetComponent::BeginPlay` subscribe loop — same upgrade
+- `UQuestWatcherComponent::RegisterQuestWatcher` subscribe loop — same
+  upgrade
+
+#### Soft class references across authoring + runtime
+- `UQuestlineNode_Step::ObjectiveClass`, `::RewardClass`, `::TargetClasses`
+  flipped from `TSubclassOf` / `TSet<TSubclassOf<>>` to `TSoftClassPtr` /
+  `TSet<TSoftClassPtr<>>`. The runtime counterparts
+  (`UQuestStep::QuestObjective`, `UQuestNodeBase::Reward`) were already
+  `TSoftClassPtr`; runtime `UQuestStep::TargetClasses`,
+  `FQuestObjectiveActivationParams::TargetClasses`, and
+  `UQuestObjective::TargetClasses` all flipped to match
+- Questline asset packages no longer record hard dependencies on
+  designer-authored Objective / Reward / target Actor BP classes.
+  Measured impact: a populated test questline dropped from ~500 MB
+  to ~54 KiB package footprint
+- Soft→hard resolution happens at well-defined boundaries:
+  `UQuestObjective::EnableQuestTargetClasses` and
+  `UQuestManagerSubsystem::ActivateNodeByTag`'s Step branch call
+  `LoadSynchronous` at step activation time; the already-loaded
+  `UClass*` is cached in the runtime `ClassFilteredSteps` multimap so
+  event-dispatch checks stay fast
+- Slate widget display in `SGraphNode_QuestlineStep` uses
+  `TSoftClassPtr::GetAssetName()` for class-name rendering without
+  forcing the class asset to load
+- Existing assets migrate on resave — `TSubclassOf` and `TSoftClassPtr`
+  share the same `FSoftObjectPath` serialization shape, so UE
+  transparently reinterprets older data. Resave each affected
+  questline to drop the stale hard-dep records from its package
+
+---
+
+## [0.3.1] — 2026-04-23 — Objective Activation Lifecycle + Structured Payloads
+
+Dominant feature: a restructuring of the objective activation surface.
+Activation now delivers a typed `FQuestObjectiveActivationParams`
+struct to objectives, with named fields + `FInstancedStruct CustomData`
+extension — symmetric with the existing `FQuestObjectiveContext` on
+the completion side. Four entry points feed the struct (authored step
+defaults, external event bus, quest giver components, step-to-step
+handoff), all merging additively. New `OriginTag` + `OriginChain` give
+objectives first-class "who activated me" tagging and full activation-
+history awareness across cascades, Quest containers, and
+LinkedQuestline boundaries.
+
+Also bundled: the graph editor polish pass — cross-graph giver display,
+auto-compile for linked questlines, copy/paste/duplicate/cut command
+wiring, Quest inner-graph deep-copy on paste, toolbar and picker
+conveniences, plus a batch of rename- and compile-refresh fixes.
+
+### Added
+
+#### Activation Params Struct (dominant feature)
+- `FQuestObjectiveActivationParams` — named activation-time fields
+  (`TargetActors`, `TargetClasses`, `NumElementsRequired`,
+  `ActivationSource`, `OriginTag`, `OriginChain`) plus
+  `FInstancedStruct CustomData` for game-specific runtime extension.
+  Symmetric with `FQuestObjectiveContext` on the completion side
+- `UQuestObjective::OnObjectiveActivated` replaces `SetObjectiveTarget`
+  — `BlueprintNativeEvent` taking the full params struct, accessed
+  via `BlueprintProtected` + public `DispatchOnObjectiveActivated`
+  wrapper. Subclasses override to read authored fields or typed
+  `CustomData`
+
+#### External Activation Entry Point 
+- `FQuestActivationRequestEvent` published on
+  `Tag_Channel_QuestActivationRequest` — programmatic activation
+  entry for procedural generators, dialogue systems, save/load
+  rehydration, test harnesses. Manager subscribes and routes without
+  exposing a new public method on the subsystem (black-box preserved)
+
+#### Giver-Authored Params 
+- `UQuestGiverComponent::ActivationParams` — designer-authored
+  `FQuestObjectiveActivationParams` carried with every give. Placed
+  world singletons (shrines, dungeon-entrance actors) author their
+  specific `TargetActors`, counts, `CustomData`, `OriginTag` directly
+  in the Details panel
+- `UQuestGiverComponent::GiveQuestByTag(QuestTag, Params)` promoted
+  signature — optional runtime `Params` arg (`AutoCreateRefTerm`
+  makes the BP pin truly optional). Merges additively with the
+  component's authored `ActivationParams` using the same rules as
+  the step-side merge
+- `ActivationSource` defaults to `GetOwner()` when neither authored
+  nor caller sets it; designer-authored `OriginTag` seeds the
+  initial `OriginChain`
+
+#### Step-to-Step Forward Params 
+- `UQuestObjective::CompleteObjectiveWithOutcome` gains optional
+  `InForwardParams` arg (`AutoCreateRefTerm`) — completing objective
+  specifies an `FQuestObjectiveActivationParams` to carry forward
+  into the next step's activation. Merges additively with the
+  downstream step's authored defaults. Both `InCompletionData` and
+  `InForwardParams` are BP-optional via `AutoCreateRefTerm`
+- `K2Node_CompleteObjectiveWithOutcome` — new `Forward Params`
+  input pin with per-pin tooltip explaining the additive merge
+  rules + common uses. `Completion Data` pin now also carries a
+  full per-pin tooltip. Node-level tooltip rewritten to cover all
+  three authored inputs
+
+#### Chain Propagation
+- `OriginTag` — immediate-origin tag stamped onto the activating
+  node; designer escape hatch for "who activated me?" BP branching
+- `OriginChain` — full activation history array, oldest-first.
+  Extended at every hop: step-to-step via `ChainToNextNodes`, across
+  `UQuest` boundaries via `ActivateNodeByTag`'s Quest branch,
+  across `LinkedQuestline` boundaries automatically (LinkedQuestline
+  inlines as a `UQuest` at compile time). Every hop contributes
+  exactly one entry — no gaps, no duplicates across boundaries
+
+#### Graph Editor Polish
+- Copy / paste / duplicate / cut command wiring on the questline
+  graph editor (`FGenericCommands::Copy` / `Paste` / `Duplicate` /
+  `Cut` + handlers modeled on `FBlueprintEditor`, clipboard via
+  `FPlatformApplicationMisc` with `ApplicationCore` module dep)
+- Quest inner-graph deep-copy on paste — pasted Quest nodes carry
+  a full deep copy of their inner graph, labels + topology + pin
+  connections intact, with fresh compiler-level identities
+  (`RegenerateInnerGraphIdentitiesRecursive` + `PostPasteNode`)
+- Graph Defaults toolbar button — jumps to the graph's root
+  properties (FriendlyName, metadata) without hunting in the
+  Details panel
+- Outcome node inline tag picker — outcome tag pickable directly
+  on the Outcome node widget rather than via the Details panel
+- Auto-compile linked questlines — compiling a graph automatically
+  recompiles any graphs that link into it, keeping cross-graph
+  state consistent without manual compile cycles
+- Cross-graph contextual giver display on all content nodes —
+  Quest / LinkedQuestline / Step nodes show their associated giver
+  actors with context-aware resolution across linked graph
+  boundaries; `bGiversExpanded` lifted to component base
+- `FriendlyName` `FText` on `UQuestlineGraph` — preferred over
+  asset name in titles, tooltips, and outliner root display
+- LinkedQuestline title format + inline asset picker (title lock
+  when an asset is picked)
+
+### Changed
+
+#### Struct Promotions
+- `PendingActivationParams` promoted from `UQuestStep` to
+  `UQuestNodeBase` so any node type can be pre-stamped by cascade
+  routing — unblocks `UQuest` / LinkedQuestline boundary chain
+  preservation
+
+#### Authoring
+- Details-panel rename propagation — editing a node's name from
+  the Details panel triggers the same propagation + compile-
+  invalidation flow as in-graph rename
+- Container rename propagation — renaming a Quest container
+  updates all inner-graph-contained node tags and downstream
+  references
+- Stale-warning banner generalization in the Details panel —
+  previously hardcoded to a single case; now covers all content-
+  node kinds uniformly
+
+### Removed
+- `UQuestStep::TargetVector` + `UQuestlineNode_Step::TargetVector`
+  — positional data now routes through `CustomData` (vectors have
+  no sensible additive merge semantic)
+
+### Fixed
+- Compile-status icon regression after auto-compile-linked landed
+  — neighbor-broadcast refreshes were resetting status to Unknown;
+  fixed with `bSuppressDirtyOnGraphChange` guard across
+  `RefreshAllNodeWidgets`
+- Cross-asset compile refresh — when a linked questline recompiles,
+  parent assets that reference it now refresh their compile status
+  without a manual re-open
+- Refresh recursion — graph-change notification loops through
+  nested Quest inner graphs without duplicate work
+- Objective BP visibility lockdown — internal objective lifecycle
+  methods (`TryCompleteObjective`, `ReportProgress` et al.)
+  properly `BlueprintProtected` + public C++ dispatcher wrappers;
+  no longer leak into arbitrary BP call menus
+- Linked-questline runtime participation — previously a
+  LinkedQuestline node could fail to wire into the runtime graph
+  depending on load order; fixed by normalizing the compile-time
+  inline handoff
+- Prerequisite expression compilation dropped leaves on multi-input
+  AND / OR when the AnyOutcome branch fired — a chained
+  `OutExpression.Nodes[Idx].ChildIndices.Add(OutExpression.Nodes.Add(...))`
+  held a dangling reference when the `TArray` reallocated mid-loop,
+  silently losing every child after the first. Symptoms: AND(Left, Right)
+  prereqs that only checked Left; unreleasable steps in deep graphs.
+  Fix sequences the `Nodes.Add` before the back-index
+- Utility node (ActivationGroup Entry/Exit, GroupSetter/Getter,
+  PrereqRule monitor) output-pin wiring resolved with the wrong
+  `TagPrefix` when compile recursion unwound — Pass 2b iterated the
+  shared `UtilityNodeKeyMap` unconditionally and rewrote nested
+  utility nodes' `NextNodesOnForward` using each outer graph's prefix.
+  Symptoms: group-entry cascades targeting shallow tags like
+  `Quest.NewTest.Left_Two` when destinations lived at
+  `Quest.NewTest.Secret_Level.Near.Left_Two`. Pass 2b now iterates
+  only utility nodes belonging to the current graph
+- `UQuestManagerSubsystem` subclass arbitration — every concrete
+  subclass was being instantiated by UE's default
+  `ShouldCreateSubsystem`, not just the one designated in project
+  settings. Designated quest manager class now gates creation
+  (`ShouldCreateSubsystem` override checks `USimpleQuestSettings`);
+  other subclasses are silently suppressed so signal-bus handlers
+  don't double-fire
+- Prerequisite Rule monitors latched permanently on first
+  satisfaction, breaking any expression with a `NOT` — the rule
+  would publish immediately at activation time if the negated leaf
+  wasn't yet asserted, then unsubscribe and never re-evaluate when
+  the leaf actually fired. Rule monitors are now dynamic: they
+  stay subscribed for the rule's lifetime and mirror the
+  expression's current truth value, adding or retracting the
+  group fact as leaves transition
+- Cross-PIE-session state leak on compiled node instances — the
+  instances live on the `UQuestlineGraph` asset and survive PIE
+  transitions, but their subscription handles, deferred-prereq
+  state, giver-gated flags, and Piece D scratch slots were from
+  the prior session's dead subsystems. Session 2 would skip
+  re-subscription (handles map already populated), silently
+  disconnecting rule monitors from the live signal bus. New
+  `UQuestNodeBase::ResetTransientState` virtual wipes this state;
+  called per compiled node by `ActivateQuestlineGraph` before any
+  other wiring
+- Linked-asset PIE debug visualization was blind to cross-graph
+  context — halos and the Prerequisite Examiner both queried
+  `WorldState` with the standalone-compile tag (e.g.
+  `Quest.SideQuestQL.Near.Left`) while live facts were nested
+  under the active parent (`Quest.NewTest.Secret_Level.Near.Left`).
+  Viewing a linked questline asset during PIE showed no feedback
+  on any inner node. `FQuestPIEDebugChannel::ResolveRuntimeTag`
+  and `QueryLeafState` now fall back to contextual tags via a new
+  `CollectContextualNodeTagsForEditorNode` Asset Registry walk
+  (extracted from the existing contextual-giver/watcher machinery)
+- Diagnostic-log volume under `LogSimpleQuest VeryVerbose` —
+  `FindCompiledTagForNode` was printing a per-slot iteration dump
+  on every call from editor paints, reaching ~260 lines per tick.
+  `IsContentNodeTagCurrent` and `ReconstructNodeTag` similarly
+  logged per-invocation on the hot path. All three are now silent
+  on the success path; misses retain their Warning/Verbose logs
 
 ---
 

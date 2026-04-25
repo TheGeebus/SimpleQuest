@@ -22,17 +22,112 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   subscription, prioritized synchronous fallback for critical paths)
 
 ### Known Issues
-- Giver "why can't activate" query API (Item 23) still deferred until
-  deactivation system stabilizes
-- Async-action K2 node icon customization is impractical — UE's
-  `UK2Node_AsyncAction` uses a hardcoded icon and its base
-  `GetMenuActions` iterates every `UBlueprintAsyncActionBase` subclass
-  into a default-icon spawner registration. Subclassing to override
-  `GetIconAndTint` works for the title-bar icon but produces a duplicate
-  palette entry. Moving the factory function off the async-action class
-  fixes the duplicate but shifts significant glue code into the BP
-  library. Current stance: ship the default async icon, accept the
-  visual inconsistency with other SimpleQuest K2 nodes
+- Giver "why can't activate" query API (Item 23) still deferred —
+  not blocking 0.4.0 sequencing
+
+---
+
+## [0.3.3] — 2026-04-25 — Catch-Up Outcome Recovery + Two-Layer State Foundations
+
+A targeted release that closes the catch-up outcome recovery gap left by
+0.3.2's BindToQuestEvent work. Subscriptions and watchers that bind to an
+already-resolved quest now recover the actual `OutcomeTag` — not the
+previous `EmptyTag` placeholder — by reading from a new
+`UQuestResolutionSubsystem` rich-record store keyed by quest tag. This
+release also formalizes a two-layer state-architecture pattern: WorldState
+remains the fast boolean-fact layer ("did X happen?" in O(1)); per-plugin
+subsystems hold typed rich-record state ("what are the details?" in O(1)).
+
+Three follow-on `BindToQuestEvent` reliability fixes ship in the same
+release because they're inseparable from the catch-up behavior contract:
+catch-up deferral to the next tick (fixes Accessed-None on user-cached
+proxy references), per-phase duplicate-broadcast guards (closes the
+one-tick race window opened by the deferral), and `RegisterWithGameInstance`
+on the factory (canonical lifetime anchor; removes fragile dependency on
+caller-side BP variable references).
+
+### Added
+
+#### Two-Layer State Architecture (MVP)
+- `UQuestResolutionSubsystem` — new `UGameInstanceSubsystem` exposing a
+  read-only public API for quest resolution post-mortems:
+  `GetQuestResolution(QuestTag)`, `HasResolved(QuestTag)`,
+  `GetResolutionCount(QuestTag)`. Writes are private and gated by
+  `friend class UQuestManagerSubsystem` — consumers physically can't
+  mutate the registry. Preserves the manager's black-box doctrine:
+  the manager remains the sole owner of orchestration; rich-data
+  queries route through specialized read-only subsystems
+- `FQuestResolutionRecord` — `USTRUCT(BlueprintType)` with three
+  `BlueprintReadOnly` fields: `OutcomeTag`, `ResolutionTime` (double,
+  world time at resolution), `ResolutionCount` (per-session repeat
+  counter — subsumes the prior `QuestCompletionCounts` map)
+- `UQuestManagerSubsystem::SetQuestResolved` writes the WorldState
+  boolean fact AND the registry record atomically — single choke point
+  preserves the two-layer write invariant. Never touch one layer
+  without the other
+- Lifetime is GameInstance-scoped, mirroring `UWorldStateSubsystem` and
+  `UQuestManagerSubsystem`. Records reset naturally on PIE transitions
+
+#### Catch-Up Outcome Recovery
+- `UQuestEventSubscription::RunCatchUp` queries the registry for the
+  recovered `OutcomeTag` instead of broadcasting `FGameplayTag::EmptyTag`
+  on the no-filter path. Listeners that bind to an already-resolved
+  quest now receive the actual outcome on `OnCompleted`
+- `UQuestWatcherComponent::RegisterQuestWatcher`'s `bWatchEnd` catch-up
+  block replaces its dual-path WorldState probing (per-filter-tag
+  probes when filter set / EmptyTag fallback when not) with a single
+  registry lookup followed by post-hoc `OutcomeFilter` matching.
+  Mirrors the live `WatchedQuestCompletedEvent` decision path; the
+  EmptyTag fallback is gone
+
+### Fixed
+
+- **BindToQuestEvent: Accessed None on cached proxy from catch-up.**
+  `UK2Node_AsyncAction`'s standard expansion calls `Activate()` before
+  firing the user's `Then` exec output. Designers wiring the AsyncTask
+  pin into a `Set` off the primary `Then` chain hadn't cached it yet
+  at the moment Activate ran. If `Activate()` fired a lifecycle delegate
+  synchronously inside `RunCatchUp` (quest already resolved), the
+  designer's downstream chain (e.g. `Print → Cancel(<var>)`) read a
+  null reference. Fixed by deferring `RunCatchUp` to next tick via
+  `SetTimerForNextTick` with a weak-pointer-protected lambda — same
+  pattern as engine async tasks like `UAsyncTaskDownloadImage`. The
+  K2 node's standard expansion now reliably completes (Activate
+  returns → ThenOut fires → user's Set node runs) before any catch-up
+  delegate fires
+- **BindToQuestEvent: duplicate broadcast in deferral window.** The
+  one-tick deferral introduced a narrow window during which a live
+  signal could fire and, on next tick, catch-up could observe the
+  same WorldState fact and broadcast the same lifecycle phase a
+  second time. Closed via per-phase `bSawLive*` flags on
+  `UQuestEventSubscription` set inside each `Handle*` after the
+  `bCancelled` early-out and checked in `RunCatchUp` before each
+  phase's broadcast. Listeners now receive exactly one broadcast per
+  state transition. Documented edge case: a parent-tag subscription
+  with the parent's *own* `Completed` fact also set during a child's
+  live completion will suppress catch-up for the parent (the listener
+  already received an `OnCompleted` for the child and would inspect
+  `QuestTag` to differentiate). Accepted tradeoff vs. double-broadcast
+- **BindToQuestEvent: missing `RegisterWithGameInstance` on factory.**
+  `USimpleQuestBlueprintLibrary::BindToQuestEvent` constructed the
+  proxy with `NewObject<UQuestEventSubscription>()` but never called
+  `RegisterWithGameInstance(WorldContextObject)` — the canonical
+  `UBlueprintAsyncActionBase` lifetime anchor. Without it, the
+  action's lifetime depended on whatever strong references happened
+  to exist (BP member variable, exec stack mid-fire), `SetReadyToDestroy`
+  was a no-op, and fire-and-forget patterns risked premature GC.
+  Fix: factory now anchors via `RegisterWithGameInstance`. `GameInstance`
+  owns the strong reference until `SetReadyToDestroy` (called by
+  `Cancel`); PIE exit cleans up automatically when the GameInstance
+  tears down
+
+### Changed
+
+- `UQuestManagerSubsystem::QuestCompletionCounts` removed —
+  `UQuestResolutionSubsystem::GetResolutionCount` is the new
+  authoritative count source. `GetQuestCompletionCount` on the manager
+  delegates to the subsystem (back-compat for any internal callers;
+  external code should switch to `GetResolutionCount` directly)
 
 ---
 

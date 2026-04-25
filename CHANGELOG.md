@@ -10,9 +10,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Active Development
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
-- Utility B Tier 2 — commandlet-capable project-wide stale-tag scan
-  covering Actor Blueprint CDOs + unloaded levels (ships-pipeline hook
-  for pre-ship validation)
+- Stale Quest Tags Tier 2 v2 — mass-clear (multi-row selection,
+  per-source mass actions, single-transaction bulk mutation; built on
+  the per-row plumbing shipped in 0.3.4)
 
 ### Upcoming
 - Tag namespace consolidation under a single `SimpleQuest.*` root
@@ -24,6 +24,170 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Known Issues
 - Giver "why can't activate" query API (Item 23) still deferred —
   not blocking 0.4.0 sequencing
+
+---
+
+## [0.3.4] — 2026-04-25 — Stale Quest Tags Tier 2 (Project-Wide Scanning)
+
+Project-wide stale quest-tag scanning. The Stale Quest Tags panel and a
+new headless commandlet now cover the full project surface — loaded
+levels (Tier 1, unchanged), Actor Blueprint defaults, and unloaded
+levels including World Partition. Designers click **Full Project Scan**
+in the panel to surface stale references that a normal pass wouldn't
+catch; ship pipelines and CI runs invoke the commandlet directly via a
+Windows `.bat` helper or a `UnrealEditor-Cmd.exe -run=StaleQuestTagsScan`
+line, get structured JSON output, and gate on exit code: `0` clean, `1`
+stale references found, `2` infra failure (couldn't init, JSON write
+failed, etc.). Designed as the pre-flight + post-flight validator for
+tag-identity work — particularly the `SimpleQuest.*` root namespace
+consolidation slated for 0.4.0 — but useful any time a project ships.
+
+The new scan tiers are opt-in and source-aware. The panel keeps its
+sub-second Tier 1 refresh as the default; clicking Full Project Scan
+fans out to Blueprint CDOs and unloaded levels (with a comprehensive-
+vs-class-filtered World Partition toggle) wrapped in a slow-task with
+progress notifications. Each row carries a Source badge — *Loaded* /
+*BP CDO* / *Unloaded* — and the navigation affordance morphs to match:
+Find frames the actor in its viewport for loaded entries, **Open BP**
+opens the Blueprint editor for CDO entries, **Open Level** loads the
+containing umap for unloaded entries. Per-row Clear works on all three
+sources; affected packages roll into a panel-header **Save All
+Modified (N)** button so the designer can review and save in bulk.
+
+### Added
+
+#### Stale Quest Tags panel — Tier 2 surfaces
+- **Full Project Scan** button alongside the existing Refresh control.
+  Refresh stays at Tier 1 (loaded levels — sub-second); Full Project
+  Scan fans out to Tiers 1+2+3 wrapped in `FScopedSlowTask` with
+  progress notifications. The panel caches the last-used scope so
+  `PostUndo` / `PostRedo` re-scan against the same view (stops Ctrl+Z
+  from silently narrowing the scope back to Tier 1 and dropping any
+  Tier 2 rows the designer pulled in)
+- **Source-aware row morphing**: per-row icon + a Source column with
+  *Loaded* / *BP CDO* / *Unloaded* badges. Find button morphs into
+  **Open BP** for CDO entries (opens the Blueprint editor) and **Open
+  Level** for unloaded entries (loads the containing umap)
+- **Save All Modified (N)** button in the panel header. Per-row Clear
+  marks the affected package dirty and surfaces it here as a
+  `TSet<TWeakObjectPtr<UPackage>>`; one click saves all of them and
+  drops them from the tracking set. Stale entries pointing at packages
+  that have been re-loaded since the last scan are dropped cleanly via
+  the weak pointer
+- Comprehensive-vs-class-filtered **World Partition scan mode** toggle
+  (default: comprehensive — loads every WP actor; class-filtered:
+  loads only descriptors whose actor class is in the quest-component
+  class set, much faster at the cost of missing per-instance component
+  additions)
+
+#### Stale Quest Tags scan commandlet
+- `UStaleQuestTagsScanCommandlet` (`UCommandlet` subclass; `IsEditor=
+  true`, `IsClient/IsServer=false`, `LogToConsole=true`,
+  `ShowErrorCount=true`). Run via
+  `UnrealEditor-Cmd.exe <project>.uproject -run=StaleQuestTagsScan`
+- Args:
+  - `-OutputJson=<path>` writes structured output. JSON shape:
+    `{ totalCount, openCount, bpCDOCount, unloadedCount, entries: [{
+    source, actor, component, field, tag, package }] }`
+  - `-FastWP` runs WP iteration in class-filtered mode (skips actor
+    descriptors whose class can't carry a quest component); default
+    is comprehensive (loads every WP actor)
+- **Exit codes** for CI gating:
+  - `0` — no stale references found
+  - `1` — one or more stale references found
+  - `2` — commandlet itself failed (init error, JSON write failure,
+    Asset Registry timeout, etc.)
+- Asset Registry is primed at the top of `Main` via
+  `FAssetRegistryModule::Get().SearchAllAssets(/*synchronous*/ true)`
+  before any scan runs — without this the freshly-spawned commandlet
+  editor reports zero AR entries and every scan finds nothing
+- Per-source summary line on stdout
+  (`StaleQuestTagsScan: summary — Open=N, BPCDOs=M, Unloaded=K,
+  Total=T`) plus one Warning-verbosity log line per stale entry
+  (`StaleQuestTagsScan: [<Source>] actor=X component=Y field=Z
+  tag=Q.R.S package=/Game/Foo`) so log-only runs without
+  `-OutputJson` are still actionable
+
+#### Windows `.bat` helper
+- `SimpleQuestDemo/Scripts/RunStaleQuestTagsScan.bat` — resolves
+  `UE_PATH` (inline assignment in the script OR the env var), finds
+  the project's `.uproject`, invokes `UnrealEditor-Cmd.exe` with
+  `-unattended -nopause -stdout` and forwards any extra args to the
+  commandlet (e.g. `RunStaleQuestTagsScan.bat
+  -OutputJson=stale-tags.json -FastWP`). Forwards the commandlet's
+  exit code to the caller for CI / make-script consumption
+
+#### Backend scan surfaces
+- `FSimpleQuestEditorUtilities::FStaleTagScanScope` — boolean flag
+  struct (`bLoadedLevels` / `bActorBlueprintCDOs` / `bUnloadedLevels`
+  + `bComprehensiveWPScan`). Default-constructed scope =
+  `{bLoadedLevels=true}`, preserving Tier 1 caller behavior bit-for-
+  bit
+- `FSimpleQuestEditorUtilities::EStaleQuestTagSource` — `Loaded` /
+  `ActorBlueprintCDO` / `UnloadedLevelInstance`. Carried on every
+  `FStaleQuestTagEntry` so the panel and commandlet output can
+  attribute each stale reference to its discovery surface
+- `ScanActorForStaleTags` — single helper consolidating the per-
+  component walk logic shared across all three scan surfaces.
+  Replaces the duplicated walk that previously lived inline in the
+  Tier 1 scan path
+- `ScanActorBlueprintCDOs` — walks every `UBlueprint` asset via
+  Asset Registry filter, hydrates each generated class's CDO, runs
+  `ScanActorForStaleTags` against actor-derived CDOs only.
+  Non-actor BPs short-circuit before generated-class load
+- `ScanUnloadedLevels` — iterates every `UWorld` asset in the AR,
+  builds a skip set from currently-loaded editor world packages
+  (Tier 1's territory), sync-loads each remaining umap, and
+  dispatches by world type:
+  - Non-WP world: walks `PersistentLevel->Actors` directly
+  - WP world: hands off to `ScanWorldPartitionActors`
+- `ScanWorldPartitionActors` — uses
+  `FWorldPartitionHelpers::ForEachActorWithLoading` (the cooker's
+  per-actor load/unload iteration pattern) wrapped in
+  `FScopedEditorWorld` for commandlet-mode lifecycle discipline.
+  Optional class-filter set built lazily from
+  `BuildQuestComponentClassSet` (FastWP mode); default is
+  comprehensive (loads every WP actor)
+
+### Changed
+
+- Stale-tag scan summary log lines (per-tier and overall) bumped from
+  `Verbose` to `Display` verbosity. The commandlet's stdout pipeline
+  now produces actionable per-world descriptor counts and final
+  per-source totals without needing a `-LogCmds="LogSimpleQuest
+  Verbose"` override
+- The `Stale Quest Tags` panel's status line summarizes both the
+  current visible-row count AND the last scope used (so it's clear
+  at a glance whether the panel reflects a Tier-1-only refresh or a
+  Full Project Scan)
+
+### Fixed
+
+- **Commandlet-mode World Partition iteration crashed during the
+  helper's per-batch GC.**
+  `FWorldPartitionHelpers::DoCollectGarbage` calls `CollectGarbage(
+  IsRunningCommandlet() ? RF_NoFlags : GARBAGE_COLLECTION_KEEPFLAGS,
+  true)` — in commandlet mode it passes `RF_NoFlags` as `KeepFlags`,
+  which means *only root-set objects survive the GC pass*.
+  `RF_Standalone` doesn't protect, asset-package ownership doesn't
+  protect. A manually sync-loaded `UWorld` therefore becomes
+  unreachable mid-iteration; `UWorldPartition::BeginDestroy` then
+  asserts because the WP we just initialized isn't in `Uninitialized`
+  state, and the sibling `UWorldPartitionSubsystem` (a tickable world
+  subsystem) ensures because it was destroyed while still
+  initialized. The fix: route every sync-loaded world through
+  `FScopedEditorWorld` (engine's RAII helper at
+  `Editor/UnrealEd/Public/EditorWorldUtils.h`, used internally by
+  the WP convert commandlet). Construction handles `AddToRoot`,
+  `GWorld` + `EditorWorldContext` swap, `InitWorld`,
+  `UpdateModelComponents`, `UpdateWorldComponents`,
+  `UpdateLevelStreaming`. Destruction handles `GEditor->Cleanse`,
+  `DestroyWorld` (which routes through `CleanupWorld` + per-
+  subsystem `Deinitialize` + `WP::Uninitialize`), `RemoveFromRoot`,
+  `GWorld` + `EditorWorldContext` restore. The dispatch branches on
+  `bIsWorldInitialized` so resident-from-prior-run worlds and
+  externally-owned worlds (which the helper would assert against)
+  scan directly without the wrapper
 
 ---
 

@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestManagerSubsystem.generated.h"
 
 struct FWorldStateFactAddedEvent;
@@ -22,7 +23,9 @@ struct FGameplayTag;
 struct FQuestStartedEvent;
 struct FQuestEnabledEvent;
 struct FQuestObjectiveTriggered;
+
 enum class EDeactivationSource : uint8;
+
 class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
@@ -90,8 +93,13 @@ protected:
 	FDelegateHandle ObjectiveTriggeredDelegateHandle;
 	FDelegateHandle AbandonDelegateHandle;
 
-	// Append-only record of how many times each quest node has been resolved. Never decremented. Used for stats, debugging, and save data.
-	TMap<FGameplayTag, int32> QuestCompletionCounts;
+	/**
+	 * Rich-record registry paired with WorldState's QuestState.<X>.Completed fact. Written atomically alongside
+	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestEventSubscription and UQuestWatcherComponent.
+	 * Holds the current session's resolution record per quest — outcome, timestamp, running count.
+	 */
+	UPROPERTY()
+	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
 
 private:
 	/**

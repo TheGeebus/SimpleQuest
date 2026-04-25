@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Quests/Types/QuestEventContext.h"
+#include "Subsystems/QuestResolutionSubsystem.h"
 #include "QuestEventSubscription.generated.h"
 
 struct FQuestEnabledEvent;
@@ -45,7 +46,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionCompletedDelega
  * Designers who want tighter lifetime (cancel on BP actor destruction, etc.) should call Cancel() explicitly from
  * EndPlay or equivalent. Otherwise the action lives for the GameInstance's lifetime.
  */
-UCLASS()
+UCLASS(BlueprintType)
 class SIMPLEQUEST_API UQuestEventSubscription : public UBlueprintAsyncActionBase
 {
     GENERATED_BODY()
@@ -69,14 +70,15 @@ public:
     FQuestSubscriptionLifecycleDelegate OnDeactivated;
 
     /**
-     * Subscribe to all lifecycle events for QuestTag. Returns a subscription object whose output pins the BP graph
-     * wires. Action holds itself alive via AddToRoot equivalent until a terminal event or explicit Cancel.
+     * Plain C++ initializer used by the BP library's factory wrapper. Not a UFUNCTION — the library owns the
+     * BP-facing entry point so UK2Node_AsyncAction's subclass iteration doesn't auto-register a duplicate
+     * palette entry for us.
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Events",
-        meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
-                HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject",
-                DisplayName = "Bind To Quest Event"))
-    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag);
+    void InitFromFactory(UObject* InWorldContextObject, FGameplayTag InQuestTag)
+    {
+        WorldContextObjectWeak = InWorldContextObject;
+        QuestTag = InQuestTag;
+    }
 
     /** Unbind from all channels and mark the action ready to destroy. Safe no-op if already cancelled. */
     UFUNCTION(BlueprintCallable, Category = "Quest|Events")
@@ -95,6 +97,17 @@ private:
 
     bool bCancelled = false;
 
+    /**
+     * Per-phase "we already broadcast this lifecycle live" guards. Set inside the corresponding Handle* the first
+     * time a live signal fires for that phase; checked in RunCatchUp so the deferred catch-up skips any phase
+     * that already broadcast through the live path during the one-tick deferral window. Closes the otherwise-
+     * narrow possibility of double-broadcasting the same state transition (live + catch-up) for a listener.
+     */
+    bool bSawLiveActivated = false;
+    bool bSawLiveStarted = false;
+    bool bSawLiveCompleted = false;
+    bool bSawLiveDeactivated = false;
+
     void HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event);
     void HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event);
     void HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event);
@@ -105,6 +118,7 @@ private:
 
     USignalSubsystem* ResolveSignalSubsystem() const;
     UWorldStateSubsystem* ResolveWorldStateSubsystem() const;
+    UQuestResolutionSubsystem* ResolveQuestResolutionSubsystem() const;
 
 };
 

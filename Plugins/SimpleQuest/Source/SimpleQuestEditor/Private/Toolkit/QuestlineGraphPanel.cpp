@@ -12,6 +12,7 @@
 #include "GraphEditorDragDropAction.h"
 #include "SGraphPanel.h"
 #include "SimpleQuestEditor.h"
+#include "SimpleQuestLog.h"
 #include "Debug/QuestNodeDebugState.h"
 #include "Debug/QuestPIEDebugChannel.h"
 #include "Styling/SlateStyleRegistry.h"
@@ -43,9 +44,7 @@ namespace PIEOverlay_Style
     }
 }
 
-void SQuestlineGraphPanel::Construct(const FArguments& InArgs,
-                                     UEdGraph* InGraph,
-                                     const TSharedPtr<FUICommandList>& InCommands)
+void SQuestlineGraphPanel::Construct(const FArguments& InArgs, UEdGraph* InGraph, const TSharedPtr<FUICommandList>& InCommands)
 {
     SAssignNew(GraphEditor, SGraphEditor)
         .IsEditable(true)
@@ -55,6 +54,27 @@ void SQuestlineGraphPanel::Construct(const FArguments& InArgs,
 
     ChildSlot[ GraphEditor.ToSharedRef() ];
     FSlateApplication::Get().OnFocusChanging().AddSP(this, &SQuestlineGraphPanel::HandleFocusChanging);
+
+    // Subscribe to OnGraphChanged so the right-click action-menu drag-from-pin path also benefits from pin-precise
+    // alignment, not just the QWERX hotkey path. Two-stage flow: this handler captures (Node, CursorPos) at AddNode
+    // time; the next Tick resolves the autowired pin and hands off to the existing alignment queue. Handle stored so
+    // we can unsubscribe in the destructor.
+    if (InGraph)
+    {
+        SubscribedGraph = InGraph;
+        GraphChangedDelegateHandle = InGraph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateSP(this, &SQuestlineGraphPanel::OnGraphAddedNodeNotify));
+    }
+}
+
+SQuestlineGraphPanel::~SQuestlineGraphPanel()
+{
+    if (GraphChangedDelegateHandle.IsValid())
+    {
+        if (UEdGraph* Graph = SubscribedGraph.Get())
+        {
+            Graph->RemoveOnGraphChangedHandler(GraphChangedDelegateHandle);
+        }
+    }
 }
 
 void SQuestlineGraphPanel::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
@@ -66,6 +86,13 @@ void SQuestlineGraphPanel::Tick(const FGeometry& AllottedGeometry, const double 
         PendingJumpNode = nullptr;
     }
     bHasTicked = true;
+
+    // Two-stage drain. PendingConnectionLookups (action-menu path) resolves the autowired pin first, then enqueues
+    // into PendingAlignments. PendingAlignments (both paths converge here) applies the position correction once
+    // the node's Slate widget is realized. Order matters — process lookups first so any newly-resolved entries can
+    // also drain into PendingAlignments in the same tick if widgets happen to be ready already.
+    if (!PendingConnectionLookups.IsEmpty()) ProcessPendingConnectionLookups();
+    if (!PendingAlignments.IsEmpty()) ProcessPendingAlignments();
 
     // Poll paint invalidation while the PIE debug channel is active so the overlay stays live as WorldState facts change
     // mid-game. Low cost — Invalidate(Paint) coalesces with Slate's per-frame paint pass; OnPaint's debug-overlay block
@@ -85,11 +112,14 @@ void SQuestlineGraphPanel::Tick(const FGeometry& AllottedGeometry, const double 
  *-------------------------------------------*/
 
 /**
- * Returns the offset to apply to the raw cursor graph position so the node's primary input pin connector lands at the
- * cursor, matching Blueprint behaviour.
- * - Regular nodes: title bar ~24 + half pin-row ~12 = 36 down, pin nub ~8 right
- * - Knot node: small control point ~16x16, so centre it on the cursor
- */ 
+ * Coarse fallback offset for the no-FromPin placement path (key+click without an active drag-from-pin). Matches Blueprint's
+ * "primary input pin under cursor" behaviour as a default visual alignment.
+ *   - Regular nodes: title bar ~24 + half pin-row ~12 = 36 down, pin nub ~8 right
+ *   - Knot node: small control point ~16x16, so centre it on the cursor
+ *
+ * The drag-from-pin path uses pin-precise alignment instead (see EnqueuePinAlignment / ProcessPendingAlignments) so the
+ * specific connecting pin lands exactly at cursor regardless of node type, content size, or which pin connects.
+ */
 static FVector2D GetPinAlignmentOffset(FKey Key)
 {
     if (Key == EKeys::R) return FVector2D(-8.f, -8.f);
@@ -153,17 +183,37 @@ FReply SQuestlineGraphPanel::OnPreviewKeyDown(const FGeometry& Geometry, const F
 
     FSlateApplication::Get().CancelDragDrop();
 
-    const FVector2D GraphPos = ToGraphCoords(Geometry, FSlateApplication::Get().GetCursorPos()) + GetPinAlignmentOffset(KeyEvent.GetKey());
+    // Cursor position in graph coords — this is where we want the connecting pin to land (drag-from-pin path) or
+    // where the node's primary pin should land (no-FromPin fallback path, via the heuristic offset).
+    const FVector2D CursorGraphPos = ToGraphCoords(Geometry, FSlateApplication::Get().GetCursorPos());
+    const FVector2D SpawnGraphPos = FromPin
+        ? CursorGraphPos                                          // pin-precise path: spawn at cursor; correct in Tick
+        : CursorGraphPos + GetPinAlignmentOffset(KeyEvent.GetKey()); // fallback path: heuristic offset (no FromPin)
 
     const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "HotkeyPlaceFromDrag", "Place Node (Hotkey)"));
 
-    UEdGraphNode* NewNode = SpawnNodeForKey(KeyEvent.GetKey(), GraphPos);
+    UEdGraphNode* NewNode = SpawnNodeForKey(KeyEvent.GetKey(), SpawnGraphPos);
     if (!NewNode) return FReply::Unhandled();
 
+    UEdGraphPin* ConnectedPin = nullptr;
     if (FromPin)
     {
+        // Snapshot the pin link state before AutowireNewNode so we can identify which pin received the connection.
+        TSet<UEdGraphPin*> PreLinkedPins;
+        for (UEdGraphPin* Pin : NewNode->Pins) { if (Pin) PreLinkedPins.Add(Pin); }
+
         NewNode->AutowireNewNode(FromPin);
         FromPin->GetOwningNode()->NodeConnectionListChanged();
+
+        // Find the pin on NewNode that's now linked to FromPin — AutowireNewNode either connected one pin or none.
+        for (UEdGraphPin* Pin : NewNode->Pins)
+        {
+            if (Pin && Pin->LinkedTo.Contains(FromPin))
+            {
+                ConnectedPin = Pin;
+                break;
+            }
+        }
     }
 
     UEdGraph* Graph = NewNode->GetGraph();
@@ -172,6 +222,14 @@ FReply SQuestlineGraphPanel::OnPreviewKeyDown(const FGeometry& Geometry, const F
     {
         Outer->PostEditChange();
         Outer->MarkPackageDirty();
+    }
+
+    // Pin-precise alignment: enqueue a deferred correction so the connecting pin lands exactly at cursor once the
+    // node's Slate widget is realized (next tick). Falls through silently for the no-FromPin path or any case where
+    // AutowireNewNode didn't actually connect (Candidate walk found no acceptable target).
+    if (FromPin && ConnectedPin)
+    {
+        EnqueuePinAlignment(NewNode, ConnectedPin, CursorGraphPos);
     }
 
     return FReply::Handled();
@@ -396,5 +454,173 @@ FReply SQuestlineGraphPanel::OnPreviewMouseButtonDown(const FGeometry& Geometry,
         }
     }
     return FReply::Handled();
+}
+
+/*-------------------------------------------*
+ *          Pin-precise alignment
+ *-------------------------------------------*/
+
+void SQuestlineGraphPanel::EnqueuePinAlignment(UEdGraphNode* Node, UEdGraphPin* ConnectingPin, FVector2D TargetGraphPos)
+{
+    if (!Node || !ConnectingPin) return;
+    FPendingPinAlignment Entry;
+    Entry.Node = Node;
+    Entry.ConnectingPinName = ConnectingPin->PinName;
+    Entry.TargetGraphPos = TargetGraphPos;
+    PendingAlignments.Add(MoveTemp(Entry));
+}
+
+void SQuestlineGraphPanel::ProcessPendingAlignments()
+{
+    if (!GraphEditor.IsValid()) { PendingAlignments.Empty(); return; }
+    SGraphPanel* Panel = GraphEditor->GetGraphPanel();
+    if (!Panel) { PendingAlignments.Empty(); return; }
+
+    // Cap retries — if the widget isn't realized after this many ticks the spawn likely raced something else
+    // (asset reload, editor close, etc.). Discard rather than hold forever.
+    static constexpr int32 MaxAttempts = 5;
+
+    for (int32 Idx = PendingAlignments.Num() - 1; Idx >= 0; --Idx)
+    {
+        FPendingPinAlignment& Entry = PendingAlignments[Idx];
+        UEdGraphNode* Node = Entry.Node.Get();
+        if (!Node) { PendingAlignments.RemoveAt(Idx); continue; }
+
+        TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
+        const bool bWidgetReady = NodeWidget.IsValid() && !NodeWidget->GetDesiredSize().IsNearlyZero();
+        if (!bWidgetReady)
+        {
+            if (++Entry.Attempts >= MaxAttempts) PendingAlignments.RemoveAt(Idx);
+            continue;
+        }
+
+        UEdGraphPin* Pin = Node->FindPin(Entry.ConnectingPinName);
+        TSharedPtr<SGraphPin> PinWidget = Pin ? NodeWidget->FindWidgetForPin(Pin) : nullptr;
+        if (!PinWidget.IsValid() || PinWidget->GetTickSpaceGeometry().GetLocalSize().IsNearlyZero())
+        {
+            if (++Entry.Attempts >= MaxAttempts) PendingAlignments.RemoveAt(Idx);
+            continue;
+        }
+
+        // Resolve the pin connector's current graph-space center, then shift the node by the delta so the pin lands
+        // at TargetGraphPos. The pin connector is the small circular nub at the outer edge of the pin widget — left
+        // edge for input pins, right edge for output pins — NOT the center of the whole pin+label widget. Aligning
+        // to the widget center would offset by half the label width, which is the bug we're correcting from the
+        // initial implementation.
+        // Path: connector local pos → absolute pixels → panel-local → graph coords (via SNodePanel::PanelCoordToGraphCoord,
+        // which folds in zoom + view offset). Avoids manual zoom math; matches the panel's own coordinate machinery.
+        const FGeometry& PinGeom = PinWidget->GetTickSpaceGeometry();
+        const FVector2D PinLocalSize = PinGeom.GetLocalSize();
+        // FAppStyle's "Graph.Pin.Connected" / "Graph.Pin.Disconnected" brushes are 11×11 by default, so the
+        // connector glyph's center sits ~5.5px in from the relevant edge. Hardcoded rather than queried because
+        // the brush is style-managed and we don't have a SGraphPin API for "give me the connector center" exposed.
+        static constexpr float ConnectorInset = 5.5f;
+        const float ConnectorX = (Pin->Direction == EGPD_Input)
+            ? ConnectorInset
+            : PinLocalSize.X - ConnectorInset;
+        const FVector2D PinConnectorLocal(ConnectorX, PinLocalSize.Y * 0.5f);
+        const FVector2D PinAbsCenter = PinGeom.LocalToAbsolute(PinConnectorLocal);
+        const FVector2D PinPanelLocal = Panel->GetTickSpaceGeometry().AbsoluteToLocal(PinAbsCenter);
+        const FVector2D PinGraphPos = Panel->PanelCoordToGraphCoord(PinPanelLocal);
+
+        const FVector2D Delta = Entry.TargetGraphPos - PinGraphPos;
+
+        Node->Modify();
+        Node->NodePosX += FMath::RoundToInt(Delta.X);
+        Node->NodePosY += FMath::RoundToInt(Delta.Y);
+
+        if (UEdGraph* Graph = Node->GetGraph())
+        {
+            Graph->NotifyGraphChanged();
+        }
+
+        UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("PinAlignment: '%s' pin '%s' shifted by (%.1f, %.1f) → final pos (%d, %d)"),
+            *Node->GetName(), *Entry.ConnectingPinName.ToString(), Delta.X, Delta.Y, Node->NodePosX, Node->NodePosY);
+
+        PendingAlignments.RemoveAt(Idx);
+    }
+}
+
+void SQuestlineGraphPanel::OnGraphAddedNodeNotify(const FEdGraphEditAction& EditAction)
+{
+    if (!(EditAction.Action & GRAPHACTION_AddNode)) return;
+
+    // Drag-from-pin signal — set every frame by DrawPreviewConnector while the user drags, persists through drop.
+    // Without this filter, programmatic AddNode calls (paste, schema-driven knot insertion in self-loops, etc.)
+    // would be misclassified as drag-from-pin spawns. Cleared at the end of this handler so the next drag is
+    // distinguishable from the previous one.
+    UEdGraphPin* ActiveDragPin = UQuestlineGraphSchema::GetActiveDragFromPin();
+    if (!ActiveDragPin) return;
+
+    // Note: we do NOT capture cursor position here. By the time PerformAction completes (next Tick), the new node's
+    // NodePosX/Y holds the drop location — same value passed as `Location` to FEdGraphSchemaAction_NewNode::Perform-
+    // Action, which is where the wire-drag was released and the action menu opened. That's the anchor point we want.
+    // Capturing cursor here would instead snapshot wherever the user clicked the menu *item*, which is unrelated to
+    // the drop point and shifts every time the user picks a different menu position.
+
+    for (const UEdGraphNode* AddedNode : EditAction.Nodes)
+    {
+        if (!AddedNode) continue;
+        // Skip knots — UQuestlineGraphSchema::TryCreateConnection adds them at specific arch coordinates as part
+        // of self-loop handling. Aligning their connector to cursor would override the schema's deliberate placement.
+        // The action-menu "Add Reroute Node" path also creates knots, but for that case the default top-left-at-cursor
+        // is close enough given the knot's small symmetric widget (16×16); pin-precise alignment isn't needed.
+        if (AddedNode->IsA<UQuestlineNode_Knot>()) continue;
+
+        FPendingConnectionPinLookup Entry;
+        Entry.Node = const_cast<UEdGraphNode*>(AddedNode);
+        PendingConnectionLookups.Add(MoveTemp(Entry));
+    }
+
+    // Consumed — reset so subsequent unrelated AddNode events don't inherit this drag's signal.
+    UQuestlineGraphSchema::ClearActiveDragFromPin();
+}
+
+void SQuestlineGraphPanel::ProcessPendingConnectionLookups()
+{
+    // AutowireNewNode runs synchronously inside FEdGraphSchemaAction_NewNode::PerformAction, so by the time this
+    // method runs at the next Tick, the connection either exists or never will. One attempt is enough; no retries.
+    static constexpr int32 MaxAttempts = 1;
+
+    for (int32 Idx = PendingConnectionLookups.Num() - 1; Idx >= 0; --Idx)
+    {
+        FPendingConnectionPinLookup& Entry = PendingConnectionLookups[Idx];
+        UEdGraphNode* Node = Entry.Node.Get();
+        if (!Node) { PendingConnectionLookups.RemoveAt(Idx); continue; }
+
+        // Find the pin that AutowireNewNode connected — the one with a link to a pin on a different node.
+        UEdGraphPin* ConnectingPin = nullptr;
+        for (UEdGraphPin* Pin : Node->Pins)
+        {
+            if (!Pin) continue;
+            for (UEdGraphPin* Linked : Pin->LinkedTo)
+            {
+                if (Linked && Linked->GetOwningNode() != Node)
+                {
+                    ConnectingPin = Pin;
+                    break;
+                }
+            }
+            if (ConnectingPin) break;
+        }
+
+        if (!ConnectingPin)
+        {
+            // AutowireNewNode found no acceptable candidate (rare — typically means the from-pin's category and
+            // the new node's pins don't have any compatible pairing). Discard rather than retry; the connection
+            // won't materialize spontaneously. Node stays at its initial drop position (existing behavior).
+            if (++Entry.Attempts >= MaxAttempts) PendingConnectionLookups.RemoveAt(Idx);
+            continue;
+        }
+
+        // Use the node's current NodePos as the alignment target. By the time PerformAction has completed (this
+        // Tick runs after the action's synchronous run wraps), NodePosX/Y is the drop position the user released
+        // the wire over — same value passed as `Location` to FEdGraphSchemaAction_NewNode::PerformAction. That's
+        // "where we stopped dragging the wire", which is what designers expect the connector to land on, NOT the
+        // current cursor position (which has moved to wherever the menu item was clicked).
+        const FVector2D DropGraphPos(Node->NodePosX, Node->NodePosY);
+        EnqueuePinAlignment(Node, ConnectingPin, DropGraphPos);
+        PendingConnectionLookups.RemoveAt(Idx);
+    }
 }
 

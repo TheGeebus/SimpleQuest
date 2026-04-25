@@ -112,6 +112,14 @@ bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext
     return WS && WS->HasFact(FactTag);
 }
 
+UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag)
+{
+    UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
+    Sub->InitFromFactory(WorldContextObject, QuestTag);
+    Sub->RegisterWithGameInstance(WorldContextObject);
+    return Sub;
+}
+
 void USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, FDelegateHandle Handle)
 {
     if (!Handle.IsValid()) return;

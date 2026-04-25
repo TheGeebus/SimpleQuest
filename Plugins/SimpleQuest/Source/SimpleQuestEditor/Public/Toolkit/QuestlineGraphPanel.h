@@ -15,7 +15,8 @@ public:
 		SLATE_ARGUMENT(SGraphEditor::FGraphEditorEvents, GraphEvents)
 	SLATE_END_ARGS()
 
-	void Construct(const FArguments& InArgs, UEdGraph* InGraph, const TSharedPtr<FUICommandList>& InCommands);
+void Construct(const FArguments& InArgs, UEdGraph* InGraph, const TSharedPtr<FUICommandList>& InCommands);
+	virtual ~SQuestlineGraphPanel() override;
 
 	TSharedPtr<SGraphEditor> GetGraphEditor() const { return GraphEditor; }
 
@@ -65,4 +66,41 @@ private:
 	UEdGraphNode* PendingJumpNode = nullptr;
 	bool bHasTicked = false;
 
+	/**
+	 * Pending pin-alignment entry — captures a freshly-spawned drag-from-pin node and the graph-space position
+	 * its connecting pin should land at. Processed in Tick once the node's Slate widget is realized (queried via
+	 * SGraphPanel::GetNodeWidgetFromGuid + SGraphNode::FindWidgetForPin). Mirrors JumpToNodeWhenReady's tick-
+	 * deferred pattern. Replaces the per-node-type GetPinAlignmentOffset heuristic for the drag-from-pin path
+	 * (heuristic remains in place for the key+click no-FromPin path where no specific pin is being aligned).
+	 */
+	struct FPendingPinAlignment
+	{
+		TWeakObjectPtr<UEdGraphNode> Node;
+		FName ConnectingPinName;
+		FVector2D TargetGraphPos = FVector2D::ZeroVector;
+		int32 Attempts = 0;
+	};
+	TArray<FPendingPinAlignment> PendingAlignments;
+	void ProcessPendingAlignments();
+	void EnqueuePinAlignment(UEdGraphNode* Node, UEdGraphPin* ConnectingPin, FVector2D TargetGraphPos);
+
+	/**
+	 * First-stage queue for the right-click action-menu drag-from-pin path. UEdGraph::OnGraphChanged fires Add events
+	 * synchronously inside FEdGraphSchemaAction_NewNode::PerformAction — at that moment AutowireNewNode hasn't yet run,
+	 * so we can't identify the connecting pin directly. Capture the node + cursor position now, and resolve the connecting
+	 * pin at the next Tick (post-PerformAction). The resolved alignment is then handed off to PendingAlignments above.
+	 */
+	struct FPendingConnectionPinLookup
+	{
+		TWeakObjectPtr<UEdGraphNode> Node;
+		int32 Attempts = 0;
+	};
+	TArray<FPendingConnectionPinLookup> PendingConnectionLookups;
+
+	TWeakObjectPtr<UEdGraph> SubscribedGraph;
+	FDelegateHandle GraphChangedDelegateHandle;
+
+	void OnGraphAddedNodeNotify(const FEdGraphEditAction& EditAction);
+	void ProcessPendingConnectionLookups();
 };
+

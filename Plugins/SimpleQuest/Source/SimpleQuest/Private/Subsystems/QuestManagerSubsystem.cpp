@@ -26,6 +26,7 @@
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
+#include "Subsystems/QuestResolutionSubsystem.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #else
@@ -861,10 +862,16 @@ void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel,
     if (EventTag.IsValid()) SetQuestDeactivated(EventTag, EDeactivationSource::Internal);
 }
 
-int32 UQuestManagerSubsystem::GetQuestCompletionCount(const FGameplayTag QuestTag) const
+int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) const
 {
-    const int32* Count = QuestCompletionCounts.Find(QuestTag);
-    return Count ? *Count : 0;
+    if (const UGameInstance* GI = GetGameInstance())
+    {
+        if (const UQuestResolutionSubsystem* ResolutionSubsystem = GI->GetSubsystem<UQuestResolutionSubsystem>())
+        {
+            return ResolutionSubsystem->GetResolutionCount(QuestTag);
+        }
+    }
+    return 0;
 }
 
 FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)
@@ -885,18 +892,30 @@ void UQuestManagerSubsystem::SetQuestActive(FGameplayTag QuestTag)
 void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
+
+    // Layer 1 — WorldState boolean-fact layer.
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
     WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
-    QuestCompletionCounts.FindOrAdd(QuestTag)++;
     if (OutcomeTag.IsValid())
     {
-        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
+        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(
+            FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
     }
-    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s' (completion #%d)"),
-        *QuestTag.ToString(),
-        *OutcomeTag.ToString(),
-        QuestCompletionCounts.FindRef(QuestTag));
+
+    // Layer 2 — rich-record registry. Friend access only; external code can't mutate the registry,
+    // but the manager writes it atomically with its own fact updates so the two layers stay consistent.
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UQuestResolutionSubsystem* Registry = GI->GetSubsystem<UQuestResolutionSubsystem>())
+        {
+            const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+            Registry->RecordResolution(QuestTag, OutcomeTag, Now);
+        }
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s'"),
+        *QuestTag.ToString(), *OutcomeTag.ToString());
 }
 
 void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)

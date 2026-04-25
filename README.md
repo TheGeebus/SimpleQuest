@@ -47,7 +47,7 @@ Quest and narrative system. Runtime + editor modules, with an optional Electroni
 
 - Tag-addressed, instance-based runtime. Every compiled quest node is a `UObject` addressed by gameplay tag. The manager subsystem, components, and signal bus all route by tag.
 - Pull-based prerequisite activation. Deferred nodes subscribe to WorldState changes per leaf tag. When all conditions are met the node activates — no polling, no ticking.
-- Component catch-up. Givers, watchers, and targets that register after quest events have already fired receive the current state immediately.
+- Component catch-up with outcome recovery. Givers, watchers, and `BindToQuestEvent` subscribers that register after quest events have already fired receive the current state immediately — and recover the actual `OutcomeTag` of any already-resolved quest via `UQuestResolutionSubsystem`, the rich-record half of the two-layer state architecture (WorldState answers "did it happen?"; the resolution subsystem answers "with what outcome?").
 - Outcome-filtered watchers. A watcher component can filter which outcomes it responds to; empty filter = all outcomes.
 
 ---
@@ -252,6 +252,7 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
 | Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
 | Q2 2026 | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references) | **Shipped** (v0.3.2) |
+| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestResolutionSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
 | Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |

@@ -46,6 +46,11 @@ one-tick race window opened by the deferral), and `RegisterWithGameInstance`
 on the factory (canonical lifetime anchor; removes fragile dependency on
 caller-side BP variable references).
 
+Also folds in a tactile graph-ergonomics improvement: pin-precise drag-create
+alignment in the questline graph editor — the connecting pin's connector nub
+now lands exactly under the cursor on drag-from-pin spawns, regardless of
+node type, content size, or which pin connects.
+
 ### Added
 
 #### Two-Layer State Architecture (MVP)
@@ -128,6 +133,36 @@ caller-side BP variable references).
   authoritative count source. `GetQuestCompletionCount` on the manager
   delegates to the subsystem (back-compat for any internal callers;
   external code should switch to `GetResolutionCount` directly)
+
+#### Pin-precise drag-create alignment in the questline graph editor
+- Replaces the previous `GetPinAlignmentOffset` heuristic (a fixed
+  per-node-type offset assuming a "title bar ~24 + half pin-row ~12"
+  layout) with a deferred Slate-geometry correction. Drag-from-pin
+  spawns now land the connecting pin's connector nub exactly at cursor
+  regardless of node type (Step / Quest / LinkedQuestline /
+  combinator / group / etc.) or content-driven height variance
+- Two placement paths covered behind a single panel-side queue:
+  - QWERX hotkey path (`SQuestlineGraphPanel::OnPreviewKeyDown`) —
+    enqueues alignment immediately after the spawn + autowire pass
+  - Right-click action-menu path —
+    `SQuestlineGraphPanel::OnGraphAddedNodeNotify` hooks
+    `UEdGraph::OnGraphChanged` Add events and queues a pin-lookup
+    that runs at the next Tick, after `FEdGraphSchemaAction_NewNode::PerformAction`
+    has set `NodePosX/Y` to the action's drop location and
+    `AutowireNewNode` has made the connection
+- Centers on the connector glyph specifically (5.5px inset from the
+  outer pin-widget edge per `FAppStyle`'s 11×11 `Graph.Pin.Connected`
+  brush), not the pin+label widget center — corrects an early-version
+  half-label-width offset
+- Action-menu drop anchor is read from `Node->NodePosX/Y` at Tick
+  time, not from `FSlateApplication::Get().GetCursorPos()` —
+  preserves the original wire-drop point even if the user moved the
+  cursor across the action menu before clicking
+- `UQuestlineNode_Knot` blacklisted from the alignment queue — the
+  schema's `TryCreateConnection` self-loop logic spawns knots at
+  specific arch coordinates that should not be overridden
+- Key+click no-drag spawn path keeps the existing heuristic offset
+  (no FromPin to align against)
 
 ---
 

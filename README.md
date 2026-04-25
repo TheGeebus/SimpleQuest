@@ -252,7 +252,7 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
 | Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
 | Q2 2026 | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references) | **Shipped** (v0.3.2) |
-| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestResolutionSubsystem` rich-record store + BindToQuestEvent reliability fixes) | **Shipped** (v0.3.3) |
+| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestResolutionSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
 | Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |

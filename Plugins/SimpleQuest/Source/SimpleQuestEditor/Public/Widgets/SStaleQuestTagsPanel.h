@@ -41,9 +41,20 @@ private:
 	EVisibility GetListVisibility() const;
 	FText GetStatusText() const;
 
-	FReply HandleRefreshClicked();
+	/**
+	 * Packages dirtied by per-row Clear actions, awaiting designer save. Tracked so the panel can surface
+	 * pending count + offer a "Save All Modified" button. Weak ptrs so unloaded packages drop cleanly.
+	 */
+	TSet<TWeakObjectPtr<UPackage>> ModifiedPackages;
+
+	int32 GetPendingSaveCount() const;
+	FReply HandleSaveAllModifiedClicked();
+	bool IsSaveAllModifiedEnabled() const;
+	FText GetSaveAllModifiedLabel() const;
+
+	FReply HandleRefreshClicked();      // Tier 1 only — scans loaded editor worlds
+	FReply HandleFullScanClicked();     // Tier 1 + Tier 2 — adds BP CDOs + unloaded levels (slow-task wrapped)
 	FReply HandleClearClicked(FEntryPtr Entry);
-	FReply HandleDismissClicked(FEntryPtr Entry);
 	FReply HandleFocusClicked(FEntryPtr Entry);
 
 	void HandleFilterTextChanged(const FText& NewText);
@@ -51,7 +62,7 @@ private:
 	EColumnSortMode::Type GetColumnSortMode(FName ColumnId) const;
 	void HandleSortColumn(EColumnSortPriority::Type SortPriority, const FName& ColumnId, EColumnSortMode::Type NewMode);
 
-	void Refresh();
+	void Refresh(FSimpleQuestEditorUtilities::FStaleTagScanScope Scope = FSimpleQuestEditorUtilities::FStaleTagScanScope());
 	
 	/**
 	 * Rebuilds VisibleEntries from AllEntries applying: dismiss filter, text filter, sort. Single entry point for any
@@ -66,6 +77,14 @@ private:
 
 	/** Current filter text — also serves as the STextBlock highlight source. */
 	FText FilterText;
+
+	/**
+	 * Scope of the most recent Refresh / Full Project Scan invocation. PostUndo / PostRedo re-run with this
+	 * scope so undo restores the entry to the same view the designer was looking at, rather than narrowing
+	 * to the panel's default (Tier 1 only) and silently dropping any Tier 2 rows the designer had pulled in
+	 * via a prior Full Project Scan. Updated by Refresh; initialized to default (Tier 1) at Construct.
+	 */
+	FSimpleQuestEditorUtilities::FStaleTagScanScope LastScope;
 
 	/** Sort state — defaults to Actor ascending. */
 	FName CurrentSortColumn;

@@ -113,7 +113,7 @@ namespace FQuestNodeSlateHelpers
 	{
 		return SNew(SBorder)
 			.BorderImage(GetStaleWarningBrush())
-			.Padding(FMargin(8.f, 2.f))
+			.Padding(FMargin(8.f, 2.f, 8.f, 6.f))
 			.HAlign(HAlign_Center)
 			.Visibility_Lambda([IsVisible]() { return IsVisible.Get() ? EVisibility::Visible : EVisibility::Collapsed; })
 			[

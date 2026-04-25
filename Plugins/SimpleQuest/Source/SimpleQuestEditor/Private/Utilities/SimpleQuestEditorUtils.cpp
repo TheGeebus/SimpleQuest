@@ -7,6 +7,7 @@
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Objectives/QuestObjective.h"
 #include "Editor.h"
+#include "EditorWorldUtils.h"
 #include "EngineUtils.h"
 #include "GameplayTagsManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -25,6 +26,8 @@
 #include "ToolMenu.h"
 #include "ToolMenus.h"
 #include "Components/QuestWatcherComponent.h"
+#include "Engine/InheritableComponentHandler.h"
+#include "Engine/SCS_Node.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
@@ -34,6 +37,9 @@
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestStateTagUtils.h"
+#include "WorldPartition/WorldPartition.h"
+#include "WorldPartition/WorldPartitionActorDescInstance.h"
+#include "WorldPartition/WorldPartitionHelpers.h"
 
 
 namespace
@@ -1350,56 +1356,687 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 	return Result;
 }
 
-TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries()
+namespace
 {
-	TArray<FStaleQuestTagEntry> Result;
-	if (!GEditor) return Result;
-
-	auto EmitIfStale = [&Result](AActor* Owner, UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
+	/**
+	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Watcher),
+	 * emits one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are stamped on
+	 * every entry; Component pointer is the specific component carrying the stale tag.
+	 *
+	 * Used by both the AActor-based scanner (Tier 1 / loaded-level path, where components come from
+	 * Actor->GetComponents) AND the BP-CDO scanner (Tier 2, where components come from the CDO's native
+	 * subobjects + the BP's SimpleConstructionScript template nodes + InheritableComponentHandler overrides).
+	 */
+	void ScanComponentsForStaleTags(
+		const TArray<UActorComponent*>& Components,
+		AActor* AssociatedActor,
+		FSimpleQuestEditorUtilities::EStaleQuestTagSource Source,
+		const FString& PackagePath,
+		TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
 	{
-		if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
-		FStaleQuestTagEntry Entry;
-		Entry.Actor = Owner;
-		Entry.Component = Component;
-		Entry.FieldLabel = FieldLabel;
-		Entry.StaleTag = Tag;
-		Result.Add(MoveTemp(Entry));
-	};
+		using FStaleQuestTagEntry = FSimpleQuestEditorUtilities::FStaleQuestTagEntry;
 
-	for (const FWorldContext& Context : GEditor->GetWorldContexts())
-	{
-		UWorld* World = Context.World();
-		if (!World || Context.WorldType != EWorldType::Editor) continue;
-
-		for (TActorIterator<AActor> It(World); It; ++It)
+		auto EmitIfStale = [&](UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
-			AActor* Actor = *It;
+			if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
+			FStaleQuestTagEntry Entry;
+			Entry.Actor = AssociatedActor;
+			Entry.Component = Component;
+			Entry.FieldLabel = FieldLabel;
+			Entry.StaleTag = Tag;
+			Entry.Source = Source;
+			Entry.PackagePath = PackagePath;
+			OutEntries.Add(MoveTemp(Entry));
+		};
 
-			TArray<UQuestGiverComponent*> Givers;
-			Actor->GetComponents<UQuestGiverComponent>(Givers);
-			for (UQuestGiverComponent* Giver : Givers)
+		for (UActorComponent* Comp : Components)
+		{
+			if (!Comp) continue;
+
+			if (UQuestGiverComponent* Giver = Cast<UQuestGiverComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive()) EmitIfStale(Actor, Giver, TEXT("QuestTagsToGive"), Tag);
+				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive())
+					EmitIfStale(Giver, TEXT("QuestTagsToGive"), Tag);
 			}
-
-			TArray<UQuestTargetComponent*> Targets;
-			Actor->GetComponents<UQuestTargetComponent>(Targets);
-			for (UQuestTargetComponent* Target : Targets)
+			else if (UQuestTargetComponent* Target = Cast<UQuestTargetComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch()) EmitIfStale(Actor, Target, TEXT("StepTagsToWatch"), Tag);
+				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch())
+					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
 			}
-
-			TArray<UQuestWatcherComponent*> Watchers;
-			Actor->GetComponents<UQuestWatcherComponent>(Watchers);
-			for (UQuestWatcherComponent* Watcher : Watchers)
+			else if (UQuestWatcherComponent* Watcher = Cast<UQuestWatcherComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedStepTags"), Tag);
-				for (const auto& Pair : Watcher->GetWatchedTags()) EmitIfStale(Actor, Watcher, TEXT("WatchedTags"), Pair.Key);
+				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags())
+					EmitIfStale(Watcher, TEXT("WatchedStepTags"), Tag);
+				for (const auto& Pair : Watcher->GetWatchedTags())
+					EmitIfStale(Watcher, TEXT("WatchedTags"), Pair.Key);
 			}
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found across loaded levels"), Result.Num());
+	/**
+	 * Actor-based convenience wrapper. Pulls every component off the actor via GetComponents and hands the list
+	 * to ScanComponentsForStaleTags. Right behavior for Tier 1 (loaded-level instances where GetComponents
+	 * returns the live component graph) — for BP CDOs the SCS / ICH paths give a more authoritative picture, see
+	 * ScanActorBlueprintCDOs.
+	 */
+	void ScanActorForStaleTags(
+		AActor* Actor,
+		FSimpleQuestEditorUtilities::EStaleQuestTagSource Source,
+		const FString& PackagePath,
+		TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	{
+		if (!Actor) return;
+		TArray<UActorComponent*> Components;
+		Actor->GetComponents(Components);
+		ScanComponentsForStaleTags(Components, Actor, Source, PackagePath, OutEntries);
+	}
+
+	/**
+	 * Actor Blueprint CDO surface — Tier 2. For each actor-derived UBlueprint asset, gathers components from
+	 * three sources and runs the shared ScanComponentsForStaleTags over the merged list:
+	 *   1. Native components on the CDO (C++ CreateDefaultSubobject in the constructor chain).
+	 *   2. SimpleConstructionScript nodes — components added via this BP's Components panel. These are template
+	 *      instances whose property values represent what an actor instance gets at construction time.
+	 *   3. InheritableComponentHandler records — overrides this BP applies to components inherited from a parent
+	 *      BP. The override-template carries the authored property values used for instances of THIS BP.
+	 *
+	 * Walking all three is necessary because Actor->GetComponents on a CDO is unreliable for SCS / ICH-sourced
+	 * components in the general case (depends on whether the BP has been compiled and the CDO recreated). The
+	 * explicit walk catches all three of UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent
+	 * regardless of how the designer added them.
+	 *
+	 * Pre-filters via AR-cached NativeParentClass tag so we don't sync-load non-actor BPs (UMG widget BPs, anim
+	 * BPs, etc.). At typical project sizes the bounded sync-load cost is acceptable as a one-shot designer-driven
+	 * action; Phase 4's Full Project Scan button wraps the whole pass in an FScopedSlowTask for the UI.
+	 */
+	void ScanActorBlueprintCDOs(TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		IAssetRegistry& AR = ARM.Get();
+		if (AR.IsLoadingAssets())
+		{
+			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanActorBlueprintCDOs: AssetRegistry still loading; waiting for completion before scan"));
+			AR.WaitForCompletion();
+		}
+
+		FARFilter Filter;
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+		Filter.bRecursiveClasses = true;
+		TArray<FAssetData> BlueprintAssets;
+		AR.GetAssets(Filter, BlueprintAssets);
+
+		// Pre-filter to actor-derived BPs via AR-cached NativeParentClass tag — avoids sync-loading UMG / anim /
+		// widget blueprints. Tag value is in "Class'/Script/Engine.Actor'" wrapped form; ExportTextPathToObjectPath
+		// strips the wrapper. FindObject<UClass> resolves against the in-memory class registry without loading.
+		static const FName NativeParentClassTag(TEXT("NativeParentClass"));
+		TArray<FAssetData> ActorBlueprints;
+		ActorBlueprints.Reserve(BlueprintAssets.Num());
+		for (const FAssetData& AssetData : BlueprintAssets)
+		{
+			FString ParentClassPath;
+			if (!AssetData.GetTagValue(NativeParentClassTag, ParentClassPath)) continue;
+
+			const FString ObjectPath = FPackageName::ExportTextPathToObjectPath(ParentClassPath);
+			UClass* ParentClass = FindObject<UClass>(nullptr, *ObjectPath);
+			if (!ParentClass) continue;
+			if (!ParentClass->IsChildOf(AActor::StaticClass())) continue;
+
+			ActorBlueprints.Add(AssetData);
+		}
+
+		for (const FAssetData& BPData : ActorBlueprints)
+		{
+			UBlueprint* BP = Cast<UBlueprint>(BPData.GetAsset());  // sync-load
+			if (!BP) continue;
+
+			UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(BP->GeneratedClass);
+			if (!BPGC) continue;
+
+			AActor* CDOActor = Cast<AActor>(BPGC->GetDefaultObject());
+
+			// Gather components from all three authoring surfaces, AddUnique-deduped (a single component reachable
+			// via two paths only gets scanned once).
+			TArray<UActorComponent*> Components;
+
+			if (CDOActor)
+			{
+				CDOActor->GetComponents(Components);  // native + (potentially) SCS-resolved on the CDO
+			}
+
+			if (USimpleConstructionScript* SCS = BPGC->SimpleConstructionScript)
+			{
+				for (USCS_Node* Node : SCS->GetAllNodes())
+				{
+					if (Node && Node->ComponentTemplate)
+					{
+						Components.AddUnique(Node->ComponentTemplate);
+					}
+				}
+			}
+
+			if (UInheritableComponentHandler* ICH = BPGC->GetInheritableComponentHandler())
+			{
+				TArray<UActorComponent*> ICHTemplates;
+				ICH->GetAllTemplates(ICHTemplates);
+				for (UActorComponent* Template : ICHTemplates)
+				{
+					if (Template) Components.AddUnique(Template);
+				}
+			}
+
+			if (Components.Num() == 0) continue;
+
+			const FString PackagePath = BPData.PackageName.ToString();
+			ScanComponentsForStaleTags(Components, CDOActor,
+				FSimpleQuestEditorUtilities::EStaleQuestTagSource::ActorBlueprintCDO,
+				PackagePath, OutEntries);
+		}
+
+		UE_LOG(LogSimpleQuest, Display,
+			TEXT("ScanActorBlueprintCDOs: scanned %d actor-derived blueprint(s) of %d total blueprint(s) found in AR"),
+			ActorBlueprints.Num(), BlueprintAssets.Num());
+	}
+
+	/**
+	 * Predicate: does this BP's component tree (native CDO + SCS templates + ICH overrides) contain at least
+	 * one UQuestComponentBase-derived component? Cheaper than a full scan because we bail on the first match.
+	 */
+	bool BlueprintHasAnyQuestComponent(UBlueprint* BP)
+	{
+		if (!BP) return false;
+		UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(BP->GeneratedClass);
+		if (!BPGC) return false;
+
+		auto AnyQuestComponent = [](const TArray<UActorComponent*>& Components) -> bool
+		{
+			for (UActorComponent* Comp : Components)
+			{
+				if (Comp && Comp->IsA<UQuestComponentBase>()) return true;
+			}
+			return false;
+		};
+
+		if (AActor* CDOActor = Cast<AActor>(BPGC->GetDefaultObject(false)))
+		{
+			TArray<UActorComponent*> Components;
+			CDOActor->GetComponents(Components);
+			if (AnyQuestComponent(Components)) return true;
+		}
+
+		if (USimpleConstructionScript* SCS = BPGC->SimpleConstructionScript)
+		{
+			TArray<UActorComponent*> SCSTemplates;
+			for (USCS_Node* Node : SCS->GetAllNodes())
+			{
+				if (Node && Node->ComponentTemplate) SCSTemplates.Add(Node->ComponentTemplate);
+			}
+			if (AnyQuestComponent(SCSTemplates)) return true;
+		}
+
+		if (UInheritableComponentHandler* ICH = BPGC->GetInheritableComponentHandler())
+		{
+			TArray<UActorComponent*> ICHTemplates;
+			ICH->GetAllTemplates(ICHTemplates);
+			if (AnyQuestComponent(ICHTemplates)) return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Builds the set of UClass* values representing "actor classes known to author a UQuestComponentBase
+	 * descendant in their default component tree." Used by ScanWorldPartitionActors's class-filter opt-in
+	 * (FStaleTagScanScope::bComprehensiveWPScan = false) to skip sync-loading WP actors that can't possibly
+	 * carry a quest tag.
+	 *
+	 * Two-pass build:
+	 *   1. Native UClass walk via TObjectIterator — catches AActor descendants with C++-added quest
+	 *      components (no BP wrapper required). Cheap; no asset loads.
+	 *   2. Actor-derived BP walk via the AR — catches BP-authored quest components. Sync-loads each
+	 *      actor BP; same cost model as ScanActorBlueprintCDOs's BP walk.
+	 *
+	 * Built only when the caller opts into the filter (comprehensive mode skips the build entirely).
+	 */
+	TSet<UClass*> BuildQuestComponentClassSet()
+	{
+		TSet<UClass*> Result;
+
+		// Pass 1: native classes
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			UClass* Cls = *It;
+			if (!Cls || Cls->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated)) continue;
+			if (!Cls->IsChildOf(AActor::StaticClass())) continue;
+
+			// Skip BP-generated classes — Pass 2 handles those via the BP iteration which gets the full
+			// component tree (SCS + ICH). The CDO-only walk here would miss SCS/ICH-added components.
+			if (Cls->ClassGeneratedBy != nullptr) continue;
+
+			AActor* CDO = Cast<AActor>(Cls->GetDefaultObject(false));
+			if (!CDO) continue;
+
+			TArray<UActorComponent*> Components;
+			CDO->GetComponents(Components);
+			for (UActorComponent* Comp : Components)
+			{
+				if (Comp && Comp->IsA<UQuestComponentBase>())
+				{
+					Result.Add(Cls);
+					break;
+				}
+			}
+		}
+
+		// Pass 2: BPs
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		IAssetRegistry& AR = ARM.Get();
+		if (AR.IsLoadingAssets()) AR.WaitForCompletion();
+
+		FARFilter Filter;
+		Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+		Filter.bRecursiveClasses = true;
+		TArray<FAssetData> BlueprintAssets;
+		AR.GetAssets(Filter, BlueprintAssets);
+
+		static const FName NativeParentClassTag(TEXT("NativeParentClass"));
+		for (const FAssetData& AssetData : BlueprintAssets)
+		{
+			FString ParentClassPath;
+			if (!AssetData.GetTagValue(NativeParentClassTag, ParentClassPath)) continue;
+			const FString ObjectPath = FPackageName::ExportTextPathToObjectPath(ParentClassPath);
+			UClass* ParentClass = FindObject<UClass>(nullptr, *ObjectPath);
+			if (!ParentClass || !ParentClass->IsChildOf(AActor::StaticClass())) continue;
+
+			UBlueprint* BP = Cast<UBlueprint>(AssetData.GetAsset());  // sync-load
+			if (!BP) continue;
+
+			if (BlueprintHasAnyQuestComponent(BP))
+			{
+				if (UClass* GenClass = BP->GeneratedClass)
+				{
+					Result.Add(GenClass);
+				}
+			}
+		}
+
+		UE_LOG(LogSimpleQuest, Verbose,
+			TEXT("BuildQuestComponentClassSet: %d quest-component-bearing classes (native + BP combined)"),
+			Result.Num());
+		return Result;
+	}
+
+	/**
+	 * WP-level actor scanner. Iterates every WP actor descriptor via FWorldPartitionHelpers::ForEachActorWithLoading
+	 * (load → callback → unload per actor, the same iteration the cooker uses). Optional class filter skips
+	 * descriptors whose actor class isn't in the quest-component class set — set to nullptr for comprehensive mode.
+	 *
+	 * The comprehensive path sync-loads every WP actor; on a 10k-actor WP level this is slow but thorough. The
+	 * filtered path resolves the class from the descriptor before loading the actor, skipping most of the cost.
+	 */
+	void ScanWorldPartitionActors(UWorld* World, const FString& PackagePath,
+		const TSet<UClass*>* ClassFilter,
+		TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	{
+		UWorldPartition* WP = World ? World->GetWorldPartition() : nullptr;
+		if (!WP) return;
+
+		int32 NumDescriptors = 0;
+		int32 NumScanned = 0;
+		int32 NumFilteredByClass = 0;
+
+		FWorldPartitionHelpers::ForEachActorWithLoading(WP,
+			[&](const FWorldPartitionActorDescInstance* DescInstance) -> bool
+			{
+				++NumDescriptors;
+				if (!DescInstance) return true;
+
+				if (ClassFilter)
+				{
+					// Resolve actor class from descriptor without forcing actor load. GetActorNativeClass returns
+					// the native ancestor; we want the actual actor class (BP-generated or native). Descriptor
+					// stores the class path; LoadClass loads just the UClass metadata, not the actor instance.
+					UClass* ActorClass = nullptr;
+					if (UClass* NativeClass = DescInstance->GetActorNativeClass())
+					{
+						ActorClass = NativeClass;
+					}
+					// Some UE 5.6 descriptor variants expose GetBaseClass / GetActorClass / GetActorClassPath —
+					// if NativeClass alone misses BP-generated subclasses, the LoadClass fallback below catches
+					// them. (Bridge code; remove the LoadClass branch if NativeClass is already the BP class.)
+
+					bool bMatches = false;
+					if (ActorClass)
+					{
+						for (UClass* AllowedClass : *ClassFilter)
+						{
+							if (ActorClass->IsChildOf(AllowedClass)) { bMatches = true; break; }
+						}
+					}
+					if (!bMatches)
+					{
+						++NumFilteredByClass;
+						return true;
+					}
+				}
+
+				if (AActor* Actor = DescInstance->GetActor())
+				{
+					ScanActorForStaleTags(Actor,
+						FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,
+						PackagePath, OutEntries);
+					++NumScanned;
+				}
+				return true;
+			});
+
+		UE_LOG(LogSimpleQuest, Display,
+			TEXT("ScanWorldPartitionActors: %s — %d descriptors, %d scanned, %d filtered by class (filter=%s)"),
+			*PackagePath, NumDescriptors, NumScanned, NumFilteredByClass,
+			ClassFilter ? TEXT("on") : TEXT("off"));
+	}
+
+	/**
+	 * Unloaded-level surface — Tier 2. Iterates every UWorld asset in the project via the Asset Registry,
+	 * skips any that are currently loaded (those are covered by ScanLoadedLevels — avoid double-counting),
+	 * sync-loads each remaining umap, and dispatches by world type:
+	 *   - Non-WP world: walks PersistentLevel->Actors and runs each through ScanActorForStaleTags.
+	 *   - WP-enabled world: hands off to ScanWorldPartitionActors, which uses
+	 *     FWorldPartitionHelpers::ForEachActorWithLoading to iterate the actor descriptor database with
+	 *     per-actor load/unload (the cooker's iteration pattern). Optional class-filter set, built lazily
+	 *     from BuildQuestComponentClassSet, skips descriptors whose class can't carry a quest component;
+	 *     comprehensive mode (Scope.bComprehensiveWPScan = true, default) skips the filter and loads every
+	 *     actor.
+	 *
+	 * Loading semantics: FAssetData::GetAsset sync-loads the umap as an asset (NOT as the editor's current
+	 * world — no PIE init, no BeginPlay, no sublevel streaming). For non-WP worlds, persistent-level actor
+	 * iteration gives us the design-time actor set authored into the umap. For WP worlds, the descriptor
+	 * walk gives us the full external-actor set without needing to load actors that won't be scanned.
+	 *
+	 * Cleanup: sync-loaded non-WP worlds stay resident until the next GC. Acceptable for a one-shot
+	 * designer-driven scan; aggressive unload after the scan would risk corrupting the editor if any
+	 * sublevel reference is already held by the editor's main world. WP descriptors handle their own
+	 * per-actor unload via FWorldPartitionHelpers, so memory pressure scales with class-filter strictness
+	 * rather than total actor count.
+	 *
+	 * Class-filter gap (only when bComprehensiveWPScan = false): per-instance component additions —
+	 * dropping a UQuestComponentBase onto a single placed actor instance without modifying its BP — won't
+	 * pass the filter because the instance's class isn't in the quest-component class set. Comprehensive
+	 * mode catches it. Documented as a deliberate trade in FStaleTagScanScope::bComprehensiveWPScan.
+	 */
+	void ScanUnloadedLevels(const FSimpleQuestEditorUtilities::FStaleTagScanScope& Scope, TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	{
+		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+		IAssetRegistry& AR = ARM.Get();
+		if (AR.IsLoadingAssets())
+		{
+			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanUnloadedLevels: AssetRegistry still loading; waiting for completion before scan"));
+			AR.WaitForCompletion();
+		}
+
+		// Build class filter set lazily — only when the user opted out of comprehensive WP mode AND we'll
+		// actually encounter a WP level. Cheaper to defer than to build unconditionally.
+		TOptional<TSet<UClass*>> ClassFilter;
+		auto EnsureClassFilter = [&]() -> const TSet<UClass*>*
+		{
+			if (Scope.bComprehensiveWPScan) return nullptr;
+			if (!ClassFilter.IsSet()) ClassFilter = BuildQuestComponentClassSet();
+			return &ClassFilter.GetValue();
+		};
+
+		// Build a snapshot of editor-active world packages — these are Tier 1's territory and should not be
+		// re-scanned here. Note we deliberately do NOT use FindPackage as the skip predicate: a world that
+		// was sync-loaded by a previous ScanUnloadedLevels call stays resident in memory (per the documented
+		// "stays resident until GC" behavior) and FindPackage would return non-null for it on subsequent
+		// scans — but that world is NOT an active editor world, so Tier 1 wouldn't pick it up either. Using
+		// GetWorldContexts ensures we only skip worlds Tier 1 actually covers; everything else gets scanned,
+		// regardless of whether it happens to already be in memory.
+		TSet<FName> EditorWorldPackages;
+		if (GEditor)
+		{
+			for (const FWorldContext& Context : GEditor->GetWorldContexts())
+			{
+				if (Context.WorldType != EWorldType::Editor) continue;
+				UWorld* ActiveWorld = Context.World();
+				if (!ActiveWorld) continue;
+				if (UPackage* Pkg = ActiveWorld->GetOutermost())
+				{
+					EditorWorldPackages.Add(Pkg->GetFName());
+				}
+			}
+		}
+
+		FARFilter Filter;
+		Filter.ClassPaths.Add(UWorld::StaticClass()->GetClassPathName());
+		Filter.bRecursiveClasses = false;
+		TArray<FAssetData> WorldAssets;
+		AR.GetAssets(Filter, WorldAssets);
+
+		int32 NumAlreadyLoaded = 0;
+		int32 NumNonWPScanned = 0;
+		int32 NumWPScanned = 0;
+		int32 NumLoadFailed = 0;
+
+		for (const FAssetData& WorldData : WorldAssets)
+		{
+			const FString PackagePath = WorldData.PackageName.ToString();
+
+			if (EditorWorldPackages.Contains(WorldData.PackageName))
+			{
+				++NumAlreadyLoaded;
+				continue;
+			}
+
+			// Either truly unloaded, OR in memory from a prior ScanUnloadedLevels run. Either way we want to
+			// scan it now — reuse the already-resident world if possible to skip a redundant sync-load.
+			UWorld* World = nullptr;
+			if (UPackage* ExistingPkg = FindPackage(nullptr, *PackagePath))
+			{
+				World = UWorld::FindWorldInPackage(ExistingPkg);
+			}
+			if (!World)
+			{
+				World = Cast<UWorld>(WorldData.GetAsset());  // sync-load
+			}
+			if (!World)
+			{
+				++NumLoadFailed;
+				continue;
+			}
+
+			if (World->IsPartitionedWorld() && World->GetWorldPartition())
+			{
+				// Sync-loading a UWorld asset via FAssetData::GetAsset doesn't initialize the world or populate
+				// its WP actor descriptor container — those happen during the editor's Map_Load pipeline, which
+				// we're not on. Without init, FWorldPartitionHelpers::ForEachActorWithLoading walks an empty
+				// container and finds nothing.
+				//
+				// Lifecycle is messier than just InitWorld: in commandlet mode the helper's per-batch and
+				// end-of-iteration GC passes use RF_NoFlags as KeepFlags (WorldPartitionHelpers.cpp:268) — only
+				// root-set objects survive. Our sync-loaded World has no rooted referencer, so it goes
+				// unreachable mid-scan; UWorldPartition::BeginDestroy / UTickableWorldSubsystem::BeginDestroy
+				// then assert because the WP and its tickable subsystems are still initialized.
+				//
+				// FScopedEditorWorld is the engine's blessed RAII helper for this exact case (used by the WP
+				// convert commandlet, etc.). It handles: AddToRoot, GWorld + EditorWorldContext swap, InitWorld,
+				// UpdateModelComponents, UpdateWorldComponents, UpdateLevelStreaming on construction; and
+				// DestroyWorld (which routes through CleanupWorld + subsystem deinit + WP Uninitialize) +
+				// RemoveFromRoot + GWorld restore on destruction. We init as Editor type and disable all
+				// play-mode subsystems — we just want WP iteration, no physics / nav / AI / audio overhead.
+				if (!World->bIsWorldInitialized)
+				{
+					FScopedEditorWorld ScopedWorld(World, UWorld::InitializationValues()
+						.ShouldSimulatePhysics(false)
+						.EnableTraceCollision(false)
+						.CreateNavigation(false)
+						.CreateAISystem(false)
+						.AllowAudioPlayback(false)
+						.CreatePhysicsScene(false), EWorldType::Editor);
+
+					ScanWorldPartitionActors(World, PackagePath, EnsureClassFilter(), OutEntries);
+				}
+				else
+				{
+					// Already-initialized (resident from a prior run still pending GC, or some external owner
+					// holds it). Scan directly without taking ownership of the lifecycle — FScopedEditorWorld
+					// asserts on already-initialized worlds and would interfere with the real owner anyway.
+					UE_LOG(LogSimpleQuest, Verbose,
+						TEXT("ScanUnloadedLevels: '%s' already initialized; scanning without lifecycle wrapper"),
+						*PackagePath);
+					ScanWorldPartitionActors(World, PackagePath, EnsureClassFilter(), OutEntries);
+				}
+				++NumWPScanned;
+			}
+			else if (ULevel* PersistentLevel = World->PersistentLevel)
+			{
+				int32 NumActorsInLevel = 0;
+				for (AActor* Actor : PersistentLevel->Actors)
+				{
+					if (!Actor) continue;
+					ScanActorForStaleTags(Actor,
+						FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,
+						PackagePath, OutEntries);
+					++NumActorsInLevel;
+				}
+				UE_LOG(LogSimpleQuest, Display,
+					TEXT("ScanUnloadedLevels: non-WP world '%s' — %d actors walked"),
+					*PackagePath, NumActorsInLevel);
+				++NumNonWPScanned;
+			}
+		}
+
+		UE_LOG(LogSimpleQuest, Display,
+			TEXT("ScanUnloadedLevels: %d total worlds in AR; %d already loaded (Tier 1), %d non-WP scanned, %d WP scanned (mode=%s), %d load failures"),
+			WorldAssets.Num(), NumAlreadyLoaded, NumNonWPScanned, NumWPScanned,
+			Scope.bComprehensiveWPScan ? TEXT("comprehensive") : TEXT("class-filtered"),
+			NumLoadFailed);
+	}
+
+	/**
+	 * Loaded-level surface — Tier 1 baseline. Walks GEditor->GetWorldContexts and scans every actor in every
+	 * editor-type world. Carries the world's package path on each entry for consistency with the Tier 2 surfaces
+	 * (the panel doesn't currently use it for loaded entries since the actor pointer is enough, but the field
+	 * is populated for the commandlet's structured output).
+	 */
+	void ScanLoadedLevels(TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	{
+		if (!GEditor) return;
+
+		for (const FWorldContext& Context : GEditor->GetWorldContexts())
+		{
+			UWorld* World = Context.World();
+			if (!World || Context.WorldType != EWorldType::Editor) continue;
+
+			const FString WorldPackagePath = World->GetOutermost() ? World->GetOutermost()->GetName() : FString();
+
+			for (TActorIterator<AActor> It(World); It; ++It)
+			{
+				ScanActorForStaleTags(*It, FSimpleQuestEditorUtilities::EStaleQuestTagSource::LoadedLevelInstance,
+					WorldPackagePath, OutEntries);
+			}
+		}
+	}
+}
+
+TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(FStaleTagScanScope Scope)
+{
+	TArray<FStaleQuestTagEntry> Result;
+
+	if (Scope.bLoadedLevels)
+	{
+		ScanLoadedLevels(Result);
+	}
+	if (Scope.bActorBlueprintCDOs)
+	{
+		ScanActorBlueprintCDOs(Result);
+	}
+	if (Scope.bUnloadedLevels)
+	{
+		ScanUnloadedLevels(Scope, Result);
+	}
+	
+	UE_LOG(LogSimpleQuest, Display,
+		TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found (scope flags: loaded=%s, bpCDOs=%s, unloaded=%s)"),
+		Result.Num(),
+		Scope.bLoadedLevels ? TEXT("on") : TEXT("off"),
+		Scope.bActorBlueprintCDOs ? TEXT("on") : TEXT("off"),
+		Scope.bUnloadedLevels ? TEXT("on") : TEXT("off"));
+
 	return Result;
 }
+
+// =============================================================================
+// TEMPORARY VERIFICATION COMMAND — Phase 2 of Stale Quest Tags Tier 2
+// Remove this entire block once Phase 4's panel button is in place.
+// =============================================================================
+//
+// Console command: SimpleQuest.Debug.ScanBlueprintCDOs
+// Runs CollectStaleQuestTagEntries with ONLY the actor-BP-CDO scope bit set,
+// prints one Display line per entry to LogSimpleQuest. Useful for verifying
+// Phase 2's ScanActorBlueprintCDOs helper without needing the panel UI.
+//
+// Usage:
+//   1. Build editor.
+//   2. Open the project.
+//   3. In the Output Log, type:  SimpleQuest.Debug.ScanBlueprintCDOs
+//   4. Look at LogSimpleQuest at Display+ verbosity. Expect a header line
+//      with the entry count, then one line per stale tag found.
+//
+// Set up a known-stale BP to test against (per Phase 2 verification step 1-5)
+// and confirm the entry shows up here. Then delete the test BP.
+
+#include "HAL/IConsoleManager.h"
+
+static FAutoConsoleCommand GSimpleQuestDebugScanBlueprintCDOsCmd(
+	TEXT("SimpleQuest.Debug.ScanBlueprintCDOs"),
+	TEXT("Run the Tier 2 actor-Blueprint-CDO stale-tag scan and dump results to LogSimpleQuest. Diagnostic only."),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		FSimpleQuestEditorUtilities::FStaleTagScanScope Scope;
+		Scope.bLoadedLevels       = false;
+		Scope.bActorBlueprintCDOs = true;
+		Scope.bUnloadedLevels     = false;
+
+		const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries =
+			FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope);
+
+		UE_LOG(LogSimpleQuest, Display, TEXT("---- BP CDO stale-tag scan: %d entries ----"), Entries.Num());
+		for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
+		{
+			const FString CDOClassName = E.Actor.IsValid() ? E.Actor->GetClass()->GetName() : TEXT("(null)");
+			UE_LOG(LogSimpleQuest, Display, TEXT("  [BP CDO] class=%s field=%s tag=%s package=%s"),
+				*CDOClassName,
+				*E.FieldLabel,
+				*E.StaleTag.ToString(),
+				*E.PackagePath);
+		}
+		UE_LOG(LogSimpleQuest, Display, TEXT("---- end of BP CDO scan ----"));
+	})
+);
+
+static FAutoConsoleCommand GSimpleQuestDebugScanUnloadedLevelsCmd(
+	TEXT("SimpleQuest.Debug.ScanUnloadedLevels"),
+	TEXT("Run the Tier 2 unloaded-level stale-tag scan and dump results to LogSimpleQuest. Diagnostic only."),
+	FConsoleCommandDelegate::CreateLambda([]()
+	{
+		FSimpleQuestEditorUtilities::FStaleTagScanScope Scope;
+		Scope.bLoadedLevels = false;
+		Scope.bActorBlueprintCDOs = false;
+		Scope.bUnloadedLevels = true;
+
+		const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries =
+			FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope);
+
+		UE_LOG(LogSimpleQuest, Display, TEXT("---- Unloaded-level stale-tag scan: %d entries ----"), Entries.Num());
+		for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
+		{
+			const FString ActorName = E.Actor.IsValid() ? E.Actor->GetActorNameOrLabel() : TEXT("(stale weak ptr)");
+			UE_LOG(LogSimpleQuest, Display, TEXT("  [Unloaded] actor=%s field=%s tag=%s package=%s"),
+				*ActorName,
+				*E.FieldLabel,
+				*E.StaleTag.ToString(),
+				*E.PackagePath);
+		}
+		UE_LOG(LogSimpleQuest, Display, TEXT("---- end of unloaded-level scan ----"));
+	})
+);
 

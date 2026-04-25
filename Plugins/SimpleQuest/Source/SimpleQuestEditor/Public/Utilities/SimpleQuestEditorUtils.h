@@ -107,8 +107,53 @@ public:
 	};
 
 	/**
-	 * One stale tag reference surfaced by the Stale Quest Tags panel. Carries everything the panel needs to render the row
-	 * (labels), perform the Clear action (weak component + tag), and uniquely key for session-scoped Dismiss tracking.
+	 * Where a stale tag reference was found. Drives type-aware navigation in the Stale Quest Tags panel
+	 * (Find/Frame for live actors vs. Open Blueprint for CDOs vs. Open Level for unloaded sublevels) and
+	 * lets the commandlet group its summary output by source category.
+	 */
+	enum class EStaleQuestTagSource : uint8
+	{
+		LoadedLevelInstance,    // live actor in a loaded editor world (Tier 1 default)
+		ActorBlueprintCDO,      // authored on the CDO of an Actor Blueprint (Tier 2)
+		UnloadedLevelInstance   // actor in an unloaded sublevel (Tier 2; sync-loaded for the scan)
+	};
+
+	/**
+	 * Scope flags for CollectStaleQuestTagEntries. Each surface is independently toggled so callers can opt
+	 * into the cost they want — Tier 1's panel sticks with loaded-levels-only for instant designer feedback;
+	 * the "Full Project Scan" button + the commandlet enable everything for pre-flight validation.
+	 */
+	struct FStaleTagScanScope
+	{
+		bool bLoadedLevels       = true;   // walks GEditor->GetWorldContexts editor worlds; Tier 1 baseline
+		bool bActorBlueprintCDOs = false;  // iterates UBlueprint AR assets, scans generated-class CDOs
+		bool bUnloadedLevels     = false;  // iterates UWorld AR assets, sync-loads each, scans actors
+
+		/**
+		 * Comprehensive scan toggle for World Partition levels. Default = true (sync-load every WP actor and
+		 * scan it). Set to false to opt into a class-filter optimization that pre-builds the set of actor
+		 * classes known to author UQuestComponentBase descendants and skips WP descriptors whose class isn't
+		 * in the set. Filter is fast on large WP levels but misses the rare case where a designer adds a
+		 * quest component to a single placed actor instance (per-instance, not on the BP). Comprehensive
+		 * mode catches that — recommended unless WP scan latency becomes a real problem.
+		 *
+		 * No effect on non-WP unloaded levels (those always do a full PersistentLevel walk) or on Tier 1
+		 * loaded-level scope.
+		 */
+		bool bComprehensiveWPScan = true;
+	};
+
+	/**
+	 * One stale tag reference surfaced by the Stale Quest Tags scan. Carries everything the panel needs to
+	 * render the row (labels) and perform navigation/clear, plus a Source discriminator + PackagePath so
+	 * Tier 2 entries (BP CDOs, unloaded levels) can be distinguished from Tier 1 loaded-level instances.
+	 *
+	 * Field semantics by Source:
+	 *   LoadedLevelInstance   — Actor + Component live; PackagePath = Actor's level package; FieldLabel + StaleTag as before.
+	 *   ActorBlueprintCDO     — Actor = the BP-generated-class CDO (cast to AActor); Component = CDO's component; PackagePath = BP asset path.
+	 *   UnloadedLevelInstance — Actor + Component point into a transiently-loaded world; PackagePath = umap path.
+	 *                           Note: weak ptrs may go stale after the scan if the world is GC'd; treat them as
+	 *                           "valid only during this scan, use PackagePath for navigation."
 	 */
 	struct FStaleQuestTagEntry
 	{
@@ -116,6 +161,8 @@ public:
 		TWeakObjectPtr<UQuestComponentBase>		Component;
 		FString									FieldLabel;
 		FGameplayTag							StaleTag;
+		EStaleQuestTagSource					Source = EStaleQuestTagSource::LoadedLevelInstance;
+		FString									PackagePath;  // long package name; used for nav even if weak ptrs go stale
 	};
 
 	/**
@@ -261,7 +308,7 @@ public:
 	 * UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent that fails IsTagRegisteredInRuntime.
 	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
-	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries();
+	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
 	
 	/**
 	 * Appends an "Examine Prerequisite Expression" entry to a right-click context menu section. Resolves the owning editor

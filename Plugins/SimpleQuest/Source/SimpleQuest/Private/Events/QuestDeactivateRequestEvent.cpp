@@ -2,4 +2,4 @@
 
 #include "Events/QuestDeactivateRequestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestDeactivateRequest, "Quest.Channel.Deactivate")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestDeactivateRequest, "SimpleQuest.QuestChannel.Deactivate")

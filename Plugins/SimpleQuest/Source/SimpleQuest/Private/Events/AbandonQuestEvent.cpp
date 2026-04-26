@@ -2,4 +2,4 @@
 
 #include "Events/AbandonQuestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestAbandoned, "Quest.Channel.Abandoned")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestAbandoned, "SimpleQuest.QuestChannel.Abandoned")

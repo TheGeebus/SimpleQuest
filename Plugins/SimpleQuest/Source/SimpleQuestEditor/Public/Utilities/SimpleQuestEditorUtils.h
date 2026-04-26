@@ -193,7 +193,7 @@ public:
 	 * Finds givers attached to this node's CONTEXTUAL inlined compiled tags, i.e., tags emitted by OUTER questline assets
 	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
 	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
-	 * (everything past "Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
+	 * (everything past "SimpleQuest.Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
 	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
 	 *
 	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.

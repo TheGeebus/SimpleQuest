@@ -2,4 +2,4 @@
 
 #include "Events/QuestObjectiveTriggered.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestTarget, "Quest.Channel.QuestTarget")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestTarget, "SimpleQuest.QuestChannel.QuestTarget")

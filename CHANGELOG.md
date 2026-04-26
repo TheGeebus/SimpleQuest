@@ -10,20 +10,216 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Active Development
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
-- Tag namespace consolidation under a single `SimpleQuest.*` root
-  (locked to 0.4.0; pre-save/load — locks tag strings before the save
-  format freezes)
+- Giver-gated quest prereq evaluation gap (0.4.1 lead — pre-existing
+  bug surfaced during 0.4.0 testing; analyzed in TODO with three fix
+  options, Option A leaning)
 
 ### Upcoming
-- Tag namespace consolidation under a single `SimpleQuest.*` root
-  (pre-save/load — locks tag strings before the save format freezes)
-- Save/load system
+- Save/load system (0.6.0 — locks tag string format; the just-shipped
+  `SimpleQuest.*` namespace consolidation in 0.4.0 was the pre-flight
+  for this)
 - Runtime asset loading pass (async graph load driven by signal
   subscription, prioritized synchronous fallback for critical paths)
 
 ### Known Issues
 - Giver "why can't activate" query API (Item 23) still deferred —
-  not blocking 0.4.0 sequencing
+  not blocking 0.5.0+ sequencing
+
+---
+
+## [0.4.0] — 2026-04-26 — Tag Namespace Consolidation under `SimpleQuest.*`
+
+Every plugin-introduced gameplay tag namespace is now collapsed under a
+single `SimpleQuest.*` root. Designers opening the Gameplay Tag Manager
+see a clean separation between plugin tags and game-authored tags —
+rather than the prior intermixed top-level (`Quest.*`, `QuestState.*`,
+`QuestPrereqRule.*`, `QuestActivationGroup.*`, `Quest.Channel.*`,
+`Quest.Outcome.*` all sitting alongside the game's own root categories),
+the entire plugin tag surface now collapses under `SimpleQuest.*`. Six
+namespace roots migrated:
+
+| Was | Now |
+|---|---|
+| `Quest.*` (quest identifiers) | `SimpleQuest.Quest.*` |
+| `Quest.Outcome.*` (named outcomes) | `SimpleQuest.QuestOutcome.*` *(promoted out of Quest — outcomes are decorators, not lifecycle events)* |
+| `QuestState.*` (state facts) | `SimpleQuest.QuestState.*` |
+| `QuestPrereqRule.*` | `SimpleQuest.QuestPrereqRule.*` |
+| `QuestActivationGroup.*` | `SimpleQuest.QuestActivationGroup.*` |
+| `Quest.Channel.*` (signal-bus channels) | `SimpleQuest.QuestChannel.*` |
+
+Strategic motivation is twofold: clean designer-visible separation
+*now*, and locking tag string identity before the save format freezes
+in the 0.6.0 save/load work (saves serialize tag strings; renaming
+after that would require save-side migration). The 0.3.4 stale-tag
+commandlet was the pre-flight + post-flight verification surface — the
+post-rename scan came back **byte-identical** to the pre-rename baseline,
+confirming the redirect chain caught every reference the migration
+touched.
+
+A comprehensive `GameplayTagRedirects` block in
+`Config/DefaultGameplayTags.ini` covers every namespace root and every
+seeded child tag, ensuring authored references in existing project
+assets migrate transparently at load time. Designers don't need to
+manually rewire tag pickers — the redirect chain rewrites old tag
+references on load and persists the new namespace on next save (BP
+CDOs and other UPROPERTY-stored `FGameplayTag` fields automatically;
+questline asset internals via the existing **Compile All Questlines**
+toolbar action).
+
+Also folded in: a pre-existing bug fix where prerequisites on
+`UQuestlineNode_LinkedQuestline` nodes were never compiled into the
+runtime — the compiler's `CompileOutputWiring` skip for LinkedQuestline
+nodes (added to bypass output-wiring logic that depends on the node's
+own title formula) inadvertently swept the prereq compilation block
+along with it. Lifted the prereq compilation above the skip; prereq
+gating on LinkedQuestline nodes now works as designers expect.
+
+### Added
+
+#### `SimpleQuest.*` namespace as the new tag tree root
+- All plugin-introduced gameplay tags now live under a single
+  `SimpleQuest.*` parent. Picker filters set on `Categories="SimpleQuest.Quest"`,
+  `Categories="SimpleQuest.QuestOutcome"`, etc. scope correctly to the
+  new tree.
+- The compiler emits node identifier tags as `SimpleQuest.Quest.<QuestlineID>.<NodeName>`;
+  state facts as `SimpleQuest.QuestState.<...>.Active` /
+  `.Completed` / `.PendingGiver` / `.Deactivated` / `.Blocked`;
+  per-node outcome facts as `SimpleQuest.QuestState.<...>.Outcome.<leaf>`.
+- `FNativeGameplayTag` registration uses `SimpleQuest.SimpleQuest`
+  module + plugin names, consistent with the new top-level identity.
+
+#### `GameplayTagRedirects` block in `Config/DefaultGameplayTags.ini`
+- Every namespace root has an explicit redirect:
+  `Quest` → `SimpleQuest.Quest`, `Quest.Outcome` → `SimpleQuest.QuestOutcome`,
+  `QuestState` → `SimpleQuest.QuestState`, `QuestPrereqRule` →
+  `SimpleQuest.QuestPrereqRule`, `QuestActivationGroup` →
+  `SimpleQuest.QuestActivationGroup`, `Quest.Channel` →
+  `SimpleQuest.QuestChannel`.
+- Every seeded child tag in the prior `DefaultGameplayTags.ini` block
+  has its own explicit redirect (UE's tag redirects are exact-match
+  per tag string; children of a redirected parent are not auto-rewritten).
+- Every `UE_DEFINE_GAMEPLAY_TAG`-defined channel and example outcome
+  also has an explicit redirect (defensive — the C++ definitions
+  were updated to the new names but any external BP that referenced
+  them by string still migrates cleanly).
+- The pre-existing `QuestPrereqGroup → QuestPrereqRule` chain
+  (from a prior rename) was updated to point directly at
+  `SimpleQuest.QuestPrereqRule.*` rather than collapsing through
+  the intermediate.
+
+#### Defensive guards in `WriteCompiledTagsIni` / `RebuildNativeTags`
+- Skip `FName::IsNone()` entries at the top of the per-tag loop —
+  prevents the "None.Active" / "None.Blocked" leak into
+  `CompiledTags.ini` that was caused by upstream NAME_None entries
+  in cached `CompiledQuestTags` AR metadata.
+- Recognize the legacy `"Quest.Outcome."` prefix (in addition to the
+  new `"SimpleQuest.QuestOutcome."`) as a transitional safeguard.
+  Stale AR metadata that hadn't been recompiled since the rename was
+  state-fact-expanding outcome tags into garbage entries before this
+  guard. Marked for removal in 0.4.1 once we're confident every
+  authored asset has been touched.
+
+### Changed
+
+- **`FQuestStateTagUtils::Namespace`** constant migrated from
+  `"QuestState."` to `"SimpleQuest.QuestState."`. Every `MakeStateFact`
+  / `MakeOutcomeFact` / `MakeNodeOutcomeFact` / `MakeEntryOutcomeFact`
+  call inherits the new prefix; the `StartsWith` / `Mid` pairs adjusted
+  for the new prefix length (6 → 18). Doc-comment fact-shape examples
+  updated.
+- **`UE_DEFINE_GAMEPLAY_TAG` channel + outcome literals** updated:
+  six signal-bus channel `.cpp` files in `Plugins/SimpleQuest/Source/SimpleQuest/Private/Events/`
+  and two example objective outcome `.cpp` files in
+  `Plugins/SimpleQuest/Source/SimpleQuest/Private/Objectives/Examples/`.
+- **`UPROPERTY meta=(Categories=...)`** filters across 11 declarations
+  (component classes, content nodes, K2 nodes, spec structs, example
+  objectives) updated to scope to the new namespaces.
+- **`GetTagFilterString()`** virtual returns on portal node headers (4
+  classes, 6 returns) updated.
+- **`SGameplayTagCombo::Filter`** strings on the inline outcome pickers
+  in `SGraphNode_Exit` and `SGraphNode_CompleteObjective` updated.
+- **Compiler tag composition** in `QuestlineGraphCompiler` and
+  `SimpleQuestEditorUtils` updated at every `TEXT("Quest.")` /
+  `TEXT("Quest.Outcome.")` literal site. The `Quest.Outcome.` outcome
+  prefix constant in the inline-outcome-label parser was specifically
+  rewritten as `SimpleQuest.QuestOutcome.` with matching offset
+  arithmetic.
+- **Prereq examiner contextual rewrite** in
+  `QuestPIEDebugChannel.cpp` updated `Mid(6)` → `Mid(18)` at two
+  call sites to strip the new `"SimpleQuest.Quest."` prefix length
+  rather than the legacy `"Quest."` length. Without this fix, the
+  examiner's contextual-rewrite for nested LinkedQuestline graphs
+  produced malformed tag names that never matched WorldState facts —
+  silent breakage where the leaf-state coloring stayed Unknown.
+
+### Fixed
+
+- **Prereqs on `UQuestlineNode_LinkedQuestline` nodes never compiled
+  into runtime instances.** A pre-existing bug, surfaced during
+  0.4.0 testing. The compiler's `CompileOutputWiring` had
+  `if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;`
+  at line 641 to bypass output-wiring logic that depends on the
+  node's own title formula (LinkedQuestline labels come from the
+  linked asset, not the node's title). The prereq compilation
+  block at line 770–776 was inside that skipped loop body, so
+  LinkedQuestline nodes never had `Instance->PrerequisiteExpression`
+  populated — the runtime check at `QuestManagerSubsystem.cpp:140`
+  short-circuited on `IsAlways()` returning true, and prereqs on
+  LinkedQuestline nodes were silently bypassed. Lifted the prereq
+  block above the LinkedQuestline skip; output-wiring +
+  `bCompletesParentGraph` stay below the skip per the existing
+  intent.
+
+### Removed
+
+- Anonymous-namespace `ScanActorForStaleTags` reverted alias from
+  pre-namespace cleanup pass (already removed in 0.3.5; noted here
+  for symmetry with the broader migration story).
+
+### Known Limitations
+
+- **Giver-gated quest prereq evaluation gap.** A pre-existing runtime
+  bug surfaced by post-rename testing of the LinkedQuestline-prereq
+  fix above. Three runtime sites collectively bypass prereq evaluation
+  for giver-gated quests:
+  `UQuestManagerSubsystem::ActivateNodeByTag` (giver-gated branch
+  doesn't check prereq before publishing `FQuestEnabledEvent`),
+  `UQuestGiverComponent::CanGiveAnyQuests` (returns
+  `!EnabledQuestTags.IsEmpty()` with no prereq evaluation), and the
+  manager's runtime prereq checks (lines 138, 213) which short-circuit
+  on `!Step->IsGiverGated()` — explicitly trusting the giver to have
+  done the prereq check the giver never does. Pre-existing — not
+  caused by the namespace rename, but masked pre-0.4.0 by the
+  LinkedQuestline-prereq-not-compiled bug. Three fix options analyzed
+  in `Notes/TODO.txt` POST-0.4.0 RUNTIME FIX section; Option A
+  (defer activation when prereq unmet, retry on leaf-fact change)
+  leaning. Slated for **0.4.1** as its own focused session — fix is
+  non-trivial and shouldn't ride on the namespace migration's coattails.
+- **Inert legacy tag string fragments persist in some questline
+  `.uasset` binaries.** Functionally inert — `CompiledTags.ini` is
+  fully `SimpleQuest.*` (524 entries, 0 legacy), runtime tag
+  registry is fully migrated, post-flight scan matches pre-flight
+  byte-for-byte. The leftover bytes are in stale FName tables or
+  serialization buffers (UE asset serialization sometimes appends
+  rather than replaces). They `grep` but don't affect runtime
+  behavior; will compress out via natural authoring activity over
+  time. BP CDO assets cleaned fully via `ResavePackages`; questline
+  binary fragments are aesthetic, not load-bearing.
+
+### Internal — audit playbook updates
+
+For the next namespace operation:
+
+- Grep for `UE_DEFINE_GAMEPLAY_TAG` macros explicitly, not just
+  string literals — that's how `Quest.Channel.*` (signal-bus
+  channels) and the example objective outcomes (`Quest.Outcome.Reached`,
+  `Quest.Outcome.TargetKilled`) were missed in the original audit
+  and surfaced one at a time as user-visible leaks during Pass A.
+- Grep for `Mid(<small_int>)` byte-offset patterns near tag-string
+  operations. Length-dependent strip operations need updating when
+  prefix lengths change; the prereq examiner's contextual-rewrite at
+  `QuestPIEDebugChannel.cpp:225,229` silently broke until manually
+  surfaced via designer testing (linked-graph examiner stayed Unknown).
 
 ---
 

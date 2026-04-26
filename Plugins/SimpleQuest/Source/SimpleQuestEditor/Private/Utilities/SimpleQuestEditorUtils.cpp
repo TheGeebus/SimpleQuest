@@ -80,8 +80,7 @@ namespace
 
         const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
         const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
-        const FString ExpectedPrefix = FString::Printf(TEXT("Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));
-        const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
+		const FString ExpectedPrefix = FString::Printf(TEXT("SimpleQuest.Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));        const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
         if (!CompiledTagStr.StartsWith(ExpectedPrefix)) return Result;
         const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
         const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
@@ -250,7 +249,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQues
 		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
 	Segments.Insert(QuestlineSegment, 0);
 
-	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
+	const FString TagName = TEXT("SimpleQuest.Quest.") + FString::Join(Segments, TEXT("."));
 	return FGameplayTag::RequestGameplayTag(FName(*TagName), false);
 }
 
@@ -503,11 +502,11 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	}
 	if (SourceTagName.IsNone()) return FGameplayTag();
 
-	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, /*ErrorIfNotFound*/ false);
+	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, false);
 
 	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
-	// branch. AnyOutcome → QuestState.<src>.Completed (source done, regardless of outcome). Named outcome →
-	// QuestState.<src>.Outcome.<leaf>.
+	// branch. AnyOutcome → SimpleQuest.QuestState.<src>.Completed (source done, regardless of outcome). Named outcome →
+	// SimpleQuest.QuestState.<src>.Outcome.<leaf>.
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
@@ -972,9 +971,9 @@ namespace PrereqExaminer_Internal
     	}
     	else
     	{
-    		// Tag-picker syntax: strip the Quest.Outcome. root (present on all named outcome pins), then split the remainder
-    		// into category prefix + leaf so the widget can render the hierarchy deemphasized above the leaf segment.
-    		static const FString OutcomePrefix = TEXT("Quest.Outcome.");
+    		// Tag-picker syntax: strip the SimpleQuest.QuestOutcome. root (present on all named outcome pins), then split
+    		// the remainder into category prefix + leaf so the widget can render the hierarchy deemphasized above the leaf.
+    		static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
     		FString Remainder = OutputPin->PinName.ToString();
     		if (Remainder.StartsWith(OutcomePrefix)) Remainder = Remainder.RightChop(OutcomePrefix.Len());
 

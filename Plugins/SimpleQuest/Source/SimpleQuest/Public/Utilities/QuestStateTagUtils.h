@@ -8,14 +8,15 @@
 
 /**
  * Static utility class for composing the per-node / per-quest state-fact gameplay tag strings used throughout the quest
- * runtime and compiler. Namespaced under QuestState.* to keep state facts distinct from the Quest.* identity tag hierarchy.
+ * runtime and compiler. Namespaced under SimpleQuest.QuestState.* to keep state facts distinct from the
+ * SimpleQuest.Quest.* identity tag hierarchy.
  * Not instantiable — all members are static.
  */
 class FQuestStateTagUtils
 {
 public:
 	// ---- Constants ----
-	inline static const FString Namespace = TEXT("QuestState.");
+	inline static const FString Namespace = TEXT("SimpleQuest.QuestState.");
 	inline static const FString Leaf_Active = TEXT("Active");
 	inline static const FString Leaf_Completed = TEXT("Completed");
 	inline static const FString Leaf_PendingGiver = TEXT("PendingGiver");
@@ -28,7 +29,7 @@ public:
 	static FName MakeStateFact(FName QuestTagName, const FString& Leaf)
 	{
 		FString Tag = QuestTagName.ToString();
-		if (Tag.StartsWith(TEXT("Quest."))) Tag = Namespace + Tag.Mid(6);
+		if (Tag.StartsWith(TEXT("SimpleQuest.Quest."))) Tag = Namespace + Tag.Mid(18);
 		return FName(*(Tag + TEXT(".") + Leaf));
 	}
 
@@ -45,49 +46,52 @@ public:
 	static FName MakeOutcomeFact(FGameplayTag OutcomeTag)
 	{
 		FString Tag = OutcomeTag.GetTagName().ToString();
-		if (Tag.StartsWith(TEXT("Quest."))) Tag = Namespace + Tag.Mid(6);
+		if (Tag.StartsWith(TEXT("SimpleQuest.Quest."))) Tag = Namespace + Tag.Mid(18);
 		return FName(*Tag);
 	}
 
 	/**
-	 * Format a per-node outcome fact: Quest.State.<NodePath>.Outcome.<OutcomeLeaf>
+	 * Format a per-node outcome fact: SimpleQuest.QuestState.<NodePath>.Outcome.<OutcomeLeaf>
 	 *
 	 * @param NodeTagName  The tag describing this node's position in a graph hierarchy
-	 *                     (e.g. Quest.Act1.Chapter3.RecruitAllies).
+	 *                     (e.g. SimpleQuest.Quest.Act1.Chapter3.RecruitAllies).
 	 * @param OutcomeTag   The tag describing a given outcome for a quest or step
-	 *                     (e.g. Quest.Outcome.HireMercenaries).
+	 *                     (e.g. SimpleQuest.QuestOutcome.HireMercenaries).
 	 * @returns            A fact tag encoding the graph context along with the outcome
-	 *                     (e.g. Quest.State.Act1.Chapter3.RecruitAllies.Outcome.HireMercenaries).
+	 *                     (e.g. SimpleQuest.QuestState.Act1.Chapter3.RecruitAllies.Outcome.HireMercenaries).
 	 */
 	static FName MakeNodeOutcomeFact(FName NodeTagName, FGameplayTag OutcomeTag)
 	{
 		FString NodeStr = NodeTagName.ToString();
-		if (NodeStr.StartsWith(TEXT("Quest.")))
-			NodeStr = Namespace + NodeStr.Mid(6);
+		if (NodeStr.StartsWith(TEXT("SimpleQuest.Quest.")))
+			NodeStr = Namespace + NodeStr.Mid(18);
 
 		FString OutcomeStr = OutcomeTag.GetTagName().ToString();
-		int32 OutcomePos = OutcomeStr.Find(TEXT("Outcome."));
+		int32 OutcomePos = OutcomeStr.Find(TEXT("QuestOutcome."));
 		if (OutcomePos == INDEX_NONE) return NAME_None;
 
-		FString OutcomeSuffix = OutcomeStr.Mid(OutcomePos);
+		// Strip the leading "Quest" off "QuestOutcome." so the embedded sub-path under the per-node fact reads
+		// as ".Outcome.<leaf>", matching the historical pre-rename shape and the comment example above.
+		FString OutcomeSuffix = OutcomeStr.Mid(OutcomePos + 5);  // 5 = strlen("Quest")
 		return FName(*(NodeStr + TEXT(".") + OutcomeSuffix));
 	}
 
 	/**
-	 * Per-quest entry outcome fact: Quest.State.<QuestPath>.EntryOutcome.<OutcomeLeaf>. Set when a Quest node is activated
-	 * via a specific IncomingOutcomeTag.
+	 * Per-quest entry outcome fact: SimpleQuest.QuestState.<QuestPath>.EntryOutcome.<OutcomeLeaf>. Set when a Quest
+	 * node is activated via a specific IncomingOutcomeTag.
 	 */
 	static FName MakeEntryOutcomeFact(FName NodeTagName, FGameplayTag OutcomeTag)
 	{
 		FString NodeStr = NodeTagName.ToString();
-		if (NodeStr.StartsWith(TEXT("Quest.")))
-			NodeStr = Namespace + NodeStr.Mid(6);
+		if (NodeStr.StartsWith(TEXT("SimpleQuest.Quest.")))
+			NodeStr = Namespace + NodeStr.Mid(18);
 
 		FString OutcomeStr = OutcomeTag.GetTagName().ToString();
-		int32 OutcomePos = OutcomeStr.Find(TEXT("Outcome."));
+		int32 OutcomePos = OutcomeStr.Find(TEXT("QuestOutcome."));
 		if (OutcomePos == INDEX_NONE) return NAME_None;
 
-		FString OutcomeLeaf = OutcomeStr.Mid(OutcomePos + 8);
+		// Skip past "QuestOutcome." (13 chars) to land on the leaf segment.
+		FString OutcomeLeaf = OutcomeStr.Mid(OutcomePos + 13);
 		return FName(*(NodeStr + TEXT(".EntryOutcome.") + OutcomeLeaf));
 	}
 

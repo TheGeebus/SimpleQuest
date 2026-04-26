@@ -5,7 +5,7 @@
 
 #include "SimpleQuestLog.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_KillClass_Killed, "Quest.Outcome.TargetKilled")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_KillClass_Killed, "SimpleQuest.QuestOutcome.TargetKilled")
 
 
 UKillClassQuestObjective::UKillClassQuestObjective()

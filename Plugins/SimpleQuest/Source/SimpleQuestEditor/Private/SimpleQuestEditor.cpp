@@ -654,25 +654,38 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 
     // Collect compiled tags and state facts from registry
     TArray<FName> AllTags;
-    for (const auto& Pair : CompiledTagRegistry)
-    {
-        for (const FName& QuestTag : Pair.Value)
-        {
-            AllTags.Add(QuestTag);
-            if (!QuestTag.ToString().StartsWith(FQuestStateTagUtils::Namespace)  && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
-            {
-                auto AddState = [&](const FString& Leaf)
-                {
-                    AllTags.Add(FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
-                };
-                AddState(FQuestStateTagUtils::Leaf_Active);
-                AddState(FQuestStateTagUtils::Leaf_Completed);
-                AddState(FQuestStateTagUtils::Leaf_PendingGiver);
-                AddState(FQuestStateTagUtils::Leaf_Deactivated);
-                AddState(FQuestStateTagUtils::Leaf_Blocked);
-            }
-        }
-    }
+	for (const auto& Pair : CompiledTagRegistry)
+	{
+		for (const FName& QuestTag : Pair.Value)
+		{
+			// Defensive: skip NAME_None entries that occasionally leak into CompiledQuestTags AR metadata
+			// (orphan nodes, failed tag assignment in upstream compile). Without this guard we emit
+			// "None.Active" / "None.Blocked" etc. into CompiledTags.ini.
+			if (QuestTag.IsNone()) continue;
+
+			AllTags.Add(QuestTag);
+
+			// Skip state-fact expansion for outcome and state-namespace tags. The legacy "Quest.Outcome."
+			// prefix is recognized as a transitional safeguard during the 0.4.0 namespace migration —
+			// questline metadata baked under the old namespace will be rewritten on the next compile pass,
+			// but until then we don't want to spuriously state-fact-expand outcome tags.
+			const FString TagStr = QuestTag.ToString();
+			if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
+				&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
+				&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+			{
+				auto AddState = [&](const FString& Leaf)
+				{
+					AllTags.Add(FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
+				};
+				AddState(FQuestStateTagUtils::Leaf_Active);
+				AddState(FQuestStateTagUtils::Leaf_Completed);
+				AddState(FQuestStateTagUtils::Leaf_PendingGiver);
+				AddState(FQuestStateTagUtils::Leaf_Deactivated);
+				AddState(FQuestStateTagUtils::Leaf_Blocked);
+			}
+		}
+	}
 
     // Deduplicate and sort
     AllTags.Sort([](const FName& A, const FName& B) { return A.LexicalLess(B); });
@@ -726,13 +739,20 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 	{
 		for (const FName& QuestTag : Pair.Value)
 		{
+			// Defensive: skip NAME_None — see WriteCompiledTagsIni for rationale.
+			if (QuestTag.IsNone()) continue;
+
 			auto Add = [this](FName TagName)
 			{
 				CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
 					TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
 			};
 			Add(QuestTag);
-			if (!QuestTag.ToString().StartsWith(FQuestStateTagUtils::Namespace) && !QuestTag.ToString().StartsWith(TEXT("Quest.Outcome.")))
+
+			const FString TagStr = QuestTag.ToString();
+			if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
+				&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
+				&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
 			{
 				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
 				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));

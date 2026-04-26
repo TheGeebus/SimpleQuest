@@ -25,6 +25,6 @@ protected:
 	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override;
 
 private:
-	UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))
+	UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.QuestOutcome", ObjectiveOutcome))
 	FGameplayTag ReachedOutcomeTag;
 };

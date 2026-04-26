@@ -36,9 +36,10 @@ struct FPrereqExaminerNode
         a FriendlyName override once that field lands on the content-node display. */
     UPROPERTY() FText LeafSourceLabel;
 
-    /** Leaf-only: outcome's tag-picker category prefix (everything after "Quest.Outcome." up to and including the last dot,
-        e.g., "Combat." for Quest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome") and for outcomes
-        that are direct children of Quest.Outcome. Rendered deemphasized above LeafOutcomeLabel in the leaf widget. */
+    /** Leaf-only: outcome's tag-picker category prefix (everything after "SimpleQuest.QuestOutcome." up to and including
+        the last dot, e.g., "Combat." for SimpleQuest.QuestOutcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome")
+        and for outcomes that are direct children of SimpleQuest.QuestOutcome. Rendered deemphasized above LeafOutcomeLabel
+        in the leaf widget. */
     UPROPERTY() FText LeafOutcomeCategory;
 
     /** Leaf-only: outcome pin label — the leaf segment of a named outcome tag, the "Any Outcome" sentinel, or "Entered".
@@ -51,7 +52,7 @@ struct FPrereqExaminerNode
         ResolveLeafFactForOutputPin (rare — Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
     UPROPERTY() FGameplayTag LeafTag;
 
-    /** Source content node's compiled runtime tag (e.g., "Quest.Demo.Step1"). Paired with LeafTag so the debug channel
+    /** Source content node's compiled runtime tag (e.g., "SimpleQuest.Quest.Demo.Step1"). Paired with LeafTag so the debug channel
         can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
         Leaf-only; invalid on other node types. */
     UPROPERTY() FGameplayTag LeafSourceTag;

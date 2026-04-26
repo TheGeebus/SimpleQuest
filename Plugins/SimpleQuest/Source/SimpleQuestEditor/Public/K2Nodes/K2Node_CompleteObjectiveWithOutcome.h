@@ -25,8 +25,8 @@ class SIMPLEQUESTEDITOR_API UK2Node_CompleteObjectiveWithOutcome : public UK2Nod
 	GENERATED_BODY()
 
 public:
-	/** The outcome this node fires. Must be under Quest.Outcome.* */
-	UPROPERTY(EditAnywhere, Category = "Outcome", meta = (Categories = "Quest.Outcome"))
+	/** The outcome this node fires. Must be under SimpleQuest.QuestOutcome.* */
+	UPROPERTY(EditAnywhere, Category = "Outcome", meta = (Categories = "SimpleQuest.QuestOutcome"))
 	FGameplayTag OutcomeTag;
 
 	/** Marks the cached title text as dirty so the next GetNodeTitle call rebuilds it. */

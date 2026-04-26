@@ -18,8 +18,8 @@ public:
 
 	virtual const FGameplayTagContainer& GetTargetQuestTags() const override { return TargetQuestTags; }
 	virtual void SetTargetQuestTags(const FGameplayTagContainer& NewTags) override { TargetQuestTags = NewTags; }
-	virtual FString GetTargetQuestTagsFilterString() const override { return TEXT("Quest"); }
+	virtual FString GetTargetQuestTagsFilterString() const override { return TEXT("SimpleQuest.Quest"); }
 
-	UPROPERTY(EditAnywhere, Category="Blocked", meta=(Categories="Quest"))
+	UPROPERTY(EditAnywhere, Category="Blocked", meta=(Categories="SimpleQuest.Quest"))
 	FGameplayTagContainer TargetQuestTags;
 };

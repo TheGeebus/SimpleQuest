@@ -22,8 +22,8 @@ class FQuestlineGraphTraversalPolicy;
  *
  * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
  * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
- * (Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner routing
- * but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
+ * (SimpleQuest.Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner
+ * routing but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
  *
@@ -136,8 +136,8 @@ private:
 	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
-	 * the compiled QuestTag: Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass ordering — uses
-	 * editor-time data only.
+	 * the compiled QuestTag: SimpleQuest.Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
+	 * ordering — uses editor-time data only.
 	 */
 	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;
 
@@ -187,8 +187,9 @@ private:
 	int32 CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression);
 
 	/**
-	 * Given a Success or Failure output pin on a content node, returns the corresponding WorldState state fact FName (Quest.State.<Tag>.Succeeded / Failed).
-	 * Returns NAME_None for Any Outcome (caller builds the OR node) or non-content-node pins.
+	 * Given a Success or Failure output pin on a content node, returns the corresponding WorldState state fact FName
+	 * (SimpleQuest.QuestState.<Tag>.Succeeded / Failed). Returns NAME_None for Any Outcome (caller builds the OR node)
+	 * or non-content-node pins.
 	 */
 	FName ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const;
 

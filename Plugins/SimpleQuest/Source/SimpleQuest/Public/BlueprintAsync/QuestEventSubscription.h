@@ -35,7 +35,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionCompletedDelega
  * Async BP action — "Bind To Quest Event". Subscribes to all four quest lifecycle channels (Enabled, Started,
  * Ended, Deactivated) on the given tag and stays bound until Cancel() is called or the GameInstance is torn down.
  *
- * Because USignalSubsystem publishes hierarchically, subscribing on a parent tag (e.g., "Quest.MyLine") receives
+ * Because USignalSubsystem publishes hierarchically, subscribing on a parent tag (e.g., "SimpleQuest.Quest.MyLine") receives
  * events from every descendant quest tag — each child's lifecycle will fire this action's output pins. Pins fire
  * once per matching live event, not one-shot.
  *

@@ -50,7 +50,7 @@ void FSimpleQuest::RegisterCompiledQuestTags()
 
             // Expand state facts for tags not already in a state or outcome namespace
             if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
-                && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+                && !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome.")))
             {
                 TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
                 TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));

@@ -22,7 +22,7 @@ public:
 	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
 	
 private:
-	UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))
+	UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.QuestOutcome", ObjectiveOutcome))
 	FGameplayTag TargetKilledOutcomeTag;
 
 };

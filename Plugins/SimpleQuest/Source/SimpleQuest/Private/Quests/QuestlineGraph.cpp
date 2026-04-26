@@ -59,7 +59,9 @@ void UQuestlineGraph::PostLoad()
 		Add(TagName);
 
 		const FString TagStr = TagName.ToString();
-		if (!TagStr.StartsWith(UQuestStateTagUtils::Namespace) && !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+		if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
+			&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
+			&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
 		{
 			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Active));
 			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed));

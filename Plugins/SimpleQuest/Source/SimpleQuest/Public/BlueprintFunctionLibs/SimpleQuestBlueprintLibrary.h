@@ -95,9 +95,9 @@ public:
      *                                      by Victory / Defeat / Negotiated / etc.
      *  - On Deactivated — quest was blocked or torn down without completing.
      *
-     * Hierarchical subscription: pass a parent tag like Quest.MyLine and you'll receive events for every descendant
-     * quest under it (Quest.MyLine.Step1, Quest.MyLine.Step2, ...). Every pin fires every time a matching event
-     * arrives — not one-shot.
+     * Hierarchical subscription: pass a parent tag like SimpleQuest.Quest.MyLine and you'll receive events for every
+     * descendant quest under it (SimpleQuest.Quest.MyLine.Step1, SimpleQuest.Quest.MyLine.Step2, ...). Every pin fires
+     * every time a matching event arrives — not one-shot.
      *
      * Catch-up: if the quest already reached one of these states before you subscribed, the matching pin fires immediately
      * on bind. Late binders aren't left waiting on events that already happened.

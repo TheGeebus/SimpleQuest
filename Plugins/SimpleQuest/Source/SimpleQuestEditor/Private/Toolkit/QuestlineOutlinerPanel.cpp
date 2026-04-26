@@ -144,7 +144,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     // Pass 2 — find missing intermediates (linked graph slots)
     // Any ancestor path that is not itself in CompiledNodes and is not the root prefix
-    const FName RootTagPrefix = FName(*FString::Printf(TEXT("Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID)));
+    const FName RootTagPrefix = FName(*FString::Printf(TEXT("SimpleQuest.Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID)));
 
     TSet<FName> MissingIntermediates;
     for (const auto& Pair : CompiledNodes)
@@ -274,7 +274,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
                         LinkedAsset->GetQuestlineID().IsEmpty() ? LinkedAsset->GetName() : LinkedAsset->GetQuestlineID());
 
                     const FString LinkedPrefix    = TagPrefix + TEXT(".") + LinkedID;
-                    const FString FullLinkedPrefix = TEXT("Quest.") + LinkedPrefix;
+                    const FString FullLinkedPrefix = TEXT("SimpleQuest.Quest.") + LinkedPrefix;
 
                     for (auto& ItemPair : ItemMap)
                     {

@@ -2,4 +2,5 @@
 
 #include "Events/QuestGivenEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestGiven, "Quest.Channel.Given")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestGiven, "SimpleQuest.QuestChannel.Given")
+

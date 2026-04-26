@@ -218,16 +218,17 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 	    {
 	        if (!HasAnyStateFact(ContextualSource, WorldState)) continue;
 
-	        // Source nesting is live. Rewrite the leaf fact by transplanting the leaf-fact tail onto the contextual
-	        // source: strip "QuestState.<home>." prefix off the leaf, re-root under "QuestState.<contextual>.".
-	        const FString LeafStr = LeafFact.GetTagName().ToString();
-	        const FString HomeStr = SourceRuntimeTag.GetTagName().ToString();  // e.g. "Quest.SideQuestQL.Near.Left"
-	        const FString HomeStatePrefix = FQuestStateTagUtils::Namespace + HomeStr.Mid(6); // "QuestState." + everything after "Quest."
-	        if (LeafStr.StartsWith(HomeStatePrefix))
-	        {
-	            const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Outcome.Reached" etc.
-	            const FString ContextualStatePrefix = FQuestStateTagUtils::Namespace + ContextualSource.GetTagName().ToString().Mid(6);
-	            const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStatePrefix + Suffix)), false);
+	    	// Source nesting is live. Rewrite the leaf fact by transplanting the leaf-fact tail onto the contextual
+	    	// source: strip "SimpleQuest.QuestState.<home>." prefix off the leaf, re-root under
+	    	// "SimpleQuest.QuestState.<contextual>.".
+	    	const FString LeafStr = LeafFact.GetTagName().ToString();
+	    	const FString HomeStr = SourceRuntimeTag.GetTagName().ToString();  // e.g. "SimpleQuest.Quest.SideQuestQL.Near.Left"
+	    	const FString HomeStatePrefix = FQuestStateTagUtils::Namespace + HomeStr.Mid(18); // "SimpleQuest.QuestState." + everything after "SimpleQuest.Quest."
+	    	if (LeafStr.StartsWith(HomeStatePrefix))
+	    	{
+	    		const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Outcome.Reached" etc.
+	    		const FString ContextualStatePrefix = FQuestStateTagUtils::Namespace + ContextualSource.GetTagName().ToString().Mid(18);
+	    		const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStatePrefix + Suffix)), false);
 	            if (RewrittenLeaf.IsValid())
 	            {
 	                EffectiveLeaf = RewrittenLeaf;
@@ -241,8 +242,8 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 	// Satisfied wins regardless of source state — the fact is present, the leaf evaluates true.
 	if (WorldState->HasFact(EffectiveLeaf)) return EPrereqDebugState::Satisfied;
 
-	// Classify based on the source content node's state facts. Resolve each QuestState.<SourceTag>.<Leaf> lazily; the
-	// ones we actually check short-circuit on first hit.
+	// Classify based on the source content node's state facts. Resolve each SimpleQuest.QuestState.<SourceTag>.<Leaf>
+	// lazily; the ones we actually check short-circuit on first hit.
 	const FName SourceTagName = EffectiveSource.GetTagName();
 	auto LookupSourceFact = [&](const FString& Leaf) -> bool
 	{

@@ -21,9 +21,9 @@ public:
 	
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
-	virtual FString GetTagFilterString() const override { return TEXT("QuestActivationGroup"); }
+	virtual FString GetTagFilterString() const override { return TEXT("SimpleQuest.QuestActivationGroup"); }
 	
-	UPROPERTY(EditAnywhere, Category="Activation Group", meta=(Categories="QuestActivationGroup"))
+	UPROPERTY(EditAnywhere, Category="Activation Group", meta=(Categories="SimpleQuest.QuestActivationGroup"))
 	FGameplayTag GroupTag;
 
 	

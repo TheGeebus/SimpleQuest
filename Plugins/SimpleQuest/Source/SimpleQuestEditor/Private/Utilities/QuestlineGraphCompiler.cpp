@@ -459,7 +459,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
 
-        // Register outcome tags: both the raw Quest.Outcome.* tag and the per-node fact tag
+        // Register outcome tags: both the raw SimpleQuest.Quest.Outcome.* tag and the per-node fact tag
         if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
             if (!QuestStepNode->ObjectiveClass.IsNull())
@@ -636,14 +636,31 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuest
 
 void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths)
 {
-    for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
-    {
-        if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;
+	for (UQuestlineNode_ContentBase* ContentNode : ContentNodes)
+	{
+		UQuestNodeBase* Instance = NodeInstanceMap.FindRef(ContentNode);
+		if (!Instance) continue;
 
-        UQuestNodeBase* Instance = NodeInstanceMap.FindRef(ContentNode);
-        if (!Instance) continue;
+		// Prereq compilation runs for ALL content nodes, including LinkedQuestlines. Without this, prereqs
+		// wired to a LinkedQuestline node's PrereqIn pin are silently dropped — the runtime instance is left
+		// with a default-constructed PrerequisiteExpression that IsAlways() returns true for, and the
+		// gating check in QuestManagerSubsystem short-circuits. Lifted above the LinkedQuestline skip below
+		// (which exists to bypass output-wiring logic that depends on the node's own title formula —
+		// LinkedQuestlines compute their label from the linked asset instead).
+		if (UEdGraphPin* PrereqPin = ContentNode->GetPinByRole(EQuestPinRole::PrereqIn))
+		{
+			if (PrereqPin->LinkedTo.Num() > 0)
+			{
+				Instance->PrerequisiteExpression = CompilePrerequisiteExpression(PrereqPin, TagPrefix, VisitedAssetPaths);
+			}
+		}
 
-        Instance->NextNodesByOutcome.Empty();
+		// Output wiring + source-tag formula + bCompletesParentGraph specifically don't apply to
+		// LinkedQuestlines — those have their downstream routing built earlier via the boundary-tag map
+		// in CompileNodeRegistration's LinkedQuestline branch.
+		if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;
+
+		Instance->NextNodesByOutcome.Empty();
         Instance->NextNodesOnAnyOutcome.Empty();
         Instance->NextNodesOnDeactivation.Empty();
         Instance->NextNodesToDeactivateOnDeactivation.Empty();
@@ -765,14 +782,6 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
                 }
             }
             Instance->bCompletesParentGraph = bCompletesParent;
-        }
-        
-    	if (UEdGraphPin* PrereqPin = ContentNode->GetPinByRole(EQuestPinRole::PrereqIn))
-        {
-            if (PrereqPin->LinkedTo.Num() > 0)
-            {
-                Instance->PrerequisiteExpression = CompilePrerequisiteExpression(PrereqPin, TagPrefix, VisitedAssetPaths);
-            }
         }
     }
 }
@@ -1075,7 +1084,7 @@ FString FQuestlineGraphCompiler::SanitizeTagSegment(const FString& InLabel) cons
 
 FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const
 {
-    return FName(*FString::Printf(TEXT("Quest.%s.%s"), *TagPrefix, *SanitizedLabel));
+    return FName(*FString::Printf(TEXT("SimpleQuest.Quest.%s.%s"), *TagPrefix, *SanitizedLabel));
 }
 
 void FQuestlineGraphCompiler::AddError(const FString& Message, const UEdGraphNode* Node)
@@ -1208,7 +1217,7 @@ FName FQuestlineGraphCompiler::ComputeCompiledTagForContentNode(const UQuestline
 	if (LabelsTopDown.IsEmpty()) return NAME_None;
 
 	const FString AssetPrefix = SanitizeTagSegment(ContainingAsset->GetQuestlineID().IsEmpty() ? ContainingAsset->GetName() : ContainingAsset->GetQuestlineID());
-	FString FullPath = TEXT("Quest.") + AssetPrefix;
+	FString FullPath = TEXT("SimpleQuest.Quest.") + AssetPrefix;
 	for (const FString& Segment : LabelsTopDown) FullPath += TEXT(".") + Segment;
 	return FName(*FullPath);
 }
@@ -1350,7 +1359,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Active fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {
-        const FName QuestTagName = FName(*(TEXT("Quest.") + TagPrefix));
+        const FName QuestTagName = FName(*(TEXT("SimpleQuest.Quest.") + TagPrefix));
 
 		if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
         {

@@ -186,8 +186,10 @@ public:
 				{
 				case EStaleQuestTagSource::ActorBlueprintCDO:
 					Tooltip = LOCTEXT("ClearTooltip_BP",
-						"Remove this stale tag from the Blueprint's authored default. Marks the BP dirty — save the BP to persist. "
-						"Note: existing actor instances may carry per-instance overrides; rescan after to confirm.");
+						"Remove this stale tag from the Blueprint's authored default. Marks the BP dirty — save the BP to persist.\n"
+						"Note: existing actor instances may carry per-instance overrides; rescan after to confirm.\n\n"
+						"[Warning] Cannot be undone. The mutation propagates permanently to the Blueprint's class state.\n\n"
+						"Use the Blueprint editor to manually re-add the tag if needed.");
 					break;
 				case EStaleQuestTagSource::UnloadedLevelInstance:
 					Tooltip = LOCTEXT("ClearTooltip_Unloaded",
@@ -274,8 +276,9 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 					.ToolTipText(LOCTEXT("ClearSelectedTooltip",
 						"Clear every stale tag reference in the current selection. Multi-select via Ctrl+Click "
 						"or Shift+Click. A confirmation dialog shows the per-source breakdown before mutation. "
-						"The entire batch is wrapped in one transaction — Ctrl+Z restores all cleared tags. "
-						"Disabled when nothing is selected."))
+						"Loaded and Unloaded entries can be undone with Ctrl+Z (single transaction wraps the batch); "
+						"BP CDO entries in the selection cannot be undone — clearing them is permanent on the Blueprint, "
+						"and Ctrl+Z is a no-op for those rows. Disabled when nothing is selected."))
 					.OnClicked(this, &SStaleQuestTagsPanel::HandleClearSelectedClicked)
 			]
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
@@ -668,13 +671,27 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 	if (NumBPCDO    > 0) BreakdownLines += FString::Printf(TEXT("\n  • %d Blueprint default%s"), NumBPCDO,    NumBPCDO    == 1 ? TEXT("")  : TEXT("s"));
 	if (NumUnloaded > 0) BreakdownLines += FString::Printf(TEXT("\n  • %d unloaded level entr%s"), NumUnloaded, NumUnloaded == 1 ? TEXT("y") : TEXT("ies"));
 
+	// Conditional BP CDO permanence warning. Only included when the selection has at least one BP CDO entry —
+	// otherwise the dialog wrongly implies the limitation applies to undo-able sources too. The count comes
+	// from the per-source breakdown above.
+	FString BPCDOWarning;
+	if (NumBPCDO > 0)
+	{
+		BPCDOWarning = FString::Printf(TEXT(
+			"\n\n[Warning] %d Blueprint default %s in this selection — clearing a BP CDO is PERMANENT. "
+			"Ctrl+Z is a no-op for those rows (the panel row stays gone and the underlying tag stays cleared "
+			"on the Blueprint). Use the Blueprint editor to manually re-add if needed."),
+			NumBPCDO, NumBPCDO == 1 ? TEXT("entry") : TEXT("entries"));
+	}
+
 	const FText ConfirmText = FText::Format(
 		LOCTEXT("ClearSelectedConfirmFmt",
 			"Clear {0} stale tag reference(s) across {1} unique asset(s)?{2}\n\n"
-			"This is wrapped in a single transaction — Ctrl+Z restores the entire batch."),
+			"Single transaction wraps the batch — Ctrl+Z restores Loaded and Unloaded clears.{3}"),
 		FText::AsNumber(Selected.Num()),
 		FText::AsNumber(UniquePackages.Num()),
-		FText::FromString(BreakdownLines));
+		FText::FromString(BreakdownLines),
+		FText::FromString(BPCDOWarning));
 
 	if (FMessageDialog::Open(EAppMsgType::OkCancel, ConfirmText) != EAppReturnType::Ok)
 	{
@@ -834,7 +851,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 						}
 					}
 				}
-				UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleFocusClicked: actor '%s' not found in newly-loaded world '%s' — selection skipped"),
+				UE_LOG(LogSimpleQuest, Log, TEXT("SStaleQuestTagsPanel: actor '%s' not found in newly-loaded world '%s' — level loaded but selection skipped (actor may have been renamed or removed since the scan)"),
 					*ActorName.ToString(), *PackagePath);
 			}
 			return FReply::Handled();

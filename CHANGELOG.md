@@ -10,9 +10,6 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Active Development
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
-- Giver-gated quest prereq evaluation gap (0.4.1 lead — pre-existing
-  bug surfaced during 0.4.0 testing; analyzed in TODO with three fix
-  options, Option A leaning)
 
 ### Upcoming
 - Save/load system (0.6.0 — locks tag string format; the just-shipped
@@ -27,7 +24,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.4.0] — 2026-04-26 — Tag Namespace Consolidation under `SimpleQuest.*`
+## [0.4.0] — TBD — Tag Namespace Consolidation under `SimpleQuest.*` + Giver-Gated Prereq Fix
 
 Every plugin-introduced gameplay tag namespace is now collapsed under a
 single `SimpleQuest.*` root. Designers opening the Gameplay Tag Manager
@@ -178,23 +175,6 @@ gating on LinkedQuestline nodes now works as designers expect.
 
 ### Known Limitations
 
-- **Giver-gated quest prereq evaluation gap.** A pre-existing runtime
-  bug surfaced by post-rename testing of the LinkedQuestline-prereq
-  fix above. Three runtime sites collectively bypass prereq evaluation
-  for giver-gated quests:
-  `UQuestManagerSubsystem::ActivateNodeByTag` (giver-gated branch
-  doesn't check prereq before publishing `FQuestEnabledEvent`),
-  `UQuestGiverComponent::CanGiveAnyQuests` (returns
-  `!EnabledQuestTags.IsEmpty()` with no prereq evaluation), and the
-  manager's runtime prereq checks (lines 138, 213) which short-circuit
-  on `!Step->IsGiverGated()` — explicitly trusting the giver to have
-  done the prereq check the giver never does. Pre-existing — not
-  caused by the namespace rename, but masked pre-0.4.0 by the
-  LinkedQuestline-prereq-not-compiled bug. Three fix options analyzed
-  in `Notes/TODO.txt` POST-0.4.0 RUNTIME FIX section; Option A
-  (defer activation when prereq unmet, retry on leaf-fact change)
-  leaning. Slated for **0.4.1** as its own focused session — fix is
-  non-trivial and shouldn't ride on the namespace migration's coattails.
 - **Inert legacy tag string fragments persist in some questline
   `.uasset` binaries.** Functionally inert — `CompiledTags.ini` is
   fully `SimpleQuest.*` (524 entries, 0 legacy), runtime tag

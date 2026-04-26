@@ -309,6 +309,14 @@ public:
 	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
+
+	/**
+	 * Single-actor stale-tag scan. Walks the actor's components, dispatches by component type, and emits one
+	 * FStaleQuestTagEntry per stale tag found. Useful for targeted recovery flows (e.g. the panel's PostUndo
+	 * handler, which only needs to re-derive entries for the specific actor whose tags an undo just restored,
+	 * rather than re-walking the entire project). Source + PackagePath are stamped on every emitted entry.
+	 */
+	static void ScanActorForStaleTags(AActor* Actor, EStaleQuestTagSource Source, const FString& PackagePath, TArray<FStaleQuestTagEntry>& OutEntries);
 	
 	/**
 	 * Appends an "Examine Prerequisite Expression" entry to a right-click context menu section. Resolves the owning editor

@@ -1414,24 +1414,6 @@ namespace
 	}
 
 	/**
-	 * Actor-based convenience wrapper. Pulls every component off the actor via GetComponents and hands the list
-	 * to ScanComponentsForStaleTags. Right behavior for Tier 1 (loaded-level instances where GetComponents
-	 * returns the live component graph) — for BP CDOs the SCS / ICH paths give a more authoritative picture, see
-	 * ScanActorBlueprintCDOs.
-	 */
-	void ScanActorForStaleTags(
-		AActor* Actor,
-		FSimpleQuestEditorUtilities::EStaleQuestTagSource Source,
-		const FString& PackagePath,
-		TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
-	{
-		if (!Actor) return;
-		TArray<UActorComponent*> Components;
-		Actor->GetComponents(Components);
-		ScanComponentsForStaleTags(Components, Actor, Source, PackagePath, OutEntries);
-	}
-
-	/**
 	 * Actor Blueprint CDO surface — Tier 2. For each actor-derived UBlueprint asset, gathers components from
 	 * three sources and runs the shared ScanComponentsForStaleTags over the merged list:
 	 *   1. Native components on the CDO (C++ CreateDefaultSubobject in the constructor chain).
@@ -1721,9 +1703,7 @@ namespace
 
 				if (AActor* Actor = DescInstance->GetActor())
 				{
-					ScanActorForStaleTags(Actor,
-						FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,
-						PackagePath, OutEntries);
+					FSimpleQuestEditorUtilities::ScanActorForStaleTags(Actor, FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,	PackagePath, OutEntries);
 					++NumScanned;
 				}
 				return true;
@@ -1892,9 +1872,7 @@ namespace
 				for (AActor* Actor : PersistentLevel->Actors)
 				{
 					if (!Actor) continue;
-					ScanActorForStaleTags(Actor,
-						FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,
-						PackagePath, OutEntries);
+					FSimpleQuestEditorUtilities::ScanActorForStaleTags(Actor, FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,	PackagePath, OutEntries);
 					++NumActorsInLevel;
 				}
 				UE_LOG(LogSimpleQuest, Display,
@@ -1930,8 +1908,7 @@ namespace
 
 			for (TActorIterator<AActor> It(World); It; ++It)
 			{
-				ScanActorForStaleTags(*It, FSimpleQuestEditorUtilities::EStaleQuestTagSource::LoadedLevelInstance,
-					WorldPackagePath, OutEntries);
+				FSimpleQuestEditorUtilities::ScanActorForStaleTags(*It, FSimpleQuestEditorUtilities::EStaleQuestTagSource::LoadedLevelInstance, WorldPackagePath, OutEntries);
 			}
 		}
 	}
@@ -1964,79 +1941,11 @@ TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtili
 	return Result;
 }
 
-// =============================================================================
-// TEMPORARY VERIFICATION COMMAND — Phase 2 of Stale Quest Tags Tier 2
-// Remove this entire block once Phase 4's panel button is in place.
-// =============================================================================
-//
-// Console command: SimpleQuest.Debug.ScanBlueprintCDOs
-// Runs CollectStaleQuestTagEntries with ONLY the actor-BP-CDO scope bit set,
-// prints one Display line per entry to LogSimpleQuest. Useful for verifying
-// Phase 2's ScanActorBlueprintCDOs helper without needing the panel UI.
-//
-// Usage:
-//   1. Build editor.
-//   2. Open the project.
-//   3. In the Output Log, type:  SimpleQuest.Debug.ScanBlueprintCDOs
-//   4. Look at LogSimpleQuest at Display+ verbosity. Expect a header line
-//      with the entry count, then one line per stale tag found.
-//
-// Set up a known-stale BP to test against (per Phase 2 verification step 1-5)
-// and confirm the entry shows up here. Then delete the test BP.
-
-#include "HAL/IConsoleManager.h"
-
-static FAutoConsoleCommand GSimpleQuestDebugScanBlueprintCDOsCmd(
-	TEXT("SimpleQuest.Debug.ScanBlueprintCDOs"),
-	TEXT("Run the Tier 2 actor-Blueprint-CDO stale-tag scan and dump results to LogSimpleQuest. Diagnostic only."),
-	FConsoleCommandDelegate::CreateLambda([]()
-	{
-		FSimpleQuestEditorUtilities::FStaleTagScanScope Scope;
-		Scope.bLoadedLevels       = false;
-		Scope.bActorBlueprintCDOs = true;
-		Scope.bUnloadedLevels     = false;
-
-		const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries =
-			FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope);
-
-		UE_LOG(LogSimpleQuest, Display, TEXT("---- BP CDO stale-tag scan: %d entries ----"), Entries.Num());
-		for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
-		{
-			const FString CDOClassName = E.Actor.IsValid() ? E.Actor->GetClass()->GetName() : TEXT("(null)");
-			UE_LOG(LogSimpleQuest, Display, TEXT("  [BP CDO] class=%s field=%s tag=%s package=%s"),
-				*CDOClassName,
-				*E.FieldLabel,
-				*E.StaleTag.ToString(),
-				*E.PackagePath);
-		}
-		UE_LOG(LogSimpleQuest, Display, TEXT("---- end of BP CDO scan ----"));
-	})
-);
-
-static FAutoConsoleCommand GSimpleQuestDebugScanUnloadedLevelsCmd(
-	TEXT("SimpleQuest.Debug.ScanUnloadedLevels"),
-	TEXT("Run the Tier 2 unloaded-level stale-tag scan and dump results to LogSimpleQuest. Diagnostic only."),
-	FConsoleCommandDelegate::CreateLambda([]()
-	{
-		FSimpleQuestEditorUtilities::FStaleTagScanScope Scope;
-		Scope.bLoadedLevels = false;
-		Scope.bActorBlueprintCDOs = false;
-		Scope.bUnloadedLevels = true;
-
-		const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries =
-			FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope);
-
-		UE_LOG(LogSimpleQuest, Display, TEXT("---- Unloaded-level stale-tag scan: %d entries ----"), Entries.Num());
-		for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
-		{
-			const FString ActorName = E.Actor.IsValid() ? E.Actor->GetActorNameOrLabel() : TEXT("(stale weak ptr)");
-			UE_LOG(LogSimpleQuest, Display, TEXT("  [Unloaded] actor=%s field=%s tag=%s package=%s"),
-				*ActorName,
-				*E.FieldLabel,
-				*E.StaleTag.ToString(),
-				*E.PackagePath);
-		}
-		UE_LOG(LogSimpleQuest, Display, TEXT("---- end of unloaded-level scan ----"));
-	})
-);
+void FSimpleQuestEditorUtilities::ScanActorForStaleTags(AActor* Actor, EStaleQuestTagSource Source, const FString& PackagePath, TArray<FStaleQuestTagEntry>& OutEntries)
+{
+	if (!Actor) return;
+	TArray<UActorComponent*> Components;
+	Actor->GetComponents(Components);
+	ScanComponentsForStaleTags(Components, Actor, Source, PackagePath, OutEntries);
+}
 

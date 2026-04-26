@@ -10,9 +10,9 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Active Development
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
-- Stale Quest Tags Tier 2 v2 — mass-clear (multi-row selection,
-  per-source mass actions, single-transaction bulk mutation; built on
-  the per-row plumbing shipped in 0.3.4)
+- Tag namespace consolidation under a single `SimpleQuest.*` root
+  (locked to 0.4.0; pre-save/load — locks tag strings before the save
+  format freezes)
 
 ### Upcoming
 - Tag namespace consolidation under a single `SimpleQuest.*` root
@@ -24,6 +24,151 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Known Issues
 - Giver "why can't activate" query API (Item 23) still deferred —
   not blocking 0.4.0 sequencing
+
+---
+
+## [0.3.5] — 2026-04-25 — Stale Quest Tags Polish
+
+A polish pass on the Stale Quest Tags panel that shipped a few hours
+earlier in 0.3.4, plus designer-facing log clarity improvements across
+`BindToQuestEvent`, the resolution subsystem, and the panel's own UX
+failure paths. The panel gains **multi-row mass-clear** with a per-
+source confirmation breakdown and atomic undo (single transaction
+wraps the batch), a **sortable + filterable Level column** with per-
+source semantics, and **near-instant undo** on cleared instance
+entries — was multi-second on Full Project Scan history; now sub-
+millisecond regardless of scan history. The Refresh button is
+renamed **Scan Loaded** for symmetric pairing with Full Project Scan,
+and the Full Project Scan progress bar now advances on completion
+instead of jumping to 100% before the work begins.
+
+### Added
+
+#### Stale Quest Tags panel — multi-row mass-clear
+- **Multi-row selection** (`ESelectionMode::Multi`) on the SListView.
+  Standard Ctrl+Click / Shift+Click multi-select gestures
+- New header button **"Clear Selected (N)"** with live label binding
+  on `ListView->GetNumItemsSelected()` and `IsEnabled` bound to the
+  same count. Disabled when nothing is selected
+- Confirmation dialog with **per-source breakdown**: shows count of
+  Loaded / BP CDO / Unloaded entries in the selection plus the
+  number of unique packages affected, before any mutation
+- **Single `FScopedTransaction`** wraps the entire batch — Ctrl+Z
+  restores all Loaded + Unloaded clears as one atomic operation
+- `ClearOneEntry` helper extracted from `HandleClearClicked` so
+  single-row and bulk paths share the source-specific dirty-resolution
+  logic (Loaded → `MarkPackageDirty` on actor; BP CDO → outer-chain
+  walk to UBlueprint + `MarkBlueprintAsModified`; Unloaded →
+  `MarkPackageDirty` on the unloaded-level actor)
+
+#### Stale Quest Tags panel — Level column
+- New sortable + filterable **Level** column between Source and
+  Actor (140px fixed width)
+- Per-source display: leaf umap name (via `FPackageName::GetShortName`)
+  with full-path tooltip on hover for Loaded / Unloaded entries; em-
+  dash `—` with muted color and "Not applicable" tooltip for BP CDO
+  entries (BP defaults aren't level-bound)
+- Underlying sort/filter value is the full umap path for Loaded /
+  Unloaded and empty for BP CDO — typing partial path text matches
+  level rows but never matches BP CDO rows; em-dash entries cluster
+  at one end of any Level sort
+- Backend reuses `FStaleQuestTagEntry::PackagePath` (already populated
+  for all three sources by the Tier 2 scanner); no schema change needed
+
+#### Stale Quest Tags panel — fast PostUndo via per-actor targeted rescan
+- New `ActorsTouchedByClear` map (per-actor `Source` + `PackagePath`)
+  populated on every Clear (single + bulk). BP CDO entries opt out —
+  their "actor" is a CDO, not a level instance
+- New `UpdateFromAffectedActors` method drops `AllEntries` for tracked
+  actors then re-emits via `ScanActorForStaleTags`
+- `PostUndo` / `PostRedo` call `UpdateFromAffectedActors` instead of
+  `Refresh(LastScope)`. Net effect: undo of a cleared instance entry
+  is now sub-millisecond regardless of `LastScope`. Sibling entries
+  on the same actor are preserved automatically because the rescan
+  emits all stale tags fresh with valid weak ptrs
+
+#### Stale Quest Tags panel — designer-visible BP CDO permanence warnings
+- **Per-row Clear tooltip** on BP CDO entries calls out "Cannot be
+  undone — the mutation propagates permanently to the Blueprint's
+  class state. Use the Blueprint editor to manually re-add the tag if
+  needed."
+- **Clear Selected (N) header button tooltip** distinguishes Loaded /
+  Unloaded undo (Ctrl+Z works, single transaction wraps the batch)
+  from BP CDO permanence (Ctrl+Z is a no-op for those rows)
+- **Confirmation dialog** conditionally appends a `[Warning]` block
+  when the selection contains any BP CDO entries — clean dialog
+  otherwise so the warning isn't always present
+
+#### `FSimpleQuestEditorUtilities::ScanActorForStaleTags` (new public utility)
+- Promoted from anonymous-namespace helper to public static method
+  on `FSimpleQuestEditorUtilities`. Walks an actor's components,
+  dispatches by component type (Giver / Target / Watcher), emits
+  one `FStaleQuestTagEntry` per stale tag found. Useful for any
+  targeted recovery / scan flow that wants to re-derive entries
+  for a specific actor without re-walking the entire project
+
+### Changed
+
+- **"Refresh" button renamed "Scan Loaded"** for symmetric pairing
+  with Full Project Scan. Method renamed `HandleRefreshClicked` →
+  `HandleScanLoadedClicked` for internal consistency. Tooltip
+  clarifies the Tier-1 scope and references Full Project Scan as
+  the alternative
+- **Slow-task progress bar** in Full Project Scan now advances on
+  completion (`SlowTask.EnterProgressFrame(1.f)` moved to after
+  `Refresh`) instead of jumping to 100% before the scan begins.
+  UE's secondary asset-loading bar continues to show real-time
+  progress during sync-loads
+- **`UQuestResolutionSubsystem` resolution-recording log** promoted
+  Verbose → Log. Quest resolution is a high-signal event; designers
+  debugging quest flow now see "recorded" entries in the Output Log
+  without enabling Verbose
+- **`SStaleQuestTagsPanel` actor-not-found-post-load log** promoted
+  Verbose → Log with more actionable wording: "actor may have been
+  renamed or removed since the scan." Class-prefix added for
+  consistency with other panel logs
+- **`UQuestEventSubscription` subsystem-resolution failure Warning**
+  gained a "Common causes:" hint — `BindToQuestEvent` fired pre-init,
+  or the `WorldContextObject` pin is wired to an actor whose UWorld
+  isn't valid
+
+### Removed
+
+- **Anonymous-namespace `ScanActorForStaleTags`** in
+  `SimpleQuestEditorUtils.cpp` — replaced by the public version above
+- **`SimpleQuest.Debug.ScanBlueprintCDOs` and
+  `SimpleQuest.Debug.ScanUnloadedLevels` console commands** — original
+  author's note explicitly slated these for removal once Phase 4's
+  panel button was in place. Phase 4 + Phase 5 (commandlet) both
+  shipped in 0.3.4; the console commands were strictly inferior to
+  the panel + commandlet surfaces
+
+### Known Limitations
+
+- **BP CDO undo is a no-op.** Clear on a BP CDO row persists
+  permanently across save (the underlying mutation propagates to
+  the Blueprint's class state). Ctrl+Z does not visually restore
+  the row, and the underlying tag stays cleared on the BP. Two
+  approaches were tried during development and both failed —
+  force-recompile in `PostUndo` (didn't fix the visibility issue
+  and added several seconds of lag per touched BP) and shadow-of-
+  cleared-entries (the predicate's component weak-ptr check failed
+  post-undo, dropping sibling rows on unrelated actors). Root
+  cause is the BP-side template / CDO propagation contract — needs
+  a refactor that routes through `FProperty::PreEditChange` /
+  `PostEditChange` flow rather than direct container mutation.
+  Slated for a focused investigation post-0.4.0; not blocking.
+  Designer-visible warnings landed alongside on the per-row tooltip,
+  Clear Selected (N) header tooltip, and bulk-clear confirmation
+  dialog so designers see the limitation BEFORE the click rather
+  than discovering it after
+- **Slow-task progress bar lacks per-step granularity.** Outer bar
+  stays at 0% during the scan and advances to 100% on completion;
+  UE's secondary asset-loading bar shows real-time progress during
+  sync-loads. Cosmetic. Plumbing per-step progress through
+  `ScanActorBlueprintCDOs` / `ScanUnloadedLevels` /
+  `ScanWorldPartitionActors` requires threading a callback through
+  the scan internals — minor lift but no immediate user-pain driver
 
 ---
 

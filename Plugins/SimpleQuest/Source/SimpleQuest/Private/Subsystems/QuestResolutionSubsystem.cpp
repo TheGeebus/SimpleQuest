@@ -28,7 +28,7 @@ void UQuestResolutionSubsystem::RecordResolution(FGameplayTag QuestTag, FGamepla
 	Record.OutcomeTag = OutcomeTag;
 	Record.ResolutionTime = ResolutionTime;
 	Record.ResolutionCount++;
-
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestResolutions update: recorded '%s' outcome='%s' (resolution #%d at t=%.2fs)"),
-		*QuestTag.ToString(), *OutcomeTag.ToString(), Record.ResolutionCount, ResolutionTime);
+	
+	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: recorded '%s' outcome='%s' (resolution #%d at t=%.2fs)"),
+		*QuestTag.ToString(), *OutcomeTag.ToString(), Record.ResolutionCount, Record.ResolutionTime);
 }

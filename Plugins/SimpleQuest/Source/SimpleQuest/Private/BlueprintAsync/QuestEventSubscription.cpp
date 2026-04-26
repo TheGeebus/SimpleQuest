@@ -31,8 +31,9 @@ void UQuestEventSubscription::Activate()
     UWorldStateSubsystem* WorldState = ResolveWorldStateSubsystem();
     if (!Signals || !WorldState)
     {
-        UE_LOG(LogSimpleQuest, Warning,
-            TEXT("UQuestEventSubscription: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting."));
+	UE_LOG(LogSimpleQuest, Warning,
+		TEXT("UQuestEventSubscription: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting. ")
+		TEXT("Common causes: BindToQuestEvent fired before the world finished initializing, or the WorldContextObject pin is wired to an actor whose UWorld isn't valid."));
         SetReadyToDestroy();
         return;
     }

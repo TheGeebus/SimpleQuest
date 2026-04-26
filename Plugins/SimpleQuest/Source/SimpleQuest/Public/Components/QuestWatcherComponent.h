@@ -82,7 +82,7 @@ private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FWatchedQuestEventSettings> WatchedTags;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))
+	// DEPRECATED - add Tag/Settings pairs to UQuestWatcherComponent::WatchedTags TMap instead
 	FGameplayTagContainer WatchedStepTags;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="Quest", AllowPrivateAccess=true))

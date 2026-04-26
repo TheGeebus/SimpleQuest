@@ -27,7 +27,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.3.5] — 2026-04-25 — Stale Quest Tags Polish + Design Captures
+## [0.3.5] — 2026-04-25 — Stale Quest Tags Polish
 
 A polish pass on the Stale Quest Tags panel that shipped a few hours
 earlier in 0.3.4, plus designer-facing log clarity improvements across
@@ -41,20 +41,6 @@ millisecond regardless of scan history. The Refresh button is
 renamed **Scan Loaded** for symmetric pairing with Full Project Scan,
 and the Full Project Scan progress bar now advances on completion
 instead of jumping to 100% before the work begins.
-
-This release also captures two foundational design conversations to
-docs — the **rewards system slated for 0.8.0** (resolved several open
-questions: Step's `RewardClass` dropped, standalone Reward node
-ships first, multi-reward per node allowed, no reward outcomes) and
-a **new scope-tag taxonomy** that will inform multiplayer-extension
-work post-1.0 (scope as a system-wide attribute, four canonical
-scopes Player / Party / World / Custom, inheritance with override,
-single-store-with-abstraction immediate target migrating to per-
-scope shards as enrichment of the existing data-registry-shard
-pattern from `UQuestResolutionSubsystem`). Neither is yet
-implemented; both are committed to design docs that bound future
-work and prevent surprise scope-creep when the implementation slots
-arrive.
 
 ### Added
 
@@ -183,25 +169,6 @@ arrive.
   `ScanActorBlueprintCDOs` / `ScanUnloadedLevels` /
   `ScanWorldPartitionActors` requires threading a callback through
   the scan internals — minor lift but no immediate user-pain driver
-
-### Internal — design captures (no shipped runtime change)
-
-- **`Notes/notes-rewards-design.txt`** gained a "Resolved 2026-04-25"
-  block. Open Questions 1, 3, 4 marked resolved; Question 5
-  (recipient scope) deferred to the new multiplayer-gameplay doc.
-  Sequencing Session D updated to reference the scope-tag system
-  instead of reward outcomes
-- **`Notes/notes-multiplayer-gameplay-design.txt`** created. Captures
-  the scope-as-system-wide-concept design: four canonical scopes,
-  inheritance with override, Project-Settings-defined defaults,
-  Shape D (single-store with abstraction) immediate target migrating
-  to Shape B (per-scope shards) as enrichment of the data-registry-
-  shard pattern. Cross-references to rewards-design and replication-
-  design docs
-- **`Notes/notes-replication-design.txt`** Open Question 1 ("Per-
-  player vs. party vs. world quest state") marked resolved with
-  cross-reference to the new gameplay doc. Design log entry added
-  for today's session
 
 ---
 

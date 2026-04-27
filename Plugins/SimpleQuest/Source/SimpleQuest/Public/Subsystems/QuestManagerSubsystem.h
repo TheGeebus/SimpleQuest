@@ -4,12 +4,15 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestManagerSubsystem.generated.h"
 
-struct FPrerequisiteExpression;
+struct FWorldStateFactRemovedEvent;
+struct FQuestActivationBlocker;
+struct FQuestPrereqStatus;
 struct FWorldStateFactAddedEvent;
 struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
@@ -30,8 +33,7 @@ enum class EDeactivationSource : uint8;
 class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
-class IQuestTargetInterface;
-class UQuestGiverInterface;
+class UQuestTargetInterface;
 class UQuestReward;
 class UQuestlineGraph;
 class UQuestNodeBase;
@@ -57,7 +59,7 @@ protected:
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
-	
+
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void StartInitialQuests();
 	
@@ -175,33 +177,46 @@ private:
 	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void TryFireDeferredCompletion(FGameplayTag StepTag);
 
+	
 	/*------------------------------------------------------------------------------------------------------------------
-	 * Deferred Giver Activation
+	 * Enablement Watches: bidirectional state tracker per giver-gated quest in PendingGiver state.
 	 *
-	 * When a giver-gated quest's activation wire fires, the giver branch in ActivateNodeByTag must evaluate the node's
-	 * PrerequisiteExpression before publishing FQuestEnabledEvent. If prereqs are unmet, the activation request is
-	 * stashed here and the manager subscribes to the prereq's leaf tags. When all leaves satisfy, the activation is
-	 * retried, at which point the giver branch fires normally. Mirrors the deferred-completion pattern above.
+	 * When a giver-gated quest's activation wire arrives and its prereq expression is non-Always, an entry is
+	 * registered here that subscribes to each prereq leaf on both Added AND Removed events. On any leaf change,
+	 * the watch re-evaluates the prereq and compares to its last-known state. Transitions fire FQuestEnabledEvent
+	 * (unsatisfied to satisfied) or FQuestDisabledEvent (satisfied to unsatisfied). Designers binding to both events
+	 * get bidirectional UI sync.
+	 *
+	 * Entries persist for the entire PendingGiver lifetime — cleared on give success, abandon, or Deinitialize.
 	 *----------------------------------------------------------------------------------------------------------------*/
 
-	struct FDeferredGiverActivation
+	struct FEnablementWatch
 	{
 		FName NodeTagName;
-		FGameplayTag IncomingOutcomeTag;
-		FName IncomingSourceTag;
+		bool bLastKnownSatisfied = false;
 	};
 
-	// Key: NodeTag (compiled FGameplayTag); Value: stashed ActivateNodeByTag args
-	TMap<FGameplayTag, FDeferredGiverActivation> DeferredGiverActivations;
+	struct FEnablementLeafHandles
+	{
+		FDelegateHandle AddedHandle;
+		FDelegateHandle RemovedHandle;
+	};
 
-	// Subscription handles for deferred giver-activation prerequisite monitoring
-	TMap<FGameplayTag, TMap<FGameplayTag, FDelegateHandle>> DeferredGiverPrereqHandles;
-	/*
-	void DeferGiverActivation(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, const FPrerequisiteExpression& Expr);
-	void OnDeferredGiverPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
-	void TryFireDeferredGiverActivation(FGameplayTag NodeTag);
-	void ClearDeferredGiverActivation(FGameplayTag NodeTag);
-	*/
+	TMap<FGameplayTag, FEnablementWatch> EnablementWatches;
+	TMap<FGameplayTag, TMap<FGameplayTag, FEnablementLeafHandles>> EnablementWatchHandles;
+	
+	/**
+	 * Per-quest map of "the giver actor that initiated the most-recent successful give" — populated in
+	 * HandleGiveQuestEvent right before ActivateNodeByTag, consumed in HandleOnNodeStarted to populate the
+	 * GiverActor field on FQuestStartedEvent. Cleared on consumption so a subsequent non-giver activation
+	 * doesn't inherit a stale entry.
+	 */
+	TMap<FGameplayTag, TWeakObjectPtr<AActor>> RecentGiverActors;
 
+	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
+	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);
+	void ReevaluateEnablementWatch(FGameplayTag QuestTag);
+	void ClearEnablementWatch(FGameplayTag QuestTag);
 
 };

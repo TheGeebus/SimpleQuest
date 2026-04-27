@@ -1,6 +1,6 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
-#include "Quests/PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 
 #include "SimpleQuestLog.h"
 #include "WorldState/WorldStateSubsystem.h"
@@ -9,6 +9,38 @@ bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState) c
 {
 	if (!WorldState || Nodes.IsEmpty()) return true;	
 	return EvaluateNode(RootIndex, WorldState);
+}
+
+FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState) const
+{
+	FQuestPrereqStatus Status;
+
+	if (Nodes.IsEmpty())
+	{
+		Status.bIsAlways = true;
+		Status.bSatisfied = true;
+		return Status;
+	}
+
+	Status.bIsAlways = false;
+
+	// Two-pass approach. First pass enumerates leaves and records their individual HasFact result; second pass
+	// does the full Boolean evaluation with And/Or/Not semantics. Keeps EvaluateNode untouched and avoids
+	// threading mutable state through the recursive walker. O(N) on node count for both passes.
+	TArray<FGameplayTag> LeafTags;
+	CollectLeafTags(LeafTags);
+	Status.Leaves.Reserve(LeafTags.Num());
+	for (const FGameplayTag& LeafTag : LeafTags)
+	{
+		FQuestPrereqLeafStatus LeafStatus;
+		LeafStatus.LeafTag = LeafTag;
+		LeafStatus.bSatisfied = WorldState && LeafTag.IsValid() && WorldState->HasFact(LeafTag);
+		Status.Leaves.Add(LeafStatus);
+	}
+
+	Status.bSatisfied = WorldState && EvaluateNode(RootIndex, WorldState);
+
+	return Status;
 }
 
 bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState) const

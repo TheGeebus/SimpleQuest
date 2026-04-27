@@ -13,8 +13,11 @@
 #include "Signals/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestActivatedEvent.h"
 #include "Events/QuestActivationRequestEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
+#include "Events/QuestDisabledEvent.h"
+#include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Objectives/QuestObjective.h"
@@ -26,7 +29,7 @@
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
-#include "Subsystems/QuestResolutionSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #else
@@ -102,6 +105,18 @@ void UQuestManagerSubsystem::Deinitialize()
             }
         }
         DeferredCompletionPrereqHandles.Reset();
+
+        for (auto& Pair : EnablementWatchHandles)
+        {
+            for (auto& Item : Pair.Value)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.AddedHandle);
+                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.RemovedHandle);
+            }
+        }
+        EnablementWatchHandles.Reset();
+        EnablementWatches.Reset();
+        RecentGiverActors.Reset();
     }
     Super::Deinitialize();
 }
@@ -246,7 +261,15 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
     if (QuestSignalSubsystem)
     {
         FQuestEventContext Context = AssembleEventContext(Node, FQuestObjectiveContext());
-        QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag(), Context));
+        AActor* GiverActor = nullptr;
+        
+        if (TWeakObjectPtr<AActor>* Found = RecentGiverActors.Find(Node->GetQuestTag()))
+        {
+            GiverActor = Found->Get();
+            RecentGiverActors.Remove(Node->GetQuestTag());
+        }
+        QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag(), Context, GiverActor));
+        
         if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
             FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Node->GetQuestTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
@@ -297,14 +320,6 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
-    // Already-deferred-giver re-entry guard: a duplicate activation wire for a quest already in DeferredGiverActivations
-    // is a no-op. The original entry holds the source-of-truth args and the leaf subscriptions that will retry it.
-    if (NodeTag.IsValid() && DeferredGiverActivations.Contains(NodeTag))
-    {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already deferred — waiting for prereqs)"), *NodeTagName.ToString());
-        return;
-    }
-    
     /**
      * Diamond convergence guard: refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
      * Completed is intentionally excluded so loops and repeatable quests can re-enter.
@@ -366,22 +381,38 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
     {
         UQuestNodeBase* Instance = *InstancePtr;
-        // Giver semantics: prereqs gate giver enablement, not just internal activation. Without this defer, the giver
-        // would light up the moment the activation wire fires, letting the player accept a quest whose prereqs aren't
-        // satisfied yet. Mirrors DeferChainToNextNodes for the parallel completion-chain case.
-        if (!Instance->PrerequisiteExpression.IsAlways() && !Instance->PrerequisiteExpression.Evaluate(WorldState))
-        {
-            //DeferGiverActivation(NodeTagName, IncomingOutcomeTag, IncomingSourceTag, Instance->PrerequisiteExpression);
-            return;
-        }
         Instance->bWasGiverGated = true;
         SetQuestPendingGiver(NodeTag);
+
         if (QuestSignalSubsystem)
         {
             FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
-            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+            const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState);
+
+            // Push the prereq status to the state subsystem before publishing events. The state subsystem's
+            // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
+            // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
+            if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+            {
+                StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
+            }
+
+            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
+
+            if (PrereqStatus.bSatisfied)
+            {
+                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+            }
+
+            if (!Instance->PrerequisiteExpression.IsAlways())
+            {
+                RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
+            }
+
+            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
+                *NodeTagName.ToString(),
+                PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
         }
-        UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — set PendingGiver"), *NodeTagName.ToString());
         return;
     }
 
@@ -567,27 +598,33 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped — already completed"), *QuestTag.ToString());
 		return;
 	}
+    
+    RecentGiverActors.Remove(QuestTag);
+    
 	const FName TagName = QuestTag.GetTagName();
 
 	UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestDeactivated: '%s' source=%s"),
 		*QuestTag.ToString(),
 		Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 
-	// Look up node instance early — needed for DeactivateInternal and context assembly.
+	// Look up node instance early. Needed for DeactivateInternal and context assembly.
 	UQuestNodeBase* Node = nullptr;
 	if (TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(TagName))
 	{
 		Node = *NodePtr;
 	}
 
-	// PendingGiver cleanup  (unchanged)
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver)))
-	{
-		RegisteredGiverQuestTags.Remove(QuestTag);
-		ClearQuestPendingGiver(QuestTag);
-	}
+	// PendingGiver cleanup
+    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver)))
+    {
+        RegisteredGiverQuestTags.Remove(QuestTag);
+        ClearQuestPendingGiver(QuestTag);
+    }
 
-	// Active node cleanup — use Node instead of redundant lookup
+    // Enablement watch cleanup: Defensive against entry persisting after deactivation.
+    ClearEnablementWatch(QuestTag);
+
+	// Active node cleanup: Use Node instead of redundant lookup
 	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live)))
 	{
 		if (Node)
@@ -640,13 +677,13 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
         Node->GetNextNodesOnDeactivation().Num(),
         Node->GetNextNodesToDeactivateOnDeactivation().Num());
     
-    // Activate downstream nodes wired to the Deactivated output → Activate input.
+    // Activate downstream nodes wired from the Deactivated output to their Activate input.
     for (const FName& Tag : Node->GetNextNodesOnDeactivation())
     {
         ActivateNodeByTag(Tag);
     }
     
-    // Cascade deactivation to nodes wired to the Deactivated output → Deactivate input.
+    // Cascade deactivation to nodes wired from the Deactivated output to a Deactivate input.
     for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
     {
         const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
@@ -673,16 +710,41 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid()) return;
 
+    // Blocker gate — check before mutating state. State subsystem owns blocker computation; we read its
+    // result. Refused gives don't disrupt the quest's PendingGiver state.
+    TArray<FQuestActivationBlocker> Blockers;
+    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    {
+        Blockers = StateSubsystem->QueryQuestActivationBlockers(QuestTag);
+    }
+    if (!Blockers.IsEmpty())
+    {
+        if (QuestSignalSubsystem)
+        {
+            QuestSignalSubsystem->PublishMessage(QuestTag, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.ActivationSource));
+        }
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("HandleGiveQuestEvent: '%s' refused — %d blocker(s) present (first reason index=%d)"),
+            *QuestTag.ToString(), Blockers.Num(), static_cast<int32>(Blockers[0].Reason));
+        return;
+    }
+
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating (CustomData %s, ActivationSource %s)"),
         *QuestTag.ToString(),
         Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
         Event.Params.ActivationSource ? *Event.Params.ActivationSource->GetName() : TEXT("null"));
 
+    if (Event.Params.ActivationSource)
+    {
+        RecentGiverActors.Add(QuestTag, Event.Params.ActivationSource);
+    }
+    
     RegisteredGiverQuestTags.Remove(QuestTag);
     ClearQuestPendingGiver(QuestTag);
+    ClearEnablementWatch(QuestTag);
 
     // Mirror of HandleActivationRequest: stash the giver-authored params on the target step so ActivateInternal
-    // merges them with the step's authored defaults. Empty Params stamps cleanly — additive merge preserves the
+    // merges them with the step's authored defaults. Empty Params stamps cleanly. Additive merge preserves the
     // step's defaults in that case.
     if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
     {
@@ -705,8 +767,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
         Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     // Stash params on the target step (if it IS a step) before activation, so ActivateInternal merges them with
-    // the Step's authored defaults. Quest / LinkedQuestline / utility targets are out of scope for Piece B —
-    // Piece D (step-to-step handoff) will cover propagation into downstream steps via completion chains.
+    // the Step's authored defaults.
     if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
     {
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
@@ -822,7 +883,7 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
 
 void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
-    // Check all deferred steps — the fact that changed could satisfy any of them
+    // Check all deferred steps. The fact that changed could satisfy any of them.
     TArray<FGameplayTag> StepTags;
     DeferredCompletionOutcomes.GetKeys(StepTags);
     for (const FGameplayTag& StepTag : StepTags)
@@ -883,7 +944,7 @@ int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) con
 {
     if (const UGameInstance* GI = GetGameInstance())
     {
-        if (const UQuestResolutionSubsystem* ResolutionSubsystem = GI->GetSubsystem<UQuestResolutionSubsystem>())
+        if (const UQuestStateSubsystem* ResolutionSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
         {
             return ResolutionSubsystem->GetResolutionCount(QuestTag);
         }
@@ -910,7 +971,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
-    // Layer 1 — WorldState boolean-fact layer.
+    // Layer 1: WorldState boolean-fact layer.
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
     WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
@@ -920,11 +981,11 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
             FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
     }
 
-    // Layer 2 — rich-record registry. Friend access only; external code can't mutate the registry,
+    // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
     // but the manager writes it atomically with its own fact updates so the two layers stay consistent.
     if (UGameInstance* GI = GetGameInstance())
     {
-        if (UQuestResolutionSubsystem* Registry = GI->GetSubsystem<UQuestResolutionSubsystem>())
+        if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
         {
             const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
             Registry->RecordResolution(QuestTag, OutcomeTag, Now);
@@ -950,5 +1011,120 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     {
         WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
+    }
+}
+
+void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName,
+    const FPrerequisiteExpression& Expr, bool bInitialSatisfied)
+{
+    if (!QuestSignalSubsystem) return;
+
+    FEnablementWatch& Watch = EnablementWatches.FindOrAdd(QuestTag);
+    Watch.NodeTagName = NodeTagName;
+    Watch.bLastKnownSatisfied = bInitialSatisfied;
+
+    TArray<FGameplayTag> LeafTags;
+    Expr.CollectLeafTags(LeafTags);
+
+    TMap<FGameplayTag, FEnablementLeafHandles>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
+    for (const FGameplayTag& LeafTag : LeafTags)
+    {
+        if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
+
+        FEnablementLeafHandles LeafHandles;
+        LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
+            LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactAdded);
+        LeafHandles.RemovedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactRemovedEvent>(
+            LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactRemoved);
+        Handles.Add(LeafTag, LeafHandles);
+    }
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d leaf fact(s), initial satisfied=%d"),
+        *QuestTag.ToString(), LeafTags.Num(), bInitialSatisfied ? 1 : 0);
+}
+
+void UQuestManagerSubsystem::OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
+{
+    // Iterate all watches; each re-evaluation is cheap and avoids needing inverse leaf-to-quest mapping.
+    TArray<FGameplayTag> Keys;
+    EnablementWatches.GetKeys(Keys);
+    for (const FGameplayTag& QuestTag : Keys)
+    {
+        ReevaluateEnablementWatch(QuestTag);
+    }
+}
+
+void UQuestManagerSubsystem::OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event)
+{
+    TArray<FGameplayTag> Keys;
+    EnablementWatches.GetKeys(Keys);
+    for (const FGameplayTag& QuestTag : Keys)
+    {
+        ReevaluateEnablementWatch(QuestTag);
+    }
+}
+
+void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
+{
+    FEnablementWatch* Watch = EnablementWatches.Find(QuestTag);
+    if (!Watch) return;
+
+    UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(Watch->NodeTagName);
+    if (!Instance) return;
+
+    // Compute full status (with leaf detail) — we both push it to the state subsystem and use the bSatisfied
+    // bit for the transition check.
+    const FQuestPrereqStatus NewStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState);
+
+    // Push to state subsystem regardless of transition — the cache should always reflect current evaluation
+    // even on no-transition leaf changes (e.g., a NOT clause's leaf flipping when the overall result happens
+    // to stay the same).
+    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance()
+        ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    {
+        StateSubsystem->UpdateQuestPrereqStatus(QuestTag, NewStatus);
+    }
+
+    if (NewStatus.bSatisfied == Watch->bLastKnownSatisfied) return;  // no transition
+
+    Watch->bLastKnownSatisfied = NewStatus.bSatisfied;
+
+    if (!QuestSignalSubsystem) return;
+    FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
+
+    if (NewStatus.bSatisfied)
+    {
+        UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs satisfied, publishing Enabled"),
+            *QuestTag.ToString());
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestEnabledEvent(QuestTag, Context));
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs no longer satisfied, publishing Disabled"),
+            *QuestTag.ToString());
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestDisabledEvent(QuestTag, Context));
+    }
+}
+
+void UQuestManagerSubsystem::ClearEnablementWatch(FGameplayTag QuestTag)
+{
+    if (TMap<FGameplayTag, FEnablementLeafHandles>* Handles = EnablementWatchHandles.Find(QuestTag))
+    {
+        if (QuestSignalSubsystem)
+        {
+            for (auto& Pair : *Handles)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.AddedHandle);
+                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.RemovedHandle);
+            }
+        }
+        EnablementWatchHandles.Remove(QuestTag);
+    }
+    EnablementWatches.Remove(QuestTag);
+
+    // Clear cached prereq status — the quest is leaving giver state, the cache entry is no longer relevant.
+    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    {
+        StateSubsystem->ClearQuestPrereqStatus(QuestTag);
     }
 }

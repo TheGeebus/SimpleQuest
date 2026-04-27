@@ -7,33 +7,74 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Upcoming
+- Two-layer state pattern-establishing pass — extends the registry
+  pattern formalized in 0.4.0 (`UQuestStateSubsystem` + manager-as-
+  orchestrator) downward to step-level records and relocates
+  transient `PendingActivationParams` from per-component fields to
+  manager-side registries. Direct save/load groundwork.
+- Runtime asset loading pass (0.5.0 — async graph load driven by
+  signal subscription; prioritized synchronous fallback for
+  critical paths). Lays groundwork for save/load by ensuring the
+  right graph assets can come online from a save's tag references
+  at restore time.
+- Save/load system (0.6.0 — locks tag string format; the
+  `SimpleQuest.*` namespace consolidation and state-registry split
+  shipped in 0.4.0 are the pre-flight for this).
+
 ### Active Development
 - Event-driven LinkedQuestline ref-index cache (incremental cross-asset
   dependency tracking to replace current Asset Registry scans on compile)
 
-### Upcoming
-- Save/load system (0.6.0 — locks tag string format; the just-shipped
-  `SimpleQuest.*` namespace consolidation in 0.4.0 was the pre-flight
-  for this)
-- Runtime asset loading pass (async graph load driven by signal
-  subscription, prioritized synchronous fallback for critical paths)
-
-### Known Issues
-- Giver "why can't activate" query API (Item 23) still deferred —
-  not blocking 0.5.0+ sequencing
-
 ---
 
-## [0.4.0] — TBD — Tag Namespace Consolidation under `SimpleQuest.*` + Giver-Gated Prereq Fix
+## [0.4.0] — TBD — Quest Lifecycle Architecture + Tag Namespace Consolidation
 
-Every plugin-introduced gameplay tag namespace is now collapsed under a
-single `SimpleQuest.*` root. Designers opening the Gameplay Tag Manager
-see a clean separation between plugin tags and game-authored tags —
-rather than the prior intermixed top-level (`Quest.*`, `QuestState.*`,
-`QuestPrereqRule.*`, `QuestActivationGroup.*`, `Quest.Channel.*`,
-`Quest.Outcome.*` all sitting alongside the game's own root categories),
-the entire plugin tag surface now collapses under `SimpleQuest.*`. Six
-namespace roots migrated:
+A multi-theme architectural pass that lays the foundations for the
+0.6.0 save/load work by locking down tag identity, splitting
+orchestration from fact-registry read access, and rebuilding the
+quest event lifecycle around an Activated / Enabled / Started /
+GiveBlocked vocabulary that lets designer-side UI choose between
+"I might offer this soon" affordance and "I can actually offer this
+right now" affordance without writing state-query boilerplate inside
+every event handler.
+
+Three intertwined themes:
+
+1. **Tag namespace consolidation under `SimpleQuest.*`** — every
+   plugin-introduced gameplay tag now lives under a single parent.
+   Designers opening the Gameplay Tag Manager see a clean separation
+   between plugin tags and game-authored tags. Locks tag string
+   identity before the save format freezes in 0.6.0.
+
+2. **Quest event lifecycle redesign** — `Activated` (execution reached
+   this giver-gated quest, with prereq snapshot) and `Enabled`
+   (genuinely accept-ready) are now distinct events; `GiveBlocked`
+   is the structured "no" partner to `Started`'s "yes"; a
+   `QueryQuestActivationBlockers` BP-callable query API surfaces
+   the same blocker structure synchronously for greyed-out / locked-
+   icon UI.
+
+3. **Manager-orchestrator + state-registry split** — the manager
+   subsystem is now a black-box orchestrator with no public read API.
+   All public read access lives on `UQuestStateSubsystem` (renamed
+   from `UQuestResolutionSubsystem` per the new "...StateSubsystem"
+   convention — externally accessible fact registry with potentially
+   limited write access; mirrors `UWorldStateSubsystem` across the
+   suite).
+
+Plus the supporting renames and surface refreshes that fall out of
+those themes: **Active → Live** state rename across runtime + editor
+(frees activation vocabulary for the new lifecycle event without
+forcing past-tense "Started" as a state name); **BindToQuestEvent**
+K2 node expansion to expose all 9 lifecycle events with per-instance
+pin exposure via right-click context menu and mask-gated proxy
+subscriptions; six discrete BP delegates on `UQuestGiverComponent`
+matching the new lifecycle granularity.
+
+### Tag namespace migration table
+
+Six namespace roots migrated:
 
 | Was | Now |
 |---|---|
@@ -44,14 +85,10 @@ namespace roots migrated:
 | `QuestActivationGroup.*` | `SimpleQuest.QuestActivationGroup.*` |
 | `Quest.Channel.*` (signal-bus channels) | `SimpleQuest.QuestChannel.*` |
 
-Strategic motivation is twofold: clean designer-visible separation
-*now*, and locking tag string identity before the save format freezes
-in the 0.6.0 save/load work (saves serialize tag strings; renaming
-after that would require save-side migration). The 0.3.4 stale-tag
-commandlet was the pre-flight + post-flight verification surface — the
-post-rename scan came back **byte-identical** to the pre-rename baseline,
-confirming the redirect chain caught every reference the migration
-touched.
+The 0.3.4 stale-tag commandlet was the pre-flight + post-flight
+verification surface — the post-rename scan came back **byte-identical**
+to the pre-rename baseline, confirming the redirect chain caught every
+reference the migration touched.
 
 A comprehensive `GameplayTagRedirects` block in
 `Config/DefaultGameplayTags.ini` covers every namespace root and every
@@ -79,7 +116,7 @@ gating on LinkedQuestline nodes now works as designers expect.
   `Categories="SimpleQuest.QuestOutcome"`, etc. scope correctly to the
   new tree.
 - The compiler emits node identifier tags as `SimpleQuest.Quest.<QuestlineID>.<NodeName>`;
-  state facts as `SimpleQuest.QuestState.<...>.Active` /
+  state facts as `SimpleQuest.QuestState.<...>.Live` /
   `.Completed` / `.PendingGiver` / `.Deactivated` / `.Blocked`;
   per-node outcome facts as `SimpleQuest.QuestState.<...>.Outcome.<leaf>`.
 - `FNativeGameplayTag` registration uses `SimpleQuest.SimpleQuest`
@@ -106,7 +143,7 @@ gating on LinkedQuestline nodes now works as designers expect.
 
 #### Defensive guards in `WriteCompiledTagsIni` / `RebuildNativeTags`
 - Skip `FName::IsNone()` entries at the top of the per-tag loop —
-  prevents the "None.Active" / "None.Blocked" leak into
+  prevents the "None.Live" / "None.Blocked" leak into
   `CompiledTags.ini` that was caused by upstream NAME_None entries
   in cached `CompiledQuestTags` AR metadata.
 - Recognize the legacy `"Quest.Outcome."` prefix (in addition to the
@@ -115,6 +152,121 @@ gating on LinkedQuestline nodes now works as designers expect.
   state-fact-expanding outcome tags into garbage entries before this
   guard. Marked for removal in 0.4.1 once we're confident every
   authored asset has been touched.
+
+#### Quest event lifecycle redesign
+- **`FQuestActivatedEvent`** — fires once per giver-gated quest the
+  moment its activation wire arrives. Always fires regardless of prereq
+  state — designer-side UI uses the carried `FQuestPrereqStatus`
+  payload (overall + per-leaf evaluation) to decide whether to show
+  a locked-icon indicator. Non-giver quests skip this event and
+  transition straight to `FQuestStartedEvent`.
+- **`FQuestEnabledEvent`** — semantic refinement to "accept-ready":
+  fires once when both `Activated` AND prereqs satisfy. Fires same
+  tick as `Activated` if prereqs already met, or later when leaf
+  facts flip. Pairs naturally with the "designer opts out of UI
+  until prereqs fulfilled" idiom.
+- **`FQuestDisabledEvent`** — symmetric partner to `FQuestEnabledEvent`.
+  Fires when a quest that was Enabled returns to non-accept-ready
+  state (e.g. NOT-prereq edge case where a leaf fact unsets after
+  satisfying the expression).
+- **`FQuestGiveBlockedEvent`** — refused-give response carrying a
+  structured `TArray<FQuestActivationBlocker>` and the giver actor
+  that initiated the attempt. Subscription model is symmetric with
+  the rest of the event surface — global subscribers (debug
+  overlays, telemetry, party-shared UI) opt in to the channel
+  without coupling to the giver-side flow.
+- **`FQuestActivationBlocker`** — structured "why can't this start"
+  entry. `EQuestActivationBlocker` enum reasons: `PrereqUnmet`
+  (with `UnsatisfiedLeafTags`), `Blocked`, `Deactivated`,
+  `AlreadyLive`, `NotPendingGiver`, `UnknownQuest`.
+- **`FQuestPrereqStatus` / `FQuestPrereqLeafStatus`** — overall +
+  per-leaf evaluation snapshots. `FPrerequisiteExpression::EvaluateWithLeafStatus`
+  is the new single-pass walker that produces them; the existing
+  `Evaluate` path remains for boolean-only consumers.
+- **`GiverActor` field on `FQuestStartedEvent`** — giver-given
+  quests carry the offering actor in the event payload so subscribers
+  can correlate which NPC initiated the chain. Catch-up subscribers
+  receive `nullptr` for this field — the manager's transient bridge
+  isn't preserved across late binding (see "Richer historical context
+  on UQuestStateSubsystem" parking-lot capture in the project notes
+  for the natural extension surface here).
+
+#### Manager-orchestrator + state-registry split
+- **`UQuestStateSubsystem`** (renamed from `UQuestResolutionSubsystem`).
+  Naming convention shift: "...StateSubsystem" signals an externally
+  accessible fact registry with potentially limited write access;
+  mirrors `UWorldStateSubsystem` across the suite. Future suite
+  plugins (dialogue, progression) will follow the same convention.
+- **`QueryQuestActivationBlockers(QuestTag) -> TArray<FQuestActivationBlocker>`**
+  on `UQuestStateSubsystem`, BP-callable. Empty array → currently
+  startable; non-empty → one entry per distinct blocker. Same private
+  helper feeds both this synchronous query and the gate inside
+  `HandleGiveQuestEvent` that publishes `FQuestGiveBlockedEvent` —
+  single-source so the two paths can never drift. Folds in **Item 23**
+  (Giver "why can't activate" query API) from the long-pending TODO.
+- **`GetQuestPrereqStatus(QuestTag) -> FQuestPrereqStatus`** —
+  accessor for the prereq snapshot stored at activation time. BP-
+  callable.
+- Friend-class enforced single-write discipline on the registry —
+  `UpdateQuestPrereqStatus` / `ClearQuestPrereqStatus` are gated by
+  `friend class UQuestManagerSubsystem` so only the orchestrator can
+  push facts into the registry. Preserves the manager's black-box
+  doctrine while exposing the read API publicly.
+
+#### `UQuestGiverComponent` BP delegates — six discrete events
+Matches the new lifecycle granularity. Designer-facing names:
+- **`OnQuestActivated(QuestTag, PrereqStatus)`** — proactive UI on
+  first wire arrival, with prereq snapshot for locked/unlocked styling.
+- **`OnQuestEnabled(QuestTag)`** — fires on accept-ready transition.
+- **`OnQuestDisabled(QuestTag)`** — symmetric partner to Enabled.
+- **`OnQuestStarted(QuestTag, GiverActor)`** — the moment of
+  acceptance.
+- **`OnQuestDeactivated(QuestTag)`** — mid-lifecycle interrupt.
+- **`OnQuestGiveBlocked(QuestTag, Blockers)`** — reactive refusal
+  handling. Bind a dialogue widget here and you get contextual
+  "go talk to the innkeeper" responses for free, no
+  `QueryQuestActivationBlockers` call required from the designer.
+- **`ActivatedQuestTags`** container parallel to `EnabledQuestTags`,
+  surfacing the proactive set for UI iteration.
+- **`QueryActivationBlockers(QuestTag)`** BP method — convenience
+  wrapper that delegates to the state subsystem.
+
+#### `BindToQuestEvent` K2 node — full lifecycle exposure + per-instance configurability
+- **9 lifecycle event pins** in chronological lifecycle order:
+  `On Activated`, `On Enabled`, `On Give Blocked`, `On Started`,
+  `On Progress`, `On Completed`, `On Deactivated`, `On Blocked`.
+  (Plus the always-on `Subscription` reference output.)
+- **Per-instance pin exposure** via right-click context menu —
+  designer toggles individual pins on/off per node placement, three
+  sub-sections matching lifecycle phase (Offer / Run / End). Reduces
+  visual clutter; a node that only listens to OnCompleted shows just
+  OnCompleted. `ReconstructNode` preserves saved pin connections by
+  name across the disappear → reappear cycle so toggling pins off
+  and back on rejoins existing wires automatically.
+- **`EQuestEventTypes` UENUM(Bitflags)** — bitmask vocabulary for
+  the proxy-side subscription mask. `K2Node_BindToQuestEvent` computes
+  the mask from per-event `bExpose*` UPROPERTYs and stuffs it into
+  the factory call; the proxy gates `SubscribeMessage` and
+  `RunCatchUp` by mask. Result: a node with only OnStarted exposed
+  only subscribes to `FQuestStartedEvent` on the SignalSubsystem —
+  no waste.
+- **`AsyncTask` → `Subscription` rename** on the proxy reference
+  output pin. Polished async action nodes typically override the
+  `UBlueprintAsyncActionBase` default with something that names
+  what the object IS (Download, Login, etc.); "Subscription" is
+  the natural fit for our proxy. Existing nodes with the old
+  pin have their wire orphaned on first reload (acceptable
+  pre-release migration cost).
+- **Defensive pin creation** for `OutcomeTag`, `PrereqStatus`,
+  `Blockers`, `GiverActor` — pins that belong only to one or two
+  delegate paths get created from a single union of the relevant
+  exposure bools, so they're discoverable regardless of which event
+  is exposed.
+- **Tooltip refresh** — every pin tooltip rewritten to BP convention
+  (Pin Label / Type Description / Description prose). Outcome Tag
+  description corrected against the 0.3.3 registry-recovery reality
+  (catch-up returns the recovered outcome via the registry; only
+  EmptyTag when no record exists for the quest in the current session).
 
 ### Changed
 
@@ -149,6 +301,42 @@ gating on LinkedQuestline nodes now works as designers expect.
   produced malformed tag names that never matched WorldState facts —
   silent breakage where the leaf-state coloring stayed Unknown.
 
+#### Active → Live state rename
+- WorldState fact: `SimpleQuest.QuestState.<X>.Active` → `...Live`.
+  Frees the activation vocabulary for the new `FQuestActivatedEvent`
+  without forcing the awkward past-tense "Started" as a state name.
+  "Live" is idiomatic English for an ongoing condition AND carries
+  useful graph-system connotation (a live wire carries current).
+- Constant: `FQuestStateTagUtils::Leaf_Active` → `Leaf_Live` (= "Live").
+- Method: `SetQuestActive` → `SetQuestLive`.
+- Container: `ActiveStepTriggerHandles` → `LiveStepTriggerHandles`
+  (and the dead `ActiveClassTriggerHandles` deleted).
+- Delegate: `OnNodeActivated` → `OnNodeStarted` (matches the existing
+  `FQuestStartedEvent` name; past-tense for the moment of transition).
+- Field: `UQuestStep::ActiveObjective` → `LiveObjective`.
+- Accessor: `GetActiveObjective` → `GetLiveObjective`.
+- BP API: `USimpleQuestBlueprintLibrary::IsQuestActive` → `IsQuestLive`.
+- Enum value: `EQuestNodeDebugState::Active` → `::Live`.
+
+#### State subsystem rename + read-API split
+- **`UQuestResolutionSubsystem` → `UQuestStateSubsystem`.** Naming
+  shift signals that this is an externally accessible fact registry
+  (read API public; write API gated by `friend class UQuestManagerSubsystem`),
+  matching `UWorldStateSubsystem` across the suite.
+- **`UQuestManagerSubsystem` public read API removed.** Manager is
+  now a black-box orchestrator; consumers query the state subsystem
+  for resolution records, prereq status, and activation blockers.
+  This codifies the manager-orchestrator + state-registry pattern as
+  a project-wide convention — see project notes for the architectural
+  framing (`overview.txt` §"Orchestrators and Fact Registries" plus
+  `notes-product-vision.txt` §"Architectural Pattern — Orchestrators
+  and Fact Registries").
+- **`FQuestEnabledEvent` semantic refinement** — fires once on
+  accept-ready transition rather than on first wire arrival.
+  Previous semantics moved to `FQuestActivatedEvent`. Existing
+  consumers that bound `OnEnabled` for the "first notice" affordance
+  should rewire to `OnActivated`.
+
 ### Fixed
 
 - **Prereqs on `UQuestlineNode_LinkedQuestline` nodes never compiled
@@ -166,6 +354,22 @@ gating on LinkedQuestline nodes now works as designers expect.
   block above the LinkedQuestline skip; output-wiring +
   `bCompletesParentGraph` stay below the skip per the existing
   intent.
+
+- **Giver-gated quest prereq evaluation gap.** Three runtime sites
+  collectively bypassed prereq evaluation for giver-gated quests:
+  `ActivateNodeByTag`'s giver branch published `FQuestEnabledEvent`
+  with no prereq check; `UQuestGiverComponent::CanGiveAnyQuests`
+  returned `!EnabledQuestTags.IsEmpty()` with no prereq check; and
+  the manager's prereq checks short-circuited on
+  `!Step->IsGiverGated()`, explicitly trusting the giver to have
+  done the prereq check (which it never did). The lifecycle redesign
+  closes this gap: the giver lights up immediately on first wire
+  arrival regardless of prereq state (via `FQuestActivatedEvent`
+  with the prereq snapshot for designer-side UI decisions);
+  acceptance is the gate that protects "started" (the manager
+  refuses `GiveQuestByTag` if blockers exist and publishes
+  `FQuestGiveBlockedEvent` with the structured blocker info instead
+  of mutating state).
 
 ### Removed
 

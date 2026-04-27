@@ -9,7 +9,7 @@
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
 #include "Quests/Quest.h"
-#include "Quests/PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"

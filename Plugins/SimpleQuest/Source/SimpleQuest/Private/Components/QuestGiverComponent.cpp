@@ -11,9 +11,13 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
+#include "Events/QuestActivatedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
+#include "Events/QuestDisabledEvent.h"
+#include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
 
@@ -102,19 +106,38 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 		if (SignalSubsystem)
 		{
+			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestStartedEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived);
 			SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
 		}
-		// Catch-up: quest may have become giver-gated before this component came online
-		if (WorldState)
+
+		// Catch-up: quest may have already reached PendingGiver state before this component came online.
+		// Reconstruct Activated state, and if prereqs currently satisfy, Enabled state. Late-registering
+		// observers end up in the same state as if they'd been listening when the events fired.
+		if (IsValid(WorldState))
 		{
-			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
-			if (WorldState->HasFact(PendingFact))
+			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
+				FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
+			if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());
-				SetQuestGiverActivated(QuestTag, true);
+
+				ActivatedQuestTags.AddTag(QuestTag);
+				FQuestPrereqStatus PrereqStatus;
+				if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+				{
+					PrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
+				}
+				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(QuestTag, PrereqStatus);
+
+				if (PrereqStatus.bSatisfied)
+				{
+					EnabledQuestTags.AddTag(QuestTag);
+					if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(QuestTag);
+				}
 			}
 		}
 	}
@@ -122,19 +145,35 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : Event tag: %s : Event type: %s : Owner: %s"), *Channel.ToString(), *Event.StaticStruct()->GetFName().ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : '%s' is now accept-ready"), *Channel.ToString());
 
-	SetQuestGiverActivated(Event.GetQuestTag(), true);
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	EnabledQuestTags.AddTag(QuestTag);
+	if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(QuestTag);
 }
 
 void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
-	SetQuestGiverActivated(Event.GetQuestTag(), false);
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	ActivatedQuestTags.RemoveTag(QuestTag);
+	EnabledQuestTags.RemoveTag(QuestTag);
+
+	// FQuestStartedEvent is the symmetric "Yes" partner to FQuestGiveBlockedEvent — clear any pending blocker
+	// subscription for this quest tag. Either response (Blocked or Started) closes the give-attempt cycle.
+	UnsubscribePendingGiveBlocked(QuestTag);
+
+	if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(QuestTag);
 }
 
 void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
-	SetQuestGiverActivated(Event.GetQuestTag(), false);
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	ActivatedQuestTags.RemoveTag(QuestTag);
+	EnabledQuestTags.RemoveTag(QuestTag);
+
+	UnsubscribePendingGiveBlocked(QuestTag);  // quest interruption ends the attempt cycle
+
+	if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(QuestTag);
 }
 
 void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
@@ -165,6 +204,13 @@ void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQ
 	}
 	if (SignalSubsystem)
 	{
+		// Subscribe one-shot to FQuestGiveBlockedEvent BEFORE publishing the give. The first response — Blocked or
+		// Started — closes the cycle and clears the subscription. Replace any prior pending subscription on this
+		// quest tag (most-recent attempt wins).
+		UnsubscribePendingGiveBlocked(QuestTag);
+		FDelegateHandle BlockedHandle = SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestGiveBlockedEventReceived);
+		PendingGiveBlockedHandles.Add(QuestTag, BlockedHandle);
+
 		// Start from the designer-authored baseline, then additively merge the caller-supplied Params on top. Matches
 		// the step-side merge rule so composition semantics are uniform across the activation pipeline.
 		FQuestObjectiveActivationParams OutgoingParams = ActivationParams;
@@ -193,21 +239,6 @@ void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQ
 	}
 }
 
-void UQuestGiverComponent::SetQuestGiverActivated(const FGameplayTag& QuestTag, bool bIsQuestActive)
-{
-	if (bIsQuestActive)
-	{
-		EnabledQuestTags.AddTag(QuestTag);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::SetQuestGiverActivated : Quest enabled: %s"), *QuestTag.ToString());
-	}
-	else
-	{
-		EnabledQuestTags.RemoveTag(QuestTag);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::SetQuestGiverActivated : Quest disabled: %s"), *QuestTag.ToString());
-	}
-	OnQuestGiverActivated.Broadcast(bIsQuestActive, QuestTag, CanGiveAnyQuests());
-}
-
 bool UQuestGiverComponent::CanGiveAnyQuests() const
 {
 	return !EnabledQuestTags.IsEmpty();
@@ -224,5 +255,73 @@ FGameplayTagContainer UQuestGiverComponent::GetRegisteredQuestTagsToGive() const
 bool UQuestGiverComponent::IsQuestEnabled(FGameplayTag QuestTag)
 {
 	return EnabledQuestTags.HasTag(QuestTag);
+}
+
+void UQuestGiverComponent::OnQuestActivatedEventReceived(FGameplayTag Channel, const FQuestActivatedEvent& Event)
+{
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestActivatedEventReceived : '%s' (prereqs satisfied=%d)"),
+		*QuestTag.ToString(), Event.PrereqStatus.bSatisfied ? 1 : 0);
+
+	ActivatedQuestTags.AddTag(QuestTag);
+	if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(QuestTag, Event.PrereqStatus);
+}
+
+void UQuestGiverComponent::OnQuestDisabledEventReceived(FGameplayTag Channel, const FQuestDisabledEvent& Event)
+{
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestDisabledEventReceived : '%s' no longer accept-ready"),
+		*QuestTag.ToString());
+
+	EnabledQuestTags.RemoveTag(QuestTag);
+	if (OnQuestDisabled.IsBound()) OnQuestDisabled.Broadcast(QuestTag);
+}
+
+void UQuestGiverComponent::OnQuestGiveBlockedEventReceived(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+{
+	// Filter to events that originated from this giver's give attempt — defensive against future scenarios
+	// where multiple givers might somehow subscribe to the same blocker channel. Under the current per-attempt
+	// subscription model the filter is belt-and-suspenders; the giver only subscribes during its own attempt.
+	if (Event.GiverActor.Get() != GetOwner()) return;
+
+	const FGameplayTag QuestTag = Event.GetQuestTag();
+	UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::OnQuestGiveBlockedEventReceived : '%s' refused — %d blocker(s)"),
+		*QuestTag.ToString(), Event.Blockers.Num());
+
+	if (OnQuestGiveBlocked.IsBound()) OnQuestGiveBlocked.Broadcast(QuestTag, Event.Blockers);
+
+	// One-shot — clear our subscription. The give attempt's cycle is closed by either this event or
+	// FQuestStartedEvent (handled in OnQuestStartedEventReceived).
+	UnsubscribePendingGiveBlocked(QuestTag);
+}
+
+void UQuestGiverComponent::UnsubscribePendingGiveBlocked(FGameplayTag QuestTag)
+{
+	if (FDelegateHandle* Handle = PendingGiveBlockedHandles.Find(QuestTag))
+	{
+		if (SignalSubsystem) SignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
+		PendingGiveBlockedHandles.Remove(QuestTag);
+	}
+}
+
+TArray<FQuestActivationBlocker> UQuestGiverComponent::QueryActivationBlockers(FGameplayTag QuestTag) const
+{
+	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+	{
+		return StateSubsystem->QueryQuestActivationBlockers(QuestTag);
+	}
+	return TArray<FQuestActivationBlocker>();
+}
+
+UQuestStateSubsystem* UQuestGiverComponent::ResolveQuestStateSubsystem() const
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UGameInstance* GI = World->GetGameInstance())
+		{
+			return GI->GetSubsystem<UQuestStateSubsystem>();
+		}
+	}
+	return nullptr;
 }
 

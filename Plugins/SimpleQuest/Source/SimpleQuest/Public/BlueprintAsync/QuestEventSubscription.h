@@ -6,9 +6,12 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Quests/Types/QuestEventContext.h"
-#include "Subsystems/QuestResolutionSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 #include "QuestEventSubscription.generated.h"
 
+struct FQuestGiveBlockedEvent;
+struct FQuestDisabledEvent;
+struct FQuestActivatedEvent;
 struct FQuestEnabledEvent;
 struct FQuestStartedEvent;
 struct FQuestEndedEvent;
@@ -23,17 +26,19 @@ class UWorldStateSubsystem;
  * Details-panel checkboxes and the factory's hidden ExposedEvents parameter use these bits — the proxy gates
  * SubscribeMessage calls and catch-up branches by mask, so unexposed events incur zero subscription cost.
  */
-UENUM(BlueprintType, meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
-enum class EQuestEventTypes : uint8
+UENUM(meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
+enum class EQuestEventTypes : uint16
 {
     None        = 0       UMETA(Hidden),
     Activated   = 1 << 0,
-    Started     = 1 << 1,
-    Completed   = 1 << 2,
-    Deactivated = 1 << 3,
-    Given       = 1 << 4,
+    Enabled     = 1 << 1,
+    Disabled    = 1 << 2,
+    GiveBlocked = 1 << 3,
+    Started     = 1 << 4,
     Progress    = 1 << 5,
-    Blocked     = 1 << 6,
+    Completed   = 1 << 6,
+    Deactivated = 1 << 7,
+    Blocked     = 1 << 8,
 };
 ENUM_CLASS_FLAGS(EQuestEventTypes);
 
@@ -51,6 +56,25 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestSubscriptionLifecycleDelegate
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionCompletedDelegate,
     FGameplayTag, QuestTag, FGameplayTag, OutcomeTag, FQuestEventContext, Context);
+
+/** Activated variant — adds the PrereqStatus payload so designers don't need to query separately. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionActivatedDelegate,
+    FGameplayTag, QuestTag, FQuestEventContext, Context, FQuestPrereqStatus, PrereqStatus);
+
+/**
+ * Started variant — adds the GiverActor payload. Populated when the quest was given via a giver; null when
+ * the quest started from a non-giver activation path.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionStartedDelegate,
+    FGameplayTag, QuestTag, FQuestEventContext, Context, AActor*, GiverActor);
+
+/**
+ * Give-blocked variant — carries the structured blocker array and the giver actor that initiated the
+ * refused attempt. AActor* (raw pointer) for BP friendliness; the underlying TWeakObjectPtr is resolved
+ * in the handler before broadcast.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionGiveBlockedDelegate,
+    FGameplayTag, QuestTag, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 /**
  * Async BP action — "Bind To Quest Event". Subscribes to the lifecycle channels selected via the K2 node's
@@ -76,21 +100,38 @@ class SIMPLEQUEST_API UQuestEventSubscription : public UBlueprintAsyncActionBase
 
 public:
     // ── Offer Phase ───────────────────────────────────────────────────────────────────────────────
-    /** Fires when execution reaches a giver-gated quest. Carries prereq evaluation in the lifecycle context. */
+    /**
+     * Fires when execution reaches a giver-gated quest. PrereqStatus describes whether the quest is
+     * currently accept-ready. Designers branch on PrereqStatus.bSatisfied to decide UI affordance.
+     */
     UPROPERTY(BlueprintAssignable)
-    FQuestSubscriptionLifecycleDelegate OnActivated;
+    FQuestSubscriptionActivatedDelegate OnActivated;
 
-    /** Fires when a player accepts the quest from a giver. Transient — no catch-up; bind before the give. */
+    /** Fires when a giver-gated quest becomes accept-ready (Activated AND prereqs satisfy). */
     UPROPERTY(BlueprintAssignable)
-    FQuestSubscriptionLifecycleDelegate OnGiven;
+    FQuestSubscriptionLifecycleDelegate OnEnabled;
+
+    /**
+     * Fires when an accept-ready quest becomes no-longer-ready (satisfied to unsatisfied transition). Symmetric
+     * partner to OnEnabled; rare in practice.
+     */
+    UPROPERTY(BlueprintAssignable)
+    FQuestSubscriptionLifecycleDelegate OnDisabled;
+
+    /**
+     * Fires when a give attempt was refused. Carries blocker array + the giver actor that initiated
+     * the attempt. Always-subscribed (not per-attempt one-shot like the giver component's path) - this
+     * is the global / observer subscription point for refused gives.
+     */
+    UPROPERTY(BlueprintAssignable)
+    FQuestSubscriptionGiveBlockedDelegate OnGiveBlocked;
 
     // ── Run Phase ─────────────────────────────────────────────────────────────────────────────────
-    /** Fires when the subscribed quest enters the Live state — its objectives are bound and ticking. */
+    /** Fires when the subscribed quest enters the Live state. Its objectives are bound. */
     UPROPERTY(BlueprintAssignable)
-    FQuestSubscriptionLifecycleDelegate OnStarted;
+    FQuestSubscriptionStartedDelegate  OnStarted;
 
-    /** Fires on objective progress ticks during the Live phase. Context.CompletionData carries CurrentCount /
-     *  RequiredCount / TriggeredActor / Instigator. Transient — no catch-up. */
+    /** Fires on objective progress ticks during the Live phase. Transient: no catch-up. */
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnProgress;
 
@@ -99,13 +140,11 @@ public:
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionCompletedDelegate OnCompleted;
 
-    /** Fires when the subscribed quest is deactivated before completing (interrupt, abandon). */
+    /** Fires when the subscribed quest is deactivated before completing. */
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnDeactivated;
 
-    /** Fires when the quest enters the Blocked state via a SetBlocked utility node. Co-fires with OnDeactivated
-     *  for the same transition — designer reads OnBlocked when the distinction between Blocked and other
-     *  deactivation reasons matters. */
+    /** Fires when the quest enters Blocked state via a SetBlocked utility node. */
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnBlocked;
 
@@ -132,30 +171,37 @@ private:
     FGameplayTag QuestTag;
     int32 ExposedEventsMask = 0;
 
+    FDelegateHandle ActivatedHandle;
     FDelegateHandle EnabledHandle;
+    FDelegateHandle DisabledHandle;
+    FDelegateHandle GiveBlockedHandle;
     FDelegateHandle StartedHandle;
+    FDelegateHandle ProgressHandle;
     FDelegateHandle EndedHandle;
     FDelegateHandle DeactivatedHandle;
-    FDelegateHandle GivenHandle;
-    FDelegateHandle ProgressHandle;
 
     bool bCancelled = false;
 
-    /** Per-phase "we already broadcast this lifecycle live" guards. Catch-up skips any phase that already fired
-     *  through the live path during the one-tick deferral window. No flags for Given/Progress — they are
-     *  transient and have no catch-up branch. */
+    /**
+     * Per-phase "we already broadcast this lifecycle live" guards. Catch-up skips any phase that already
+     * fired through the live path during the one-tick deferral window. No flags for Disabled / GiveBlocked /
+     * Given / Progress — those are transient or don't have catch-up semantics.
+     */
     bool bSawLiveActivated = false;
+    bool bSawLiveEnabled = false;
     bool bSawLiveStarted = false;
     bool bSawLiveCompleted = false;
     bool bSawLiveDeactivated = false;
     bool bSawLiveBlocked = false;
 
+    void HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event);
     void HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event);
+    void HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event);
+    void HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
     void HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event);
+    void HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event);
     void HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event);
     void HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
-    void HandleGiven(FGameplayTag Channel, const FQuestGivenEvent& Event);
-    void HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event);
 
     void UnbindAll();
     void RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState);
@@ -168,5 +214,5 @@ private:
 
     USignalSubsystem* ResolveSignalSubsystem() const;
     UWorldStateSubsystem* ResolveWorldStateSubsystem() const;
-    UQuestResolutionSubsystem* ResolveQuestResolutionSubsystem() const;
+    UQuestStateSubsystem* ResolveQuestStateSubsystem() const;
 };

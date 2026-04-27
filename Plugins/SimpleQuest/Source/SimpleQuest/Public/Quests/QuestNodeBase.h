@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestNodeInfo.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestNodeBase.generated.h"

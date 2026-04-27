@@ -25,9 +25,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Activated"))
 	bool bExposeOnActivated = true;
 
-	/** A player accepted the quest from a giver. Transient — no catch-up; bind before the give attempt. */
-	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Given"))
-	bool bExposeOnGiven = false;
+	/** Quest is now accept-ready (Activated AND prereqs satisfy). */
+	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Enabled"))
+	bool bExposeOnEnabled = true;
+
+	/** Quest was accept-ready but prereqs flipped back unsatisfied. Rare; primarily NOT-prereq cases. */
+	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Disabled"))
+	bool bExposeOnDisabled = false;
+
+	/** A give attempt was refused by the manager. Carries blocker array for contextual UI. */
+	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Give Blocked"))
+	bool bExposeOnGiveBlocked = false;
 
 	/** The subscribed quest entered the Live state — its objectives are bound. */
 	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Started"))

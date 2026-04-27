@@ -31,19 +31,44 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
         }
     }
     
-    /*
-    // Defensive: ensure the proxy reference output exists, named "Subscription" per the
-    // meta=(ExposedAsyncProxy=Subscription) on UQuestEventSubscription.
-    if (!FindPin(TEXT("Subscription")))
+    // Defensive: ensure the PrereqStatus pin exists when On Activated is exposed. Unique-to-one-delegate
+    // data params get dropped by some UE 5.6 paths during the unified pin pass.
+    if (bExposeOnActivated && !FindPin(TEXT("PrereqStatus")))
     {
-        UEdGraphPin* ProxyPin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Object,
-            UQuestEventSubscription::StaticClass(), TEXT("Subscription"));
-        if (ProxyPin)
+        FCreatePinParams PinParams;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct,
+            FQuestPrereqStatus::StaticStruct(), TEXT("PrereqStatus"), PinParams);
+        if (Pin)
         {
-            ProxyPin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "SubscriptionLabel", "Subscription");
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "PrereqStatusLabel", "Prereq Status");
         }
     }
-    */
+
+    // Defensive: Blockers pin (unique to On Give Blocked) — array of FQuestActivationBlocker.
+    if (bExposeOnGiveBlocked && !FindPin(TEXT("Blockers")))
+    {
+        FCreatePinParams PinParams;
+        PinParams.ContainerType = EPinContainerType::Array;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct,
+            FQuestActivationBlocker::StaticStruct(), TEXT("Blockers"), PinParams);
+        if (Pin)
+        {
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "BlockersLabel", "Blockers");
+        }
+    }
+
+    // Defensive: GiverActor pin shared by On Given and On Give Blocked. Create if either exec is exposed; UE
+    // base expansion aggregates pins by name across delegates with matching parameter names.
+    if ((bExposeOnStarted || bExposeOnGiveBlocked) && !FindPin(TEXT("GiverActor")))
+    {
+        FCreatePinParams PinParams;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Object,
+            AActor::StaticClass(), TEXT("GiverActor"), PinParams);
+        if (Pin)
+        {
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "GiverActorLabel", "Giver Actor");
+        }
+    }    
     
     // Strip exec output pins for events the designer hasn't exposed via the bExpose* properties. The proxy class
     // delegate properties still exist (Super generated a pin for each), so we surgically remove the ones we don't
@@ -59,15 +84,29 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
         }
     };
     StripIfHidden(TEXT("OnActivated"),   bExposeOnActivated);
+    StripIfHidden(TEXT("OnEnabled"),     bExposeOnEnabled);
+    StripIfHidden(TEXT("OnDisabled"),    bExposeOnDisabled);
+    StripIfHidden(TEXT("OnGiveBlocked"), bExposeOnGiveBlocked);
     StripIfHidden(TEXT("OnStarted"),     bExposeOnStarted);
     StripIfHidden(TEXT("OnCompleted"),   bExposeOnCompleted);
     StripIfHidden(TEXT("OnDeactivated"), bExposeOnDeactivated);
-    StripIfHidden(TEXT("OnGiven"),       bExposeOnGiven);
     StripIfHidden(TEXT("OnProgress"),    bExposeOnProgress);
     StripIfHidden(TEXT("OnBlocked"),     bExposeOnBlocked);
     
-    // Strip exec-unique data pins:
-    //   OutcomeTag → only meaningful on OnCompleted
+    // Strip exec-unique data pins when their owning exec is hidden.
+    if (!bExposeOnActivated)
+    {
+        if (UEdGraphPin* Pin = FindPin(TEXT("PrereqStatus"))) RemovePin(Pin);
+    }
+    if (!bExposeOnGiveBlocked)
+    {
+        if (UEdGraphPin* Pin = FindPin(TEXT("Blockers"))) RemovePin(Pin);
+    }
+    // GiverActor is shared by On Given and On Give Blocked — strip only when BOTH are hidden.
+    if (!bExposeOnStarted && !bExposeOnGiveBlocked)
+    {
+        if (UEdGraphPin* Pin = FindPin(TEXT("GiverActor"))) RemovePin(Pin);
+    }
     if (!bExposeOnCompleted)
     {
         if (UEdGraphPin* OutcomePin = FindPin(TEXT("OutcomeTag")))
@@ -245,19 +284,43 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
                 "On Activated\n"
                 "Exec\n\n"
                 "Fires when execution reaches a giver-gated quest. Always fires on first wire arrival, "
-                "regardless of prereq state — read Context for prereq info if you need to decorate UI based "
-                "on whether the quest is actually accept-ready. Typical wiring: spawn quest-log entries, place "
-                "world markers, queue intro UI.");
+                "regardless of prereq state. Read PrereqStatus to decide UI affordance immediately — "
+                "branch on PrereqStatus.bSatisfied for ready-vs-locked indicators, or read PrereqStatus.Leaves "
+                "for contextual hints about which prereqs the player still needs to satisfy.");
             return;
         }
-        if (PinName == TEXT("OnGiven"))
+        if (PinName == TEXT("OnEnabled"))
         {
             HoverTextOut = TEXT(
-                "On Given\n"
+                "On Enabled\n"
                 "Exec\n\n"
-                "Fires when a player accepts the quest from a giver — between Activation and Started. Useful "
-                "for analytics, audio stings, or any one-shot reaction to acceptance specifically. Transient "
-                "event: no catch-up. If you bind after the give already happened, this pin won't fire.");
+                "Fires when a giver-gated quest becomes accept-ready (Activated AND its prereqs satisfy). "
+                "Either fires same-tick as On Activated when prereqs are already met, or fires later as the "
+                "manager's enablement watch detects prereq satisfaction. Use this for UI that should appear "
+                "only when the player can actually take the quest.");
+            return;
+        }
+        if (PinName == TEXT("OnDisabled"))
+        {
+            HoverTextOut = TEXT(
+                "On Disabled\n"
+                "Exec\n\n"
+                "Fires when a previously accept-ready quest becomes no-longer-ready (sat → unsat transition). "
+                "Symmetric partner to On Enabled; rare in practice — typically only fires for NOT-prereq cases "
+                "where a fact gets added that inverts a NOT(...) clause. Bind alongside On Enabled for "
+                "bidirectional UI sync.");
+            return;
+        }
+        if (PinName == TEXT("OnGiveBlocked"))
+        {
+            HoverTextOut = TEXT(
+                "On Give Blocked\n"
+                "Exec\n\n"
+                "Fires when a give attempt was refused by the manager. Blockers carries the structured array "
+                "of blocker reasons (PrereqUnmet, AlreadyLive, Blocked, etc.); designer branches on Reason for "
+                "contextual refusal dialogue. GiverActor identifies which actor's component initiated the "
+                "attempt — useful for telemetry, party UI, multi-giver scenarios. Always-subscribed (not "
+                "per-attempt one-shot like the giver component); use this for global / observer subscriptions.");
             return;
         }
         if (PinName == TEXT("OnStarted"))
@@ -359,6 +422,39 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
                 "GameInstance-scoped — it stays bound until manually cancelled or the game tears down.");
             return;
         }
+        if (PinName == TEXT("PrereqStatus"))
+        {
+            HoverTextOut = TEXT(
+                "Prereq Status\n"
+                "Quest Prereq Status Structure\n\n"
+                "Snapshot of the quest's prereq evaluation at the moment On Activated fired. bSatisfied tells "
+                "you if the quest is currently accept-ready; Leaves carries per-leaf evaluation detail "
+                "(designers filter to !bSatisfied entries to know which prereqs are unmet). bIsAlways is true "
+                "when the quest has no prereq expression wired.");
+            return;
+        }
+        if (PinName == TEXT("Blockers"))
+        {
+            HoverTextOut = TEXT(
+                "Blockers\n"
+                "Array of Quest Activation Blocker\n\n"
+                "Structured reasons the give attempt was refused. State-fact blockers (UnknownQuest, AlreadyLive, "
+                "Blocked, Deactivated, NotPendingGiver) come first; PrereqUnmet last with UnsatisfiedLeafTags "
+                "populated. Designer branches on Reason to produce contextual refusal dialogue.");
+            return;
+        }
+        if (PinName == TEXT("GiverActor"))
+        {
+            HoverTextOut = TEXT(
+                "Giver Actor\n"
+                "Actor Object Reference\n\n"
+                "The giver actor associated with this event. On On Started, this is the actor whose component "
+                "delivered the quest — null if the quest started without giver involvement (non-giver "
+                "activation path). On On Give Blocked, this is the actor whose component initiated the refused "
+                "attempt. Useful for attributing the event to a specific NPC in dialogue / telemetry / "
+                "multi-giver coordination.");
+            return;
+        }
     }
 
     // Fallback to base — covers Begin exec input, hidden WorldContext, and anything else we haven't named.
@@ -450,8 +546,12 @@ void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraph
             NSLOCTEXT("BindToQuestEvent", "OfferPhase", "Exposed Events — Offer Phase"));
         AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnActivated", "On Activated"),
             const_cast<bool*>(&bExposeOnActivated));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnGiven", "On Given"),
-            const_cast<bool*>(&bExposeOnGiven));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnEnabled", "On Enabled"),
+            const_cast<bool*>(&bExposeOnEnabled));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnDisabled", "On Disabled"),
+            const_cast<bool*>(&bExposeOnDisabled));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnGiveBlocked", "On Give Blocked"),
+            const_cast<bool*>(&bExposeOnGiveBlocked));
     }
     {
         FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_Run",
@@ -477,11 +577,13 @@ int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
 {
     int32 Mask = 0;
     if (bExposeOnActivated)   Mask |= static_cast<int32>(EQuestEventTypes::Activated);
+    if (bExposeOnEnabled)     Mask |= static_cast<int32>(EQuestEventTypes::Enabled);
+    if (bExposeOnDisabled)    Mask |= static_cast<int32>(EQuestEventTypes::Disabled);
+    if (bExposeOnGiveBlocked) Mask |= static_cast<int32>(EQuestEventTypes::GiveBlocked);
     if (bExposeOnStarted)     Mask |= static_cast<int32>(EQuestEventTypes::Started);
+    if (bExposeOnProgress)    Mask |= static_cast<int32>(EQuestEventTypes::Progress);
     if (bExposeOnCompleted)   Mask |= static_cast<int32>(EQuestEventTypes::Completed);
     if (bExposeOnDeactivated) Mask |= static_cast<int32>(EQuestEventTypes::Deactivated);
-    if (bExposeOnGiven)       Mask |= static_cast<int32>(EQuestEventTypes::Given);
-    if (bExposeOnProgress)    Mask |= static_cast<int32>(EQuestEventTypes::Progress);
     if (bExposeOnBlocked)     Mask |= static_cast<int32>(EQuestEventTypes::Blocked);
     return Mask;
 }

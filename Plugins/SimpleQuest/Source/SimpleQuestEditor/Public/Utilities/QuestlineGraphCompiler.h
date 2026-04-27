@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Logging/TokenizedMessage.h"
-#include "Quests/PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 
 struct FIncomingSignalPinSpec;
 struct FQuestEntryRouteList;

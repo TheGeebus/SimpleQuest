@@ -11,7 +11,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Subsystems/QuestResolutionSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 
 
 UQuestWatcherComponent::UQuestWatcherComponent()
@@ -169,7 +169,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-	UQuestResolutionSubsystem* ResolutionRegistry = GameInstance ? GameInstance->GetSubsystem<UQuestResolutionSubsystem>() : nullptr;
+	UQuestStateSubsystem* ResolutionRegistry = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
 	for (auto& QuestPair : WatchedTags)
 	{

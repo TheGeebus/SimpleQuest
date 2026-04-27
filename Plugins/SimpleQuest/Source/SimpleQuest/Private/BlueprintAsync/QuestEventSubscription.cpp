@@ -4,16 +4,18 @@
 
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
+#include "Events/QuestActivatedEvent.h"
+#include "Events/QuestDisabledEvent.h"
+#include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestEndedEvent.h"
-#include "Events/QuestGivenEvent.h"
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "GameplayTagsManager.h"
 #include "Signals/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
-#include "Subsystems/QuestResolutionSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -52,37 +54,45 @@ void UQuestEventSubscription::Activate()
 
     // Subscribe only to the channels the K2 node has exposed. Each guard saves both the SubscribeMessage cost and
     // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side.
+
+    // Offer phase
     if (IsExposed(EQuestEventTypes::Activated))
+    {
+        ActivatedHandle = Signals->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleActivated);
+    }
+    if (IsExposed(EQuestEventTypes::Enabled))
     {
         EnabledHandle = Signals->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnabled);
     }
+    if (IsExposed(EQuestEventTypes::Disabled))
+    {
+        DisabledHandle = Signals->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleDisabled);
+    }
+    if (IsExposed(EQuestEventTypes::GiveBlocked))
+    {
+        GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleGiveBlocked);
+    }
+
+    // Run phase
     if (IsExposed(EQuestEventTypes::Started))
     {
         StartedHandle = Signals->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestEventSubscription::HandleStarted);
     }
+    if (IsExposed(EQuestEventTypes::Progress))
+    {
+        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestEventSubscription::HandleProgress);
+    }
+    
+    // End phase
     if (IsExposed(EQuestEventTypes::Completed))
     {
         EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnded);
     }
-    
-    // OnDeactivated and OnBlocked share a single underlying subscription — Blocked is detected by inspecting the
-    // Blocked WorldState fact when the Deactivated event arrives. Subscribe if either pin is exposed.
     if (IsExposed(EQuestEventTypes::Deactivated) || IsExposed(EQuestEventTypes::Blocked))
     {
         DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleDeactivated);
     }
     
-    // OnGiven uses the global give channel rather than the quest tag — FQuestGivenEvent is published on
-    // Tag_Channel_QuestGiven. The handler filters to events whose QuestTag is QuestTag or a descendant.
-    if (IsExposed(EQuestEventTypes::Given))
-    {
-        GivenHandle = Signals->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestEventSubscription::HandleGiven);
-    }
-    
-    if (IsExposed(EQuestEventTypes::Progress))
-    {
-        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestEventSubscription::HandleProgress);
-    }
     // Defer the catch-up broadcast to next tick. The K2 node's standard async expansion calls Activate() *before*
     // firing the user's Then exec output — so any designer who wires the AsyncTask pin into a "Set <var>" off the
     // primary Then chain hasn't cached it yet at the moment Activate runs. If catch-up fires a lifecycle delegate
@@ -119,18 +129,43 @@ void UQuestEventSubscription::Cancel()
     SetReadyToDestroy();
 }
 
-void UQuestEventSubscription::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+void UQuestEventSubscription::HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
     if (bCancelled) return;
     bSawLiveActivated = true;
-    if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Event.Context, Event.PrereqStatus);
+}
+
+void UQuestEventSubscription::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+{
+    if (bCancelled) return;
+    bSawLiveEnabled = true;
+    if (OnEnabled.IsBound()) OnEnabled.Broadcast(Event.GetQuestTag(), Event.Context);
+}
+
+void UQuestEventSubscription::HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
+{
+    if (bCancelled) return;
+    if (OnDisabled.IsBound()) OnDisabled.Broadcast(Event.GetQuestTag(), Event.Context);
+}
+
+void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+{
+    if (bCancelled) return;
+    if (OnGiveBlocked.IsBound())
+    {
+        OnGiveBlocked.Broadcast(Event.GetQuestTag(), Event.Blockers, Event.GiverActor.Get());
+    }
 }
 
 void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (bCancelled) return;
     bSawLiveStarted = true;
-    if (OnStarted.IsBound()) OnStarted.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnStarted.IsBound())
+    {
+        OnStarted.Broadcast(Event.GetQuestTag(), Event.Context, Event.GiverActor.Get());
+    }
 }
 
 void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event)
@@ -167,23 +202,6 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
     // Persistent — no finalize here. Same rationale as HandleEnded.
 }
 
-void UQuestEventSubscription::HandleGiven(FGameplayTag Channel, const FQuestGivenEvent& Event)
-{
-    if (bCancelled) return;
-
-    // Tag_Channel_QuestGiven is a global channel — filter to events that match QuestTag or any descendant so the
-    // hierarchy semantic matches the per-quest-tag subscriptions on the other handles.
-    if (!Event.GetQuestTag().MatchesTag(QuestTag)) return;
-
-    // Synthesize a minimal context — FQuestGivenEvent doesn't carry a full FQuestEventContext (the giver-supplied
-    // FQuestObjectiveActivationParams is a different payload). Designers who need the params should subscribe to
-    // FQuestGivenEvent directly via SubscribeMessage rather than going through this convenience node.
-    FQuestEventContext SyntheticContext;
-    SyntheticContext.NodeInfo.QuestTag = Event.GetQuestTag();
-
-    if (OnGiven.IsBound()) OnGiven.Broadcast(Event.GetQuestTag(), SyntheticContext);
-}
-
 void UQuestEventSubscription::HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
     if (bCancelled) return;
@@ -194,13 +212,16 @@ void UQuestEventSubscription::UnbindAll()
 {
     USignalSubsystem* Signals = ResolveSignalSubsystem();
     if (!Signals) return;
+    if (ActivatedHandle.IsValid())   Signals->UnsubscribeMessage(QuestTag, ActivatedHandle);
     if (EnabledHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, EnabledHandle);
+    if (DisabledHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, DisabledHandle);
+    if (GiveBlockedHandle.IsValid()) Signals->UnsubscribeMessage(QuestTag, GiveBlockedHandle);
     if (StartedHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, StartedHandle);
+    if (ProgressHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, ProgressHandle);
     if (EndedHandle.IsValid())       Signals->UnsubscribeMessage(QuestTag, EndedHandle);
     if (DeactivatedHandle.IsValid()) Signals->UnsubscribeMessage(QuestTag, DeactivatedHandle);
-    if (GivenHandle.IsValid())       Signals->UnsubscribeMessage(Tag_Channel_QuestGiven, GivenHandle);
-    if (ProgressHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, ProgressHandle);
-    EnabledHandle = StartedHandle = EndedHandle = DeactivatedHandle = GivenHandle = ProgressHandle = FDelegateHandle();
+    ActivatedHandle = EnabledHandle = DisabledHandle = GiveBlockedHandle = FDelegateHandle();
+    StartedHandle = ProgressHandle = EndedHandle = DeactivatedHandle = FDelegateHandle();
 }
 
 void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState)
@@ -213,21 +234,40 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     FQuestEventContext SyntheticContext;
     SyntheticContext.NodeInfo.QuestTag = QuestTag;
 
-    if (IsExposed(EQuestEventTypes::Activated) && !bSawLiveActivated)
+    // PendingGiver fact gates both Activated and Enabled catch-up — quest is in giver state if-and-only-if
+    // the fact is set. Activated fires regardless of prereq status; Enabled gates additionally on bSatisfied.
+    const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
+        FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
+    const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+
+    FQuestPrereqStatus CachedPrereqStatus;
+    if (bIsPendingGiver)
     {
-        const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
-        if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
+        if (const UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
         {
-            if (OnActivated.IsBound()) OnActivated.Broadcast(QuestTag, SyntheticContext);
+            CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
         }
+    }
+
+    if (IsExposed(EQuestEventTypes::Activated) && !bSawLiveActivated && bIsPendingGiver)
+    {
+        if (OnActivated.IsBound()) OnActivated.Broadcast(QuestTag, SyntheticContext, CachedPrereqStatus);
+    }
+
+    if (IsExposed(EQuestEventTypes::Enabled) && !bSawLiveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
+    {
+        if (OnEnabled.IsBound()) OnEnabled.Broadcast(QuestTag, SyntheticContext);
     }
 
     if (IsExposed(EQuestEventTypes::Started) && !bSawLiveStarted)
     {
-        const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false);
+        const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
+            FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false);
         if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
         {
-            if (OnStarted.IsBound()) OnStarted.Broadcast(QuestTag, SyntheticContext);
+            // Catch-up GiverActor is null — the manager's RecentGiverActors entry was consumed at start time
+            // and isn't recovered. Designers expecting historic giver attribution should subscribe live.
+            if (OnStarted.IsBound()) OnStarted.Broadcast(QuestTag, SyntheticContext, nullptr);
         }
     }
 
@@ -237,7 +277,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
         if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
         {
             FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-            if (const UQuestResolutionSubsystem* Resolution = ResolveQuestResolutionSubsystem())
+            if (const UQuestStateSubsystem* Resolution = ResolveQuestStateSubsystem())
             {
                 if (const FQuestResolutionRecord* Record = Resolution->GetQuestResolution(QuestTag))
                 {
@@ -297,7 +337,7 @@ UWorldStateSubsystem* UQuestEventSubscription::ResolveWorldStateSubsystem() cons
     return nullptr;
 }
 
-UQuestResolutionSubsystem* UQuestEventSubscription::ResolveQuestResolutionSubsystem() const
+UQuestStateSubsystem* UQuestEventSubscription::ResolveQuestStateSubsystem() const
 {
     if (UObject* Context = WorldContextObjectWeak.Get())
     {
@@ -305,7 +345,7 @@ UQuestResolutionSubsystem* UQuestEventSubscription::ResolveQuestResolutionSubsys
         {
             if (UGameInstance* GI = World->GetGameInstance())
             {
-                return GI->GetSubsystem<UQuestResolutionSubsystem>();
+                return GI->GetSubsystem<UQuestStateSubsystem>();
             }
         }
     }

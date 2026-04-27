@@ -20,7 +20,7 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
 
     // Defensive: ensure the OutcomeTag data pin exists. Some UE 5.6 paths drop unique-to-one-delegate
     // params during the unified pin pass.
-    if (!FindPin(TEXT("OutcomeTag")))
+    if (bExposeOnCompleted && !FindPin(TEXT("OutcomeTag")))
     {
         FCreatePinParams PinParams;
         UEdGraphPin* OutcomePin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct,
@@ -30,16 +30,49 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
             OutcomePin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "OutcomeTagLabel", "Outcome Tag");
         }
     }
-
-    // Defensive: ensure the proxy reference output exists, named "AsyncTask" per the
-    // meta=(ExposedAsyncProxy=AsyncTask) on UBlueprintAsyncActionBase.
-    if (!FindPin(TEXT("AsyncTask")))
+    
+    /*
+    // Defensive: ensure the proxy reference output exists, named "Subscription" per the
+    // meta=(ExposedAsyncProxy=Subscription) on UQuestEventSubscription.
+    if (!FindPin(TEXT("Subscription")))
     {
         UEdGraphPin* ProxyPin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Object,
-            UQuestEventSubscription::StaticClass(), TEXT("AsyncTask"));
+            UQuestEventSubscription::StaticClass(), TEXT("Subscription"));
         if (ProxyPin)
         {
-            ProxyPin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "AsyncTaskLabel", "Async Task");
+            ProxyPin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "SubscriptionLabel", "Subscription");
+        }
+    }
+    */
+    
+    // Strip exec output pins for events the designer hasn't exposed via the bExpose* properties. The proxy class
+    // delegate properties still exist (Super generated a pin for each), so we surgically remove the ones we don't
+    // want to surface. The corresponding subscription is gated on the proxy side via the ExposedEvents bitmask.
+    auto StripIfHidden = [this](const TCHAR* PinName, bool bExpose)
+    {
+        if (!bExpose)
+        {
+            if (UEdGraphPin* Pin = FindPin(PinName))
+            {
+                RemovePin(Pin);
+            }
+        }
+    };
+    StripIfHidden(TEXT("OnActivated"),   bExposeOnActivated);
+    StripIfHidden(TEXT("OnStarted"),     bExposeOnStarted);
+    StripIfHidden(TEXT("OnCompleted"),   bExposeOnCompleted);
+    StripIfHidden(TEXT("OnDeactivated"), bExposeOnDeactivated);
+    StripIfHidden(TEXT("OnGiven"),       bExposeOnGiven);
+    StripIfHidden(TEXT("OnProgress"),    bExposeOnProgress);
+    StripIfHidden(TEXT("OnBlocked"),     bExposeOnBlocked);
+    
+    // Strip exec-unique data pins:
+    //   OutcomeTag → only meaningful on OnCompleted
+    if (!bExposeOnCompleted)
+    {
+        if (UEdGraphPin* OutcomePin = FindPin(TEXT("OutcomeTag")))
+        {
+            RemovePin(OutcomePin);
         }
     }
 }
@@ -123,7 +156,27 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     Assignment->NotifyPinConnectionListChanged(AssignVariable);
     Assignment->NotifyPinConnectionListChanged(AssignValue);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment"));
+    // 7. Stuff the computed exposure mask into the factory call's ExposedEvents parameter pin. The pin is hidden
+    //    via the factory function's HidePin meta — designers configure exposure via the K2 node's bExpose* bools
+    //    instead. Setting the per-instance DefaultValue is what makes those bools take effect at runtime.
+    const int32 Mask = ComputeExposureMask();
+    if (UEdGraphPin* MaskPin = FactoryCall->FindPin(TEXT("ExposedEvents")))
+    {
+        MaskPin->DefaultValue = FString::FromInt(Mask);
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("[BindToQuestEvent::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
+    }
+
+    if (Mask == 0)
+    {
+        CompilerContext.MessageLog.Warning(*FString::Printf(TEXT(
+            "@@: Bind To Quest Event has no exposed event pins — subscription will be a no-op. ")
+            TEXT("Enable at least one event under Pins | <phase> in the Details panel.")), this);
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
 }
 
 void UK2Node_BindToQuestEvent::PostPlacedNewNode()
@@ -148,6 +201,23 @@ void UK2Node_BindToQuestEvent::PostPlacedNewNode()
     }
 }
 
+void UK2Node_BindToQuestEvent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+
+    // ReconstructNode on any bExpose* toggle — the pin set is keyed off these flags. ReconstructNode preserves
+    // wires to surviving pins automatically; wires to pins that disappear get reported as orphaned during the
+    // next compile, which is the standard UE behavior for configurable K2 nodes.
+    if (PropertyChangedEvent.Property)
+    {
+        const FName PropertyName = PropertyChangedEvent.Property->GetFName();
+        if (PropertyName.ToString().StartsWith(TEXT("bExpose")))
+        {
+            ReconstructNode();
+        }
+    }
+}
+
 void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& HoverTextOut) const
 {
     const FName PinName = Pin.PinName;
@@ -158,8 +228,11 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
     if (Direction == EGPD_Input && PinName == TEXT("QuestTag"))
     {
         HoverTextOut = TEXT(
-            "The quest tag to subscribe to. Pass a leaf tag (e.g. Quest.MyLine.Step1) to watch a specific quest, "
-            "or a parent tag (e.g. Quest.MyLine) to receive events from every descendant quest under it.");
+            "Quest Tag\n"
+            "Gameplay Tag Structure\n\n"
+            "The quest tag to subscribe to. Pass a leaf tag (e.g. SimpleQuest.Quest.MyLine.Step1) to watch a "
+            "specific quest, or a parent tag (e.g. SimpleQuest.Quest.MyLine) to receive events from every "
+            "descendant quest under it.");
         return;
     }
 
@@ -169,21 +242,49 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         if (PinName == TEXT("OnActivated"))
         {
             HoverTextOut = TEXT(
-                "Fires when the subscribed quest becomes enabled — it's ready to start but may be waiting on a "
-                "giver. Typical wiring: spawn quest-log entries, place world markers, queue intro UI.");
+                "On Activated\n"
+                "Exec\n\n"
+                "Fires when execution reaches a giver-gated quest. Always fires on first wire arrival, "
+                "regardless of prereq state — read Context for prereq info if you need to decorate UI based "
+                "on whether the quest is actually accept-ready. Typical wiring: spawn quest-log entries, place "
+                "world markers, queue intro UI.");
+            return;
+        }
+        if (PinName == TEXT("OnGiven"))
+        {
+            HoverTextOut = TEXT(
+                "On Given\n"
+                "Exec\n\n"
+                "Fires when a player accepts the quest from a giver — between Activation and Started. Useful "
+                "for analytics, audio stings, or any one-shot reaction to acceptance specifically. Transient "
+                "event: no catch-up. If you bind after the give already happened, this pin won't fire.");
             return;
         }
         if (PinName == TEXT("OnStarted"))
         {
             HoverTextOut = TEXT(
-                "Fires when the subscribed quest actually begins — its objectives are live. Typical wiring: "
-                "music swap, target activation, gameplay-state changes, anything that should run only once the "
-                "quest is truly underway.");
+                "On Started\n"
+                "Exec\n\n"
+                "Fires when the subscribed quest enters the Live state — its objectives are bound and ticking. "
+                "Typical wiring: music swap, target activation, gameplay-state changes, anything that should run "
+                "only once the quest is truly underway.");
+            return;
+        }
+        if (PinName == TEXT("OnProgress"))
+        {
+            HoverTextOut = TEXT(
+                "On Progress\n"
+                "Exec\n\n"
+                "Fires on objective progress ticks during the Live phase. Context.CompletionData carries "
+                "CurrentCount / RequiredCount / TriggeredActor / Instigator — break the struct to read them. "
+                "Fires once per progress tick, not just on milestones.");
             return;
         }
         if (PinName == TEXT("OnCompleted"))
         {
             HoverTextOut = TEXT(
+                "On Completed\n"
+                "Exec\n\n"
                 "Fires when the subscribed quest resolves. Outcome Tag tells you which outcome fired — switch "
                 "on it to branch by Victory / Defeat / Negotiated / etc. The subscription stays bound after this "
                 "event; if you only want to react once, wire Cancel into the Async Task pin.");
@@ -192,8 +293,22 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         if (PinName == TEXT("OnDeactivated"))
         {
             HoverTextOut = TEXT(
-                "Fires when the subscribed quest is blocked or torn down without completing. Useful for cleanup "
-                "(dismiss UI, deactivate markers, revert music) on quest failure or interruption.");
+                "On Deactivated\n"
+                "Exec\n\n"
+                "Fires when the subscribed quest is interrupted before completing (abandon, faction shift, "
+                "external Deactivate request). Useful for cleanup — dismiss UI, deactivate markers, revert "
+                "music. For the specific Blocked-state case, also expose On Blocked if you need to distinguish.");
+            return;
+        }
+        if (PinName == TEXT("OnBlocked"))
+        {
+            HoverTextOut = TEXT(
+                "On Blocked\n"
+                "Exec\n\n"
+                "Fires when the quest enters Blocked state via a SetBlocked utility node. Co-fires with "
+                "On Deactivated when both pins are exposed (Blocked is a kind of deactivation). Read this when "
+                "the Blocked-vs-other-deactivation distinction matters — e.g. to surface a 'this quest is "
+                "locked out' UI distinct from 'this quest was abandoned'.");
             return;
         }
     }
@@ -204,6 +319,8 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         if (PinName == TEXT("QuestTag"))
         {
             HoverTextOut = TEXT(
+                "Quest Tag\n"
+                "Gameplay Tag Structure\n\n"
                 "Which quest this event fired for. When subscribing on a parent tag, this is the specific "
                 "descendant quest that triggered — use it to identify which child of the watched line is "
                 "active right now.");
@@ -212,23 +329,30 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         if (PinName == TEXT("OutcomeTag"))
         {
             HoverTextOut = TEXT(
-                "The outcome the quest resolved with — only meaningful on the On Completed pin. Empty (no tag) "
-                "for catch-up notifications when the quest had already completed before binding (the original "
-                "outcome can't be recovered from world state alone).");
+                "Outcome Tag\n"
+                "Gameplay Tag Structure\n\n"
+                "The outcome the quest resolved with — only meaningful on the On Completed pin. For catch-up "
+                "notifications (quest already resolved before binding), the outcome is recovered from this "
+                "session's resolution registry. Empty (no tag) only when no record exists for this quest "
+                "(e.g., it never resolved this session, or registry state was reset).");
             return;
         }
         if (PinName == TEXT("Context"))
         {
             HoverTextOut = TEXT(
+                "Context\n"
+                "Quest Event Context Structure\n\n"
                 "The full event payload — Triggered Actor, Instigator, Node Info (quest tag + display name), "
                 "and Custom Data. Break the struct (right-click → Split Struct Pin) or use member-access nodes "
-                "to read individual fields. Lets you build messages like 'Player X completed Quest Y' without "
-                "extra lookups.");
+                "to read individual fields. On the On Progress pin, Context.CompletionData carries the progress "
+                "counters.");
             return;
         }
-        if (PinName == TEXT("AsyncTask"))
+        if (PinName == TEXT("Subscription"))
         {
             HoverTextOut = TEXT(
+                "Subscription\n"
+                "Quest Event Subscription Object Reference\n\n"
                 "Reference to this subscription instance. Wire directly to a Cancel call when an exec pin fires "
                 "(e.g. cancel-after-first-completion), or promote to a variable to hold the reference for later "
                 "cancellation from elsewhere (e.g. End Play, player death). The subscription is otherwise "
@@ -291,3 +415,73 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     ActionRegistrar.AddBlueprintAction(ActionKey, Spawner);
 }
 
+void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+    Super::GetNodeContextMenuActions(Menu, Context);
+    if (Context->Pin) return;  // pin context, not node context
+
+    TWeakObjectPtr<UK2Node_BindToQuestEvent> WeakThis(const_cast<UK2Node_BindToQuestEvent*>(this));
+    auto AddToggle = [WeakThis](FToolMenuSection& Section, const FText& Label, bool* PropPtr)
+    {
+        Section.AddMenuEntry(
+            FName(*Label.ToString()),
+            Label,
+            FText::Format(NSLOCTEXT("BindToQuestEvent", "ToggleTooltip",
+                "Show or hide the {0} exec pin on this node."), Label),
+            FSlateIcon(),
+            FUIAction(
+            FExecuteAction::CreateLambda([WeakThis, PropPtr]()
+                {
+                    if (UK2Node_BindToQuestEvent* Node = WeakThis.Get())
+                    {
+                        const FScopedTransaction Transaction(NSLOCTEXT("BindToQuestEvent", "ToggleEventTransaction", "Toggle Quest Event Pin"));
+                        Node->Modify();
+                        *PropPtr = !*PropPtr;
+                        Node->ReconstructNode();
+                    }
+                }),
+                FCanExecuteAction(),
+                FIsActionChecked::CreateLambda([PropPtr]() { return *PropPtr; })),
+            EUserInterfaceActionType::Check);
+    };
+
+    {
+        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_Offer",
+            NSLOCTEXT("BindToQuestEvent", "OfferPhase", "Exposed Events — Offer Phase"));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnActivated", "On Activated"),
+            const_cast<bool*>(&bExposeOnActivated));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnGiven", "On Given"),
+            const_cast<bool*>(&bExposeOnGiven));
+    }
+    {
+        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_Run",
+            NSLOCTEXT("BindToQuestEvent", "RunPhase", "Exposed Events — Run Phase"));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnStarted", "On Started"),
+            const_cast<bool*>(&bExposeOnStarted));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnProgress", "On Progress"),
+            const_cast<bool*>(&bExposeOnProgress));
+    }
+    {
+        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_End",
+            NSLOCTEXT("BindToQuestEvent", "EndPhase", "Exposed Events — End Phase"));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnCompleted", "On Completed"),
+            const_cast<bool*>(&bExposeOnCompleted));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnDeactivated", "On Deactivated"),
+            const_cast<bool*>(&bExposeOnDeactivated));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnBlocked", "On Blocked"),
+            const_cast<bool*>(&bExposeOnBlocked));
+    }
+}
+
+int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
+{
+    int32 Mask = 0;
+    if (bExposeOnActivated)   Mask |= static_cast<int32>(EQuestEventTypes::Activated);
+    if (bExposeOnStarted)     Mask |= static_cast<int32>(EQuestEventTypes::Started);
+    if (bExposeOnCompleted)   Mask |= static_cast<int32>(EQuestEventTypes::Completed);
+    if (bExposeOnDeactivated) Mask |= static_cast<int32>(EQuestEventTypes::Deactivated);
+    if (bExposeOnGiven)       Mask |= static_cast<int32>(EQuestEventTypes::Given);
+    if (bExposeOnProgress)    Mask |= static_cast<int32>(EQuestEventTypes::Progress);
+    if (bExposeOnBlocked)     Mask |= static_cast<int32>(EQuestEventTypes::Blocked);
+    return Mask;
+}

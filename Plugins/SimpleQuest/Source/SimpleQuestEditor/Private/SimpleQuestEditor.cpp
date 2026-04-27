@@ -44,8 +44,6 @@
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/QuestlineNode_Quest.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Slate/SGraphNode_Exit.h"
 #include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
 #include "Nodes/Slate/SGraphNode_QuestlineQuest.h"
@@ -54,6 +52,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "K2Nodes/K2Node_BindToQuestEvent.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
 
 
@@ -130,7 +129,7 @@ void FSimpleQuestEditor::StartupModule()
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
 	MessageLogModule.RegisterLogListing("QuestValidator", NSLOCTEXT("SimpleQuestEditor", "QuestValidatorLog", "Quest Validator"));
-
+	
 #define LOCTEXT_NAMESPACE "SimpleQuestEditor"
 	FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
 		StaleQuestTagsTabId,
@@ -330,6 +329,7 @@ void FSimpleQuestEditor::ShutdownModule()
 		IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools").Get();
 		AssetTools.UnregisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
 	}
+	
 	FEdGraphUtilities::UnregisterVisualNodeFactory(QuestlineGraphNodeFactory);
 	QuestlineGraphNodeFactory.Reset();
 

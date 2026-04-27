@@ -111,9 +111,9 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Events",
         meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
-                HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject",
+                HidePin = "WorldContextObject,ExposedEvents", DefaultToSelf = "WorldContextObject",
                 DisplayName = "Bind To Quest Event"))
-    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag);
+    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255);
 
     /** Companion unbind — pairs with BindToQuestEvent's returned handle. Safe no-op if the handle is invalid. */
     static void UnsubscribeFromQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, FDelegateHandle Handle);

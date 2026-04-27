@@ -112,10 +112,10 @@ bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext
     return WS && WS->HasFact(FactTag);
 }
 
-UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag)
+UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents)
 {
     UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
-    Sub->InitFromFactory(WorldContextObject, QuestTag);
+    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents);
     Sub->RegisterWithGameInstance(WorldContextObject);
     return Sub;
 }

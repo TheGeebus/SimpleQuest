@@ -61,15 +61,15 @@ class SIMPLEQUEST_API UQuestNodeBase : public UObject
     friend class UQuestManagerSubsystem;
 
 public:
-    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeActivated, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
+    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeStarted, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag);
     DECLARE_DYNAMIC_DELEGATE_OneParam (FOnNodeForwardActivated, UQuestNodeBase*, Node);
 
-    FOnNodeActivated OnNodeActivated;
+    FOnNodeStarted OnNodeStarted;
     FOnNodeCompleted OnNodeCompleted;
     
     /**
-     * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeActivated/OnNodeCompleted.
+     * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeStarted/OnNodeCompleted.
      * Manager chains NextNodesOnForward without writing any lifecycle facts.
      */
     FOnNodeForwardActivated OnNodeForwardActivated;
@@ -86,15 +86,15 @@ public:
     
 protected:
     /**
-     * Called when prerequisites are confirmed satisfied. Sets ContextualTag and fires OnNodeActivated. Override in subclasses
+     * Called when prerequisites are confirmed satisfied. Sets ContextualTag and fires OnNodeStarted. Override in subclasses
      * for additional activation behavior; always call Super::ActivateInternal first.
      */
     virtual void ActivateInternal(FGameplayTag InContextualTag);
     
     /**
-     * Called by the manager when this node is deactivated while Active. Override in subclasses to destroy live objectives
-     * and cancel any subscriptions specific to the active lifecycle. Default implementation cancels deferred prereq subscriptions.
-     * Always call Super::DeactivateInternal.
+     * Called by the manager when this node is deactivated while in the Live state. Override in subclasses to destroy
+     * any running objectives and cancel subscriptions specific to the running lifecycle. Default implementation cancels
+     * deferred prereq subscriptions. Always call Super::DeactivateInternal.
      */
     virtual void DeactivateInternal(FGameplayTag InContextualTag);
     

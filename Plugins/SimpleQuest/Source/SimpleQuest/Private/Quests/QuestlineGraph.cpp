@@ -63,7 +63,7 @@ void UQuestlineGraph::PostLoad()
 			&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
 			&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
 		{
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Active));
+			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live));
 			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed));
 			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver));
 			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated));

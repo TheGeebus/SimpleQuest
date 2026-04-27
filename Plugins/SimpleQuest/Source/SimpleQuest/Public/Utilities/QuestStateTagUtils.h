@@ -17,7 +17,7 @@ class FQuestStateTagUtils
 public:
 	// ---- Constants ----
 	inline static const FString Namespace = TEXT("SimpleQuest.QuestState.");
-	inline static const FString Leaf_Active = TEXT("Active");
+	inline static const FString Leaf_Live = TEXT("Live");
 	inline static const FString Leaf_Completed = TEXT("Completed");
 	inline static const FString Leaf_PendingGiver = TEXT("PendingGiver");
 	inline static const FString Leaf_Deactivated = TEXT("Deactivated");

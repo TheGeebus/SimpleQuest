@@ -47,10 +47,10 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 // Quest state queries
 // -------------------------------------------------------------------------
 
-bool USimpleQuestBlueprintLibrary::IsQuestActive(const UObject* WorldContext, FGameplayTag QuestTag)
+bool USimpleQuestBlueprintLibrary::IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)

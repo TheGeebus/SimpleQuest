@@ -209,8 +209,8 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is currently active
         if (QuestPair.Value.bWatchStart)
         {
-            const FGameplayTag ActiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false);
-            if (WorldState->HasFact(ActiveFact))
+            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false);
+            if (WorldState->HasFact(LiveFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
                 if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(QuestTag);

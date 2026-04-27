@@ -142,9 +142,9 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
     if (!bSawLiveStarted)
     {
-        const FGameplayTag ActiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false);
-        if (ActiveFact.IsValid() && WorldState->HasFact(ActiveFact))
+        const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
+            FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false);
+        if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
         {
             if (OnStarted.IsBound()) OnStarted.Broadcast(QuestTag, SyntheticContext);
         }

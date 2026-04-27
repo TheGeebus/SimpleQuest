@@ -1356,17 +1356,17 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 		return OutExpression.Nodes.Add(LeafNode);
 	}
     
-    // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Active fact
+    // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Live fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {
         const FName QuestTagName = FName(*(TEXT("SimpleQuest.Quest.") + TagPrefix));
 
 		if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
         {
-            // The parent quest's Active fact is always set when the inner graph is running
+            // The parent quest's Live fact is always set when the inner graph is running
             FPrerequisiteExpressionNode LeafNode;
             LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Active), false);
+            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Live), false);
             return OutExpression.Nodes.Add(LeafNode);
         }
 

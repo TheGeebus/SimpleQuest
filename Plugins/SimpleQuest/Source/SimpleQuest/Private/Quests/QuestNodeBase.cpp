@@ -21,7 +21,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 void UQuestNodeBase::ActivateInternal(FGameplayTag InContextualTag)
 {
     SetContextualTag(InContextualTag);
-    OnNodeActivated.ExecuteIfBound(this, InContextualTag);
+    OnNodeStarted.ExecuteIfBound(this, InContextualTag);
 }
 
 void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)

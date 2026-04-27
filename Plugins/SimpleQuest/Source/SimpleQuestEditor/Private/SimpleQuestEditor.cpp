@@ -660,7 +660,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 		{
 			// Defensive: skip NAME_None entries that occasionally leak into CompiledQuestTags AR metadata
 			// (orphan nodes, failed tag assignment in upstream compile). Without this guard we emit
-			// "None.Active" / "None.Blocked" etc. into CompiledTags.ini.
+			// "None.Live" / "None.Blocked" etc. into CompiledTags.ini.
 			if (QuestTag.IsNone()) continue;
 
 			AllTags.Add(QuestTag);
@@ -678,7 +678,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 				{
 					AllTags.Add(FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
 				};
-				AddState(FQuestStateTagUtils::Leaf_Active);
+				AddState(FQuestStateTagUtils::Leaf_Live);
 				AddState(FQuestStateTagUtils::Leaf_Completed);
 				AddState(FQuestStateTagUtils::Leaf_PendingGiver);
 				AddState(FQuestStateTagUtils::Leaf_Deactivated);
@@ -754,7 +754,7 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 				&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
 				&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
 			{
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
 				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
 				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
 				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));

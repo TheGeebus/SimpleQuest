@@ -25,7 +25,7 @@ namespace PIEOverlay_Style
     // their on-screen appearance. Priority order matches FQuestPIEDebugChannel::QueryNodeState's selection logic.
     static const FLinearColor Blocked      = FLinearColor(FColor(230,  60,  60));  // red — highest urgency
     static const FLinearColor PendingGiver = FLinearColor(FColor( 80, 180, 230));  // cyan — waiting
-    static const FLinearColor Active       = FLinearColor(FColor(250, 200,  60));  // amber — running
+    static const FLinearColor Live       = FLinearColor(FColor(250, 200,  60));  // amber — running
     static const FLinearColor Completed    = FLinearColor(FColor( 90, 210, 110));  // green — done
     static const FLinearColor Deactivated  = FLinearColor(FColor(150, 150, 150));  // grey — inert
     static const FLinearColor DebugBadge   = FLinearColor(FColor(250, 200,  60));  // badge text color when overlay active
@@ -36,7 +36,7 @@ namespace PIEOverlay_Style
         {
         case EQuestNodeDebugState::Blocked:       return Blocked;
         case EQuestNodeDebugState::PendingGiver:  return PendingGiver;
-        case EQuestNodeDebugState::Active:        return Active;
+        case EQuestNodeDebugState::Live:          return Live;
         case EQuestNodeDebugState::Completed:     return Completed;
         case EQuestNodeDebugState::Deactivated:   return Deactivated;
         default:                                  return Deactivated; // unused — Unknown returns early before this is called

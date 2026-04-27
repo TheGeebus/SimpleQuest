@@ -9,6 +9,7 @@
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestManagerSubsystem.generated.h"
 
+struct FPrerequisiteExpression;
 struct FWorldStateFactAddedEvent;
 struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
@@ -115,7 +116,7 @@ private:
 	UFUNCTION()
 	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData);
 	UFUNCTION()
-	void HandleOnNodeActivated(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
 
@@ -127,7 +128,7 @@ private:
 	void HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event);
 
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
-	void SetQuestActive(FGameplayTag QuestTag);
+	void SetQuestLive(FGameplayTag QuestTag);
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
@@ -150,9 +151,8 @@ private:
 	FDelegateHandle DeactivateEventDelegateHandle;
 	FDelegateHandle ActivationRequestDelegateHandle;
 	
-	TMap<FGameplayTag, FDelegateHandle> ActiveStepTriggerHandles;
+	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
 
-	TMap<FGameplayTag, FDelegateHandle> ActiveClassTriggerHandles;
 	TMultiMap<FGameplayTag, UClass*> ClassFilteredSteps;
 	FDelegateHandle ClassBridgeHandle;	
 
@@ -174,6 +174,34 @@ private:
 	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag);
 	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void TryFireDeferredCompletion(FGameplayTag StepTag);
+
+	/*------------------------------------------------------------------------------------------------------------------
+	 * Deferred Giver Activation
+	 *
+	 * When a giver-gated quest's activation wire fires, the giver branch in ActivateNodeByTag must evaluate the node's
+	 * PrerequisiteExpression before publishing FQuestEnabledEvent. If prereqs are unmet, the activation request is
+	 * stashed here and the manager subscribes to the prereq's leaf tags. When all leaves satisfy, the activation is
+	 * retried, at which point the giver branch fires normally. Mirrors the deferred-completion pattern above.
+	 *----------------------------------------------------------------------------------------------------------------*/
+
+	struct FDeferredGiverActivation
+	{
+		FName NodeTagName;
+		FGameplayTag IncomingOutcomeTag;
+		FName IncomingSourceTag;
+	};
+
+	// Key: NodeTag (compiled FGameplayTag); Value: stashed ActivateNodeByTag args
+	TMap<FGameplayTag, FDeferredGiverActivation> DeferredGiverActivations;
+
+	// Subscription handles for deferred giver-activation prerequisite monitoring
+	TMap<FGameplayTag, TMap<FGameplayTag, FDelegateHandle>> DeferredGiverPrereqHandles;
+	/*
+	void DeferGiverActivation(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, const FPrerequisiteExpression& Expr);
+	void OnDeferredGiverPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void TryFireDeferredGiverActivation(FGameplayTag NodeTag);
+	void ClearDeferredGiverActivation(FGameplayTag NodeTag);
+	*/
 
 
 };

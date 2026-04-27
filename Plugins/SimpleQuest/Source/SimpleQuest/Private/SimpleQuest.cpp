@@ -52,7 +52,7 @@ void FSimpleQuest::RegisterCompiledQuestTags()
             if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
                 && !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome.")))
             {
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active));
+                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
                 TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
                 TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
                 TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));

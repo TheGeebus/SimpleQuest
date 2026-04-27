@@ -23,7 +23,7 @@ public:
     // -------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static bool IsQuestActive(const UObject* WorldContext, FGameplayTag QuestTag);
+    static bool IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag);
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag);

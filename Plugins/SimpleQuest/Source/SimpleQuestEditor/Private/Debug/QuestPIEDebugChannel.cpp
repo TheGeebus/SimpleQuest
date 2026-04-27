@@ -23,7 +23,7 @@ namespace
 	{
 		using FQ = FQuestStateTagUtils;
 		const FName TagName = NodeTag.GetTagName();
-		for (const FString& Leaf : { FQ::Leaf_Active, FQ::Leaf_Completed, FQ::Leaf_PendingGiver, FQ::Leaf_Blocked, FQ::Leaf_Deactivated })
+		for (const FString& Leaf : { FQ::Leaf_Live, FQ::Leaf_Completed, FQ::Leaf_PendingGiver, FQ::Leaf_Blocked, FQ::Leaf_Deactivated })
 		{
 			const FGameplayTag Fact = FGameplayTag::RequestGameplayTag(FQ::MakeStateFact(TagName, Leaf), false);
 			if (Fact.IsValid() && WorldState->HasFact(Fact)) return true;
@@ -153,9 +153,9 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver), false);
 	if (PendingGiverFact.IsValid() && WorldState->HasFact(PendingGiverFact)) return EQuestNodeDebugState::PendingGiver;
 
-	const FGameplayTag ActiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Active), false);
-	if (ActiveFact.IsValid() && WorldState->HasFact(ActiveFact)) return EQuestNodeDebugState::Active;
-
+	const FGameplayTag LiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live), false);
+	if (LiveFact.IsValid() && WorldState->HasFact(LiveFact)) return EQuestNodeDebugState::Live;
+	
 	const FGameplayTag CompletedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed), false);
 	if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact)) return EQuestNodeDebugState::Completed;
 
@@ -251,17 +251,17 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 		return Tag.IsValid() && WorldState->HasFact(Tag);
 	};
 
-	const bool bSourceActive       = LookupSourceFact(FQuestStateTagUtils::Leaf_Active);
-	const bool bSourcePendingGiver = LookupSourceFact(FQuestStateTagUtils::Leaf_PendingGiver);
-	const bool bSourceCompleted    = LookupSourceFact(FQuestStateTagUtils::Leaf_Completed);
-	const bool bSourceDeactivated  = LookupSourceFact(FQuestStateTagUtils::Leaf_Deactivated);
+	const bool bSourceLive			= LookupSourceFact(FQuestStateTagUtils::Leaf_Live);
+	const bool bSourcePendingGiver	= LookupSourceFact(FQuestStateTagUtils::Leaf_PendingGiver);
+	const bool bSourceCompleted		= LookupSourceFact(FQuestStateTagUtils::Leaf_Completed);
+	const bool bSourceDeactivated	= LookupSourceFact(FQuestStateTagUtils::Leaf_Deactivated);
 
 	if (bSourceCompleted || bSourceDeactivated)
 	{
 		// Source resolved but the leaf's specific fact isn't present — the leaf's required outcome won't happen.
 		return EPrereqDebugState::Unsatisfied;
 	}
-	if (bSourceActive || bSourcePendingGiver)
+	if (bSourceLive || bSourcePendingGiver)
 	{
 		// Source running, outcome not yet resolved — still in flight.
 		return EPrereqDebugState::InProgress;

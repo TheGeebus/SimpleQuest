@@ -67,7 +67,7 @@ public:
 	
 private:
 	UPROPERTY()
-	TObjectPtr<UQuestObjective> ActiveObjective;
+	TObjectPtr<UQuestObjective> LiveObjective;
 
 	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
 	FQuestObjectiveContext CompletionData;
@@ -83,7 +83,7 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
-	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
+	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }
 	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }

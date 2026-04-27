@@ -27,9 +27,9 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	UClass* ObjClass = QuestObjective.LoadSynchronous();
 	if (!ObjClass) return;
 
-	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
-	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
-	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
+	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
+	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
+	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 
 	// Compose activation params — Step's authored defaults plus any external params from a
 	// Tag_Channel_QuestActivationRequest publisher. Additive for compound fields (sets union, count sums);
@@ -58,16 +58,16 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationParams = FQuestObjectiveActivationParams{};
 
-	ActiveObjective->DispatchOnObjectiveActivated(Params);
+	LiveObjective->DispatchOnObjectiveActivated(Params);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {
-	if (ActiveObjective)
+	if (LiveObjective)
 	{
-		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		ActiveObjective = nullptr;
+		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective = nullptr;
 	}
 	ReceivedActivationParams = FQuestObjectiveActivationParams{};
 	CompletionForwardParams = FQuestObjectiveActivationParams{};
@@ -77,9 +77,9 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 void UQuestStep::ResetTransientState()
 {
 	Super::ResetTransientState();
-	// ActiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
+	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
 	// drop the reference. CompletionData + Piece D params are pure value types; reset to empty.
-	ActiveObjective = nullptr;
+	LiveObjective = nullptr;
 	CompletionData = FQuestObjectiveContext{};
 	ReceivedActivationParams = FQuestObjectiveActivationParams{};
 	CompletionForwardParams = FQuestObjectiveActivationParams{};
@@ -87,13 +87,13 @@ void UQuestStep::ResetTransientState()
 
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
 {
-	if (ActiveObjective)
+	if (LiveObjective)
 	{
-		CompletionData = ActiveObjective->TakeCompletionData();
-		CompletionForwardParams = ActiveObjective->TakeForwardActivationParams();
-		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		ActiveObjective = nullptr;
+		CompletionData = LiveObjective->TakeCompletionData();
+		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
+		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective = nullptr;
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
 }

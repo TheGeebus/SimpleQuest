@@ -29,7 +29,7 @@ enum class EQuestPinRole : uint8
 	/** Deactivation trigger input. Fires when upstream node's Deactivated output activates. */
 	DeactivateIn,
 
-	/** Deactivation passthrough output. Fires when this node is deactivated while Active. */
+	/** Deactivation passthrough output. Fires when this node is deactivated while in the Live state. */
 	DeactivatedOut,
 
 	/** Per-graph any-outcome sentinel ("Entered" on Entry terminal, "Any Outcome" legacy). */

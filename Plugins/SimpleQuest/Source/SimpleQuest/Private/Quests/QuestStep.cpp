@@ -51,11 +51,11 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	Params.OriginTag = PendingActivationParams.OriginTag;
 	Params.OriginChain = PendingActivationParams.OriginChain;
 
-	// Snapshot the composed params for Piece D chain propagation — ChainToNextNodes needs OriginChain to extend the
+	// Snapshot the composed params for Piece D chain propagation. ChainToNextNodes needs OriginChain to extend the
 	// forwarded chain with this step's tag when the chain reaches a downstream step.
 	ReceivedActivationParams = Params;
 
-	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
+	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationParams = FQuestObjectiveActivationParams{};
 
 	LiveObjective->DispatchOnObjectiveActivated(Params);
@@ -65,6 +65,10 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {
 	if (LiveObjective)
 	{
+		// Symmetric to OnObjectiveActivated: fire the deactivation hook BEFORE delegate cleanup and null-out
+		// so subclass overrides (universal-adapter pattern: subscribed to game-system events in OnObjective-
+		// Activated) can still inspect targets / objective state and explicitly unsubscribe.
+		LiveObjective->DispatchOnObjectiveDeactivated();
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective = nullptr;
@@ -78,24 +82,29 @@ void UQuestStep::ResetTransientState()
 {
 	Super::ResetTransientState();
 	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
-	// drop the reference. CompletionData + Piece D params are pure value types; reset to empty.
+	// drop the reference. CompletionContext + Piece D params are pure value types; reset to empty.
 	LiveObjective = nullptr;
-	CompletionData = FQuestObjectiveContext{};
+	CompletionContext = FQuestObjectiveContext{};
 	ReceivedActivationParams = FQuestObjectiveActivationParams{};
 	CompletionForwardParams = FQuestObjectiveActivationParams{};
 }
 
-void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
+void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity)
 {
 	if (LiveObjective)
 	{
-		CompletionData = LiveObjective->TakeCompletionData();
+		// Fire the deactivation hook FIRST, before TakeCompletionContext / TakeForwardActivationParams move
+		// data out of the objective, so the subclass override can read CompletionContext / ForwardActivation-
+		// Params if it needs them. The objective is still live (we're inside its OnQuestObjectiveComplete
+		// broadcast); ConditionalBeginDestroy hasn't fired yet.
+		LiveObjective->DispatchOnObjectiveDeactivated();
+		CompletionContext = LiveObjective->TakeCompletionContext();
 		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective = nullptr;
 	}
-	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
+	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
 }
 
 void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressData)

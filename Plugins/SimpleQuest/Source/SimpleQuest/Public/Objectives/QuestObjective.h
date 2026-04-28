@@ -6,7 +6,6 @@
 #include "GameplayTagContainer.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveContext.h"
-#include "StructUtils/InstancedStruct.h"
 #include "QuestObjective.generated.h"
 
 class UQuestTargetInterface;
@@ -29,7 +28,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnableTarget, UObject*, InTargetObject, bool, bNewIsEnabled);
 	FOnEnableTarget OnEnableTarget;
 
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuestObjectiveComplete, FGameplayTag, OutcomeTag);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, FGameplayTag, OutcomeTag, FName, PathIdentity);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
 	
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressData);
@@ -96,19 +95,49 @@ public:
 	 * BlueprintNativeEvent TryCompleteObjective. Same thunk-routing behavior as DispatchSetObjectiveTarget.
 	 */
 	void DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext);
+
+	/**
+	 * Step-facing entry point for tearing down the objective. Thin C++ forwarder to the protected
+	 * BlueprintNativeEvent OnObjectiveDeactivated. Same thunk-routing behavior as DispatchOnObjectiveActivated.
+	 *
+	 * Called by UQuestStep BOTH on the interruption path (DeactivateInternal: abandon, blocked, cascade-
+	 * deactivated) AND on the completion path (OnObjectiveComplete) before the step releases its reference
+	 * to the objective. Gives subclasses a symmetric hook to OnObjectiveActivated for unsubscribing from
+	 * external event sources, releasing UI handles, stopping timers, etc.
+	 *
+	 * Does NOT fire on PIE-end / ResetTransientState, the objective is already GC'd at that point.
+	 * Subclasses subscribing to non-UE systems should defend against PIE end via TWeakObjectPtr or
+	 * equivalent standard UE patterns.
+	 */
+	void DispatchOnObjectiveDeactivated();
 	
 protected:
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
 	 * to bind additional delegates. (see: UGoToQuestObjective)
 	 *
-	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
+	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
 	 *
 	 * @param Params a set of specific target actors in the scene
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
 	void OnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
+
+	/**
+	 * Symmetric partner to OnObjectiveActivated. Fires whenever the owning step is releasing the
+	 * objective: both the interruption path (abandon, blocked, cascade-deactivated) AND the completion
+	 * path. Override to unsubscribe from external event sources, tear down UI handles, release timers, etc.
+	 *
+	 * The objective is still live when this fires; LiveObjective on the step is nulled AFTER this dispatch
+	 * returns. Inside the override you can still call EnableQuestTargetActors(false), inspect TargetActors,
+	 * read state stored during OnObjectiveActivated, etc.
+	 *
+	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the
+	 * public DispatchOnObjectiveDeactivated from C++; subclass BPs override normally.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
+	void OnObjectiveDeactivated();
 
 	/**
 	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
@@ -127,10 +156,19 @@ protected:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
 	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
-
-	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionData,InForwardParams"), Category = "Quest|Objectives")
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData = FQuestObjectiveContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
-
+	
+	/**
+	 * Completes the objective with a runtime outcome tag and optional explicit path identity. PathIdentity routes
+	 * the completion through the Step's structurally-keyed pin map (NextNodesByPath); when NAME_None, the manager
+	 * auto-derives PathIdentity from OutcomeTag.GetTagName() so static K2 placements behave identically to pre-
+	 * Bundle-Y. Dynamic K2 placements supply an explicit PathIdentity authored on the K2 node's PathName field.
+	 *
+	 * Direct C++ callers can also supply PathIdentity explicitly; legacy callers passing only OutcomeTag get the
+	 * auto-derive fallback via the default argument.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionContext,InForwardParams"), Category = "Quest|Objectives")
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveContext& InCompletionContext = FQuestObjectiveContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
+	
 	/**
 	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
 	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
@@ -148,9 +186,9 @@ protected:
 	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
 	
 private:
-	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionData. */
+	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionContext. */
 	UPROPERTY()
-	FQuestObjectiveContext CompletionData;
+	FQuestObjectiveContext CompletionContext;
 	
 	/**
 	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step
@@ -168,6 +206,6 @@ private:
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
-	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
+	FQuestObjectiveContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
 	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 };

@@ -150,13 +150,16 @@ TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdG
 	return Result;
 }
 
-TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass)
+TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass)
 {
 	if (!ObjectiveClass) return {};
 
-	TArray<FGameplayTag> AllOutcomes;
+	TArray<FName> AllPaths;
 
 	// ── Source 1: K2 node scan (Blueprint graphs) ──
+	// Each K2 placement resolves its path identity via UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity
+	// (single source of truth across the K2 node, the title-display path, and discovery here):
+	//   PathName > "Dynamic" sentinel (wired, no PathName) > OutcomeTag.GetTagName() (static).
 	if (UBlueprint* Blueprint = Cast<UBlueprint>(ObjectiveClass->ClassGeneratedBy))
 	{
 		TArray<UEdGraph*> AllGraphs;
@@ -167,7 +170,13 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 			Graph->GetNodesOfClass(Nodes);
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				if (Node->OutcomeTag.IsValid())	AllOutcomes.AddUnique(Node->OutcomeTag);
+				const FName ResolvedPath = Node->ResolvePathIdentity();
+				if (!ResolvedPath.IsNone())
+				{
+					AllPaths.AddUnique(ResolvedPath);
+				}
+				// Else: misconfigured placement (no PathName, no OutcomeTag default, no wire). Discovery
+				// silently skips; ValidateNodeDuringCompilation flags it as a Warning at compile time.
 			}
 		}
 	}
@@ -183,33 +192,34 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllOutcomes.AddUnique(*Tag);
+					AllPaths.AddUnique(Tag->GetTagName());
 				}
 			}
 		}
 
 		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
+		// Returns FGameplayTags; treat each as a path identity (full tag FName).
 		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
 			if (Tag.IsValid())
 			{
-				AllOutcomes.AddUnique(Tag);
+				AllPaths.AddUnique(Tag.GetTagName());
 			}
 		}
 	}
 
-	if (AllOutcomes.Num() > 0)
+	if (AllPaths.Num() > 0)
 	{
 		// Deterministic pin order regardless of discovery source — prevents pin shuffling across rebuilds
-		AllOutcomes.Sort([](const FGameplayTag& A, const FGameplayTag& B)
+		AllPaths.Sort([](const FName& A, const FName& B)
 		{
-			return A.GetTagName().LexicalLess(B.GetTagName());
+			return A.LexicalLess(B);
 		});
-		
-		UE_LOG(LogSimpleQuest, Verbose,	TEXT("DiscoverObjectiveOutcomes: Found %d outcome(s) for %s"),	AllOutcomes.Num(), *ObjectiveClass->GetName());
+
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("DiscoverObjectivePaths: Found %d path(s) for %s"), AllPaths.Num(), *ObjectiveClass->GetName());
 	}
 
-	return AllOutcomes;
+	return AllPaths;
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode)
@@ -505,8 +515,8 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, false);
 
 	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
-	// branch. AnyOutcome → SimpleQuest.QuestState.<src>.Completed (source done, regardless of outcome). Named outcome →
-	// SimpleQuest.QuestState.<src>.Outcome.<leaf>.
+	// branch. AnyOutcome → SimpleQuest.QuestState.<src>.Completed (source done, regardless of path). Named path →
+	// SimpleQuest.QuestState.<src>.Path.<leaf>.
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
@@ -514,9 +524,11 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 		return FGameplayTag::RequestGameplayTag(FactName, false);
 	}
 
-	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
-	if (!OutcomeTag.IsValid()) return FGameplayTag();
-	const FName FactName = FQuestStateTagUtils::MakeNodeOutcomeFact(SourceTagName, OutcomeTag);
+	// PinName IS the path identity (FName matching the upstream K2 node's outcome tag for static placements,
+	// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip needed —
+	// MakeNodePathFact takes the FName directly and handles prefix stripping internally.
+	const FName FactName = FQuestStateTagUtils::MakeNodePathFact(SourceTagName, OutputPin->PinName);
+	if (FactName.IsNone()) return FGameplayTag();
 	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
 

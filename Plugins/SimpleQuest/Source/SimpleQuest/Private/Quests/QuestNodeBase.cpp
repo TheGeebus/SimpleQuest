@@ -115,8 +115,8 @@ void UQuestNodeBase::ResolveQuestTag(FName TagName)
     UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveQuestTag: %s → DisplayName='%s'"), *QuestTag.ToString(), *NodeInfo.DisplayName.ToString());
 }
 
-const TArray<FName>* UQuestNodeBase::GetNextNodesForOutcome(FGameplayTag OutcomeTag) const
+const TArray<FName>* UQuestNodeBase::GetNextNodesForPath(FName PathIdentity) const
 {
-    const FQuestOutcomeNodeList* List = NextNodesByOutcome.Find(OutcomeTag);
+    const FQuestPathNodeList* List = NextNodesByPath.Find(PathIdentity);
     return List ? &List->NodeTags : nullptr;
 }

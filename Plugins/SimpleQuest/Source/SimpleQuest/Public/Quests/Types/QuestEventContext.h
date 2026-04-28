@@ -11,7 +11,7 @@
  * Assembled context for outbound quest events.
  *
  *  - NodeInfo       — design-time: display name, tag identity (compiler-populated)
- *  - CompletionData — completion-time: payload from the objective (default-constructed for non-completion events)
+ *  - CompletionContext — completion-time: payload from the objective (default-constructed for non-completion events)
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestEventContext
@@ -24,5 +24,5 @@ struct SIMPLEQUEST_API FQuestEventContext
 
 	/** Completion data from the objective. Default-constructed for non-completion events. */
 	UPROPERTY(BlueprintReadOnly)
-	FQuestObjectiveContext CompletionData;
+	FQuestObjectiveContext CompletionContext;
 };

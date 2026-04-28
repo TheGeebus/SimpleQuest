@@ -51,48 +51,56 @@ public:
 	}
 
 	/**
-	 * Format a per-node outcome fact: SimpleQuest.QuestState.<NodePath>.Outcome.<OutcomeLeaf>
+	 * Format a per-node path fact: SimpleQuest.QuestState.<NodePath>.Path.<PathLeaf>
 	 *
-	 * @param NodeTagName  The tag describing this node's position in a graph hierarchy
-	 *                     (e.g. SimpleQuest.Quest.Act1.Chapter3.RecruitAllies).
-	 * @param OutcomeTag   The tag describing a given outcome for a quest or step
-	 *                     (e.g. SimpleQuest.QuestOutcome.HireMercenaries).
-	 * @returns            A fact tag encoding the graph context along with the outcome
-	 *                     (e.g. SimpleQuest.QuestState.Act1.Chapter3.RecruitAllies.Outcome.HireMercenaries).
+	 * Path identity is an FName that uniquely identifies a completion route through this node. For static K2
+	 * placements the identity is the outcome tag's full FName (preserving existing pin-name semantics);
+	 * for dynamic placements it's a sanitized author-supplied path name. The "SimpleQuest.QuestOutcome." prefix
+	 * is stripped when present so the leaf reads cleanly under .Path.<...>; bare path identities pass through
+	 * unmodified.
+	 *
+	 * @param NodeTagName    The tag describing this node's position in a graph hierarchy
+	 *                       (e.g. SimpleQuest.Quest.Act1.Chapter3.RecruitAllies).
+	 * @param PathIdentity   FName routing identifier for the completion path
+	 *                       (e.g. SimpleQuest.QuestOutcome.HireMercenaries — static; or "DynamicVictory" — dynamic).
+	 * @returns              A fact tag encoding the node + path
+	 *                       (e.g. SimpleQuest.QuestState.Act1.Chapter3.RecruitAllies.Path.HireMercenaries).
 	 */
-	static FName MakeNodeOutcomeFact(FName NodeTagName, FGameplayTag OutcomeTag)
+	static FName MakeNodePathFact(FName NodeTagName, FName PathIdentity)
 	{
+		if (PathIdentity.IsNone()) return NAME_None;
+
 		FString NodeStr = NodeTagName.ToString();
 		if (NodeStr.StartsWith(TEXT("SimpleQuest.Quest.")))
 			NodeStr = Namespace + NodeStr.Mid(18);
 
-		FString OutcomeStr = OutcomeTag.GetTagName().ToString();
-		int32 OutcomePos = OutcomeStr.Find(TEXT("QuestOutcome."));
-		if (OutcomePos == INDEX_NONE) return NAME_None;
+		FString PathStr = PathIdentity.ToString();
+		static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
+		if (PathStr.StartsWith(OutcomePrefix))
+			PathStr = PathStr.RightChop(OutcomePrefix.Len());
 
-		// Strip the leading "Quest" off "QuestOutcome." so the embedded sub-path under the per-node fact reads
-		// as ".Outcome.<leaf>", matching the historical pre-rename shape and the comment example above.
-		FString OutcomeSuffix = OutcomeStr.Mid(OutcomePos + 5);  // 5 = strlen("Quest")
-		return FName(*(NodeStr + TEXT(".") + OutcomeSuffix));
+		return FName(*(NodeStr + TEXT(".Path.") + PathStr));
 	}
 
 	/**
-	 * Per-quest entry outcome fact: SimpleQuest.QuestState.<QuestPath>.EntryOutcome.<OutcomeLeaf>. Set when a Quest
-	 * node is activated via a specific IncomingOutcomeTag.
+	 * Per-quest entry path fact: SimpleQuest.QuestState.<QuestPath>.EntryPath.<PathLeaf>. Set when a Quest
+	 * node is activated via a specific entry path identity (matching the upstream node's PathIdentity that
+	 * caused this Quest's activation).
 	 */
-	static FName MakeEntryOutcomeFact(FName NodeTagName, FGameplayTag OutcomeTag)
+	static FName MakeEntryPathFact(FName NodeTagName, FName PathIdentity)
 	{
+		if (PathIdentity.IsNone()) return NAME_None;
+
 		FString NodeStr = NodeTagName.ToString();
 		if (NodeStr.StartsWith(TEXT("SimpleQuest.Quest.")))
 			NodeStr = Namespace + NodeStr.Mid(18);
 
-		FString OutcomeStr = OutcomeTag.GetTagName().ToString();
-		int32 OutcomePos = OutcomeStr.Find(TEXT("QuestOutcome."));
-		if (OutcomePos == INDEX_NONE) return NAME_None;
+		FString PathStr = PathIdentity.ToString();
+		static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
+		if (PathStr.StartsWith(OutcomePrefix))
+			PathStr = PathStr.RightChop(OutcomePrefix.Len());
 
-		// Skip past "QuestOutcome." (13 chars) to land on the leaf segment.
-		FString OutcomeLeaf = OutcomeStr.Mid(OutcomePos + 13);
-		return FName(*(NodeStr + TEXT(".EntryOutcome.") + OutcomeLeaf));
+		return FName(*(NodeStr + TEXT(".EntryPath.") + PathStr));
 	}
 
 	/**

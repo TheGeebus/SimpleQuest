@@ -44,7 +44,7 @@ struct FQuestEntryRouteList
 };
 
 USTRUCT(BlueprintType)
-struct FQuestOutcomeNodeList
+struct FQuestPathNodeList
 {
     GENERATED_BODY()
 
@@ -62,7 +62,7 @@ class SIMPLEQUEST_API UQuestNodeBase : public UObject
 
 public:
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeStarted, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
-    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag);
+    DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag, FName, PathIdentity);
     DECLARE_DYNAMIC_DELEGATE_OneParam (FOnNodeForwardActivated, UQuestNodeBase*, Node);
 
     FOnNodeStarted OnNodeStarted;
@@ -147,11 +147,12 @@ protected:
     FQuestObjectiveActivationParams PendingActivationParams;
 
     /**
-     * Map of tags representing each discrete outcome possible as set on either the UQuestObjective or by the exit nodes on the
-     * child graph contained by this node.
+     * Routing table keyed by completion path identity. For static K2 placements PathIdentity equals the outcome
+     * tag's full FName; for dynamic placements it's the sanitized PathName authored on the K2 node. Either way
+     * the FName uniquely identifies one completion route through this node.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TMap<FGameplayTag, FQuestOutcomeNodeList> NextNodesByOutcome;
+    TMap<FName, FQuestPathNodeList> NextNodesByPath;
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
@@ -159,7 +160,7 @@ protected:
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
     
-    /** Nodes to activate normally when this node deactivates (Deactivated output → Activate input). */
+    /** Nodes to activate normally when this node deactivates (Deactivated output to Activate input). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnDeactivation;
 
@@ -222,7 +223,7 @@ public:
     FORCEINLINE FGameplayTag GetQuestTag() const { return QuestTag; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE void SetContextualTag(const FGameplayTag InTag) { ContextualTag = InTag; }
-    const TArray<FName>* GetNextNodesForOutcome(FGameplayTag OutcomeTag) const;
+    const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }

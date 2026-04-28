@@ -41,7 +41,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Started"))
 	bool bExposeOnStarted = true;
 
-	/** Objective progress tick during the Live phase. Context.CompletionData carries CurrentCount / RequiredCount. */
+	/** Objective progress tick during the Live phase. Context.CompletionContext carries CurrentCount / RequiredCount. */
 	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Progress"))
 	bool bExposeOnProgress = false;
 

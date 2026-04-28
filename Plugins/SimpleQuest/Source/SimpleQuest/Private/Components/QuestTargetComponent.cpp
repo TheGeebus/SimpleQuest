@@ -140,6 +140,8 @@ void UQuestTargetComponent::SendTriggeredEvent(const FInstancedStruct& CustomDat
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendTriggeredEvent);
+    
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendTriggeredEvent : '%s' fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
@@ -155,6 +157,8 @@ void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor, const FInstance
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendKilledEvent);
+
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendKilledEvent : '%s' killed by '%s', fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), KillerActor ? *KillerActor->GetActorNameOrLabel() : TEXT("(none)"),
         ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
@@ -169,6 +173,8 @@ void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const 
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
+
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendInteractedEvent);
 
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendInteractedEvent : '%s' interacted by '%s', fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), InteractingActor ? *InteractingActor->GetActorNameOrLabel() : TEXT("(none)"),

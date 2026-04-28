@@ -70,10 +70,10 @@ private:
 	TObjectPtr<UQuestObjective> LiveObjective;
 
 	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
-	FQuestObjectiveContext CompletionData;
+	FQuestObjectiveContext CompletionContext;
 
 	UFUNCTION(BlueprintCallable)
-	void OnObjectiveComplete(FGameplayTag OutcomeTag);
+	void OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity);
 
 	UFUNCTION()
 	void OnObjectiveProgress(FQuestObjectiveContext ProgressData);
@@ -85,7 +85,7 @@ public:
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
 	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
-	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }
+	FORCEINLINE const FQuestObjectiveContext& GetCompletionContext() const { return CompletionContext; }
 	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }
 	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }	
 };

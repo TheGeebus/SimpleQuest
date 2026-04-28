@@ -83,7 +83,7 @@ protected:
 	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None);
 
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
-	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag);
+	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
 
 	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag) const;
 
@@ -111,10 +111,10 @@ private:
 	 * Stage 2: copies InObjectiveData (non-empty only for completion events).
 	 * Stage 3: broadcasts OnAssembleEventContext for game code to fill GameData.
 	 */
-	FQuestEventContext AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionData) const;
+	FQuestEventContext AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionContext) const;
 	
 	UFUNCTION()
-	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag);
+	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity);
 	UFUNCTION()
 	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData);
 	UFUNCTION()
@@ -166,14 +166,25 @@ private:
 	/*------------------------------------------------------------------------------------------------------------------
 	 * Deferred Completion
 	 *----------------------------------------------------------------------------------------------------------------*/
-	
-	// Key: Step tag; Value: Pending outcome tag
-	TMap<FGameplayTag, FGameplayTag> DeferredCompletionOutcomes;
+
+	/**
+	 * Pending completion data for a step whose chain is deferred until prereqs satisfy. Carries both the runtime
+	 * OutcomeTag (event payload axis) and the PathIdentity (structural routing axis) so the resumed chain calls
+	 * ChainToNextNodes with the same arguments the immediate path would have used.
+	 */
+	struct FQuestDeferredCompletion
+	{
+		FGameplayTag OutcomeTag;
+		FName PathIdentity = NAME_None;
+	};
+
+	// Key: Step tag; Value: Pending completion data (OutcomeTag + PathIdentity)
+	TMap<FGameplayTag, FQuestDeferredCompletion> DeferredCompletions;
 
 	// Subscription handles for deferred completion prerequisite monitoring
 	TMap<FGameplayTag, TMap<FGameplayTag, FDelegateHandle>> DeferredCompletionPrereqHandles;
 
-	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag);
+	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag, FName PathIdentity);
 	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void TryFireDeferredCompletion(FGameplayTag StepTag);
 

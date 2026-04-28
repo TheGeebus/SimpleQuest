@@ -42,16 +42,31 @@ void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveContext&
 	TryCompleteObjective(InContext);
 }
 
+void UQuestObjective::DispatchOnObjectiveDeactivated()
+{
+	OnObjectiveDeactivated();
+}
+
+void UQuestObjective::OnObjectiveDeactivated_Implementation()
+{
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::OnObjectiveDeactivated_Implementation — base no-op. Override in "
+		"subclass to unsubscribe from external event sources, tear down UI handles, release timers, etc. (%s)"), *GetFullName());
+}
+
 TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 {
 	return {};
 }
 
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData, const FQuestObjectiveActivationParams& InForwardParams)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveContext& InCompletionContext, const FQuestObjectiveActivationParams& InForwardParams)
 {
-	CompletionData = InCompletionData;
+	CompletionContext = InCompletionContext;
 	ForwardActivationParams = InForwardParams;
-	OnQuestObjectiveComplete.Broadcast(OutcomeTag);
+	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
+	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements (Bundle Y)
+	// supply an explicit PathIdentity from the node's authored PathName.
+	const FName ResolvedPath = PathIdentity.IsNone() ? OutcomeTag.GetTagName() : PathIdentity;
+	OnQuestObjectiveComplete.Broadcast(OutcomeTag, ResolvedPath);
 	ConditionalBeginDestroy();
 }
 

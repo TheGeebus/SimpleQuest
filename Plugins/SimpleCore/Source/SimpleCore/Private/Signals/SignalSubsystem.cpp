@@ -1,6 +1,8 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Signals/SignalSubsystem.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+
 
 void USignalSubsystem::Deinitialize()
 {
@@ -13,6 +15,8 @@ void USignalSubsystem::Deinitialize()
 void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInstancedStruct& Payload)
 {
 	if (bIsShuttingDown) return;
+	
+	TRACE_CPUPROFILER_EVENT_SCOPE(USignalSubsystem_PublishRawMessage);
 
 	TSet<FGameplayTag> VisitedTags;
 	FGameplayTag CurrentTag = Channel;

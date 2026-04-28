@@ -30,6 +30,7 @@
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #else
@@ -207,23 +208,25 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
     }
 }
 
-FQuestEventContext UQuestManagerSubsystem::AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionData) const
+FQuestEventContext UQuestManagerSubsystem::AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionContext) const
 {
     FQuestEventContext Context;
     Context.NodeInfo = Node->GetNodeInfo();
-    Context.CompletionData = InCompletionData;
+    Context.CompletionContext = InCompletionContext;
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionData=%s"),
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s"),
         *Context.NodeInfo.QuestTag.ToString(),
         *Context.NodeInfo.DisplayName.ToString(),
-        Context.CompletionData.TriggeredActor ? TEXT("set") : TEXT("empty"));
+        Context.CompletionContext.TriggeredActor ? TEXT("set") : TEXT("empty"));
 
     return Context;
 }
 
-void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
+void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
 {
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s'"), *Node->GetQuestTag().ToString(), *OutcomeTag.ToString());    
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s' path='%s'"),
+        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), *PathIdentity.ToString());
+
     UQuestStep* Step = Cast<UQuestStep>(Node);
     if (Step
         && !Step->IsGiverGated()
@@ -232,11 +235,11 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         && !Step->PrerequisiteExpression.Evaluate(WorldState))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetQuestTag().ToString());
-        DeferChainToNextNodes(Step, OutcomeTag);
+        DeferChainToNextNodes(Step, OutcomeTag, PathIdentity);
         return;
     }
 
-    ChainToNextNodes(Node, OutcomeTag);
+    ChainToNextNodes(Node, OutcomeTag, PathIdentity);
 }
 
 void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData)
@@ -254,6 +257,8 @@ void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObject
 
 void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_HandleOnNodeStarted);
+
     if (Node->GetQuestTag().IsValid())
     {
         SetQuestLive(Node->GetQuestTag());
@@ -311,6 +316,9 @@ void UQuestManagerSubsystem::HandleAbandonQuestEvent(FGameplayTag Channel, const
 
 void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag)
 {
+
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ActivateNodeByTag);
+
     TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
     if (!InstancePtr || !*InstancePtr)
     {
@@ -341,13 +349,13 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-live quest '%s'"),
                         *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
 
-                    const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+                    const FName EntryFactName = FQuestStateTagUtils::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
                     if (!EntryFactName.IsNone())
                     {
                         WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
                     }
 
-                    if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+                    if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))
                     {
                         for (const FQuestEntryDestination& Entry : RouteList->Destinations)
                         {
@@ -357,7 +365,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
 
                     if (IncomingSourceTag != NAME_None)
                     {
-                        if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+                        if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByPath().Find(NAME_None))
                         {
                             for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
                             {
@@ -443,7 +451,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         // Write entry outcome fact for prerequisite expressions within the inner graph.
         if (IncomingOutcomeTag.IsValid() && WorldState)
         {
-            const FName EntryFactName = FQuestStateTagUtils::MakeEntryOutcomeFact(NodeTagName, IncomingOutcomeTag);
+            const FName EntryFactName = FQuestStateTagUtils::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
             if (!EntryFactName.IsNone())
             {
                 UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: setting entry outcome fact '%s' for quest '%s'"),
@@ -487,7 +495,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
          */
         if (IncomingOutcomeTag.IsValid())
         {
-            if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByOutcome().Find(IncomingOutcomeTag))
+            if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))
             {
                 for (const FQuestEntryDestination& Entry : RouteList->Destinations)
                 {
@@ -507,7 +515,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
          */
         if (IncomingSourceTag != NAME_None)
         {
-            if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByOutcome().Find(FGameplayTag()))
+            if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByPath().Find(NAME_None))
             {
                 for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
                 {
@@ -522,13 +530,19 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     }
 }
 
-void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag)
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
 {
     if (!Node) return;
 
-    const int32 OutcomeCount = Node->GetNextNodesForOutcome(OutcomeTag) ? Node->GetNextNodesForOutcome(OutcomeTag)->Num() : 0;
-    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' — %d outcome + %d any-outcome downstream node(s)"),
-        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), OutcomeCount, Node->GetNextNodesOnAnyOutcome().Num());
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ChainToNextNodes);
+
+    // Auto-derive PathIdentity from OutcomeTag when caller passes NAME_None — preserves back-compat for any
+    // direct C++ caller that hasn't been updated to thread PathIdentity through. Static K2 placements always
+    // produce a PathIdentity matching OutcomeTag.GetTagName(), so this path is a no-op for them.
+    const FName ResolvedPath = PathIdentity.IsNone() ? OutcomeTag.GetTagName() : PathIdentity;
+    const int32 OutcomeCount = Node->GetNextNodesForPath(ResolvedPath) ? Node->GetNextNodesForPath(ResolvedPath)->Num() : 0;
+    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' — %d path + %d any-outcome downstream node(s)"),
+        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), *ResolvedPath.ToString(), OutcomeCount, Node->GetNextNodesOnAnyOutcome().Num());
 
     if (Node->GetQuestTag().IsValid())
     {
@@ -576,9 +590,9 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ActivateNodeByTag(DestTagName, OutcomeTag, SourceTagName);
     };
 
-    if (const TArray<FName>* OutcomeNodes = Node->GetNextNodesForOutcome(OutcomeTag))
+    if (const TArray<FName>* PathNodes = Node->GetNextNodesForPath(ResolvedPath))
     {
-        for (const FName& Tag : *OutcomeNodes)
+        for (const FName& Tag : *PathNodes)
         {
             StampAndActivate(Tag);
         }
@@ -647,7 +661,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 			}
 			DeferredCompletionPrereqHandles.Remove(QuestTag);
 		}
-		DeferredCompletionOutcomes.Remove(QuestTag);
+		DeferredCompletions.Remove(QuestTag);
 	}
 
 	WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
@@ -698,7 +712,7 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
     FQuestObjectiveContext CompletionCtx;
     if (const UQuestStep* Step = Cast<UQuestStep>(Node))
     {
-        CompletionCtx = Step->GetCompletionData();
+        CompletionCtx = Step->GetCompletionContext();
     }
 
     FQuestEventContext Context = AssembleEventContext(Node, CompletionCtx);
@@ -860,10 +874,10 @@ void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FI
     }
 }
 
-void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag)
+void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag, FName PathIdentity)
 {
     const FGameplayTag StepTag = Step->GetQuestTag();
-    DeferredCompletionOutcomes.Add(StepTag, OutcomeTag);
+    DeferredCompletions.Add(StepTag, FQuestDeferredCompletion{ OutcomeTag, PathIdentity });
 
     TArray<FGameplayTag> LeafTags;
     Step->PrerequisiteExpression.CollectLeafTags(LeafTags);
@@ -875,9 +889,10 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
         Handles.Add(LeafTag, Handle);
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' — subscribed to %d prereq leaf tag(s)"),
+    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq leaf tag(s)"),
         *StepTag.ToString(),
         *OutcomeTag.ToString(),
+        *PathIdentity.ToString(),
         LeafTags.Num());
 }
 
@@ -885,7 +900,7 @@ void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channe
 {
     // Check all deferred steps. The fact that changed could satisfy any of them.
     TArray<FGameplayTag> StepTags;
-    DeferredCompletionOutcomes.GetKeys(StepTags);
+    DeferredCompletions.GetKeys(StepTags);
     for (const FGameplayTag& StepTag : StepTags)
     {
         TryFireDeferredCompletion(StepTag);
@@ -899,9 +914,9 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
 
     UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
     if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState)) return;
-    
+
     UE_LOG(LogSimpleQuest, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
-    
+
     // Clean up subscriptions
     if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
     {
@@ -912,10 +927,10 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
         DeferredCompletionPrereqHandles.Remove(StepTag);
     }
 
-    FGameplayTag OutcomeTag;
-    DeferredCompletionOutcomes.RemoveAndCopyValue(StepTag, OutcomeTag);
+    FQuestDeferredCompletion Pending;
+    DeferredCompletions.RemoveAndCopyValue(StepTag, Pending);
 
-    ChainToNextNodes(Step, OutcomeTag);
+    ChainToNextNodes(Step, Pending.OutcomeTag, Pending.PathIdentity);
 }
 
 void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event)
@@ -978,7 +993,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     if (OutcomeTag.IsValid())
     {
         WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestStateTagUtils::MakeNodeOutcomeFact(QuestTag.GetTagName(), OutcomeTag), false));
+            FQuestStateTagUtils::MakeNodePathFact(QuestTag.GetTagName(), OutcomeTag.GetTagName()), false));
     }
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,

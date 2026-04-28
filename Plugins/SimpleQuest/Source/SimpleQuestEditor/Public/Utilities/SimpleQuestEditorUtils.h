@@ -69,7 +69,7 @@ public:
 	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint graphs for UK2Node_CompleteObjectiveWithOutcome
 	 * instances; falls back to the CDO's GetPossibleOutcomes() virtual for classes where neither K2 nodes nor ObjectiveOutcome UPROPERTYs apply.
 	 */
-	static TArray<FGameplayTag> DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass);
+	static TArray<FName> DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass);
 
 	/**
 	 * Reconstructs the compiled gameplay tag for a step node by walking the graph hierarchy (Step → Quest → QuestlineGraph).

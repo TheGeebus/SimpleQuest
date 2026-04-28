@@ -1109,7 +1109,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   `InForwardParams` arg (`AutoCreateRefTerm`) — completing objective
   specifies an `FQuestObjectiveActivationParams` to carry forward
   into the next step's activation. Merges additively with the
-  downstream step's authored defaults. Both `InCompletionData` and
+  downstream step's authored defaults. Both `InCompletionContext` and
   `InForwardParams` are BP-optional via `AutoCreateRefTerm`
 - `K2Node_CompleteObjectiveWithOutcome` — new `Forward Params`
   input pin with per-pin tooltip explaining the additive merge

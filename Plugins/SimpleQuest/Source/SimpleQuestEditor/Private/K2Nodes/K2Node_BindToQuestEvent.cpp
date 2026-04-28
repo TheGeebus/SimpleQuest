@@ -338,7 +338,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
             HoverTextOut = TEXT(
                 "On Progress\n"
                 "Exec\n\n"
-                "Fires on objective progress ticks during the Live phase. Context.CompletionData carries "
+                "Fires on objective progress ticks during the Live phase. Context.CompletionContext carries "
                 "CurrentCount / RequiredCount / TriggeredActor / Instigator — break the struct to read them. "
                 "Fires once per progress tick, not just on milestones.");
             return;
@@ -407,7 +407,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
                 "Quest Event Context Structure\n\n"
                 "The full event payload — Triggered Actor, Instigator, Node Info (quest tag + display name), "
                 "and Custom Data. Break the struct (right-click → Split Struct Pin) or use member-access nodes "
-                "to read individual fields. On the On Progress pin, Context.CompletionData carries the progress "
+                "to read individual fields. On the On Progress pin, Context.CompletionContext carries the progress "
                 "counters.");
             return;
         }

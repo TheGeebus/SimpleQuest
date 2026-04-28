@@ -13,7 +13,7 @@ UGoToQuestObjective::UGoToQuestObjective()
 void UGoToQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
 {
 	EnableTargetObject(InContext.TriggeredActor, false);
-	CompleteObjectiveWithOutcome(ReachedOutcomeTag, InContext);
+	CompleteObjectiveWithOutcome(ReachedOutcomeTag, NAME_None, InContext);
 }
 
 void UGoToQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params)

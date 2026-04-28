@@ -22,7 +22,7 @@ bool UCountingQuestObjective::AddProgress(const FQuestObjectiveContext& InContex
 
 	if (CurrentElements >= MaxElements)
 	{
-		CompleteObjectiveWithOutcome(OutcomeTag, OutContext);
+		CompleteObjectiveWithOutcome(OutcomeTag, NAME_None, OutContext);
 		return true;
 	}
 

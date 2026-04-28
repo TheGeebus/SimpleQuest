@@ -89,6 +89,8 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		return;
 	}
 
+	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestGiverComponent_RegisterQuestGiver);
+
 	UWorldStateSubsystem* WorldState = GetWorld() && GetWorld()->GetGameInstance() ? GetWorld()->GetGameInstance()->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 
 	for (const FGameplayTag& QuestTag : QuestTagsToGive)

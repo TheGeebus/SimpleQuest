@@ -167,6 +167,8 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         return;
     }
 
+	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestWatcherComponent_RegisterQuestWatcher);
+
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* ResolutionRegistry = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;

@@ -13,7 +13,7 @@ enum class EDeactivationSource : uint8
 	/** Triggered by a Deactivate input pin, SetBlocked node, or other graph-authored path. */
 	Internal    UMETA(DisplayName = "Internal"),
 
-	/** Triggered by an external call — AbandonQuest, editor tooling, or a game system  publishing FAbandonQuestEvent on Tag_Channel_QuestAbandoned. */
+	/** Triggered by an external call — DeactivateQuest, editor tooling, or a game system  publishing FQuestDeactivateRequestEvent on Tag_Channel_QuestDeactivateRequest. */
 	External    UMETA(DisplayName = "External"),
 };
 

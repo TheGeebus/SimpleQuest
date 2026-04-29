@@ -76,7 +76,7 @@ private:
 	void OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity);
 
 	UFUNCTION()
-	void OnObjectiveProgress(FQuestObjectiveContext ProgressData);
+	void OnObjectiveProgress(FQuestObjectiveContext ProgressContext);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }

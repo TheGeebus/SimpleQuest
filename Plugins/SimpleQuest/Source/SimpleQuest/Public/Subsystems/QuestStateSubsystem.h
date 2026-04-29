@@ -13,22 +13,22 @@
 class UWorldStateSubsystem;
 
 /**
- * Public read-side surface for quest state queries — past resolutions (rich-record half of the two-layer
+ * Public read-side surface for quest state queries: past resolutions (rich-record half of the two-layer
  * state architecture; SimpleCore's UWorldStateSubsystem provides the boolean-fact half) and present-tense
  * activation queries (cached prereq snapshots, computed activation blockers).
  *
  * Naming convention mirrors UWorldStateSubsystem in SimpleCore — "State Subsystem" denotes a public,
  * externally-accessible fact registry with potentially limited write access. Designers come here for
- * quest-state queries; the manager subsystem stays a black box for orchestration and pushes facts here
+ * quest-state queries, and the manager subsystem stays a black box for orchestration and pushes facts here
  * when state changes.
  *
- * Writes are exclusive to UQuestManagerSubsystem via friend access — external code never mutates this
+ * Writes are exclusive to UQuestManagerSubsystem via friend access. External code never mutates this
  * subsystem. The manager pushes:
  *   - Resolution records on quest completion (RecordResolution).
  *   - Prereq status snapshots on giver-branch entry and enablement-watch transitions (UpdateQuestPrereqStatus).
  *   - Cache clears on quest leaving giver state (ClearQuestPrereqStatus).
  *
- * Reads are pure — blocker enumeration reads WorldState facts + the local CachedPrereqStatus map. No
+ * Reads are pure: blocker enumeration reads WorldState facts and the local CachedPrereqStatus map. No
  * manager dependency at query time.
  */
 UCLASS()
@@ -42,11 +42,21 @@ public:
     /** Returns the full resolution record for a quest, or nullptr if the quest hasn't resolved this session. */
     const FQuestResolutionRecord* GetQuestResolution(FGameplayTag QuestTag) const;
 
-    /** Convenience predicate — whether this quest has any resolution record this session. */
+    /** Convenience predicate: whether this quest has any resolution record this session. */
     bool HasResolved(FGameplayTag QuestTag) const;
 
-    /** Convenience accessor — how many times this quest has resolved this session. */
+    /** Convenience accessor: how many times this quest has resolved this session. */
     int32 GetResolutionCount(FGameplayTag QuestTag) const;
+
+    /** Returns the full chronological resolution history for a quest (every entry appended via RecordResolution).
+     * Empty array if the quest hasn't resolved this session. */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    TArray<FQuestResolutionEntry> GetResolutionHistory(FGameplayTag QuestTag) const;
+
+    /** Returns the most recent resolution entry for a quest, or a default-constructed entry if no resolutions. */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    FQuestResolutionEntry GetLatestResolution(FGameplayTag QuestTag) const;
+
 
     // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
 
@@ -79,7 +89,7 @@ private:
     TMap<FGameplayTag, FQuestPrereqStatus> CachedPrereqStatus;
 
     /** Manager calls these via friend access. */
-    void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime);
+    void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime, EQuestResolutionSource Source);
     void UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status);
     void ClearQuestPrereqStatus(FGameplayTag QuestTag);
 

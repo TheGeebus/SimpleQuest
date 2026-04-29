@@ -31,7 +31,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, FGameplayTag, OutcomeTag, FName, PathIdentity);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
 	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressData);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressContext);
 	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
 	
 	/**
@@ -174,7 +174,7 @@ protected:
 	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-	void ReportProgress(const FQuestObjectiveContext& InProgressData);
+	void ReportProgress(const FQuestObjectiveContext& ProgressContext);
 	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;

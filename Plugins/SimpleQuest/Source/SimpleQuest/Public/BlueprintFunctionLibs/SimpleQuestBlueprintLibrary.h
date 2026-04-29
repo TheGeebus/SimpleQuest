@@ -4,12 +4,16 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Events/QuestEventBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 class UQuestEventSubscription;
+class UQuestlineGraph;
+class UQuestManagerSubsystem;
+class UWorldStateSubsystem;
 
 UCLASS()
 class SIMPLEQUEST_API USimpleQuestBlueprintLibrary : public UBlueprintFunctionLibrary
@@ -18,9 +22,9 @@ class SIMPLEQUEST_API USimpleQuestBlueprintLibrary : public UBlueprintFunctionLi
 
 public:
 
-    // -------------------------------------------------------------------------
-    // Quest state queries — read directly from WorldState
-    // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------------------------------------------
+    // Quest state queries: read directly from WorldState and/or QuestState
+    // -------------------------------------------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag);
@@ -37,19 +41,34 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, FGameplayTag QuestTag);
 
-    // -------------------------------------------------------------------------
-    // Quest actions — publish to the signal bus; designer never touches the bus
-    // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------------------------------------------
+    // Quest actions: publish to the signal bus; designer never touches the bus
+    // -------------------------------------------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void AbandonQuest(const UObject* WorldContext, FGameplayTag QuestTag);
+    static void DeactivateQuest(const UObject* WorldContext, FGameplayTag QuestTag);
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
     static void GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag);
 
-    // -------------------------------------------------------------------------
-    // World state — general fact store, for power users and external prereqs
-    // -------------------------------------------------------------------------
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    static void ActivateQuest(const UObject* WorldContext, FGameplayTag QuestTag);
+
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    static void SetQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag);
+
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    static void ClearQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag);
+
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    static void ResolveQuest(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag, bool bOverrideExisting = false);
+
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
+
+    // -------------------------------------------------------------------------------------------------------------
+    // World state: general fact store, for power users and external prereqs
+    // -------------------------------------------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|World State", meta = (WorldContext = "WorldContext"))
     static void AddWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag);
@@ -61,23 +80,23 @@ public:
     static bool HasWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag);
 
 private:
-    static class UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);
-    static class USignalSubsystem* GetSignalSubsystem(const UObject* WorldContext);
-    static class UQuestManagerSubsystem* GetQuestManager(const UObject* WorldContext);
+    static UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);
+    static USignalSubsystem* GetSignalSubsystem(const UObject* WorldContext);
+    static UQuestManagerSubsystem* GetQuestManager(const UObject* WorldContext);
 
 public:
     
     /**
      * C++ one-liner for subscribing to a quest event. Resolves the SignalSubsystem from the world context, subscribes
      * the listener/callback on QuestTag, returns the FDelegateHandle for explicit unbind. Returns an invalid handle if
-     * the subsystem can't be resolved or the tag isn't registered — same silent-failure contract as the BP async action.
+     * the subsystem can't be resolved or the tag isn't registered. Same silent-failure contract as the BP async action.
      *
-     * TEvent must be a FQuestEventBase-derived struct published on the quest's tag channel — FQuestStartedEvent,
-     * FQuestEndedEvent, FQuestEnabledEvent, FQuestDeactivatedEvent, etc.
+     * TEvent is constrained by the CQuestEvent concept to any FQuestEventBase-derived struct published on the quest's
+     * tag channel: FQuestStartedEvent, FQuestEndedEvent, FQuestEnabledEvent, FQuestDeactivatedEvent, etc. Passing an
+     * unrelated type fails to compile with a clear concept-violation diagnostic.
      */
-    template<typename TEvent, typename TObject>
-    static FDelegateHandle SubscribeToQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, TObject* Listener,
-        void (TObject::* Callback)(FGameplayTag, const TEvent&))
+    template<CQuestEvent TEvent, typename TObject>
+    static FDelegateHandle SubscribeToQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, TObject* Listener, void (TObject::* Callback)(FGameplayTag, const TEvent&))
     {
         if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag)) return FDelegateHandle();
         if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))

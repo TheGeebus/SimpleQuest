@@ -281,7 +281,10 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
             {
                 if (const FQuestResolutionRecord* Record = Resolution->GetQuestResolution(QuestTag))
                 {
-                    RecoveredOutcome = Record->OutcomeTag;
+                    if (const FQuestResolutionEntry* Latest = Record->GetLatest())
+                    {
+                        RecoveredOutcome = Latest->OutcomeTag;
+                    }
                 }
             }
             if (OnCompleted.IsBound()) OnCompleted.Broadcast(QuestTag, RecoveredOutcome, SyntheticContext);

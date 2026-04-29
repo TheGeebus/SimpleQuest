@@ -8,18 +8,23 @@
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEnabledEvent.h"
-#include "Events/AbandonQuestEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestActivationRequestEvent.h"
+#include "Events/QuestBlockRequestEvent.h"
+#include "Events/QuestClearBlockRequestEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Events/QuestDisabledEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
+#include "Events/QuestlineStartRequestEvent.h"
+#include "Events/QuestResolveRequestEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -48,11 +53,14 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
         WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
         if (QuestSignalSubsystem)
         {
-            AbandonDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FAbandonQuestEvent>(Tag_Channel_QuestAbandoned, this, &UQuestManagerSubsystem::HandleAbandonQuestEvent);
             GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
             GiverRegisteredDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGiverRegisteredEvent>(Tag_Channel_QuestGiverRegistered, this, &UQuestManagerSubsystem::HandleGiverRegisteredEvent);
             DeactivateEventDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivateRequestEvent>(Tag_Channel_QuestDeactivateRequest, this, &UQuestManagerSubsystem::HandleNodeDeactivationRequest);
             ActivationRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestActivationRequestEvent>(Tag_Channel_QuestActivationRequest, this, &UQuestManagerSubsystem::HandleActivationRequest);
+            BlockRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestBlockRequestEvent>(Tag_Channel_QuestBlockRequest, this, &UQuestManagerSubsystem::HandleBlockRequest);
+            ClearBlockRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestClearBlockRequestEvent>(Tag_Channel_QuestClearBlockRequest, this, &UQuestManagerSubsystem::HandleClearBlockRequest);
+            ResolveRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestResolveRequestEvent>(Tag_Channel_QuestResolveRequest, this, &UQuestManagerSubsystem::HandleResolveRequest);
+            QuestlineStartRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestlineStartRequestEvent>(Tag_Channel_QuestlineStartRequest, this, &UQuestManagerSubsystem::HandleQuestlineStartRequest);
         }
     }
 
@@ -85,12 +93,15 @@ void UQuestManagerSubsystem::Deinitialize()
 {
     if (QuestSignalSubsystem)
     {
-        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestAbandoned, AbandonDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiven, GivenDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestGiverRegistered, GiverRegisteredDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestDeactivateRequest, DeactivateEventDelegateHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestTarget, ClassBridgeHandle);
         QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestActivationRequest, ActivationRequestDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestBlockRequest, BlockRequestDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestClearBlockRequest, ClearBlockRequestDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestResolveRequest, ResolveRequestDelegateHandle);
+        QuestSignalSubsystem->UnsubscribeMessage(Tag_Channel_QuestlineStartRequest, QuestlineStartRequestDelegateHandle);
 
         for (auto& Pair : DeactivationSubscriptionHandles)
         {
@@ -294,7 +305,8 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                 // Subscribe once to global channel if this is the first class-filtered step
                 if (!ClassBridgeHandle.IsValid())
                 {
-                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);                }
+                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);
+                }
             }
         }
     }
@@ -305,13 +317,6 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     if (!Node) return;
     for (const FName& Tag : Node->GetNextNodesOnForward())
         ActivateNodeByTag(Tag);
-}
-
-void UQuestManagerSubsystem::HandleAbandonQuestEvent(FGameplayTag Channel, const FAbandonQuestEvent& Event)
-{
-    const FGameplayTag QuestTag = Event.GetQuestTag();
-    if (!QuestTag.IsValid()) return;
-    SetQuestDeactivated(QuestTag, EDeactivationSource::External);
 }
 
 void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag)
@@ -546,7 +551,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     if (Node->GetQuestTag().IsValid())
     {
-        SetQuestResolved(Node->GetQuestTag(), OutcomeTag);
+        SetQuestResolved(Node->GetQuestTag(), OutcomeTag, EQuestResolutionSource::Graph);
         if (QuestSignalSubsystem)
         {
             if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetQuestTag()))
@@ -557,7 +562,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         }
     }
 
-    PublishQuestEndedEvent(Node, OutcomeTag);
+    PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph);
 
     /**
      * Thread this node's compiled QuestTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
@@ -705,7 +710,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     }
 }
 
-void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag) const
+void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const
 {
     if (!QuestSignalSubsystem || !Node->GetQuestTag().IsValid()) return;
 
@@ -716,7 +721,7 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
     }
 
     FQuestEventContext Context = AssembleEventContext(Node, CompletionCtx);
-    QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestEndedEvent(Node->GetQuestTag(), OutcomeTag, Context));
+    QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestEndedEvent(Node->GetQuestTag(), OutcomeTag, Source, Context));
 }
 
 void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event)
@@ -791,6 +796,135 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     }
 
     ActivateNodeByTag(QuestTag.GetTagName());
+}
+
+void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQuestBlockRequestEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid() || !WorldState) return;
+
+    const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked);
+    const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+    if (BlockedFact.IsValid()) WorldState->AddFact(BlockedFact);
+
+    if (QuestSignalSubsystem)
+    {
+        QuestSignalSubsystem->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(QuestTag, EDeactivationSource::Internal));
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, deactivation requested"), *QuestTag.ToString());
+}
+
+void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid() || !WorldState) return;
+
+    const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked);
+    const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+    if (BlockedFact.IsValid()) WorldState->ClearFact(BlockedFact);
+    // Deactivated intentionally not cleared — the target's Activate input clears it on re-entry.
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared"), *QuestTag.ToString());
+}
+
+void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQuestResolveRequestEvent& Event)
+{
+    const FGameplayTag QuestTag = Event.GetQuestTag();
+    if (!QuestTag.IsValid() || !WorldState) return;
+
+    // Override guard — skip if already in a terminal state unless designer explicitly opts in. Default-false
+    // protects against accidental double-broadcast; opt-in true appends additively (never removes prior facts).
+    if (!Event.bOverrideExisting)
+    {
+        if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed))
+            || WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated)))
+        {
+            UE_LOG(LogSimpleQuest, Warning,
+                TEXT("HandleResolveRequest: '%s' skipped — already in terminal state. Pass bOverrideExisting=true to append a new resolution entry additively."),
+                *QuestTag.ToString());
+            return;
+        }
+    }
+
+    SetQuestResolved(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External);
+
+    // Live-step bookkeeping cleanup mirroring ChainToNextNodes — defensive against the non-Live cases (Find returns null).
+    if (QuestSignalSubsystem)
+    {
+        if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
+        {
+            QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
+            LiveStepTriggerHandles.Remove(QuestTag);
+        }
+        if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
+        {
+            for (const auto& Pair : *Handles)
+            {
+                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
+            }
+            DeferredCompletionPrereqHandles.Remove(QuestTag);
+        }
+        DeferredCompletions.Remove(QuestTag);
+    }
+    ClearEnablementWatch(QuestTag);
+
+    // Publish FQuestEndedEvent — branch on whether a node instance is loaded for context assembly.
+    if (QuestSignalSubsystem)
+    {
+        if (UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+        {
+            PublishQuestEndedEvent(Node, Event.OutcomeTag, EQuestResolutionSource::External);
+        }
+        else
+        {
+            // Fully-dynamic flow — no node instance. Publish a minimal event without assembled Context.
+            QuestSignalSubsystem->PublishMessage(QuestTag, FQuestEndedEvent(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External));
+        }
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleResolveRequest: '%s' resolved with outcome='%s' (override=%d)"),
+        *QuestTag.ToString(), *Event.OutcomeTag.ToString(), Event.bOverrideExisting ? 1 : 0);
+}
+
+void UQuestManagerSubsystem::HandleQuestlineStartRequest(FGameplayTag Channel, const FQuestlineStartRequestEvent& Event)
+{
+    if (Event.Graph.IsNull())
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: null graph reference, skipping"));
+        return;
+    }
+
+    // Hot path: already-loaded graph activates immediately.
+    if (UQuestlineGraph* AlreadyLoaded = Event.Graph.Get())
+    {
+        UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' already loaded, activating immediately"), *AlreadyLoaded->GetName());
+        ActivateQuestlineGraph(AlreadyLoaded);
+        return;
+    }
+
+    // Cold path: async load via FStreamableManager, activate on completion. CreateWeakLambda binds the lambda
+    // to this UObject's weak pointer so a manager Deinitialize mid-load makes the callback a no-op rather than
+    // a crash. Pattern prototype for 0.5.0's runtime asset loading pass.
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' cold, async-loading"), *Event.Graph.ToString());
+
+    FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
+    const TSoftObjectPtr<UQuestlineGraph> SoftGraph = Event.Graph;
+    StreamableManager.RequestAsyncLoad(
+        SoftGraph.ToSoftObjectPath(),
+        FStreamableDelegate::CreateWeakLambda(this, [this, SoftGraph]()
+        {
+            if (UQuestlineGraph* Graph = SoftGraph.Get())
+            {
+                UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: async-load complete for '%s', activating"), *Graph->GetName());
+                ActivateQuestlineGraph(Graph);
+            }
+            else
+            {
+                UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: async-load completed but graph still null"));
+            }
+        })
+    );
 }
 
 void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
@@ -952,7 +1086,7 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
 void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event)
 {
     FGameplayTag EventTag = Event.GetQuestTag();
-    if (EventTag.IsValid()) SetQuestDeactivated(EventTag, EDeactivationSource::Internal);
+    if (EventTag.IsValid()) SetQuestDeactivated(EventTag, Event.Source);
 }
 
 int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) const
@@ -982,7 +1116,7 @@ void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
     }
 }
 
-void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag)
+void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
@@ -1003,12 +1137,14 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
         if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
         {
             const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-            Registry->RecordResolution(QuestTag, OutcomeTag, Now);
+            Registry->RecordResolution(QuestTag, OutcomeTag, Now, Source);
         }
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s'"),
-        *QuestTag.ToString(), *OutcomeTag.ToString());
+    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s' source=%s"),
+        *QuestTag.ToString(),
+        *OutcomeTag.ToString(),
+        Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"));
 }
 
 void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)

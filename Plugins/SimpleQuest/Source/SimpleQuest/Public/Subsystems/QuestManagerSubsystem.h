@@ -10,6 +10,7 @@
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestManagerSubsystem.generated.h"
 
+
 struct FWorldStateFactRemovedEvent;
 struct FQuestActivationBlocker;
 struct FQuestPrereqStatus;
@@ -18,8 +19,11 @@ struct FQuestDeactivateRequestEvent;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
 struct FQuestActivationRequestEvent;
-struct FAbandonQuestEvent;
 struct FQuestDeactivatedEvent;
+struct FQuestlineStartRequestEvent;
+struct FQuestResolveRequestEvent;
+struct FQuestClearBlockRequestEvent;
+struct FQuestBlockRequestEvent;
 struct FQuestEventContext;
 struct FInstancedStruct;
 struct FQuestText;
@@ -85,21 +89,17 @@ protected:
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
 
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
 	UPROPERTY()
 	TObjectPtr<UWorldStateSubsystem> WorldState;
-	
-	FDelegateHandle GivenDelegateHandle;
-	FDelegateHandle ObjectiveTriggeredDelegateHandle;
-	FDelegateHandle AbandonDelegateHandle;
 
 	/**
 	 * Rich-record registry paired with WorldState's QuestState.<X>.Completed fact. Written atomically alongside
 	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestEventSubscription and UQuestWatcherComponent.
-	 * Holds the current session's resolution record per quest — outcome, timestamp, running count.
+	 * Holds the current session's resolution record per quest: outcome, timestamp, running count.
 	 */
 	UPROPERTY()
 	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
@@ -122,16 +122,33 @@ private:
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
 
-	void HandleAbandonQuestEvent(FGameplayTag Channel, const FAbandonQuestEvent& Event);
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
 	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
 	void HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event);
 	void HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	void HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event);
+	void HandleBlockRequest(FGameplayTag Channel, const FQuestBlockRequestEvent& Event);
+	void HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event);
+	void HandleResolveRequest(FGameplayTag Channel, const FQuestResolveRequestEvent& Event);
+	void HandleQuestlineStartRequest(FGameplayTag Channel, const FQuestlineStartRequestEvent& Event);
+	
+	FDelegateHandle GivenDelegateHandle;
+	FDelegateHandle GiverRegisteredDelegateHandle;
+	FDelegateHandle DeactivateEventDelegateHandle;
+	FDelegateHandle ActivationRequestDelegateHandle;
+	FDelegateHandle BlockRequestDelegateHandle;
+	FDelegateHandle ClearBlockRequestDelegateHandle;
+	FDelegateHandle ResolveRequestDelegateHandle;
+	FDelegateHandle QuestlineStartRequestDelegateHandle;
+
+	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
+
+	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
+	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
 
 	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestLive(FGameplayTag QuestTag);
-	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag);
+	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
 
@@ -149,19 +166,12 @@ private:
 	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
 	 */
 	TSet<FGameplayTag> RegisteredGiverQuestTags;
-	FDelegateHandle GiverRegisteredDelegateHandle;
-	FDelegateHandle DeactivateEventDelegateHandle;
-	FDelegateHandle ActivationRequestDelegateHandle;
 	
-	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
-
 	TMultiMap<FGameplayTag, UClass*> ClassFilteredSteps;
-	FDelegateHandle ClassBridgeHandle;	
+	FDelegateHandle ClassBridgeHandle;
 
 	void CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
-	
-	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
-	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
+
 
 	/*------------------------------------------------------------------------------------------------------------------
 	 * Deferred Completion

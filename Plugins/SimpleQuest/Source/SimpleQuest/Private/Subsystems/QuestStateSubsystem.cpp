@@ -21,7 +21,28 @@ bool UQuestStateSubsystem::HasResolved(FGameplayTag QuestTag) const
 int32 UQuestStateSubsystem::GetResolutionCount(FGameplayTag QuestTag) const
 {
 	const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag);
-	return Record ? Record->ResolutionCount : 0;
+	return Record ? Record->GetCount() : 0;
+}
+
+TArray<FQuestResolutionEntry> UQuestStateSubsystem::GetResolutionHistory(FGameplayTag QuestTag) const
+{
+	if (const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag))
+	{
+		return Record->History;
+	}
+	return TArray<FQuestResolutionEntry>();
+}
+
+FQuestResolutionEntry UQuestStateSubsystem::GetLatestResolution(FGameplayTag QuestTag) const
+{
+	if (const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag))
+	{
+		if (const FQuestResolutionEntry* Latest = Record->GetLatest())
+		{
+			return *Latest;
+		}
+	}
+	return FQuestResolutionEntry();
 }
 
 TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlockers(FGameplayTag QuestTag) const
@@ -106,17 +127,20 @@ FQuestPrereqStatus UQuestStateSubsystem::GetQuestPrereqStatus(FGameplayTag Quest
 	return FQuestPrereqStatus();
 }
 
-void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime)
+void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime, EQuestResolutionSource Source)
 {
 	if (!QuestTag.IsValid()) return;
 
 	FQuestResolutionRecord& Record = QuestResolutions.FindOrAdd(QuestTag);
-	Record.OutcomeTag = OutcomeTag;
-	Record.ResolutionTime = ResolutionTime;
-	Record.ResolutionCount++;
+	FQuestResolutionEntry& Entry = Record.History.Emplace_GetRef();
+	Entry.OutcomeTag = OutcomeTag;
+	Entry.ResolutionTime = ResolutionTime;
+	Entry.Source = Source;
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: recorded '%s' outcome='%s' (resolution #%d at t=%.2fs)"),
-		*QuestTag.ToString(), *OutcomeTag.ToString(), Record.ResolutionCount, Record.ResolutionTime);
+	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
+		*QuestTag.ToString(), *OutcomeTag.ToString(),
+		Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"),
+		Record.History.Num(), ResolutionTime);
 }
 
 void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status)

@@ -70,10 +70,10 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 	ConditionalBeginDestroy();
 }
 
-void UQuestObjective::ReportProgress(const FQuestObjectiveContext& InProgressData)
+void UQuestObjective::ReportProgress(const FQuestObjectiveContext& ProgressContext)
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), InProgressData.CurrentCount, InProgressData.RequiredCount, *GetFullName());
-	OnQuestObjectiveProgress.Broadcast(InProgressData);
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), ProgressContext.CurrentCount, ProgressContext.RequiredCount, *GetFullName());
+	OnQuestObjectiveProgress.Broadcast(ProgressContext);
 }
 
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const

@@ -23,7 +23,7 @@ public:
     /**
      * Publish a message on Channel. Walks the tag hierarchy from Channel up to root, notifying all subscribers on each ancestor.
      * Visited-set deduplication prevents double-firing at convergence points. Subscribers always receive the original published
-     * tag, not the ancestor being walked — a subscriber on Quest.Questline1 knows exactly which descendant fired.
+     * tag, not the ancestor being walked, so a subscriber on a parent tag, like Quest.Questline1, knows exactly which descendant fired.
      */
     template<typename T>
     void PublishMessage(FGameplayTag Channel, const T& Payload);

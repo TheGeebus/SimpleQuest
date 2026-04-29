@@ -236,7 +236,10 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				{
 					if (const FQuestResolutionRecord* Record = ResolutionRegistry->GetQuestResolution(QuestTag))
 					{
-						RecoveredOutcome = Record->OutcomeTag;
+						if (const FQuestResolutionEntry* Latest = Record->GetLatest())
+						{
+							RecoveredOutcome = Latest->OutcomeTag;
+						}
 					}
 				}
 

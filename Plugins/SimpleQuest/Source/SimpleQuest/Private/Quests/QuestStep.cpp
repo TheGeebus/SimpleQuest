@@ -107,7 +107,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
 }
 
-void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressData)
+void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressContext)
 {
-	OnNodeProgress.ExecuteIfBound(this, ProgressData);
+	OnNodeProgress.ExecuteIfBound(this, ProgressContext);
 }

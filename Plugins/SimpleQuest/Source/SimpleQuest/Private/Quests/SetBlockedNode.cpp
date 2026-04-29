@@ -28,7 +28,7 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 				}
 				if (Signals)
 				{
-					Signals->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(Tag));
+					Signals->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(Tag, EDeactivationSource::Internal));
 				}
 			}
 		}

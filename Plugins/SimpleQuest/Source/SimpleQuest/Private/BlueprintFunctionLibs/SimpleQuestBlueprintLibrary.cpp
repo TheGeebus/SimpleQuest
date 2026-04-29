@@ -3,13 +3,20 @@
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
-#include "Events/AbandonQuestEvent.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "GameplayTagsManager.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"
+#include "Events/QuestActivationRequestEvent.h"
+#include "Events/QuestBlockRequestEvent.h"
+#include "Events/QuestClearBlockRequestEvent.h"
+#include "Events/QuestDeactivateRequestEvent.h"
+#include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestGivenEvent.h"
+#include "Events/QuestlineStartRequestEvent.h"
+#include "Events/QuestResolveRequestEvent.h"
 #include "Subsystems/QuestManagerSubsystem.h"
+
 
 // -------------------------------------------------------------------------
 // Private helpers
@@ -82,14 +89,60 @@ int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* World
 // Quest actions
 // -------------------------------------------------------------------------
 
-void USimpleQuestBlueprintLibrary::AbandonQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+void USimpleQuestBlueprintLibrary::DeactivateQuest(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(QuestTag, FAbandonQuestEvent(QuestTag));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(QuestTag, EDeactivationSource::External));
+    }
 }
 
 void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ActivateQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestActivationRequest, FQuestActivationRequestEvent(QuestTag, FQuestObjectiveActivationParams()));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::SetQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestBlockRequest, FQuestBlockRequestEvent(QuestTag));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ClearQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestClearBlockRequest, FQuestClearBlockRequestEvent(QuestTag));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ResolveQuest(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag, bool bOverrideExisting)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestResolveRequest, FQuestResolveRequestEvent(QuestTag, OutcomeTag, bOverrideExisting));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestlineStartRequest, FQuestlineStartRequestEvent(QuestlineGraph));
+    }
 }
 
 // -------------------------------------------------------------------------

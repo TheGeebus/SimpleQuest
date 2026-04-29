@@ -70,4 +70,14 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationParams
 	 */
 	UPROPERTY(BlueprintReadWrite)
 	FInstancedStruct CustomData;
+
+	/**
+	 * The outcome tag that triggered this activation when the activator is an upstream content node's named
+	 * outcome. Invalid for non-outcome-driven activations (top-level entry, giver gate, external publish without
+	 * specific outcome). Stamped by UQuestManagerSubsystem::ActivateNodeByTag immediately before calling
+	 * Activate(); read by HandleOnNodeStarted's UQuest branch (post-prereq-gate) to drive inner-entry routing.
+	 * Consumed and cleared after use.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	FGameplayTag IncomingOutcomeTag;
 };

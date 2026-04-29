@@ -17,6 +17,7 @@ class SIMPLEQUEST_API UQuest : public UQuestNodeBase
 	GENERATED_BODY()
 
 	friend class FQuestlineGraphCompiler;
+	friend class UQuestManagerSubsystem;
 
 protected:
 	/** Tags of nodes to activate when this quest starts (the "Any Outcome" path). Compiler-written from the inner Entry node's Any Outcome pin. */
@@ -24,13 +25,24 @@ protected:
 	TArray<FName> EntryStepTags;
 
 	/**
-	 * Per-path, source-filtered entry routing. When this quest is entered via a specific completion path identity from a
-	 * specific source, each FQuestEntryDestination in the matching list fires only if its SourceFilter matches the
-	 * IncomingSourceTag passed by the activating parent. Compiler-written from the inner Entry node's exposed specs: one
-	 * entry per spec; spec.Outcome.GetTagName() is the path identity for static placements.
+	 * Per-path, source-filtered entry routing. ...
 	 */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	TMap<FName, FQuestEntryRouteList> EntryStepTagsByPath;
+
+	/**
+	 * Per-cascade activation snapshots. Each call to UQuestManagerSubsystem::ActivateNodeByTag for this Quest
+	 * appends one snapshot of PendingActivationParams to this queue. HandleOnNodeStarted drains the queue when
+	 * ActivateInternal fires (immediately or via TryActivateDeferred) and fires entry routes for each queued
+	 * cascade. Necessary for fan-in convergence patterns where multiple upstream outcomes feed into the same
+	 * Quest while its prereq is unmet: without this queue, only the most-recent cascade's IncomingOutcomeTag
+	 * survives when the prereq satisfies and earlier cascades' entry routes are silently dropped.
+	 */
+	UPROPERTY(Transient)
+	TArray<FQuestObjectiveActivationParams> PendingEntryActivations;
+
+	/** Clears the per-cascade queue between PIE sessions. Base ResetTransientState handles PendingActivationParams. */
+	virtual void ResetTransientState() override;
 
 public:
 	FORCEINLINE const TArray<FName>& GetEntryStepTags() const { return EntryStepTags; }

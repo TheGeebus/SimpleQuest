@@ -44,7 +44,7 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
         }
     }
 
-    // Defensive: Blockers pin (unique to On Give Blocked) — array of FQuestActivationBlocker.
+    // Defensive: Blockers pin (unique to On Give Blocked) - array of FQuestActivationBlocker.
     if (bExposeOnGiveBlocked && !FindPin(TEXT("Blockers")))
     {
         FCreatePinParams PinParams;
@@ -73,6 +73,8 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
     // Strip exec output pins for events the designer hasn't exposed via the bExpose* properties. The proxy class
     // delegate properties still exist (Super generated a pin for each), so we surgically remove the ones we don't
     // want to surface. The corresponding subscription is gated on the proxy side via the ExposedEvents bitmask.
+    // ExpandNode reinstates these temporarily so Super::ExpandNode's delegate iteration succeeds; see ExpandNode
+    // body for the recreate/cleanup pair.
     auto StripIfHidden = [this](const TCHAR* PinName, bool bExpose)
     {
         if (!bExpose)
@@ -102,7 +104,7 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
     {
         if (UEdGraphPin* Pin = FindPin(TEXT("Blockers"))) RemovePin(Pin);
     }
-    // GiverActor is shared by On Given and On Give Blocked — strip only when BOTH are hidden.
+    // GiverActor is shared by On Given and On Give Blocked. Strip only when BOTH are hidden.
     if (!bExposeOnStarted && !bExposeOnGiveBlocked)
     {
         if (UEdGraphPin* Pin = FindPin(TEXT("GiverActor"))) RemovePin(Pin);
@@ -118,17 +120,76 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
 
 void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
 {
+    // Super::ExpandNode (UK2Node_BaseAsyncTask) iterates every BlueprintAssignable multicast delegate on the
+    // proxy class and looks for a matching pin on this K2 node via FindPin. If a pin's been stripped (because
+    // the matching bExpose* flag is false), it errors with "Cannot find execution pin for delegate" and bails
+    // before generating the AsyncTask temp variable. Workaround: temporarily reinstate the missing pins so
+    // Super sees the full set, then strip them again after Super finishes. The temp pins have no user wires
+    // (the user authored against the stripped pin set), so Super's intermediate-graph delegate handlers are
+    // dead. Combined with the proxy's ExposedEventsMask gating subscriptions, runtime cost is zero and no
+    // unexpected dispatch occurs even if the designer ignored an orphan-wire warning during compile.
+    TArray<FName> TempPinNames;
+
+    auto EnsureExecPin = [this, &TempPinNames](const TCHAR* PinName, bool bExpose)
+    {
+        if (!bExpose && !FindPin(PinName))
+        {
+            FCreatePinParams Params;
+            CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, PinName, Params);
+            TempPinNames.Add(PinName);
+        }
+    };
+    EnsureExecPin(TEXT("OnActivated"),   bExposeOnActivated);
+    EnsureExecPin(TEXT("OnEnabled"),     bExposeOnEnabled);
+    EnsureExecPin(TEXT("OnDisabled"),    bExposeOnDisabled);
+    EnsureExecPin(TEXT("OnGiveBlocked"), bExposeOnGiveBlocked);
+    EnsureExecPin(TEXT("OnStarted"),     bExposeOnStarted);
+    EnsureExecPin(TEXT("OnCompleted"),   bExposeOnCompleted);
+    EnsureExecPin(TEXT("OnDeactivated"), bExposeOnDeactivated);
+    EnsureExecPin(TEXT("OnProgress"),    bExposeOnProgress);
+    EnsureExecPin(TEXT("OnBlocked"),     bExposeOnBlocked);
+
+    // Same recreate for the unique-to-one-delegate data pins. Super's iteration also looks for the delegate's
+    // parameter pins by name when expanding each handler; if PrereqStatus / Blockers / GiverActor / OutcomeTag
+    // are missing, the per-delegate connection step fails the same way.
+    if (!bExposeOnActivated && !FindPin(TEXT("PrereqStatus")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FQuestPrereqStatus::StaticStruct(),
+            TEXT("PrereqStatus"), Params);
+        TempPinNames.Add(TEXT("PrereqStatus"));
+    }
+    if (!bExposeOnGiveBlocked && !FindPin(TEXT("Blockers")))
+    {
+        FCreatePinParams Params;
+        Params.ContainerType = EPinContainerType::Array;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FQuestActivationBlocker::StaticStruct(),
+            TEXT("Blockers"), Params);
+        TempPinNames.Add(TEXT("Blockers"));
+    }
+    if (!bExposeOnStarted && !bExposeOnGiveBlocked && !FindPin(TEXT("GiverActor")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Object, AActor::StaticClass(), TEXT("GiverActor"), Params);
+        TempPinNames.Add(TEXT("GiverActor"));
+    }
+    if (!bExposeOnCompleted && !FindPin(TEXT("OutcomeTag")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FGameplayTag::StaticStruct(),
+            TEXT("OutcomeTag"), Params);
+        TempPinNames.Add(TEXT("OutcomeTag"));
+    }
+
     Super::ExpandNode(CompilerContext, SourceGraph);
 
     // Base UK2Node_AsyncAction creates: factory call, AsyncTask temp variable, delegate handlers, delegate-param
-    // assignment statements. What it does NOT create — at least when the factory function lives on a separate
-    // class from the proxy class, as we're set up — is the assignment that copies the factory's return value into
+    // assignment statements. What it does NOT create - at least when the factory function lives on a separate
+    // class from the proxy class, as we're set up - is the assignment that copies the factory's return value into
     // the AsyncTask temp variable. Result: AsyncTask temp stays null, any designer wire from AsyncTask reads null
     // at runtime, Cancel crashes. Splice the missing assignment in here.
 
-    // 1. Find the AsyncTask temp variable. The four temp variables base creates are typed FGameplayTag (×2),
-    //    FQuestEventContext, and UQuestEventSubscription* — only the last is object-typed, so filter by
-    //    PinSubCategoryObject pointing at our proxy class.
+    // 1. Find the AsyncTask temp variable by type
     UK2Node_TemporaryVariable* AsyncTaskTemp = nullptr;
     for (UEdGraphNode* Node : SourceGraph->Nodes)
     {
@@ -196,8 +257,8 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     Assignment->NotifyPinConnectionListChanged(AssignValue);
 
     // 7. Stuff the computed exposure mask into the factory call's ExposedEvents parameter pin. The pin is hidden
-    //    via the factory function's HidePin meta — designers configure exposure via the K2 node's bExpose* bools
-    //    instead. Setting the per-instance DefaultValue is what makes those bools take effect at runtime.
+    //    via the factory function's HidePin meta. Designers configure exposure via the K2 node's bExpose* booleans
+    //    instead. Setting the per-instance DefaultValue is what makes those booleans take effect at runtime.
     const int32 Mask = ComputeExposureMask();
     if (UEdGraphPin* MaskPin = FactoryCall->FindPin(TEXT("ExposedEvents")))
     {
@@ -216,6 +277,18 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
 
     UE_LOG(LogSimpleQuest, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
+
+    // Cleanup: remove the temp pins so the K2 node's saved pin set matches the bExpose* configuration. Without
+    // this, the temp pins persist across save/load and surface as ghost pins in the graph editor on next open.
+    // Done after the existing custom expansion finishes so any code that runs between Super and here can still
+    // FindPin the temp pins if it needs to.
+    for (const FName& Name : TempPinNames)
+    {
+        if (UEdGraphPin* TempPin = FindPin(Name))
+        {
+            RemovePin(TempPin);
+        }
+    }
 }
 
 void UK2Node_BindToQuestEvent::PostPlacedNewNode()
@@ -229,7 +302,7 @@ void UK2Node_BindToQuestEvent::PostPlacedNewNode()
     // (it iterates GetProxyClass(), which is still null at that moment).
     //
     // Setting the proxy fields here means base's AllocateDefaultPins sees the correct proxy reference
-    // and generates the full pin set naturally — no defensive overrides needed downstream.
+    // and generates the full pin set naturally. No defensive overrides needed downstream.
     if (UFunction* FactoryFunc = USimpleQuestBlueprintLibrary::StaticClass()->FindFunctionByName(
         GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, BindToQuestEvent)))
     {
@@ -244,7 +317,7 @@ void UK2Node_BindToQuestEvent::PostEditChangeProperty(FPropertyChangedEvent& Pro
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
 
-    // ReconstructNode on any bExpose* toggle — the pin set is keyed off these flags. ReconstructNode preserves
+    // ReconstructNode on any bExpose* toggle: the pin set is keyed off these flags. ReconstructNode preserves
     // wires to surviving pins automatically; wires to pins that disappear get reported as orphaned during the
     // next compile, which is the standard UE behavior for configurable K2 nodes.
     if (PropertyChangedEvent.Property)
@@ -457,14 +530,14 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         }
     }
 
-    // Fallback to base — covers Begin exec input, hidden WorldContext, and anything else we haven't named.
+    // Fallback to base. Covers Begin exec input, hidden WorldContext, and anything else we haven't named.
     Super::GetPinHoverText(Pin, HoverTextOut);
 }
 
 FSlateIcon UK2Node_BindToQuestEvent::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FLinearColor::White;
-	// Reuses the existing Questline class icon registered by FSimpleQuestEditor::StartupModule — same brush
+	// Reuses the existing Questline class icon registered by FSimpleQuestEditor::StartupModule - same brush
 	// UK2Node_CompleteObjectiveWithOutcome uses. No new style-set entry needed.
 	return FSlateIcon(TEXT("SimpleQuestStyle"), TEXT("ClassIcon.QuestlineGraph"));
 }
@@ -475,7 +548,7 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     if (!ActionRegistrar.IsOpenForRegistration(ActionKey)) return;
 
     // Factory lives on USimpleQuestBlueprintLibrary (not on UQuestEventSubscription) so UK2Node_AsyncAction's
-    // base iteration doesn't scan it — this K2 node is the only entry point for the Bind To Quest Event action.
+    // base iteration doesn't scan it - this K2 node is the only entry point for the Bind To Quest Event action.
     UFunction* FactoryFunc = USimpleQuestBlueprintLibrary::StaticClass()->FindFunctionByName(
         GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, BindToQuestEvent));
     if (!FactoryFunc) return;
@@ -486,12 +559,12 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     Spawner->NodeClass = GetClass();
 
     // Palette-row icon. The palette uses DefaultMenuSignature.Icon rather than calling GetIconAndTint on
-    // a template node, so we have to set it explicitly — otherwise the right-click search shows the default
+    // a template node, so we have to set it explicitly, otherwise the right-click search shows the default
     // F (function) glyph regardless of what GetIconAndTint returns.
     Spawner->DefaultMenuSignature.Icon = FSlateIcon(TEXT("SimpleQuestStyle"), TEXT("ClassIcon.QuestlineGraph"));
     Spawner->DefaultMenuSignature.IconTint = FLinearColor::White;
 
-    // CustomizeNodeDelegate — post-spawn hook that populates ProxyFactoryFunctionName / ProxyFactoryClass /
+    // CustomizeNodeDelegate: post-spawn hook that populates ProxyFactoryFunctionName / ProxyFactoryClass /
     // ProxyClass on the node. Without it, the base UK2Node_AsyncAction machinery has no idea what proxy class
     // this node wraps and can't auto-generate input + output pins. Mirrors what the base's GetMenuActions does.
     TWeakObjectPtr<UFunction> FactoryFuncWeak = MakeWeakObjectPtr(FactoryFunc);

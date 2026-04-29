@@ -310,6 +310,120 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             }
         }
     }
+    // UQuest inner-entry activation. When Activate defers due to unmet prereqs, this branch doesn't run; when prereqs
+    // satisfy (immediately or via TryActivateDeferred firing), ActivateInternal runs, OnNodeStarted fires, this branch
+    // runs and drains the per-cascade queue populated by ActivateNodeByTag.
+    if (UQuest* QuestNode = Cast<UQuest>(Node))
+    {
+        const FName NodeTagName = Node->GetQuestTag().GetTagName();
+
+        // Drain the per-cascade snapshot queue. For the immediate-prereq-satisfied case, the queue holds exactly
+        // one entry (the cascade that just fired this OnNodeStarted). For the deferred case, the queue may hold
+        // multiple — every cascade that arrived during the deferral window stamped its own snapshot. All entries
+        // fire here so fan-in convergence patterns route correctly.
+        TArray<FQuestObjectiveActivationParams> DrainedCascades;
+        Swap(DrainedCascades, QuestNode->PendingEntryActivations);
+        QuestNode->PendingActivationParams = FQuestObjectiveActivationParams{};
+
+        // Defensive synthesis for paths that fire OnNodeStarted without going through ActivateNodeByTag's queue
+        // append (e.g., direct Activate calls). Synthesizes one empty cascade so Any-Outcome entries still fire.
+        if (DrainedCascades.IsEmpty())
+        {
+            DrainedCascades.Add(FQuestObjectiveActivationParams{});
+        }
+
+        // Use the first cascade's params for Any-Outcome entries (these fire ONCE per OnNodeStarted, not per
+        // cascade — they're unconditional "Quest started" entries). Matches pre-queue behavior where the first
+        // cascade's stamping won via diamond convergence on subsequent calls.
+        const FQuestObjectiveActivationParams& FirstCascade = DrainedCascades[0];
+        TArray<FGameplayTag> AnyOutcomeChain = FirstCascade.OriginChain;
+        if (QuestNode->GetQuestTag().IsValid())
+        {
+            AnyOutcomeChain.Add(QuestNode->GetQuestTag());
+        }
+
+        auto StampWithParams = [this, &QuestNode](const FName& DestTagName,
+            const FQuestObjectiveActivationParams& Params, const TArray<FGameplayTag>& Chain)
+        {
+            if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
+            {
+                DestInstance->PendingActivationParams = Params;
+                DestInstance->PendingActivationParams.OriginTag = QuestNode->GetQuestTag();
+                DestInstance->PendingActivationParams.OriginChain = Chain;
+            }
+        };
+
+        // Always-activate Any-Outcome entries. Fire ONCE per OnNodeStarted, not per cascade.
+        for (const FName& StepTag : QuestNode->GetEntryStepTags())
+        {
+            StampWithParams(StepTag, FirstCascade, AnyOutcomeChain);
+            ActivateNodeByTag(StepTag);
+        }
+
+        // Per-cascade outcome-specific routing. Each queued cascade fires its own entry routes — this is the
+        // path that fan-in convergence patterns rely on (Q1's Victory and Q2's Defeat both routing into separate
+        // inner steps when the Quest's prereq finally satisfies).
+        for (const FQuestObjectiveActivationParams& CascadeParams : DrainedCascades)
+        {
+            const FGameplayTag IncomingOutcomeTag = CascadeParams.IncomingOutcomeTag;
+            const FName IncomingSourceTag = CascadeParams.OriginTag.IsValid()
+                ? CascadeParams.OriginTag.GetTagName()
+                : NAME_None;
+
+            // Write entry outcome fact for this cascade's outcome (per-cascade — different cascades may carry
+            // different outcomes, each writing its own entry path fact for inner-graph prereqs to read).
+            if (IncomingOutcomeTag.IsValid() && WorldState)
+            {
+                const FName EntryFactName = FQuestStateTagUtils::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
+                if (!EntryFactName.IsNone())
+                {
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: setting entry outcome fact '%s' for quest '%s'"),
+                        *EntryFactName.ToString(), *NodeTagName.ToString());
+                    WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+                }
+            }
+
+            // Build chain for this cascade.
+            TArray<FGameplayTag> InnerForwardChain = CascadeParams.OriginChain;
+            if (QuestNode->GetQuestTag().IsValid())
+            {
+                InnerForwardChain.Add(QuestNode->GetQuestTag());
+            }
+
+            // Outcome-specific, source-filtered entries.
+            if (IncomingOutcomeTag.IsValid())
+            {
+                if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))
+                {
+                    for (const FQuestEntryDestination& Entry : RouteList->Destinations)
+                    {
+                        if (Entry.SourceFilter == IncomingSourceTag)
+                        {
+                            StampWithParams(Entry.DestTag, CascadeParams, InnerForwardChain);
+                            ActivateNodeByTag(Entry.DestTag);
+                        }
+                    }
+                }
+            }
+
+            // Any-outcome-from-source entries — bucket keyed by invalid FGameplayTag. Fires when the incoming
+            // source matches, regardless of which specific outcome triggered entry.
+            if (IncomingSourceTag != NAME_None)
+            {
+                if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByPath().Find(NAME_None))
+                {
+                    for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
+                    {
+                        if (Entry.SourceFilter == IncomingSourceTag)
+                        {
+                            StampWithParams(Entry.DestTag, CascadeParams, InnerForwardChain);
+                            ActivateNodeByTag(Entry.DestTag);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
@@ -429,7 +543,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         return;
     }
 
-    // Cascade origin fallback: ChainToNextNodes pre-stamps OriginTag + OriginChain for every cascade destination as
+    // Cascade origin fallback: ChainToNextNodes pre-stamps OriginTag and OriginChain for every cascade destination as
     // of Piece D, so this block is effectively a no-op on the normal cascade path. Retained as a safety net for any
     // direct caller that passes IncomingSourceTag without pre-stamping. Guard on empty OriginChain so the chain
     // propagation built by ChainToNextNodes isn't stomped with a double-append.
@@ -447,92 +561,30 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         }
     }
 
-    (*InstancePtr)->Activate(NodeTag);
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
-        *NodeTagName.ToString(), *IncomingSourceTag.ToString(), *IncomingOutcomeTag.ToString());
+    // Stash the incoming outcome on the instance so HandleOnNodeStarted's UQuest branch can route inner entries
+    // post-prereq-gate. UQuest's inner-entry activation used to run inline below this Activate call (pre-fix),
+    // bypassing UQuestNodeBase::Activate's deferred-prereq path. Routing it through HandleOnNodeStarted ensures
+    // inner entries activate only after ActivateInternal actually fires - synchronously when prereqs are
+    // satisfied immediately, or later via TryActivateDeferred when a leaf fact arrives.
+    (*InstancePtr)->PendingActivationParams.IncomingOutcomeTag = IncomingOutcomeTag;
 
+    // For UQuest containers, snapshot this cascade's params into the per-cascade queue. HandleOnNodeStarted
+    // drains the queue and fires entry routes for each cascade - necessary so fan-in convergence patterns
+    // (multiple upstream outcomes converging at a single deferred Quest) all route correctly when the prereq
+    // satisfies. Without this snapshot, only the most-recently-stamped IncomingOutcomeTag would survive,
+    // dropping earlier cascades.
     if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
     {
-        // Write entry outcome fact for prerequisite expressions within the inner graph.
-        if (IncomingOutcomeTag.IsValid() && WorldState)
-        {
-            const FName EntryFactName = FQuestStateTagUtils::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
-            if (!EntryFactName.IsNone())
-            {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: setting entry outcome fact '%s' for quest '%s'"),
-                    *EntryFactName.ToString(), *NodeTagName.ToString());
-                WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
-            }
-        }
-
-        // Quest-boundary origin forwarding: take the chain that was stamped on the Quest by whoever cascaded into it
-        // (outer ChainToNextNodes, a Piece B/C event, or a manual ActivateNodeByTag call), extend it with this Quest's
-        // own tag, and pre-stamp every inner entry destination so they receive the full history rather than starting
-        // fresh. Consume + clear so re-entering the Quest later starts from a fresh stamp.
-        FQuestObjectiveActivationParams InnerForwardPayload = QuestNode->PendingActivationParams;
-        TArray<FGameplayTag> InnerForwardChain = InnerForwardPayload.OriginChain;
-        if (QuestNode->GetQuestTag().IsValid())
-        {
-            InnerForwardChain.Add(QuestNode->GetQuestTag());
-        }
-        QuestNode->PendingActivationParams = FQuestObjectiveActivationParams{};
-
-        auto StampInnerEntry = [this, &InnerForwardPayload, &InnerForwardChain, &QuestNode](const FName& DestTagName)
-        {
-            if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
-            {
-                DestInstance->PendingActivationParams = InnerForwardPayload;
-                DestInstance->PendingActivationParams.OriginTag = QuestNode->GetQuestTag();
-                DestInstance->PendingActivationParams.OriginChain = InnerForwardChain;
-            }
-        };
-
-        // Always activate the Any-Outcome entry paths — unconditional, no source filter.
-        for (const FName& StepTag : QuestNode->GetEntryStepTags())
-        {
-            StampInnerEntry(StepTag);
-            ActivateNodeByTag(StepTag);
-        }
-
-        /**
-         * Outcome-specific, source-filtered entries. Each destination fires only when its SourceFilter matches the IncomingSourceTag.
-         * This is where the per-source routing protocol discriminates two specs producing the same outcome from different sources.
-         */
-        if (IncomingOutcomeTag.IsValid())
-        {
-            if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))
-            {
-                for (const FQuestEntryDestination& Entry : RouteList->Destinations)
-                {
-                    if (Entry.SourceFilter == IncomingSourceTag)
-                    {
-                        StampInnerEntry(Entry.DestTag);
-                        ActivateNodeByTag(Entry.DestTag);
-                    }
-                }
-            }
-        }
-
-        /**
-         * Any-outcome-from-source entries — bucket keyed by invalid FGameplayTag. Fires when the incoming source matches,
-         * regardless of which specific outcome triggered entry. Gated on IncomingSourceTag so we don't dispatch any-outcome
-         * routes when no source context exists (e.g., synthetic activation paths).
-         */
-        if (IncomingSourceTag != NAME_None)
-        {
-            if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByPath().Find(NAME_None))
-            {
-                for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
-                {
-                    if (Entry.SourceFilter == IncomingSourceTag)
-                    {
-                        StampInnerEntry(Entry.DestTag);
-                        ActivateNodeByTag(Entry.DestTag);
-                    }
-                }
-            }
-        }
+        QuestNode->PendingEntryActivations.Add(QuestNode->PendingActivationParams);
     }
+
+    (*InstancePtr)->Activate(NodeTag);
+    
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
+        *NodeTagName.ToString(),
+        *IncomingSourceTag.ToString(),
+        *IncomingOutcomeTag.ToString());
+
 }
 
 void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
@@ -610,13 +662,19 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
 void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source)
 {
-	if (!QuestTag.IsValid() || !WorldState) return;
+    if (!QuestTag.IsValid() || !WorldState) return;
 
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed)))
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped — already completed"), *QuestTag.ToString());
-		return;
-	}
+    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed)))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already completed"), *QuestTag.ToString());
+        return;
+    }
+
+    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated)))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already deactivated"), *QuestTag.ToString());
+        return;
+    }
     
     RecentGiverActors.Remove(QuestTag);
     
@@ -805,7 +863,19 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 
     const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked);
     const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
-    if (BlockedFact.IsValid()) WorldState->AddFact(BlockedFact);
+    if (!BlockedFact.IsValid()) return;
+
+    // Idempotency guard: symmetric with the already-deactivated guard in SetQuestDeactivated. Spamming
+    // SetQuestBlocked on an already-blocked quest would otherwise bump the WorldState ref-count and re-publish
+    // the deactivation request to any third-party subscribers, neither of which reflects a genuine state
+    // transition.
+    if (WorldState->HasFact(BlockedFact))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
+        return;
+    }
+
+    WorldState->AddFact(BlockedFact);
 
     if (QuestSignalSubsystem)
     {
@@ -822,8 +892,19 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
     const FName FactName = FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked);
     const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
-    if (BlockedFact.IsValid()) WorldState->ClearFact(BlockedFact);
-    // Deactivated intentionally not cleared — the target's Activate input clears it on re-entry.
+    if (!BlockedFact.IsValid()) return;
+
+    // Symmetric with the already-blocked guard in HandleBlockRequest. ClearFact is naturally idempotent at the
+    // WorldState layer, but suppressing the "cleared" log when there's nothing to clear keeps panel observability
+    // honest and avoids implying a state transition that didn't happen.
+    if (!WorldState->HasFact(BlockedFact))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleClearBlockRequest: '%s' skipped — not currently blocked"), *QuestTag.ToString());
+        return;
+    }
+
+    WorldState->ClearFact(BlockedFact);
+    // Deactivated intentionally not cleared: the target's Activate input clears it on re-entry.
 
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared"), *QuestTag.ToString());
 }

@@ -282,12 +282,32 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
             AddError(FString::Printf(TEXT("[%s] A content node has an empty label. All Quest and Step nodes must have a label before compiling."), *TagPrefix), ContentNode);
             continue;
         }
-        if (LabelMap.Contains(Label))
-        {
-            AddError(FString::Printf(TEXT("[%s] Duplicate node label '%s'. Labels must be unique within a graph."), *TagPrefix, *Label), ContentNode);
-            continue;
-        }
-        LabelMap.Add(Label, ContentNode);
+    	if (LabelMap.Contains(Label))
+    	{
+    		AddError(FString::Printf(TEXT("[%s] Duplicate node label '%s'. Labels must be unique within a graph."), *TagPrefix, *Label), ContentNode);
+    		continue;
+    	}
+
+    	// Reserved segments — labels that would compose into ambiguous compiled tags. Currently warn-only since the
+    	// resulting tags still parse correctly; just visually confusing in pickers, debug logs, and tag-derived UI.
+    	// Tightens to error-or-rename if dual-tag finalization touches the namespace and we want hard guarantees.
+    	static const TSet<FString> ReservedSegments = {
+        	TEXT("Quest"),                                    // the runtime namespace segment itself (would yield SimpleQuest.Quest.<X>.Quest)
+			TEXT("QuestState"),                               // sibling state namespace
+			TEXT("QuestPrereqRule"),                               // sibling prereq-rule namespace
+			TEXT("Path"), TEXT("EntryPath"),                  // path-fact sub-suffixes (FQuestStateTagUtils)
+			FQuestStateTagUtils::Leaf_Live,
+			FQuestStateTagUtils::Leaf_Completed,
+			FQuestStateTagUtils::Leaf_Blocked,
+			FQuestStateTagUtils::Leaf_PendingGiver,
+			FQuestStateTagUtils::Leaf_Deactivated,
+		};
+    	if (ReservedSegments.Contains(Label))
+    	{
+    		AddWarning(FString::Printf(TEXT("[%s] Node label '%s' matches a reserved tag segment — compiles to an ambiguous tag (e.g. SimpleQuest.Quest.<...>.%s). "
+				"Recommend renaming. (Warning only — compile proceeds.)"), *TagPrefix, *Label, *Label), ContentNode);
+    	}
+    	LabelMap.Add(Label, ContentNode);
 
         // Create the appropriate runtime instance
         UQuestNodeBase* Instance = nullptr;

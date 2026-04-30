@@ -127,8 +127,8 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     // Tag prefix this asset owns. Only CompiledNodes entries whose key starts with "<RootTagPrefix>." belong to this
     // questline's content tree; everything else (Util_* utility keys, prereq-rule monitor tags namespaced under
-    // SimpleQuest.PrereqRule.*, any future foreign-namespace registrations) must be skipped. Without this filter, foreign
-    // ancestors flow into MissingIntermediates and cascade non-zero LinkDepth onto every local item — which strips their
+    // SimpleQuest.QuestPrereqRule.*, any future foreign-namespace registrations) must be skipped. Without this filter, foreign
+    // ancestors flow into MissingIntermediates and cascade non-zero LinkDepth onto every local item, which strips their
     // styling and routes their double-click through the cross-asset branch with a null SourceGraph (silent navigation no-op).
     const FString RootTagPrefixStr = FString::Printf(TEXT("SimpleQuest.Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID));
     const FName   RootTagPrefix(*RootTagPrefixStr);
@@ -139,8 +139,8 @@ void SQuestlineOutlinerPanel::RebuildTree()
     //   bIsLinkedQuestlinePlacement (set by compiler) → LinkedGraph (blue-bold per original spec)
     //   UQuestStep runtime class                       → Step (reserves the slot; same default styling as Quest for now)
     //   anything else                                  → Quest (default)
-    // Both signals serialize with the asset, so the panel classifies correctly on first display after editor load —
-    // no recompile required. (Earlier draft used CompiledEditorNodes which is UPROPERTY(Transient) and cleared on load.)
+    // Both signals serialize with the asset, so the panel classifies correctly on first display after editor load.
+    // No recompile required. (Earlier draft used CompiledEditorNodes which is UPROPERTY(Transient) and cleared on load.)
     for (const auto& Pair : CompiledNodes)
     {
         if (!IsLocalContentTag(Pair.Key)) continue;

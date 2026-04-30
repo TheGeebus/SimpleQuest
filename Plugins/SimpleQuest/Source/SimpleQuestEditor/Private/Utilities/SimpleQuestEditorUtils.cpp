@@ -80,7 +80,8 @@ namespace
 
         const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
         const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
-		const FString ExpectedPrefix = FString::Printf(TEXT("SimpleQuest.Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));        const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
+		const FString ExpectedPrefix = FString::Printf(TEXT("SimpleQuest.Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));
+    	const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
         if (!CompiledTagStr.StartsWith(ExpectedPrefix)) return Result;
         const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
         const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
@@ -91,7 +92,7 @@ namespace
 
     	// Filter to assets that actually reference the home asset's package. An asset that doesn't reference
     	// the home asset can't have a LinkedQuestline node pointing at it, so its tags can't legitimately be
-    	// contextualized inlinings of this node — they're at most coincidental leaf-name collisions. Without
+    	// contextualized inlinings of this node. They're at most coincidental leaf-name collisions. Without
     	// this filter, two unrelated graphs with same-named leaf nodes (e.g. both have a "Step") cross-attribute
     	// each other's actor watchers via the suffix-match logic below, producing false "(via OtherAsset)"
     	// entries on the expanded node panel.

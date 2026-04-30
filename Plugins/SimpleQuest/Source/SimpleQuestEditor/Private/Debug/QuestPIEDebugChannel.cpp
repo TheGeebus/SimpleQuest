@@ -145,19 +145,19 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	if (!WorldState) return EQuestNodeDebugState::Unknown;
 
-	// Priority order: Blocked > PendingGiver > Active > Completed > Deactivated. See agenda item 7 Session A discussion.
+	// Priority order: Blocked > Completed > PendingGiver > Live > Deactivated
 	const FName TagName = RuntimeTag.GetTagName();
-	const FGameplayTag BlockedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked), /*ErrorIfNotFound*/ false);
+	const FGameplayTag BlockedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked), false);
 	if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact)) return EQuestNodeDebugState::Blocked;
-
-	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver), false);
-	if (PendingGiverFact.IsValid() && WorldState->HasFact(PendingGiverFact)) return EQuestNodeDebugState::PendingGiver;
-
-	const FGameplayTag LiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live), false);
-	if (LiveFact.IsValid() && WorldState->HasFact(LiveFact)) return EQuestNodeDebugState::Live;
-	
+		
 	const FGameplayTag CompletedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed), false);
 	if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact)) return EQuestNodeDebugState::Completed;
+	
+	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver), false);
+	if (PendingGiverFact.IsValid() && WorldState->HasFact(PendingGiverFact)) return EQuestNodeDebugState::PendingGiver;
+	
+	const FGameplayTag LiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live), false);
+	if (LiveFact.IsValid() && WorldState->HasFact(LiveFact)) return EQuestNodeDebugState::Live;
 
 	const FGameplayTag DeactivatedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated), false);
 	if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact)) return EQuestNodeDebugState::Deactivated;

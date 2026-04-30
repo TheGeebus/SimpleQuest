@@ -355,7 +355,11 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 					*TagPrefix,
 					*Label),
 					LinkedNode);
-				Instance = NewObject<UQuest>(RootGraph);
+				{
+					UQuest* LinkedInstance = NewObject<UQuest>(RootGraph);
+					LinkedInstance->bIsLinkedQuestlinePlacement = true;
+					Instance = LinkedInstance;
+				}
 			}
 			else
 			{
@@ -402,6 +406,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 				}
 
 				UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
+				QuestInstance->bIsLinkedQuestlinePlacement = true;
 
 				/**
 				 * Per-path boundary tag map for the linked graph. Keys are completion path identities as FNames (matching

@@ -1068,37 +1068,42 @@ void FQuestlineGraphEditor::ClearNodeHighlight()
     }
 }
 
-static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid)
+// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
+// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
+// preserved when descending into an inline Quest's inner graph. See QuestlineGraphCompiler.cpp lines 429-430 for the
+// compiler-side push and line 465 for the assignment to QuestContentGuid that this lookup pairs with.
+static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
 {
     if (!Graph) return {};
 
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        // GUID match — this node is the target
         if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
         {
-            if (Content->QuestGuid == ContentGuid)
+            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
+            if (Combined == ContentGuid)
                 return { Graph, Node };
         }
 
-        // Recurse into quest inner graphs
+        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
         if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
         {
             if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
             {
-                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid);
+                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
                 if (Inner.IsValid()) return Inner;
             }
         }
 
-        // Recurse into linked questline graphs
+        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
         if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
         {
             if (!LinkedNode->LinkedGraph.IsNull())
             {
                 if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
                 {
-                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid);
+                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
+                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
                     if (Linked.IsValid()) return Linked;
                 }
             }
@@ -1170,36 +1175,59 @@ void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutliner
         NavigateToEntry();
         return;
     }
-    
-    if (Item->LinkDepth == 0)
+
+    // Synthetic LinkedGraph intermediates (Pass 3 fallback for cases where the wrapper's own tag isn't in CompiledNodes)
+    // have no Node, so there's nothing to look up by GUID. Fall back to opening the linked asset and jumping to its entry.
+    // Real LinkedQuestline wrapper items classified by Pass 1 carry a Node and follow the unified path below.
+    if (!Item->Node)
     {
-        NavigateToContentNode(Item->Node->GetQuestGuid());
+        if (Item->ItemType != EOutlinerItemType::LinkedGraph || !Item->SourceGraph) return;
+        UAssetEditorSubsystem* AssetEditors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+        if (!AssetEditors) return;
+        AssetEditors->OpenEditorForAsset(Item->SourceGraph);
+        IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(Item->SourceGraph, false);
+        FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
+        if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
+        FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
+        LinkedEditor->CrossAssetBackEditor = StaticCastSharedRef<FQuestlineGraphEditor>(AsShared());
+        LinkedEditor->NavigateToEntry();
         return;
     }
 
-    UQuestlineGraph* SourceAsset = Item->SourceGraph;
-    if (!SourceAsset) return;
+    // Unified content-node navigation. FindEdNodeLocation walks this asset's graph hierarchy and descends into linked
+    // questline asset graphs reachable from it, so it locates the EdNode regardless of which asset hosts it. Owning
+    // asset is recovered from the EdNode's host UEdGraph via outer-chain walk, no per-item SourceGraph cache needed.
+    FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid());
+    if (!Location.IsValid()) return;
 
+    UQuestlineGraph* HostAsset = nullptr;
+    for (UObject* Outer = Location.HostGraph; Outer; Outer = Outer->GetOuter())
+    {
+        if (UQuestlineGraph* AsAsset = Cast<UQuestlineGraph>(Outer))
+        {
+            HostAsset = AsAsset;
+            break;
+        }
+    }
+
+    // Same-asset (or unresolvable host) - center locally. LinkedQuestline wrapper headers fall here too: their EdNode
+    // lives in THIS asset's graph, so double-click centers on the wrapper instead of jumping into the linked asset.
+    if (HostAsset == nullptr || HostAsset == QuestlineGraph)
+    {
+        NavigateToLocation(Location.HostGraph, Location.EdNode);
+        return;
+    }
+
+    // Cross-asset: open the host asset's editor, hand off navigation to it.
     UAssetEditorSubsystem* AssetEditors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-    AssetEditors->OpenEditorForAsset(SourceAsset);
-
-    IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(SourceAsset, false);
+    if (!AssetEditors) return;
+    AssetEditors->OpenEditorForAsset(HostAsset);
+    IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(HostAsset, false);
     FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
     if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
-
     FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
     LinkedEditor->CrossAssetBackEditor = StaticCastSharedRef<FQuestlineGraphEditor>(AsShared());
-
-    if (Item->ItemType == EOutlinerItemType::LinkedGraph)
-    {
-        LinkedEditor->NavigateToEntry();
-    }
-    else
-    {
-        FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid()); 
-        if (!Location.IsValid()) return;
-        LinkedEditor->NavigateToLocation(Location.HostGraph, Location.EdNode);
-    }
+    LinkedEditor->NavigateToLocation(Location.HostGraph, Location.EdNode);
 }
 
 void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)

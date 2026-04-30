@@ -310,9 +310,6 @@ private:
 	 */
 	FGuid CurrentOuterGuidChain;
 
-	/** Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). */
-	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
-
 	/** (source, outcome) pairs that reach each destination via direct outcome→Activate wiring (through utilities and Setter.Forward chains). */
 	TMap<FName, TSet<FSourcePathKey>> DirectReachesByDest;
 
@@ -366,5 +363,12 @@ public:
 	int32 GetNumErrors() const { return NumErrors; }
 	int32 GetNumWarnings() const { return NumWarnings; }
 	const TMap<FName, FName>& GetDetectedRenames() const { return DetectedTagRenames; }
+
+	/**
+	 * Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). Public so editor
+	 * navigation code can mirror the compiler's GUID-chain logic when looking up the editor node corresponding to a
+	 * runtime instance whose QuestContentGuid was combined through one or more LinkedQuestline placements.
+	 */
+	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
 	
 };

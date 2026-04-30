@@ -6,6 +6,7 @@
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
+#include "Quests/QuestStep.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Text/STextBlock.h"
@@ -124,14 +125,35 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     TMap<FName, TSharedPtr<FQuestlineOutlinerItem>> ItemMap;
 
-    // Pass 1 — items from compiled nodes
+    // Tag prefix this asset owns. Only CompiledNodes entries whose key starts with "<RootTagPrefix>." belong to this
+    // questline's content tree; everything else (Util_* utility keys, prereq-rule monitor tags namespaced under
+    // SimpleQuest.PrereqRule.*, any future foreign-namespace registrations) must be skipped. Without this filter, foreign
+    // ancestors flow into MissingIntermediates and cascade non-zero LinkDepth onto every local item — which strips their
+    // styling and routes their double-click through the cross-asset branch with a null SourceGraph (silent navigation no-op).
+    const FString RootTagPrefixStr = FString::Printf(TEXT("SimpleQuest.Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID));
+    const FName   RootTagPrefix(*RootTagPrefixStr);
+    const FString RootChildPrefix = RootTagPrefixStr + TEXT(".");
+    auto IsLocalContentTag = [&](FName Key) { return Key.ToString().StartsWith(RootChildPrefix); };
+
+    // Pass 1 — items from compiled nodes; classify by serialized runtime metadata.
+    //   bIsLinkedQuestlinePlacement (set by compiler) → LinkedGraph (blue-bold per original spec)
+    //   UQuestStep runtime class                       → Step (reserves the slot; same default styling as Quest for now)
+    //   anything else                                  → Quest (default)
+    // Both signals serialize with the asset, so the panel classifies correctly on first display after editor load —
+    // no recompile required. (Earlier draft used CompiledEditorNodes which is UPROPERTY(Transient) and cleared on load.)
     for (const auto& Pair : CompiledNodes)
     {
-        if (Pair.Key.ToString().StartsWith(TEXT("Util_"))) continue;
-        
+        if (!IsLocalContentTag(Pair.Key)) continue;
+
         auto Item = MakeShared<FQuestlineOutlinerItem>();
         Item->Tag  = Pair.Key;
         Item->Node = Pair.Value;
+
+        if (Pair.Value && Pair.Value->IsLinkedQuestlinePlacement())
+            Item->ItemType = EOutlinerItemType::LinkedGraph;
+        else if (Pair.Value && Pair.Value->IsA<UQuestStep>())
+            Item->ItemType = EOutlinerItemType::Step;
+        // else default = EOutlinerItemType::Quest (struct default)
 
         const FString TagStr = Pair.Key.ToString();
         FString Ignored, LastSegment;
@@ -144,11 +166,11 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     // Pass 2 — find missing intermediates (linked graph slots)
     // Any ancestor path that is not itself in CompiledNodes and is not the root prefix
-    const FName RootTagPrefix = FName(*FString::Printf(TEXT("SimpleQuest.Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID)));
-
     TSet<FName> MissingIntermediates;
     for (const auto& Pair : CompiledNodes)
     {
+        if (!IsLocalContentTag(Pair.Key)) continue;
+
         FString Cursor = Pair.Key.ToString();
         FString Parent, Last;
         while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
@@ -161,8 +183,18 @@ void SQuestlineOutlinerPanel::RebuildTree()
         }
     }
 
+    // Linked-graph slots = synthesized missing intermediates (rare fallback for cases where the wrapper's own tag
+    // isn't in CompiledNodes) UNION real LinkedQuestline wrappers classified during Pass 1. Both kinds anchor the
+    // depth-cascade for descendant content items below.
+    TSet<FName> LinkedGraphSlots = MissingIntermediates;
+    for (const auto& ItemPair : ItemMap)
+    {
+        if (ItemPair.Value->ItemType == EOutlinerItemType::LinkedGraph)
+            LinkedGraphSlots.Add(ItemPair.Key);
+    }
+
     // Pass 3 — compute depth and create synthetic LinkedGraph items
-    // Depth of a missing intermediate = number of its ancestors that are also missing intermediates + 1
+    // Depth = 1 (this slot itself) + number of its ancestors that are also linked-graph slots.
     auto ComputeLinkedDepth = [&](FName Key) -> int32
     {
         int32 Depth = 1;
@@ -170,7 +202,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
         FString Parent, Last;
         while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
         {
-            if (MissingIntermediates.Contains(FName(*Parent)))
+            if (LinkedGraphSlots.Contains(FName(*Parent)))
                 ++Depth;
             Cursor = Parent;
         }
@@ -193,6 +225,18 @@ void SQuestlineOutlinerPanel::RebuildTree()
         ItemMap.Add(MissingKey, HeaderItem);
     }
 
+    // Pass 3.5 — assign LinkDepth to real LinkedQuestline wrapper items already in ItemMap from Pass 1.
+    // Synthetic intermediates set their own LinkDepth above; real wrappers need it computed from the unified slot set
+    // so that nested-linked wrappers (LinkDepth >= 2) render in BoldItalic per the original deep-linked rule.
+    for (auto& ItemPair : ItemMap)
+    {
+        TSharedPtr<FQuestlineOutlinerItem>& Item = ItemPair.Value;
+        if (Item->ItemType != EOutlinerItemType::LinkedGraph) continue;
+        if (MissingIntermediates.Contains(ItemPair.Key))    continue;  // synthetic, already done
+
+        Item->LinkDepth = ComputeLinkedDepth(ItemPair.Key);
+    }
+
     // Pass 4 — set LinkDepth on content items from their nearest linked graph ancestor
     for (auto& ItemPair : ItemMap)
     {
@@ -203,7 +247,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
         FString Parent, Last;
         while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
         {
-            if (MissingIntermediates.Contains(FName(*Parent)))
+            if (LinkedGraphSlots.Contains(FName(*Parent)))
             {
                 Item->LinkDepth = ComputeLinkedDepth(FName(*Parent));
                 break;

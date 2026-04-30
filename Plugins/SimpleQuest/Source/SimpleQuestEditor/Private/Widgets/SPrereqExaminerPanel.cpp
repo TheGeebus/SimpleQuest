@@ -975,15 +975,15 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const
                         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                    .Text(Node.LeafOutcomeCategory)
+                                    .Text(Node.LeafPathCategory)
                                     .Font(ValueFont)
                                     .ColorAndOpacity(FSlateColor(PrereqExaminer_Style::LeafCategoryTint))
-                                    .Visibility(Node.LeafOutcomeCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+                                    .Visibility(Node.LeafPathCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
                             ]
                         + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                    .Text(Node.LeafOutcomeLabel)
+                                    .Text(Node.LeafPathLabel)
                                     .Font(ValueFont)
                                     .ColorAndOpacity(LeafColor)
                             ]

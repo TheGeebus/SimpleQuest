@@ -85,13 +85,24 @@ namespace
         const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
         const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
 
-        IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-        TArray<FAssetData> QuestlineAssets;
-        AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+    	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+    	TArray<FAssetData> QuestlineAssets;
+    	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
 
-        for (const FAssetData& AssetData : QuestlineAssets)
-        {
-            if (AssetData.PackageName == HomePackageName) continue;
+    	// Filter to assets that actually reference the home asset's package. An asset that doesn't reference
+    	// the home asset can't have a LinkedQuestline node pointing at it, so its tags can't legitimately be
+    	// contextualized inlinings of this node — they're at most coincidental leaf-name collisions. Without
+    	// this filter, two unrelated graphs with same-named leaf nodes (e.g. both have a "Step") cross-attribute
+    	// each other's actor watchers via the suffix-match logic below, producing false "(via OtherAsset)"
+    	// entries on the expanded node panel.
+    	TArray<FName> ReferencerPackageNames;
+    	AR.GetReferencers(HomePackageName, ReferencerPackageNames);
+    	const TSet<FName> ReferencerSet(ReferencerPackageNames);
+
+    	for (const FAssetData& AssetData : QuestlineAssets)
+    	{
+    		if (AssetData.PackageName == HomePackageName) continue;
+    		if (!ReferencerSet.Contains(AssetData.PackageName)) continue;
 
             const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
             if (CompiledTagsJoined.IsEmpty()) continue;
@@ -150,16 +161,19 @@ TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdG
 	return Result;
 }
 
-TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass)
+TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass)
 {
 	if (!ObjectiveClass) return {};
 
-	TArray<FName> AllPaths;
+	TArray<FObjectivePathDescriptor> AllPaths;
 
 	// ── Source 1: K2 node scan (Blueprint graphs) ──
-	// Each K2 placement resolves its path identity via UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity
-	// (single source of truth across the K2 node, the title-display path, and discovery here):
-	//   PathName > "Dynamic" sentinel (wired, no PathName) > OutcomeTag.GetTagName() (static).
+	// Each K2 placement resolves via UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity (single source
+	// of truth across the K2 node, the title-display path, and discovery here):
+	//   PathName (dynamic) > "Dynamic N" (dynamic, wired no PathName) > OutcomeTag.GetTagName() (static).
+	// The out-param tells us which branch fired so we can stamp bIsRegisteredTag at the source — the
+	// compiler then registers only registered-tag identities at the tag manager root, without relying
+	// on string-shape heuristics that a designer-authored dotted PathName could defeat.
 	if (UBlueprint* Blueprint = Cast<UBlueprint>(ObjectiveClass->ClassGeneratedBy))
 	{
 		TArray<UEdGraph*> AllGraphs;
@@ -170,10 +184,11 @@ TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQ
 			Graph->GetNodesOfClass(Nodes);
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				const FName ResolvedPath = Node->ResolvePathIdentity();
+				bool bIsRegisteredTag = false;
+				const FName ResolvedPath = Node->ResolvePathIdentity(&bIsRegisteredTag);
 				if (!ResolvedPath.IsNone())
 				{
-					AllPaths.AddUnique(ResolvedPath);
+					AllPaths.AddUnique({ ResolvedPath, bIsRegisteredTag });
 				}
 				// Else: misconfigured placement (no PathName, no OutcomeTag default, no wire). Discovery
 				// silently skips; ValidateNodeDuringCompilation flags it as a Warning at compile time.
@@ -182,6 +197,7 @@ TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQ
 	}
 
 	// ── Source 2: UPROPERTY reflection scan (ObjectiveOutcome meta) ──
+	// Always a registered FGameplayTag — bIsRegisteredTag = true.
 	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
 	{
 		for (TFieldIterator<FStructProperty> PropIt(ObjectiveClass); PropIt; ++PropIt)
@@ -192,18 +208,18 @@ TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQ
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllPaths.AddUnique(Tag->GetTagName());
+					AllPaths.AddUnique({ Tag->GetTagName(), /*bIsRegisteredTag=*/ true });
 				}
 			}
 		}
 
 		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
-		// Returns FGameplayTags; treat each as a path identity (full tag FName).
+		// Returns FGameplayTags; always registered tags — bIsRegisteredTag = true.
 		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
 			if (Tag.IsValid())
 			{
-				AllPaths.AddUnique(Tag.GetTagName());
+				AllPaths.AddUnique({ Tag.GetTagName(), /*bIsRegisteredTag=*/ true });
 			}
 		}
 	}
@@ -211,9 +227,9 @@ TArray<FName> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQ
 	if (AllPaths.Num() > 0)
 	{
 		// Deterministic pin order regardless of discovery source — prevents pin shuffling across rebuilds
-		AllPaths.Sort([](const FName& A, const FName& B)
+		AllPaths.Sort([](const FObjectivePathDescriptor& A, const FObjectivePathDescriptor& B)
 		{
-			return A.LexicalLess(B);
+			return A.Identity.LexicalLess(B.Identity);
 		});
 
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("DiscoverObjectivePaths: Found %d path(s) for %s"), AllPaths.Num(), *ObjectiveClass->GetName());
@@ -969,7 +985,7 @@ namespace PrereqExaminer_Internal
     	Leaf.Type = EPrereqExaminerNodeType::Leaf;
     	Leaf.SourceNode = OwningNode;
 
-    	// Populate the compiler-equivalent fact tag + source runtime tag so the panel can query PIE state per leaf.
+    	// Populate the compiler-equivalent fact tag and source runtime tag so the panel can query PIE state per leaf.
     	// Both stay invalid for node types the helper doesn't cover (Entry outcome leaves, etc.) — the panel then
     	// renders neutral for those leaves rather than a misleading "NotStarted" grey.
     	Leaf.LeafTag = FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(OutputPin, Leaf.LeafSourceTag);
@@ -979,12 +995,14 @@ namespace PrereqExaminer_Internal
     	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
     	if (Role == EQuestPinRole::AnyOutcomeOut)
     	{
-    		Leaf.LeafOutcomeLabel = FText::FromString(TEXT("Any Outcome"));
+    		Leaf.LeafPathLabel = FText::FromString(TEXT("Any Outcome"));
     	}
     	else
     	{
-    		// Tag-picker syntax: strip the SimpleQuest.QuestOutcome. root (present on all named outcome pins), then split
-    		// the remainder into category prefix + leaf so the widget can render the hierarchy deemphasized above the leaf.
+    		// Tag-picker syntax: strip the SimpleQuest.QuestOutcome. root (present on static outcome-derived pin
+    		// names), then split the remainder into category prefix and leaf so the widget can render the hierarchy
+    		// de-emphasized above the leaf. Bare path identities (dynamic placements) lack the prefix and the dot -
+    		// they fall through to the no-LastDot branch with the whole identity going to LeafPathLabel.
     		static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
     		FString Remainder = OutputPin->PinName.ToString();
     		if (Remainder.StartsWith(OutcomePrefix)) Remainder = Remainder.RightChop(OutcomePrefix.Len());
@@ -992,18 +1010,18 @@ namespace PrereqExaminer_Internal
     		int32 LastDot = INDEX_NONE;
     		if (Remainder.FindLastChar(TEXT('.'), LastDot))
     		{
-    			Leaf.LeafOutcomeCategory = FText::FromString(Remainder.Left(LastDot + 1)); // includes trailing dot
-    			Leaf.LeafOutcomeLabel    = FText::FromString(Remainder.Mid(LastDot + 1));
+    			Leaf.LeafPathCategory = FText::FromString(Remainder.Left(LastDot + 1)); // includes trailing dot
+    			Leaf.LeafPathLabel    = FText::FromString(Remainder.Mid(LastDot + 1));
     		}
     		else
     		{
-    			Leaf.LeafOutcomeLabel = FText::FromString(Remainder);
+    			Leaf.LeafPathLabel = FText::FromString(Remainder);
     		}
     	}
 
-    	// DisplayLabel retained for any legacy consumers (currently none for Leaf — pills filter by type — but kept
+    	// DisplayLabel retained for any legacy consumers (currently none for Leaf - pills filter by type - but kept
     	// populated for diagnostics / future reuse).
-    	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafOutcomeCategory.ToString(), *Leaf.LeafOutcomeLabel.ToString()));
+    	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafPathCategory.ToString(), *Leaf.LeafPathLabel.ToString()));
 
     	return Tree.Nodes.Add(Leaf);
     }

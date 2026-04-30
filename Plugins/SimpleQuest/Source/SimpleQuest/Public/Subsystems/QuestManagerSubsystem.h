@@ -80,13 +80,13 @@ protected:
 
 	/**
 	 * Looks up the instance for NodeTag in LoadedNodeInstances and activates it. IncomingOutcomeTag carries the outcome from
-	 * the parent node for per-outcome entry routing in Quest nodes. IncomingSourceTag identifies the specific parent source
+	 * the parent node for per-path entry routing in Quest nodes. IncomingSourceTag identifies the specific parent source
 	 * whose outcome fired. Quest entry routing filters source-qualified entries against this tag so only the matching spec's
-	 * entry step fires, enabling per-source routing on duplicate outcomes.
+	 * entry step fires, enabling per-source routing on duplicate paths.
 	 */
 	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None);
 
-	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByOutcome / NextNodesOnAnyOutcome. */
+	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
 
 	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;

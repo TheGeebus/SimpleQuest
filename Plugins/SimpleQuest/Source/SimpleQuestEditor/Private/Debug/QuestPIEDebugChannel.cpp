@@ -226,7 +226,7 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 	    	const FString HomeStatePrefix = FQuestStateTagUtils::Namespace + HomeStr.Mid(18); // "SimpleQuest.QuestState." + everything after "SimpleQuest.Quest."
 	    	if (LeafStr.StartsWith(HomeStatePrefix))
 	    	{
-	    		const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Outcome.Reached" etc.
+    			const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Path.Reached" etc.
 	    		const FString ContextualStatePrefix = FQuestStateTagUtils::Namespace + ContextualSource.GetTagName().ToString().Mid(18);
 	    		const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStatePrefix + Suffix)), false);
 	            if (RewrittenLeaf.IsValid())

@@ -75,8 +75,13 @@ bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldConte
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    if (!WS || !OutcomeTag.IsValid()) return false;
-    return WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false));
+    if (!WS || !QuestTag.IsValid() || !OutcomeTag.IsValid()) return false;
+    // Static placement: PathIdentity = OutcomeTag's full FName, so the fact tag matches what the runtime
+    // writes via MakeNodePathFact when the quest resolves through a static OutcomeTag pin. Dynamic
+    // placements with bare PathName identities are not expressible through this OutcomeTag-typed BP API
+    // and read false even when resolved: correct given the FGameplayTag pin-picker constraint.
+    const FName PathFact = FQuestStateTagUtils::MakeNodePathFact(QuestTag.GetTagName(), OutcomeTag.GetTagName());
+    return WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(PathFact, false));
 }
 
 int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)

@@ -42,12 +42,17 @@ public:
 	 *   1. Author-specified PathName (dynamic with explicit identity)
 	 *   2. "Dynamic" sentinel if OutcomeTag pin is wired but no PathName authored (auto-fallback)
 	 *   3. OutcomeTag pin's static DefaultValue tag name (static placement)
-	 *   4. NAME_None (misconfigured — no PathName, no wire, no static tag)
+	 *   4. NAME_None (misconfigured: no PathName, no wire, no static tag)
 	 *
 	 * Used by ExpandNode (passes to CompleteObjectiveWithOutcome's PathIdentity arg), GetNodeTitle (drives
 	 * the on-node title), and DiscoverObjectivePaths (Step pin generation). Single source of truth.
+	 *
+	 * If bOutIsRegisteredTag is non-null, also writes true if and only if the resolved Identity came from
+	 * branch 3 (an FGameplayTag's GetTagName). False otherwise. DiscoverObjectivePaths uses this so the compiler
+	 * can register only known-registered-tag identities at the gameplay tag manager root, without relying
+	 * on string-shape heuristics that a designer-authored PathName containing a dot could defeat.
 	 */
-	FName ResolvePathIdentity() const;
+	FName ResolvePathIdentity(bool* bOutIsRegisteredTag = nullptr) const;
 
 	/**
 	 * Idempotent allocation of DynamicIndex for the wired-without-PathName case. If the node is currently in

@@ -65,8 +65,10 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 		"Leave unconnected to forward only the chain — the common case.").ToString();
 }
 
-FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity() const
+FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(bool* bOutIsRegisteredTag) const
 {
+	if (bOutIsRegisteredTag) *bOutIsRegisteredTag = false;
+
 	// 1. Designer-authored PathName wins (dynamic with explicit identity).
 	if (!PathName.IsNone())
 	{
@@ -97,7 +99,12 @@ FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity() const
 
 	FGameplayTag OutcomeTag;
 	FGameplayTag::StaticStruct()->ImportText(*OutcomeTagPin->DefaultValue, &OutcomeTag, nullptr, PPF_None, nullptr, FString());
-	return OutcomeTag.IsValid() ? OutcomeTag.GetTagName() : NAME_None;
+	if (OutcomeTag.IsValid())
+	{
+		if (bOutIsRegisteredTag) *bOutIsRegisteredTag = true;
+		return OutcomeTag.GetTagName();
+	}
+	return NAME_None;
 }
 
 void UK2Node_CompleteObjectiveWithOutcome::EnsureDynamicIndexAllocated()

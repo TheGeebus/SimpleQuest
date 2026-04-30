@@ -50,6 +50,22 @@ struct FGroupExaminerTopology;
 struct FPrereqExaminerTree;
 
 
+/**
+ * Output of DiscoverObjectivePaths: pairs the path identity FName with its provenance. bIsRegisteredTag
+ * is true when Identity came from a registered FGameplayTag source (the OutcomeTag pin DefaultValue parsed
+ * as a tag, an ObjectiveOutcome UPROPERTY meta scan, or GetPossibleOutcomes); false when Identity is a bare
+ * designer-authored or auto-numbered K2 placement string (PathName / "Dynamic N"). The compiler uses this
+ * to register only known-registered-tag identities at the gameplay tag manager root, capturing provenance
+ * at the source instead of inferring it later from string structure (which a dotted PathName could defeat).
+ */
+struct FObjectivePathDescriptor
+{
+	FName Identity;
+	bool bIsRegisteredTag = false;
+
+	bool operator==(const FObjectivePathDescriptor& Other) const { return Identity == Other.Identity; }
+};
+
 class FSimpleQuestEditorUtilities
 {
 	
@@ -69,8 +85,8 @@ public:
 	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint graphs for UK2Node_CompleteObjectiveWithOutcome
 	 * instances; falls back to the CDO's GetPossibleOutcomes() virtual for classes where neither K2 nodes nor ObjectiveOutcome UPROPERTYs apply.
 	 */
-	static TArray<FName> DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass);
-
+	static TArray<FObjectivePathDescriptor> DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass);
+	
 	/**
 	 * Reconstructs the compiled gameplay tag for a step node by walking the graph hierarchy (Step → Quest → QuestlineGraph).
 	 * Returns an invalid tag if the graph hasn't been compiled yet or the step label is empty.
@@ -234,7 +250,7 @@ public:
 	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
 	 * at runtime, plus the source node's compiled runtime tag (OutSourceTag). Mirrors the content-node branches of
 	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
-	 * NamedOutcomeOut resolves to QuestState.<src>.Outcome.<leaf>. Returns invalid tags for pin roles the examiner treats
+	 * NamedOutcomeOut resolves to QuestState.<src>.Path.<leaf>. Returns invalid tags for pin roles the examiner treats
 	 * as drill-through (Rule Entry Forward) or RuleRef (Rule Exit); those code paths don't flatten to leaves in the
 	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring.
 	 */

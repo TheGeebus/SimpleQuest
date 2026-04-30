@@ -42,11 +42,11 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
 {
     if (!SignalSubsystem) return;
     
-    // Guard: only respond to exact tag matches — parent tags in StepTagsToWatch would otherwise catch every descendant step's started event
-    if (!StepTagsToWatch.HasTagExact(Channel))
+    // Guard: ensure the channel matches some entry in StepTagsToWatch, including ancestor-matching semantics.
+    if (!StepTagsToWatch.HasTag(Channel))
     {
         UE_LOG(LogSimpleQuest, Warning,
-            TEXT("UQuestTargetComponent::OnTargetActivated : '%s' on '%s' — channel tag is not an exact match for any watched tag. Check StepTagsToWatch configuration."),
+            TEXT("UQuestTargetComponent::OnTargetActivated : '%s' on '%s' — channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToWatch configuration."),
             *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
         return;
     }

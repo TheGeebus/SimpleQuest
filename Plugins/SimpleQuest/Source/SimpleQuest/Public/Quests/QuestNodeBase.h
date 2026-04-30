@@ -31,8 +31,8 @@ struct FQuestEntryDestination
 };
 
 /**
- * Value type for Quest's EntryStepTagsByOutcome map. Wraps a per-outcome list of source-filtered destinations: one
- * entry per Entry-node output pin that fires for this outcome, each tagged with the parent source required to fire it.
+ * Value type for Quest's EntryStepTagsByPath map. Wraps a per-path list of source-filtered destinations: one
+ * entry per Entry-node output pin that fires for this path, each tagged with the parent source required to fire it.
  */
 USTRUCT(BlueprintType)
 struct FQuestEntryRouteList
@@ -43,6 +43,34 @@ struct FQuestEntryRouteList
     TArray<FQuestEntryDestination> Destinations;
 };
 
+/**
+ * One boundary crossing fired during ChainToNextNodes. When an inner-graph outcome routes through a
+ * LinkedQuestline placement's Exit, the wrapper itself is treated as resolving with the matching outcome.
+ * SetQuestResolved fires on WrapperTag (writes Completed and Path facts, records resolution history) and
+ * FQuestEndedEvent publishes on the wrapper's tag. Compile-time populated by the LinkedQuestline branch and
+ * accumulated by ResolvePinToTags as the walk crosses Exits; runtime consumed by ChainToNextNodes before
+ * activating destination nodes (boundary facts must exist before downstream prereq evaluation).
+ */
+USTRUCT(BlueprintType)
+struct FQuestBoundaryCompletion
+{
+    GENERATED_BODY()
+
+    /** The LinkedQuestline wrapper's compiled quest tag (boundary's outer-side identity). FName form for
+     *  compile-time storage; ChainToNextNodes resolves to FGameplayTag at runtime. */
+    UPROPERTY(VisibleDefaultsOnly)
+    FName WrapperTagName;
+
+    /** The outcome the boundary completed with. Matches the crossed Exit's OutcomeTag. */
+    UPROPERTY(VisibleDefaultsOnly)
+    FGameplayTag OutcomeTag;
+
+    bool operator==(const FQuestBoundaryCompletion& Other) const
+    {
+        return WrapperTagName == Other.WrapperTagName && OutcomeTag == Other.OutcomeTag;
+    }
+};
+
 USTRUCT(BlueprintType)
 struct FQuestPathNodeList
 {
@@ -50,6 +78,15 @@ struct FQuestPathNodeList
 
     UPROPERTY(VisibleDefaultsOnly)
     TArray<FName> NodeTags;
+
+    /**
+     * Boundary completions to fire when chaining through this path. Each entry triggers SetQuestResolved on
+     * the wrapper tag, publishing Path facts, Completed fact, and FQuestEndedEvent. Order is innermost-first
+     * (deepest LinkedQuestline crosses first, outer levels follow) so ChainToNextNodes fires nested
+     * boundaries in the right semantic order. Empty for paths that don't cross any LinkedQuestline boundary.
+     */
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FQuestBoundaryCompletion> BoundaryCompletions;
 };
 
 UCLASS(Abstract, Blueprintable)
@@ -157,6 +194,14 @@ protected:
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
 
+    /**
+     * Boundary completions for the Any-Outcome path. Same semantic as FQuestPathNodeList::BoundaryCompletions.
+     * Fires when the completed node's outcome doesn't match a named path and routing falls through to
+     * Any-Outcome, with one or more LinkedQuestline boundary crossings along the way.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnAnyOutcome;
+
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
     
@@ -233,6 +278,6 @@ public:
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
-
-    
+    FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
+    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }    
 };

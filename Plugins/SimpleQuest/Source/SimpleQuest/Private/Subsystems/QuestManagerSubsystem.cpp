@@ -593,13 +593,18 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ChainToNextNodes);
 
-    // Auto-derive PathIdentity from OutcomeTag when caller passes NAME_None — preserves back-compat for any
+    // Auto-derive PathIdentity from OutcomeTag when caller passes NAME_None. Preserves back-compat for any
     // direct C++ caller that hasn't been updated to thread PathIdentity through. Static K2 placements always
     // produce a PathIdentity matching OutcomeTag.GetTagName(), so this path is a no-op for them.
     const FName ResolvedPath = PathIdentity.IsNone() ? OutcomeTag.GetTagName() : PathIdentity;
-    const int32 OutcomeCount = Node->GetNextNodesForPath(ResolvedPath) ? Node->GetNextNodesForPath(ResolvedPath)->Num() : 0;
-    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' — %d path + %d any-outcome downstream node(s)"),
-        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), *ResolvedPath.ToString(), OutcomeCount, Node->GetNextNodesOnAnyOutcome().Num());
+    const TArray<FName>* PathNodes = Node->GetNextNodesForPath(ResolvedPath);
+    const int32 PathCount = PathNodes ? PathNodes->Num() : 0;
+    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' - %d path + %d any-outcome downstream node(s)"),
+        *Node->GetQuestTag().ToString(),
+        *OutcomeTag.ToString(),
+        *ResolvedPath.ToString(),
+        PathCount,
+        Node->GetNextNodesOnAnyOutcome().Num());
 
     if (Node->GetQuestTag().IsValid())
     {
@@ -647,12 +652,41 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ActivateNodeByTag(DestTagName, OutcomeTag, SourceTagName);
     };
 
-    if (const TArray<FName>* PathNodes = Node->GetNextNodesForPath(ResolvedPath))
+    // Helper: fire one boundary completion. Resolves the wrapper's FName to its registered FGameplayTag,
+    // calls SetQuestResolved (writes Completed + Path facts, appends to History), and publishes
+    // FQuestEndedEvent on the wrapper tag so subscribers receive the boundary-completion event.
+    auto FireBoundaryCompletion = [this](const FQuestBoundaryCompletion& BC)
     {
-        for (const FName& Tag : *PathNodes)
+        const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
+        if (!WrapperTag.IsValid()) return;
+
+        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
+
+        if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
+        {
+            PublishQuestEndedEvent(WrapperNode, BC.OutcomeTag, EQuestResolutionSource::Graph);
+        }
+    };
+
+    // Named-outcome path: fire boundary completions first so wrapper Path facts exist before the destination
+    // node's prereq evaluation runs (otherwise the destination node defers waiting on a fact we're about to
+    // write — defer-then-recover would also work but produces unnecessary one-tick latency).
+    if (const FQuestPathNodeList* PathList = Node->GetNextNodesByPath().Find(ResolvedPath))
+    {
+        for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
+        {
+            FireBoundaryCompletion(BC);
+        }
+        for (const FName& Tag : PathList->NodeTags)
         {
             StampAndActivate(Tag);
         }
+    }
+
+    // Any-outcome path: same pattern.
+    for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
+    {
+        FireBoundaryCompletion(BC);
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {

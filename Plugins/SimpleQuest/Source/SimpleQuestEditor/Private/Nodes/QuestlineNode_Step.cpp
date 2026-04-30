@@ -12,12 +12,12 @@ void UQuestlineNode_Step::AllocateOutcomePins()
 {
 	if (ObjectiveClass.IsNull()) return;
 
-	TArray<FName> Paths = FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
-	for (const FName& PathIdentity : Paths)
+	TArray<FObjectivePathDescriptor> Paths = FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
+	for (const FObjectivePathDescriptor& Desc : Paths)
 	{
-		if (PathIdentity.IsNone()) continue;
-		UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), PathIdentity);
-		if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(PathIdentity);
+		if (Desc.Identity.IsNone()) continue;
+		UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Desc.Identity);
+		if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Desc.Identity);
 	}
 }
 
@@ -38,8 +38,13 @@ void UQuestlineNode_Step::RefreshOutcomePins()
 	TArray<FName> DesiredNames;
 	if (!ObjectiveClass.IsNull())
 	{
-		DesiredNames = FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
-		DesiredNames.RemoveAll([](const FName& N) { return N.IsNone(); });
+		const TArray<FObjectivePathDescriptor> Paths =
+			FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
+		DesiredNames.Reserve(Paths.Num());
+		for (const FObjectivePathDescriptor& Desc : Paths)
+		{
+			if (!Desc.Identity.IsNone()) DesiredNames.Add(Desc.Identity);
+		}
 	}
 	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });

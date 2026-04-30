@@ -78,7 +78,7 @@ public:
 	 * computed at CDO construction time. Tags returned here are not constrained to the
 	 * SimpleQuest.QuestOutcome namespace. Base implementation returns an empty array.
 	 *
-	 * @see FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes
+	 * @see FSimpleQuestEditorUtilities::DiscoverObjectivePaths
 	 * @see UK2Node_CompleteObjectiveWithOutcome
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;

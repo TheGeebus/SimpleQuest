@@ -38,18 +38,7 @@ public:
 	{
 		return MakeStateFact(QuestTag.GetTagName(), Leaf);
 	}
-
-	/**
-	 * DEPRECATED — produces a global outcome fact shared by all nodes using the same outcome. Use MakeNodeOutcomeFact
-	 * instead for per-node outcome facts.
-	 */
-	static FName MakeOutcomeFact(FGameplayTag OutcomeTag)
-	{
-		FString Tag = OutcomeTag.GetTagName().ToString();
-		if (Tag.StartsWith(TEXT("SimpleQuest.Quest."))) Tag = Namespace + Tag.Mid(18);
-		return FName(*Tag);
-	}
-
+	
 	/**
 	 * Format a per-node path fact: SimpleQuest.QuestState.<NodePath>.Path.<PathLeaf>
 	 *

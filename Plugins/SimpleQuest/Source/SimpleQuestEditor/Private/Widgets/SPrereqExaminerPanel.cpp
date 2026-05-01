@@ -434,12 +434,9 @@ protected:
     {
         SCompoundWidget::OnMouseEnter(MyGeometry, MouseEvent);
         bDirectHover = true;
-        if (UEdGraphNode* Node = HighlightNode.Get())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->HighlightNodesInViewport({ Node });
-            }
+            Panel->SetGraphHighlight(HighlightNode.Get());
         }
     }
 
@@ -447,12 +444,9 @@ protected:
     {
         SCompoundWidget::OnMouseLeave(MouseEvent);
         bDirectHover = false;
-        if (UEdGraphNode* Node = HighlightNode.Get())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->ClearNodeHighlight();
-            }
+            Panel->ClearGraphHighlight();
         }
     }
 
@@ -626,38 +620,26 @@ protected:
     virtual void OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
     {
         SButton::OnMouseEnter(MyGeometry, MouseEvent);
-        if (OperatorGuid.IsValid())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
+            if (OperatorGuid.IsValid())
             {
                 Panel->SetHoveredOperator(OperatorGuid);
             }
-        }
-        if (UEdGraphNode* Node = HighlightNode.Get())
-        {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->HighlightNodesInViewport({ Node });
-            }
+            Panel->SetGraphHighlight(HighlightNode.Get());
         }
     }
 
     virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
     {
         SButton::OnMouseLeave(MouseEvent);
-        if (OperatorGuid.IsValid())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
+            if (OperatorGuid.IsValid())
             {
                 Panel->SetHoveredOperator(FGuid());
             }
-        }
-        if (UEdGraphNode* Node = HighlightNode.Get())
-        {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->ClearNodeHighlight();
-            }
+            Panel->ClearGraphHighlight();
         }
     }
 
@@ -752,10 +734,13 @@ void SPrereqExaminerPanel::Refresh()
 
 void SPrereqExaminerPanel::RebuildAll()
 {
-    // Old widgets are about to be discarded — any hovered-operator state they broadcast is stale. Clear it so freshly
+    // Old widgets are about to be discarded: any hovered-operator state they broadcast is stale. Clear it so freshly
     // built widgets don't re-emerge already emphasized (e.g., expanding a previously hovered operator should read as
-    // un-hovered until the cursor actually lands on a label again).
+    // un-hovered until the cursor actually lands on a label again). Same reasoning for the graph-node halo: a leaf
+    // or operator currently directing a halo via SetGraphHighlight is about to be destroyed, and its OnMouseLeave
+    // won't fire to clean up - clear panel-tracked state explicitly so the destination editor drops the halo.
     SetHoveredOperator(FGuid());
+    ClearGraphHighlight();
 
     if (HeaderSlot.IsValid())
     {
@@ -779,6 +764,32 @@ void SPrereqExaminerPanel::RebuildAll()
             ExpressionSlot->SetContent(BuildExpressionWidget(Tree.RootIndex, FGuid(), EPrereqBoxOutline::Default));
         }
     }
+}
+
+void SPrereqExaminerPanel::SetGraphHighlight(UEdGraphNode* Node)
+{
+    // Clear any prior highlight first — the new target may live in a different editor than the previous one, and
+    // we don't want to leave a stale halo on the prior editor's graph.
+    ClearGraphHighlight();
+
+    if (!Node) return;
+    if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
+    {
+        Editor->HighlightNodesInViewport({ Node });
+        LastHighlightedNode = Node;
+    }
+}
+
+void SPrereqExaminerPanel::ClearGraphHighlight()
+{
+    if (UEdGraphNode* Prev = LastHighlightedNode.Get())
+    {
+        if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Prev))
+        {
+            Editor->ClearNodeHighlight();
+        }
+    }
+    LastHighlightedNode.Reset();
 }
 
 TSharedRef<SWidget> SPrereqExaminerPanel::BuildHeader()

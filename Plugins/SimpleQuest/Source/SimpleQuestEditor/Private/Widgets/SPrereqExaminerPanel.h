@@ -53,10 +53,20 @@ public:
     /** Re-walk the currently-pinned context without changing graph subscriptions. Collapse state survives. */
     void Refresh();
 
-    /** Invoked by an SPrereqExaminerOperatorButton on mouse enter/leave — stores the hovered combinator's GUID for
+    /** Invoked by an SPrereqExaminerOperatorButton on mouse enter/leave - stores the hovered combinator's GUID for
         downstream saturation lookups, and triggers a paint invalidation so TAttribute lambdas re-evaluate. */
     void SetHoveredOperator(const FGuid& Guid);
     const FGuid& GetHoveredOperatorGuid() const { return HoveredOperatorGuid; }
+
+    /**
+     * Routes a graph-node halo on behalf of a hovered leaf/operator widget. Tracks the highlighted node so the panel
+     * can clear it on rebuild - destroyed widgets don't fire OnMouseLeave to clean up after themselves, so without
+     * panel-side tracking the cross-editor halo persists on the destination node after a collapse/expand.
+     */
+    void SetGraphHighlight(UEdGraphNode* Node);
+
+    /** Clears the active graph-node halo set via SetGraphHighlight. */
+    void ClearGraphHighlight();
 
 private:
     // ---- Composition ----
@@ -98,6 +108,10 @@ private:
     FPrereqExaminerTree Tree;
     TMap<FGuid, bool> CollapsedByNodeGuid;
     FGuid HoveredOperatorGuid;
+    
+    /** Last node passed to SetGraphHighlight; tracked so ClearGraphHighlight can hit the right editor when the
+    originating widget is destroyed (RebuildAll mid-hover) and no longer fires its OnMouseLeave. */
+    TWeakObjectPtr<UEdGraphNode> LastHighlightedNode;
 
     // ---- Widgets ----
     TSharedPtr<SBox> HeaderSlot;

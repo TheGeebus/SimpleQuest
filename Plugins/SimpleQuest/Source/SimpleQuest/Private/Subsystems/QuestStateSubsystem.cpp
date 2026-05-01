@@ -7,7 +7,7 @@
 #include "SimpleQuestLog.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplayTag QuestTag) const
@@ -59,7 +59,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 	TArray<FQuestActivationBlocker> Out;
 
 	// 1. UnknownQuest — early return; no other checks meaningful for unregistered tags.
-	if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::UnknownQuest;
@@ -74,7 +74,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// 2. AlreadyLive — terminal: quest in flight.
 	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false)))
+		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false)))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::AlreadyLive;
@@ -83,7 +83,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// 3. Blocked — terminal until ClearBlocked.
 	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked), false)))
+		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Blocked), false)))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::Blocked;
@@ -92,7 +92,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// 4. Deactivated — clearable on Activate-input re-entry.
 	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated), false)))
+		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false)))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::Deactivated;
@@ -101,7 +101,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// 5. NotPendingGiver — quest hasn't been activated to giver-offer state.
 	if (!WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false)))
+		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false)))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::NotPendingGiver;

@@ -4,7 +4,7 @@
 
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
@@ -22,7 +22,7 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 			{
 				if (WS)
 				{
-					const FName FactName = FQuestStateTagUtils::MakeStateFact(Tag, FQuestStateTagUtils::Leaf_Blocked);
+					const FName FactName = FQuestTagComposer::MakeStateFact(Tag, FQuestTagComposer::Leaf_Blocked);
 					const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
 					if (BlockedFact.IsValid()) WS->AddFact(BlockedFact);
 				}

@@ -3,7 +3,7 @@
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "GameplayTagsManager.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"
@@ -57,19 +57,19 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 bool USimpleQuestBlueprintLibrary::IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false));
+    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false));
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)

@@ -5,7 +5,7 @@
 
 #if !WITH_EDITOR
 #include "NativeGameplayTags.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "SimpleQuestLog.h"
 #endif
 
@@ -58,16 +58,12 @@ void UQuestlineGraph::PostLoad()
 
 		Add(TagName);
 
-		const FString TagStr = TagName.ToString();
-		if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
-			&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
-			&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+		if (FQuestTagComposer::IsIdentityTag(TagName))
 		{
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live));
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed));
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver));
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated));
-			Add(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked));
+			for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+			{
+				Add(FQuestTagComposer::MakeStateFact(TagName, Leaf));
+			}
 		}
 	}
 

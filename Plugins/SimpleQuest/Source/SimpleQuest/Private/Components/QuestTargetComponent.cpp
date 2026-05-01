@@ -10,7 +10,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 
 UQuestTargetComponent::UQuestTargetComponent()
 {
@@ -24,7 +24,7 @@ void UQuestTargetComponent::BeginPlay()
 
     for (const FGameplayTag& StepTag : StepTagsToWatch)
     {
-        if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(StepTag))
+        if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
         {
             UE_LOG(LogSimpleQuest, Warning,
                 TEXT("UQuestTargetComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
@@ -188,7 +188,7 @@ void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const 
 
 FGameplayTagContainer UQuestTargetComponent::GetRegisteredStepTagsToWatch() const
 {
-    return FQuestStateTagUtils::FilterToRegisteredTags(
+    return FQuestTagComposer::FilterToRegisteredTags(
         StepTagsToWatch,
         FString::Printf(TEXT("UQuestTargetComponent::GetRegisteredStepTagsToWatch ('%s')"),
             GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));

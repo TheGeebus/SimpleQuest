@@ -10,6 +10,7 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_TemporaryVariable.h"
 #include "KismetCompiler.h"
+#include "SimpleQuestLog.h"
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "UObject/WeakObjectPtr.h"
 

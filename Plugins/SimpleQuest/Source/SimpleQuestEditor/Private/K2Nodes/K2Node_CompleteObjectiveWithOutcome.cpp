@@ -9,6 +9,7 @@
 #include "K2Nodes/Slate/SGraphNode_CompleteObjective.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Objectives/QuestObjective.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 #define LOCTEXT_NAMESPACE "K2Node_CompleteObjectiveWithOutcome"
@@ -193,28 +194,9 @@ FText UK2Node_CompleteObjectiveWithOutcome::GetNodeTitle(ENodeTitleType::Type Ti
 		}
 		else
 		{
-			// Strip the SimpleQuest.QuestOutcome. prefix if present (static placements resolve to the
-			// outcome tag's full FName; dynamic placements resolve to a bare name like "Dynamic" or the
-			// designer-authored PathName, which won't carry the prefix and pass through unmodified).
-			FString PathString = ResolvedPath.ToString();
-			static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
-			if (PathString.StartsWith(OutcomePrefix))
-			{
-				PathString = PathString.RightChop(OutcomePrefix.Len());
-			}
-
-			// Prettify multi-segment paths (e.g., "Combat.BossDefeated" → "Combat: Boss Defeated").
-			TArray<FString> Segments;
-			PathString.ParseIntoArray(Segments, TEXT("."));
-			for (FString& Seg : Segments)
-			{
-				Seg = FName::NameToDisplayString(Seg, false);
-			}
-
 			FFormatNamedArguments Args;
-			Args.Add(TEXT("Path"), FText::FromString(FString::Join(Segments, TEXT(": "))));
-			CachedNodeTitle.SetCachedText(
-				FText::Format(LOCTEXT("Title", "Complete - {Path}"), Args), this);
+			Args.Add(TEXT("Path"), FQuestTagComposer::FormatOutcomeForDisplay(ResolvedPath));
+			CachedNodeTitle.SetCachedText(FText::Format(LOCTEXT("Title", "Complete - {Path}"), Args), this);
 		}
 	}
 	return CachedNodeTitle;

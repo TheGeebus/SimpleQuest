@@ -4,34 +4,19 @@
 
 #include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Utilities/QuestTagComposer.h"
+
 
 FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
 {
-	const FString Full = TagName.ToString();
-	int32 LastDot;
-	if (Full.FindLastChar(TEXT('.'), LastDot))
-	{
-		return FText::FromString(FName::NameToDisplayString(Full.Mid(LastDot + 1), false));
-	}
-	return FText::FromString(FName::NameToDisplayString(Full, false));
+	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
 }
 
 FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
 {
-	const FString Full = TagName.ToString();
-	int32 OutcomePos = Full.Find(TEXT("Outcome."));
-	if (OutcomePos != INDEX_NONE)
-	{
-		FString Remainder = Full.Mid(OutcomePos + 8);
-		TArray<FString> Segments;
-		Remainder.ParseIntoArray(Segments, TEXT("."));
-		for (FString& Seg : Segments)
-		{
-			Seg = FName::NameToDisplayString(Seg, false);
-		}
-		return FText::FromString(FString::Join(Segments, TEXT(": ")));
-	}
-	return GetTagLeafLabel(TagName);
+	return FQuestTagComposer::IsOutcomeTag(TagName)
+		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
+		: GetTagLeafLabel(TagName);
 }
 
 EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const

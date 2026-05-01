@@ -6,11 +6,11 @@
 #include "SimpleQuestLog.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 
 
 bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState,
-	const UQuestStateSubsystem* StateSubsystem) const
+                                       const UQuestStateSubsystem* StateSubsystem) const
 {
 	if (Nodes.IsEmpty()) return true;
 	return EvaluateNode(RootIndex, WorldState, StateSubsystem);
@@ -218,7 +218,7 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf_Resolution;
 	Node.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestStateTagUtils::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
+		FQuestTagComposer::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
 	Node.ResolutionQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.ResolutionOutcomeTag = OutcomeTag;
 	return Nodes.Add(Node);

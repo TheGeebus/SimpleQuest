@@ -3,7 +3,7 @@
 #include "Quests/ClearBlockedNode.h"
 #include "GameplayTagsManager.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 
 void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {
@@ -18,7 +18,7 @@ void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 			{
 				for (auto Tag : TargetQuestTags)
 				{
-					const FName FactName = FQuestStateTagUtils::MakeStateFact(Tag, FQuestStateTagUtils::Leaf_Blocked);
+					const FName FactName = FQuestTagComposer::MakeStateFact(Tag, FQuestTagComposer::Leaf_Blocked);
 					const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
 					if (BlockedFact.IsValid()) WS->ClearFact(BlockedFact);
 					// Deactivated is intentionally not cleared here. The target node's re-entry via its Activate input clears

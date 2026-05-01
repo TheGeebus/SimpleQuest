@@ -9,6 +9,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/SBoxPanel.h"
@@ -151,7 +152,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
     // SimpleQuest.QuestPrereqRule.*, any future foreign-namespace registrations) must be skipped. Without this filter, foreign
     // ancestors flow into MissingIntermediates and cascade non-zero LinkDepth onto every local item, which strips their
     // styling and routes their double-click through the cross-asset branch with a null SourceGraph (silent navigation no-op).
-    const FString RootTagPrefixStr = FString::Printf(TEXT("SimpleQuest.Quest.%s"), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID));
+    const FString RootTagPrefixStr = FQuestTagComposer::IdentityNamespace + FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID);
     const FName   RootTagPrefix(*RootTagPrefixStr);
     const FString RootChildPrefix = RootTagPrefixStr + TEXT(".");
     auto IsLocalContentTag = [&](FName Key) { return Key.ToString().StartsWith(RootChildPrefix); };
@@ -176,11 +177,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
             Item->ItemType = EOutlinerItemType::Step;
         // else default = EOutlinerItemType::Quest (struct default)
 
-        const FString TagStr = Pair.Key.ToString();
-        FString Ignored, LastSegment;
-        if (!TagStr.Split(TEXT("."), &Ignored, &LastSegment, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
-            LastSegment = TagStr;
-        Item->DisplayName = LastSegment;
+        Item->DisplayName = FQuestTagComposer::GetLeafSegment(Pair.Key);
 
         ItemMap.Add(Pair.Key, Item);
     }
@@ -192,16 +189,12 @@ void SQuestlineOutlinerPanel::RebuildTree()
     {
         if (!IsLocalContentTag(Pair.Key)) continue;
 
-        FString Cursor = Pair.Key.ToString();
-        FString Parent, Last;
-        while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
+        FQuestTagComposer::EnumerateAncestors(Pair.Key, [&](FName ParentName) -> bool
         {
-            const FName ParentName(*Parent);
-            if (ParentName == RootTagPrefix) break;
-            if (!ItemMap.Contains(ParentName))
-                MissingIntermediates.Add(ParentName);
-            Cursor = Parent;
-        }
+            if (ParentName == RootTagPrefix) return false; // stop walking
+            if (!ItemMap.Contains(ParentName)) MissingIntermediates.Add(ParentName);
+            return true;
+        });
     }
 
     // Linked-graph slots = synthesized missing intermediates (rare fallback for cases where the wrapper's own tag
@@ -219,14 +212,11 @@ void SQuestlineOutlinerPanel::RebuildTree()
     auto ComputeLinkedDepth = [&](FName Key) -> int32
     {
         int32 Depth = 1;
-        FString Cursor = Key.ToString();
-        FString Parent, Last;
-        while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
+        FQuestTagComposer::EnumerateAncestors(Key, [&](FName ParentName) -> bool
         {
-            if (LinkedGraphSlots.Contains(FName(*Parent)))
-                ++Depth;
-            Cursor = Parent;
-        }
+            if (LinkedGraphSlots.Contains(ParentName)) ++Depth;
+            return true; // count every ancestor that's a slot
+        });
         return Depth;
     };
 
@@ -237,11 +227,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
         HeaderItem->ItemType  = EOutlinerItemType::LinkedGraph;
         HeaderItem->LinkDepth = ComputeLinkedDepth(MissingKey);
 
-        const FString KeyStr = MissingKey.ToString();
-        FString Ignored, LastSeg;
-        if (!KeyStr.Split(TEXT("."), &Ignored, &LastSeg, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
-            LastSeg = KeyStr;
-        HeaderItem->DisplayName = LastSeg;
+        HeaderItem->DisplayName = FQuestTagComposer::GetLeafSegment(MissingKey);
 
         ItemMap.Add(MissingKey, HeaderItem);
     }
@@ -264,29 +250,26 @@ void SQuestlineOutlinerPanel::RebuildTree()
         TSharedPtr<FQuestlineOutlinerItem>& Item = ItemPair.Value;
         if (Item->ItemType == EOutlinerItemType::LinkedGraph) continue;
 
-        FString Cursor = Item->Tag.ToString();
-        FString Parent, Last;
-        while (Cursor.Split(TEXT("."), &Parent, &Last, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
+        FQuestTagComposer::EnumerateAncestors(Item->Tag, [&](FName ParentName) -> bool
         {
-            if (LinkedGraphSlots.Contains(FName(*Parent)))
+            if (LinkedGraphSlots.Contains(ParentName))
             {
-                Item->LinkDepth = ComputeLinkedDepth(FName(*Parent));
-                break;
+                Item->LinkDepth = ComputeLinkedDepth(ParentName);
+                return false; // found nearest, stop
             }
-            Cursor = Parent;
-        }
+            return true;
+        });
     }
 
     // Pass 5 — parent-attach
     for (const auto& ItemPair : ItemMap)
     {
         const TSharedPtr<FQuestlineOutlinerItem>& Item = ItemPair.Value;
-        const FString TagStr = Item->Tag.ToString();
 
-        FString ParentStr, LastSeg;
-        if (TagStr.Split(TEXT("."), &ParentStr, &LastSeg, ESearchCase::IgnoreCase, ESearchDir::FromEnd))
+        FName ParentName;
+        if (FQuestTagComposer::TryGetParentTag(Item->Tag, ParentName))
         {
-            if (TSharedPtr<FQuestlineOutlinerItem>* ParentItem = ItemMap.Find(FName(*ParentStr)))
+            if (TSharedPtr<FQuestlineOutlinerItem>* ParentItem = ItemMap.Find(ParentName))
             {
                 (*ParentItem)->Children.Add(Item);
                 continue;
@@ -337,9 +320,9 @@ void SQuestlineOutlinerPanel::RebuildTree()
                     const FString LinkedID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
                         LinkedAsset->GetQuestlineID().IsEmpty() ? LinkedAsset->GetName() : LinkedAsset->GetQuestlineID());
 
-                    const FString LinkedPrefix    = TagPrefix + TEXT(".") + LinkedID;
-                    const FString FullLinkedPrefix = TEXT("SimpleQuest.Quest.") + LinkedPrefix;
-
+                    const FString LinkedPrefix = TagPrefix + TEXT(".") + LinkedID;
+                    const FString FullLinkedPrefix = FQuestTagComposer::IdentityNamespace + LinkedPrefix;
+                    
                     for (auto& ItemPair : ItemMap)
                     {
                         if (ItemPair.Value->Tag.ToString().StartsWith(FullLinkedPrefix))

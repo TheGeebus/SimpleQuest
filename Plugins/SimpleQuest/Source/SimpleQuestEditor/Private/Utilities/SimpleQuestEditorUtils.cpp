@@ -36,7 +36,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
@@ -80,7 +80,7 @@ namespace
 
         const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
         const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
-		const FString ExpectedPrefix = FString::Printf(TEXT("SimpleQuest.Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));
+    	const FString ExpectedPrefix = FQuestTagComposer::IdentityNamespace + FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID) + TEXT(".");
     	const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
         if (!CompiledTagStr.StartsWith(ExpectedPrefix)) return Result;
         const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
@@ -272,12 +272,8 @@ FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQues
 	if (!QuestlineAsset) return FGameplayTag();
 
 	const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
-	const FString QuestlineSegment = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
-	Segments.Insert(QuestlineSegment, 0);
-
-	const FString TagName = TEXT("SimpleQuest.Quest.") + FString::Join(Segments, TEXT("."));
-	return FGameplayTag::RequestGameplayTag(FName(*TagName), false);
+	const FString QuestlineSegment = SanitizeQuestlineTagSegment(QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
+	return FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeIdentityTag(QuestlineSegment, Segments), false);
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
@@ -537,14 +533,14 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
-		const FName FactName = FQuestStateTagUtils::MakeStateFact(SourceTagName, FQuestStateTagUtils::Leaf_Completed);
+		const FName FactName = FQuestTagComposer::MakeStateFact(SourceTagName, FQuestTagComposer::Leaf_Completed);
 		return FGameplayTag::RequestGameplayTag(FactName, false);
 	}
 
 	// PinName IS the path identity (FName matching the upstream K2 node's outcome tag for static placements,
 	// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip needed —
 	// MakeNodePathFact takes the FName directly and handles prefix stripping internally.
-	const FName FactName = FQuestStateTagUtils::MakeNodePathFact(SourceTagName, OutputPin->PinName);
+	const FName FactName = FQuestTagComposer::MakeNodePathFact(SourceTagName, OutputPin->PinName);
 	if (FactName.IsNone()) return FGameplayTag();
 	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
@@ -1004,9 +1000,8 @@ namespace PrereqExaminer_Internal
     		// names), then split the remainder into category prefix and leaf so the widget can render the hierarchy
     		// de-emphasized above the leaf. Bare path identities (dynamic placements) lack the prefix and the dot -
     		// they fall through to the no-LastDot branch with the whole identity going to LeafPathLabel.
-    		static const FString OutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
     		FString Remainder = OutputPin->PinName.ToString();
-    		if (Remainder.StartsWith(OutcomePrefix)) Remainder = Remainder.RightChop(OutcomePrefix.Len());
+    		FQuestTagComposer::TryStripOutcomePrefix(Remainder);
 
     		int32 LastDot = INDEX_NONE;
     		if (Remainder.FindLastChar(TEXT('.'), LastDot))
@@ -1314,7 +1309,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 			for (const FPrereqExaminerNode& ExamNode : Tree.Nodes)
 			{
 				if (ExamNode.Type != EPrereqExaminerNodeType::Leaf) continue;
-				if (FQuestStateTagUtils::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
+				if (FQuestTagComposer::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
 
 				const UEdGraphNode* SourceForJump = ExamNode.SourceNode.IsValid() ? ExamNode.SourceNode.Get() : ContentNode;
 				const FText Lead = FText::Format(
@@ -1408,7 +1403,7 @@ namespace
 
 		auto EmitIfStale = [&](UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
-			if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
+			if (FQuestTagComposer::IsTagRegisteredInRuntime(Tag)) return;
 			FStaleQuestTagEntry Entry;
 			Entry.Actor = AssociatedActor;
 			Entry.Component = Component;

@@ -9,7 +9,7 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "GameplayTagsManager.h"
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
@@ -95,7 +95,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 	for (const FGameplayTag& QuestTag : QuestTagsToGive)
 	{
-		if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
 			UE_LOG(LogSimpleQuest, Warning,
 				TEXT("UQuestGiverComponent::RegisterQuestGiver : '%s' holds stale tag '%s' — skipping subscribe. ")
@@ -122,7 +122,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		if (IsValid(WorldState))
 		{
 			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
-				FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
+				FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver), false);
 			if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());
@@ -196,7 +196,7 @@ void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Contex
 
 void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params)
 {
-	if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
 		UE_LOG(LogSimpleQuest, Warning,
 			TEXT("UQuestGiverComponent::GiveQuestByTag : '%s' on '%s' tried to give stale tag '%s' — skipping publish. ")
@@ -248,7 +248,7 @@ bool UQuestGiverComponent::CanGiveAnyQuests() const
 
 FGameplayTagContainer UQuestGiverComponent::GetRegisteredQuestTagsToGive() const
 {
-	return FQuestStateTagUtils::FilterToRegisteredTags(
+	return FQuestTagComposer::FilterToRegisteredTags(
 		QuestTagsToGive,
 		FString::Printf(TEXT("UQuestGiverComponent::GetRegisteredQuestTagsToGive ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));

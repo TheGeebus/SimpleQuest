@@ -15,7 +15,7 @@
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Toolkit/QuestlineGraphEditorCommands.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Engine/Blueprint.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -664,25 +664,13 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 			if (QuestTag.IsNone()) continue;
 
 			AllTags.Add(QuestTag);
-
-			// Skip state-fact expansion for outcome and state-namespace tags. The legacy "Quest.Outcome."
-			// prefix is recognized as a transitional safeguard during the 0.4.0 namespace migration —
-			// questline metadata baked under the old namespace will be rewritten on the next compile pass,
-			// but until then we don't want to spuriously state-fact-expand outcome tags.
-			const FString TagStr = QuestTag.ToString();
-			if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
-				&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
-				&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+			
+			if (FQuestTagComposer::IsIdentityTag(QuestTag))
 			{
-				auto AddState = [&](const FString& Leaf)
+				for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
 				{
-					AllTags.Add(FQuestStateTagUtils::MakeStateFact(QuestTag, Leaf));
-				};
-				AddState(FQuestStateTagUtils::Leaf_Live);
-				AddState(FQuestStateTagUtils::Leaf_Completed);
-				AddState(FQuestStateTagUtils::Leaf_PendingGiver);
-				AddState(FQuestStateTagUtils::Leaf_Deactivated);
-				AddState(FQuestStateTagUtils::Leaf_Blocked);
+					AllTags.Add(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
+				}
 			}
 		}
 	}
@@ -749,16 +737,12 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 			};
 			Add(QuestTag);
 
-			const FString TagStr = QuestTag.ToString();
-			if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
-				&& !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome."))
-				&& !TagStr.StartsWith(TEXT("Quest.Outcome.")))
+			if (FQuestTagComposer::IsIdentityTag(QuestTag))
 			{
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
-				Add(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked));
+				for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+				{
+					Add(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
+				}
 			}
 		}
 	}

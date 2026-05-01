@@ -1,12 +1,13 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SimpleQuest.h"
+#include "Delegates/DelegateCombinations.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Quests/QuestlineGraph.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 
 #define LOCTEXT_NAMESPACE "FSimpleQuestModule"
 
@@ -49,15 +50,13 @@ void FSimpleQuest::RegisterCompiledQuestTags()
             ++TotalTags;
 
             // Expand state facts for tags not already in a state or outcome namespace
-            if (!TagStr.StartsWith(FQuestStateTagUtils::Namespace)
-                && !TagStr.StartsWith(TEXT("SimpleQuest.QuestOutcome.")))
+            if (FQuestTagComposer::IsIdentityTag(QuestTag))
             {
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated));
-                TagsManager.AddNativeGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Blocked));
-                TotalTags += 5;
+                for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+                {
+                    TagsManager.AddNativeGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
+                    ++TotalTags;
+                }
             }
         }
     }

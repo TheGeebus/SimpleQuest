@@ -13,7 +13,7 @@
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 
@@ -21,7 +21,7 @@ namespace
 {
 	bool HasAnyStateFact(const FGameplayTag& NodeTag, UWorldStateSubsystem* WorldState)
 	{
-		using FQ = FQuestStateTagUtils;
+		using FQ = FQuestTagComposer;
 		const FName TagName = NodeTag.GetTagName();
 		for (const FString& Leaf : { FQ::Leaf_Live, FQ::Leaf_Completed, FQ::Leaf_PendingGiver, FQ::Leaf_Blocked, FQ::Leaf_Deactivated })
 		{
@@ -147,19 +147,19 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 
 	// Priority order: Blocked > Completed > PendingGiver > Live > Deactivated
 	const FName TagName = RuntimeTag.GetTagName();
-	const FGameplayTag BlockedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked), false);
+	const FGameplayTag BlockedFact = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(TagName, FQuestTagComposer::Leaf_Blocked), false);
 	if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact)) return EQuestNodeDebugState::Blocked;
 		
-	const FGameplayTag CompletedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed), false);
+	const FGameplayTag CompletedFact = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(TagName, FQuestTagComposer::Leaf_Completed), false);
 	if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact)) return EQuestNodeDebugState::Completed;
 	
-	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver), false);
+	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(TagName, FQuestTagComposer::Leaf_PendingGiver), false);
 	if (PendingGiverFact.IsValid() && WorldState->HasFact(PendingGiverFact)) return EQuestNodeDebugState::PendingGiver;
 	
-	const FGameplayTag LiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Live), false);
+	const FGameplayTag LiveFact = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(TagName, FQuestTagComposer::Leaf_Live), false);
 	if (LiveFact.IsValid() && WorldState->HasFact(LiveFact)) return EQuestNodeDebugState::Live;
 
-	const FGameplayTag DeactivatedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated), false);
+	const FGameplayTag DeactivatedFact = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(TagName, FQuestTagComposer::Leaf_Deactivated), false);
 	if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact)) return EQuestNodeDebugState::Deactivated;
 	
 	return EQuestNodeDebugState::Unknown;
@@ -222,13 +222,13 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 	    	// source: strip "SimpleQuest.QuestState.<home>." prefix off the leaf, re-root under
 	    	// "SimpleQuest.QuestState.<contextual>.".
 	    	const FString LeafStr = LeafFact.GetTagName().ToString();
-	    	const FString HomeStr = SourceRuntimeTag.GetTagName().ToString();  // e.g. "SimpleQuest.Quest.SideQuestQL.Near.Left"
-	    	const FString HomeStatePrefix = FQuestStateTagUtils::Namespace + HomeStr.Mid(18); // "SimpleQuest.QuestState." + everything after "SimpleQuest.Quest."
+	    	const FName HomeStateRoot = FQuestTagComposer::SwapNamespacePrefix(SourceRuntimeTag.GetTagName(), FQuestTagComposer::IdentityNamespace, FQuestTagComposer::StateNamespace);
+	    	const FString HomeStatePrefix = HomeStateRoot.ToString();
 	    	if (LeafStr.StartsWith(HomeStatePrefix))
 	    	{
-    			const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Path.Reached" etc.
-	    		const FString ContextualStatePrefix = FQuestStateTagUtils::Namespace + ContextualSource.GetTagName().ToString().Mid(18);
-	    		const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStatePrefix + Suffix)), false);
+	    		const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Path.Reached" etc.
+	    		const FName ContextualStateRoot = FQuestTagComposer::SwapNamespacePrefix(ContextualSource.GetTagName(),	FQuestTagComposer::IdentityNamespace, FQuestTagComposer::StateNamespace);
+	    		const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStateRoot.ToString() + Suffix)), false);
 	            if (RewrittenLeaf.IsValid())
 	            {
 	                EffectiveLeaf = RewrittenLeaf;
@@ -247,14 +247,14 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& Leaf
 	const FName SourceTagName = EffectiveSource.GetTagName();
 	auto LookupSourceFact = [&](const FString& Leaf) -> bool
 	{
-		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(SourceTagName, Leaf), false);
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeStateFact(SourceTagName, Leaf), false);
 		return Tag.IsValid() && WorldState->HasFact(Tag);
 	};
 
-	const bool bSourceLive			= LookupSourceFact(FQuestStateTagUtils::Leaf_Live);
-	const bool bSourcePendingGiver	= LookupSourceFact(FQuestStateTagUtils::Leaf_PendingGiver);
-	const bool bSourceCompleted		= LookupSourceFact(FQuestStateTagUtils::Leaf_Completed);
-	const bool bSourceDeactivated	= LookupSourceFact(FQuestStateTagUtils::Leaf_Deactivated);
+	const bool bSourceLive			= LookupSourceFact(FQuestTagComposer::Leaf_Live);
+	const bool bSourcePendingGiver	= LookupSourceFact(FQuestTagComposer::Leaf_PendingGiver);
+	const bool bSourceCompleted		= LookupSourceFact(FQuestTagComposer::Leaf_Completed);
+	const bool bSourceDeactivated	= LookupSourceFact(FQuestTagComposer::Leaf_Deactivated);
 
 	if (bSourceCompleted || bSourceDeactivated)
 	{

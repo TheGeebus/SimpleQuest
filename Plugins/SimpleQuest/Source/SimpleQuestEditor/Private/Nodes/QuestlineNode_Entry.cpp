@@ -1,7 +1,6 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Nodes/QuestlineNode_Entry.h"
-#include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Quests/QuestlineGraph.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Framework/Notifications/NotificationManager.h"
@@ -10,7 +9,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "SimpleQuestLog.h"
-#include "Utilities/QuestlineGraphTraversalPolicy.h"
+#include "Utilities/QuestTagComposer.h"
 
 
 /*------------------------------------------------------------------------------------------------*
@@ -52,11 +51,7 @@ FName UQuestlineNode_Entry::BuildDisambiguatedPinName(const FIncomingSignalPinSp
 
 	// Specific-outcome path (existing graded disambiguation).
 	const FName OutcomeName = Spec.Outcome.GetTagName();
-	const FString OutcomeLeaf = [&OutcomeName]()
-	{
-		const FString Full = OutcomeName.ToString();
-		int32 LastDot; if (Full.FindLastChar(TEXT('.'), LastDot)) return Full.Mid(LastDot + 1); return Full;
-	}();
+	const FString OutcomeLeaf = FQuestTagComposer::GetLeafSegment(OutcomeName);
 
 	TArray<const FIncomingSignalPinSpec*> Siblings;
 	for (const FIncomingSignalPinSpec& Other : AllSpecs)

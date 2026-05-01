@@ -31,7 +31,6 @@
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
-#include "Utilities/QuestStateTagUtils.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
@@ -42,7 +41,7 @@
 #include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
-
+#include "Utilities/QuestTagComposer.h"
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -297,11 +296,11 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 			TEXT("QuestState"),                               // sibling state namespace
 			TEXT("QuestPrereqRule"),                               // sibling prereq-rule namespace
 			TEXT("Path"), TEXT("EntryPath"),                  // path-fact sub-suffixes (FQuestStateTagUtils)
-			FQuestStateTagUtils::Leaf_Live,
-			FQuestStateTagUtils::Leaf_Completed,
-			FQuestStateTagUtils::Leaf_Blocked,
-			FQuestStateTagUtils::Leaf_PendingGiver,
-			FQuestStateTagUtils::Leaf_Deactivated,
+			FQuestTagComposer::Leaf_Live,
+			FQuestTagComposer::Leaf_Completed,
+			FQuestTagComposer::Leaf_Blocked,
+			FQuestTagComposer::Leaf_PendingGiver,
+			FQuestTagComposer::Leaf_Deactivated,
 		};
     	if (ReservedSegments.Contains(Label))
     	{
@@ -339,7 +338,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         				{
         					if (!Spec.bExposed) continue;
         					if (!Spec.Outcome.IsValid()) continue;
-        					AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
+        					AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
         				}
         				break;
         			}
@@ -476,7 +475,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 						{
 							if (!Spec.bExposed) continue;
 							if (!Spec.Outcome.IsValid()) continue;
-							AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
+							AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
 						}
 						break;
 					}
@@ -519,7 +518,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     				}
     				// The path-fact tag is always properly namespaced (SimpleQuest.QuestState.<Quest>.Path.<PathID>),
     				// so registering it never causes pollution regardless of static / dynamic provenance.
-    				AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeNodePathFact(TagName, Desc.Identity));
+    				AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeNodePathFact(TagName, Desc.Identity));
     			}
     		}
     	}
@@ -1169,7 +1168,7 @@ FString FQuestlineGraphCompiler::SanitizeTagSegment(const FString& InLabel) cons
 
 FName FQuestlineGraphCompiler::MakeNodeTagName(const FString& TagPrefix, const FString& SanitizedLabel) const
 {
-    return FName(*FString::Printf(TEXT("SimpleQuest.Quest.%s.%s"), *TagPrefix, *SanitizedLabel));
+    return FQuestTagComposer::MakeIdentityTag(TagPrefix, { SanitizedLabel });
 }
 
 void FQuestlineGraphCompiler::AddError(const FString& Message, const UEdGraphNode* Node)
@@ -1304,9 +1303,7 @@ FName FQuestlineGraphCompiler::ComputeCompiledTagForContentNode(const UQuestline
 	if (LabelsTopDown.IsEmpty()) return NAME_None;
 
 	const FString AssetPrefix = SanitizeTagSegment(ContainingAsset->GetQuestlineID().IsEmpty() ? ContainingAsset->GetName() : ContainingAsset->GetQuestlineID());
-	FString FullPath = TEXT("SimpleQuest.Quest.") + AssetPrefix;
-	for (const FString& Segment : LabelsTopDown) FullPath += TEXT(".") + Segment;
-	return FName(*FullPath);
+	return FQuestTagComposer::MakeIdentityTag(AssetPrefix, LabelsTopDown);
 }
 
 FName FQuestlineGraphCompiler::ResolveSourceFilterTag(const FIncomingSignalPinSpec& Spec, const UQuestlineGraph* ChildAsset) const
@@ -1435,12 +1432,12 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     // Entry node: outcome pin to leaf checking entry outcome fact; "Any Outcome" → parent quest Live fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {
-        const FName QuestTagName = FName(*(TEXT("SimpleQuest.Quest.") + TagPrefix));
-
+    	const FName QuestTagName = FName(*(FQuestTagComposer::IdentityNamespace + TagPrefix));
+    	
     	if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
     	{
     		// The parent quest's Live fact is always set when the inner graph is running
-    		const FGameplayTag LiveFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Live), false);
+    		const FGameplayTag LiveFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTagName, FQuestTagComposer::Leaf_Live), false);
     		return OutExpression.AddFactLeaf(LiveFactTag);
     	}
 
@@ -1460,7 +1457,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                                        *TagPrefix, *OutcomeTag.ToString()), Node);
         }
 
-    	const FGameplayTag EntryPathFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeEntryPathFact(QuestTagName, OutcomeTag.GetTagName()), false);
+    	const FGameplayTag EntryPathFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeEntryPathFact(QuestTagName, OutcomeTag.GetTagName()), false);
     	return OutExpression.AddFactLeaf(EntryPathFactTag);
     }
 
@@ -1485,7 +1482,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 			// No named outcomes. This node is satisfied by Leaf_Completed alone
 			if (OutcomePins.IsEmpty())
 			{
-				const FGameplayTag CompletedFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(NodeTagName, FQuestStateTagUtils::Leaf_Completed), false);
+				const FGameplayTag CompletedFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(NodeTagName, FQuestTagComposer::Leaf_Completed), false);
 				return OutExpression.AddFactLeaf(CompletedFactTag);
 			}
 
@@ -1579,7 +1576,7 @@ void FQuestlineGraphCompiler::ComputeInnerBoundaryMaps(
     		// CompileNodeRegistration (lines ~519-521).
     		if (OutcomeTag.IsValid())
     		{
-    			AllCompiledQuestTags.AddUnique(FQuestStateTagUtils::MakeNodePathFact(WrapperTagName, OutcomeTag.GetTagName()));
+    			AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeNodePathFact(WrapperTagName, OutcomeTag.GetTagName()));
     		}
 
     		// This container's own wrapper completion. Insert at front so it fires before any inherited

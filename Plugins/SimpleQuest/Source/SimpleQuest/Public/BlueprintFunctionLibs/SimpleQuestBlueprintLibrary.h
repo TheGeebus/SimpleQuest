@@ -7,7 +7,7 @@
 #include "Events/QuestEventBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 class UQuestEventSubscription;
@@ -61,7 +61,7 @@ public:
     template<CQuestEvent TEvent, typename TObject>
     static FDelegateHandle SubscribeToQuestEvent(UObject* WorldContextObject, const FGameplayTag& QuestTag, TObject* Listener, void (TObject::* Callback)(FGameplayTag, const TEvent&))
     {
-        if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag)) return FDelegateHandle();
+        if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag)) return FDelegateHandle();
         if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
         {
             return Signals->SubscribeMessage<TEvent>(QuestTag, Listener, Callback);

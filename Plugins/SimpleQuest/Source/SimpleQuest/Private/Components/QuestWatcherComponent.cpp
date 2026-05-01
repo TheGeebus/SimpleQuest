@@ -3,7 +3,7 @@
 
 #include "Components/QuestWatcherComponent.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestDeactivatedEvent.h"
@@ -176,7 +176,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 	for (auto& QuestPair : WatchedTags)
 	{
 		const FGameplayTag& QuestTag = QuestPair.Key;
-		if (!FQuestStateTagUtils::IsTagRegisteredInRuntime(QuestTag))
+		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
 			UE_LOG(LogSimpleQuest, Warning,
 				TEXT("UQuestWatcherComponent::RegisterQuestWatcher : '%s' holds stale tag '%s' — skipping subscribe. ")
@@ -200,7 +200,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is waiting for a giver
         if (QuestPair.Value.bWatchActivation)
         {
-            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false);
+            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver), false);
             if (WorldState->HasFact(PendingFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -211,7 +211,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is currently active
         if (QuestPair.Value.bWatchStart)
         {
-            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live), false);
+            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Live), false);
             if (WorldState->HasFact(LiveFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -225,7 +225,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 		// probe loop in favor of a single keyed lookup that always recovers the real OutcomeTag.
 		if (QuestPair.Value.bWatchEnd)
 		{
-			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed), false);
+			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Completed), false);
 			if (WorldState->HasFact(CompletedFact))
 			{
 				ActiveQuestTags.RemoveTag(QuestTag);
@@ -261,7 +261,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     	// Quest has been deactivated
     	if (QuestPair.Value.bWatchDeactivation)
     	{
-    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Deactivated), false);
+    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated), false);
     		if (WorldState->HasFact(DeactivatedFact))
     		{
     			ActiveQuestTags.RemoveTag(QuestTag);
@@ -273,7 +273,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 
 FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedStepTags() const
 {
-	return FQuestStateTagUtils::FilterToRegisteredTags(
+	return FQuestTagComposer::FilterToRegisteredTags(
 		WatchedStepTags,
 		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedStepTags ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
@@ -283,7 +283,7 @@ FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedQuestKeys() co
 {
 	FGameplayTagContainer KeysContainer;
 	for (const auto& Pair : WatchedTags) KeysContainer.AddTag(Pair.Key);
-	return FQuestStateTagUtils::FilterToRegisteredTags(
+	return FQuestTagComposer::FilterToRegisteredTags(
 		KeysContainer,
 		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedQuestKeys ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));

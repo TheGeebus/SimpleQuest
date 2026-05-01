@@ -44,6 +44,26 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 
+namespace
+{
+	/**
+	 * Single canonical builder for resolution-typed prereq leaves. All compiler paths that compile an outcome-pin
+	 * connection into a leaf go through here so the (Type, LeafTag, ResolutionQuestTag, ResolutionOutcomeTag) field
+	 * combination stays consistent. Bridge LeafTag is preserved for Prereq Examiner display compat through any
+	 * subsequent polish pass; runtime evaluation uses the resolution-payload fields via HasResolvedWith.
+	 */
+	FPrerequisiteExpressionNode MakeResolutionLeafNode(FName NodeTagName, const FGameplayTag& OutcomeTag)
+	{
+		FPrerequisiteExpressionNode LeafNode;
+		LeafNode.Type = EPrerequisiteExpressionType::Leaf_Resolution;
+		LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
+			FQuestStateTagUtils::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
+		LeafNode.ResolutionQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+		LeafNode.ResolutionOutcomeTag = OutcomeTag;
+		return LeafNode;
+	}
+}
+
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
 {
@@ -1512,30 +1532,33 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
             OrNode.Type = EPrerequisiteExpressionType::Or;
             const int32 OrIndex = OutExpression.Nodes.Add(OrNode);
 
-            for (UEdGraphPin* OutcomePin : OutcomePins)
-            {
-                const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
-                if (!OutcomeTag.IsValid()) continue;
+			for (UEdGraphPin* OutcomePin : OutcomePins)
+			{
+				const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
+				if (!OutcomeTag.IsValid()) continue;
 
-            	FPrerequisiteExpressionNode LeafNode;
-            	LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-            	LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
-            	// Sequence the Add-to-Nodes (which may reallocate the TArray) BEFORE indexing back into Nodes,
-            	// otherwise OutExpression.Nodes[OrIndex].ChildIndices holds a dangling reference when a grow happens.
-            	const int32 LeafIdx = OutExpression.Nodes.Add(LeafNode);
-            	OutExpression.Nodes[OrIndex].ChildIndices.Add(LeafIdx);
-            }
+				// Sequence the Add-to-Nodes (which may reallocate the TArray) BEFORE indexing back into Nodes, otherwise
+				// OutExpression.Nodes[OrIndex].ChildIndices holds a dangling reference when a grow happens.
+				const int32 LeafIdx = OutExpression.Nodes.Add(MakeResolutionLeafNode(NodeTagName, OutcomeTag));
+				OutExpression.Nodes[OrIndex].ChildIndices.Add(LeafIdx);
+			}
 
             return OrIndex;
         }
 
-        const FName FactTagName = ResolveOutputPinToStateFact(OutputPin, TagPrefix);
-        if (FactTagName.IsNone()) return INDEX_NONE;
+    	// Specific outcome pin (a single named outcome wired into a prereq input). PinName IS the outcome tag's
+    	// FName for static placements; for dynamic placements it's the sanitized PathName. Either way this routes
+    	// through the same Leaf_Resolution shape as the AnyOutcomeOut OR-loop above: single canonical builder via
+    	// MakeResolutionLeafNode means future leaf-shape changes touch one place, not two.
+    	const UQuestlineNode_ContentBase* ContentNode = Cast<const UQuestlineNode_ContentBase>(OutputPin->GetOwningNode());
+    	if (!ContentNode) return INDEX_NONE;
+    	const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+    	if (Label.IsEmpty()) return INDEX_NONE;
+    	const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
+    	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
+    	if (!OutcomeTag.IsValid()) return INDEX_NONE;
 
-        FPrerequisiteExpressionNode LeafNode;
-        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-        LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FactTagName, false);
-        return OutExpression.Nodes.Add(LeafNode);
+    	return OutExpression.Nodes.Add(MakeResolutionLeafNode(NodeTagName, OutcomeTag));
     }
 
     return INDEX_NONE;
@@ -1655,27 +1678,6 @@ FPrerequisiteExpression FQuestlineGraphCompiler::CompilePrerequisiteExpression(U
     }
 
     return Expression;
-}
-
-FName FQuestlineGraphCompiler::ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const
-{
-    const UQuestlineNode_ContentBase* ContentNode = Cast<const UQuestlineNode_ContentBase>(OutputPin->GetOwningNode());
-    if (!ContentNode) return NAME_None;
-
-    const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-    if (Label.IsEmpty()) return NAME_None;
-
-    const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
-    const FName PinName = OutputPin->PinName;
-    
-	if (OutputPin->PinType.PinCategory == TEXT("QuestOutcome"))
-	{
-		// PinName IS the path identity (FName matching the upstream K2 node's outcome tag for static placements,
-		// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip
-		// needed. We pass the FName directly to MakeNodePathFact, which handles prefix stripping internally.
-		return FQuestStateTagUtils::MakeNodePathFact(NodeTagName, PinName);
-	}
-	return NAME_None; // Any Outcome or Abandon: caller handles these
 }
 
 void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags)

@@ -7,6 +7,7 @@
 #include "QuestPrereqRuleNode.generated.h"
 
 struct FWorldStateFactAddedEvent;
+struct FQuestResolutionRecordedEvent;
 
 UCLASS()
 class SIMPLEQUEST_API UQuestPrereqRuleNode : public UQuestNodeBase
@@ -27,9 +28,11 @@ private:
 	/** The compiled prereq expression tree. Publishes GroupTag when it evaluates true against WorldState. */
 	UPROPERTY() FPrerequisiteExpression Expression;
 
-	/** Per-leaf subscription handles for re-evaluation on each fact arrival. */
+	/** Per-leaf subscription handles for re-evaluation on leaf events. Keyed by FactTag for fact leaves and by
+		ResolutionQuestTag for resolution leaves — both are FGameplayTag, so the map key shape is uniform. */
 	TMap<FGameplayTag, FDelegateHandle> SubscriptionHandles;
 
 	void OnLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void OnLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
 	void TryPublishRule();
 };

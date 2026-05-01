@@ -5,12 +5,15 @@
 #include "SimpleQuestLog.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
+#include "Events/QuestResolutionRecordedEvent.h"
+
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
     UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-
-    if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState))
+    UQuestStateSubsystem* StateSubsystem = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState, StateSubsystem))
     {
         ActivateInternal(InContextualTag);
         return;
@@ -64,13 +67,30 @@ void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
     USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
     if (!Signals) return;
 
-    TArray<FGameplayTag> LeafTags;
-    PrerequisiteExpression.CollectLeafTags(LeafTags);
-    
-    for (const FGameplayTag& LeafTag : LeafTags)
+    // Subscribe per-leaf with type-aware channel: WorldState fact channel for Leaf, resolution-recorded channel
+    // for Leaf_Resolution. Either path triggers TryActivateDeferred via its handler. Mirrors the same shape used
+    // in UQuestManagerSubsystem::RegisterEnablementWatch / DeferChainToNextNodes and UQuestPrereqRuleNode::Activate
+    // - fourth site in the prereq-subscription duplication pattern flagged for the centralized leaf-construction
+    // refactor parked under FUTURE EXTENSIBILITY CANDIDATES.
+    TArray<FPrereqLeafDescriptor> Leaves;
+    PrerequisiteExpression.CollectLeaves(Leaves);
+
+    for (const FPrereqLeafDescriptor& Leaf : Leaves)
     {
-        FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestNodeBase::OnPrereqFactAdded);
-        PrereqSubscriptionHandles.Add(LeafTag, Handle);
+        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
+        {
+            const FGameplayTag& LeafTag = Leaf.FactTag;
+            if (!LeafTag.IsValid() || PrereqSubscriptionHandles.Contains(LeafTag)) continue;
+            FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestNodeBase::OnPrereqFactAdded);
+            PrereqSubscriptionHandles.Add(LeafTag, Handle);
+        }
+        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+        {
+            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
+            if (!LeafQuestTag.IsValid() || PrereqSubscriptionHandles.Contains(LeafQuestTag)) continue;
+            FDelegateHandle Handle = Signals->SubscribeMessage<FQuestResolutionRecordedEvent>(LeafQuestTag, this, &UQuestNodeBase::OnPrereqResolutionRecorded);
+            PrereqSubscriptionHandles.Add(LeafQuestTag, Handle);
+        }
     }
 }
 
@@ -79,12 +99,19 @@ void UQuestNodeBase::OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFa
     TryActivateDeferred();
 }
 
+void UQuestNodeBase::OnPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    TryActivateDeferred();
+}
+
 void UQuestNodeBase::TryActivateDeferred()
 {
-    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-    if (!WorldState) return;
+    if (!CachedGameInstance.IsValid()) return;
+    UWorldStateSubsystem* WorldState = CachedGameInstance->GetSubsystem<UWorldStateSubsystem>();
+    UQuestStateSubsystem* StateSubsystem = CachedGameInstance->GetSubsystem<UQuestStateSubsystem>();
+    if (!WorldState || !StateSubsystem) return;
 
-    if (!PrerequisiteExpression.Evaluate(WorldState)) return;
+    if (!PrerequisiteExpression.Evaluate(WorldState, StateSubsystem)) return;
 
     if (USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>())
     {

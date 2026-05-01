@@ -3,17 +3,17 @@
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
+#include "Signals/SignalSubsystem.h"
+#include "GameplayTagsManager.h"
+#include "SimpleQuestLog.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
-#include "Signals/SignalSubsystem.h"
-#include "GameplayTagsManager.h"
-#include "SimpleQuestLog.h"
-#include "Engine/AssetManager.h"
-#include "Engine/StreamableManager.h"
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestActivationRequestEvent.h"
 #include "Events/QuestBlockRequestEvent.h"
@@ -25,6 +25,7 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
+#include "Events/QuestResolutionRecordedEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -49,8 +50,9 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     if (UGameInstance* GameInstance = GetGameInstance())
     {
-        QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
         WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
+        QuestStateSubsystem = GameInstance->GetSubsystem<UQuestStateSubsystem>();
+        QuestSignalSubsystem = GameInstance->GetSubsystem<USignalSubsystem>();
         if (QuestSignalSubsystem)
         {
             GivenDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGivenEvent>(Tag_Channel_QuestGiven, this, &UQuestManagerSubsystem::HandleGiveQuestEvent);
@@ -166,7 +168,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
         && !Step->IsGiverGated()
         && !Step->PrerequisiteExpression.IsAlways())
     {
-        if (!Step->PrerequisiteExpression.Evaluate(WorldState)) return;
+        if (!Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem)) return;
     }
 
     FQuestObjectiveContext Context;
@@ -243,7 +245,7 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         && !Step->IsGiverGated()
         && Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesCompletion
         && !Step->PrerequisiteExpression.IsAlways()
-        && !Step->PrerequisiteExpression.Evaluate(WorldState))
+        && !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetQuestTag().ToString());
         DeferChainToNextNodes(Step, OutcomeTag, PathIdentity);
@@ -514,7 +516,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         if (QuestSignalSubsystem)
         {
             FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
-            const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState);
+            const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
 
             // Push the prereq status to the state subsystem before publishing events. The state subsystem's
             // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
@@ -1128,26 +1130,51 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
     const FGameplayTag StepTag = Step->GetQuestTag();
     DeferredCompletions.Add(StepTag, FQuestDeferredCompletion{ OutcomeTag, PathIdentity });
 
-    TArray<FGameplayTag> LeafTags;
-    Step->PrerequisiteExpression.CollectLeafTags(LeafTags);
+    TArray<FPrereqLeafDescriptor> Leaves;
+    Step->PrerequisiteExpression.CollectLeaves(Leaves);
 
     TMap<FGameplayTag, FDelegateHandle>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
-    for (const FGameplayTag& LeafTag : LeafTags)
+    for (const FPrereqLeafDescriptor& Leaf : Leaves)
     {
-        FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded);
-        Handles.Add(LeafTag, Handle);
+        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
+        {
+            const FGameplayTag& LeafTag = Leaf.FactTag;
+            if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
+                LeafTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded);
+            Handles.Add(LeafTag, Handle);
+        }
+        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+        {
+            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
+            if (!LeafQuestTag.IsValid() || Handles.Contains(LeafQuestTag)) continue;
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestResolutionRecordedEvent>(
+                LeafQuestTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded);
+            Handles.Add(LeafQuestTag, Handle);
+        }
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq leaf tag(s)"),
+    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq leaf(s)"),
         *StepTag.ToString(),
         *OutcomeTag.ToString(),
         *PathIdentity.ToString(),
-        LeafTags.Num());
+        Leaves.Num());
 }
 
 void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
-    // Check all deferred steps. The fact that changed could satisfy any of them.
+    TryFireAllDeferredCompletions();
+}
+
+void UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    TryFireAllDeferredCompletions();
+}
+
+void UQuestManagerSubsystem::TryFireAllDeferredCompletions()
+{
+    // Try every deferred step: the event that just fired (a fact arrival or a resolution recording) could
+    // satisfy any of them; per-step Evaluate inside TryFireDeferredCompletion makes the determination.
     TArray<FGameplayTag> StepTags;
     DeferredCompletions.GetKeys(StepTags);
     for (const FGameplayTag& StepTag : StepTags)
@@ -1162,7 +1189,7 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
     if (!NodePtr) return;
 
     UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
-    if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState)) return;
+    if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem)) return;
 
     UE_LOG(LogSimpleQuest, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
 
@@ -1261,6 +1288,13 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
         WorldState->AddFact(CompletedFact);
     }
 
+    // Path fact write to WorldState removed in the Outcome/Path data-layer migration. The resolution
+    // registry (UQuestStateSubsystem) is now the canonical source of truth for outcome-keyed queries
+    // via HasResolvedWith. Subscribers that previously watched <Quest>.Path.<Outcome> facts now subscribe
+    // to FQuestResolutionRecordedEvent on the QuestTag channel. See RegisterEnablementWatch and
+    // DeferChainToNextNodes for the subscription wiring. RecordResolution below publishes the event.
+    
+    /*
     if (OutcomeTag.IsValid())
     {
         // Path fact is asserted on every resolution: ref-count grows per fire, NOT idempotent. Looping Steps and
@@ -1274,6 +1308,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
             WorldState->AddFact(PathFact);
         }
     }
+    */
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
     // but the manager writes it atomically with its own fact updates so the two layers stay consistent.
@@ -1322,8 +1357,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     }
 }
 
-void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName,
-    const FPrerequisiteExpression& Expr, bool bInitialSatisfied)
+void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied)
 {
     if (!QuestSignalSubsystem) return;
 
@@ -1331,39 +1365,65 @@ void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FNam
     Watch.NodeTagName = NodeTagName;
     Watch.bLastKnownSatisfied = bInitialSatisfied;
 
-    TArray<FGameplayTag> LeafTags;
-    Expr.CollectLeafTags(LeafTags);
+    TArray<FPrereqLeafDescriptor> Leaves;
+    Expr.CollectLeaves(Leaves);
 
     TMap<FGameplayTag, FEnablementLeafHandles>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
-    for (const FGameplayTag& LeafTag : LeafTags)
+    for (const FPrereqLeafDescriptor& Leaf : Leaves)
     {
-        if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
+        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
+        {
+            // Fact-typed leaf — subscribe to FactAdded + FactRemoved on the leaf's WorldState fact tag.
+            const FGameplayTag& LeafTag = Leaf.FactTag;
+            if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
 
-        FEnablementLeafHandles LeafHandles;
-        LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
-            LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactAdded);
-        LeafHandles.RemovedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactRemovedEvent>(
-            LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactRemoved);
-        Handles.Add(LeafTag, LeafHandles);
+            FEnablementLeafHandles LeafHandles;
+            LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
+                LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactAdded);
+            LeafHandles.RemovedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactRemovedEvent>(
+                LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactRemoved);
+            Handles.Add(LeafTag, LeafHandles);
+        }
+        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+        {
+            // Resolution-typed leaf: subscribe to FQuestResolutionRecordedEvent on the resolved-quest's tag.
+            // Multiple resolution leaves with the same ResolutionQuestTag (different OutcomeTags) dedupe via the
+            // map's Contains check; one subscription per channel is enough since the handler re-evaluates the
+            // full expression which checks each outcome internally via HasResolvedWith. RemovedHandle stays
+            // invalid - resolutions are append-only, no symmetric removed event.
+            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
+            if (!LeafQuestTag.IsValid() || Handles.Contains(LeafQuestTag)) continue;
+
+            FEnablementLeafHandles LeafHandles;
+            LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FQuestResolutionRecordedEvent>(LeafQuestTag, this, &UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded);
+            // LeafHandles.RemovedHandle intentionally left invalid.
+            Handles.Add(LeafQuestTag, LeafHandles);
+        }
     }
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d leaf fact(s), initial satisfied=%d"),
-        *QuestTag.ToString(), LeafTags.Num(), bInitialSatisfied ? 1 : 0);
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d leaf(s), initial satisfied=%d"),
+        *QuestTag.ToString(), Leaves.Num(), bInitialSatisfied ? 1 : 0);
 }
 
 void UQuestManagerSubsystem::OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
 {
-    // Iterate all watches; each re-evaluation is cheap and avoids needing inverse leaf-to-quest mapping.
-    TArray<FGameplayTag> Keys;
-    EnablementWatches.GetKeys(Keys);
-    for (const FGameplayTag& QuestTag : Keys)
-    {
-        ReevaluateEnablementWatch(QuestTag);
-    }
+    ReevaluateAllEnablementWatches();
 }
 
 void UQuestManagerSubsystem::OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event)
 {
+    ReevaluateAllEnablementWatches();
+}
+
+void UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    ReevaluateAllEnablementWatches();
+}
+
+void UQuestManagerSubsystem::ReevaluateAllEnablementWatches()
+{
+    // Iterate every active watch; each re-evaluation is cheap and avoids needing an inverse channel-to-watch
+    // map. Called from all three OnEnablementLeaf*** handlers (FactAdded / FactRemoved / ResolutionRecorded).
     TArray<FGameplayTag> Keys;
     EnablementWatches.GetKeys(Keys);
     for (const FGameplayTag& QuestTag : Keys)
@@ -1382,7 +1442,7 @@ void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
 
     // Compute full status (with leaf detail) — we both push it to the state subsystem and use the bSatisfied
     // bit for the transition check.
-    const FQuestPrereqStatus NewStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState);
+    const FQuestPrereqStatus NewStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
 
     // Push to state subsystem regardless of transition — the cache should always reflect current evaluation
     // even on no-transition leaf changes (e.g., a NOT clause's leaf flipping when the overall result happens
@@ -1422,15 +1482,21 @@ void UQuestManagerSubsystem::ClearEnablementWatch(FGameplayTag QuestTag)
         {
             for (auto& Pair : *Handles)
             {
+                // AddedHandle is set for both leaf kinds. RemovedHandle is set only for Leaf-typed (fact)
+                // subscriptions. Leaf_Resolution leaves leave it invalid since resolution events are
+                // append-only. Guard the second unsubscribe so we don't pass an invalid handle.
                 QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.AddedHandle);
-                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.RemovedHandle);
+                if (Pair.Value.RemovedHandle.IsValid())
+                {
+                    QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.RemovedHandle);
+                }
             }
         }
         EnablementWatchHandles.Remove(QuestTag);
     }
     EnablementWatches.Remove(QuestTag);
 
-    // Clear cached prereq status — the quest is leaving giver state, the cache entry is no longer relevant.
+    // Clear cached prereq status. The quest is leaving giver state, the cache entry is no longer relevant.
     if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
     {
         StateSubsystem->ClearQuestPrereqStatus(QuestTag);

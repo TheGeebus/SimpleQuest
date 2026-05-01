@@ -9,8 +9,11 @@
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestNodeBase.generated.h"
 
-class UQuestReward;
 struct FWorldStateFactAddedEvent;
+struct FQuestResolutionRecordedEvent;
+
+class UQuestReward;
+
 
 /**
  * A single source-filtered entry destination. DestTag is the tag of a step or sub-node to activate when the parent quest
@@ -263,6 +266,7 @@ private:
     TMap<FGameplayTag, FDelegateHandle> PrereqSubscriptionHandles;
 
     void OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+    void OnPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
     void TryActivateDeferred();
 
     /**

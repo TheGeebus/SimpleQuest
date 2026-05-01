@@ -5,6 +5,8 @@
 #include "SimpleQuestLog.h"
 #include "Signals/SignalSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
+#include "Events/QuestResolutionRecordedEvent.h"
 
 void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
 {
@@ -21,21 +23,33 @@ void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
 	// May already be satisfied at graph load (mid-session activation).
 	TryPublishRule();
 
-	// Subscribe to every leaf tag of the expression — any arrival triggers re-evaluation.
-	TArray<FGameplayTag> LeafTags;
-	Expression.CollectLeafTags(LeafTags);
-	for (const FGameplayTag& LeafTag : LeafTags)
+	// Subscribe per-leaf with type-aware channel: WorldState fact channel for Leaf, resolution-recorded
+	// channel for Leaf_Resolution. Either path triggers TryPublishRule via its handler.
+	TArray<FPrereqLeafDescriptor> Leaves;
+	Expression.CollectLeaves(Leaves);
+	for (const FPrereqLeafDescriptor& Leaf : Leaves)
 	{
-		if (SubscriptionHandles.Contains(LeafTag)) continue;
-		FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestPrereqRuleNode::OnLeafFactAdded);
-		SubscriptionHandles.Add(LeafTag, Handle);
+		if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
+		{
+			const FGameplayTag& LeafTag = Leaf.FactTag;
+			if (!LeafTag.IsValid() || SubscriptionHandles.Contains(LeafTag)) continue;
+			FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestPrereqRuleNode::OnLeafFactAdded);
+			SubscriptionHandles.Add(LeafTag, Handle);
+		}
+		else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+		{
+			const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
+			if (!LeafQuestTag.IsValid() || SubscriptionHandles.Contains(LeafQuestTag)) continue;
+			FDelegateHandle Handle = Signals->SubscribeMessage<FQuestResolutionRecordedEvent>(LeafQuestTag, this, &UQuestPrereqRuleNode::OnLeafResolutionRecorded);
+			SubscriptionHandles.Add(LeafQuestTag, Handle);
+		}
 	}
 }
 
 void UQuestPrereqRuleNode::ResetTransientState()
 {
 	Super::ResetTransientState();
-	// SubscriptionHandles referenced the prior PIE's SignalSubsystem. Wipe — if we left them populated, the
+	// SubscriptionHandles referenced the prior PIE's SignalSubsystem. Wipe: if we left them populated, the
 	// subscribe loop in Activate would skip every leaf ("already subscribed") and the rule would never hear
 	// any leaf-fact-added events this session.
 	SubscriptionHandles.Reset();
@@ -46,15 +60,20 @@ void UQuestPrereqRuleNode::OnLeafFactAdded(FGameplayTag Channel, const FWorldSta
 	TryPublishRule();
 }
 
+void UQuestPrereqRuleNode::OnLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+	TryPublishRule();
+}
+
 void UQuestPrereqRuleNode::TryPublishRule()
 {
 	if (!CachedGameInstance.IsValid()) return;
 
 	UWorldStateSubsystem* WorldState = CachedGameInstance->GetSubsystem<UWorldStateSubsystem>();
-	if (!WorldState) return;
-
+	UQuestStateSubsystem* StateSubsystem = CachedGameInstance->GetSubsystem<UQuestStateSubsystem>();
+	if (!WorldState || !StateSubsystem) return;
 	const bool bIsAlways = Expression.IsAlways();
-	const bool bEval = bIsAlways || Expression.Evaluate(WorldState);
+	const bool bEval = bIsAlways || Expression.Evaluate(WorldState, StateSubsystem);
 	const bool bCurrentlyPublished = WorldState->HasFact(GroupTag);
 
 	if (bEval && !bCurrentlyPublished)
@@ -70,7 +89,7 @@ void UQuestPrereqRuleNode::TryPublishRule()
 			*GroupTag.ToString());
 	}
 
-	// Subscriptions stay live for the rule's lifetime — NOT expressions require re-evaluation whenever a leaf
+	// Subscriptions stay live for the rule's lifetime: NOT expressions require re-evaluation whenever a leaf
 	// transitions. For monotonic AND/OR expressions this is cheap: AddFact on a count-already-positive tag bumps
 	// the count without re-broadcasting, and we don't enter the publish branch twice.
 }

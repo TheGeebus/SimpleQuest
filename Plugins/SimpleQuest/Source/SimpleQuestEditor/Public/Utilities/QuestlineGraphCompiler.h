@@ -209,13 +209,6 @@ private:
 	int32 CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression);
 
 	/**
-	 * Given a Success or Failure output pin on a content node, returns the corresponding WorldState state fact FName
-	 * (SimpleQuest.QuestState.<Tag>.Succeeded / Failed). Returns NAME_None for Any Outcome (caller builds the OR node)
-	 * or non-content-node pins.
-	 */
-	FName ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const;
-
-	/**
 	 * Follows the Deactivated output pin and splits resolved node tags by destination pin category: connections to Activate inputs
 	 * populate OutActivateTags (NextNodesOnDeactivation); connections to Deactivate inputs populate OutDeactivateTags
 	 * (NextNodesToDeactivateOnDeactivation).

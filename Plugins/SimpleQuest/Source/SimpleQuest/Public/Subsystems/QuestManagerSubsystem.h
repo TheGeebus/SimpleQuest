@@ -11,6 +11,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestResolutionRecordedEvent;
 struct FWorldStateFactRemovedEvent;
 struct FQuestActivationBlocker;
 struct FQuestPrereqStatus;
@@ -37,6 +38,7 @@ enum class EDeactivationSource : uint8;
 class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
+class UQuestStateSubsystem;
 class UQuestTargetInterface;
 class UQuestReward;
 class UQuestlineGraph;
@@ -95,6 +97,8 @@ protected:
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
 	UPROPERTY()
 	TObjectPtr<UWorldStateSubsystem> WorldState;
+	UPROPERTY()
+	TObjectPtr<UQuestStateSubsystem> QuestStateSubsystem;
 
 	/**
 	 * Rich-record registry paired with WorldState's QuestState.<X>.Completed fact. Written atomically alongside
@@ -196,7 +200,11 @@ private:
 
 	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag, FName PathIdentity);
 	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void OnDeferredCompletionPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
 	void TryFireDeferredCompletion(FGameplayTag StepTag);
+	
+	/** Shared body for both OnDeferredCompletionPrereq*** handlers: try every deferred completion. */
+	void TryFireAllDeferredCompletions();
 
 	
 	/*------------------------------------------------------------------------------------------------------------------
@@ -237,7 +245,12 @@ private:
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);
+	void OnEnablementLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
 	void ReevaluateEnablementWatch(FGameplayTag QuestTag);
 	void ClearEnablementWatch(FGameplayTag QuestTag);
+
+	/** Shared body for all three OnEnablementLeaf*** handlers: re-evaluate every active enablement watch.
+	Per-channel filtering isn't worth the inverse-lookup cost; expression re-eval is cheap. */
+	void ReevaluateAllEnablementWatches();
 
 };

@@ -10,6 +10,7 @@
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
+class USignalSubsystem;
 class UWorldStateSubsystem;
 
 /**
@@ -44,6 +45,15 @@ public:
 
     /** Convenience predicate: whether this quest has any resolution record this session. */
     bool HasResolved(FGameplayTag QuestTag) const;
+
+    /**
+     * Whether this quest has resolved with the specified OutcomeTag at any point this session. O(1) lookup against
+     * a parallel index maintained alongside QuestResolutions; populated on every RecordResolution call. Works for
+     * any OutcomeTag the quest has actually fired with, regardless of whether that outcome was registered at
+     * compile time.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    bool HasResolvedWith(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
 
     /** Convenience accessor: how many times this quest has resolved this session. */
     int32 GetResolutionCount(FGameplayTag QuestTag) const;
@@ -84,6 +94,12 @@ private:
     UPROPERTY()
     TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
 
+    /**
+     * Parallel O(1) index for HasResolvedWith. Maintained alongside QuestResolutions: every RecordResolution call
+     * adds the (QuestTag, OutcomeTag) pair to this map. Avoids walking History for outcome-keyed prereq queries.
+     */
+    TMap<FGameplayTag, TSet<FGameplayTag>> ResolvedOutcomesByQuest;
+    
     /** Cache of current prereq status per quest in PendingGiver state. Populated by the manager's giver branch
      *  and updated on enablement-watch transitions. Cleared when the quest leaves giver state. */
     TMap<FGameplayTag, FQuestPrereqStatus> CachedPrereqStatus;
@@ -95,4 +111,7 @@ private:
 
     /** Resolves the GameInstance's WorldState subsystem for the blocker-fact lookups. */
     UWorldStateSubsystem* ResolveWorldState() const;
+    
+    /** Resolves the GameInstance's SignalSubsystem for publishing FQuestResolutionRecordedEvent on RecordResolution. */
+    USignalSubsystem* ResolveSignalSubsystem() const;
 };

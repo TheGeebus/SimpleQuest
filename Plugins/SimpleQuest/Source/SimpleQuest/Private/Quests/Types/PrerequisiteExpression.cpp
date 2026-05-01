@@ -4,14 +4,18 @@
 
 #include "SimpleQuestLog.h"
 #include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 
-bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState) const
+
+bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState,
+	const UQuestStateSubsystem* StateSubsystem) const
 {
-	if (!WorldState || Nodes.IsEmpty()) return true;	
-	return EvaluateNode(RootIndex, WorldState);
+	if (Nodes.IsEmpty()) return true;
+	return EvaluateNode(RootIndex, WorldState, StateSubsystem);
 }
 
-FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState) const
+FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState,
+	const UQuestStateSubsystem* StateSubsystem) const
 {
 	FQuestPrereqStatus Status;
 
@@ -24,26 +28,39 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 
 	Status.bIsAlways = false;
 
-	// Two-pass approach. First pass enumerates leaves and records their individual HasFact result; second pass
-	// does the full Boolean evaluation with And/Or/Not semantics. Keeps EvaluateNode untouched and avoids
-	// threading mutable state through the recursive walker. O(N) on node count for both passes.
-	TArray<FGameplayTag> LeafTags;
-	CollectLeafTags(LeafTags);
-	Status.Leaves.Reserve(LeafTags.Num());
-	for (const FGameplayTag& LeafTag : LeafTags)
+	// Walk per-node and emit one FQuestPrereqLeafStatus per leaf-typed node, branching on leaf kind. Replaces the
+	// previous CollectLeafTags + per-tag iteration since mixed leaf types make the flat-tag-array shape lossy:
+	// Leaf_Resolution leaves require the (QuestTag, OutcomeTag) pair, not just a single tag, to evaluate. LeafTag
+	// is still emitted onto the status entry for display compatibility (matches the bridge tag stamped by the
+	// compiler) so blocker-list rendering stays untouched through this batch.
+	for (const FPrerequisiteExpressionNode& Node : Nodes)
 	{
-		FQuestPrereqLeafStatus LeafStatus;
-		LeafStatus.LeafTag = LeafTag;
-		LeafStatus.bSatisfied = WorldState && LeafTag.IsValid() && WorldState->HasFact(LeafTag);
-		Status.Leaves.Add(LeafStatus);
+		if (Node.Type == EPrerequisiteExpressionType::Leaf)
+		{
+			FQuestPrereqLeafStatus LeafStatus;
+			LeafStatus.LeafTag = Node.LeafTag;
+			LeafStatus.bSatisfied = WorldState && Node.LeafTag.IsValid() && WorldState->HasFact(Node.LeafTag);
+			Status.Leaves.Add(LeafStatus);
+		}
+		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+		{
+			FQuestPrereqLeafStatus LeafStatus;
+			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag — preserves blocker-display API shape
+			LeafStatus.bSatisfied = StateSubsystem
+				&& Node.ResolutionQuestTag.IsValid()
+				&& Node.ResolutionOutcomeTag.IsValid()
+				&& StateSubsystem->HasResolvedWith(Node.ResolutionQuestTag, Node.ResolutionOutcomeTag);
+			Status.Leaves.Add(LeafStatus);
+		}
 	}
 
-	Status.bSatisfied = WorldState && EvaluateNode(RootIndex, WorldState);
+	Status.bSatisfied = EvaluateNode(RootIndex, WorldState, StateSubsystem);
 
 	return Status;
 }
 
-bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState) const
+bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState,
+	const UQuestStateSubsystem* StateSubsystem) const
 {
 	if (!Nodes.IsValidIndex(NodeIndex)) return true;
 	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
@@ -51,37 +68,43 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 	switch (Node.Type)
 	{
 	case EPrerequisiteExpressionType::Always:
-		{
-			return true;
-		}
+		return true;
+
 	case EPrerequisiteExpressionType::Leaf:
 		{
-			const bool bHas = WorldState->HasFact(Node.LeafTag);
-			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf: '%s' (valid=%d) → HasFact=%d"),
+			const bool bHas = WorldState && WorldState->HasFact(Node.LeafTag);
+			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Fact]: '%s' (valid=%d) → HasFact=%d"),
 				*Node.LeafTag.ToString(), Node.LeafTag.IsValid(), bHas);
-
 			return bHas;
 		}
+
+	case EPrerequisiteExpressionType::Leaf_Resolution:
+		{
+			const bool bResolved = StateSubsystem
+				&& Node.ResolutionQuestTag.IsValid()
+				&& Node.ResolutionOutcomeTag.IsValid()
+				&& StateSubsystem->HasResolvedWith(Node.ResolutionQuestTag, Node.ResolutionOutcomeTag);
+			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Resolution]: quest='%s' outcome='%s' → HasResolvedWith=%d"),
+				*Node.ResolutionQuestTag.ToString(), *Node.ResolutionOutcomeTag.ToString(), bResolved);
+			return bResolved;
+		}
+
 	case EPrerequisiteExpressionType::And:
+		for (int32 ChildIdx : Node.ChildIndices)
 		{
-			for (int32 ChildIdx : Node.ChildIndices)
-			{
-				if (!EvaluateNode(ChildIdx, WorldState)) return false;
-			}
-			return true;
+			if (!EvaluateNode(ChildIdx, WorldState, StateSubsystem)) return false;
 		}
+		return true;
+
 	case EPrerequisiteExpressionType::Or:
+		for (int32 ChildIdx : Node.ChildIndices)
 		{
-			for (int32 ChildIdx : Node.ChildIndices)
-			{
-				if (EvaluateNode(ChildIdx, WorldState)) return true;
-			}
-			return false;
+			if (EvaluateNode(ChildIdx, WorldState, StateSubsystem)) return true;
 		}
+		return false;
+
 	case EPrerequisiteExpressionType::Not:
-		{
-			return Node.ChildIndices.Num() > 0 && !EvaluateNode(Node.ChildIndices[0], WorldState);
-		}
+		return Node.ChildIndices.Num() > 0 && !EvaluateNode(Node.ChildIndices[0], WorldState, StateSubsystem);
 	}
 	return true;
 }
@@ -97,7 +120,9 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	if (!Nodes.IsValidIndex(NodeIndex)) return;
 	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
 
-	if (Node.Type == EPrerequisiteExpressionType::Leaf)
+	// Both leaf kinds emit their LeafTag. Subscription wiring on the call sites continues to subscribe via the
+	// FWorldStateFactAddedEvent channel.
+	if (Node.Type == EPrerequisiteExpressionType::Leaf || Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
 	{
 		OutTags.AddUnique(Node.LeafTag);
 		return;
@@ -105,6 +130,40 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	for (int32 ChildIdx : Node.ChildIndices)
 	{
 		CollectLeafTagsFromNode(ChildIdx, OutTags);
+	}
+}
+
+void FPrerequisiteExpression::CollectLeaves(TArray<FPrereqLeafDescriptor>& OutLeaves) const
+{
+	if (Nodes.IsEmpty()) return;
+	CollectLeavesFromNode(RootIndex, OutLeaves);
+}
+
+void FPrerequisiteExpression::CollectLeavesFromNode(int32 NodeIndex, TArray<FPrereqLeafDescriptor>& OutLeaves) const
+{
+	if (!Nodes.IsValidIndex(NodeIndex)) return;
+	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
+
+	if (Node.Type == EPrerequisiteExpressionType::Leaf)
+	{
+		FPrereqLeafDescriptor Desc;
+		Desc.Type = EPrerequisiteExpressionType::Leaf;
+		Desc.FactTag = Node.LeafTag;
+		OutLeaves.Add(Desc);
+		return;
+	}
+	if (Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+	{
+		FPrereqLeafDescriptor Desc;
+		Desc.Type = EPrerequisiteExpressionType::Leaf_Resolution;
+		Desc.ResolutionQuestTag = Node.ResolutionQuestTag;
+		Desc.ResolutionOutcomeTag = Node.ResolutionOutcomeTag;
+		OutLeaves.Add(Desc);
+		return;
+	}
+	for (int32 ChildIdx : Node.ChildIndices)
+	{
+		CollectLeavesFromNode(ChildIdx, OutLeaves);
 	}
 }
 
@@ -121,7 +180,9 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 	switch (Node.Type)
 	{
 	case EPrerequisiteExpressionType::Always: OutLines.Add(Indent + TEXT("Always")); break;
-	case EPrerequisiteExpressionType::Leaf:   OutLines.Add(FString::Printf(TEXT("%sLeaf '%s' (valid=%d)"), *Indent, *Node.LeafTag.ToString(), Node.LeafTag.IsValid())); break;
+	case EPrerequisiteExpressionType::Leaf:   OutLines.Add(FString::Printf(TEXT("%sLeaf [Fact] '%s' (valid=%d)"), *Indent, *Node.LeafTag.ToString(), Node.LeafTag.IsValid())); break;
+	case EPrerequisiteExpressionType::Leaf_Resolution: OutLines.Add(FString::Printf(TEXT("%sLeaf [Resolution] quest='%s' outcome='%s' (bridge='%s')"),
+		*Indent, *Node.ResolutionQuestTag.ToString(), *Node.ResolutionOutcomeTag.ToString(), *Node.LeafTag.ToString())); break;
 	case EPrerequisiteExpressionType::And:    OutLines.Add(Indent + FString::Printf(TEXT("AND (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Or:     OutLines.Add(Indent + FString::Printf(TEXT("OR (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Not:    OutLines.Add(Indent + TEXT("NOT")); break;

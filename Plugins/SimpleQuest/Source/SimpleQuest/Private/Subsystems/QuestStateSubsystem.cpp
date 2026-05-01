@@ -5,6 +5,8 @@
 #include "Engine/GameInstance.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestResolutionRecordedEvent.h"
+#include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestStateTagUtils.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -16,6 +18,13 @@ const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplay
 bool UQuestStateSubsystem::HasResolved(FGameplayTag QuestTag) const
 {
 	return QuestResolutions.Contains(QuestTag);
+}
+
+bool UQuestStateSubsystem::HasResolvedWith(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const
+{
+	if (!QuestTag.IsValid() || !OutcomeTag.IsValid()) return false;
+	const TSet<FGameplayTag>* OutcomeSet = ResolvedOutcomesByQuest.Find(QuestTag);
+	return OutcomeSet && OutcomeSet->Contains(OutcomeTag);
 }
 
 int32 UQuestStateSubsystem::GetResolutionCount(FGameplayTag QuestTag) const
@@ -137,10 +146,28 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	Entry.ResolutionTime = ResolutionTime;
 	Entry.Source = Source;
 
+	// Index maintenance for HasResolvedWith. Skipped when OutcomeTag is invalid (the "resolve without specifying an
+	// outcome" case via the BP ResolveQuest helper). Those entries appear in History but don't contribute to outcome-
+	// keyed lookups. TSet handles deduplication so repeat resolutions with the same outcome don't bloat the set.
+	if (OutcomeTag.IsValid())
+	{
+		ResolvedOutcomesByQuest.FindOrAdd(QuestTag).Add(OutcomeTag);
+	}
+
 	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
-		*QuestTag.ToString(), *OutcomeTag.ToString(),
+		*QuestTag.ToString(),
+		*OutcomeTag.ToString(),
 		Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"),
-		Record.History.Num(), ResolutionTime);
+		Record.History.Num(),
+		ResolutionTime);
+
+	// Broadcast on the resolved quest's tag channel. Distinct from FQuestEndedEvent (manager-published in
+	// ChainToNextNodes for graph-driven completions). This event fires for every resolution path - graph chain,
+	// external ResolveQuest, future save rehydration - so subscribers reach a single canonical channel.
+	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
+	{
+		Signals->PublishMessage(QuestTag, FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
+	}
 }
 
 void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status)
@@ -165,6 +192,15 @@ UWorldStateSubsystem* UQuestStateSubsystem::ResolveWorldState() const
 	if (UGameInstance* GI = GetGameInstance())
 	{
 		return GI->GetSubsystem<UWorldStateSubsystem>();
+	}
+	return nullptr;
+}
+
+USignalSubsystem* UQuestStateSubsystem::ResolveSignalSubsystem() const
+{
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		return GI->GetSubsystem<USignalSubsystem>();
 	}
 	return nullptr;
 }

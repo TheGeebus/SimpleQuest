@@ -25,7 +25,6 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
-#include "Events/QuestResolutionRecordedEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -37,6 +36,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #else
@@ -125,7 +125,10 @@ void UQuestManagerSubsystem::Deinitialize()
             for (auto& Item : Pair.Value)
             {
                 QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.AddedHandle);
-                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.RemovedHandle);
+                if (Item.Value.RemovedHandle.IsValid())
+                {
+                    QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.RemovedHandle);
+                }
             }
         }
         EnablementWatchHandles.Reset();
@@ -1130,35 +1133,19 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
     const FGameplayTag StepTag = Step->GetQuestTag();
     DeferredCompletions.Add(StepTag, FQuestDeferredCompletion{ OutcomeTag, PathIdentity });
 
-    TArray<FPrereqLeafDescriptor> Leaves;
-    Step->PrerequisiteExpression.CollectLeaves(Leaves);
-
     TMap<FGameplayTag, FDelegateHandle>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
-    for (const FPrereqLeafDescriptor& Leaf : Leaves)
-    {
-        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
-        {
-            const FGameplayTag& LeafTag = Leaf.FactTag;
-            if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
-            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
-                LeafTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded);
-            Handles.Add(LeafTag, Handle);
-        }
-        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
-        {
-            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
-            if (!LeafQuestTag.IsValid() || Handles.Contains(LeafQuestTag)) continue;
-            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestResolutionRecordedEvent>(
-                LeafQuestTag, this, &UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded);
-            Handles.Add(LeafQuestTag, Handle);
-        }
-    }
+    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+        Step->PrerequisiteExpression,
+        this,
+        &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded,
+        &UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded,
+        Handles);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq leaf(s)"),
+    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq channel(s)"),
         *StepTag.ToString(),
         *OutcomeTag.ToString(),
         *PathIdentity.ToString(),
-        Leaves.Num());
+        Handles.Num());
 }
 
 void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
@@ -1365,44 +1352,19 @@ void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FNam
     Watch.NodeTagName = NodeTagName;
     Watch.bLastKnownSatisfied = bInitialSatisfied;
 
-    TArray<FPrereqLeafDescriptor> Leaves;
-    Expr.CollectLeaves(Leaves);
+    TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
+    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+        Expr,
+        this,
+        &UQuestManagerSubsystem::OnEnablementLeafFactAdded,
+        &UQuestManagerSubsystem::OnEnablementLeafFactRemoved,
+        &UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded,
+        Handles);
 
-    TMap<FGameplayTag, FEnablementLeafHandles>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
-    for (const FPrereqLeafDescriptor& Leaf : Leaves)
-    {
-        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
-        {
-            // Fact-typed leaf — subscribe to FactAdded + FactRemoved on the leaf's WorldState fact tag.
-            const FGameplayTag& LeafTag = Leaf.FactTag;
-            if (!LeafTag.IsValid() || Handles.Contains(LeafTag)) continue;
-
-            FEnablementLeafHandles LeafHandles;
-            LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactAddedEvent>(
-                LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactAdded);
-            LeafHandles.RemovedHandle = QuestSignalSubsystem->SubscribeMessage<FWorldStateFactRemovedEvent>(
-                LeafTag, this, &UQuestManagerSubsystem::OnEnablementLeafFactRemoved);
-            Handles.Add(LeafTag, LeafHandles);
-        }
-        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
-        {
-            // Resolution-typed leaf: subscribe to FQuestResolutionRecordedEvent on the resolved-quest's tag.
-            // Multiple resolution leaves with the same ResolutionQuestTag (different OutcomeTags) dedupe via the
-            // map's Contains check; one subscription per channel is enough since the handler re-evaluates the
-            // full expression which checks each outcome internally via HasResolvedWith. RemovedHandle stays
-            // invalid - resolutions are append-only, no symmetric removed event.
-            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
-            if (!LeafQuestTag.IsValid() || Handles.Contains(LeafQuestTag)) continue;
-
-            FEnablementLeafHandles LeafHandles;
-            LeafHandles.AddedHandle = QuestSignalSubsystem->SubscribeMessage<FQuestResolutionRecordedEvent>(LeafQuestTag, this, &UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded);
-            // LeafHandles.RemovedHandle intentionally left invalid.
-            Handles.Add(LeafQuestTag, LeafHandles);
-        }
-    }
-
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d leaf(s), initial satisfied=%d"),
-        *QuestTag.ToString(), Leaves.Num(), bInitialSatisfied ? 1 : 0);
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d channel(s), initial satisfied=%d"),
+        *QuestTag.ToString(),
+        Handles.Num(),
+        bInitialSatisfied ? 1 : 0);
 }
 
 void UQuestManagerSubsystem::OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
@@ -1476,7 +1438,7 @@ void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
 
 void UQuestManagerSubsystem::ClearEnablementWatch(FGameplayTag QuestTag)
 {
-    if (TMap<FGameplayTag, FEnablementLeafHandles>* Handles = EnablementWatchHandles.Find(QuestTag))
+    if (TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>* Handles = EnablementWatchHandles.Find(QuestTag))
     {
         if (QuestSignalSubsystem)
         {

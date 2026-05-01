@@ -44,25 +44,6 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 
-namespace
-{
-	/**
-	 * Single canonical builder for resolution-typed prereq leaves. All compiler paths that compile an outcome-pin
-	 * connection into a leaf go through here so the (Type, LeafTag, ResolutionQuestTag, ResolutionOutcomeTag) field
-	 * combination stays consistent. Bridge LeafTag is preserved for Prereq Examiner display compat through any
-	 * subsequent polish pass; runtime evaluation uses the resolution-payload fields via HasResolvedWith.
-	 */
-	FPrerequisiteExpressionNode MakeResolutionLeafNode(FName NodeTagName, const FGameplayTag& OutcomeTag)
-	{
-		FPrerequisiteExpressionNode LeafNode;
-		LeafNode.Type = EPrerequisiteExpressionType::Leaf_Resolution;
-		LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-			FQuestStateTagUtils::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
-		LeafNode.ResolutionQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
-		LeafNode.ResolutionOutcomeTag = OutcomeTag;
-		return LeafNode;
-	}
-}
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
@@ -1400,40 +1381,32 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
         return CompileCombinatorNode(EPrerequisiteExpressionType::Or, Node, TagPrefix, VisitedAssetPaths, OutExpression);
     }
     
-    // NOT
-    if (UQuestlineNode_PrerequisiteNot* NotNode = Cast<UQuestlineNode_PrerequisiteNot>(Node))
-    {
-        FPrerequisiteExpressionNode ExprNode;
-        ExprNode.Type = EPrerequisiteExpressionType::Not;
-        const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+	// NOT
+	if (UQuestlineNode_PrerequisiteNot* NotNode = Cast<UQuestlineNode_PrerequisiteNot>(Node))
+	{
+		const int32 NodeIndex = OutExpression.AddNot();
 
 		if (UEdGraphPin* CondPin = NotNode->GetPinByRole(EQuestPinRole::PrereqIn))
-        {
-            if (CondPin->LinkedTo.Num() > 0)
-            {
-                const int32 ChildIndex = CompilePrerequisiteFromOutputPin(CondPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
-                if (ChildIndex != INDEX_NONE)
-                {
-                    OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
-                }
-            }
-        }
-        return NodeIndex;
-    }
+		{
+			if (CondPin->LinkedTo.Num() > 0)
+			{
+				const int32 ChildIndex = CompilePrerequisiteFromOutputPin(CondPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+				OutExpression.AddCombinatorChild(NodeIndex, ChildIndex);
+			}
+		}
+		return NodeIndex;
+	}
 
-    // Getter: resolves to a Leaf on the group's Satisfied tag
-    if (UQuestlineNode_PrerequisiteRuleExit* Getter = Cast<UQuestlineNode_PrerequisiteRuleExit>(Node))
-    {
-        if (!Getter->GroupTag.IsValid())
-        {
-            AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Getter has no GroupTag set and will be skipped."), *TagPrefix), Getter);
-            return INDEX_NONE;
-        }
-        FPrerequisiteExpressionNode LeafNode;
-        LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-        LeafNode.LeafTag = Getter->GroupTag;
-        return OutExpression.Nodes.Add(LeafNode);
-    }
+	// Getter: resolves to a Leaf on the group's Satisfied tag
+	if (UQuestlineNode_PrerequisiteRuleExit* Getter = Cast<UQuestlineNode_PrerequisiteRuleExit>(Node))
+	{
+		if (!Getter->GroupTag.IsValid())
+		{
+			AddWarning(FString::Printf(TEXT("[%s] A Prereq Group Getter has no GroupTag set and will be skipped."), *TagPrefix), Getter);
+			return INDEX_NONE;
+		}
+		return OutExpression.AddFactLeaf(Getter->GroupTag);
+	}
 
 	// Rule Entry Forward: direct-eval. Inline the Enter pin's linked expression subtree so a local Forward
 	// consumer avoids the WorldState roundtrip that a cross-graph Exit would use. Behaviorally equivalent
@@ -1454,27 +1427,22 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 			}
 		}
 
-		// No wired expression on Enter — fall back to the tag-read leaf. Same expression a cross-graph Exit
+		// No wired expression on Enter: fall back to the tag-read leaf. Same expression a cross-graph Exit
 		// compiles to; evaluates false at runtime unless the Monitor has somehow published the tag anyway.
-		FPrerequisiteExpressionNode LeafNode;
-		LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-		LeafNode.LeafTag = Entry->GroupTag;
-		return OutExpression.Nodes.Add(LeafNode);
+		return OutExpression.AddFactLeaf(Entry->GroupTag);
 	}
     
-    // Entry node: outcome pin → leaf checking entry outcome fact; "Any Outcome" → parent quest Live fact
+    // Entry node: outcome pin to leaf checking entry outcome fact; "Any Outcome" → parent quest Live fact
     if (Cast<UQuestlineNode_Entry>(Node))
     {
         const FName QuestTagName = FName(*(TEXT("SimpleQuest.Quest.") + TagPrefix));
 
-		if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
-        {
-            // The parent quest's Live fact is always set when the inner graph is running
-            FPrerequisiteExpressionNode LeafNode;
-            LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-            LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Live), false);
-            return OutExpression.Nodes.Add(LeafNode);
-        }
+    	if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
+    	{
+    		// The parent quest's Live fact is always set when the inner graph is running
+    		const FGameplayTag LiveFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTagName, FQuestStateTagUtils::Leaf_Live), false);
+    		return OutExpression.AddFactLeaf(LiveFactTag);
+    	}
 
         const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
         if (!OutcomeTag.IsValid())
@@ -1492,11 +1460,8 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                                        *TagPrefix, *OutcomeTag.ToString()), Node);
         }
 
-        FPrerequisiteExpressionNode LeafNode;
-        LeafNode.Type = EPrerequisiteExpressionType::Leaf;
-        LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestStateTagUtils::MakeEntryPathFact(QuestTagName, OutcomeTag.GetTagName()), false);
-        return OutExpression.Nodes.Add(LeafNode);
+    	const FGameplayTag EntryPathFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeEntryPathFact(QuestTagName, OutcomeTag.GetTagName()), false);
+    	return OutExpression.AddFactLeaf(EntryPathFactTag);
     }
 
     
@@ -1517,39 +1482,33 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                     OutcomePins.Add(Pin);
             }
 
-            // No named outcomes — this node is satisfied by Leaf_Completed alone
-            if (OutcomePins.IsEmpty())
-            {
-                FPrerequisiteExpressionNode LeafNode;
-                LeafNode.Type    = EPrerequisiteExpressionType::Leaf;
-                LeafNode.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
-                    FQuestStateTagUtils::MakeStateFact(NodeTagName, FQuestStateTagUtils::Leaf_Completed), false);
-                return OutExpression.Nodes.Add(LeafNode);
-            }
+			// No named outcomes. This node is satisfied by Leaf_Completed alone
+			if (OutcomePins.IsEmpty())
+			{
+				const FGameplayTag CompletedFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(NodeTagName, FQuestStateTagUtils::Leaf_Completed), false);
+				return OutExpression.AddFactLeaf(CompletedFactTag);
+			}
 
-            // Build OR over all named outcome facts
-            FPrerequisiteExpressionNode OrNode;
-            OrNode.Type = EPrerequisiteExpressionType::Or;
-            const int32 OrIndex = OutExpression.Nodes.Add(OrNode);
+			// Build OR over all named outcome facts
+			const int32 OrIndex = OutExpression.AddCombinator(EPrerequisiteExpressionType::Or);
 
 			for (UEdGraphPin* OutcomePin : OutcomePins)
 			{
 				const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
 				if (!OutcomeTag.IsValid()) continue;
 
-				// Sequence the Add-to-Nodes (which may reallocate the TArray) BEFORE indexing back into Nodes, otherwise
-				// OutExpression.Nodes[OrIndex].ChildIndices holds a dangling reference when a grow happens.
-				const int32 LeafIdx = OutExpression.Nodes.Add(MakeResolutionLeafNode(NodeTagName, OutcomeTag));
-				OutExpression.Nodes[OrIndex].ChildIndices.Add(LeafIdx);
+				// AddResolutionLeaf may reallocate Nodes; AddCombinatorChild's parent index is reused after the leaf
+				// add so the index stays valid (TArray Add returns by value, no dangling reference into the array).
+				const int32 LeafIdx = OutExpression.AddResolutionLeaf(NodeTagName, OutcomeTag);
+				OutExpression.AddCombinatorChild(OrIndex, LeafIdx);
 			}
 
-            return OrIndex;
+			return OrIndex;
         }
 
     	// Specific outcome pin (a single named outcome wired into a prereq input). PinName IS the outcome tag's
-    	// FName for static placements; for dynamic placements it's the sanitized PathName. Either way this routes
-    	// through the same Leaf_Resolution shape as the AnyOutcomeOut OR-loop above: single canonical builder via
-    	// MakeResolutionLeafNode means future leaf-shape changes touch one place, not two.
+    	// FName for static placements; for dynamic placements it's the sanitized PathName. Routes through the same
+    	// Leaf_Resolution shape as the AnyOutcomeOut OR-loop above via FPrerequisiteExpression::AddResolutionLeaf.
     	const UQuestlineNode_ContentBase* ContentNode = Cast<const UQuestlineNode_ContentBase>(OutputPin->GetOwningNode());
     	if (!ContentNode) return INDEX_NONE;
     	const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
@@ -1558,7 +1517,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
     	if (!OutcomeTag.IsValid()) return INDEX_NONE;
 
-    	return OutExpression.Nodes.Add(MakeResolutionLeafNode(NodeTagName, OutcomeTag));
+    	return OutExpression.AddResolutionLeaf(NodeTagName, OutcomeTag);
     }
 
     return INDEX_NONE;
@@ -1566,9 +1525,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 
 int32 FQuestlineGraphCompiler::CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)
 {
-    FPrerequisiteExpressionNode ExprNode;
-    ExprNode.Type = Type;
-    const int32 NodeIndex = OutExpression.Nodes.Add(ExprNode);
+	const int32 NodeIndex = OutExpression.AddCombinator(Type);
 
     for (UEdGraphPin* Pin : Node->Pins)
     {

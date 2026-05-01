@@ -3,11 +3,16 @@
 #include "Quests/QuestNodeBase.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
-#include "Signals/SignalSubsystem.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 
+
+UWorld* UQuestNodeBase::GetWorld() const
+{
+    return CachedGameInstance.IsValid() ? CachedGameInstance->GetWorld() : nullptr;
+}
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
@@ -63,35 +68,12 @@ void UQuestNodeBase::ResetTransientState()
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 {
     DeferredContextualTag = InContextualTag;
-
-    USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
-    if (!Signals) return;
-
-    // Subscribe per-leaf with type-aware channel: WorldState fact channel for Leaf, resolution-recorded channel
-    // for Leaf_Resolution. Either path triggers TryActivateDeferred via its handler. Mirrors the same shape used
-    // in UQuestManagerSubsystem::RegisterEnablementWatch / DeferChainToNextNodes and UQuestPrereqRuleNode::Activate
-    // - fourth site in the prereq-subscription duplication pattern flagged for the centralized leaf-construction
-    // refactor parked under FUTURE EXTENSIBILITY CANDIDATES.
-    TArray<FPrereqLeafDescriptor> Leaves;
-    PrerequisiteExpression.CollectLeaves(Leaves);
-
-    for (const FPrereqLeafDescriptor& Leaf : Leaves)
-    {
-        if (Leaf.Type == EPrerequisiteExpressionType::Leaf)
-        {
-            const FGameplayTag& LeafTag = Leaf.FactTag;
-            if (!LeafTag.IsValid() || PrereqSubscriptionHandles.Contains(LeafTag)) continue;
-            FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestNodeBase::OnPrereqFactAdded);
-            PrereqSubscriptionHandles.Add(LeafTag, Handle);
-        }
-        else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
-        {
-            const FGameplayTag& LeafQuestTag = Leaf.ResolutionQuestTag;
-            if (!LeafQuestTag.IsValid() || PrereqSubscriptionHandles.Contains(LeafQuestTag)) continue;
-            FDelegateHandle Handle = Signals->SubscribeMessage<FQuestResolutionRecordedEvent>(LeafQuestTag, this, &UQuestNodeBase::OnPrereqResolutionRecorded);
-            PrereqSubscriptionHandles.Add(LeafQuestTag, Handle);
-        }
-    }
+    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+        PrerequisiteExpression,
+        this,
+        &UQuestNodeBase::OnPrereqFactAdded,
+        &UQuestNodeBase::OnPrereqResolutionRecorded,
+        PrereqSubscriptionHandles);
 }
 
 void UQuestNodeBase::OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)

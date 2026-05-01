@@ -118,36 +118,28 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 
 	bool IsAlways() const { return Nodes.IsEmpty(); }
 
-	/**
-	 * Recursively evaluates the expression. Leaf-typed nodes query UWorldStateSubsystem::HasFact;
-	 * Leaf_Resolution-typed nodes query UQuestStateSubsystem::HasResolvedWith. Either subsystem may be null -
-	 * leaves whose subsystem is unavailable evaluate to false (defensive default during early init).
-	 */
 	bool Evaluate(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const;
 
-	/**
-	 * Single-walk evaluator that returns both the overall result and per-leaf evaluation detail. Leaf statuses
-	 * carry LeafTag for blocker-display compatibility regardless of leaf type - see FPrerequisiteExpressionNode
-	 * doc-comment for the bridge semantics through Batch B of the Outcome/Path migration.
-	 */
 	FQuestPrereqStatus EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState,
 		const UQuestStateSubsystem* StateSubsystem) const;
-	
-	/**
-	 * Collects every leaf tag in the tree - flat-tag enumeration kept for compatibility with consumers that
-	 * don't need per-leaf type discrimination (e.g., the compiler's verbose-log leaf count). Returns LeafTag for
-	 * both Leaf and Leaf_Resolution nodes; the Leaf_Resolution case returns the compiler's bridge path-fact tag.
-	 * Subscription wiring should use CollectLeaves below for per-leaf-type branching.
-	 */
+
 	void CollectLeafTags(TArray<FGameplayTag>& OutTags) const;
 
-	/**
-	 * Type-aware leaf enumeration. Each FPrereqLeafDescriptor identifies the leaf's kind plus the
-	 * subscription-relevant identifier(s) - fact tag for Leaf, (QuestTag, OutcomeTag) for Leaf_Resolution.
-	 * Used by enablement-watch / deferred-completion / Prereq Rule subscription wiring to route each leaf to
-	 * the correct event channel.
-	 */
 	void CollectLeaves(TArray<FPrereqLeafDescriptor>& OutLeaves) const;
+
+	/**
+	 * Builder methods. Return the index of the new node so callers can wire combinator children and set RootIndex.
+	 * Use these instead of constructing FPrerequisiteExpressionNode by hand. Keeps per-leaf-kind field combinations
+	 * consistent (Type + LeafTag for Leaf; Type + ResolutionQuestTag + ResolutionOutcomeTag + bridge LeafTag for
+	 * Leaf_Resolution). Future leaf-kinds drop in as one new method here + one branch in the evaluator + one branch
+	 * in the subscription helper.
+	 */
+	int32 AddAlways();
+	int32 AddFactLeaf(const FGameplayTag& FactTag);
+	int32 AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
+	int32 AddCombinator(EPrerequisiteExpressionType Type);  // expects And or Or; child indices wired by caller
+	int32 AddNot();                                         // child index wired by caller via AddCombinatorChild
+	void  AddCombinatorChild(int32 ParentIndex, int32 ChildIndex);
 
 private:
 	bool EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const;

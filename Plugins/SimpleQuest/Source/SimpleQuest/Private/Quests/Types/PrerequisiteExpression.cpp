@@ -2,9 +2,11 @@
 
 #include "Quests/Types/PrerequisiteExpression.h"
 
+#include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "Utilities/QuestStateTagUtils.h"
 
 
 bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState,
@@ -190,5 +192,58 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 	for (int32 ChildIdx : Node.ChildIndices)
 	{
 		DebugDumpTo(OutLines, ChildIdx, Depth + 1);
+	}
+}
+
+int32 FPrerequisiteExpression::AddAlways()
+{
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Always;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddFactLeaf(const FGameplayTag& FactTag)
+{
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Leaf;
+	Node.LeafTag = FactTag;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag)
+{
+	// Bridge LeafTag is preserved for Prereq Examiner display compat. Runtime evaluation reads ResolutionQuestTag
+	// + ResolutionOutcomeTag via UQuestStateSubsystem::HasResolvedWith. Single canonical builder so future leaf-shape
+	// changes touch one site.
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Leaf_Resolution;
+	Node.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
+		FQuestStateTagUtils::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
+	Node.ResolutionQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+	Node.ResolutionOutcomeTag = OutcomeTag;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddCombinator(EPrerequisiteExpressionType Type)
+{
+	checkf(Type == EPrerequisiteExpressionType::And || Type == EPrerequisiteExpressionType::Or,
+		TEXT("AddCombinator only accepts And or Or; got %d"), static_cast<int32>(Type));
+	FPrerequisiteExpressionNode Node;
+	Node.Type = Type;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddNot()
+{
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Not;
+	return Nodes.Add(Node);
+}
+
+void FPrerequisiteExpression::AddCombinatorChild(int32 ParentIndex, int32 ChildIndex)
+{
+	if (Nodes.IsValidIndex(ParentIndex) && ChildIndex != INDEX_NONE)
+	{
+		Nodes[ParentIndex].ChildIndices.Add(ChildIndex);
 	}
 }

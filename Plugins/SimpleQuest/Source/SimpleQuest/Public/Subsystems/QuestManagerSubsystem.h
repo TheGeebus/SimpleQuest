@@ -8,6 +8,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "QuestManagerSubsystem.generated.h"
 
 
@@ -225,14 +226,8 @@ private:
 		bool bLastKnownSatisfied = false;
 	};
 
-	struct FEnablementLeafHandles
-	{
-		FDelegateHandle AddedHandle;
-		FDelegateHandle RemovedHandle;
-	};
-
 	TMap<FGameplayTag, FEnablementWatch> EnablementWatches;
-	TMap<FGameplayTag, TMap<FGameplayTag, FEnablementLeafHandles>> EnablementWatchHandles;
+	TMap<FGameplayTag, TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>> EnablementWatchHandles;
 	
 	/**
 	 * Per-quest map of "the giver actor that initiated the most-recent successful give" — populated in

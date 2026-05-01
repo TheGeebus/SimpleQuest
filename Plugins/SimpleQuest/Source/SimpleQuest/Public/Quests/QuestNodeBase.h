@@ -107,6 +107,8 @@ public:
 
     FOnNodeStarted OnNodeStarted;
     FOnNodeCompleted OnNodeCompleted;
+
+    virtual UWorld* GetWorld() const override;
     
     /**
      * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeStarted/OnNodeCompleted.

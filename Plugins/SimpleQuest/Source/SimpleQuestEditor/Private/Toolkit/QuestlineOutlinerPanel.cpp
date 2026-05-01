@@ -10,14 +10,18 @@
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Widgets/Input/SSearchBox.h"
+#include "Widgets/SBoxPanel.h"
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Text/STextBlock.h"
+
 
 #define LOCTEXT_NAMESPACE "SQuestlineOutlinerPanel"
 
 void SQuestlineOutlinerRow::Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable)
 {
     Item = InArgs._Item;
+    HighlightText = InArgs._HighlightText;
     OnDoubleClicked = InArgs._OnDoubleClicked;
 
     STableRow<TSharedPtr<FQuestlineOutlinerItem>>::Construct(
@@ -77,6 +81,7 @@ void SQuestlineOutlinerRow::ConstructChildren(ETableViewMode::Type InOwnerTableM
         [
             SNew(STextBlock)
             .Text(FText::FromString(Item->DisplayName))
+            .HighlightText(HighlightText)
             .ColorAndOpacity(TextColor)
             .Font(Font)
         ]
@@ -95,12 +100,25 @@ void SQuestlineOutlinerPanel::Construct(const FArguments& InArgs, UQuestlineGrap
     OnItemNavigate = InArgs._OnItemNavigate;
 
     SAssignNew(TreeView, STreeView<TSharedPtr<FQuestlineOutlinerItem>>)
-        .TreeItemsSource(&RootItems)
+        .TreeItemsSource(&VisibleRoots)
         .OnGenerateRow(this, &SQuestlineOutlinerPanel::GenerateRow)
         .OnGetChildren(this, &SQuestlineOutlinerPanel::GetChildQuestlineItems)
         .OnContextMenuOpening(this, &SQuestlineOutlinerPanel::MakeContextMenu);
 
-    ChildSlot[ TreeView.ToSharedRef() ];
+    ChildSlot
+    [
+        SNew(SVerticalBox)
+        + SVerticalBox::Slot().AutoHeight().Padding(FMargin(2.f, 2.f, 2.f, 2.f))
+        [
+            SNew(SSearchBox)
+                .HintText(LOCTEXT("FilterHint", "Filter by tag or label..."))
+                .OnTextChanged(this, &SQuestlineOutlinerPanel::HandleFilterTextChanged)
+        ]
+        + SVerticalBox::Slot().FillHeight(1.f)
+        [
+            TreeView.ToSharedRef()
+        ]
+    ];
 
     RebuildTree();
 }
@@ -281,7 +299,6 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     if (TreeView.IsValid())
     {
-        TreeView->RequestTreeRefresh();
         TreeView->SetItemExpansion(RootItem, true);
         for (const auto& ItemPair : ItemMap)
         {
@@ -357,12 +374,19 @@ void SQuestlineOutlinerPanel::RebuildTree()
     const FString RootPrefix = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(QuestlineID);
     ResolveLinkedSources(QuestlineGraph->QuestlineEdGraph, RootPrefix, QuestlineGraph);
 
+    // Re-derive VisibleRoots / VisibleItemSet against the freshly-rebuilt RootItems and the current FilterText (if any).
+    RebuildVisibleTree();
+    if (TreeView.IsValid())
+    {
+        TreeView->RequestTreeRefresh();
+    }
 }
 
 TSharedRef<ITableRow> SQuestlineOutlinerPanel::GenerateRow(TSharedPtr<FQuestlineOutlinerItem> Item, const TSharedRef<STableViewBase>& OwnerTable)
 {
     return SNew(SQuestlineOutlinerRow, OwnerTable)
         .Item(Item)
+        .HighlightText(this, &SQuestlineOutlinerPanel::GetFilterText)
         .OnDoubleClicked_Lambda([this, Item]()
         {
             if (OnItemNavigate.IsBound())
@@ -373,7 +397,23 @@ TSharedRef<ITableRow> SQuestlineOutlinerPanel::GenerateRow(TSharedPtr<FQuestline
 
 void SQuestlineOutlinerPanel::GetChildQuestlineItems(TSharedPtr<FQuestlineOutlinerItem> Item, TArray<TSharedPtr<FQuestlineOutlinerItem>>& OutChildren)
 {
-    OutChildren = Item->Children;
+    if (!Item.IsValid()) return;
+
+    if (FilterText.IsEmpty())
+    {
+        OutChildren = Item->Children;
+        return;
+    }
+
+    // Active filter — drop children that aren't in the visible set (themselves not matching and no descendant matching).
+    OutChildren.Reset();
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Child : Item->Children)
+    {
+        if (Child.IsValid() && VisibleItemSet.Contains(Child))
+        {
+            OutChildren.Add(Child);
+        }
+    }
 }
 
 TSharedPtr<SWidget> SQuestlineOutlinerPanel::MakeContextMenu()
@@ -402,6 +442,152 @@ void SQuestlineOutlinerPanel::CopySelectedItemTag()
     if (Selected.IsEmpty() || !Selected[0].IsValid() || Selected[0]->Tag.IsNone()) return;
 
     FPlatformApplicationMisc::ClipboardCopy(*Selected[0]->Tag.ToString());
+}
+
+void SQuestlineOutlinerPanel::HandleFilterTextChanged(const FText& NewText)
+{
+    const FString NewFilter = NewText.ToString();
+    const bool bWasFiltering = !FilterText.IsEmpty();
+    const bool bIsFiltering  = !NewFilter.IsEmpty();
+
+    // Save expansion state on the empty -> non-empty transition so we can restore it when the user clears the filter.
+    if (bIsFiltering && !bWasFiltering)
+    {
+        SaveExpansionState();
+    }
+
+    FilterText = NewFilter;
+    RebuildVisibleTree();
+
+    if (bIsFiltering)
+    {
+        // Auto-expand every visible item so matches are reachable without manual drill-down. Subsequent filter
+        // changes (typing more / less) just re-expand the new visible set; non-matching expansion is dropped
+        // because those items are no longer in the visible source array Slate is iterating.
+        AutoExpandVisibleItems();
+    }
+    else if (bWasFiltering)
+    {
+        RestoreExpansionState();
+    }
+
+    if (TreeView.IsValid())
+    {
+        TreeView->RequestTreeRefresh();
+    }
+}
+
+void SQuestlineOutlinerPanel::RebuildVisibleTree()
+{
+    VisibleRoots.Reset();
+    VisibleItemSet.Reset();
+
+    if (FilterText.IsEmpty())
+    {
+        VisibleRoots = RootItems;  // shallow copy of TSharedPtrs — same items, no clone.
+        return;
+    }
+
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Root : RootItems)
+    {
+        if (CollectVisible(Root))
+        {
+            VisibleRoots.Add(Root);
+        }
+    }
+}
+
+bool SQuestlineOutlinerPanel::CollectVisible(TSharedPtr<FQuestlineOutlinerItem> Item)
+{
+    if (!Item.IsValid()) return false;
+
+    bool bAnyVisible = false;
+    if (ItemMatches(*Item))
+    {
+        VisibleItemSet.Add(Item);
+        bAnyVisible = true;
+    }
+
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Child : Item->Children)
+    {
+        if (CollectVisible(Child))
+        {
+            // Ancestor preservation — any item with a matching descendant stays visible to keep the path readable.
+            VisibleItemSet.Add(Item);
+            bAnyVisible = true;
+        }
+    }
+
+    return bAnyVisible;
+}
+
+bool SQuestlineOutlinerPanel::ItemMatches(const FQuestlineOutlinerItem& Item) const
+{
+    // Case-insensitive substring match (FString::Contains defaults to ESearchCase::IgnoreCase). Matching either
+    // DisplayName or the full Tag string lets designers find rows by label or by partial gameplay-tag fragment.
+    return Item.DisplayName.Contains(FilterText) || Item.Tag.ToString().Contains(FilterText);
+}
+
+void SQuestlineOutlinerPanel::SaveExpansionState()
+{
+    SavedExpansionState.Reset();
+    if (!TreeView.IsValid()) return;
+
+    // Capture expanded items by tag (stable identity across recompile) rather than TSharedPtr (rebuilt on Refresh,
+    // would leave us holding stale pointers when restoring after a mid-filter compile).
+    TSet<TSharedPtr<FQuestlineOutlinerItem>> Expanded;
+    TreeView->GetExpandedItems(Expanded);
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Item : Expanded)
+    {
+        if (Item.IsValid() && !Item->Tag.IsNone())
+        {
+            SavedExpansionState.Add(Item->Tag);
+        }
+    }
+}
+
+void SQuestlineOutlinerPanel::RestoreExpansionState()
+{
+    if (!TreeView.IsValid()) return;
+
+    TreeView->ClearExpandedItems();
+    if (SavedExpansionState.IsEmpty()) return;
+
+    // Walk the current tree once and re-apply expansion to any item whose tag matches a saved entry. Cheap given
+    // typical questline sizes: dozens of items at the upper end. Items that no longer exist in the post-compile
+    // tree silently fall out (their tags aren't found); items in the rebuilt tree with previously-saved tags get
+    // their expansion restored.
+    TFunction<void(const TSharedPtr<FQuestlineOutlinerItem>&)> ApplyExpansion =
+        [this, &ApplyExpansion](const TSharedPtr<FQuestlineOutlinerItem>& Item)
+        {
+            if (!Item.IsValid()) return;
+            if (SavedExpansionState.Contains(Item->Tag))
+            {
+                TreeView->SetItemExpansion(Item, true);
+            }
+            for (const TSharedPtr<FQuestlineOutlinerItem>& Child : Item->Children)
+            {
+                ApplyExpansion(Child);
+            }
+        };
+
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Root : RootItems)
+    {
+        ApplyExpansion(Root);
+    }
+}
+
+void SQuestlineOutlinerPanel::AutoExpandVisibleItems()
+{
+    if (!TreeView.IsValid()) return;
+
+    for (const TSharedPtr<FQuestlineOutlinerItem>& Item : VisibleItemSet)
+    {
+        if (Item.IsValid())
+        {
+            TreeView->SetItemExpansion(Item, true);
+        }
+    }
 }
 
 #undef LOCTEXT_NAMESPACE

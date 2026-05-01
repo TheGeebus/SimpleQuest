@@ -2,6 +2,8 @@
 
 #include "Toolkit/QuestlineOutlinerPanel.h"
 
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
@@ -11,7 +13,7 @@
 #include "Widgets/Views/STableRow.h"
 #include "Widgets/Text/STextBlock.h"
 
-
+#define LOCTEXT_NAMESPACE "SQuestlineOutlinerPanel"
 
 void SQuestlineOutlinerRow::Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable)
 {
@@ -95,7 +97,8 @@ void SQuestlineOutlinerPanel::Construct(const FArguments& InArgs, UQuestlineGrap
     SAssignNew(TreeView, STreeView<TSharedPtr<FQuestlineOutlinerItem>>)
         .TreeItemsSource(&RootItems)
         .OnGenerateRow(this, &SQuestlineOutlinerPanel::GenerateRow)
-        .OnGetChildren(this, &SQuestlineOutlinerPanel::GetChildQuestlineItems);
+        .OnGetChildren(this, &SQuestlineOutlinerPanel::GetChildQuestlineItems)
+        .OnContextMenuOpening(this, &SQuestlineOutlinerPanel::MakeContextMenu);
 
     ChildSlot[ TreeView.ToSharedRef() ];
 
@@ -136,7 +139,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
     auto IsLocalContentTag = [&](FName Key) { return Key.ToString().StartsWith(RootChildPrefix); };
 
     // Pass 1 — items from compiled nodes; classify by serialized runtime metadata.
-    //   bIsLinkedQuestlinePlacement (set by compiler) → LinkedGraph (blue-bold per original spec)
+    //   bIsLinkedQuestlinePlacement (set by compiler)  → LinkedGraph (blue-bold per original spec)
     //   UQuestStep runtime class                       → Step (reserves the slot; same default styling as Quest for now)
     //   anything else                                  → Quest (default)
     // Both signals serialize with the asset, so the panel classifies correctly on first display after editor load.
@@ -373,3 +376,32 @@ void SQuestlineOutlinerPanel::GetChildQuestlineItems(TSharedPtr<FQuestlineOutlin
     OutChildren = Item->Children;
 }
 
+TSharedPtr<SWidget> SQuestlineOutlinerPanel::MakeContextMenu()
+{
+    if (!TreeView.IsValid()) return nullptr;
+
+    const TArray<TSharedPtr<FQuestlineOutlinerItem>> Selected = TreeView->GetSelectedItems();
+    if (Selected.IsEmpty() || !Selected[0].IsValid()) return nullptr;
+
+    FMenuBuilder MenuBuilder(true, nullptr);
+    MenuBuilder.BeginSection(NAME_None, LOCTEXT("ClipboardSection", "Clipboard"));
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("CopyTagLabel", "Copy Tag"),
+        LOCTEXT("CopyTagTooltip", "Copy this row's tag (full runtime tag for Quest / Step / Linked nodes; questline ID for the root row) to the clipboard."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateSP(this, &SQuestlineOutlinerPanel::CopySelectedItemTag)));
+    MenuBuilder.EndSection();
+    return MenuBuilder.MakeWidget();
+}
+
+void SQuestlineOutlinerPanel::CopySelectedItemTag()
+{
+    if (!TreeView.IsValid()) return;
+
+    const TArray<TSharedPtr<FQuestlineOutlinerItem>> Selected = TreeView->GetSelectedItems();
+    if (Selected.IsEmpty() || !Selected[0].IsValid() || Selected[0]->Tag.IsNone()) return;
+
+    FPlatformApplicationMisc::ClipboardCopy(*Selected[0]->Tag.ToString());
+}
+
+#undef LOCTEXT_NAMESPACE

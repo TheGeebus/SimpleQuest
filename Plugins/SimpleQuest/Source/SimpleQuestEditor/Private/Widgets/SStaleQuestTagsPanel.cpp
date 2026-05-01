@@ -15,6 +15,7 @@
 #include "Misc/PackageName.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "UObject/Package.h"
+#include "Widgets/SimpleCoreEditorWidgetUtils.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -142,8 +143,8 @@ public:
 			using EStaleQuestTagSource = FSimpleQuestEditorUtilities::EStaleQuestTagSource;
 			if (!Entry.IsValid()) return WithStripe(TextCell(FString()));
 
-			// BP CDO entries have no level — render an em-dash with a muted color and a "not applicable"
-			// tooltip. The underlying value (per GetColumnText) stays empty so sort + filter naturally
+			// BP CDO entries have no level: render an em-dash with a muted color and a "not applicable"
+			// tooltip. The underlying value (per GetColumnText) stays empty so sort and filter naturally
 			// exclude these from level-text matches.
 			if (Entry->Source == EStaleQuestTagSource::ActorBlueprintCDO)
 			{
@@ -221,9 +222,7 @@ private:
 
 	FSlateColor GetStripeColor() const
 	{
-		return (IndexInList % 2 == 0)
-			? FSlateColor(FLinearColor(0.f, 0.f, 0.f, 0.15f))
-			: FSlateColor(FLinearColor::Transparent);
+		return FSimpleCoreEditorWidgetUtils::GetTableRowStripeColor(IndexInList);
 	}
 };
 

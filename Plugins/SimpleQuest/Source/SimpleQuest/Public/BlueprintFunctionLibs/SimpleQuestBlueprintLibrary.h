@@ -117,7 +117,7 @@ public:
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
 
     // -------------------------------------------------------------------------------------------------------------
-    // World state: general fact store, for power users and external prereqs
+    // World state: general fact store, for power users and external prereqs (relocate to SimpleCore?)
     // -------------------------------------------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|World State", meta = (WorldContext = "WorldContext"))

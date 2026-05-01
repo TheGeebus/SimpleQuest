@@ -4,7 +4,9 @@
 
 #include "SimpleCoreEditorLog.h"
 #include "Debug/SimpleCorePIEDebugChannel.h"
-#include "Widgets/SWorldStateFactsPanel.h"
+#include "FactsPanel/FactsPanelRegistry.h"
+#include "Widgets/SFactsPanel.h"
+#include "Widgets/SWorldStateFactsView.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Docking/TabManager.h"
 #include "Modules/ModuleManager.h"
@@ -16,35 +18,43 @@
 
 DEFINE_LOG_CATEGORY(LogSimpleCoreEditor);
 
-const FName FSimpleCoreEditorModule::WorldStateFactsTabId(TEXT("SimpleCore.WorldStateFacts"));
+const FName FSimpleCoreEditorModule::FactsPanelTabId(TEXT("SimpleCore.FactsPanel"));
+const FName FSimpleCoreEditorModule::WorldStateViewId(TEXT("SimpleCore.WorldState"));
 
 void FSimpleCoreEditorModule::StartupModule()
 {
-    // Lifecycle: construct + Initialize here, Shutdown + reset in ShutdownModule. Matches FQuestPIEDebugChannel's pattern.
-    // Zero runtime cost outside PIE — the channel just holds a pair of editor-delegate handles.
     PIEDebugChannel = MakeUnique<FSimpleCorePIEDebugChannel>();
     PIEDebugChannel->Initialize();
 
-    // Nomad tab under Window → Developer Tools. RegisterNomadTabSpawner returns a FTabSpawnerEntry we can fluently
-    // configure; SetGroup() pins it under the editor's standard developer-tools submenu so it discoverability matches
-    // UE's built-in debug inspectors (Output Log, Session Frontend, etc.).
-    FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-        WorldStateFactsTabId,
-        FOnSpawnTab::CreateRaw(this, &FSimpleCoreEditorModule::SpawnWorldStateFactsTab))
-        .SetDisplayName(LOCTEXT("WorldStateFactsTabTitle", "World State Facts"))
-        .SetTooltipText(LOCTEXT("WorldStateFactsTabTooltip", "Live view of all facts asserted in the PIE world's UWorldStateSubsystem."))
-        .SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsDebugCategory())
-        .SetMenuType(ETabSpawnerMenuType::Enabled);
+    // Register the WorldState facts view with the generic facts-panel registry. Each SFactsPanel instance gets its own
+    // SWorldStateFactsView via this factory, so per-panel filter / scroll state stays isolated across docked panels.
+    FFactsPanelRegistry::Get().RegisterView(
+        WorldStateViewId,
+        LOCTEXT("WorldStateViewName", "World State Facts"),
+        []() -> TSharedRef<SWidget> { return SNew(SWorldStateFactsView); });
 
-    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::StartupModule — PIE debug channel initialized, WorldState Facts tab registered"));
+    // Nomad tab under Window > Developer Tools. SetReuseTabMethod returning null forces a fresh SFactsPanel on each
+    // menu invocation - designers can dock multiple panels showing different registries side-by-side.
+    FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
+        FactsPanelTabId,
+        FOnSpawnTab::CreateRaw(this, &FSimpleCoreEditorModule::SpawnFactsPanelTab))
+        .SetDisplayName(LOCTEXT("FactsPanelTabTitle", "Facts Panel"))
+        .SetTooltipText(LOCTEXT("FactsPanelTabTooltip", "Live view of registered fact registries (WorldState, Quest State, etc.). Re-invoke for additional panels."))
+        .SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsDebugCategory())
+        .SetMenuType(ETabSpawnerMenuType::Enabled)
+        .SetReuseTabMethod(FOnFindTabToReuse::CreateLambda([](const FTabId&) -> TSharedPtr<SDockTab> { return nullptr; }));
+
+    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::StartupModule — PIE debug channel initialized, WorldState facts view registered, Facts Panel tab registered"));
 }
 
 void FSimpleCoreEditorModule::ShutdownModule()
 {
     if (FSlateApplication::IsInitialized())
     {
-        FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(WorldStateFactsTabId);
+        FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(FactsPanelTabId);
     }
+
+    FFactsPanelRegistry::Get().UnregisterView(WorldStateViewId);
 
     if (PIEDebugChannel.IsValid())
     {
@@ -52,7 +62,7 @@ void FSimpleCoreEditorModule::ShutdownModule()
         PIEDebugChannel.Reset();
     }
 
-    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::ShutdownModule — tab unregistered, PIE debug channel torn down"));
+    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::ShutdownModule — Facts Panel tab unregistered, WorldState view deregistered, PIE debug channel torn down"));
 }
 
 FSimpleCorePIEDebugChannel* FSimpleCoreEditorModule::GetPIEDebugChannel()
@@ -64,18 +74,21 @@ FSimpleCorePIEDebugChannel* FSimpleCoreEditorModule::GetPIEDebugChannel()
     return nullptr;
 }
 
-TSharedRef<SDockTab> FSimpleCoreEditorModule::SpawnWorldStateFactsTab(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FSimpleCoreEditorModule::SpawnFactsPanelTab(const FSpawnTabArgs& Args)
 {
-    // NomadTab is the standalone-window variant. The panel itself is self-contained — owns its own Tick for live
-    // refresh while the channel is active.
+    ++SpawnedPanelCount;
+    const FText TabLabel = SpawnedPanelCount == 1
+        ? LOCTEXT("FactsPanelTabLabel", "Facts Panel")
+        : FText::Format(LOCTEXT("FactsPanelTabLabelN", "Facts Panel {0}"), FText::AsNumber(SpawnedPanelCount));
+
     return SNew(SDockTab)
         .TabRole(ETabRole::NomadTab)
+        .Label(TabLabel)
         [
-            SNew(SWorldStateFactsPanel)
+            SNew(SFactsPanel)
         ];
 }
 
 #undef LOCTEXT_NAMESPACE
 
 IMPLEMENT_MODULE(FSimpleCoreEditorModule, SimpleCoreEditor)
-

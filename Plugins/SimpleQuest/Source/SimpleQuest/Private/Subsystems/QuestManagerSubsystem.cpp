@@ -1224,29 +1224,60 @@ FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, c
 
 void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
 {
-    if (WorldState && QuestTag.IsValid())
+    if (!WorldState || !QuestTag.IsValid()) return;
+
+    const FGameplayTag LiveFact = MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live);
+
+    // Idempotency guard: symmetric with SetQuestBlocked / SetQuestDeactivated. Fan-in convergence on a single quest
+    // (two upstream paths activating the same node, especially when both arrive while an inner prereq defers) calls
+    // through here once per cascade and would otherwise bump the WorldState ref-count to 2. The single RemoveFact on
+    // completion or deactivation then leaves a residual Live assertion stuck on. Signal propagation upstream still
+    // fires per cascade, only the boolean state fact is gated here.
+    if (WorldState->HasFact(LiveFact))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
-        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s' already live, skipping (convergence)"), *QuestTag.ToString());
+        return;
     }
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
+    WorldState->AddFact(LiveFact);
 }
 
 void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
-    // Layer 1: WorldState boolean-fact layer.
+    // Layer 1: WorldState boolean-fact layer. State facts are semantically boolean ("has X been asserted?") so each
+    // AddFact is guarded against ref-count duplication on convergent or repeat-resolution paths. The resolution
+    // registry below (Layer 2) and any downstream chain dispatch driven by the caller are NOT gated here. Quests
+    // are allowed to resolve multiple times (stays-Live-after-completion, or deactivate > reactivate > re-resolve), and
+    // each fire should append to history and propagate signals normally.
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Live));
     WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
-    WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed));
+
+    const FGameplayTag CompletedFact = MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed);
+    if (CompletedFact.IsValid() && !WorldState->HasFact(CompletedFact))
+    {
+        WorldState->AddFact(CompletedFact);
+    }
+
     if (OutcomeTag.IsValid())
     {
-        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestStateTagUtils::MakeNodePathFact(QuestTag.GetTagName(), OutcomeTag.GetTagName()), false));
+        // Path fact is asserted on every resolution: ref-count grows per fire, NOT idempotent. Looping Steps and
+        // any downstream subscriber that tracks "this outcome happened again" rely on the fresh per-resolution
+        // assertion (and on the corresponding RemoveFact path in cleanup paths) to propagate. Distinct from the
+        // Completed fact above, which is genuinely one-shot per quest lifetime.
+        const FGameplayTag PathFact = UGameplayTagsManager::Get().RequestGameplayTag(
+            FQuestStateTagUtils::MakeNodePathFact(QuestTag.GetTagName(), OutcomeTag.GetTagName()), false);
+        if (PathFact.IsValid())
+        {
+            WorldState->AddFact(PathFact);
+        }
     }
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
     // but the manager writes it atomically with its own fact updates so the two layers stay consistent.
+    // Append-only history: every resolution call records, supporting multi-outcome lifetimes per quest.
     if (UGameInstance* GI = GetGameInstance())
     {
         if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
@@ -1264,11 +1295,22 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
 
 void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
 {
-    if (WorldState && QuestTag.IsValid())
+    if (!WorldState || !QuestTag.IsValid()) return;
+
+    const FGameplayTag PendingGiverFact = MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver);
+
+    // Idempotency guard, symmetric with SetQuestLive / SetQuestBlocked / SetQuestDeactivated. The ActivateNodeByTag
+    // short-circuit (top of activation) already intercepts a second cascade arriving while PendingGiver is asserted,
+    // so this is belt-and-braces, but keeping the Set* methods uniformly idempotent means any future caller reaching
+    // here can't accidentally bump the ref-count past 1 on a state that's semantically a boolean.
+    if (WorldState->HasFact(PendingGiverFact))
     {
-        WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver));
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s' already pending, skipping"), *QuestTag.ToString());
+        return;
     }
+
+    WorldState->AddFact(PendingGiverFact);
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
 }
 
 void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)

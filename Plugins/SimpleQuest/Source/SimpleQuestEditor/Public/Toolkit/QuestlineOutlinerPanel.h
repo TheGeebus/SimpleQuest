@@ -70,9 +70,11 @@ private:
 	TSharedRef<ITableRow> GenerateRow(TSharedPtr<FQuestlineOutlinerItem> Item, const TSharedRef<STableViewBase>& OwnerTable);
 	void GetChildQuestlineItems(TSharedPtr<FQuestlineOutlinerItem> Item, TArray<TSharedPtr<FQuestlineOutlinerItem>>& OutChildren);
 
+	TSharedPtr<SWidget> MakeContextMenu();
+	void CopySelectedItemTag();
+
 	TObjectPtr<UQuestlineGraph> QuestlineGraph;
 	TArray<TSharedPtr<FQuestlineOutlinerItem>> RootItems;
 	TSharedPtr<STreeView<TSharedPtr<FQuestlineOutlinerItem>>> TreeView;
-	FOnOutlinerItemNavigate OnItemNavigate;
-		
+	FOnOutlinerItemNavigate OnItemNavigate;		
 };

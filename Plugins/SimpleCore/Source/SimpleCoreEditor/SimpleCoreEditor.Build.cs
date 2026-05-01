@@ -27,7 +27,8 @@ public class SimpleCoreEditor : ModuleRules
 			"ToolMenus",
 			"InputCore",
 			"WorkspaceMenuStructure",
-			"Projects"
+			"Projects",
+			"ApplicationCore"
 		});
 	}
 }

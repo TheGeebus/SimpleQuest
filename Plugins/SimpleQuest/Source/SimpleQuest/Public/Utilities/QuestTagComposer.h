@@ -184,21 +184,20 @@ public:
 	 *  display, QuestlineNodeBase::GetOutcomeLabel, and the Prereq Examiner tree all render identically. */
 	static FText FormatOutcomeForDisplay(FName OutcomeTagName);
 
-	/** Strips the namespace prefix from a tag and returns a short, designer-readable form for rendering
-	 *  surfaces (panel headers, K2 node titles, tooltips). Dispatches on ClassifyTag — outcome tags get the
-	 *  existing FormatOutcomeForDisplay shape ("Combat: Boss Defeated"); identity / state / prereq-rule /
-	 *  activation-group tags get prefix-stripped and rendered as the post-prefix remainder. The data layer
-	 *  keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances and
-	 *  serialization continue to use the raw tag explicitly.
+	/** Strips the PluginPrefix from a tag and returns the remainder for rendering surfaces (panel headers,
+	 *  K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim — preserves the namespace
+	 *  context that distinguishes `Quest.X` (identity) from `QuestState.X.Live` (state fact) without forcing
+	 *  designers to mentally re-prepend the plugin name on every read. The data layer keeps the full tag;
+	 *  only rendering surfaces use this shortened form. Copy-tag affordances and serialization continue to
+	 *  use the raw tag.
 	 *
 	 *  Examples:
-	 *    "SimpleQuest.Quest.MyAsset.Step1"               → "MyAsset.Step1"
-	 *    "SimpleQuest.QuestState.MyAsset.Step1.Live"     → "MyAsset.Step1.Live"
-	 *    "SimpleQuest.QuestOutcome.Combat.BossDefeated"  → "Combat: Boss Defeated"
-	 *    "SimpleQuest.QuestPrereqRule.MyRule"            → "MyRule"
-	 *    "Game.Foo.Bar" (foreign)                        → "Game.Foo.Bar"  (Unknown — pass through)
-	 *    NAME_None                                       → ""              (empty FText)
-	 */
+	 *    "SimpleQuest.Quest.MyAsset.Step1"               → "Quest.MyAsset.Step1"
+	 *    "SimpleQuest.QuestState.MyAsset.Step1.Live"     → "QuestState.MyAsset.Step1.Live"
+	 *    "SimpleQuest.QuestOutcome.Combat.BossDefeated"  → "QuestOutcome.Combat.BossDefeated"
+	 *    "SimpleQuest.QuestPrereqRule.MyRule"            → "QuestPrereqRule.MyRule"
+	 *    "Game.Foo.Bar" (foreign — no PluginPrefix)      → "Game.Foo.Bar"
+	 *    NAME_None                                       → ""              (empty FText) */
 	static FText FormatTagForDisplay(FName TagName);
 
 	// ------------------------------------------------------------------------------------------------

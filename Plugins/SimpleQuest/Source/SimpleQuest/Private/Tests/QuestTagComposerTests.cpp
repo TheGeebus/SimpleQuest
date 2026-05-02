@@ -2,7 +2,10 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "GameplayTagsManager.h"
 #include "Misc/AutomationTest.h"
+#include "Quests/Types/PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpressionTestHelpers.h"
 #include "Utilities/QuestTagComposer.h"
 
 namespace
@@ -273,6 +276,67 @@ bool FQuestTagComposer_PathFacts::RunTest(const FString& Parameters)
 	// None path identity: None output.
 	TestEqual(TEXT("MakeNodePathFact None → None"),
 		FQuestTagComposer::MakeNodePathFact(Node, NAME_None), NAME_None);
+	return true;
+}
+
+// -------------------------------------------------------------------------------------------------
+// FPrerequisiteExpression builders: verify Leaf_Resolution and Leaf_Entry stamp the right Type and
+// shared (LeafQuestTag, LeafOutcomeTag) payload.
+// -------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrerequisiteExpression_AddResolutionLeaf, "SimpleQuest.PrerequisiteExpression.AddResolutionLeaf", TestFlags)
+bool FPrerequisiteExpression_AddResolutionLeaf::RunTest(const FString& Parameters)
+{
+	// Verifies the production builder stamps Type=Leaf_Resolution and appends a single node. Field-forwarding
+	// for the (Quest, Outcome) pair is not asserted here: the FName to FGameplayTag resolution path inside the
+	// builder requires registered tags, which would pollute the gameplay tag picker. Multi-node and field-
+	// shape assertions go via FPrerequisiteExpressionTestHelpers (see CollectLeavesEntry below).
+	FPrerequisiteExpression Expr;
+	const int32 Idx = Expr.AddResolutionLeaf(FName(TEXT("Test.Quest.Unregistered")), FGameplayTag());
+
+	TestEqual(TEXT("Index returned"), Idx, 0);
+	TestTrue(TEXT("Node added"), Expr.Nodes.IsValidIndex(Idx));
+	TestEqual(TEXT("Type is Leaf_Resolution"),
+		Expr.Nodes[Idx].Type, EPrerequisiteExpressionType::Leaf_Resolution);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrerequisiteExpression_AddEntryLeaf, "SimpleQuest.PrerequisiteExpression.AddEntryLeaf", TestFlags)
+bool FPrerequisiteExpression_AddEntryLeaf::RunTest(const FString& Parameters)
+{
+	// Verifies the production builder stamps Type=Leaf_Entry, appends a single node, and leaves the bridge
+	// LeafTag default-invalid. The bridge-LeafTag absence assertion is meaningful without registered tags
+	// because AddEntryLeaf never assigns Node.LeafTag at all (Entry leaves render via LeafQuestTag /
+	// LeafOutcomeTag directly). Field-forwarding assertions on the (Quest, Outcome) pair would require
+	// tag registration; see helper-based tests for shape-level coverage.
+	FPrerequisiteExpression Expr;
+	const int32 Idx = Expr.AddEntryLeaf(FName(TEXT("Test.Quest.Unregistered")), FGameplayTag());
+
+	TestEqual(TEXT("Index returned"), Idx, 0);
+	TestTrue(TEXT("Node added"), Expr.Nodes.IsValidIndex(Idx));
+	TestEqual(TEXT("Type is Leaf_Entry"),
+		Expr.Nodes[Idx].Type, EPrerequisiteExpressionType::Leaf_Entry);
+	TestFalse(TEXT("Entry leaf has no bridge LeafTag"),
+		Expr.Nodes[Idx].LeafTag.IsValid());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FPrerequisiteExpression_CollectLeavesEntry, "SimpleQuest.PrerequisiteExpression.CollectLeavesEntry", TestFlags)
+bool FPrerequisiteExpression_CollectLeavesEntry::RunTest(const FString& Parameters)
+{
+	// Construct an Entry-leaf node directly via the test helpers. Bypasses the production builder's tag-
+	// resolution path so the test runs without registering fixture tags. CollectLeaves only cares about
+	// per-node Type and field shape, so default-invalid tags are sufficient to verify the descriptor
+	// emission walks Leaf_Entry nodes the same way it walks Leaf and Leaf_Resolution.
+	FPrerequisiteExpression Expr;
+	FPrerequisiteExpressionTestHelpers::AppendEntryLeaf(Expr, FGameplayTag(), FGameplayTag());
+
+	TArray<FPrereqLeafDescriptor> Leaves;
+	Expr.CollectLeaves(Leaves);
+
+	TestEqual(TEXT("One leaf collected"), Leaves.Num(), 1);
+	TestEqual(TEXT("Descriptor type is Leaf_Entry"),
+		Leaves[0].Type, EPrerequisiteExpressionType::Leaf_Entry);
 	return true;
 }
 

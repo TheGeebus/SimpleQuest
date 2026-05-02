@@ -17,9 +17,12 @@ enum class EPrerequisiteExpressionType : uint8
 	And,			 // all children must be satisfied
 	Or,				 // any child must be satisfied
 	Not,			 // child must NOT be satisfied
-	Leaf_Resolution	 // quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith on
-					 // ResolutionQuestTag and ResolutionOutcomeTag). Appended at the end so existing
-					 // assets stamped with int values 0–4 continue to deserialize correctly.
+	Leaf_Resolution, // quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith on
+					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing assets
+					 // stamped with int values 0–4 continue to deserialize correctly.
+	Leaf_Entry		 // Quest-entry check (queries UQuestStateSubsystem::HasEnteredWith on
+					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing
+					 // serialized assets continue to deserialize correctly.
 };
 
 USTRUCT(Blueprintable)
@@ -30,16 +33,17 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 	UPROPERTY() EPrerequisiteExpressionType Type = EPrerequisiteExpressionType::Always;
 
 	/** Meaningful for Type=Leaf (the WorldState fact tag). Also populated for Type=Leaf_Resolution as a bridge
-		path-fact tag matching the runtime's MakeNodePathFact output, so the legacy fact-channel subscription
-		wiring (CollectLeafTags and RegisterEnablementWatch) keeps working unchanged through Batch B of the
-		Outcome/Path data-layer migration. Batch C cuts the subscription wiring over to FQuestResolutionRecorded-
-		Event and stops populating LeafTag for Leaf_Resolution leaves. */
+		path-fact tag matching the runtime's MakeNodePathFact output for Prereq Examiner display compatibility:
+		runtime evaluation reads via UQuestStateSubsystem rather than WorldState; the bridge tag is editor-side
+		only. NOT populated for Type=Leaf_Entry. Entry leaves render via LeafQuestTag / LeafOutcomeTag directly. */
 	UPROPERTY() FGameplayTag LeafTag;
 
-	/** Meaningful only for Type=Leaf_Resolution. The (QuestTag, OutcomeTag) pair the leaf checks against the
-		UQuestStateSubsystem registry via HasResolvedWith. Stamped by the compiler from the outcome-pin context. */
-	UPROPERTY() FGameplayTag ResolutionQuestTag;
-	UPROPERTY() FGameplayTag ResolutionOutcomeTag;
+	/** Shared (QuestTag, OutcomeTag) payload for both Type=Leaf_Resolution and Type=Leaf_Entry. The runtime
+		evaluator dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith
+		for resolution leaves, HasEnteredWith for entry leaves. Stamped by the compiler	from the outcome-pin
+		context. */
+	UPROPERTY() FGameplayTag LeafQuestTag;
+	UPROPERTY() FGameplayTag LeafOutcomeTag;
 
 	UPROPERTY() TArray<int32> ChildIndices;
 };
@@ -96,16 +100,19 @@ struct SIMPLEQUEST_API FQuestPrereqStatus
  *
  *  - Type=Leaf				—   FactTag is the WorldState fact to subscribe via FWorldStateFactAddedEvent /
  *								FWorldStateFactRemovedEvent on its tag channel.
- *  - Type=Leaf_Resolution	—	ResolutionQuestTag is the channel for FQuestResolutionRecordedEvent. ResolutionOutcomeTag
- *								is informational — handler unconditionally re-evaluates the expression, which uses the
+ *  - Type=Leaf_Resolution	—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent. LeafOutcomeTag
+ *								is informational: handler unconditionally re-evaluates the expression, which uses the
  *								outcome internally via UQuestStateSubsystem::HasResolvedWith.
+ *  - Type=Leaf_Entry		—	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag
+ *								is informational: handler unconditionally re-evaluates the expression, which uses the
+ *								outcome internally via UQuestStateSubsystem::HasEnteredWith.
  */
 struct FPrereqLeafDescriptor
 {
 	EPrerequisiteExpressionType Type = EPrerequisiteExpressionType::Always;
 	FGameplayTag FactTag;
-	FGameplayTag ResolutionQuestTag;
-	FGameplayTag ResolutionOutcomeTag;
+	FGameplayTag LeafQuestTag;
+	FGameplayTag LeafOutcomeTag;
 };
 
 USTRUCT(Blueprintable)
@@ -130,13 +137,14 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 	/**
 	 * Builder methods. Return the index of the new node so callers can wire combinator children and set RootIndex.
 	 * Use these instead of constructing FPrerequisiteExpressionNode by hand. Keeps per-leaf-kind field combinations
-	 * consistent (Type + LeafTag for Leaf; Type + ResolutionQuestTag + ResolutionOutcomeTag + bridge LeafTag for
-	 * Leaf_Resolution). Future leaf-kinds drop in as one new method here + one branch in the evaluator + one branch
-	 * in the subscription helper.
+	 * consistent (Type + LeafTag for Leaf; Type + LeafQuestTag + LeafOutcomeTag + bridge LeafTag for
+	 * Leaf_Resolution; Type + LeafQuestTag + LeafOutcomeTag for Leaf_Entry). Future leaf-kinds drop in as one
+	 * new method here + one branch in the evaluator + one branch in the subscription helper.
 	 */
 	int32 AddAlways();
 	int32 AddFactLeaf(const FGameplayTag& FactTag);
 	int32 AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
+	int32 AddEntryLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
 	int32 AddCombinator(EPrerequisiteExpressionType Type);  // expects And or Or; child indices wired by caller
 	int32 AddNot();                                         // child index wired by caller via AddCombinatorChild
 	void  AddCombinatorChild(int32 ParentIndex, int32 ChildIndex);

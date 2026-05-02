@@ -47,11 +47,24 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
 		{
 			FQuestPrereqLeafStatus LeafStatus;
-			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag — preserves blocker-display API shape
+			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag: preserves blocker-display API shape
 			LeafStatus.bSatisfied = StateSubsystem
-				&& Node.ResolutionQuestTag.IsValid()
-				&& Node.ResolutionOutcomeTag.IsValid()
-				&& StateSubsystem->HasResolvedWith(Node.ResolutionQuestTag, Node.ResolutionOutcomeTag);
+				&& Node.LeafQuestTag.IsValid()
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasResolvedWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
+			Status.Leaves.Add(LeafStatus);
+		}
+		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Entry)
+		{
+			FQuestPrereqLeafStatus LeafStatus;
+			// Entry leaves have no bridge LeafTag (no WorldState entry fact post-2c). Synthesize a designer-
+			// readable identifier from the (QuestTag, OutcomeTag) pair so blocker-display UI can render
+			// "Quest <X> entered with outcome <Y>" without a separate display path.
+			LeafStatus.LeafTag = Node.LeafQuestTag;  // best available identifier; OutcomeTag captured below
+			LeafStatus.bSatisfied = StateSubsystem
+				&& Node.LeafQuestTag.IsValid()
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasEnteredWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
 			Status.Leaves.Add(LeafStatus);
 		}
 	}
@@ -83,12 +96,23 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 	case EPrerequisiteExpressionType::Leaf_Resolution:
 		{
 			const bool bResolved = StateSubsystem
-				&& Node.ResolutionQuestTag.IsValid()
-				&& Node.ResolutionOutcomeTag.IsValid()
-				&& StateSubsystem->HasResolvedWith(Node.ResolutionQuestTag, Node.ResolutionOutcomeTag);
+				&& Node.LeafQuestTag.IsValid()
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasResolvedWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
 			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Resolution]: quest='%s' outcome='%s' → HasResolvedWith=%d"),
-				*Node.ResolutionQuestTag.ToString(), *Node.ResolutionOutcomeTag.ToString(), bResolved);
+				*Node.LeafQuestTag.ToString(), *Node.LeafOutcomeTag.ToString(), bResolved);
 			return bResolved;
+		}
+
+	case EPrerequisiteExpressionType::Leaf_Entry:
+		{
+			const bool bEntered = StateSubsystem
+				&& Node.LeafQuestTag.IsValid()
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasEnteredWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
+			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Entry]: quest='%s' outcome='%s' → HasEnteredWith=%d"),
+				*Node.LeafQuestTag.ToString(), *Node.LeafOutcomeTag.ToString(), bEntered);
+			return bEntered;
 		}
 
 	case EPrerequisiteExpressionType::And:
@@ -158,8 +182,17 @@ void FPrerequisiteExpression::CollectLeavesFromNode(int32 NodeIndex, TArray<FPre
 	{
 		FPrereqLeafDescriptor Desc;
 		Desc.Type = EPrerequisiteExpressionType::Leaf_Resolution;
-		Desc.ResolutionQuestTag = Node.ResolutionQuestTag;
-		Desc.ResolutionOutcomeTag = Node.ResolutionOutcomeTag;
+		Desc.LeafQuestTag = Node.LeafQuestTag;
+		Desc.LeafOutcomeTag = Node.LeafOutcomeTag;
+		OutLeaves.Add(Desc);
+		return;
+	}
+	if (Node.Type == EPrerequisiteExpressionType::Leaf_Entry)
+	{
+		FPrereqLeafDescriptor Desc;
+		Desc.Type = EPrerequisiteExpressionType::Leaf_Entry;
+		Desc.LeafQuestTag = Node.LeafQuestTag;
+		Desc.LeafOutcomeTag = Node.LeafOutcomeTag;
 		OutLeaves.Add(Desc);
 		return;
 	}
@@ -183,8 +216,14 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 	{
 	case EPrerequisiteExpressionType::Always: OutLines.Add(Indent + TEXT("Always")); break;
 	case EPrerequisiteExpressionType::Leaf:   OutLines.Add(FString::Printf(TEXT("%sLeaf [Fact] '%s' (valid=%d)"), *Indent, *Node.LeafTag.ToString(), Node.LeafTag.IsValid())); break;
-	case EPrerequisiteExpressionType::Leaf_Resolution: OutLines.Add(FString::Printf(TEXT("%sLeaf [Resolution] quest='%s' outcome='%s' (bridge='%s')"),
-		*Indent, *Node.ResolutionQuestTag.ToString(), *Node.ResolutionOutcomeTag.ToString(), *Node.LeafTag.ToString())); break;
+	case EPrerequisiteExpressionType::Leaf_Entry:
+		{
+			OutLines.Add(FString::Printf(TEXT("%sLeaf [Entry] quest='%s' outcome='%s'"),
+				*Indent,
+				*Node.LeafQuestTag.ToString(),
+				*Node.LeafOutcomeTag.ToString()));
+			break;
+		}
 	case EPrerequisiteExpressionType::And:    OutLines.Add(Indent + FString::Printf(TEXT("AND (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Or:     OutLines.Add(Indent + FString::Printf(TEXT("OR (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Not:    OutLines.Add(Indent + TEXT("NOT")); break;
@@ -212,15 +251,24 @@ int32 FPrerequisiteExpression::AddFactLeaf(const FGameplayTag& FactTag)
 
 int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag)
 {
-	// Bridge LeafTag is preserved for Prereq Examiner display compat. Runtime evaluation reads ResolutionQuestTag
-	// + ResolutionOutcomeTag via UQuestStateSubsystem::HasResolvedWith. Single canonical builder so future leaf-shape
-	// changes touch one site.
+	// Bridge LeafTag preserved for Prereq Examiner display compat.
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf_Resolution;
 	Node.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(
 		FQuestTagComposer::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
-	Node.ResolutionQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
-	Node.ResolutionOutcomeTag = OutcomeTag;
+	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+	Node.LeafOutcomeTag = OutcomeTag;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddEntryLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag)
+{
+	// Bridge LeafTag preserved for Prereq Examiner display compat; runtime evaluation reads
+	// LeafQuestTag / LeafOutcomeTag via UQuestStateSubsystem::HasResolvedWith.
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Leaf_Entry;
+	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+	Node.LeafOutcomeTag = OutcomeTag;
 	return Nodes.Add(Node);
 }
 

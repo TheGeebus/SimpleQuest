@@ -29,7 +29,7 @@ private:
 	UPROPERTY() FPrerequisiteExpression Expression;
 
 	/** Per-leaf subscription handles for re-evaluation on leaf events. Keyed by FactTag for fact leaves and by
-		ResolutionQuestTag for resolution leaves — both are FGameplayTag, so the map key shape is uniform. */
+		LeafQuestTag for resolution leaves. Both are FGameplayTag, so the map key shape is uniform. */
 	TMap<FGameplayTag, FDelegateHandle> SubscriptionHandles;
 
 	void OnLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

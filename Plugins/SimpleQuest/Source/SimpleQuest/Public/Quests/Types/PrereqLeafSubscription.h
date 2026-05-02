@@ -34,9 +34,9 @@ namespace PrereqLeafSubscription
 		 * UGameInstanceSubsystem). Iterates Expr's leaves, dedupes per channel, calls the type-appropriate
 		 * SubscribeMessage on the resolved SignalSubsystem, invokes StoreHandles per newly-subscribed channel.
 		 *
-		 * Per-channel dedupe: multiple leaves with the same channel only subscribe once. The handler re-evaluates
-		 * the full expression on any event, which checks each leaf internally - safe for resolution leaves whose
-		 * outcome tags differ but whose ResolutionQuestTag is the same.
+		* Per-channel dedupe: multiple leaves with the same channel only subscribe once. The handler re-evaluates
+		 * the full expression on any event, which checks each leaf internally. Safe for resolution leaves whose
+		 * outcome tags differ but whose LeafQuestTag is the same.
 		 */
 		template<typename T>
 		void SubscribeImpl(
@@ -75,7 +75,7 @@ namespace PrereqLeafSubscription
 				}
 				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
 				{
-					const FGameplayTag& Channel = Leaf.ResolutionQuestTag;
+					const FGameplayTag& Channel = Leaf.LeafQuestTag;
 					if (!Channel.IsValid() || AlreadySubscribed.Contains(Channel)) continue;
 
 					FDelegateHandle Added = Signals->template SubscribeMessage<FQuestResolutionRecordedEvent>(Channel, Subscriber, ResolutionHandler);

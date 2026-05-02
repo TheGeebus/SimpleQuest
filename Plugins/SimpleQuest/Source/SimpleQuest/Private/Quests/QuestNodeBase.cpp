@@ -7,6 +7,7 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
+#include "Events/QuestEntryRecordedEvent.h"
 
 
 UWorld* UQuestNodeBase::GetWorld() const
@@ -37,14 +38,8 @@ void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)
     // Cancel any deferred prereq subscriptions that are still live
     if (DeferredContextualTag.IsValid())
     {
-        if (USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr)
-        {
-            for (auto& Pair : PrereqSubscriptionHandles)
-            {
-                Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
-            }
-            PrereqSubscriptionHandles.Reset();
-        }
+        USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
+        FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
         DeferredContextualTag = FGameplayTag::EmptyTag;
     }
 }
@@ -68,11 +63,12 @@ void UQuestNodeBase::ResetTransientState()
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 {
     DeferredContextualTag = InContextualTag;
-    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+    FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
         PrerequisiteExpression,
         this,
         &UQuestNodeBase::OnPrereqFactAdded,
         &UQuestNodeBase::OnPrereqResolutionRecorded,
+        &UQuestNodeBase::OnPrereqEntryRecorded,
         PrereqSubscriptionHandles);
 }
 
@@ -86,6 +82,11 @@ void UQuestNodeBase::OnPrereqResolutionRecorded(FGameplayTag Channel, const FQue
     TryActivateDeferred();
 }
 
+void UQuestNodeBase::OnPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event)
+{
+    TryActivateDeferred();
+}
+
 void UQuestNodeBase::TryActivateDeferred()
 {
     if (!CachedGameInstance.IsValid()) return;
@@ -95,14 +96,8 @@ void UQuestNodeBase::TryActivateDeferred()
 
     if (!PrerequisiteExpression.Evaluate(WorldState, StateSubsystem)) return;
 
-    if (USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>())
-    {
-        for (auto& Pair : PrereqSubscriptionHandles)
-        {
-            Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
-        }
-        PrereqSubscriptionHandles.Reset();
-    }
+    USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>();
+    FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
 
     const FGameplayTag TagToActivate = DeferredContextualTag;
     DeferredContextualTag = FGameplayTag::EmptyTag;

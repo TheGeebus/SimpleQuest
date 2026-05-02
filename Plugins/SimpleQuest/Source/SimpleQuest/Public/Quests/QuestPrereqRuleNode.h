@@ -8,6 +8,8 @@
 
 struct FWorldStateFactAddedEvent;
 struct FQuestResolutionRecordedEvent;
+struct FQuestEntryRecordedEvent;
+
 
 UCLASS()
 class SIMPLEQUEST_API UQuestPrereqRuleNode : public UQuestNodeBase
@@ -28,11 +30,14 @@ private:
 	/** The compiled prereq expression tree. Publishes GroupTag when it evaluates true against WorldState. */
 	UPROPERTY() FPrerequisiteExpression Expression;
 
-	/** Per-leaf subscription handles for re-evaluation on leaf events. Keyed by FactTag for fact leaves and by
-		LeafQuestTag for resolution leaves. Both are FGameplayTag, so the map key shape is uniform. */
-	TMap<FGameplayTag, FDelegateHandle> SubscriptionHandles;
+	/** Per-leaf-channel subscription handles for re-evaluation on leaf events. Keyed by FactTag for fact leaves
+		and by LeafQuestTag for Resolution / Entry leaves. Each channel's value carries a per-event-type slot
+		record so a channel hit by multiple leaf kinds (e.g. a Resolution and an Entry leaf on the same source
+		quest) keeps each subscription independent. */
+	TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> SubscriptionHandles;
 
 	void OnLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void OnLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
+	void OnLeafEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
 	void TryPublishRule();
 };

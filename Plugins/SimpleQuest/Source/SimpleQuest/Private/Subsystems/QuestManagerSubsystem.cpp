@@ -25,6 +25,9 @@
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
+#include "Events/QuestResolutionRecordedEvent.h"
+#include "Events/QuestEntryRecordedEvent.h"
+#include "Net/RepLayout.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -113,23 +116,13 @@ void UQuestManagerSubsystem::Deinitialize()
 
         for (auto& Pair : DeferredCompletionPrereqHandles)
         {
-            for (auto& Item : Pair.Value)
-            {
-                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value);
-            }
+            FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, Pair.Value);
         }
         DeferredCompletionPrereqHandles.Reset();
 
         for (auto& Pair : EnablementWatchHandles)
         {
-            for (auto& Item : Pair.Value)
-            {
-                QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.AddedHandle);
-                if (Item.Value.RemovedHandle.IsValid())
-                {
-                    QuestSignalSubsystem->UnsubscribeMessage(Item.Key, Item.Value.RemovedHandle);
-                }
-            }
+            FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, Pair.Value);
         }
         EnablementWatchHandles.Reset();
         EnablementWatches.Reset();
@@ -754,15 +747,12 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 			if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
 			LiveStepTriggerHandles.Remove(QuestTag);
 		}
-		
-		if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
-		{
-			for (const auto& Pair : *Handles)
-			{
-				QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
-			}
-			DeferredCompletionPrereqHandles.Remove(QuestTag);
-		}
+
+        if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
+        {
+            FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
+            DeferredCompletionPrereqHandles.Remove(QuestTag);
+        }
 		DeferredCompletions.Remove(QuestTag);
 	}
 
@@ -975,12 +965,9 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
             QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
             LiveStepTriggerHandles.Remove(QuestTag);
         }
-        if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
+        if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
         {
-            for (const auto& Pair : *Handles)
-            {
-                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
-            }
+            FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
             DeferredCompletionPrereqHandles.Remove(QuestTag);
         }
         DeferredCompletions.Remove(QuestTag);
@@ -1131,12 +1118,13 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
     const FGameplayTag StepTag = Step->GetQuestTag();
     DeferredCompletions.Add(StepTag, FQuestDeferredCompletion{ OutcomeTag, PathIdentity });
 
-    TMap<FGameplayTag, FDelegateHandle>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
-    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+    TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
+    FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
         Step->PrerequisiteExpression,
         this,
         &UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded,
         &UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded,
+        &UQuestManagerSubsystem::OnDeferredCompletionPrereqEntryRecorded,
         Handles);
 
     UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq channel(s)"),
@@ -1152,6 +1140,11 @@ void UQuestManagerSubsystem::OnDeferredCompletionPrereqAdded(FGameplayTag Channe
 }
 
 void UQuestManagerSubsystem::OnDeferredCompletionPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    TryFireAllDeferredCompletions();
+}
+
+void UQuestManagerSubsystem::OnDeferredCompletionPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event)
 {
     TryFireAllDeferredCompletions();
 }
@@ -1179,12 +1172,9 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
     UE_LOG(LogSimpleQuest, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
 
     // Clean up subscriptions
-    if (TMap<FGameplayTag, FDelegateHandle>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
+    if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
     {
-        for (auto& Pair : *Handles)
-        {
-            QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value);
-        }
+        FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
         DeferredCompletionPrereqHandles.Remove(StepTag);
     }
 
@@ -1344,13 +1334,14 @@ void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FNam
     Watch.NodeTagName = NodeTagName;
     Watch.bLastKnownSatisfied = bInitialSatisfied;
 
-    TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
-    PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+    TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>& Handles = EnablementWatchHandles.FindOrAdd(QuestTag);
+    FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
         Expr,
         this,
         &UQuestManagerSubsystem::OnEnablementLeafFactAdded,
         &UQuestManagerSubsystem::OnEnablementLeafFactRemoved,
         &UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded,
+        &UQuestManagerSubsystem::OnEnablementLeafEntryRecorded,
         Handles);
 
     UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d channel(s), initial satisfied=%d"),
@@ -1370,6 +1361,11 @@ void UQuestManagerSubsystem::OnEnablementLeafFactRemoved(FGameplayTag Channel, c
 }
 
 void UQuestManagerSubsystem::OnEnablementLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    ReevaluateAllEnablementWatches();
+}
+
+void UQuestManagerSubsystem::OnEnablementLeafEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event)
 {
     ReevaluateAllEnablementWatches();
 }
@@ -1430,22 +1426,9 @@ void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
 
 void UQuestManagerSubsystem::ClearEnablementWatch(FGameplayTag QuestTag)
 {
-    if (TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>* Handles = EnablementWatchHandles.Find(QuestTag))
+    if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = EnablementWatchHandles.Find(QuestTag))
     {
-        if (QuestSignalSubsystem)
-        {
-            for (auto& Pair : *Handles)
-            {
-                // AddedHandle is set for both leaf kinds. RemovedHandle is set only for Leaf-typed (fact)
-                // subscriptions. Leaf_Resolution leaves leave it invalid since resolution events are
-                // append-only. Guard the second unsubscribe so we don't pass an invalid handle.
-                QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.AddedHandle);
-                if (Pair.Value.RemovedHandle.IsValid())
-                {
-                    QuestSignalSubsystem->UnsubscribeMessage(Pair.Key, Pair.Value.RemovedHandle);
-                }
-            }
-        }
+        FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
         EnablementWatchHandles.Remove(QuestTag);
     }
     EnablementWatches.Remove(QuestTag);

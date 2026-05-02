@@ -5,12 +5,15 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/PrerequisiteExpression.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestNodeInfo.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestNodeBase.generated.h"
 
+
 struct FWorldStateFactAddedEvent;
 struct FQuestResolutionRecordedEvent;
+struct FQuestEntryRecordedEvent;
 
 class UQuestReward;
 
@@ -264,11 +267,12 @@ private:
     // Stores the contextual tag while waiting for prerequisites to clear
     FGameplayTag DeferredContextualTag;
 
-    // Per-leaf-tag subscription handles; cleared when prerequisites are satisfied
-    TMap<FGameplayTag, FDelegateHandle> PrereqSubscriptionHandles;
+    // Per-leaf-channel subscription handles; cleared when prerequisites are satisfied
+    TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> PrereqSubscriptionHandles;
 
     void OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
     void OnPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
+    void OnPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
     void TryActivateDeferred();
 
     /**

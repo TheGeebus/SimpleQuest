@@ -6,6 +6,7 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
+#include "Events/QuestEntryRecordedEvent.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 
 void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
@@ -19,11 +20,12 @@ void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
 	// May already be satisfied at graph load (mid-session activation).
 	TryPublishRule();
 
-	PrereqLeafSubscription::SubscribeLeavesForReevaluation(
+	FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
 		Expression,
 		this,
 		&UQuestPrereqRuleNode::OnLeafFactAdded,
 		&UQuestPrereqRuleNode::OnLeafResolutionRecorded,
+		&UQuestPrereqRuleNode::OnLeafEntryRecorded,
 		SubscriptionHandles);
 }
 
@@ -42,6 +44,11 @@ void UQuestPrereqRuleNode::OnLeafFactAdded(FGameplayTag Channel, const FWorldSta
 }
 
 void UQuestPrereqRuleNode::OnLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+	TryPublishRule();
+}
+
+void UQuestPrereqRuleNode::OnLeafEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event)
 {
 	TryPublishRule();
 }

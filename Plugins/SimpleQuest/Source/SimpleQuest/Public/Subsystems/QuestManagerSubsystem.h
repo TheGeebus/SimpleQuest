@@ -13,6 +13,7 @@
 
 
 struct FQuestResolutionRecordedEvent;
+struct FQuestEntryRecordedEvent;
 struct FWorldStateFactRemovedEvent;
 struct FQuestActivationBlocker;
 struct FQuestPrereqStatus;
@@ -196,14 +197,15 @@ private:
 	TMap<FGameplayTag, FQuestDeferredCompletion> DeferredCompletions;
 
 	// Subscription handles for deferred completion prerequisite monitoring
-	TMap<FGameplayTag, TMap<FGameplayTag, FDelegateHandle>> DeferredCompletionPrereqHandles;
+	TMap<FGameplayTag, TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>> DeferredCompletionPrereqHandles;
 
 	void DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag, FName PathIdentity);
 	void OnDeferredCompletionPrereqAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void OnDeferredCompletionPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
+	void OnDeferredCompletionPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
 	void TryFireDeferredCompletion(FGameplayTag StepTag);
-	
-	/** Shared body for both OnDeferredCompletionPrereq*** handlers: try every deferred completion. */
+
+	/** Shared body for all OnDeferredCompletionPrereq*** handlers: try every deferred completion. */
 	void TryFireAllDeferredCompletions();
 
 	
@@ -216,7 +218,7 @@ private:
 	 * (unsatisfied to satisfied) or FQuestDisabledEvent (satisfied to unsatisfied). Designers binding to both events
 	 * get bidirectional UI sync.
 	 *
-	 * Entries persist for the entire PendingGiver lifetime — cleared on give success, abandon, or Deinitialize.
+	 * Entries persist for the entire PendingGiver lifetime. Cleared on give success, abandon, or Deinitialize.
 	 *----------------------------------------------------------------------------------------------------------------*/
 
 	struct FEnablementWatch
@@ -226,10 +228,10 @@ private:
 	};
 
 	TMap<FGameplayTag, FEnablementWatch> EnablementWatches;
-	TMap<FGameplayTag, TMap<FGameplayTag, PrereqLeafSubscription::FPrereqLeafHandlePair>> EnablementWatchHandles;
-	
+	TMap<FGameplayTag, TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>> EnablementWatchHandles;
+
 	/**
-	 * Per-quest map of "the giver actor that initiated the most-recent successful give" — populated in
+	 * Per-quest map of "the giver actor that initiated the most-recent successful give". Populated in
 	 * HandleGiveQuestEvent right before ActivateNodeByTag, consumed in HandleOnNodeStarted to populate the
 	 * GiverActor field on FQuestStartedEvent. Cleared on consumption so a subsequent non-giver activation
 	 * doesn't inherit a stale entry.
@@ -240,11 +242,11 @@ private:
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);
 	void OnEnablementLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
+	void OnEnablementLeafEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
 	void ReevaluateEnablementWatch(FGameplayTag QuestTag);
 	void ClearEnablementWatch(FGameplayTag QuestTag);
 
-	/** Shared body for all three OnEnablementLeaf*** handlers: re-evaluate every active enablement watch.
+	/** Shared body for all OnEnablementLeaf*** handlers: re-evaluate every active enablement watch.
 	Per-channel filtering isn't worth the inverse-lookup cost; expression re-eval is cheap. */
 	void ReevaluateAllEnablementWatches();
-
 };

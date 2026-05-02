@@ -458,15 +458,15 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
      */
     if (NodeTag.IsValid() && WorldState)
     {
-        if (WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_Live)) ||
-            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_PendingGiver)) ||
-            WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_Blocked)))
+        if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ||
+            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)) ||
+            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Blocked)))
         {
             /**
              * Already-live Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
              * a Quest node is activated before its incoming outcome arrives. Source filtering applies the same way as first-time activation.
              */
-            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_Live)))
+            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)))
             {
                 if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
                 {
@@ -501,13 +501,13 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             }
             UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
                 *NodeTagName.ToString(),
-                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_Live)) ? TEXT("live") :
-                WorldState->HasFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_PendingGiver)) ? TEXT("pending giver") :
+                WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ? TEXT("live") :
+                WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)) ? TEXT("pending giver") :
                 TEXT("blocked"));
             return;
         }
         // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
-        WorldState->RemoveFact(MakeQuestStateFact(NodeTag, FQuestTagComposer::Leaf_Deactivated));
+        WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Deactivated));
     }
 
     if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
@@ -703,13 +703,13 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 {
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Completed)))
+    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed)))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already completed"), *QuestTag.ToString());
         return;
     }
 
-    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated)))
+    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated)))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already deactivated"), *QuestTag.ToString());
         return;
@@ -731,7 +731,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 	}
 
 	// PendingGiver cleanup
-    if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver)))
+    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver)))
     {
         RegisteredGiverQuestTags.Remove(QuestTag);
         ClearQuestPendingGiver(QuestTag);
@@ -741,13 +741,13 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     ClearEnablementWatch(QuestTag);
 
 	// Active node cleanup: Use Node instead of redundant lookup
-	if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Live)))
+	if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
 	{
 		if (Node)
 		{
 			Node->DeactivateInternal(QuestTag);
 		}
-		WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Live));
+		WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
 
 		if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
 		{
@@ -766,7 +766,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 		DeferredCompletions.Remove(QuestTag);
 	}
 
-	WorldState->AddFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated));
+	WorldState->AddFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated));
 
 	// Publish with context
 	if (QuestSignalSubsystem)
@@ -900,8 +900,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    const FName FactName = FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Blocked);
-    const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+    const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
     if (!BlockedFact.IsValid()) return;
 
     // Idempotency guard: symmetric with the already-deactivated guard in SetQuestDeactivated. Spamming
@@ -929,8 +928,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    const FName FactName = FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Blocked);
-    const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+    const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
     if (!BlockedFact.IsValid()) return;
 
     // Symmetric with the already-blocked guard in HandleBlockRequest. ClearFact is naturally idempotent at the
@@ -957,8 +955,8 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
     // protects against accidental double-broadcast; opt-in true appends additively (never removes prior facts).
     if (!Event.bOverrideExisting)
     {
-        if (WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Completed))
-            || WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated)))
+        if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed))
+            || WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated)))
         {
             UE_LOG(LogSimpleQuest, Warning,
                 TEXT("HandleResolveRequest: '%s' skipped — already in terminal state. Pass bOverrideExisting=true to append a new resolution entry additively."),
@@ -1204,7 +1202,7 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
     RegisteredGiverQuestTags.Add(QuestTag);
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
 
-    if (WorldState && WorldState->HasFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Live)))
+    if (WorldState && WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
     {
         UE_LOG(LogSimpleQuest, Warning,
             TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
@@ -1230,17 +1228,11 @@ int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) con
     return 0;
 }
 
-FGameplayTag UQuestManagerSubsystem::MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf)
-{
-    const FName FactName = FQuestTagComposer::MakeStateFact(QuestTag, Leaf);
-    return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
-}
-
 void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
-    const FGameplayTag LiveFact = MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Live);
+    const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live);
 
     // Idempotency guard: symmetric with SetQuestBlocked / SetQuestDeactivated. Fan-in convergence on a single quest
     // (two upstream paths activating the same node, especially when both arrive while an inner prereq defers) calls
@@ -1266,10 +1258,10 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // registry below (Layer 2) and any downstream chain dispatch driven by the caller are NOT gated here. Quests
     // are allowed to resolve multiple times (stays-Live-after-completion, or deactivate > reactivate > re-resolve), and
     // each fire should append to history and propagate signals normally.
-    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Live));
-    WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver));
+    WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+    WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
-    const FGameplayTag CompletedFact = MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_Completed);
+    const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed);
     if (CompletedFact.IsValid() && !WorldState->HasFact(CompletedFact))
     {
         WorldState->AddFact(CompletedFact);
@@ -1319,7 +1311,7 @@ void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
-    const FGameplayTag PendingGiverFact = MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver);
+    const FGameplayTag PendingGiverFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver);
 
     // Idempotency guard, symmetric with SetQuestLive / SetQuestBlocked / SetQuestDeactivated. The ActivateNodeByTag
     // short-circuit (top of activation) already intercepts a second cascade arriving while PendingGiver is asserted,
@@ -1339,7 +1331,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
 {
     if (WorldState && QuestTag.IsValid())
     {
-        WorldState->RemoveFact(MakeQuestStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver));
+        WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
     }
 }

@@ -122,7 +122,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 		if (IsValid(WorldState))
 		{
 			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
-				FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver), false);
+				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
 			if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
 			{
 				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"), *QuestTag.ToString());

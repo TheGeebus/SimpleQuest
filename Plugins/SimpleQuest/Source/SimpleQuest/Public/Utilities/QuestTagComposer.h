@@ -42,35 +42,62 @@ enum class EQuestStateLeaf : uint8
  */
 class SIMPLEQUEST_API FQuestTagComposer
 {
+
+private:
+	// Helper for concatenating fully defined tag namespaces with the plugin prefix and relevant sub-prefix
+	static FString MakeNamespace(const FString& SubPrefix)
+	{
+		return PluginPrefix + TEXT(".") + SubPrefix + TEXT(".");
+	}
+	
 public:
+
+	/**
+	 * Wire-format string for a state-leaf enum value. Single source of truth: anywhere outside FQuestTagComposer
+	 * that needs the leaf's string form (e.g. reserved-segment validators, INI emission, debug logging) routes
+	 * through this rather than hardcoding "Live" / "Completed" / etc. literals. Adding a new EQuestStateLeaf entry
+	 * means adding one switch arm here and every consumer picks it up automatically.
+	 */
+	static const FString& LeafToString(EQuestStateLeaf Leaf);
+	
 	// ------------------------------------------------------------------------------------------------
 	// Namespace constants: every prefix string in one place. Renaming a namespace touches one line here
 	// instead of every hand-rolled site that hard-coded the literal.
 	// ------------------------------------------------------------------------------------------------
-	inline static const FString IdentityNamespace        = TEXT("SimpleQuest.Quest.");
-	inline static const FString StateNamespace           = TEXT("SimpleQuest.QuestState.");
-	inline static const FString OutcomeNamespace         = TEXT("SimpleQuest.QuestOutcome.");
-	inline static const FString PrereqRuleNamespace      = TEXT("SimpleQuest.QuestPrereqRule.");
-	inline static const FString ActivationGroupNamespace = TEXT("SimpleQuest.QuestActivationGroup.");
-	inline static const FString LegacyOutcomePrefix      = TEXT("Quest.Outcome.");
+
+	inline static const FString PluginPrefix				= TEXT("SimpleQuest");
+	inline static const FString QuestSubPrefix				= TEXT("Quest");
+	inline static const FString StateSubPrefix				= TEXT("QuestState");
+	inline static const FString OutcomeSubPrefix			= TEXT("QuestOutcome");
+	inline static const FString PrereqRuleSubPrefix			= TEXT("QuestPrereqRule");
+	inline static const FString ActivationGroupSubPrefix	= TEXT("QuestActivationGroup");
+	// Pre-0.4.0 outcome tag prefix retained for defensive runtime support — assets compiled
+	// before the namespace consolidation may still carry "Quest.Outcome.*" tags. Removal is
+	// a 0.4.1 polish item, gated on every authored asset being recompiled at least once
+	// (verifiable via Stale Quest Tags scanner). NOT part of item 2b cleanup.
+	inline static const FString LegacyOutcomeSubPrefix		= TEXT("Quest.Outcome.");
+
+	inline static const FString AllPrefixes[] = { PluginPrefix, QuestSubPrefix, StateSubPrefix, OutcomeSubPrefix,
+		PrereqRuleSubPrefix, ActivationGroupSubPrefix, LegacyOutcomeSubPrefix };
 
 	// ------------------------------------------------------------------------------------------------
-	// BACKWARDS COMPAT — preserved during the FQuestStateTagUtils → FQuestTagComposer migration so the
-	// codebase compiles incrementally. Prefer the modern surface at new sites:
-	//   FString constants  → EQuestStateLeaf enum
-	//   Namespace          → StateNamespace
-	//   MakeStateFact(...) FString-overloads → EQuestStateLeaf-overloads
-	// Remove this block once every call site has migrated. Tracked under item 2b cleanup follow-up.
+	// Fully defined namespaces
 	// ------------------------------------------------------------------------------------------------
-	inline static const FString Namespace        = TEXT("SimpleQuest.QuestState.");
-	inline static const FString Leaf_Live        = TEXT("Live");
-	inline static const FString Leaf_Completed   = TEXT("Completed");
-	inline static const FString Leaf_PendingGiver = TEXT("PendingGiver");
-	inline static const FString Leaf_Deactivated = TEXT("Deactivated");
-	inline static const FString Leaf_Blocked     = TEXT("Blocked");
+	inline static const FString IdentityNamespace			= MakeNamespace(QuestSubPrefix);
+	inline static const FString StateNamespace				= MakeNamespace(StateSubPrefix);
+	inline static const FString OutcomeNamespace			= MakeNamespace(OutcomeSubPrefix);
+	inline static const FString PrereqRuleNamespace			= MakeNamespace(PrereqRuleSubPrefix);
+	inline static const FString ActivationGroupNamespace	= MakeNamespace(ActivationGroupSubPrefix);
 
-	static FName MakeStateFact(FName IdentityTagName, const FString& Leaf);
-	static FName MakeStateFact(FGameplayTag IdentityTag, const FString& Leaf);
+	inline static const FString AllFullNamespaces[] = { IdentityNamespace, StateNamespace, OutcomeNamespace, PrereqRuleNamespace, ActivationGroupNamespace };
+
+	// ------------------------------------------------------------------------------------------------
+	// Suffixes - graph entry/exit paths
+	// ------------------------------------------------------------------------------------------------
+	inline static const FString PathSubSuffix				= TEXT("Path");       // used in MakeNodePathFact composition
+	inline static const FString EntryPathSubSuffix			= TEXT("EntryPath");  // used in MakeEntryPathFact composition
+
+	inline static const FString AllSuffixes[] = { PathSubSuffix, EntryPathSubSuffix };
 	
 	/** Iteration helper for "expand state facts on every identity tag" loops. */
 	inline static constexpr EQuestStateLeaf AllStateLeaves[] = {
@@ -78,6 +105,28 @@ public:
 		EQuestStateLeaf::Deactivated, EQuestStateLeaf::Blocked,
 	};
 
+	/**
+	 * Comprehensive union of every tag token FQuestTagComposer manages: plugin prefix, sub-prefixes
+	 * (including LegacyOutcomeSubPrefix), fully composed namespaces, suffixes (Path / EntryPath), and
+	 * the wire-format leaf names (Live, Completed, …) sourced via LeafToString. Heterogeneous by design
+	 * — single-segment entries mixed with dot-bearing prefix strings — so NOT suitable for tag-validity
+	 * checks (would produce false positives). Primary use: reserved-segment validation in the compiler
+	 * to block designer node labels from colliding with any internal-use token. Also suitable as a
+	 * complete inventory for any future audit / inspection surface.
+	 */
+	inline static const TArray<FString> AllNamespaces = []
+	{
+		TArray<FString> Result;
+		Result.Append(AllPrefixes, UE_ARRAY_COUNT(AllPrefixes));
+		Result.Append(AllFullNamespaces, UE_ARRAY_COUNT(AllFullNamespaces));
+		Result.Append(AllSuffixes, UE_ARRAY_COUNT(AllSuffixes));
+		for (EQuestStateLeaf Leaf : AllStateLeaves)
+		{
+			Result.Add(LeafToString(Leaf));
+		}
+		return Result;
+	}();
+	
 	// ------------------------------------------------------------------------------------------------
 	// Classifier: every "is this kind of tag?" question routes here
 	// ------------------------------------------------------------------------------------------------
@@ -145,6 +194,5 @@ public:
 private:
 	FQuestTagComposer() = delete;
 
-	/** Internal: enum → wire-format string for the tag name. Not public, leaf identity is enum-typed at the boundary. */
-	static const FString& LeafToString(EQuestStateLeaf Leaf);
+
 };

@@ -22,8 +22,7 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 			{
 				if (WS)
 				{
-					const FName FactName = FQuestTagComposer::MakeStateFact(Tag, FQuestTagComposer::Leaf_Blocked);
-					const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+					const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(Tag, EQuestStateLeaf::Blocked);
 					if (BlockedFact.IsValid()) WS->AddFact(BlockedFact);
 				}
 				if (Signals)

@@ -151,7 +151,6 @@ private:
 	/** Per-node FQuestDeactivatedEvent subscription handles; populated in ActivateQuestlineGraph, cleaned up in Deinitialize. */
 	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
 
-	static FGameplayTag MakeQuestStateFact(FGameplayTag QuestTag, const FString& Leaf);
 	void SetQuestLive(FGameplayTag QuestTag);
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);

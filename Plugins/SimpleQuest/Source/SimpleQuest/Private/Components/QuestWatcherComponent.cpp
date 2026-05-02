@@ -200,7 +200,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is waiting for a giver
         if (QuestPair.Value.bWatchActivation)
         {
-            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver), false);
+            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
             if (WorldState->HasFact(PendingFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -211,7 +211,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
         // Quest is currently active
         if (QuestPair.Value.bWatchStart)
         {
-            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Live), false);
+            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false);
             if (WorldState->HasFact(LiveFact))
             {
                 ActiveQuestTags.AddTag(QuestTag);
@@ -225,7 +225,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 		// probe loop in favor of a single keyed lookup that always recovers the real OutcomeTag.
 		if (QuestPair.Value.bWatchEnd)
 		{
-			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Completed), false);
+			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false);
 			if (WorldState->HasFact(CompletedFact))
 			{
 				ActiveQuestTags.RemoveTag(QuestTag);
@@ -261,7 +261,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
     	// Quest has been deactivated
     	if (QuestPair.Value.bWatchDeactivation)
     	{
-    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated), false);
+    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false);
     		if (WorldState->HasFact(DeactivatedFact))
     		{
     			ActiveQuestTags.RemoveTag(QuestTag);

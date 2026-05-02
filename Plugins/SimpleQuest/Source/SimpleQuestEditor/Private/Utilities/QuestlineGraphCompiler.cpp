@@ -288,20 +288,14 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     		continue;
     	}
 
-    	// Reserved segments — labels that would compose into ambiguous compiled tags. Currently warn-only since the
-    	// resulting tags still parse correctly; just visually confusing in pickers, debug logs, and tag-derived UI.
-    	// Tightens to error-or-rename if dual-tag finalization touches the namespace and we want hard guarantees.
-    	static const TSet<FString> ReservedSegments = {
-        	TEXT("Quest"),                                    // the runtime namespace segment itself (would yield SimpleQuest.Quest.<X>.Quest)
-			TEXT("QuestState"),                               // sibling state namespace
-			TEXT("QuestPrereqRule"),                               // sibling prereq-rule namespace
-			TEXT("Path"), TEXT("EntryPath"),                  // path-fact sub-suffixes (FQuestStateTagUtils)
-			FQuestTagComposer::Leaf_Live,
-			FQuestTagComposer::Leaf_Completed,
-			FQuestTagComposer::Leaf_Blocked,
-			FQuestTagComposer::Leaf_PendingGiver,
-			FQuestTagComposer::Leaf_Deactivated,
-		};
+    	// Defensive overkill: every token FQuestTagComposer manages is reserved against label collision.
+    	// AllNamespaces is the union of AllPrefixes / AllFullNamespaces / AllSuffixes / AllStateLeaves -- adding
+    	// a new namespace, suffix, or leaf-kind to FQuestTagComposer extends ReservedSegments automatically with
+    	// no edit here. Some entries (the fully-composed namespaces with embedded dots) can never match a
+    	// single-segment label so they're effectively no-ops, but keeping them in the set is harmless and removes
+    	// any "did I forget to update this?" risk class.
+    	static const TSet<FString> ReservedSegments(FQuestTagComposer::AllNamespaces);
+    	
     	if (ReservedSegments.Contains(Label))
     	{
     		AddWarning(FString::Printf(TEXT("[%s] Node label '%s' matches a reserved tag segment — compiles to an ambiguous tag (e.g. SimpleQuest.Quest.<...>.%s). "
@@ -1437,7 +1431,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     	if (UQuestlineNodeBase::GetPinRoleOf(OutputPin) == EQuestPinRole::AnyOutcomeOut)
     	{
     		// The parent quest's Live fact is always set when the inner graph is running
-    		const FGameplayTag LiveFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTagName, FQuestTagComposer::Leaf_Live), false);
+    		const FGameplayTag LiveFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTagName, EQuestStateLeaf::Live), false);
     		return OutExpression.AddFactLeaf(LiveFactTag);
     	}
 
@@ -1482,7 +1476,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 			// No named outcomes. This node is satisfied by Leaf_Completed alone
 			if (OutcomePins.IsEmpty())
 			{
-				const FGameplayTag CompletedFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(NodeTagName, FQuestTagComposer::Leaf_Completed), false);
+				const FGameplayTag CompletedFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(NodeTagName, EQuestStateLeaf::Completed), false);
 				return OutExpression.AddFactLeaf(CompletedFactTag);
 			}
 

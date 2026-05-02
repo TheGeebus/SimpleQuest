@@ -5,6 +5,9 @@
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 
+
+
+
 const FString& FQuestTagComposer::LeafToString(EQuestStateLeaf Leaf)
 {
 	static const FString S_Live         = TEXT("Live");
@@ -31,7 +34,7 @@ EQuestTagKind FQuestTagComposer::ClassifyTag(FName TagName)
 	const FString TagStr = TagName.ToString();
 	if (TagStr.StartsWith(StateNamespace))           return EQuestTagKind::State;
 	if (TagStr.StartsWith(OutcomeNamespace))         return EQuestTagKind::Outcome;
-	if (TagStr.StartsWith(LegacyOutcomePrefix))      return EQuestTagKind::LegacyOutcome;
+	if (TagStr.StartsWith(LegacyOutcomeSubPrefix))			return EQuestTagKind::LegacyOutcome;
 	if (TagStr.StartsWith(PrereqRuleNamespace))      return EQuestTagKind::PrereqRule;
 	if (TagStr.StartsWith(ActivationGroupNamespace)) return EQuestTagKind::ActivationGroup;
 	if (TagStr.StartsWith(IdentityNamespace))        return EQuestTagKind::Identity;
@@ -85,7 +88,7 @@ FName FQuestTagComposer::MakeNodePathFact(FName IdentityTagName, FName PathIdent
 	}
 	FString PathStr = PathIdentity.ToString();
 	TryStripOutcomePrefix(PathStr);
-	return FName(*(NodeStr + TEXT(".Path.") + PathStr));
+	return FName(*(NodeStr + TEXT(".") + PathSubSuffix + TEXT(".") + PathStr));
 }
 
 FName FQuestTagComposer::MakeEntryPathFact(FName IdentityTagName, FName PathIdentity)
@@ -98,7 +101,7 @@ FName FQuestTagComposer::MakeEntryPathFact(FName IdentityTagName, FName PathIden
 	}
 	FString PathStr = PathIdentity.ToString();
 	TryStripOutcomePrefix(PathStr);
-	return FName(*(NodeStr + TEXT(".EntryPath.") + PathStr));
+	return FName(*(NodeStr + TEXT(".") + EntryPathSubSuffix + TEXT(".") + PathStr));
 }
 
 FGameplayTag FQuestTagComposer::ResolveStateFactTag(FGameplayTag IdentityTag, EQuestStateLeaf Leaf)
@@ -154,9 +157,9 @@ bool FQuestTagComposer::TryStripOutcomePrefix(FString& InOutPathString)
 		InOutPathString.RightChopInline(OutcomeNamespace.Len());
 		return true;
 	}
-	if (InOutPathString.StartsWith(LegacyOutcomePrefix))
+	if (InOutPathString.StartsWith(LegacyOutcomeSubPrefix))
 	{
-		InOutPathString.RightChopInline(LegacyOutcomePrefix.Len());
+		InOutPathString.RightChopInline(LegacyOutcomeSubPrefix.Len());
 		return true;
 	}
 	return false;
@@ -194,21 +197,5 @@ FGameplayTagContainer FQuestTagComposer::FilterToRegisteredTags(const FGameplayT
 			*ContextLabel, *Tag.ToString());
 	}
 	return Result;
-}
-
-FName FQuestTagComposer::MakeStateFact(FName IdentityTagName, const FString& Leaf)
-{
-	if (IdentityTagName.IsNone()) return NAME_None;
-	FString TagStr = IdentityTagName.ToString();
-	if (TagStr.StartsWith(IdentityNamespace))
-	{
-		TagStr = StateNamespace + TagStr.RightChop(IdentityNamespace.Len());
-	}
-	return FName(*(TagStr + TEXT(".") + Leaf));
-}
-
-FName FQuestTagComposer::MakeStateFact(FGameplayTag IdentityTag, const FString& Leaf)
-{
-	return MakeStateFact(IdentityTag.GetTagName(), Leaf);
 }
 

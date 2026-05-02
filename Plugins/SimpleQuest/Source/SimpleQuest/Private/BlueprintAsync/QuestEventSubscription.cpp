@@ -188,7 +188,7 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
     {
         if (UWorldStateSubsystem* WorldState = ResolveWorldStateSubsystem())
         {
-            const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(Event.GetQuestTag(), FQuestTagComposer::Leaf_Blocked), false);
+            const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(Event.GetQuestTag(), EQuestStateLeaf::Blocked), false);
             if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
             {
                 bSawLiveBlocked = true;
@@ -237,7 +237,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     // PendingGiver fact gates both Activated and Enabled catch-up — quest is in giver state if-and-only-if
     // the fact is set. Activated fires regardless of prereq status; Enabled gates additionally on bSatisfied.
     const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
-        FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_PendingGiver), false);
+        FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
     const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
 
     FQuestPrereqStatus CachedPrereqStatus;
@@ -262,7 +262,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     if (IsExposed(EQuestEventTypes::Started) && !bSawLiveStarted)
     {
         const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Live), false);
+            FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false);
         if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
         {
             // Catch-up GiverActor is null — the manager's RecentGiverActors entry was consumed at start time
@@ -273,7 +273,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
     if (IsExposed(EQuestEventTypes::Completed) && !bSawLiveCompleted)
     {
-        const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Completed), false);
+        const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false);
         if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
         {
             FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
@@ -293,7 +293,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
     if (IsExposed(EQuestEventTypes::Deactivated) && !bSawLiveDeactivated)
     {
-        const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Deactivated), false);
+        const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false);
         if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
         {
             if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(QuestTag, SyntheticContext);
@@ -302,7 +302,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
     if (IsExposed(EQuestEventTypes::Blocked) && !bSawLiveBlocked)
     {
-        const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, FQuestTagComposer::Leaf_Blocked), false);
+        const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Blocked), false);
         if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
         {
             if (OnBlocked.IsBound()) OnBlocked.Broadcast(QuestTag, SyntheticContext);

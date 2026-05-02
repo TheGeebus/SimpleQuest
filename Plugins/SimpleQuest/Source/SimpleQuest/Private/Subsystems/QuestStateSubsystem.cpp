@@ -5,6 +5,7 @@
 #include "Engine/GameInstance.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
@@ -52,6 +53,50 @@ FQuestResolutionEntry UQuestStateSubsystem::GetLatestResolution(FGameplayTag Que
 		}
 	}
 	return FQuestResolutionEntry();
+}
+
+const FQuestEntryRecord* UQuestStateSubsystem::GetQuestEntry(FGameplayTag QuestTag) const
+{
+	return QuestEntries.Find(QuestTag);
+}
+
+bool UQuestStateSubsystem::HasEntered(FGameplayTag QuestTag) const
+{
+	return QuestEntries.Contains(QuestTag);
+}
+
+bool UQuestStateSubsystem::HasEnteredWith(FGameplayTag QuestTag, FGameplayTag IncomingOutcomeTag) const
+{
+	if (!QuestTag.IsValid() || !IncomingOutcomeTag.IsValid()) return false;
+	const TSet<FGameplayTag>* OutcomeSet = EnteredOutcomesByQuest.Find(QuestTag);
+	return OutcomeSet && OutcomeSet->Contains(IncomingOutcomeTag);
+}
+
+int32 UQuestStateSubsystem::GetEntryCount(FGameplayTag QuestTag) const
+{
+	const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag);
+	return Record ? Record->GetCount() : 0;
+}
+
+TArray<FQuestEntryArrival> UQuestStateSubsystem::GetEntryHistory(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		return Record->History;
+	}
+	return TArray<FQuestEntryArrival>();
+}
+
+FQuestEntryArrival UQuestStateSubsystem::GetLatestEntry(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			return *Latest;
+		}
+	}
+	return FQuestEntryArrival();
 }
 
 TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlockers(FGameplayTag QuestTag) const
@@ -167,6 +212,40 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
 	{
 		Signals->PublishMessage(QuestTag, FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
+	}
+}
+
+void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag SourceQuestTag, FGameplayTag IncomingOutcomeTag, double EntryTime)
+{
+	if (!QuestTag.IsValid()) return;
+
+	FQuestEntryRecord& Record = QuestEntries.FindOrAdd(QuestTag);
+	FQuestEntryArrival& Entry = Record.History.Emplace_GetRef();
+	Entry.SourceQuestTag = SourceQuestTag;
+	Entry.IncomingOutcomeTag = IncomingOutcomeTag;
+	Entry.EntryTime = EntryTime;
+
+	// Index maintenance for HasEnteredWith. Skipped when IncomingOutcomeTag is invalid (defensive — the cascade
+	// path always carries a valid outcome tag in current code, but the registry stays robust against future paths
+	// that might call RecordEntry without one).
+	if (IncomingOutcomeTag.IsValid())
+	{
+		EnteredOutcomesByQuest.FindOrAdd(QuestTag).Add(IncomingOutcomeTag);
+	}
+
+	UE_LOG(LogSimpleQuest, Log, TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' (entry #%d at t=%.2fs)"),
+		*QuestTag.ToString(),
+		*SourceQuestTag.ToString(),
+		*IncomingOutcomeTag.ToString(),
+		Record.History.Num(),
+		EntryTime);
+
+	// Broadcast on the destination quest's tag channel. PrereqLeafSubscription consumers routed by Leaf_Entry
+	// listen here and trigger expression re-evaluation; designers can also subscribe directly for cascade-attribution
+	// audit / logging.
+	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
+	{
+		Signals->PublishMessage(QuestTag, FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
 	}
 }
 

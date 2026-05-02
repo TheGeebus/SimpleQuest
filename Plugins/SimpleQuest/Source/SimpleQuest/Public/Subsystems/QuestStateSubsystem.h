@@ -7,6 +7,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
+#include "Quests/Types/QuestEntryRecord.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
@@ -18,7 +19,7 @@ class UWorldStateSubsystem;
  * state architecture; SimpleCore's UWorldStateSubsystem provides the boolean-fact half) and present-tense
  * activation queries (cached prereq snapshots, computed activation blockers).
  *
- * Naming convention mirrors UWorldStateSubsystem in SimpleCore — "State Subsystem" denotes a public,
+ * Naming convention mirrors UWorldStateSubsystem in SimpleCore: "State Subsystem" denotes a public,
  * externally-accessible fact registry with potentially limited write access. Designers come here for
  * quest-state queries, and the manager subsystem stays a black box for orchestration and pushes facts here
  * when state changes.
@@ -67,6 +68,33 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
     FQuestResolutionEntry GetLatestResolution(FGameplayTag QuestTag) const;
 
+    // ── Past entry queries ───────────────────────────────────────────────────────────────────────────────
+
+    /** Returns the full entry record for a quest, or nullptr if the quest hasn't been entered this session. */
+    const FQuestEntryRecord* GetQuestEntry(FGameplayTag QuestTag) const;
+
+    /** Convenience predicate: whether this quest has any entry record this session. */
+    bool HasEntered(FGameplayTag QuestTag) const;
+
+    /**
+     * Whether this quest has been entered with the specified IncomingOutcomeTag at any point this session.
+     * O(1) lookup against a parallel index maintained alongside QuestEntries. Used by Leaf_Entry prereqs
+     * evaluating against this registry rather than against a WorldState fact.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    bool HasEnteredWith(FGameplayTag QuestTag, FGameplayTag IncomingOutcomeTag) const;
+
+    /** Convenience accessor: how many times this quest has been entered this session. */
+    int32 GetEntryCount(FGameplayTag QuestTag) const;
+
+    /** Returns the full chronological entry history for a quest. Empty array if never entered this session. */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    TArray<FQuestEntryArrival> GetEntryHistory(FGameplayTag QuestTag) const;
+
+    /** Returns the most recent entry for a quest, or a default-constructed entry if no entries. */
+    UFUNCTION(BlueprintCallable, Category = "Quest|State")
+    FQuestEntryArrival GetLatestEntry(FGameplayTag QuestTag) const;
+    
 
     // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
 
@@ -99,6 +127,16 @@ private:
      * adds the (QuestTag, OutcomeTag) pair to this map. Avoids walking History for outcome-keyed prereq queries.
      */
     TMap<FGameplayTag, TSet<FGameplayTag>> ResolvedOutcomesByQuest;
+
+    UPROPERTY()
+    TMap<FGameplayTag, FQuestEntryRecord> QuestEntries;
+
+    /**
+     * Parallel O(1) index for HasEnteredWith. Maintained alongside QuestEntries: every RecordEntry call
+     * adds the (QuestTag, IncomingOutcomeTag) pair. TSet handles deduplication so repeat entries with the
+     * same outcome don't bloat the set.
+     */
+    TMap<FGameplayTag, TSet<FGameplayTag>> EnteredOutcomesByQuest;
     
     /** Cache of current prereq status per quest in PendingGiver state. Populated by the manager's giver branch
      *  and updated on enablement-watch transitions. Cleared when the quest leaves giver state. */
@@ -108,6 +146,7 @@ private:
     void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime, EQuestResolutionSource Source);
     void UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status);
     void ClearQuestPrereqStatus(FGameplayTag QuestTag);
+    void RecordEntry(FGameplayTag QuestTag, FGameplayTag SourceQuestTag, FGameplayTag IncomingOutcomeTag, double EntryTime);
 
     /** Resolves the GameInstance's WorldState subsystem for the blocker-fact lookups. */
     UWorldStateSubsystem* ResolveWorldState() const;

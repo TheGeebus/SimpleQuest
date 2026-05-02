@@ -533,7 +533,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
-		const FName FactName = FQuestTagComposer::MakeStateFact(SourceTagName, FQuestTagComposer::Leaf_Completed);
+		const FName FactName = FQuestTagComposer::MakeStateFact(SourceTagName, EQuestStateLeaf::Completed);
 		return FGameplayTag::RequestGameplayTag(FactName, false);
 	}
 

@@ -368,17 +368,18 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                 ? CascadeParams.OriginTag.GetTagName()
                 : NAME_None;
 
-            // Write entry outcome fact for this cascade's outcome (per-cascade — different cascades may carry
-            // different outcomes, each writing its own entry path fact for inner-graph prereqs to read).
-            if (IncomingOutcomeTag.IsValid() && WorldState)
+            // Record this cascade's per-source entry into the QuestStateSubsystem entry registry. Parallel to
+            // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
+            // FQuestEntryRecord and broadcasts FQuestEntryRecordedEvent on the destination's tag channel.
+            // Inner-graph Leaf_Entry prereqs subscribe to that event via FPrereqLeafSubscription and re-evaluate.
+            if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetQuestTag().IsValid())
             {
-                const FName EntryFactName = FQuestTagComposer::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
-                if (!EntryFactName.IsNone())
-                {
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: setting entry outcome fact '%s' for quest '%s'"),
-                        *EntryFactName.ToString(), *NodeTagName.ToString());
-                    WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
-                }
+                const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+                QuestStateSubsystem->RecordEntry(QuestNode->GetQuestTag(), CascadeParams.OriginTag, IncomingOutcomeTag, Now);
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s'"),
+                    *QuestNode->GetQuestTag().ToString(),
+                    *CascadeParams.OriginTag.ToString(),
+                    *IncomingOutcomeTag.ToString());
             }
 
             // Build chain for this cascade.
@@ -466,10 +467,11 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-live quest '%s'"),
                         *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
 
-                    const FName EntryFactName = FQuestTagComposer::MakeEntryPathFact(NodeTagName, IncomingOutcomeTag.GetTagName());
-                    if (!EntryFactName.IsNone())
+                    if (QuestStateSubsystem && NodeTag.IsValid())
                     {
-                        WorldState->AddFact(UGameplayTagsManager::Get().RequestGameplayTag(EntryFactName, false));
+                        const FGameplayTag SourceQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
+                        const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+                        QuestStateSubsystem->RecordEntry(NodeTag, SourceQuestTag, IncomingOutcomeTag, Now);
                     }
 
                     if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))

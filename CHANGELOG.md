@@ -8,17 +8,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Upcoming
-- Two-layer state pattern-establishing pass — extends the registry
-  pattern formalized in 0.4.0 (`UQuestStateSubsystem` + manager-as-
-  orchestrator) downward to step-level records and relocates
-  transient `PendingActivationParams` from per-component fields to
-  manager-side registries. Direct save/load groundwork.
-- Runtime asset loading pass (0.5.0 — async graph load driven by
+- Step-level rich-record registry + transient activation-state
+  relocation — extends the per-quest registry pattern items 2 + 2c
+  established. Adds an equivalent rich-record struct for step-level
+  resolutions; relocates `PendingActivationParams` /
+  `ReceivedActivationParams` / `CompletionForwardParams` from
+  transient `UQuestStep` fields into a manager-side "active
+  activation records" registry (cleaner ownership; decouples from
+  per-node PIE-reset discipline). Codifies the two-layer pattern
+  (boolean facts in WorldState + rich records in plugin-owned
+  registries, atomic write through manager choke-points) as the
+  SimpleCore-consumer convention. Direct save/load groundwork.
+- Runtime asset loading pass — async graph load driven by
   signal subscription; prioritized synchronous fallback for
-  critical paths). Lays groundwork for save/load by ensuring the
-  right graph assets can come online from a save's tag references
-  at restore time.
-- Save/load system (0.6.0 — locks tag string format; the
+  critical paths. Folded into the 0.4.x rollup per the
+  2026-05-02 sequencing revision. Lays groundwork for save/load
+  by ensuring the right graph assets can come online from a
+  save's tag references at restore time.
+- Save/load system (0.5.0 — locks tag string format; the
   `SimpleQuest.*` namespace consolidation and state-registry split
   shipped in 0.4.0 are the pre-flight for this).
 
@@ -267,6 +274,60 @@ Matches the new lifecycle granularity. Designer-facing names:
   description corrected against the 0.3.3 registry-recovery reality
   (catch-up returns the recovered outcome via the registry; only
   EmptyTag when no record exists for the quest in the current session).
+
+#### Two-layer state pattern extension — registry data layer (items 2 + 2c)
+
+Per-resolution outcome detail (item 2 — 2026-05-01) and per-cascade entry
+attribution (item 2c — 2026-05-02) moved out of WorldState into queryable
+rich-record registries on `UQuestStateSubsystem`, extending the manager-
+orchestrator / state-registry split shipped earlier in 0.4.0. The
+`SimpleQuest.QuestState.<X>.Path.<Outcome>` and `.EntryPath.<Outcome>`
+WorldState facts are no longer written.
+
+- **`HasResolvedWith(QuestTag, OutcomeTag)`** + **`HasEnteredWith(QuestTag,
+  OutcomeTag)`** on `UQuestStateSubsystem` — BP-callable predicate queries
+  against the registry. `USimpleQuestBlueprintLibrary::IsQuestResolvedWith`
+  now routes through `HasResolvedWith`.
+- **`FQuestResolutionRecord`** + **`FQuestEntryRecord`** — append-only
+  history per quest. Each entry carries timestamps + (for entries)
+  per-cascade source identity (`SourceQuestTag` + `IncomingOutcomeTag` +
+  `EntryTime`) that the prior WorldState refcount couldn't preserve.
+- **`FQuestResolutionRecordedEvent`** + **`FQuestEntryRecordedEvent`** —
+  broadcast on the quest's tag channel on each `RecordResolution` /
+  `RecordEntry`. Pre-flight for save/load + the upcoming Quest State view.
+- **Prereq leaf-kind dispatch** — `EPrerequisiteExpressionType::Leaf_Resolution`
+  and `Leaf_Entry` for outcome-pin and entry-pin prereq leaves; runtime
+  evaluator dispatches to `HasResolvedWith` / `HasEnteredWith`.
+  `FPrereqLeafSubscription` routes per-leaf subscriptions to the matching
+  event channel.
+
+#### Internal — compiler + runtime infrastructure refactors (items 2a + 2b)
+
+Pre-flight for the data-layer migrations:
+
+- **`FPrerequisiteExpression` builder API + `FPrereqLeafSubscription`
+  helper** (item 2a — 2026-05-01). Single canonical construction +
+  subscription surface (`AddAlways`, `AddFactLeaf`, `AddResolutionLeaf`,
+  `AddEntryLeaf`, `AddCombinator`, `AddNot`, `AddCombinatorChild`).
+  Adding a new leaf-kind = one new builder + one evaluator branch + one
+  subscription dispatch arm. `FPrereqLeafHandles` storage type with
+  named per-event-type slots (`FactAdded`, `FactRemoved`, `Resolution`,
+  `Entry`) unifies the prior `FDelegateHandle` and `FPrereqLeafHandlePair`
+  shapes; `UnsubscribeAll` convenience replaces six inline cleanup loops
+  with a single canonical entry point.
+- **`FQuestTagComposer`** (item 2b — 2026-05-02; renamed from
+  `FQuestStateTagUtils`). Single source of truth for tag namespace
+  prefixes, compose / decompose helpers, and tag-kind classification.
+  `EQuestStateLeaf` enum replaces FString leaf constants (typo-proof,
+  switch-exhaustive). Reserved-segment validator auto-extends with new
+  tag kinds via `AllNamespaces` aggregate. 12-test regression suite
+  locks the canonical helpers; `FPrerequisiteExpressionTestHelpers`
+  (test-only, gated `WITH_DEV_AUTOMATION_TESTS`) provides bypass-
+  construction so unit tests don't pollute the gameplay tag picker
+  with fixture tags.
+- **`MakeEntryPathFact` orphaned post-2c** — helper still exists in
+  `FQuestTagComposer` but no production callers remain. Cleanup
+  candidate for the next namespace pass.
 
 ### Changed
 

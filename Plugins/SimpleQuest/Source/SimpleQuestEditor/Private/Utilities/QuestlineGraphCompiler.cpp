@@ -321,22 +321,6 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         		TMap<FName, FQuestEntryRouteList> InnerEntryByPath;
         		QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, InlineBoundaryByPath, InlineBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
         		QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
-                
-        		// Register entry outcome fact tags for prerequisite expressions within the inner graph.
-        		for (UEdGraphNode* InnerNode : QuestEdNode->GetInnerGraph()->Nodes)
-        		{
-        			if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
-        			{
-        				const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
-        				for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
-        				{
-        					if (!Spec.bExposed) continue;
-        					if (!Spec.Outcome.IsValid()) continue;
-        					AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
-        				}
-        				break;
-        			}
-        		}
         	}
             Instance = QuestInstance;
         }
@@ -455,26 +439,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 
 				CurrentOuterGuidChain = PreviousGuidChain;
 				VisitedAssetPaths.RemoveSingleSwap(LinkedPath);
-
-				/**
-				 * Register entry outcome fact tags for prerequisite expressions inside the linked graph — same pattern as the
-				 * inline Quest branch. Iterates the linked graph's Entry node specs.
-				 */
-				for (UEdGraphNode* InnerNode : LinkedGraph->QuestlineEdGraph->Nodes)
-				{
-					if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
-					{
-						const FName QuestTagName = MakeNodeTagName(TagPrefix, Label);
-						for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
-						{
-							if (!Spec.bExposed) continue;
-							if (!Spec.Outcome.IsValid()) continue;
-							AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeEntryPathFact(QuestTagName, Spec.Outcome.GetTagName()));
-						}
-						break;
-					}
-				}
-
+				
 				Instance = QuestInstance;
 			}
 		}
@@ -1451,8 +1416,10 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
                                        *TagPrefix, *OutcomeTag.ToString()), Node);
         }
 
-    	const FGameplayTag EntryPathFactTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeEntryPathFact(QuestTagName, OutcomeTag.GetTagName()), false);
-    	return OutExpression.AddFactLeaf(EntryPathFactTag);
+    	// Entry pin prereq: stamps a Leaf_Entry leaf carrying (QuestTag, OutcomeTag). Runtime evaluation reads the
+    	// QuestStateSubsystem entry registry via HasEnteredWith; subscription routes through FQuestEntryRecorded-
+    	// Event on the parent quest's tag channel.
+    	return OutExpression.AddEntryLeaf(QuestTagName, OutcomeTag);
     }
 
     

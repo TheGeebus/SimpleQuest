@@ -184,6 +184,23 @@ public:
 	 *  display, QuestlineNodeBase::GetOutcomeLabel, and the Prereq Examiner tree all render identically. */
 	static FText FormatOutcomeForDisplay(FName OutcomeTagName);
 
+	/** Strips the namespace prefix from a tag and returns a short, designer-readable form for rendering
+	 *  surfaces (panel headers, K2 node titles, tooltips). Dispatches on ClassifyTag — outcome tags get the
+	 *  existing FormatOutcomeForDisplay shape ("Combat: Boss Defeated"); identity / state / prereq-rule /
+	 *  activation-group tags get prefix-stripped and rendered as the post-prefix remainder. The data layer
+	 *  keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances and
+	 *  serialization continue to use the raw tag explicitly.
+	 *
+	 *  Examples:
+	 *    "SimpleQuest.Quest.MyAsset.Step1"               → "MyAsset.Step1"
+	 *    "SimpleQuest.QuestState.MyAsset.Step1.Live"     → "MyAsset.Step1.Live"
+	 *    "SimpleQuest.QuestOutcome.Combat.BossDefeated"  → "Combat: Boss Defeated"
+	 *    "SimpleQuest.QuestPrereqRule.MyRule"            → "MyRule"
+	 *    "Game.Foo.Bar" (foreign)                        → "Game.Foo.Bar"  (Unknown — pass through)
+	 *    NAME_None                                       → ""              (empty FText)
+	 */
+	static FText FormatTagForDisplay(FName TagName);
+
 	// ------------------------------------------------------------------------------------------------
 	// Stale-tag utilities
 	// ------------------------------------------------------------------------------------------------

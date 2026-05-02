@@ -8,6 +8,7 @@
 #include "EdGraph/EdGraphNode.h"
 #include "Styling/AppStyle.h"
 #include "Toolkit/QuestlineGraphEditor.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -521,7 +522,6 @@ FText SGroupExaminerPanel::GetHeaderTagText() const
 	{
 		return LOCTEXT("HeaderNoGroup", "Group Examiner");
 	}
-	return FText::Format(LOCTEXT("HeaderGroupFmt", "Group Examiner — {0}"), FText::FromString(PinnedGroupTag.ToString()));
-}
+	return FText::Format(LOCTEXT("HeaderGroupFmt", "Group Examiner — {0}"), FQuestTagComposer::FormatTagForDisplay(PinnedGroupTag.GetTagName()));}
 
 #undef LOCTEXT_NAMESPACE

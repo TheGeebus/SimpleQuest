@@ -179,6 +179,38 @@ FText FQuestTagComposer::FormatOutcomeForDisplay(FName OutcomeTagName)
 	return FText::FromString(FString::Join(Segments, TEXT(": ")));
 }
 
+FText FQuestTagComposer::FormatTagForDisplay(FName TagName)
+{
+	if (TagName.IsNone()) return FText::GetEmpty();
+
+	const FString TagStr = TagName.ToString();
+	switch (ClassifyTag(TagName))
+	{
+	case EQuestTagKind::Outcome:
+	case EQuestTagKind::LegacyOutcome:
+		return FormatOutcomeForDisplay(TagName);
+
+	case EQuestTagKind::Identity:
+		return FText::FromString(TagStr.RightChop(IdentityNamespace.Len()));
+
+	case EQuestTagKind::State:
+		return FText::FromString(TagStr.RightChop(StateNamespace.Len()));
+
+	case EQuestTagKind::PrereqRule:
+		return FText::FromString(TagStr.RightChop(PrereqRuleNamespace.Len()));
+
+	case EQuestTagKind::ActivationGroup:
+		return FText::FromString(TagStr.RightChop(ActivationGroupNamespace.Len()));
+
+	case EQuestTagKind::Unknown:
+	default:
+		// Foreign / unrecognised tags pass through unchanged. We don't know their structure, so any prefix
+		// strip would be arbitrary. Designer-facing surfaces can still recognise the full string in the
+		// rare case where a foreign tag bleeds through (e.g. a project-specific tag in a quest pin picker).
+		return FText::FromString(TagStr);
+	}
+}
+
 bool FQuestTagComposer::IsTagRegisteredInRuntime(const FGameplayTag& Tag)
 {
 	if (!Tag.IsValid()) return false;

@@ -249,6 +249,42 @@ bool FQuestTagComposer_FormatOutcomeForDisplay::RunTest(const FString& Parameter
 }
 
 // -------------------------------------------------------------------------------------------------
+// FormatTagForDisplay: ClassifyTag-dispatched display shortener. Outcome arm delegates to
+// FormatOutcomeForDisplay; identity / state / prereq-rule / activation-group strip their prefix and
+// render the remainder; foreign tags pass through unchanged.
+// -------------------------------------------------------------------------------------------------
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_FormatTagForDisplay, "SimpleQuest.TagComposer.FormatTagForDisplay", TestFlags)
+bool FQuestTagComposer_FormatTagForDisplay::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("Identity tag"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Quest.MyAsset.Step1")).ToString(),
+		FString(TEXT("MyAsset.Step1")));
+	TestEqual(TEXT("State tag"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Live")).ToString(),
+		FString(TEXT("MyAsset.Step1.Live")));
+	TestEqual(TEXT("Outcome tag (delegates to FormatOutcomeForDisplay)"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestOutcome.Combat.BossDefeated")).ToString(),
+		FString(TEXT("Combat: Boss Defeated")));
+	TestEqual(TEXT("Legacy outcome tag (delegates to FormatOutcomeForDisplay)"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("Quest.Outcome.Combat.BossDefeated")).ToString(),
+		FString(TEXT("Combat: Boss Defeated")));
+	TestEqual(TEXT("PrereqRule tag"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestPrereqRule.MyRule")).ToString(),
+		FString(TEXT("MyRule")));
+	TestEqual(TEXT("ActivationGroup tag"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestActivationGroup.MyGroup")).ToString(),
+		FString(TEXT("MyGroup")));
+	TestEqual(TEXT("Foreign tag passes through"),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("Game.Foo.Bar")).ToString(),
+		FString(TEXT("Game.Foo.Bar")));
+	TestEqual(TEXT("None input → empty FText"),
+		FQuestTagComposer::FormatTagForDisplay(NAME_None).ToString(),
+		FString());
+	return true;
+}
+
+// -------------------------------------------------------------------------------------------------
 // MakeNodePathFact and MakeEntryPathFact: both perform identity to state namespace transition AND
 // strip outcome prefix from path identity. Verifies the dual decompose/compose path.
 // -------------------------------------------------------------------------------------------------

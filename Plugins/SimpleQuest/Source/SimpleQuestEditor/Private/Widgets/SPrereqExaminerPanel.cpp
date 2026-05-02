@@ -14,6 +14,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Toolkit/QuestlineGraphEditor.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
@@ -850,7 +851,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildHeader()
     if (Tree.RuleTag.IsValid() || bIsRuleContext)
     {
         const FText RuleHeaderText = Tree.RuleTag.IsValid()
-            ? FText::Format(LOCTEXT("RuleHeaderFmt", "Rule: {0}"), FText::FromString(Tree.RuleTag.GetTagName().ToString()))
+            ? FText::Format(LOCTEXT("RuleHeaderFmt", "Rule: {0}"), FQuestTagComposer::FormatTagForDisplay(Tree.RuleTag.GetTagName()))
             : LOCTEXT("RuleHeaderNoTag", "Rule: (no tag set)");
 
         // "Go to Exit" when the pinned context is a Rule Exit whose tag didn't resolve to a defining Entry (no-tag case,

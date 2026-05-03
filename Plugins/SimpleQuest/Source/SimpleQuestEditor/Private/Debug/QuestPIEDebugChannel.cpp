@@ -13,6 +13,7 @@
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -51,6 +52,7 @@ void FQuestPIEDebugChannel::Shutdown()
 	}
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
+	CachedQuestState.Reset();
 	bIsActive = false;
 }
 
@@ -72,6 +74,7 @@ void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 {
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
+	CachedQuestState.Reset();
 	bIsActive = false;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE ended"));
 	OnDebugActiveChanged.Broadcast();
@@ -122,12 +125,17 @@ bool FQuestPIEDebugChannel::ResolvePIESubsystems()
 
 	CachedWorldState = GI->GetSubsystem<UWorldStateSubsystem>();
 	CachedQuestManager = GI->GetSubsystem<UQuestManagerSubsystem>();
+	CachedQuestState = GI->GetSubsystem<UQuestStateSubsystem>();
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel::ResolvePIESubsystems : world='%s' type=%d, WorldState=%s, QuestManager=%s"),
+	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel::ResolvePIESubsystems : world='%s' type=%d, WorldState=%s, QuestManager=%s, QuestState=%s"),
 		*PIEWorld->GetName(), static_cast<int32>(PIEWorld->WorldType),
 		CachedWorldState.IsValid() ? TEXT("resolved") : TEXT("NULL"),
-		CachedQuestManager.IsValid() ? TEXT("resolved") : TEXT("NULL"));
-
+		CachedQuestManager.IsValid() ? TEXT("resolved") : TEXT("NULL"),
+		CachedQuestState.IsValid() ? TEXT("resolved") : TEXT("NULL"));
+	
+	// IsActive() condition unchanged: WorldState + QuestManager are the load-bearing pair for existing queries
+	// (QueryNodeState, QueryLeafState, HasFact). QuestState is a separately-checked optional resource for the
+	// Quest State view; failures to resolve it don't disable the rest of the channel.
 	return CachedWorldState.IsValid() && CachedQuestManager.IsValid();
 }
 
@@ -271,4 +279,17 @@ bool FQuestPIEDebugChannel::HasFact(const FGameplayTag& FactTag) const
 	if (!IsActive() || !FactTag.IsValid()) return false;
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	return WorldState && WorldState->HasFact(FactTag);
+}
+
+UQuestStateSubsystem* FQuestPIEDebugChannel::GetQuestStateSubsystem() const
+{
+	return CachedQuestState.Get();
+}
+
+double FQuestPIEDebugChannel::GetCurrentGameTimeSeconds() const
+{
+	const UQuestManagerSubsystem* QM = CachedQuestManager.Get();
+	if (!QM) return 0.0;
+	const UWorld* World = QM->GetWorld();
+	return World ? World->GetTimeSeconds() : 0.0;
 }

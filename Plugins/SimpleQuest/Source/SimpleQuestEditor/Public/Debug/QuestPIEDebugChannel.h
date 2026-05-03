@@ -11,6 +11,8 @@ class UQuestlineNode_ContentBase;
 class UEdGraphNode;
 class UWorldStateSubsystem;
 class UQuestManagerSubsystem;
+class UQuestStateSubsystem;
+
 
 /**
  * Editor-side shared infrastructure for the PIE graph debug overlay (agenda item 7, Session A). Hooks BeginPIE/EndPIE at
@@ -59,6 +61,20 @@ public:
 		(including when not in PIE). */
 	bool HasFact(const FGameplayTag& FactTag) const;
 
+	/**
+	 * Weak-pointer accessor for the PIE-world's QuestStateSubsystem. Returns nullptr when not in PIE or when the
+	 * subsystem failed to resolve. Used by the Quest State facts panel view to walk resolution / entry / prereq
+	 * registries during PIE. Independent of IsActive() — the view checks this getter directly so QuestState resolution
+	 * failures don't gate the rest of the channel's queries (which only need WorldState + QuestManager).
+	 */
+	UQuestStateSubsystem* GetQuestStateSubsystem() const;
+	
+	/**
+	 * Current PIE world time in seconds (matches the manager's GetTimeSeconds() time domain). Returns 0.0 when
+	 * not in PIE or when the cached subsystems aren't resolved. Live-paintable via Text_Lambda binding.
+	 */
+	double GetCurrentGameTimeSeconds() const;
+
 	/** Broadcasts true on PostPIEStarted success, false on EndPIE. Useful for panel paint invalidation. */
 	FSimpleMulticastDelegate OnDebugActiveChanged;
 
@@ -75,6 +91,8 @@ private:
 	TWeakObjectPtr<UWorldStateSubsystem> CachedWorldState;
 
 	TWeakObjectPtr<UQuestManagerSubsystem> CachedQuestManager;
+
+	TWeakObjectPtr<UQuestStateSubsystem> CachedQuestState;
 
 	FDelegateHandle PostPIEStartedHandle;
 	FDelegateHandle EndPIEHandle;

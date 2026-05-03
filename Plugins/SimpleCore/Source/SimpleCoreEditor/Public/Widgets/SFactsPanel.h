@@ -29,6 +29,14 @@ public:
     void Construct(const FArguments& InArgs);
     virtual ~SFactsPanel();
 
+    
+    /**
+     * Returns "Facts - <ActiveViewDisplayName>" for the docked tab's title, polled per-paint. Falls back to
+     * "Facts Panel" when no view is currently active (registry empty, view unregistered while tab open, etc.).
+     * Bound by tab spawners via Label_Lambda so the tab title tracks the dropdown selection live.
+     */
+    FText GetActiveViewLabel() const;
+
 private:
     void RebuildViewOptions();
     void SwitchToView(FName ViewId);

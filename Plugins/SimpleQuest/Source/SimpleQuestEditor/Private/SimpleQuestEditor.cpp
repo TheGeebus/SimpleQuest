@@ -52,12 +52,20 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "FactsPanel/FactsPanelRegistry.h"
 #include "K2Nodes/K2Node_BindToQuestEvent.h"
+#include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
 
 
 const FName FSimpleQuestEditor::StaleQuestTagsTabId(TEXT("SimpleQuest.StaleQuestTags"));
 
+namespace
+{
+	/** ViewID for the Quest State view in the generic FactsPanelRegistry. Stable string used as the dropdown
+	 *  selection key inside SFactsPanel. File-scope since no other translation unit needs to reference it. */
+	const FName QuestStateViewId(TEXT("SimpleQuest.QuestState"));
+}
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
@@ -205,6 +213,17 @@ void FSimpleQuestEditor::StartupModule()
 	// No-op unless PIE is running.
 	PIEDebugChannel = MakeUnique<FQuestPIEDebugChannel>();
 	PIEDebugChannel->Initialize();
+
+	// Quest State view registration with the generic Facts Panel registry. Each SFactsPanel instance gets its own
+	// SQuestStateView via this factory, so per-panel filter / sort / active-tab / scroll state stays isolated across
+	// docked panels. Sibling registration to SWorldStateFactsView (registered by SimpleCoreEditor) — both views share
+	// the same Facts Panel tab + dropdown.
+#define LOCTEXT_NAMESPACE "SimpleQuestEditor"
+	FFactsPanelRegistry::Get().RegisterView(
+		QuestStateViewId,
+		LOCTEXT("QuestStateViewLabel", "Quest State"),
+		[]() -> TSharedRef<SWidget> { return SNew(SQuestStateView); });
+#undef LOCTEXT_NAMESPACE
 }
 
 FQuestPIEDebugChannel* FSimpleQuestEditor::GetPIEDebugChannel()
@@ -292,6 +311,8 @@ void FSimpleQuestEditor::ShutdownModule()
 		PIEDebugChannel->Shutdown();
 		PIEDebugChannel.Reset();
 	}
+
+	FFactsPanelRegistry::Get().UnregisterView(QuestStateViewId);
 	
 	if (FModuleManager::Get().IsModuleLoaded("AssetRegistry"))
 	{

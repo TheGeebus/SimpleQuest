@@ -112,6 +112,20 @@ SFactsPanel::~SFactsPanel()
     }
 }
 
+FText SFactsPanel::GetActiveViewLabel() const
+{
+    if (!ActiveOption.IsValid())
+    {
+        return LOCTEXT("FactsPanelDefaultLabel", "Facts Panel");
+    }
+    const FFactsViewRegistration* Reg = FFactsPanelRegistry::Get().FindView(*ActiveOption);
+    if (!Reg)
+    {
+        return LOCTEXT("FactsPanelDefaultLabel", "Facts Panel");
+    }
+    return FText::Format(LOCTEXT("FactsPanelLabelFmt", "Facts: {0}"), Reg->DisplayName);
+}
+
 void SFactsPanel::RebuildViewOptions()
 {
     const TArray<FFactsViewRegistration>& Registrations = FFactsPanelRegistry::Get().GetRegisteredViews();

@@ -94,7 +94,23 @@ public:
     /** Returns the most recent entry for a quest, or a default-constructed entry if no entries. */
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
     FQuestEntryArrival GetLatestEntry(FGameplayTag QuestTag) const;
-    
+
+
+    // ── Read-side enumeration (inspection-only) ──────────────────────────────────────────────────────────
+    //
+    // Exposes the underlying registry maps as const refs so editor / debug surfaces (Quest State facts panel,
+    // future telemetry tools) can walk the full registry without per-quest probes. Mutation stays friend-
+    // protected through UQuestManagerSubsystem; these accessors are read-only by const-ness.
+
+    /** All resolved quests this session, keyed by quest tag. Values are append-only history records. */
+    const TMap<FGameplayTag, FQuestResolutionRecord>& GetAllResolutions() const { return QuestResolutions; }
+
+    /** All entered destination quests this session, keyed by destination quest tag. */
+    const TMap<FGameplayTag, FQuestEntryRecord>& GetAllEntries() const { return QuestEntries; }
+
+    /** All quests currently in PendingGiver state with a cached prereq snapshot. Cleared on giver-state exit. */
+    const TMap<FGameplayTag, FQuestPrereqStatus>& GetAllCachedPrereqStatus() const { return CachedPrereqStatus; }
+
 
     // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
 

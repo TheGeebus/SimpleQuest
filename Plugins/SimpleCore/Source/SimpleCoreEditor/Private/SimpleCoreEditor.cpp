@@ -30,7 +30,7 @@ void FSimpleCoreEditorModule::StartupModule()
     // SWorldStateFactsView via this factory, so per-panel filter / scroll state stays isolated across docked panels.
     FFactsPanelRegistry::Get().RegisterView(
         WorldStateViewId,
-        LOCTEXT("WorldStateViewName", "World State Facts"),
+        LOCTEXT("WorldStateViewName", "World State"),
         []() -> TSharedRef<SWidget> { return SNew(SWorldStateFactsView); });
 
     // Nomad tab under Window > Developer Tools. SetReuseTabMethod returning null forces a fresh SFactsPanel on each
@@ -76,16 +76,16 @@ FSimpleCorePIEDebugChannel* FSimpleCoreEditorModule::GetPIEDebugChannel()
 
 TSharedRef<SDockTab> FSimpleCoreEditorModule::SpawnFactsPanelTab(const FSpawnTabArgs& Args)
 {
-    ++SpawnedPanelCount;
-    const FText TabLabel = SpawnedPanelCount == 1
-        ? LOCTEXT("FactsPanelTabLabel", "Facts Panel")
-        : FText::Format(LOCTEXT("FactsPanelTabLabelN", "Facts Panel {0}"), FText::AsNumber(SpawnedPanelCount));
+    // Construct the panel first so its instance ref can be captured into the tab's Label lambda. Each spawner
+    // invocation produces a fresh SFactsPanel + SDockTab pair (per the SetReuseTabMethod returning null), so
+    // multiple docked tabs can show different registries side-by-side and each tracks its own dropdown selection.
+    TSharedRef<SFactsPanel> Panel = SNew(SFactsPanel);
 
     return SNew(SDockTab)
         .TabRole(ETabRole::NomadTab)
-        .Label(TabLabel)
+        .Label_Lambda([Panel]() { return Panel->GetActiveViewLabel(); })
         [
-            SNew(SFactsPanel)
+            Panel
         ];
 }
 

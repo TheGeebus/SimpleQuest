@@ -25,7 +25,9 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 					const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(Tag, EQuestStateLeaf::Blocked);
 					if (BlockedFact.IsValid()) WS->AddFact(BlockedFact);
 				}
-				if (Signals)
+				// Block is purely a re-entry gate by default — leaves any in-flight lifecycle on the target alone.
+				// Designers opt into interrupting in-flight quests via the bAlsoDeactivateTargets toggle.
+				if (bAlsoDeactivateTargets && Signals)
 				{
 					Signals->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(Tag, EDeactivationSource::Internal));
 				}

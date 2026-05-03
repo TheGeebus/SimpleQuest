@@ -238,13 +238,19 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 		if (!Inst) continue;
 
 		Inst->NextNodesOnForward.Empty();
-
+		Inst->BoundaryCompletionsOnForward.Empty();
 		if (UEdGraphPin* ForwardPin = UQuestlineNodeBase::FindPinByRole(Node, EQuestPinRole::ExecForwardOut))
 		{
+			// Utility forward output may cross one or more wrapper Exits: capture both the next-tag list AND the
+			// boundary-completion records the walk accumulates so HandleOnNodeForwardActivated can fire wrapper
+			// completion (SetQuestResolved + FQuestEndedEvent) before the chain fans out. Without this, a utility
+			// node placed before a wrapper Exit silently drops the wrapper's completion: host stays Live forever,
+			// Path facts never emit, downstream Path-prereqs never satisfy.
 			TArray<FName> ForwardTags;
-			TArray<FQuestBoundaryCompletion> UnusedBoundaryCompletions;
-			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByPath, BoundaryCompletionsByPath, VisitedAssetPaths, ForwardTags, UnusedBoundaryCompletions);
+			TArray<FQuestBoundaryCompletion> ForwardBoundaries;
+			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryTagsByPath, BoundaryCompletionsByPath, VisitedAssetPaths, ForwardTags, ForwardBoundaries);
 			for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
+			for (const FQuestBoundaryCompletion& BC : ForwardBoundaries) Inst->BoundaryCompletionsOnForward.AddUnique(BC);
 		}
 	}
 
@@ -624,10 +630,11 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuest
 
         UQuestNodeBase* Instance = nullptr;
 
-        if (UQuestlineNode_SetBlocked* BlockNode = Cast<UQuestlineNode_SetBlocked>(UtilEdNode))
-        {
-            USetBlockedNode* Inst = NewObject<USetBlockedNode>(RootGraph);
-            Inst->TargetQuestTags = BlockNode->TargetQuestTags;
+    	if (UQuestlineNode_SetBlocked* BlockNode = Cast<UQuestlineNode_SetBlocked>(UtilEdNode))
+    	{
+    		USetBlockedNode* Inst = NewObject<USetBlockedNode>(RootGraph);
+    		Inst->TargetQuestTags = BlockNode->TargetQuestTags;
+    		Inst->bAlsoDeactivateTargets = BlockNode->bAlsoDeactivateTargets;
             Instance = Inst;
         }
         else if (UQuestlineNode_ClearBlocked* ClearBlockNode = Cast<UQuestlineNode_ClearBlocked>(UtilEdNode))

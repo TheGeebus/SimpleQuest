@@ -37,6 +37,22 @@ void UQuestlineNode_UtilityBase::AllocateDefaultPins()
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Forward"));
 }
 
+void UQuestlineNode_UtilityBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// Every UPROPERTY on a utility node is compile-relevant — TargetQuestTags, GroupTag, bAlsoDeactivateTargets,
+	// any future toggle. Notify the graph editor so it marks the asset dirty + signals "needs recompile" without
+	// each concrete utility-node subclass having to override this.
+	if (PropertyChangedEvent.Property)
+	{
+		if (UEdGraph* Graph = GetGraph())
+		{
+			Graph->NotifyGraphChanged();
+		}
+	}
+}
+
 FLinearColor UQuestlineNode_UtilityBase::GetNodeTitleColor() const
 {
 	return SQ_ED_NODE_UTILITY;

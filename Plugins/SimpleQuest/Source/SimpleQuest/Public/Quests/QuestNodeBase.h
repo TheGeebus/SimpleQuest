@@ -232,6 +232,16 @@ protected:
     /** Nodes to activate as a pass-through (utility node chaining; no lifecycle writes). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnForward;
+
+    /**
+     * Boundary completions to fire when this utility node's forward output crosses one or more wrapper Exits.
+     * Each entry triggers SetQuestResolved on the wrapper tag (Completed + Path facts + resolution record) and
+     * publishes FQuestEndedEvent. Order is innermost-first — the compiler's ResolvePinToTags walk accumulates
+     * deepest crosses first as it traverses outward. Empty for utility nodes whose forward output doesn't
+     * cross a wrapper boundary.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnForward;
     
     /**
      * A struct that holds the composable prerequisites for this quest graph node: the relevant tags representing events and their
@@ -293,6 +303,7 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
+    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }

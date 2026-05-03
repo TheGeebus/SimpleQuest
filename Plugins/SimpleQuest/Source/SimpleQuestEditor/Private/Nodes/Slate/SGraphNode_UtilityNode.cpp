@@ -2,6 +2,7 @@
 
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
+#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "SGraphPin.h"
 #include "SGameplayTagContainerCombo.h"
 #include "ScopedTransaction.h"
@@ -10,6 +11,7 @@
 #include "SCommentBubble.h"
 #include "TutorialMetaData.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSpacer.h"
@@ -133,6 +135,16 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		]
 
+
+
+		// Pin content area — 2px bottom padding for input column breathing room
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.HAlign(HAlign_Fill)
+		[
+			CreatePinContentArea()
+		]
+
 		// Tag picker
 		+ SVerticalBox::Slot()
 		.AutoHeight()
@@ -141,13 +153,14 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 			CreateTagPickerWidget()
 		]
 
-		// Pin content area — 2px bottom padding for input column breathing room
+		// Optional toggles row — currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
+		// CreateAlsoDeactivateToggleWidget returns SNullWidget for any other utility node type, so the slot
+		// collapses to zero size in those cases (padding lives inside the wrapper widget).
 		+ SVerticalBox::Slot()
 		.AutoHeight()
-		.HAlign(HAlign_Fill)
-		.Padding(0.f, 0.f, 0.f, 2.f)
+		.Padding(0.f, 0.f, 0.f, 4.f)
 		[
-			CreatePinContentArea()
+			CreateAlsoDeactivateToggleWidget()
 		];
 
 	// Enabled state widget
@@ -299,6 +312,29 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 {
 	FString FilterString = UtilityNode ? UtilityNode->GetTargetQuestTagsFilterString() : FString(TEXT("Quest"));
 
+	return SNew(SWrapBox).PreferredSize(200.f).Orientation(Orient_Horizontal)
+		+ SWrapBox::Slot().Padding(8.f, 0.f, 2.f, 0.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("TagsToBlockLabel", "Tags to Block:"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+		]
+		+ SWrapBox::Slot().Padding(4.f, 2.f, 0.f, 2.f)
+		[
+			SNew(SGameplayTagContainerCombo)
+			.Filter(*FilterString)
+			.TagContainer_Lambda([this]()
+			{
+				if (UtilityNode) return UtilityNode->GetTargetQuestTags();
+				static const FGameplayTagContainer Empty;
+				return Empty;
+			})
+			.OnTagContainerChanged_Lambda([this](const FGameplayTagContainer& NewTags)
+			{
+				OnTargetTagsChanged(NewTags);
+			})
+		];
+	/*
 	return SNew(SGameplayTagContainerCombo)
 		.Filter(*FilterString)
 		.TagContainer_Lambda([this]()
@@ -311,6 +347,7 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 		{
 			OnTargetTagsChanged(NewTags);
 		});
+		*/
 }
 
 void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& NewTags)
@@ -321,6 +358,53 @@ void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& Ne
 	GraphNode->Modify();
 
 	UtilityNode->SetTargetQuestTags(NewTags);
+
+	if (UEdGraph* Graph = GraphNode->GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+TSharedRef<SWidget> SGraphNode_UtilityNode::CreateAlsoDeactivateToggleWidget()
+{
+	UQuestlineNode_SetBlocked* SetBlockedNode = Cast<UQuestlineNode_SetBlocked>(UtilityNode);
+	if (!SetBlockedNode) return SNullWidget::NullWidget;
+
+	return SNew(SBox)
+	.Padding(FMargin(18.f, 4.f, 10.f, 8.f))
+	[
+		SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SCheckBox)
+				.IsChecked_Lambda([SetBlockedNode]()
+				{
+					return SetBlockedNode->bAlsoDeactivateTargets ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged(this, &SGraphNode_UtilityNode::OnAlsoDeactivateChanged)
+				.ToolTipText(LOCTEXT("AlsoDeactivateTooltip",
+					"When checked, also issues a deactivation request for each target quest in addition to setting the "
+					"Blocked re-entry gate. By default, blocking only sets the gate — any in-flight lifecycle on the targets "
+					"continues to its current resolution."))
+			]
+			+ SHorizontalBox::Slot().Padding(4.f, 0.f, 0.f, 0.f).FillWidth(1.f).HAlign(HAlign_Left).VAlign(VAlign_Center)
+			[			
+				SNew(STextBlock)
+				.Text(LOCTEXT("AlsoDeactivateLabel", "Also Deactivate"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+			]
+	];
+}
+
+void SGraphNode_UtilityNode::OnAlsoDeactivateChanged(ECheckBoxState NewState)
+{
+	UQuestlineNode_SetBlocked* SetBlockedNode = Cast<UQuestlineNode_SetBlocked>(UtilityNode);
+	if (!SetBlockedNode || !GraphNode) return;
+
+	const FScopedTransaction Transaction(LOCTEXT("ChangeAlsoDeactivate", "Toggle Also Deactivate Targets"));
+	GraphNode->Modify();
+
+	SetBlockedNode->bAlsoDeactivateTargets = (NewState == ECheckBoxState::Checked);
 
 	if (UEdGraph* Graph = GraphNode->GetGraph())
 	{

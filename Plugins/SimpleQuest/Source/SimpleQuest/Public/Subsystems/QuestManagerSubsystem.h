@@ -88,8 +88,8 @@ protected:
 	 * whose outcome fired. Quest entry routing filters source-qualified entries against this tag so only the matching spec's
 	 * entry step fires, enabling per-source routing on duplicate paths.
 	 */
-	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None);
-
+	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None, bool bBypassGiverGate = false);
+	
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
 

@@ -15,6 +15,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_UtilityBase : public UQuestlineNodeBa
 public:
 	virtual void PostLoad() override;
 	virtual void AllocateDefaultPins() override;
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual bool IsUtilityNode() const override { return true; }
 	virtual bool CanUserDeleteNode() const override { return true; }
 	virtual bool CanDuplicateNode() const override { return true; }

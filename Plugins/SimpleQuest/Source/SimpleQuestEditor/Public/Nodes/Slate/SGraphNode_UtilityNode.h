@@ -25,5 +25,11 @@ private:
 	TSharedRef<SWidget> CreatePinContentArea();
 	void OnTargetTagsChanged(const FGameplayTagContainer& NewTags);
 
+	/** Returns a SetBlocked-specific "Also Deactivate Targets" checkbox row, or SNullWidget for any other utility
+	 *  node type. The checkbox edits UQuestlineNode_SetBlocked::bAlsoDeactivateTargets in place; only that one
+	 *  utility subclass surfaces the toggle. */
+	TSharedRef<SWidget> CreateAlsoDeactivateToggleWidget();
+	void OnAlsoDeactivateChanged(ECheckBoxState NewState);
+
 	UQuestlineNode_UtilityBase* UtilityNode = nullptr;
 };

@@ -22,4 +22,13 @@ public:
 
 	UPROPERTY(EditAnywhere, Category="Blocked", meta=(Categories="SimpleQuest.Quest"))
 	FGameplayTagContainer TargetQuestTags;
+
+	/**
+	 * When true, also issues a deactivation request for each target quest in addition to setting the Blocked
+	 * re-entry gate. When false (default), Set Blocked only sets the gate — any in-flight lifecycle on the
+	 * targets continues to its current resolution. Block is purely a future-activation gate by default;
+	 * this toggle opts into interrupting in-flight quests as well.
+	 */
+	UPROPERTY(EditAnywhere, Category="Blocked", meta=(DisplayName="Also Deactivate Targets"))
+	bool bAlsoDeactivateTargets = false;
 };

@@ -428,11 +428,32 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
 void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
 {
     if (!Node) return;
+
+    // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
+    // downstream prereq evaluation runs. Mirrors ChainToNextNodes's FireBoundaryCompletion lambda. Empty when
+    // the utility's forward output doesn't cross a wrapper Exit (the common mid-graph utility chaining case).
+    for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnForward())
+    {
+        const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
+        if (!WrapperTag.IsValid()) continue;
+
+        UE_LOG(LogSimpleQuest, Verbose,
+            TEXT("HandleOnNodeForwardActivated: firing boundary completion '%s' outcome='%s' (from utility '%s')"),
+            *WrapperTag.ToString(), *BC.OutcomeTag.ToString(), *Node->GetQuestTag().ToString());
+
+        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
+
+        if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
+        {
+            PublishQuestEndedEvent(WrapperNode, BC.OutcomeTag, EQuestResolutionSource::Graph);
+        }
+    }
+
     for (const FName& Tag : Node->GetNextNodesOnForward())
         ActivateNodeByTag(Tag);
 }
 
-void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag)
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate)
 {
 
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ActivateNodeByTag);
@@ -447,14 +468,16 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
     /**
-     * Diamond convergence guard: refuses activation if the node is already running, waiting for a giver, or explicitly blocked.
-     * Completed is intentionally excluded so loops and repeatable quests can re-enter.
+     * Diamond convergence guard: refuses activation if the node is already running or waiting for a giver. Blocked is
+     * intentionally NOT in this set — Block is orthogonal to the lifecycle, so a giver-gated quest under Block should
+     * still publish FQuestEnabledEvent and let the giver remain visible/interactable. The actual SetQuestLive
+     * transition is gated by the post-giver Block check further down, which mirrors HandleGiveQuestEvent's
+     * blocker-refusal at the give step. Completed is intentionally excluded so loops and repeatable quests can re-enter.
      */
     if (NodeTag.IsValid() && WorldState)
     {
         if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ||
-            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)) ||
-            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Blocked)))
+            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)))
         {
             /**
              * Already-live Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
@@ -497,15 +520,14 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
                 *NodeTagName.ToString(),
                 WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ? TEXT("live") :
-                WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)) ? TEXT("pending giver") :
-                TEXT("blocked"));
+                TEXT("pending giver"));
             return;
         }
         // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Deactivated));
     }
 
-    if (NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
+    if (!bBypassGiverGate && NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
     {
         UQuestNodeBase* Instance = *InstancePtr;
         Instance->bWasGiverGated = true;
@@ -540,6 +562,19 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
                 *NodeTagName.ToString(),
                 PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
         }
+        return;
+    }
+
+    // Block gate — orthogonal to lifecycle. Block intentionally allows the giver-gate setup above (so the giver
+    // stays visible and the player can attempt to interact) but refuses the actual SetQuestLive transition. This
+    // mirrors HandleGiveQuestEvent's blocker check at the give step: gives on Blocked quests are refused with
+    // FQuestGiveBlockedEvent, and direct/cascade activations on Blocked quests are refused here. Together these
+    // make Block a pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
+    if (NodeTag.IsValid() && WorldState &&
+        WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Blocked)))
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
+            *NodeTagName.ToString());
         return;
     }
 
@@ -698,16 +733,32 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 {
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed)))
+    // Inclusive precondition: deactivation only makes sense if there's an active lifecycle to interrupt: Live or
+    // PendingGiver. The prior exclusive "skip if Completed" guard mishandled loopable quests (Any Outcome routing
+    // back to own Activate), where Completed remains asserted across loop iterations alongside a freshly-set
+    // Live fact. Asking "is there an active lifecycle?" answers the actual question; "is it not yet completed?"
+    // produces false negatives on multi-resolution quests.
+    const bool bHasLive = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+    const bool bHasPendingGiver = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
+    if (!bHasLive && !bHasPendingGiver)
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already completed"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - no Live or PendingGiver lifecycle to interrupt"), *QuestTag.ToString());
         return;
     }
 
-    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated)))
+    // Snapshot Deactivated state before doing the cleanup work. Live/PendingGiver + Deactivated co-occurring is an
+    // inconsistent state — normal flow has ActivateNodeByTag clearing Deactivated before SetQuestLive runs, so the
+    // two should never be both asserted. If they are (manual fact write, save/load round-trip, race in a callback),
+    // we still need to clear Live / PendingGiver — that's the actual point of deactivation. We just skip
+    // re-asserting Deactivated (would bump the WorldState ref-count, leaving Deactivated pinned past a future
+    // ClearBlocked / similar) and the FQuestDeactivatedEvent re-publish (subscribers already saw the original
+    // transition).
+    const bool bWasAlreadyDeactivated = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated));
+    if (bWasAlreadyDeactivated)
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - already deactivated"), *QuestTag.ToString());
-        return;
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("SetQuestDeactivated: '%s' had Live or PendingGiver AND Deactivated asserted simultaneously — inconsistent state; clearing active facts, skipping Deactivated fact-write + event re-publish"),
+            *QuestTag.ToString());
     }
     
     RecentGiverActors.Remove(QuestTag);
@@ -725,10 +776,11 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 		Node = *NodePtr;
 	}
 
-	// PendingGiver cleanup
+    // PendingGiver cleanup. Don't mutate RegisteredGiverQuestTags — it's the structural "this quest has a giver"
+    // set, sticky across the session. After deactivation, the next activation re-engages the giver gate
+    // normally because the tag is still in the set.
     if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver)))
     {
-        RegisteredGiverQuestTags.Remove(QuestTag);
         ClearQuestPendingGiver(QuestTag);
     }
 
@@ -758,18 +810,25 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 		DeferredCompletions.Remove(QuestTag);
 	}
 
-	WorldState->AddFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated));
+    // Skip the Deactivated fact write + event publish if Deactivated was already asserted (the ref-count bump
+    // would prevent a future ClearBlocked from fully clearing Deactivated; the event re-publish would deliver a
+    // duplicate signal). Live / PendingGiver cleanup above ran unconditionally — that's the actual point of this
+    // function.
+    if (!bWasAlreadyDeactivated)
+    {
+        WorldState->AddFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated));
 
-	// Publish with context
-	if (QuestSignalSubsystem)
-	{
-		FQuestDeactivatedEvent Event(QuestTag, Source);
-		if (Node)
-		{
-			Event = FQuestDeactivatedEvent(QuestTag, Source, AssembleEventContext(Node, FQuestObjectiveContext()));
-		}
-		QuestSignalSubsystem->PublishMessage(QuestTag, Event);
-	}
+        // Publish with context
+        if (QuestSignalSubsystem)
+        {
+            FQuestDeactivatedEvent Event(QuestTag, Source);
+            if (Node)
+            {
+                Event = FQuestDeactivatedEvent(QuestTag, Source, AssembleEventContext(Node, FQuestObjectiveContext()));
+            }
+            QuestSignalSubsystem->PublishMessage(QuestTag, Event);
+        }
+    }
 }
 
 void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
@@ -846,8 +905,11 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     {
         RecentGiverActors.Add(QuestTag, Event.Params.ActivationSource);
     }
-    
-    RegisteredGiverQuestTags.Remove(QuestTag);
+
+    // RegisteredGiverQuestTags is the structural "this quest has a giver" set — populated at startup by
+    // RegisterGiversFromAssetRegistry, never mutated at runtime. The give-completion path bypasses the giver
+    // gate explicitly via the bBypassGiverGate flag passed to ActivateNodeByTag below; loop-back iterations
+    // see the tag still in the set and correctly re-route through PendingGiver again.
     ClearQuestPendingGiver(QuestTag);
     ClearEnablementWatch(QuestTag);
 
@@ -862,7 +924,10 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
         }
     }
 
-    ActivateNodeByTag(QuestTag.GetTagName());
+    // bBypassGiverGate=true — this is the give-completion re-activation; the player has already accepted, so
+    // route past the giver gate to Live without re-entering PendingGiver. The structural giver-gated set still
+    // contains this tag for the next loop iteration / external re-activation.
+    ActivateNodeByTag(QuestTag.GetTagName(), FGameplayTag(), NAME_None, true);
 }
 
 void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event)
@@ -895,10 +960,9 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
     if (!BlockedFact.IsValid()) return;
 
-    // Idempotency guard: symmetric with the already-deactivated guard in SetQuestDeactivated. Spamming
-    // SetQuestBlocked on an already-blocked quest would otherwise bump the WorldState ref-count and re-publish
-    // the deactivation request to any third-party subscribers, neither of which reflects a genuine state
-    // transition.
+    // Idempotency guard: symmetric with the already-deactivated guard in SetQuestDeactivated. Spamming a block
+    // request on an already-blocked quest would otherwise bump the WorldState ref-count without reflecting a
+    // genuine state transition.
     if (WorldState->HasFact(BlockedFact))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
@@ -907,12 +971,10 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 
     WorldState->AddFact(BlockedFact);
 
-    if (QuestSignalSubsystem)
-    {
-        QuestSignalSubsystem->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(QuestTag, EDeactivationSource::Internal));
-    }
-
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, deactivation requested"), *QuestTag.ToString());
+    // Block does NOT auto-deactivate. Block is the orthogonal re-entry gate; deactivation is the lifecycle/world
+    // disabler. Callers who want both must publish FQuestDeactivateRequestEvent themselves (or use SetBlocked's
+    // bAlsoDeactivateTargets toggle on the node-driven path). A combined-event API may be added later — see TODO.
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added (no auto-deactivate)"), *QuestTag.ToString());
 }
 
 void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)

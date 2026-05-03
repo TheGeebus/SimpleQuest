@@ -314,7 +314,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
     if (UQuest* QuestNode = Cast<UQuest>(Node))
     {
         const FName NodeTagName = Node->GetQuestTag().GetTagName();
-
+       
         // Drain the per-cascade snapshot queue. For the immediate-prereq-satisfied case, the queue holds exactly
         // one entry (the cascade that just fired this OnNodeStarted). For the deferred case, the queue may hold
         // multiple — every cascade that arrived during the deferral window stamped its own snapshot. All entries
@@ -430,27 +430,25 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     if (!Node) return;
 
     // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
-    // downstream prereq evaluation runs. Mirrors ChainToNextNodes's FireBoundaryCompletion lambda. Empty when
-    // the utility's forward output doesn't cross a wrapper Exit (the common mid-graph utility chaining case).
+    // downstream prereq evaluation runs. Routes through the shared FireWrapperBoundaryCompletion helper so
+    // the wrapper's full outcome chain fires (including loop-back wires) — symmetric with ChainToNextNodes's
+    // FireBoundaryCompletion lambda. Empty when the utility's forward output doesn't cross a wrapper Exit
+    // (the common mid-graph utility chaining case).
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnForward())
     {
-        const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
-        if (!WrapperTag.IsValid()) continue;
-
         UE_LOG(LogSimpleQuest, Verbose,
             TEXT("HandleOnNodeForwardActivated: firing boundary completion '%s' outcome='%s' (from utility '%s')"),
-            *WrapperTag.ToString(), *BC.OutcomeTag.ToString(), *Node->GetQuestTag().ToString());
+            *BC.WrapperTagName.ToString(),
+            *BC.OutcomeTag.ToString(),
+            *Node->GetQuestTag().ToString());
 
-        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
-
-        if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
-        {
-            PublishQuestEndedEvent(WrapperNode, BC.OutcomeTag, EQuestResolutionSource::Graph);
-        }
+        FireWrapperBoundaryCompletion(BC);
     }
 
     for (const FName& Tag : Node->GetNextNodesOnForward())
+    {
         ActivateNodeByTag(Tag);
+    }
 }
 
 void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate)
@@ -628,6 +626,31 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ChainToNextNodes);
 
+    // Cycle guard: refuses recursive re-entry on the same node tag within a single synchronous chain.
+    // Required because FireBoundaryCompletion now routes wrapper resolutions back through ChainToNextNodes
+    // so wrapper outcome wires actually fire (closing the gap that broke outer-Quest-loops-on-itself topologies).
+    // Without this guard, a degenerate authoring path — e.g., ActivationGroup wired entry→exit with no gating
+    // step between, then the exit loops the parent wrapper — would stack-overflow because every iteration
+    // synchronously re-enters the wrapper. Legitimate nested-wrapper recursion always climbs to outer tags
+    // (Step → wrapper → grandparent), never revisits an in-flight tag, so this guard has no false positives.
+    const FName NodeTagName = Node->GetQuestTag().GetTagName();
+    if (ChainRecursionTags.Contains(NodeTagName))
+    {
+        UE_LOG(LogSimpleQuest, Error,
+            TEXT("ChainToNextNodes: synchronous cycle detected on '%s' outcome='%s' — aborting recursive re-entry. ")
+            TEXT("This means a single chain iteration completed without yielding to an external trigger and looped ")
+            TEXT("back to the same node. Common causes: (a) ActivationGroup wired entry→exit with no gating step ")
+            TEXT("between, then the exit loops the parent's Activate; (b) an Objective that calls CompleteObjective ")
+            TEXT("synchronously during initialization on a Step that loops on itself; (c) any equivalent topology ")
+            TEXT("where one loop iteration runs to completion within a single call stack. Authoring fix: ensure ")
+            TEXT("each iteration includes at least one node that waits for an external trigger (player input, ")
+            TEXT("world event, timer) so the synchronous call stack breaks between iterations."),
+            *NodeTagName.ToString(), *OutcomeTag.ToString());
+        return;
+    }
+    ChainRecursionTags.Add(NodeTagName);
+    ON_SCOPE_EXIT { ChainRecursionTags.Remove(NodeTagName); };
+
     // Auto-derive PathIdentity from OutcomeTag when caller passes NAME_None. Preserves back-compat for any
     // direct C++ caller that hasn't been updated to thread PathIdentity through. Static K2 placements always
     // produce a PathIdentity matching OutcomeTag.GetTagName(), so this path is a no-op for them.
@@ -687,20 +710,14 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ActivateNodeByTag(DestTagName, OutcomeTag, SourceTagName);
     };
 
-    // Helper: fire one boundary completion. Resolves the wrapper's FName to its registered FGameplayTag,
-    // calls SetQuestResolved (writes Completed + Path facts, appends to History), and publishes
-    // FQuestEndedEvent on the wrapper tag so subscribers receive the boundary-completion event.
+    // Helper: route a wrapper boundary completion through the shared helper. The shared helper calls
+    // ChainToNextNodes on the wrapper so its full outcome-chain processing fires (SetQuestResolved +
+    // PublishQuestEndedEvent + the wrapper's own destination wires, including loop-back wires that
+    // close outer-Quest-loops-on-itself topologies). HandleOnNodeForwardActivated uses the same helper
+    // so utility-forward paths (Set Blocked, Clear Blocked, Activation Group) are symmetric.
     auto FireBoundaryCompletion = [this](const FQuestBoundaryCompletion& BC)
     {
-        const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
-        if (!WrapperTag.IsValid()) return;
-
-        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
-
-        if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
-        {
-            PublishQuestEndedEvent(WrapperNode, BC.OutcomeTag, EQuestResolutionSource::Graph);
-        }
+        FireWrapperBoundaryCompletion(BC);
     };
 
     // Named-outcome path: fire boundary completions first so wrapper Path facts exist before the destination
@@ -1387,6 +1404,27 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     {
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
+    }
+}
+
+void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC)
+{
+    const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
+    if (!WrapperTag.IsValid()) return;
+
+    if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
+    {
+        UE_LOG(LogSimpleQuest, Verbose,
+            TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes"),
+            *WrapperTag.ToString(), *BC.OutcomeTag.ToString());
+        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName());
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("FireWrapperBoundaryCompletion: wrapper '%s' instance not loaded — falling back to direct SetQuestResolved + publish"),
+            *WrapperTag.ToString());
+        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
     }
 }
 

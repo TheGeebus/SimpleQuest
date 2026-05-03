@@ -12,6 +12,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestBoundaryCompletion;
 struct FQuestResolutionRecordedEvent;
 struct FQuestEntryRecordedEvent;
 struct FWorldStateFactRemovedEvent;
@@ -237,6 +238,25 @@ private:
 	 * doesn't inherit a stale entry.
 	 */
 	TMap<FGameplayTag, TWeakObjectPtr<AActor>> RecentGiverActors;
+
+	/**
+	 * Tag-cycle guard for ChainToNextNodes recursion. Tracks tags currently mid-processing so the
+	 * recursion through FireBoundaryCompletion → ChainToNextNodes can detect re-entry on the same
+	 * wrapper tag and abort cleanly. Catches degenerate authoring topologies (e.g. ActivationGroup
+	 * wired entry→exit with no gating step between, then the exit loops the parent wrapper).
+	 */
+	TSet<FName> ChainRecursionTags;
+	
+	/**
+	 * Shared helper: routes a wrapper boundary completion through ChainToNextNodes so the wrapper's
+	 * full outcome-chain processing fires (SetQuestResolved + PublishQuestEndedEvent + the wrapper's
+	 * own destination wires). Called from both the resolution path (ChainToNextNodes's
+	 * FireBoundaryCompletion lambda) and the utility-forward path (HandleOnNodeForwardActivated).
+	 * Keeping both call sites symmetric ensures wrapper outcome wires fire regardless of which
+	 * inner mechanism reached the boundary — Step completion vs utility forward (Set Blocked,
+	 * Clear Blocked, Activation Group). Falls back to direct SetQuestResolved + publish if the
+	 * wrapper instance isn't loaded for some reason. */
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC);
 
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

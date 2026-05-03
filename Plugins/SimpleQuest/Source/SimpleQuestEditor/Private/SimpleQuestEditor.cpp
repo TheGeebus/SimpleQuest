@@ -222,7 +222,10 @@ void FSimpleQuestEditor::StartupModule()
 	FFactsPanelRegistry::Get().RegisterView(
 		QuestStateViewId,
 		LOCTEXT("QuestStateViewLabel", "Quest State"),
-		[]() -> TSharedRef<SWidget> { return SNew(SQuestStateView); });
+		[](FName PanelPersistenceKey) -> TSharedRef<SWidget>
+		{
+			return SNew(SQuestStateView).PersistenceKey(PanelPersistenceKey);
+		});
 #undef LOCTEXT_NAMESPACE
 }
 

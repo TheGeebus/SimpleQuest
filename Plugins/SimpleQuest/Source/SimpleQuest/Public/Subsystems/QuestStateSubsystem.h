@@ -14,6 +14,10 @@
 class USignalSubsystem;
 class UWorldStateSubsystem;
 
+/** Multicast fired after any mutation to the registry maps (resolutions, entries, prereq cache). See
+ *  UQuestStateSubsystem::OnAnyRegistryChanged for semantics. */
+DECLARE_MULTICAST_DELEGATE(FOnAnyRegistryChanged);
+
 /**
  * Public read-side surface for quest state queries: past resolutions (rich-record half of the two-layer
  * state architecture; SimpleCore's UWorldStateSubsystem provides the boolean-fact half) and present-tense
@@ -110,6 +114,13 @@ public:
 
     /** All quests currently in PendingGiver state with a cached prereq snapshot. Cleared on giver-state exit. */
     const TMap<FGameplayTag, FQuestPrereqStatus>& GetAllCachedPrereqStatus() const { return CachedPrereqStatus; }
+
+    /** Multicast fired after any mutation to the registry maps — RecordResolution, RecordEntry, UpdateQuest-
+     *  PrereqStatus, ClearQuestPrereqStatus. Distinct from the per-quest FQuestResolutionRecordedEvent / FQuest-
+     *  EntryRecordedEvent publishes used by prereq-leaf subscribers. This is a "registry mutated, refresh if
+     *  you care about the whole map" signal for inspection surfaces (Quest State Facts Panel, future telemetry
+     *  tools). Fires synchronously inside the mutation method, after the per-quest publish (if any). */
+    FOnAnyRegistryChanged OnAnyRegistryChanged;
 
 
     // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────

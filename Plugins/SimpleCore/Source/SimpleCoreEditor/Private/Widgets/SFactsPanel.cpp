@@ -21,20 +21,42 @@ namespace FactsPanel_Style
 
 void SFactsPanel::Construct(const FArguments& InArgs)
 {
+    PersistenceKey = InArgs._PersistenceKey;
+
     RebuildViewOptions();
 
-    // Pick initial selection: caller-provided ViewId if it's still registered, else the first option.
-    if (!InArgs._InitialViewID.IsNone())
+    // Resolve initial selection in priority order:
+    //   1. Persisted last selection (GConfig under PersistenceKey, if registered)
+    //   2. InArgs._InitialViewID (if registered)
+    //   3. InArgs._FallbackViewID (if registered) — typically WorldState, set by the spawner
+    //   4. First registered view (ViewOptions[0]) — last-resort tiebreaker
+    auto TryResolve = [this](const FName& ViewId) -> bool
     {
+        if (ViewId.IsNone()) return false;
         for (const TSharedPtr<FName>& Option : ViewOptions)
         {
-            if (Option.IsValid() && *Option == InArgs._InitialViewID)
+            if (Option.IsValid() && *Option == ViewId)
             {
                 ActiveOption = Option;
-                break;
+                return true;
             }
         }
+        return false;
+    };
+
+    if (!PersistenceKey.IsNone())
+    {
+        FString SavedViewID;
+        GConfig->GetString(TEXT("FactsPanel"),
+            *FString::Printf(TEXT("%s.LastView"), *PersistenceKey.ToString()),
+            SavedViewID, GEditorPerProjectIni);
+        if (!SavedViewID.IsEmpty())
+        {
+            TryResolve(FName(*SavedViewID));
+        }
     }
+    if (!ActiveOption.IsValid()) { TryResolve(InArgs._InitialViewID); }
+    if (!ActiveOption.IsValid()) { TryResolve(InArgs._FallbackViewID); }
     if (!ActiveOption.IsValid() && ViewOptions.Num() > 0)
     {
         ActiveOption = ViewOptions[0];
@@ -145,7 +167,7 @@ void SFactsPanel::SwitchToView(FName ViewId)
     const FFactsViewRegistration* Reg = FFactsPanelRegistry::Get().FindView(ViewId);
     if (Reg && Reg->Factory)
     {
-        ContentHost->SetContent(Reg->Factory());
+        ContentHost->SetContent(Reg->Factory(PersistenceKey));
     }
     else
     {
@@ -199,6 +221,16 @@ void SFactsPanel::HandleSelectionChanged(TSharedPtr<FName> NewSelection, ESelect
     }
     ActiveOption = NewSelection;
     SwitchToView(*NewSelection);
+
+    // Persist the user's choice so the next construction (e.g., editor restart) restores it. Only writes
+    // when PersistenceKey is set — menu-spawned panels with no key fall back to FallbackViewID each time.
+    if (!PersistenceKey.IsNone())
+    {
+        GConfig->SetString(TEXT("FactsPanel"),
+            *FString::Printf(TEXT("%s.LastView"), *PersistenceKey.ToString()),
+            *NewSelection->ToString(), GEditorPerProjectIni);
+        GConfig->Flush(false, GEditorPerProjectIni);
+    }
 }
 
 TSharedRef<SWidget> SFactsPanel::HandleGenerateOption(TSharedPtr<FName> Option)

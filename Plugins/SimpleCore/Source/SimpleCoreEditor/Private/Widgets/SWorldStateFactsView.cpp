@@ -152,9 +152,9 @@ void SWorldStateFactsView::Construct(const FArguments& InArgs)
             SNew(SOverlay)
             + SOverlay::Slot()
             [
-                SNew(SBox)
-                    .Visibility_Lambda([this]() { return GetListVisibility(); })
-                    [ ListView.ToSharedRef() ]
+                // List always visible — when empty, the header row + empty body provide the dark background that the
+                // overlay'd empty message sits on top of. Mirrors the Quest State view's pattern for consistency.
+                ListView.ToSharedRef()
             ]
             + SOverlay::Slot().HAlign(HAlign_Center).VAlign(VAlign_Center)
             [
@@ -194,15 +194,8 @@ void SWorldStateFactsView::Tick(const FGeometry& AllottedGeometry, const double 
             ListView->RequestListRefresh();
         }
     }
-    else if (!AllRows.IsEmpty() || !Rows.IsEmpty())
-    {
-        AllRows.Reset();
-        Rows.Reset();
-        if (ListView.IsValid())
-        {
-            ListView->RequestListRefresh();
-        }
-    }
+    // No else-branch: when PIE ends, the snapshot stays visible until the next PIE session starts (handled by
+    // HandleDebugActiveChanged). The designer can inspect captured facts post-session.
 }
 
 TSharedRef<ITableRow> SWorldStateFactsView::HandleGenerateRow(TSharedPtr<FWorldStateFactRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -245,13 +238,14 @@ TSharedPtr<SWidget> SWorldStateFactsView::HandleContextMenuOpening()
         FSlateIcon(),
         FUIAction(FExecuteAction::CreateSP(this, &SWorldStateFactsView::CopySelectionAsTagContainer)));
 
+    MenuBuilder.AddMenuEntry(
+        LOCTEXT("CopyRowsTSV", "Copy Row(s) as TSV"),
+        LOCTEXT("CopyRowsTSVTooltip", "Copy each selected row as tab-separated values: Tag\\tCount with header row. Paste into a spreadsheet for analysis."),
+        FSlateIcon(),
+        FUIAction(FExecuteAction::CreateSP(this, &SWorldStateFactsView::CopySelectionAsTSV)));
+
     MenuBuilder.EndSection();
     return MenuBuilder.MakeWidget();
-}
-
-EVisibility SWorldStateFactsView::GetListVisibility() const
-{
-    return Rows.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
 }
 
 EVisibility SWorldStateFactsView::GetEmptyMessageVisibility() const
@@ -290,11 +284,18 @@ FText SWorldStateFactsView::GetStatusText() const
 
 void SWorldStateFactsView::HandleDebugActiveChanged()
 {
-    RebuildRows();
-    if (ListView.IsValid())
+    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
+    if (Channel && Channel->IsActive())
     {
-        ListView->RequestListRefresh();
+        // PIE just started — wipe any snapshot from the previous session and pull fresh data.
+        RebuildRows();
+        if (ListView.IsValid())
+        {
+            ListView->RequestListRefresh();
+        }
     }
+    // PIE just ended — leave the snapshot intact so the designer can inspect post-session facts. The next
+    // PostPIEStarted will RebuildRows and replace it with the fresh session.
 }
 
 void SWorldStateFactsView::RebuildRows()
@@ -465,6 +466,23 @@ void SWorldStateFactsView::CopySelectionAsTagContainer()
         return;  // nothing was actually selected/valid
     }
     FPlatformApplicationMisc::ClipboardCopy(*Out);
+}
+
+void SWorldStateFactsView::CopySelectionAsTSV()
+{
+    if (!ListView.IsValid()) return;
+
+    // Iterate Rows (filtered + sorted) so the clipboard order matches what the user sees, not the internal
+    // selection-array order. Header row first; row data tab-separated. Mirrors the Quest State view's TSV format.
+    TArray<FString> Lines;
+    Lines.Add(TEXT("Tag\tCount"));
+    for (const TSharedPtr<FWorldStateFactRow>& Row : Rows)
+    {
+        if (!Row.IsValid() || !Row->Tag.IsValid() || !ListView->IsItemSelected(Row)) continue;
+        Lines.Add(FString::Printf(TEXT("%s\t%d"), *Row->Tag.GetTagName().ToString(), Row->Count));
+    }
+    if (Lines.Num() <= 1) return;  // header only, no rows selected
+    FPlatformApplicationMisc::ClipboardCopy(*FString::Join(Lines, TEXT("\n")));
 }
 
 #undef LOCTEXT_NAMESPACE

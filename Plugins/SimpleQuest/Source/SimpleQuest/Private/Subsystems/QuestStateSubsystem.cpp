@@ -213,6 +213,8 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	{
 		Signals->PublishMessage(QuestTag, FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
 	}
+
+	OnAnyRegistryChanged.Broadcast();
 }
 
 void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag SourceQuestTag, FGameplayTag IncomingOutcomeTag, double EntryTime)
@@ -247,6 +249,8 @@ void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag Sourc
 	{
 		Signals->PublishMessage(QuestTag, FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
 	}
+
+	OnAnyRegistryChanged.Broadcast();
 }
 
 void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status)
@@ -255,6 +259,8 @@ void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const 
 	CachedPrereqStatus.Add(QuestTag, Status);
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::UpdateQuestPrereqStatus : '%s' bSatisfied=%d (leaves=%d)"),
 		*QuestTag.ToString(), Status.bSatisfied ? 1 : 0, Status.Leaves.Num());
+
+	OnAnyRegistryChanged.Broadcast();
 }
 
 void UQuestStateSubsystem::ClearQuestPrereqStatus(FGameplayTag QuestTag)
@@ -263,6 +269,8 @@ void UQuestStateSubsystem::ClearQuestPrereqStatus(FGameplayTag QuestTag)
 	{
 		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::ClearQuestPrereqStatus : '%s' cleared"),
 			*QuestTag.ToString());
+
+		OnAnyRegistryChanged.Broadcast();
 	}
 }
 

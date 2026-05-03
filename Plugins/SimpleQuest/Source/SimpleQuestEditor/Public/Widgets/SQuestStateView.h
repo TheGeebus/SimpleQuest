@@ -62,6 +62,10 @@ class SIMPLEQUESTEDITOR_API SQuestStateView : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SQuestStateView) {}
+        /** Optional: stable key for persisting per-instance state (active sub-tab) to GEditorPerProjectIni.
+         *  Forwarded from the hosting SFactsPanel via the FactsPanelRegistry factory signature. Empty key
+         *  disables persistence — view defaults to Resolutions tab each construction. */
+        SLATE_ARGUMENT(FName, PersistenceKey)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -165,4 +169,7 @@ private:
     EColumnSortMode::Type PrereqsSortMode = EColumnSortMode::None;
 
     FDelegateHandle DebugActiveHandle;
+
+    /** Persistence key forwarded by the hosting SFactsPanel; empty when persistence is disabled. */
+    FName PersistenceKey;
 };

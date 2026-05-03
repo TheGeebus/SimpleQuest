@@ -22,6 +22,10 @@ void UWorldStateSubsystem::AddFact(const FGameplayTag Tag, const EFactBroadcastM
 		*Tag.ToString(),
 		NewCount,
 		bShouldBroadcast ? TEXT("yes") : TEXT("no"));
+
+	// Inspection-surface broadcast: fires on every AddFact regardless of per-tag broadcast mode (subscribers
+	// care about count mutations even when they don't cross the 0/1 boundary).
+	OnAnyFactChanged.Broadcast();
 }
 
 void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadcastMode BroadcastMode)
@@ -44,6 +48,8 @@ void UWorldStateSubsystem::RemoveFact(const FGameplayTag Tag, const EFactBroadca
 		*Tag.ToString(),
 		bReachedZero ? 0 : *Count,
 		bShouldBroadcast ? TEXT("yes") : TEXT("no"));
+
+	OnAnyFactChanged.Broadcast();
 }
 
 void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppressBroadcast)
@@ -62,6 +68,8 @@ void UWorldStateSubsystem::ClearFact(const FGameplayTag Tag, const bool bSuppres
 			Signals->PublishMessage(Tag, FWorldStateFactRemovedEvent(Tag));
 		}
 	}
+
+	OnAnyFactChanged.Broadcast();
 }
 
 bool UWorldStateSubsystem::HasFact(const FGameplayTag Tag) const

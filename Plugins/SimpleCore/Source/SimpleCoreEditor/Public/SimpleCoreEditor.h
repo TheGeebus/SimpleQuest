@@ -35,6 +35,13 @@ private:
 	/** Counter appended to spawned tab labels for multi-instance disambiguation. */
 	int32 SpawnedPanelCount = 0;
 
+	/**
+	 * Handle for FCoreDelegates::OnExit subscription that flips GFactsPanelEditorShuttingDown. Released in
+	 * ShutdownModule so module unload during a still-running editor session (hot reload) doesn't leave a
+	 * dangling lambda firing into freed memory at editor exit.
+	 */
+	FDelegateHandle OnExitHandle;
+
 	static const FName FactsPanelTabId;
 	static const FName WorldStateViewId;
 };

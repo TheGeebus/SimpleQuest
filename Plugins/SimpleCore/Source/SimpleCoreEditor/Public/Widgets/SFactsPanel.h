@@ -22,8 +22,19 @@ class SFactsPanel : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SFactsPanel) {}
-        /** Optional: ViewId to select on construction. If unset/unknown, defaults to first registered view. */
+        /** Optional: ViewId to select on construction. If unset/unknown, falls through the resolution chain
+         *  below. */
         SLATE_ARGUMENT(FName, InitialViewID)
+
+        /** Optional: stable per-instance key for persisting the active selection to GEditorPerProjectIni.
+         *  Nomad tab spawners pass the tab's InstanceId here so each docked panel remembers its last view
+         *  across editor sessions. Empty key disables persistence. */
+        SLATE_ARGUMENT(FName, PersistenceKey)
+
+        /** Optional: explicit fallback ViewID used when no other source resolves a registered view. Resolution
+         *  priority is: persisted selection (if PersistenceKey set + saved + registered) > InitialViewID >
+         *  FallbackViewID > first registered view. */
+        SLATE_ARGUMENT(FName, FallbackViewID)
     SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
@@ -63,4 +74,7 @@ private:
     TSharedPtr<SComboBox<TSharedPtr<FName>>> ComboBox;
 
     FDelegateHandle ViewsChangedHandle;
+    
+    /** Persistence key passed in via SLATE_ARGUMENT; empty when persistence is disabled. */
+    FName PersistenceKey;
 };

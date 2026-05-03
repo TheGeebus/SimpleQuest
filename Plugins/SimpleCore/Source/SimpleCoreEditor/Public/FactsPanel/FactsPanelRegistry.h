@@ -6,8 +6,11 @@
 
 class SWidget;
 
-/** Factory signature: produce a fresh widget instance for a registered view. Called every time an SFactsPanel selects this view. */
-using FFactsViewWidgetFactory = TFunction<TSharedRef<SWidget>()>;
+/** Factory signature: produce a fresh widget instance for a registered view. Called every time an SFactsPanel
+ *  selects this view. The PanelPersistenceKey arg is forwarded from the hosting SFactsPanel so views can persist
+ *  per-panel internal state (active sub-tab, scroll position, etc.) alongside the panel's view-selection state.
+ *  Views that don't need persistence ignore the arg. */
+using FFactsViewWidgetFactory = TFunction<TSharedRef<SWidget>(FName PanelPersistenceKey)>;
 
 /** One entry in the registry - display name and factory. ViewId is the stable lookup key. */
 struct FFactsViewRegistration

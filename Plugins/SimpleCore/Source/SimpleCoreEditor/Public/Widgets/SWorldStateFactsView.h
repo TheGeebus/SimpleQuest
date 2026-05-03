@@ -47,7 +47,6 @@ private:
     TSharedPtr<SWidget>   HandleContextMenuOpening();
 
     EVisibility GetEmptyMessageVisibility() const;
-    EVisibility GetListVisibility() const;
     FText GetEmptyMessageText() const;
     FText GetStatusText() const;
 
@@ -68,6 +67,7 @@ private:
 
     void CopySelectionAsTagList();
     void CopySelectionAsTagContainer();
+    void CopySelectionAsTSV();
 
     /** Full set of rows pulled from WorldState (pre-filter). Rebuilt on PIE transitions and per-tick fact changes. */
     TArray<TSharedPtr<FWorldStateFactRow>> AllRows;

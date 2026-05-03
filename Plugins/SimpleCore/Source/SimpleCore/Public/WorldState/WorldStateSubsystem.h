@@ -48,6 +48,9 @@ struct SIMPLECORE_API FWorldStateFactRemovedEvent
     FGameplayTag StateTag;
 };
 
+/** Multicast fired after any mutation to WorldFacts. See UWorldStateSubsystem::OnAnyFactChanged for semantics. */
+DECLARE_MULTICAST_DELEGATE(FOnAnyFactChanged);
+
 UCLASS()
 class SIMPLECORE_API UWorldStateSubsystem : public UGameInstanceSubsystem
 {
@@ -86,6 +89,13 @@ public:
      * fact mutation always goes through AddFact / RemoveFact / ClearFact to keep broadcast semantics intact.
      */
     const TMap<FGameplayTag, int32>& GetAllFacts() const { return WorldFacts; }
+
+    /** Multicast fired after any mutation to WorldFacts (AddFact, RemoveFact, or ClearFact), regardless of the
+     *  per-call broadcast mode. Distinct from the per-tag FWorldStateFactAdded/RemovedEvent publishes — this
+     *  is a "registry mutated, refresh if you care about the whole map" signal for inspection surfaces (Facts
+     *  Panel, future telemetry tools). Fires synchronously inside the mutation method, after the per-tag
+     *  publish (if any). FSimpleMulticastDelegate semantics — bind via AddRaw, unbind via Remove. */
+    FOnAnyFactChanged OnAnyFactChanged;
 
 private:
     /** Live game world state. Keys are gameplay tags; values are assertion counts. A fact is considered present when its

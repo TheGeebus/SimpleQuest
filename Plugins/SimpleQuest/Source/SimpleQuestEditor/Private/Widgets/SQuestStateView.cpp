@@ -141,7 +141,7 @@ public:
             const FText Label = (Item->Source == EQuestResolutionSource::Graph)
                 ? LOCTEXT("SourceGraph", "Graph")
                 : LOCTEXT("SourceExternal", "External");
-            return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
+            return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f)).HAlign(HAlign_Right)
                 [
                     SNew(STextBlock).Text(Label).Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ]);  // no tag — non-tag column
@@ -338,12 +338,28 @@ private:
 
 void SQuestStateView::Construct(const FArguments& InArgs)
 {
+    PersistenceKey = InArgs._PersistenceKey;
+
+    // Restore the previously-active tab if a persisted entry exists for this panel. Saved as a named string
+    // ("Resolutions" / "Entries" / "PrereqStatus") under the same FactsPanel section that the SFactsPanel
+    // uses for view-selection persistence — keys are namespaced by PersistenceKey.
+    if (!PersistenceKey.IsNone())
+    {
+        FString SavedTab;
+        GConfig->GetString(TEXT("FactsPanel"),
+            *FString::Printf(TEXT("%s.QuestStateActiveTab"), *PersistenceKey.ToString()),
+            SavedTab, GEditorPerProjectIni);
+        if      (SavedTab == TEXT("Entries"))      { ActiveTab = EQuestStateViewTab::Entries; }
+        else if (SavedTab == TEXT("PrereqStatus")) { ActiveTab = EQuestStateViewTab::PrereqStatus; }
+        // else: leave at default (EQuestStateViewTab::Resolutions, set in the header default-init).
+    }
+
     // Default sort per tab: each tab's primary tag column ascending. Refresh*FromSubsystem calls Sort* so
     // the initial population respects this.
-    ResolutionsSortColumn = QuestStateView_Resolutions_ColumnIDs::Quest;
-    ResolutionsSortMode   = EColumnSortMode::Ascending;
-    EntriesSortColumn     = QuestStateView_Entries_ColumnIDs::Dest;
-    EntriesSortMode       = EColumnSortMode::Ascending;
+    ResolutionsSortColumn = QuestStateView_Resolutions_ColumnIDs::Time;
+    ResolutionsSortMode   = EColumnSortMode::Descending;
+    EntriesSortColumn     = QuestStateView_Entries_ColumnIDs::Time;
+    EntriesSortMode       = EColumnSortMode::Descending;
     PrereqsSortColumn     = QuestStateView_Prereqs_ColumnIDs::Quest;
     PrereqsSortMode       = EColumnSortMode::Ascending;
 
@@ -367,7 +383,7 @@ void SQuestStateView::Construct(const FArguments& InArgs)
             .SortMode_Lambda([this]() { return GetResolutionsSortMode(QuestStateView_Resolutions_ColumnIDs::Time); })
             .OnSort(this, &SQuestStateView::HandleResolutionsColumnSort)
         + SHeaderRow::Column(QuestStateView_Resolutions_ColumnIDs::Source)
-            .DefaultLabel(LOCTEXT("ResColSource", "Source")).FillWidth(0.15f)
+            .DefaultLabel(LOCTEXT("ResColSource", "Source")).FillWidth(0.15f).HAlignHeader(HAlign_Right)
             .SortMode_Lambda([this]() { return GetResolutionsSortMode(QuestStateView_Resolutions_ColumnIDs::Source); })
             .OnSort(this, &SQuestStateView::HandleResolutionsColumnSort);
 
@@ -435,15 +451,17 @@ void SQuestStateView::Construct(const FArguments& InArgs)
         SNew(SVerticalBox)
         + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
         [
-            SNew(STextBlock)
-                .Text_Lambda([this]() { return GetStatusText(); })
-                .ColorAndOpacity(FSlateColor(QuestStateView_Style::SubduedText))
-                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
-        ]
-        + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
-        [
+            // 2x2 grid row 1: Status text fills left; segmented tabs auto-width on the right. Tabs get a small
+            // left-padding to separate them from the status text.
             SNew(SHorizontalBox)
-            + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+            + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+            [
+                SNew(STextBlock)
+                    .Text_Lambda([this]() { return GetStatusText(); })
+                    .ColorAndOpacity(FSlateColor(QuestStateView_Style::SubduedText))
+                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+            ]
+            + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
             [
                 SNew(SSegmentedControl<EQuestStateViewTab>)
                     .UniformPadding(FMargin(20.f, 4.f))
@@ -456,12 +474,14 @@ void SQuestStateView::Construct(const FArguments& InArgs)
                     + SSegmentedControl<EQuestStateViewTab>::Slot(EQuestStateViewTab::PrereqStatus)
                         .Text(LOCTEXT("TabPrereqStatus", "Prereq Status"))
             ]
-            + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
-            [
-                SNew(SSearchBox)
-                    .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
-                    .OnTextChanged(this, &SQuestStateView::HandleFilterTextChanged)
-            ]
+        ]
+        + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
+        [
+            // 2x2 grid row 2: Session selector (Phase 3, not yet added) will land in an auto-width left slot;
+            // for now the filter fills the whole row alone.
+            SNew(SSearchBox)
+                .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
+                .OnTextChanged(this, &SQuestStateView::HandleFilterTextChanged)
         ]
         + SVerticalBox::Slot().FillHeight(1.f)
         [
@@ -559,6 +579,23 @@ void SQuestStateView::HandleTabChanged(EQuestStateViewTab NewTab)
 {
     ActiveTab = NewTab;
     // No data work — visibility lambdas swap which list shows; status / empty lambdas re-evaluate from bindings.
+
+    // Persist the active tab so the next construction (e.g., editor restart) restores it. Same per-panel key
+    // namespace as SFactsPanel's view-selection persistence.
+    if (!PersistenceKey.IsNone())
+    {
+        FString TabName;
+        switch (NewTab)
+        {
+        case EQuestStateViewTab::Resolutions:  TabName = TEXT("Resolutions");  break;
+        case EQuestStateViewTab::Entries:      TabName = TEXT("Entries");      break;
+        case EQuestStateViewTab::PrereqStatus: TabName = TEXT("PrereqStatus"); break;
+        }
+        GConfig->SetString(TEXT("FactsPanel"),
+            *FString::Printf(TEXT("%s.QuestStateActiveTab"), *PersistenceKey.ToString()),
+            *TabName, GEditorPerProjectIni);
+        GConfig->Flush(false, GEditorPerProjectIni);
+    }
 }
 
 EVisibility SQuestStateView::GetTabVisibility(EQuestStateViewTab Tab) const

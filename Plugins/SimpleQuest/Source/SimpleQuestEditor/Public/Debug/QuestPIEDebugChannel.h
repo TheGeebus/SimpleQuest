@@ -6,6 +6,10 @@
 #include "GameplayTagContainer.h"
 #include "Debug/QuestNodeDebugState.h"
 #include "Debug/QuestPrereqDebugState.h"
+#include "Quests/Types/QuestEntryRecord.h"
+#include "Quests/Types/QuestResolutionRecord.h"
+#include "Quests/Types/PrerequisiteExpression.h"
+
 
 class UQuestlineNode_ContentBase;
 class UEdGraphNode;
@@ -13,6 +17,30 @@ class UWorldStateSubsystem;
 class UQuestManagerSubsystem;
 class UQuestStateSubsystem;
 
+
+/**
+ * Per-session snapshot of UQuestStateSubsystem registry contents. One entry per PIE session this editor run. While
+ * in-flight, the three Maps are empty and FQuestPIEDebugChannel::GetXxxForSession proxies the live subsystem. On
+ * EndPIE the channel copies the registry maps in and marks bInFlight=false.
+ */
+struct FQuestStateSessionSnapshot
+{
+	int32 SessionNumber = 0;
+	double SessionStartRealTime = 0.0;  // FPlatformTime::Seconds() at PostPIEStarted
+	double EndedAtGameTime = 0.0;       // PIE world's GetTimeSeconds() at EndPIE; 0.0 while in flight
+	bool bInFlight = false;
+	
+	/** Registry maps captured at EndPIE — all empty while bInFlight=true (live data via subsystem proxy accessors). */
+	TMap<FGameplayTag, FQuestResolutionRecord> Resolutions;
+	TMap<FGameplayTag, FQuestEntryRecord> Entries;
+	TMap<FGameplayTag, FQuestPrereqStatus> PrereqStatus;
+};
+
+/**
+ * Multicast fired when SessionHistory mutates: new in-flight entry pushed (PostPIEStarted), in-flight transitions
+ * to completed (EndPIE), or any subsystem-side mutation while in-flight (forwarded from UQuestStateSubsystem::OnAnyRegistryChanged).
+ */
+DECLARE_MULTICAST_DELEGATE(FOnQuestStateSessionHistoryChanged);
 
 /**
  * Editor-side shared infrastructure for the PIE graph debug overlay (agenda item 7, Session A). Hooks BeginPIE/EndPIE at
@@ -78,6 +106,23 @@ public:
 	/** Broadcasts true on PostPIEStarted success, false on EndPIE. Useful for panel paint invalidation. */
 	FSimpleMulticastDelegate OnDebugActiveChanged;
 
+	/** Broadcasts when SessionHistory entries are added, transition in-flight → completed, or live-mutate (via
+	 *  forwarded UQuestStateSubsystem::OnAnyRegistryChanged). View-side refresh hook. Bind via AddRaw, unbind via Remove. */
+	FOnQuestStateSessionHistoryChanged OnSessionHistoryChanged;
+
+	/** Read-only access to the full session history. Index 0 is oldest; last index is newest (in-flight if PIE active). */
+	const TArray<FQuestStateSessionSnapshot>& GetSessionHistory() const { return SessionHistory; }
+
+	/** Returns the snapshot at Index, or nullptr if out of range. */
+	const FQuestStateSessionSnapshot* GetSessionByIndex(int32 Index) const;
+
+	/** Per-dataset proxies. For the in-flight session, return references to the live subsystem maps; for completed
+	 *  sessions, return the captured snapshot. Static empty fallbacks cover invalid Index or in-flight with the
+	 *  cached subsystem unresolvable. */
+	const TMap<FGameplayTag, FQuestResolutionRecord>& GetResolutionsForSession(int32 Index) const;
+	const TMap<FGameplayTag, FQuestEntryRecord>& GetEntriesForSession(int32 Index) const;
+	const TMap<FGameplayTag, FQuestPrereqStatus>& GetPrereqStatusForSession(int32 Index) const;
+
 private:
 	void HandlePostPIEStarted(bool bIsSimulating);
 	void HandleEndPIE(bool bIsSimulating);
@@ -88,6 +133,19 @@ private:
 	/** Walks editor node → containing UQuestlineGraph → CompiledNodes lookup by QuestGuid. Returns invalid tag if not resolvable. */
 	FGameplayTag ResolveRuntimeTag(const UEdGraphNode* EditorNode) const;
 
+	/** Pushes a new in-flight session snapshot, applies the FIFO memory cap, fires OnSessionHistoryChanged. */
+	void BeginNewSession();
+
+	/** Closes the latest in-flight session: copies live registries in, captures EndedAtGameTime, marks bInFlight=false,
+	 *  fires OnSessionHistoryChanged. No-op if SessionHistory is empty or latest entry is already completed. */
+	void FinalizeInFlightSession();
+
+	/** Forwarded from CachedQuestState->OnAnyRegistryChanged while PIE is active — re-broadcasts as OnSessionHistoryChanged. */
+	void HandleAnyRegistryChanged();
+
+	/** Memory cap — maximum sessions retained in SessionHistory. Older entries are FIFO-evicted on push. */
+	static constexpr int32 MaxStoredSessions = 50;
+
 	TWeakObjectPtr<UWorldStateSubsystem> CachedWorldState;
 
 	TWeakObjectPtr<UQuestManagerSubsystem> CachedQuestManager;
@@ -96,6 +154,10 @@ private:
 
 	FDelegateHandle PostPIEStartedHandle;
 	FDelegateHandle EndPIEHandle;
+	FDelegateHandle OnAnyRegistryChangedHandle;
+
+	TArray<FQuestStateSessionSnapshot> SessionHistory;
+	int32 NextSessionNumber = 1;
 
 	bool bIsActive = false;
 };

@@ -108,7 +108,7 @@ void SWorldStateFactsView::Construct(const FArguments& InArgs)
 
     if (FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel())
     {
-        DebugActiveHandle = Channel->OnDebugActiveChanged.AddRaw(this, &SWorldStateFactsView::HandleDebugActiveChanged);
+        SessionHistoryHandle = Channel->OnSessionHistoryChanged.AddRaw(this, &SWorldStateFactsView::HandleSessionHistoryChanged);
     }
 
     TSharedRef<SHeaderRow> Header = SNew(SHeaderRow)
@@ -143,9 +143,29 @@ void SWorldStateFactsView::Construct(const FArguments& InArgs)
         ]
         + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
         [
-            SNew(SSearchBox)
-                .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
-                .OnTextChanged(this, &SWorldStateFactsView::HandleFilterTextChanged)
+            // Row 2: session selector (auto-width, left) + filter (fill, right). Combo always shows the effective
+            // session label via Text_Lambda; user-driven picks write PinnedSessionNumber, programmatic re-syncs are
+            // filtered out by the OnSelectionChanged handler.
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+            [
+                SAssignNew(SessionCombo, SComboBox<TSharedPtr<int32>>)
+                    .OptionsSource(&SessionItems)
+                    .OnGenerateWidget(this, &SWorldStateFactsView::GenerateSessionItemWidget)
+                    .OnSelectionChanged(this, &SWorldStateFactsView::HandleSessionComboSelectionChanged)
+                    .IsEnabled_Lambda([this]() { return !SessionItems.IsEmpty(); })
+                    [
+                        SNew(STextBlock)
+                            .Text_Lambda([this]() { return GetSelectedSessionLabel(); })
+                            .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                    ]
+            ]
+            + SHorizontalBox::Slot().FillWidth(1.f)
+            [
+                SNew(SSearchBox)
+                    .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
+                    .OnTextChanged(this, &SWorldStateFactsView::HandleFilterTextChanged)
+            ]
         ]
         + SVerticalBox::Slot().FillHeight(1.f)
         [
@@ -167,35 +187,19 @@ void SWorldStateFactsView::Construct(const FArguments& InArgs)
         ]
     ];
 
-    RebuildRows();
+    HandleSessionHistoryChanged();
 }
 
 SWorldStateFactsView::~SWorldStateFactsView()
 {
-    if (DebugActiveHandle.IsValid())
+    if (SessionHistoryHandle.IsValid())
     {
         if (FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel())
         {
-            Channel->OnDebugActiveChanged.Remove(DebugActiveHandle);
+            Channel->OnSessionHistoryChanged.Remove(SessionHistoryHandle);
         }
-        DebugActiveHandle.Reset();
+        SessionHistoryHandle.Reset();
     }
-}
-
-void SWorldStateFactsView::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
-{
-    SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
-
-    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (Channel && Channel->IsActive())
-    {
-        if (RefreshRowsFromChannel() && ListView.IsValid())
-        {
-            ListView->RequestListRefresh();
-        }
-    }
-    // No else-branch: when PIE ends, the snapshot stays visible until the next PIE session starts (handled by
-    // HandleDebugActiveChanged). The designer can inspect captured facts post-session.
 }
 
 TSharedRef<ITableRow> SWorldStateFactsView::HandleGenerateRow(TSharedPtr<FWorldStateFactRow> Item, const TSharedRef<STableViewBase>& OwnerTable)
@@ -256,13 +260,15 @@ EVisibility SWorldStateFactsView::GetEmptyMessageVisibility() const
 FText SWorldStateFactsView::GetEmptyMessageText() const
 {
     FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive())
+    if (!Channel || GetEffectiveSessionIndex() == INDEX_NONE)
     {
         return LOCTEXT("EmptyNotInPIE", "Not in PIE — start Play In Editor to inspect live WorldState facts.");
     }
     if (AllRows.IsEmpty())
     {
-        return LOCTEXT("EmptyNoFacts", "PIE active — no facts have been asserted yet.");
+        return Channel->IsActive()
+            ? LOCTEXT("EmptyNoFacts", "PIE active — no facts have been asserted yet.")
+            : LOCTEXT("EmptyNoFactsSnapshot", "SNAPSHOT — no facts captured this session.");
     }
     return FText::Format(LOCTEXT("EmptyFilterMismatch", "No facts match filter '{0}'."), FText::FromString(FilterText));
 }
@@ -270,44 +276,54 @@ FText SWorldStateFactsView::GetEmptyMessageText() const
 FText SWorldStateFactsView::GetStatusText() const
 {
     FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive())
+    if (!Channel) return LOCTEXT("StatusIdle", "idle");
+
+    const FWorldStateSessionSnapshot* Session = Channel->GetSessionByIndex(GetEffectiveSessionIndex());
+    if (!Session) return LOCTEXT("StatusIdle", "idle");
+
+    const FText CountText = (AllRows.Num() != Rows.Num())
+        ? FText::Format(LOCTEXT("StatusCountFiltered", "{0} fact(s), {1} shown"), FText::AsNumber(AllRows.Num()), FText::AsNumber(Rows.Num()))
+        : FText::Format(LOCTEXT("StatusCount", "{0} fact(s)"), FText::AsNumber(AllRows.Num()));
+
+    if (Session->bInFlight)
     {
-        return LOCTEXT("StatusIdle", "idle");
+        return FText::Format(LOCTEXT("StatusActive", "DEBUG (PIE) — {0}"), CountText);
     }
-    if (AllRows.Num() != Rows.Num())
-    {
-        return FText::Format(LOCTEXT("StatusActiveFiltered", "DEBUG (PIE) — {0} fact(s), {1} shown"),
-            FText::AsNumber(AllRows.Num()), FText::AsNumber(Rows.Num()));
-    }
-    return FText::Format(LOCTEXT("StatusActive", "DEBUG (PIE) — {0} fact(s)"), FText::AsNumber(AllRows.Num()));
+
+    FNumberFormattingOptions TimeOpts;
+    TimeOpts.MinimumFractionalDigits = 2;
+    TimeOpts.MaximumFractionalDigits = 2;
+    return FText::Format(LOCTEXT("StatusSnapshot", "SNAPSHOT — Session {0} ended at t={1}s — {2}"),
+        FText::AsNumber(Session->SessionNumber),
+        FText::AsNumber(Session->EndedAtGameTime, &TimeOpts),
+        CountText);
 }
 
-void SWorldStateFactsView::HandleDebugActiveChanged()
+void SWorldStateFactsView::HandleSessionHistoryChanged()
+{
+    RebuildSessionItems();
+    if (RefreshRowsFromChannel() && ListView.IsValid())
+    {
+        ListView->RequestListRefresh();
+    }
+}
+
+int32 SWorldStateFactsView::GetEffectiveSessionIndex() const
 {
     FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (Channel && Channel->IsActive())
+    if (!Channel) return INDEX_NONE;
+    const TArray<FWorldStateSessionSnapshot>& History = Channel->GetSessionHistory();
+    if (History.IsEmpty()) return INDEX_NONE;
+    if (PinnedSessionNumber != INDEX_NONE)
     {
-        // PIE just started — wipe any snapshot from the previous session and pull fresh data.
-        RebuildRows();
-        if (ListView.IsValid())
+        // Walk by SessionNumber so a FIFO eviction of the pinned session falls through to "latest" cleanly rather
+        // than silently shifting the pin onto a different session that happens to occupy the old array index.
+        for (int32 i = 0; i < History.Num(); ++i)
         {
-            ListView->RequestListRefresh();
+            if (History[i].SessionNumber == PinnedSessionNumber) return i;
         }
     }
-    // PIE just ended — leave the snapshot intact so the designer can inspect post-session facts. The next
-    // PostPIEStarted will RebuildRows and replace it with the fresh session.
-}
-
-void SWorldStateFactsView::RebuildRows()
-{
-    AllRows.Reset();
-    Rows.Reset();
-    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive())
-    {
-        return;
-    }
-    RefreshRowsFromChannel();
+    return History.Num() - 1;  // auto = latest, OR pinned-but-evicted fallback
 }
 
 void SWorldStateFactsView::HandleFilterTextChanged(const FText& NewText)
@@ -340,18 +356,20 @@ void SWorldStateFactsView::ApplyFilter()
 bool SWorldStateFactsView::RefreshRowsFromChannel()
 {
     FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive())
+    if (!Channel) return false;
+
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+
+    // No sessions yet (fresh editor session, never PIE'd). Wipe rows if not already empty so the empty state shows.
+    if (EffectiveIndex == INDEX_NONE)
     {
-        return false;
+        if (AllRows.IsEmpty()) return false;
+        AllRows.Reset();
+        ApplyFilter();
+        return true;
     }
 
-    UWorldStateSubsystem* WorldState = Channel->GetWorldState();
-    if (!WorldState)
-    {
-        return false;
-    }
-
-    const TMap<FGameplayTag, int32>& Facts = WorldState->GetAllFacts();
+    const TMap<FGameplayTag, int32>& Facts = Channel->GetFactsForSession(EffectiveIndex);
 
     if (Facts.Num() == AllRows.Num())
     {
@@ -483,6 +501,100 @@ void SWorldStateFactsView::CopySelectionAsTSV()
     }
     if (Lines.Num() <= 1) return;  // header only, no rows selected
     FPlatformApplicationMisc::ClipboardCopy(*FString::Join(Lines, TEXT("\n")));
+}
+
+void SWorldStateFactsView::RebuildSessionItems()
+{
+    SessionItems.Reset();
+    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
+    if (Channel)
+    {
+        const TArray<FWorldStateSessionSnapshot>& History = Channel->GetSessionHistory();
+        SessionItems.Reserve(History.Num());
+        for (int32 i = 0; i < History.Num(); ++i)
+        {
+            SessionItems.Add(MakeShared<int32>(i));
+        }
+    }
+    if (SessionCombo.IsValid())
+    {
+        SessionCombo->RefreshOptions();
+        // Re-sync the combo's selected item to mirror the effective index. SetSelectedItem fires OnSelectionChanged
+        // with ESelectInfo::Direct — the handler filters that out so this re-sync doesn't spuriously rewrite
+        // PinnedSessionNumber.
+        const int32 EffectiveIndex = GetEffectiveSessionIndex();
+        if (SessionItems.IsValidIndex(EffectiveIndex))
+        {
+            SessionCombo->SetSelectedItem(SessionItems[EffectiveIndex]);
+        }
+        else
+        {
+            SessionCombo->ClearSelection();
+        }
+    }
+}
+
+TSharedRef<SWidget> SWorldStateFactsView::GenerateSessionItemWidget(TSharedPtr<int32> InItem)
+{
+    if (!InItem.IsValid()) return SNullWidget::NullWidget;
+    const int32 Index = *InItem;
+    return SNew(STextBlock)
+        .Text(MakeSessionLabel(Index))
+        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9));
+}
+
+void SWorldStateFactsView::HandleSessionComboSelectionChanged(TSharedPtr<int32> NewItem, ESelectInfo::Type SelectInfo)
+{
+    // Direct = programmatic SetSelectedItem call (e.g. RebuildSessionItems re-sync). Only user-driven picks should
+    // mutate pin state.
+    if (SelectInfo == ESelectInfo::Direct) return;
+    if (!NewItem.IsValid()) return;
+
+    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
+    if (!Channel) return;
+
+    const FWorldStateSessionSnapshot* Session = Channel->GetSessionByIndex(*NewItem);
+    if (!Session) return;
+
+    // If the user picked the latest session, clear the pin so future PIE starts auto-advance to the new latest;
+    // otherwise pin to the explicit SessionNumber.
+    const TArray<FWorldStateSessionSnapshot>& History = Channel->GetSessionHistory();
+    PinnedSessionNumber = (*NewItem == History.Num() - 1) ? INDEX_NONE : Session->SessionNumber;
+
+    if (RefreshRowsFromChannel() && ListView.IsValid())
+    {
+        ListView->RequestListRefresh();
+    }
+}
+
+FText SWorldStateFactsView::MakeSessionLabel(int32 Index) const
+{
+    FSimpleCorePIEDebugChannel* Channel = FSimpleCoreEditorModule::GetPIEDebugChannel();
+    if (!Channel) return FText::GetEmpty();
+    const FWorldStateSessionSnapshot* Session = Channel->GetSessionByIndex(Index);
+    if (!Session) return FText::GetEmpty();
+
+    if (Session->bInFlight)
+    {
+        return FText::Format(LOCTEXT("SessionLabelInFlight", "Session {0} (in flight)"),
+            FText::AsNumber(Session->SessionNumber));
+    }
+    FNumberFormattingOptions TimeOpts;
+    TimeOpts.MinimumFractionalDigits = 2;
+    TimeOpts.MaximumFractionalDigits = 2;
+    return FText::Format(LOCTEXT("SessionLabelEnded", "Session {0} (ended at t={1}s)"),
+        FText::AsNumber(Session->SessionNumber),
+        FText::AsNumber(Session->EndedAtGameTime, &TimeOpts));
+}
+
+FText SWorldStateFactsView::GetSelectedSessionLabel() const
+{
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+    if (EffectiveIndex == INDEX_NONE)
+    {
+        return LOCTEXT("SessionLabelNone", "(no sessions)");
+    }
+    return MakeSessionLabel(EffectiveIndex);
 }
 
 #undef LOCTEXT_NAMESPACE

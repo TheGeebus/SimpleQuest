@@ -50,9 +50,19 @@ void FQuestPIEDebugChannel::Shutdown()
 		FEditorDelegates::EndPIE.Remove(EndPIEHandle);
 		EndPIEHandle.Reset();
 	}
+	if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		if (OnAnyRegistryChangedHandle.IsValid())
+		{
+			QS->OnAnyRegistryChanged.Remove(OnAnyRegistryChangedHandle);
+		}
+	}
+	OnAnyRegistryChangedHandle.Reset();
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
 	CachedQuestState.Reset();
+	SessionHistory.Reset();
+	NextSessionNumber = 1;
 	bIsActive = false;
 }
 
@@ -67,11 +77,35 @@ void FQuestPIEDebugChannel::HandlePostPIEStarted(bool bIsSimulating)
 	bIsActive = bResolved;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE started (simulating=%d, subsystems resolved=%d)"),
 		bIsSimulating ? 1 : 0, bResolved ? 1 : 0);
+
+	// Always begin a new session even if QuestState didn't resolve — the snapshot fields stay empty in that case
+	// (graceful degradation). This matches IsActive()'s policy: WorldState + QuestManager are load-bearing, QuestState
+	// is optional. Subscribe to OnAnyRegistryChanged only if the subsystem resolved.
+	if (bResolved)
+	{
+		BeginNewSession();
+		if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+		{
+			OnAnyRegistryChangedHandle = QS->OnAnyRegistryChanged.AddRaw(this, &FQuestPIEDebugChannel::HandleAnyRegistryChanged);
+		}
+	}
 	OnDebugActiveChanged.Broadcast();
 }
 
 void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 {
+	// Finalize before resetting CachedQuestState — finalize reads the live subsystem to capture registry maps.
+	FinalizeInFlightSession();
+
+	if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		if (OnAnyRegistryChangedHandle.IsValid())
+		{
+			QS->OnAnyRegistryChanged.Remove(OnAnyRegistryChangedHandle);
+		}
+	}
+	OnAnyRegistryChangedHandle.Reset();
+
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
 	CachedQuestState.Reset();
@@ -292,4 +326,100 @@ double FQuestPIEDebugChannel::GetCurrentGameTimeSeconds() const
 	if (!QM) return 0.0;
 	const UWorld* World = QM->GetWorld();
 	return World ? World->GetTimeSeconds() : 0.0;
+}
+
+void FQuestPIEDebugChannel::BeginNewSession()
+{
+	FQuestStateSessionSnapshot NewSession;
+	NewSession.SessionNumber = NextSessionNumber++;
+	NewSession.SessionStartRealTime = FPlatformTime::Seconds();
+	NewSession.bInFlight = true;
+	SessionHistory.Add(MoveTemp(NewSession));
+
+	// FIFO trim — drop oldest until under the cap. RemoveAt(0) preserves chronological index order.
+	while (SessionHistory.Num() > MaxStoredSessions)
+	{
+		SessionHistory.RemoveAt(0);
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel::BeginNewSession : session #%d started, %d total in history"),
+		SessionHistory.Last().SessionNumber, SessionHistory.Num());
+
+	OnSessionHistoryChanged.Broadcast();
+}
+
+void FQuestPIEDebugChannel::FinalizeInFlightSession()
+{
+	if (SessionHistory.IsEmpty()) return;
+	FQuestStateSessionSnapshot& Latest = SessionHistory.Last();
+	if (!Latest.bInFlight) return;
+
+	if (const UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		Latest.Resolutions = QS->GetAllResolutions();
+		Latest.Entries = QS->GetAllEntries();
+		Latest.PrereqStatus = QS->GetAllCachedPrereqStatus();
+	}
+	if (const UQuestManagerSubsystem* QM = CachedQuestManager.Get())
+	{
+		if (const UWorld* World = QM->GetWorld())
+		{
+			Latest.EndedAtGameTime = World->GetTimeSeconds();
+		}
+	}
+	Latest.bInFlight = false;
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel::FinalizeInFlightSession : session #%d closed at t=%.2fs (resolutions=%d, entries=%d, prereqs=%d)"),
+		Latest.SessionNumber, Latest.EndedAtGameTime, Latest.Resolutions.Num(), Latest.Entries.Num(), Latest.PrereqStatus.Num());
+
+	OnSessionHistoryChanged.Broadcast();
+}
+
+void FQuestPIEDebugChannel::HandleAnyRegistryChanged()
+{
+	OnSessionHistoryChanged.Broadcast();
+}
+
+const FQuestStateSessionSnapshot* FQuestPIEDebugChannel::GetSessionByIndex(int32 Index) const
+{
+	return SessionHistory.IsValidIndex(Index) ? &SessionHistory[Index] : nullptr;
+}
+
+const TMap<FGameplayTag, FQuestResolutionRecord>& FQuestPIEDebugChannel::GetResolutionsForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestResolutionRecord> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllResolutions() : Empty;
+	}
+	return Session.Resolutions;
+}
+
+const TMap<FGameplayTag, FQuestEntryRecord>& FQuestPIEDebugChannel::GetEntriesForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestEntryRecord> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllEntries() : Empty;
+	}
+	return Session.Entries;
+}
+
+const TMap<FGameplayTag, FQuestPrereqStatus>& FQuestPIEDebugChannel::GetPrereqStatusForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestPrereqStatus> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllCachedPrereqStatus() : Empty;
+	}
+	return Session.PrereqStatus;
 }

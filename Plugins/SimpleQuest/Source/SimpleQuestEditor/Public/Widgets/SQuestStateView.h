@@ -4,10 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Quests/Types/QuestResolutionRecord.h"  // EQuestResolutionSource
+#include "Quests/Types/QuestResolutionRecord.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SHeaderRow.h"
 #include "Widgets/Views/SListView.h"
+#include "Widgets/Input/SComboBox.h"
+
 
 class ITableRow;
 class STableViewBase;
@@ -71,15 +73,24 @@ public:
     void Construct(const FArguments& InArgs);
     virtual ~SQuestStateView();
 
-    virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
-
     /** Current filter substring formatted for STextBlock::HighlightText. Public so row widgets can bind to it. */
     FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
 
 private:
     // ── Lifecycle / refresh ──────────────────────────────────────────────────────────────────────────
-    void HandleDebugActiveChanged();
-    void RebuildAll();
+    
+    /**
+     * Subscribed to channel's OnSessionHistoryChanged — fires on session push/finalize and on every registry mutation
+     * while in flight. Refreshes all three tabs from the channel and requests list paint per tab if the diff changed.
+     */
+    void HandleSessionHistoryChanged();
+
+    /**
+     * Returns the session index this view should display: SelectedSessionIndex if set to a valid index, else newest
+     * session (auto-latest), else INDEX_NONE.
+     */
+    int32 GetEffectiveSessionIndex() const;
+    
 
     // ── Tab switching ────────────────────────────────────────────────────────────────────────────────
     void HandleTabChanged(EQuestStateViewTab NewTab);
@@ -97,9 +108,9 @@ private:
     void ApplyAllFilters();
 
     // ── Per-tab refresh (returns true if contents changed) ────────────────────────────────────────────
-    bool RefreshResolutionsFromSubsystem();
-    bool RefreshEntriesFromSubsystem();
-    bool RefreshPrereqsFromSubsystem();
+    bool RefreshResolutionsFromChannel();
+    bool RefreshEntriesFromChannel();
+    bool RefreshPrereqsFromChannel();
 
     // ── Per-tab sort ─────────────────────────────────────────────────────────────────────────────────
     void SortResolutions();
@@ -140,12 +151,6 @@ private:
     // clears the flag so stale state from a previous right-click doesn't leak into a non-tag-cell click.
     FGameplayTag LastRightClickedTag;
     bool bLastRightClickedTagSet = false;
-
-    /**
-     * Last-seen PIE game time, refreshed each Tick during active PIE. After PIE ends this freezes at the time of
-     * the last refresh — used by the snapshot status text to give post-session context for the row timestamps.
-     */
-    double LastSeenGameTime = 0.0;
     
     void NotifyTagRightClicked(const FGameplayTag& InTag) { LastRightClickedTag = InTag; bLastRightClickedTagSet = true; }
 
@@ -168,7 +173,33 @@ private:
     FName PrereqsSortColumn;
     EColumnSortMode::Type PrereqsSortMode = EColumnSortMode::None;
 
-    FDelegateHandle DebugActiveHandle;
+    /** Rebuilds SessionItems from the channel's history, refreshes the combo, re-syncs visually-selected item. */
+    void RebuildSessionItems();
+
+    /** Generates the dropdown row widget for a session item (wrapped int32 = array index at rebuild time). */
+    TSharedRef<SWidget> GenerateSessionItemWidget(TSharedPtr<int32> InItem);
+
+    /** User-driven combo selection. ESelectInfo::Direct skipped (programmatic re-sync). */
+    void HandleSessionComboSelectionChanged(TSharedPtr<int32> NewItem, ESelectInfo::Type SelectInfo);
+
+    /** Session label per spec — "Session N (in flight)" or "Session N (ended at t=X.XXs)". */
+    FText MakeSessionLabel(int32 Index) const;
+
+    /** Combo button's collapsed-state text — always reflects GetEffectiveSessionIndex via lambda. */
+    FText GetSelectedSessionLabel() const;
+
+    /**
+     * SessionNumber the user has explicitly pinned via the combo. INDEX_NONE means "auto-track latest". Stored as
+     * SessionNumber rather than array index so FIFO eviction in the channel doesn't silently shift the pin.
+     */
+    int32 PinnedSessionNumber = INDEX_NONE;
+
+    /** One TSharedPtr<int32> per session in history. Rebuilt on every OnSessionHistoryChanged. */
+    TArray<TSharedPtr<int32>> SessionItems;
+
+    TSharedPtr<SComboBox<TSharedPtr<int32>>> SessionCombo;
+
+    FDelegateHandle SessionHistoryHandle;
 
     /** Persistence key forwarded by the hosting SFactsPanel; empty when persistence is disabled. */
     FName PersistenceKey;

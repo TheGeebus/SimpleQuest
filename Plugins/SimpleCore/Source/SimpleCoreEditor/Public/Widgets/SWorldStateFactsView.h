@@ -7,6 +7,8 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SHeaderRow.h"
 #include "Widgets/Views/SListView.h"
+#include "Widgets/Input/SComboBox.h"
+
 
 class ITableRow;
 class STableViewBase;
@@ -37,8 +39,6 @@ public:
     void Construct(const FArguments& InArgs);
     virtual ~SWorldStateFactsView();
 
-    virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
-
     /** Current filter substring formatted for STextBlock::HighlightText. Public so row widgets can bind to it. */
     FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
 
@@ -50,11 +50,21 @@ private:
     FText GetEmptyMessageText() const;
     FText GetStatusText() const;
 
-    void HandleDebugActiveChanged();
-    void RebuildRows();
+    /**
+     * Subscribed to channel's OnSessionHistoryChanged — fires on session push/finalize and on every fact mutation
+     * while in flight. Refreshes AllRows from the channel and requests list paint if the diff changed.
+     */
+    void HandleSessionHistoryChanged();
 
-    /** Rebuilds the AllRows array from the channel's current facts. Returns true if the contents changed. */
+    /** Rebuilds the AllRows array from the channel's effective session. Returns true if the contents changed. */
     bool RefreshRowsFromChannel();
+
+    /**
+     * Returns the session index this view should display: SelectedSessionIndex if set to a valid index, else newest
+     * session (auto-latest), else INDEX_NONE if the channel has no sessions. Phase 3 wires SelectedSessionIndex
+     * to a dropdown; Phase 2c always uses INDEX_NONE so the view tracks newest.
+     */
+    int32 GetEffectiveSessionIndex() const;
 
     /** Reorders AllRows in place per CurrentSortColumn / CurrentSortMode. No-op when CurrentSortMode is None. */
     void SortAllRows();
@@ -79,5 +89,41 @@ private:
     FName CurrentSortColumn;
     EColumnSortMode::Type CurrentSortMode = EColumnSortMode::None;
 
-    FDelegateHandle DebugActiveHandle;
+    /**
+     * Rebuilds SessionItems from the channel's history, refreshes the combo's options, and re-syncs the combo's
+     * visually-selected item to GetEffectiveSessionIndex. Called from HandleSessionHistoryChanged.
+     */
+    void RebuildSessionItems();
+
+    /** Generates the dropdown row widget for a session-item shared pointer (the wrapped int32 is the array index). */
+    TSharedRef<SWidget> GenerateSessionItemWidget(TSharedPtr<int32> InItem);
+
+    /**
+     * Fires when the user picks a session via the combo. Writes PinnedSessionNumber and triggers a data refresh.
+     * Programmatic SetSelectedItem calls (ESelectInfo::Direct) are ignored — only user picks change pin state.
+     */
+    void HandleSessionComboSelectionChanged(TSharedPtr<int32> NewItem, ESelectInfo::Type SelectInfo);
+
+    /** Returns the label for a given session index — "Session N (in flight)" or "Session N (ended at t=X.XXs)". */
+    FText MakeSessionLabel(int32 Index) const;
+
+    /** Combo button's collapsed-state text — always reflects GetEffectiveSessionIndex via lambda. */
+    FText GetSelectedSessionLabel() const;
+
+    /**
+     * SessionNumber the user has explicitly pinned via the combo. INDEX_NONE means "auto-track latest". Stored as
+     * SessionNumber rather than array index so FIFO eviction in the channel doesn't silently shift the pin to a
+     * different session. GetEffectiveSessionIndex resolves the SessionNumber to a current array index per call.
+     */
+    int32 PinnedSessionNumber = INDEX_NONE;
+
+    /**
+     * One TSharedPtr<int32> per session in history; the wrapped int32 is the array index at rebuild time. Rebuilt
+     * on every OnSessionHistoryChanged so SComboBox's OptionsSource pointer stability holds across mutations.
+     */
+    TArray<TSharedPtr<int32>> SessionItems;
+
+    TSharedPtr<SComboBox<TSharedPtr<int32>>> SessionCombo;
+
+    FDelegateHandle SessionHistoryHandle;
 };

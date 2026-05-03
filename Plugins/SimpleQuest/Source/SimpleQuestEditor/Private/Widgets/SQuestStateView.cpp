@@ -4,18 +4,17 @@
 
 #include "Debug/QuestPIEDebugChannel.h"
 #include "SimpleQuestEditor.h"
-#include "SimpleQuestLog.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestEntryRecord.h"
-#include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SOverlay.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Input/SSegmentedControl.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Views/STableRow.h"
 #include "Styling/AppStyle.h"
@@ -124,6 +123,7 @@ public:
                 [
                     SNew(STextBlock)
                         .Text(FQuestTagComposer::FormatTagForDisplay(Item->OutcomeTag.GetTagName()))
+                        .HighlightText(HighlightText)
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ], Item->OutcomeTag);
         }
@@ -214,6 +214,7 @@ public:
                 [
                     SNew(STextBlock)
                         .Text(FQuestTagComposer::FormatTagForDisplay(Item->SourceQuestTag.GetTagName()))
+                        .HighlightText(HighlightText)
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ], Item->SourceQuestTag);
         }
@@ -223,6 +224,7 @@ public:
                 [
                     SNew(STextBlock)
                         .Text(FQuestTagComposer::FormatTagForDisplay(Item->IncomingOutcomeTag.GetTagName()))
+                        .HighlightText(HighlightText)
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ], Item->IncomingOutcomeTag);
         }
@@ -303,7 +305,7 @@ public:
             const FText Label = Item->bIsAlways ? LOCTEXT("TypeAlways", "Always") : LOCTEXT("TypeCustom", "Custom");
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
-                    SNew(STextBlock).Text(Label).Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                    SNew(STextBlock).Text(Label).HighlightText(HighlightText).Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ]);
         }
         if (ColumnName == QuestStateView_Prereqs_ColumnIDs::Status)
@@ -365,7 +367,7 @@ void SQuestStateView::Construct(const FArguments& InArgs)
 
     if (FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel())
     {
-        DebugActiveHandle = Channel->OnDebugActiveChanged.AddRaw(this, &SQuestStateView::HandleDebugActiveChanged);
+        SessionHistoryHandle = Channel->OnSessionHistoryChanged.AddRaw(this, &SQuestStateView::HandleSessionHistoryChanged);
     }
 
     // Resolutions header + list
@@ -464,7 +466,7 @@ void SQuestStateView::Construct(const FArguments& InArgs)
             + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
             [
                 SNew(SSegmentedControl<EQuestStateViewTab>)
-                    .UniformPadding(FMargin(20.f, 4.f))
+                    .UniformPadding(FMargin(10.f, 4.f))
                     .Value_Lambda([this]() { return ActiveTab; })
                     .OnValueChanged(this, &SQuestStateView::HandleTabChanged)
                     + SSegmentedControl<EQuestStateViewTab>::Slot(EQuestStateViewTab::Resolutions)
@@ -477,11 +479,28 @@ void SQuestStateView::Construct(const FArguments& InArgs)
         ]
         + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
         [
-            // 2x2 grid row 2: Session selector (Phase 3, not yet added) will land in an auto-width left slot;
-            // for now the filter fills the whole row alone.
-            SNew(SSearchBox)
-                .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
-                .OnTextChanged(this, &SQuestStateView::HandleFilterTextChanged)
+            // 2x2 grid row 2: session selector (auto-width, left) + filter (fill, right). Combo's collapsed display
+            // always shows the effective session label via Text_Lambda; user-driven picks write PinnedSessionNumber.
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.f, 0.f, 8.f, 0.f))
+            [
+                SAssignNew(SessionCombo, SComboBox<TSharedPtr<int32>>)
+                    .OptionsSource(&SessionItems)
+                    .OnGenerateWidget(this, &SQuestStateView::GenerateSessionItemWidget)
+                    .OnSelectionChanged(this, &SQuestStateView::HandleSessionComboSelectionChanged)
+                    .IsEnabled_Lambda([this]() { return !SessionItems.IsEmpty(); })
+                    [
+                        SNew(STextBlock)
+                            .Text_Lambda([this]() { return GetSelectedSessionLabel(); })
+                            .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                    ]
+            ]
+            + SHorizontalBox::Slot().FillWidth(1.f)
+            [
+                SNew(SSearchBox)
+                    .HintText(LOCTEXT("FilterHint", "Filter by tag..."))
+                    .OnTextChanged(this, &SQuestStateView::HandleFilterTextChanged)
+            ]
         ]
         + SVerticalBox::Slot().FillHeight(1.f)
         [
@@ -512,67 +531,43 @@ void SQuestStateView::Construct(const FArguments& InArgs)
         ]
     ];
 
-    RebuildAll();
+    HandleSessionHistoryChanged();
 }
 
 SQuestStateView::~SQuestStateView()
 {
-    if (DebugActiveHandle.IsValid())
+    if (SessionHistoryHandle.IsValid())
     {
         if (FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel())
         {
-            Channel->OnDebugActiveChanged.Remove(DebugActiveHandle);
+            Channel->OnSessionHistoryChanged.Remove(SessionHistoryHandle);
         }
-        DebugActiveHandle.Reset();
+        SessionHistoryHandle.Reset();
     }
 }
 
-void SQuestStateView::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
+void SQuestStateView::HandleSessionHistoryChanged()
 {
-    SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
+    RebuildSessionItems();
+    if (RefreshResolutionsFromChannel() && ResolutionsList.IsValid()) ResolutionsList->RequestListRefresh();
+    if (RefreshEntriesFromChannel()     && EntriesList.IsValid())     EntriesList->RequestListRefresh();
+    if (RefreshPrereqsFromChannel()     && PrereqsList.IsValid())     PrereqsList->RequestListRefresh();
+}
 
+int32 SQuestStateView::GetEffectiveSessionIndex() const
+{
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    if (Channel && Channel->IsActive() && Channel->GetQuestStateSubsystem())
+    if (!Channel) return INDEX_NONE;
+    const TArray<FQuestStateSessionSnapshot>& History = Channel->GetSessionHistory();
+    if (History.IsEmpty()) return INDEX_NONE;
+    if (PinnedSessionNumber != INDEX_NONE)
     {
-        if (RefreshResolutionsFromSubsystem() && ResolutionsList.IsValid()) ResolutionsList->RequestListRefresh();
-        if (RefreshEntriesFromSubsystem()     && EntriesList.IsValid())     EntriesList->RequestListRefresh();
-        if (RefreshPrereqsFromSubsystem()     && PrereqsList.IsValid())     PrereqsList->RequestListRefresh();
-
-        // Capture current game time so the snapshot status text can show "last seen at t=X.XXs" once PIE ends.
-        LastSeenGameTime = Channel->GetCurrentGameTimeSeconds();
+        for (int32 i = 0; i < History.Num(); ++i)
+        {
+            if (History[i].SessionNumber == PinnedSessionNumber) return i;
+        }
     }
-    // No else-branch: when PIE ends, the snapshot stays visible until the next PIE session starts. Wipe-and-refresh
-    // happens in HandleDebugActiveChanged on PostPIEStarted only.
-}
-
-void SQuestStateView::HandleDebugActiveChanged()
-{
-    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    if (Channel && Channel->IsActive() && Channel->GetQuestStateSubsystem())
-    {
-        // PIE just started — wipe any snapshot from the previous session and pull fresh data.
-        RebuildAll();
-    }
-    // PIE just ended — leave the snapshot intact so the designer can inspect post-session row history. The next
-    // PostPIEStarted will RebuildAll and replace it with the fresh session.
-}
-
-void SQuestStateView::RebuildAll()
-{
-    AllResolutions.Reset(); Resolutions.Reset();
-    AllEntries.Reset();     Entries.Reset();
-    AllPrereqs.Reset();     Prereqs.Reset();
-
-    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive() || !Channel->GetQuestStateSubsystem()) return;
-
-    RefreshResolutionsFromSubsystem();
-    RefreshEntriesFromSubsystem();
-    RefreshPrereqsFromSubsystem();
-
-    if (ResolutionsList.IsValid()) ResolutionsList->RequestListRefresh();
-    if (EntriesList.IsValid())     EntriesList->RequestListRefresh();
-    if (PrereqsList.IsValid())     PrereqsList->RequestListRefresh();
+    return History.Num() - 1;  // auto = latest, OR pinned-but-evicted fallback
 }
 
 void SQuestStateView::HandleTabChanged(EQuestStateViewTab NewTab)
@@ -622,7 +617,7 @@ EVisibility SQuestStateView::GetListVisibility() const
 FText SQuestStateView::GetEmptyMessageText() const
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    if (!Channel || !Channel->IsActive() || !Channel->GetQuestStateSubsystem())
+    if (!Channel || GetEffectiveSessionIndex() == INDEX_NONE)
     {
         return LOCTEXT("EmptyNotInPIE", "Not in PIE — start Play In Editor to inspect live Quest State.");
     }
@@ -632,11 +627,18 @@ FText SQuestStateView::GetEmptyMessageText() const
         (ActiveTab == EQuestStateViewTab::PrereqStatus && AllPrereqs.IsEmpty());
     if (bUnfilteredEmpty)
     {
+        const bool bInFlight = Channel->IsActive();
         switch (ActiveTab)
         {
-        case EQuestStateViewTab::Resolutions:  return LOCTEXT("EmptyNoResolutions", "PIE active — no quests have resolved yet.");
-        case EQuestStateViewTab::Entries:      return LOCTEXT("EmptyNoEntries",     "PIE active — no quests have been entered yet.");
-        case EQuestStateViewTab::PrereqStatus: return LOCTEXT("EmptyNoPrereqs",     "PIE active — no quests are currently in PendingGiver state.");
+        case EQuestStateViewTab::Resolutions:
+            return bInFlight ? LOCTEXT("EmptyNoResolutions", "PIE active — no quests have resolved yet.")
+                             : LOCTEXT("EmptyNoResolutionsSnapshot", "SNAPSHOT — no quests resolved this session.");
+        case EQuestStateViewTab::Entries:
+            return bInFlight ? LOCTEXT("EmptyNoEntries",     "PIE active — no quests have been entered yet.")
+                             : LOCTEXT("EmptyNoEntriesSnapshot",     "SNAPSHOT — no quests entered this session.");
+        case EQuestStateViewTab::PrereqStatus:
+            return bInFlight ? LOCTEXT("EmptyNoPrereqs",     "PIE active — no quests are currently in PendingGiver state.")
+                             : LOCTEXT("EmptyNoPrereqsSnapshot",     "SNAPSHOT — no quests in PendingGiver state at session end.");
         }
     }
     return FText::Format(LOCTEXT("EmptyFilterMismatch", "No rows match filter '{0}'."), FText::FromString(FilterText));
@@ -645,7 +647,10 @@ FText SQuestStateView::GetEmptyMessageText() const
 FText SQuestStateView::GetStatusText() const
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    const bool bPIEActive = Channel && Channel->IsActive() && Channel->GetQuestStateSubsystem();
+    if (!Channel) return LOCTEXT("StatusIdle", "idle");
+
+    const FQuestStateSessionSnapshot* Session = Channel->GetSessionByIndex(GetEffectiveSessionIndex());
+    if (!Session) return LOCTEXT("StatusIdle", "idle");
 
     int32 AllNum = 0;
     int32 ShownNum = 0;
@@ -656,29 +661,21 @@ FText SQuestStateView::GetStatusText() const
     case EQuestStateViewTab::PrereqStatus: AllNum = AllPrereqs.Num();     ShownNum = Prereqs.Num();     break;
     }
 
-    if (!bPIEActive)
+    const FText CountText = (AllNum != ShownNum)
+        ? FText::Format(LOCTEXT("StatusCountFiltered", "{0} row(s), {1} shown"), FText::AsNumber(AllNum), FText::AsNumber(ShownNum))
+        : FText::Format(LOCTEXT("StatusCount", "{0} row(s)"), FText::AsNumber(AllNum));
+
+    if (Session->bInFlight)
     {
-        // Snapshot mode: rows are preserved from the just-ended session. Show the last-seen game time so post-
-        // session row timestamps have a reference point. If nothing was ever captured, fall through to "idle".
-        const bool bHasSnapshot = !AllResolutions.IsEmpty() || !AllEntries.IsEmpty() || !AllPrereqs.IsEmpty();
-        if (bHasSnapshot)
-        {
-            return FText::Format(LOCTEXT("StatusSnapshot", "SNAPSHOT — last PIE session ended at t={0} — {1} row(s)"),
-                QuestStateView_Style::FormatTime(LastSeenGameTime), FText::AsNumber(AllNum));
-        }
-        return LOCTEXT("StatusIdle", "idle");
+        // Live readout — Channel->GetCurrentGameTimeSeconds() ticks every frame via the Text_Lambda binding.
+        return FText::Format(LOCTEXT("StatusActive", "DEBUG (PIE) — t={0} — {1}"),
+            QuestStateView_Style::FormatTime(Channel->GetCurrentGameTimeSeconds()), CountText);
     }
 
-    // PIE active — live readout including current game time. Time_Lambda binding causes this to repaint every frame
-    // while the panel is visible, so the time field updates in real time.
-    const FText TimeText = QuestStateView_Style::FormatTime(Channel->GetCurrentGameTimeSeconds());
-    if (AllNum != ShownNum)
-    {
-        return FText::Format(LOCTEXT("StatusActiveFiltered", "DEBUG (PIE) — t={0} — {1} row(s), {2} shown"),
-            TimeText, FText::AsNumber(AllNum), FText::AsNumber(ShownNum));
-    }
-    return FText::Format(LOCTEXT("StatusActive", "DEBUG (PIE) — t={0} — {1} row(s)"),
-        TimeText, FText::AsNumber(AllNum));
+    return FText::Format(LOCTEXT("StatusSnapshot", "SNAPSHOT — Session {0} ended at t={1} — {2}"),
+        FText::AsNumber(Session->SessionNumber),
+        QuestStateView_Style::FormatTime(Session->EndedAtGameTime),
+        CountText);
 }
 
 void SQuestStateView::HandleFilterTextChanged(const FText& NewText)
@@ -700,13 +697,22 @@ void SQuestStateView::ApplyAllFilters()
 
 // ── Per-tab refresh ──────────────────────────────────────────────────────────────────────────────────
 
-bool SQuestStateView::RefreshResolutionsFromSubsystem()
+bool SQuestStateView::RefreshResolutionsFromChannel()
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    UQuestStateSubsystem* Subsystem = Channel ? Channel->GetQuestStateSubsystem() : nullptr;
-    if (!Subsystem) return false;
+    if (!Channel) return false;
 
-    const TMap<FGameplayTag, FQuestResolutionRecord>& Map = Subsystem->GetAllResolutions();
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+
+    if (EffectiveIndex == INDEX_NONE)
+    {
+        if (AllResolutions.IsEmpty()) return false;
+        AllResolutions.Reset();
+        ApplyResolutionsFilter();
+        return true;
+    }
+
+    const TMap<FGameplayTag, FQuestResolutionRecord>& Map = Channel->GetResolutionsForSession(EffectiveIndex);
 
     // Snapshot diff: total history-entry count across all quests is a cheap proxy for "anything changed."
     // Rebuild only when count differs from cached. Append-only history means count-only diff is reliable.
@@ -732,13 +738,22 @@ bool SQuestStateView::RefreshResolutionsFromSubsystem()
     return true;
 }
 
-bool SQuestStateView::RefreshEntriesFromSubsystem()
+bool SQuestStateView::RefreshEntriesFromChannel()
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    UQuestStateSubsystem* Subsystem = Channel ? Channel->GetQuestStateSubsystem() : nullptr;
-    if (!Subsystem) return false;
+    if (!Channel) return false;
 
-    const TMap<FGameplayTag, FQuestEntryRecord>& Map = Subsystem->GetAllEntries();
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+
+    if (EffectiveIndex == INDEX_NONE)
+    {
+        if (AllEntries.IsEmpty()) return false;
+        AllEntries.Reset();
+        ApplyEntriesFilter();
+        return true;
+    }
+
+    const TMap<FGameplayTag, FQuestEntryRecord>& Map = Channel->GetEntriesForSession(EffectiveIndex);
 
     int32 TotalCount = 0;
     for (const TPair<FGameplayTag, FQuestEntryRecord>& Pair : Map) { TotalCount += Pair.Value.History.Num(); }
@@ -762,13 +777,22 @@ bool SQuestStateView::RefreshEntriesFromSubsystem()
     return true;
 }
 
-bool SQuestStateView::RefreshPrereqsFromSubsystem()
+bool SQuestStateView::RefreshPrereqsFromChannel()
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    UQuestStateSubsystem* Subsystem = Channel ? Channel->GetQuestStateSubsystem() : nullptr;
-    if (!Subsystem) return false;
+    if (!Channel) return false;
 
-    const TMap<FGameplayTag, FQuestPrereqStatus>& Map = Subsystem->GetAllCachedPrereqStatus();
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+
+    if (EffectiveIndex == INDEX_NONE)
+    {
+        if (AllPrereqs.IsEmpty()) return false;
+        AllPrereqs.Reset();
+        ApplyPrereqsFilter();
+        return true;
+    }
+
+    const TMap<FGameplayTag, FQuestPrereqStatus>& Map = Channel->GetPrereqStatusForSession(EffectiveIndex);
 
     // Always rebuild — prereq snapshots can mutate internally (bSatisfied flips, leaf counts shift) without
     // changing the map size, so a count diff would miss those updates. Map is bounded by quests-in-PendingGiver
@@ -962,9 +986,16 @@ void SQuestStateView::ApplyPrereqsFilter()
 {
     Prereqs.Reset();
     if (FilterText.IsEmpty()) { Prereqs.Append(AllPrereqs); return; }
+
+    // Match Quest + Type. Status (Met/Unmet) and Unmet (leaf count) are dynamic state — filtering on them isn't a
+    // useful workflow and would surface noise as values flip between frames. Type label mirrors the row widget's
+    // LOCTEXT keys so localized values stay in sync.
     for (const TSharedPtr<FQuestStatePrereqRow>& Row : AllPrereqs)
     {
-        if (Row.IsValid() && Row->QuestTag.GetTagName().ToString().Contains(FilterText))
+        if (!Row.IsValid()) continue;
+        const FString TypeLabel = (Row->bIsAlways ? LOCTEXT("TypeAlways", "Always") : LOCTEXT("TypeCustom", "Custom")).ToString();
+        if (Row->QuestTag.GetTagName().ToString().Contains(FilterText) ||
+            TypeLabel.Contains(FilterText))
         {
             Prereqs.Add(Row);
         }
@@ -1145,6 +1176,88 @@ void SQuestStateView::HandlePrereqsColumnSort(EColumnSortPriority::Type, const F
     PrereqsSortColumn = ColumnID; PrereqsSortMode = NewMode;
     SortPrereqs(); ApplyPrereqsFilter();
     if (PrereqsList.IsValid()) PrereqsList->RequestListRefresh();
+}
+
+void SQuestStateView::RebuildSessionItems()
+{
+    SessionItems.Reset();
+    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
+    if (Channel)
+    {
+        const TArray<FQuestStateSessionSnapshot>& History = Channel->GetSessionHistory();
+        SessionItems.Reserve(History.Num());
+        for (int32 i = 0; i < History.Num(); ++i)
+        {
+            SessionItems.Add(MakeShared<int32>(i));
+        }
+    }
+    if (SessionCombo.IsValid())
+    {
+        SessionCombo->RefreshOptions();
+        const int32 EffectiveIndex = GetEffectiveSessionIndex();
+        if (SessionItems.IsValidIndex(EffectiveIndex))
+        {
+            SessionCombo->SetSelectedItem(SessionItems[EffectiveIndex]);
+        }
+        else
+        {
+            SessionCombo->ClearSelection();
+        }
+    }
+}
+
+TSharedRef<SWidget> SQuestStateView::GenerateSessionItemWidget(TSharedPtr<int32> InItem)
+{
+    if (!InItem.IsValid()) return SNullWidget::NullWidget;
+    return SNew(STextBlock)
+        .Text(MakeSessionLabel(*InItem))
+        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9));
+}
+
+void SQuestStateView::HandleSessionComboSelectionChanged(TSharedPtr<int32> NewItem, ESelectInfo::Type SelectInfo)
+{
+    if (SelectInfo == ESelectInfo::Direct) return;
+    if (!NewItem.IsValid()) return;
+
+    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
+    if (!Channel) return;
+
+    const FQuestStateSessionSnapshot* Session = Channel->GetSessionByIndex(*NewItem);
+    if (!Session) return;
+
+    const TArray<FQuestStateSessionSnapshot>& History = Channel->GetSessionHistory();
+    PinnedSessionNumber = (*NewItem == History.Num() - 1) ? INDEX_NONE : Session->SessionNumber;
+
+    if (RefreshResolutionsFromChannel() && ResolutionsList.IsValid()) ResolutionsList->RequestListRefresh();
+    if (RefreshEntriesFromChannel()     && EntriesList.IsValid())     EntriesList->RequestListRefresh();
+    if (RefreshPrereqsFromChannel()     && PrereqsList.IsValid())     PrereqsList->RequestListRefresh();
+}
+
+FText SQuestStateView::MakeSessionLabel(int32 Index) const
+{
+    FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
+    if (!Channel) return FText::GetEmpty();
+    const FQuestStateSessionSnapshot* Session = Channel->GetSessionByIndex(Index);
+    if (!Session) return FText::GetEmpty();
+
+    if (Session->bInFlight)
+    {
+        return FText::Format(LOCTEXT("SessionLabelInFlight", "Session {0} (in flight)"),
+            FText::AsNumber(Session->SessionNumber));
+    }
+    return FText::Format(LOCTEXT("SessionLabelEnded", "Session {0} (ended at t={1})"),
+        FText::AsNumber(Session->SessionNumber),
+        QuestStateView_Style::FormatTime(Session->EndedAtGameTime));
+}
+
+FText SQuestStateView::GetSelectedSessionLabel() const
+{
+    const int32 EffectiveIndex = GetEffectiveSessionIndex();
+    if (EffectiveIndex == INDEX_NONE)
+    {
+        return LOCTEXT("SessionLabelNone", "(no sessions)");
+    }
+    return MakeSessionLabel(EffectiveIndex);
 }
 
 #undef LOCTEXT_NAMESPACE

@@ -301,6 +301,72 @@ WorldState facts are no longer written.
   `FPrereqLeafSubscription` routes per-leaf subscriptions to the matching
   event channel.
 
+#### Container lifecycle alignment — Step vs container state model split
+
+Step state model unchanged; UQuest container Live state is now DERIVED from
+inner Step state across `SetQuestLive` / `SetQuestResolved` / `SetQuestDeact-
+ivated` / the `ActivateNodeByTag` diamond guard / the giver gate. Closes a
+class of inconsistencies where containers and Steps were treated identically
+by lifecycle writers despite playing different roles in the graph (containers
+own derived state — they exist to group inner Steps and route activation;
+Steps own intrinsic state — they're where running, completing, and deactivating
+actually happens).
+
+- **`IsStepNode()` / `IsContainerNode()` virtual predicates on
+  `UQuestNodeBase`** — `UQuestStep` overrides `IsStepNode` to true, `UQuest`
+  overrides `IsContainerNode` to true. Default false on the base. Lifecycle
+  writers branch on these predicates rather than scattering `Cast` logic at
+  every site.
+- **Compile-time reachability data** — three new fields populated by a new
+  post-compile pass `FQuestlineGraphCompiler::ComputeContainerReachability`:
+  `UQuest::InnerStepTags` (any-depth structural containment, used by
+  derivation), `UQuest::ReachableStepsByActivatePin` (per-pin activation-
+  immediate reachable Step subsets, used by the path-aware giver gate — entry
+  routes only, NOT outcome chains), `UQuestStep::AncestorContainerTags`
+  (innermost-first, used by ancestor walks). Compiler infrastructure:
+  `ImmediateContainerByTag` map populated during `CompileNodeRegistration`
+  via `CurrentInnerContainerTag` save/restore around recursive `CompileGraph`
+  calls; `ResolveQuestTag` pre-pass at the top of `ComputeContainerReachability`
+  ensures `QuestTag` fields are valid for the rest of the pass.
+- **`FQuestReachableSteps` USTRUCT** — wraps `TArray<FGameplayTag> Steps` so
+  `TMap<FName, FQuestReachableSteps>` works under UE's reflection rules
+  (`TMap` values need `USTRUCT` wrappers around `TArray`s).
+- **`UQuestManagerSubsystem::DeriveContainerLive(ContainerTag)`** — recomputes
+  a container's Live fact from inner Step state. Iterates
+  `Container->InnerStepTags` and asks `WorldState->HasFact` for each Step's
+  Live fact; `AddFact` / `RemoveFact` on the container's Live fact based on
+  the result. Idempotent. Called from `SetQuestLive` / `SetQuestResolved` /
+  `SetQuestDeactivated` via the ancestor walk on Step state transitions.
+- **`UQuestStateSubsystem::IsContainerTag(FGameplayTag) const`** — public
+  read API for container classification, backed by a manager-pushed
+  `TSet<FGameplayTag> ContainerTags`. Manager pushes during graph activation
+  (matches the existing `RecordResolution` / `RecordEntry` /
+  `UpdateQuestPrereqStatus` push pattern). Used by `QueryQuestActivation-
+  Blockers` for the AlreadyLive split — preserves the manager-as-black-box
+  rule (no public accessors on the manager).
+- **`ActivateNodeByTag` diamond guard split** — Steps refuse re-entry on
+  Live or PendingGiver (unchanged). Containers fall through to the normal
+  activation flow when re-activated while Live (loop-back wires, fan-in,
+  external re-activation). The old "late-outcome delivery" short-circuit
+  branch is gone — full re-activation handles outcome routing correctly via
+  the derivation cascade (inner Step diamond guards still enforce
+  idempotency for already-Live Steps).
+- **Path-aware giver gate** — for containers, looks up
+  `Container->ReachableStepsByActivatePin[PinKey]` (PinKey =
+  `IncomingOutcomeTag.GetTagName()` if valid, else `NAME_None`). If all
+  reachable Steps are already Live, skip the gate entirely (no work for the
+  giver to enable); fall through to normal activation. Empty reachable set
+  falls through to fire the gate (preserves Step-only-node behavior).
+- **`EQuestActivationBlocker::AlreadyLive` split** — now reported only for
+  non-container nodes. Container Live is derived; gives forwarding
+  activation to a Live wrapper with mixed-Live inner Steps is exactly the
+  case the path-aware gate handles.
+- **`EQuestActivationBlocker::Deactivated` enum value REMOVED entirely** —
+  `ActivateNodeByTag` clears the Deactivated fact on entry (a Deactivated
+  node is allowed to re-enter via its Activate input); reporting Deactivated
+  as a blocker contradicted that. Zero consumers; was already marked
+  DEPRECATED in the header comment.
+
 #### Internal — compiler + runtime infrastructure refactors (items 2a + 2b)
 
 Pre-flight for the data-layer migrations:

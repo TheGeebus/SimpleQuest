@@ -532,24 +532,40 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     {
         UQuestNodeBase* Instance = *InstancePtr;
 
-        // Phase 6 of container lifecycle alignment — path-aware skip. For containers, look up which inner Steps
-        // are reachable from the entered Activate pin (compile-time populated by ComputeContainerReachability into
-        // UQuest::ReachableStepsByActivatePin). If all reachable Steps are already Live, there's no work for the
-        // giver to enable, so skip the gate and fall through to normal activation. This covers loop-back wires,
-        // fan-in re-entry, and any case where the entered path's targets are already running — preventing the
-        // giver from spuriously re-firing each iteration. Empty reachable set falls through to fire the gate as
-        // before (preserves behavior for non-container giver-gated nodes and edge cases where reachability data
-        // didn't populate).
+        // Path-aware skip. For containers, look up which inner Steps are reachable from the entered Activate pin
+        // (compile-time populated by ComputeContainerReachability into UQuest::ReachableStepsByActivatePin). If all
+        // reachable Steps are already Live, there's no work for the giver to enable, so skip the gate and fall through
+        // to normal activation. This covers loop-back wires, fan-in re-entry, and any case where the entered path's
+        // targets are already running — preventing the giver from spuriously re-firing each iteration. Empty reachable
+        // set falls through to fire the gate as before (preserves behavior for non-container giver-gated nodes and edge
+        // cases where reachability data didn't populate).
         bool bSkipGiverGate = false;
         if (UQuest* Container = Cast<UQuest>(Instance))
         {
+            
             const FName DiagPinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
             UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: container '%s' pin '%s' — %d ReachableStepsByActivatePin entry(s)"),
                 *NodeTagName.ToString(), *DiagPinKey.ToString(), Container->GetReachableStepsByActivatePin().Num());
-            if (const FQuestReachableSteps* DiagReachable = Container->GetReachableStepsByActivatePin().Find(DiagPinKey))
+
+            const FQuestReachableSteps* DiagReachable = nullptr;
+            if (IncomingOutcomeTag.IsValid())
             {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: pin '%s' found, %d reachable Step(s)"),
-                    *DiagPinKey.ToString(), DiagReachable->StepTags.Num());
+                DiagReachable = Container->GetReachableStepsByActivatePin().Find(IncomingOutcomeTag.GetTagName());
+            }
+            if (!DiagReachable)
+            {
+                DiagReachable = Container->GetReachableStepsByActivatePin().Find(NAME_None);
+                if (DiagReachable)
+                {
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: per-pin '%s' miss; using AnyOutcome fallback"),
+                        *DiagPinKey.ToString());
+                }
+            }
+
+            if (DiagReachable)
+            {
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: %d reachable Step(s) consulted"),
+                    DiagReachable->StepTags.Num());
                 for (const FGameplayTag& DiagStep : DiagReachable->StepTags)
                 {
                     const FGameplayTag DiagLive = FQuestTagComposer::ResolveStateFactTag(DiagStep, EQuestStateLeaf::Live);
@@ -559,23 +575,34 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
             }
             else
             {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: pin '%s' NOT found in map"), *DiagPinKey.ToString());
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: NO reachable data found for any key"));
             }
-            
-            const FName PinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
-            if (const FQuestReachableSteps* Reachable = Container->GetReachableStepsByActivatePin().Find(PinKey))
+                        
+            // Lookup with Any-Outcome fallback. Try the outcome-tag-keyed per-path entry first; if the wrapper
+            // has no per-path Activate pin matching this outcome (the common case — most wrappers expose only
+            // Any-Outcome), fall back to the Any-Outcome (NAME_None) reachability. Activation pulses always
+            // fire Any-Outcome entries regardless of source outcome tag, so NAME_None reachability is the right
+            // baseline. Future refinement: when per-path entries DO match, the value should be the union of
+            // Any-Outcome ∪ per-path-reachable Steps; for now per-path keys store only their own reachability.
+            const FQuestReachableSteps* Reachable = nullptr;
+            if (IncomingOutcomeTag.IsValid())
             {
-                if (!Reachable->StepTags.IsEmpty())
+                Reachable = Container->GetReachableStepsByActivatePin().Find(IncomingOutcomeTag.GetTagName());
+            }
+            if (!Reachable)
+            {
+                Reachable = Container->GetReachableStepsByActivatePin().Find(NAME_None);
+            }
+            if (Reachable && !Reachable->StepTags.IsEmpty())
+            {
+                bSkipGiverGate = true;
+                for (const FGameplayTag& StepTag : Reachable->StepTags)
                 {
-                    bSkipGiverGate = true;
-                    for (const FGameplayTag& StepTag : Reachable->StepTags)
+                    const FGameplayTag StepLiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
+                    if (!StepLiveFact.IsValid() || !WorldState->HasFact(StepLiveFact))
                     {
-                        const FGameplayTag StepLiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
-                        if (!StepLiveFact.IsValid() || !WorldState->HasFact(StepLiveFact))
-                        {
-                            bSkipGiverGate = false;
-                            break;
-                        }
+                        bSkipGiverGate = false;
+                        break;
                     }
                 }
             }
@@ -640,10 +667,10 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         return;
     }
 
-    // Cascade origin fallback: ChainToNextNodes pre-stamps OriginTag and OriginChain for every cascade destination as
-    // of Piece D, so this block is effectively a no-op on the normal cascade path. Retained as a safety net for any
-    // direct caller that passes IncomingSourceTag without pre-stamping. Guard on empty OriginChain so the chain
-    // propagation built by ChainToNextNodes isn't stomped with a double-append.
+    // Cascade origin fallback: ChainToNextNodes pre-stamps OriginTag and OriginChain for every cascade destination, so
+    // this block is effectively a no-op on the normal cascade path. Retained as a safety net for any direct caller that
+    // passes IncomingSourceTag without pre-stamping. Guard on empty OriginChain so the chain propagation built by
+    // ChainToNextNodes isn't stomped with a double-append.
     if (IncomingSourceTag != NAME_None)
     {
         UQuestNodeBase* Instance = *InstancePtr;

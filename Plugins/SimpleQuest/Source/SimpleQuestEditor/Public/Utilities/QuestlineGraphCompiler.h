@@ -121,6 +121,28 @@ protected:
 private:
 
 	/**
+	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during
+	 * CompileNodeRegistration as instances are registered, while CurrentInnerContainerTag tracks the wrapper
+	 * whose inner graph is currently being compiled. Cleared at Compile() start. Read by ComputeContainerReachability
+	 * to walk ancestor chains and to filter routing-walk traversal by structural containment.
+	 */
+	TMap<FName, FName> ImmediateContainerByTag;
+
+	/**
+	 * Tracks the wrapper UQuest whose inner graph is currently being compiled. NAME_None at root level.
+	 * Save/restored across recursive CompileGraph calls in CompileNodeRegistration's wrapper branches so each
+	 * inner registration sees its direct container. Cleared at Compile() start.
+	 */
+	FName CurrentInnerContainerTag = NAME_None;
+
+	/**
+	 * Post-compile pass — populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and
+	 * UQuestStep::AncestorContainerTags. Called from Compile() after RegisterCompiledTags so FGameplayTag
+	 * resolution succeeds.
+	 */
+	void ComputeContainerReachability(UQuestlineGraph* InGraph);
+
+	/**
 	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
 	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
 	 * the compiler uses. Cleared at Compile() start.

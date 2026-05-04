@@ -119,6 +119,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	GroupGetterDestsByTag.Empty();
 	SetterEdNodeByGroupAndSource.Empty();
 	GetterEdNodeByGroupAndDest.Empty();
+	ImmediateContainerByTag.Empty();
+	CurrentInnerContainerTag = NAME_None;
 	
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
@@ -153,6 +155,11 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 
     RegisterCompiledTags(InGraph);
 
+	// Phase 1 of container lifecycle alignment — compute structural reachability data so the downstream
+	// lifecycle methods (SetQuestLive auto-propagation, path-aware giver gate, etc.) can branch on
+	// structural containment rather than re-deriving it at runtime.
+	ComputeContainerReachability(InGraph);
+	
     UE_LOG(LogSimpleQuest, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
         *InGraph->GetName(),
         InGraph->CompiledNodes.Num(),
@@ -309,27 +316,40 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     	}
     	LabelMap.Add(Label, ContentNode);
 
+    	// TagName computed up-front so wrapper branches can pass it as their inner CompileGraph's container tag
+    	// (see CurrentInnerContainerTag save/restore below). Originally computed after the type-cascade; moved up
+    	// so containment tracking can identify the just-being-compiled wrapper before recursing into its inner graph.
+    	const FName TagName = MakeNodeTagName(TagPrefix, Label);
+    	
         // Create the appropriate runtime instance
         UQuestNodeBase* Instance = nullptr;
 
-        if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
-        {
-            UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
-        	if (QuestEdNode->GetInnerGraph())
-        	{
-        		TMap<FName, TArray<FName>> InlineBoundaryByPath;
-        		TMap<FName, TArray<FQuestBoundaryCompletion>> InlineBoundaryCompletionsByPath;
-        		ComputeInnerBoundaryMaps(QuestEdNode, TagPrefix, Label,
+    	if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
+    	{
+    		UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
+    		if (QuestEdNode->GetInnerGraph())
+    		{
+    			TMap<FName, TArray<FName>> InlineBoundaryByPath;
+    			TMap<FName, TArray<FQuestBoundaryCompletion>> InlineBoundaryCompletionsByPath;
+    			ComputeInnerBoundaryMaps(QuestEdNode, TagPrefix, Label,
 					BoundaryTagsByPath, BoundaryCompletionsByPath, VisitedAssetPaths,
 					InlineBoundaryByPath, InlineBoundaryCompletionsByPath);
 
-        		const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-        		TMap<FName, FQuestEntryRouteList> InnerEntryByPath;
-        		QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, InlineBoundaryByPath, InlineBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
-        		QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
-        	}
-            Instance = QuestInstance;
-        }
+    			const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
+    			TMap<FName, FQuestEntryRouteList> InnerEntryByPath;
+
+    			// Save/restore CurrentInnerContainerTag around the inner CompileGraph recursion so nested
+    			// registrations record this UQuest as their immediate container. Mirrors the CurrentOuterGuidChain
+    			// save/restore pattern in the LinkedQuestline branch below.
+    			const FName PreviousContainer = CurrentInnerContainerTag;
+    			CurrentInnerContainerTag = TagName;
+    			QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, InlineBoundaryByPath, InlineBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
+    			CurrentInnerContainerTag = PreviousContainer;
+
+    			QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
+    		}
+    		Instance = QuestInstance;
+    	}
         else if (UQuestlineNode_Step* StepNode = Cast<UQuestlineNode_Step>(ContentNode))
         {
             if (StepNode->ObjectiveClass.IsNull())
@@ -440,7 +460,14 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 
 				const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
 				TMap<FName, FQuestEntryRouteList> InnerEntryByPath;
+
+				// Save/restore CurrentInnerContainerTag around the linked inner CompileGraph so nested
+				// registrations record this LinkedQuestline placement as their immediate container.
+				const FName PreviousContainer = CurrentInnerContainerTag;
+				CurrentInnerContainerTag = TagName;
 				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, LinkedBoundaryByPath, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
+				CurrentInnerContainerTag = PreviousContainer;
+
 				QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
 
 				CurrentOuterGuidChain = PreviousGuidChain;
@@ -454,8 +481,14 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
         Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
-        const FName TagName = MakeNodeTagName(TagPrefix, Label);
         AllCompiledQuestTags.Add(TagName);
+
+    	// Containment tracking — record the just-registered instance under whatever wrapper is currently being
+    	// expanded. NAME_None means root level (no enclosing wrapper).
+    	if (CurrentInnerContainerTag != NAME_None)
+    	{
+    		ImmediateContainerByTag.Add(TagName, CurrentInnerContainerTag);
+    	}
 
         // Register path identities: both the raw outcome tag (when path is static) and the per-node path fact
     	if (const UQuestlineNode_Step* QuestStepNode = Cast<UQuestlineNode_Step>(ContentNode))
@@ -1905,5 +1938,172 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 				GetterEdNodeByGroupAndDest.FindOrAdd(GroupTag).Add(DestTag, Getter);			}
 		}
 	}
+}
+
+// -------------------------------------------------------------------------------------------------
+// ComputeContainerReachability — post-compile pass populating containment + reachability data
+// -------------------------------------------------------------------------------------------------
+
+void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGraph)
+{
+    if (!InGraph) return;
+
+    TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_ComputeContainerReachability);
+
+    // ---- Step 1: Per-Step ancestor chain (innermost-first) via ImmediateContainerByTag walk ----
+    for (const auto& Pair : InGraph->CompiledNodes)
+    {
+        UQuestStep* Step = Cast<UQuestStep>(Pair.Value);
+        if (!Step) continue;
+        Step->AncestorContainerTags.Reset();
+        FName Cursor = ImmediateContainerByTag.FindRef(Pair.Key);
+        while (Cursor != NAME_None)
+        {
+            const FGameplayTag CursorTag = FGameplayTag::RequestGameplayTag(Cursor, /*bErrorIfNotFound=*/false);
+            if (CursorTag.IsValid())
+            {
+                Step->AncestorContainerTags.Add(CursorTag);
+            }
+            Cursor = ImmediateContainerByTag.FindRef(Cursor);
+        }
+    }
+
+    // ---- Step 2: Per-container InnerStepTags (any-depth Steps inside) ----
+    // Iterate Steps and back-fill each ancestor's InnerStepTags. Result is: a Step's QuestTag appears in the
+    // InnerStepTags of every container in its ancestor chain.
+    for (const auto& Pair : InGraph->CompiledNodes)
+    {
+        UQuestStep* Step = Cast<UQuestStep>(Pair.Value);
+        if (!Step || !Step->QuestTag.IsValid()) continue;
+        for (const FGameplayTag& AncestorTag : Step->AncestorContainerTags)
+        {
+            UQuestNodeBase* AncestorInstance = InGraph->CompiledNodes.FindRef(AncestorTag.GetTagName()).Get();
+            if (UQuest* AncestorQuest = Cast<UQuest>(AncestorInstance))
+            {
+                AncestorQuest->InnerStepTags.AddUnique(Step->QuestTag);
+            }
+        }
+    }
+
+    // ---- Step 3: Per-container ReachableStepsByActivatePin via routing walk filtered by containment ----
+    auto IsInsideContainer = [this](FName CandidateTag, FName ContainerTagName) -> bool
+    {
+        FName Cursor = ImmediateContainerByTag.FindRef(CandidateTag);
+        while (Cursor != NAME_None)
+        {
+            if (Cursor == ContainerTagName) return true;
+            Cursor = ImmediateContainerByTag.FindRef(Cursor);
+        }
+        return false;
+    };
+
+    auto WalkReachableFromEntries = [&](UQuest* Container, const TArray<FName>& EntryDestinations) -> TArray<FGameplayTag>
+    {
+        TSet<FName> Visited;
+        TArray<FName> Frontier = EntryDestinations;
+        TArray<FGameplayTag> Reached;
+        const FName ContainerTagName = Container->QuestTag.GetTagName();
+
+        while (Frontier.Num() > 0)
+        {
+            const FName Current = Frontier.Pop(EAllowShrinking::No);
+            if (Visited.Contains(Current)) continue;
+            Visited.Add(Current);
+
+            UQuestNodeBase* Node = InGraph->CompiledNodes.FindRef(Current).Get();
+            if (!Node) continue;
+
+            if (UQuestStep* Step = Cast<UQuestStep>(Node))
+            {
+                if (Step->QuestTag.IsValid()) Reached.AddUnique(Step->QuestTag);
+            }
+            else if (UQuest* InnerWrapper = Cast<UQuest>(Node))
+            {
+                // Absorb already-computed inner Steps from the nested wrapper (Step 2 populated InnerStepTags
+                // before Step 3 runs, so this is order-safe).
+                for (const FGameplayTag& T : InnerWrapper->InnerStepTags) Reached.AddUnique(T);
+            }
+
+            // Walk forward only into nodes still inside Container. Nested-wrapper outcomes that route to
+            // out-of-Container destinations (via the wrapper's Exit) are filtered cleanly by the structural check.
+            auto AppendIfInside = [&](FName Dest)
+            {
+                if (IsInsideContainer(Dest, ContainerTagName)) Frontier.Add(Dest);
+            };
+            for (const auto& PathPair : Node->GetNextNodesByPath())
+            {
+                for (FName Dest : PathPair.Value.NodeTags) AppendIfInside(Dest);
+            }
+            for (FName Dest : Node->GetNextNodesOnAnyOutcome()) AppendIfInside(Dest);
+            for (FName Dest : Node->GetNextNodesOnForward()) AppendIfInside(Dest);
+        }
+        return Reached;
+    };
+
+    for (const auto& Pair : InGraph->CompiledNodes)
+    {
+        UQuest* Container = Cast<UQuest>(Pair.Value);
+        if (!Container) continue;
+
+        Container->ReachableStepsByActivatePin.Reset();
+
+        // Any-Outcome entry pin: stored under NAME_None.
+        FQuestReachableSteps AnySteps;
+        AnySteps.StepTags = WalkReachableFromEntries(Container, Container->GetEntryStepTags());
+        Container->ReachableStepsByActivatePin.Add(NAME_None, MoveTemp(AnySteps));
+
+        // Per-path entry pins — keys mirror EntryStepTagsByPath.
+        for (const auto& EntryPair : Container->GetEntryStepTagsByPath())
+        {
+            TArray<FName> PathDests;
+            PathDests.Reserve(EntryPair.Value.Destinations.Num());
+            for (const FQuestEntryDestination& Dest : EntryPair.Value.Destinations)
+            {
+                PathDests.Add(Dest.DestTag);
+            }
+            FQuestReachableSteps PathSteps;
+            PathSteps.StepTags = WalkReachableFromEntries(Container, PathDests);
+            Container->ReachableStepsByActivatePin.Add(EntryPair.Key, MoveTemp(PathSteps));
+        }
+    }
+
+    // ---- Step 4: Verbose log dump for verification ----
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("ComputeContainerReachability: graph '%s' — %d compiled node(s)"),
+        *InGraph->GetName(), InGraph->CompiledNodes.Num());
+
+    for (const auto& Pair : InGraph->CompiledNodes)
+    {
+        if (UQuest* Container = Cast<UQuest>(Pair.Value))
+        {
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("  Container '%s' — %d inner Step(s), %d Activate-pin entry(s)"),
+                *Pair.Key.ToString(), Container->InnerStepTags.Num(), Container->ReachableStepsByActivatePin.Num());
+            for (const FGameplayTag& T : Container->InnerStepTags)
+            {
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("    InnerStep: %s"), *T.GetTagName().ToString());
+            }
+            for (const auto& PinPair : Container->ReachableStepsByActivatePin)
+            {
+                const FString PinLabel = (PinPair.Key == NAME_None) ? TEXT("AnyOutcome") : PinPair.Key.ToString();
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("    ActivatePin '%s' → %d Step(s)"),
+                    *PinLabel, PinPair.Value.StepTags.Num());
+                for (const FGameplayTag& T : PinPair.Value.StepTags)
+                {
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("      reachable Step: %s"), *T.GetTagName().ToString());
+                }
+            }
+        }
+        else if (UQuestStep* Step = Cast<UQuestStep>(Pair.Value))
+        {
+            FString AncestorList;
+            for (const FGameplayTag& T : Step->AncestorContainerTags)
+            {
+                if (!AncestorList.IsEmpty()) AncestorList += TEXT(" → ");
+                AncestorList += T.GetTagName().ToString();
+            }
+            if (AncestorList.IsEmpty()) AncestorList = TEXT("(root)");
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("  Step '%s' — Ancestors=[%s]"),
+                *Pair.Key.ToString(), *AncestorList);
+        }
+    }
 }
 

@@ -18,6 +18,7 @@ struct FQuestEntryRecordedEvent;
 class UQuestReward;
 
 
+
 /**
  * A single source-filtered entry destination. DestTag is the tag of a step or sub-node to activate when the parent quest
  * enters via a matching outcome from a matching source. SourceFilter is the compiled QuestTag (as FName) of the specific
@@ -95,6 +96,20 @@ struct FQuestPathNodeList
     TArray<FQuestBoundaryCompletion> BoundaryCompletions;
 };
 
+/**
+ * Compile-time reachability snapshot per Activate pin on a UQuest container. Populated by
+ * FQuestlineGraphCompiler::ComputeContainerReachability via a precise routing walk filtered by structural
+ * containment (cf. UQuest::ReachableStepsByActivatePin doc). Read by the path-aware giver gate.
+ */
+USTRUCT(BlueprintType)
+struct FQuestReachableSteps
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FGameplayTag> StepTags;
+};
+
 UCLASS(Abstract, Blueprintable)
 class SIMPLEQUEST_API UQuestNodeBase : public UObject
 {
@@ -112,6 +127,22 @@ public:
     FOnNodeCompleted OnNodeCompleted;
 
     virtual UWorld* GetWorld() const override;
+    
+    /**
+     * True for the concrete UQuestStep leaf class — the only node type that bears intrinsic lifecycle state
+     * (PendingGiver / Live / Deactivated mutually exclusive). Read by lifecycle methods to gate behavior that
+     * applies only to state-bearing leaves (e.g. publishing FQuestStartedEvent on the per-Step channel,
+     * mutating the Live boolean fact directly).
+     */
+    virtual bool IsStepNode() const { return false; }
+
+    /**
+     * True for UQuest container wrappers (inline Quest placements + LinkedQuestline placements). Container Live
+     * is DERIVED from inner Step state rather than tracked as an intrinsic boolean fact — see UQuest::InnerStepTags
+     * for the data backing the derivation. Read by lifecycle methods to skip direct Live-fact writes on containers
+     * and instead route through the auto-propagation walk over UQuestStep::AncestorContainerTags.
+     */
+    virtual bool IsContainerNode() const { return false; }
     
     /**
      * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeStarted/OnNodeCompleted.

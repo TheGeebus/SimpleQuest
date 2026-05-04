@@ -28,6 +28,8 @@ public:
 	
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
+	virtual bool IsStepNode() const override { return true; }
+
 protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 	virtual void DeactivateInternal(FGameplayTag InContextualTag) override;
@@ -49,6 +51,15 @@ protected:
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
 
+	/**
+	 * Container chain ordered innermost → outermost. Compile-time populated by FQuestlineGraphCompiler::
+	 * ComputeContainerReachability. Read by Step state-transition methods (SetQuestLive / SetQuestResolved /
+	 * SetQuestDeactivated) to walk up and re-derive each ancestor container's Live state.
+	 */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+	TArray<FGameplayTag> AncestorContainerTags;
+
+	
 public:
 	/**
 	 * Snapshot of the final composed params delivered to the objective at activation. Retained for Piece D chain
@@ -87,5 +98,6 @@ public:
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveContext& GetCompletionContext() const { return CompletionContext; }
 	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }
-	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }	
+	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }
+	FORCEINLINE const TArray<FGameplayTag>& GetAncestorContainerTags() const { return AncestorContainerTags; }
 };

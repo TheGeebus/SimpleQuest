@@ -154,6 +154,16 @@ private:
 	TMap<FGameplayTag, FDelegateHandle> DeactivationSubscriptionHandles;
 
 	void SetQuestLive(FGameplayTag QuestTag);
+
+	/**
+	 * Recomputes a container's Live fact from its inner Step state. Called by SetQuestLive (and in upcoming
+	 * phases by SetQuestResolved / SetQuestDeactivated) once a Step's Live state has changed — walks the Step's
+	 * ancestor chain and re-derives each ancestor in turn. A container is Live whenever any inner Step (at any
+	 * depth) has its Live fact set; not Live otherwise. Idempotent — checks current state and only mutates the
+	 * WorldState fact when the derivation result differs.
+	 */
+	void DeriveContainerLive(FGameplayTag ContainerTag);
+	
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);

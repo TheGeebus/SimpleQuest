@@ -1950,6 +1950,20 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
 
     TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_ComputeContainerReachability);
 
+	// Resolve each compiled node's runtime QuestTag field from its compiled FName key. UQuestNodeBase::QuestTag
+	// is a runtime FGameplayTag normally populated by UQuestManagerSubsystem::ActivateQuestlineGraph at PIE start;
+	// at compile time it's default-invalid, which would silently break Steps 2 and 3 below (the InnerStepTags
+	// back-fill and the routing walk both compare against it). ResolveQuestTag is idempotent — runtime calls it
+	// again at graph load with no side effects beyond re-assignment. Skip Util_ keys — utility nodes use a
+	// GUID-derived FName that isn't a registered gameplay tag.
+	for (const auto& Pair : InGraph->CompiledNodes)
+	{
+		if (Pair.Value && !Pair.Key.ToString().StartsWith(TEXT("Util_")))
+		{
+			Pair.Value->ResolveQuestTag(Pair.Key);
+		}
+	}
+	
     // ---- Step 1: Per-Step ancestor chain (innermost-first) via ImmediateContainerByTag walk ----
     for (const auto& Pair : InGraph->CompiledNodes)
     {

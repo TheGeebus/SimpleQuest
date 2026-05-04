@@ -268,8 +268,12 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_HandleOnNodeStarted);
 
-    if (Node->GetQuestTag().IsValid())
+    if (Node->GetQuestTag().IsValid() && Node->IsStepNode())
     {
+        // Only Steps own a direct Live fact; containers' Live state is derived from inner Step state by
+        // DeriveContainerLive (triggered by the Step's SetQuestLive ancestor walk). Containers still publish
+        // FQuestStartedEvent below so subscribers see the activation, just without an accompanying intrinsic Live
+        // fact write. The Live fact arrives later when an inner Step activates and walks up.
         SetQuestLive(Node->GetQuestTag());
     }
     if (QuestSignalSubsystem)
@@ -1318,6 +1322,60 @@ void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
 
     UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
     WorldState->AddFact(LiveFact);
+
+    // Ancestor walk for Steps. Containers' Live state is derived from inner Step state, so a Step
+    // transitioning to Live propagates upward: each ancestor container re-derives its Live fact based on whether
+    // any of its inner Steps is now Live. Innermost-first ordering means the immediate parent derives first;
+    // outer ancestors derive against the now-up-to-date inner state. Non-Step callers (containers passed in by
+    // misuse, future node kinds) skip the walk — there's no ancestor chain to traverse for them.
+    if (UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    {
+        if (Node->IsStepNode())
+        {
+            for (const FGameplayTag& AncestorTag : Cast<UQuestStep>(Node)->GetAncestorContainerTags())
+            {
+                DeriveContainerLive(AncestorTag);
+            }
+        }
+    }
+}
+
+void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
+{
+    if (!WorldState || !ContainerTag.IsValid()) return;
+
+    UQuest* Container = Cast<UQuest>(LoadedNodeInstances.FindRef(ContainerTag.GetTagName()));
+    if (!Container) return;  // not a container — nothing to derive
+
+    // A container is Live whenever any inner Step at any depth has its Live fact set in WorldState. InnerStepTags
+    // is compile-time populated by ComputeContainerReachability and bounded by the number of Steps inside this
+    // wrapper (typically a handful), so the linear scan is cheap. Short-circuits on the first Live inner Step.
+    bool bAnyInnerLive = false;
+    for (const FGameplayTag& InnerStepTag : Container->GetInnerStepTags())
+    {
+        const FGameplayTag InnerLiveFact = FQuestTagComposer::ResolveStateFactTag(InnerStepTag, EQuestStateLeaf::Live);
+        if (InnerLiveFact.IsValid() && WorldState->HasFact(InnerLiveFact))
+        {
+            bAnyInnerLive = true;
+            break;
+        }
+    }
+
+    const FGameplayTag ContainerLiveFact = FQuestTagComposer::ResolveStateFactTag(ContainerTag, EQuestStateLeaf::Live);
+    if (!ContainerLiveFact.IsValid()) return;
+
+    const bool bCurrentlyLive = WorldState->HasFact(ContainerLiveFact);
+    if (bAnyInnerLive && !bCurrentlyLive)
+    {
+        WorldState->AddFact(ContainerLiveFact);
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("DeriveContainerLive: '%s' → Live (inner Step now active)"), *ContainerTag.ToString());
+    }
+    else if (!bAnyInnerLive && bCurrentlyLive)
+    {
+        WorldState->RemoveFact(ContainerLiveFact);
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("DeriveContainerLive: '%s' → not Live (no inner Steps active)"), *ContainerTag.ToString());
+    }
+    // else: container's Live state already matches what's derived — no action needed.
 }
 
 void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source)
@@ -1343,22 +1401,6 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // via HasResolvedWith. Subscribers that previously watched <Quest>.Path.<Outcome> facts now subscribe
     // to FQuestResolutionRecordedEvent on the QuestTag channel. See RegisterEnablementWatch and
     // DeferChainToNextNodes for the subscription wiring. RecordResolution below publishes the event.
-    
-    /*
-    if (OutcomeTag.IsValid())
-    {
-        // Path fact is asserted on every resolution: ref-count grows per fire, NOT idempotent. Looping Steps and
-        // any downstream subscriber that tracks "this outcome happened again" rely on the fresh per-resolution
-        // assertion (and on the corresponding RemoveFact path in cleanup paths) to propagate. Distinct from the
-        // Completed fact above, which is genuinely one-shot per quest lifetime.
-        const FGameplayTag PathFact = UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestStateTagUtils::MakeNodePathFact(QuestTag.GetTagName(), OutcomeTag.GetTagName()), false);
-        if (PathFact.IsValid())
-        {
-            WorldState->AddFact(PathFact);
-        }
-    }
-    */
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
     // but the manager writes it atomically with its own fact updates so the two layers stay consistent.

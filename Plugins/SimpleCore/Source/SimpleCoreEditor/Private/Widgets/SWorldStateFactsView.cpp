@@ -134,12 +134,25 @@ void SWorldStateFactsView::Construct(const FArguments& InArgs)
     ChildSlot
     [
         SNew(SVerticalBox)
-        + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
+        + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f ,4.f))
         [
-            SNew(STextBlock)
-                .Text_Lambda([this]() { return GetStatusText(); })
-                .ColorAndOpacity(FSlateColor(WorldStateFactsView_Style::SubduedText))
-                .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+            SNew(SHorizontalBox)
+            + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+            [
+                SNew(STextBlock)
+                    .Text_Lambda([this]() { return GetStatusText(); })
+                    .ColorAndOpacity(FSlateColor(WorldStateFactsView_Style::SubduedText))
+                    .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+            ]
+            + SHorizontalBox::Slot().AutoWidth().Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+            [
+                // Height-matched invisible placeholder. Forces row 1 to allocate the same vertical space as the
+                // Quest State view's segmented control so row 2 (and thus the SSearchBox hint text) lands on
+                // identical sub-pixel y in both views. Width auto-collapses to zero since SBox is content-empty.
+                SNew(SBox)
+                    .HeightOverride(25.f)  // matches QuestState SSegmentedControl actual rendered height - creates pixel perfect swap effect
+                    .Visibility(EVisibility::Hidden)
+            ]
         ]
         + SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.f, 0.f, 0.f, 4.f))
         [

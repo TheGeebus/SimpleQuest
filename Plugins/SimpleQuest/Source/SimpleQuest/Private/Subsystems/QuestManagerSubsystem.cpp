@@ -1387,7 +1387,20 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // registry below (Layer 2) and any downstream chain dispatch driven by the caller are NOT gated here. Quests
     // are allowed to resolve multiple times (stays-Live-after-completion, or deactivate > reactivate > re-resolve), and
     // each fire should append to history and propagate signals normally.
-    WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+    //
+    // Phase 4 of container lifecycle alignment — only Steps own a direct Live fact, so only Steps clear it here.
+    // For containers, Live is derived from inner Step state by DeriveContainerLive; the container's Live transitions
+    // to false naturally when the last inner Step transitions out of Live (Phase 5 wires that path symmetrically
+    // on SetQuestDeactivated and the Step-side resolution). Skipping the RemoveFact here for containers also gives
+    // loopable wrappers correct semantics — the wrapper stays Live across loop iterations as long as inner Steps
+    // remain Live, instead of flickering false on each outer outcome's chain processing.
+    UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName());
+    const bool bIsContainer = Node && Node->IsContainerNode();
+
+    if (!bIsContainer)
+    {
+        WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+    }
     WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
     const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed);

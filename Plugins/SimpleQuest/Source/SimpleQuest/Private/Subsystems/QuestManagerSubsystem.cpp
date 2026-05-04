@@ -206,6 +206,18 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
             {
                 Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
             }
+
+            // Push container classification to the state subsystem so its blocker query (AlreadyLive split) can
+            // distinguish Step-vs-container semantics without cross-subsystem coupling. Mirrors the existing
+            // record-pushes (RecordResolution / RecordEntry / UpdateQuestPrereqStatus) — manager pushes structural
+            // info; state subsystem owns the public read surface.
+            if (Instance->IsContainerNode() && ResolvedTag.IsValid())
+            {
+                if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+                {
+                    StateSubsystem->RegisterContainerTag(ResolvedTag);
+                }
+            }
         }
     }
     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — loaded %d node(s), activating %d entry tag(s)"),
@@ -478,52 +490,39 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
      */
     if (NodeTag.IsValid() && WorldState)
     {
-        if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ||
-            WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver)))
+        const bool bIsLive = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live));
+        const bool bIsPendingGiver = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver));
+
+        if (bIsLive || bIsPendingGiver)
         {
+            UQuestNodeBase* Instance = *InstancePtr;
+            const bool bIsContainer = Instance && Instance->IsContainerNode();
+
             /**
-             * Already-live Quest receiving a late outcome: deliver the outcome without re-activating. This handles graphs where
-             * a Quest node is activated before its incoming outcome arrives. Source filtering applies the same way as first-time activation.
+             * STEP PATH: refuse re-entry on Live or PendingGiver. Steps own their state directly; re-firing would
+             * corrupt lifecycle invariants and double-publish FQuestStartedEvent.
              */
-            if (IncomingOutcomeTag.IsValid() && WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)))
+            if (!bIsContainer)
             {
-                if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
-                {
-                    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: delivering late outcome '%s' (source '%s') to already-live quest '%s'"),
-                        *IncomingOutcomeTag.ToString(), *IncomingSourceTag.ToString(), *NodeTagName.ToString());
-
-                    if (QuestStateSubsystem && NodeTag.IsValid())
-                    {
-                        const FGameplayTag SourceQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
-                        const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-                        QuestStateSubsystem->RecordEntry(NodeTag, SourceQuestTag, IncomingOutcomeTag, Now);
-                    }
-
-                    if (const FQuestEntryRouteList* RouteList = QuestNode->GetEntryStepTagsByPath().Find(IncomingOutcomeTag.GetTagName()))
-                    {
-                        for (const FQuestEntryDestination& Entry : RouteList->Destinations)
-                        {
-                            if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
-                        }
-                    }
-
-                    if (IncomingSourceTag != NAME_None)
-                    {
-                        if (const FQuestEntryRouteList* AnyRouteList = QuestNode->GetEntryStepTagsByPath().Find(NAME_None))
-                        {
-                            for (const FQuestEntryDestination& Entry : AnyRouteList->Destinations)
-                            {
-                                if (Entry.SourceFilter == IncomingSourceTag) ActivateNodeByTag(Entry.DestTag);
-                            }
-                        }
-                    }
-                }
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
+                    *NodeTagName.ToString(),
+                    bIsLive ? TEXT("live") : TEXT("pending giver"));
+                return;
             }
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
+
+            /**
+             * CONTAINER PATH: containers always fall through to the full activation flow when re-activated while
+             * Live. Containers don't directly write the Live fact, and inner Step diamond guards refuse re-Live
+             * for already-Live Steps so spurious re-fires of entry routes are idempotent. HandleOnNodeStarted's
+             * container branch handles Any-Outcome and per-path entries, records entry to UQuestStateSubsystem,
+             * and re-publishes FQuestStartedEvent. Per-cascade fan-in is handled by the PendingEntryActivations
+             * queue stamped further below. Loop-back wires (own outer outcome → own Activate) and external fan-in
+             * both route through here equivalently.
+             */
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' re-activating container while %s"),
                 *NodeTagName.ToString(),
-                WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live)) ? TEXT("live") :
-                TEXT("pending giver"));
-            return;
+                bIsLive ? TEXT("live") : TEXT("pending giver"));
+            // Fall through to Block gate, giver gate, and normal activation flow below.
         }
         // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Deactivated));
@@ -532,39 +531,100 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
     if (!bBypassGiverGate && NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
     {
         UQuestNodeBase* Instance = *InstancePtr;
-        Instance->bWasGiverGated = true;
-        SetQuestPendingGiver(NodeTag);
 
-        if (QuestSignalSubsystem)
+        // Phase 6 of container lifecycle alignment — path-aware skip. For containers, look up which inner Steps
+        // are reachable from the entered Activate pin (compile-time populated by ComputeContainerReachability into
+        // UQuest::ReachableStepsByActivatePin). If all reachable Steps are already Live, there's no work for the
+        // giver to enable, so skip the gate and fall through to normal activation. This covers loop-back wires,
+        // fan-in re-entry, and any case where the entered path's targets are already running — preventing the
+        // giver from spuriously re-firing each iteration. Empty reachable set falls through to fire the gate as
+        // before (preserves behavior for non-container giver-gated nodes and edge cases where reachability data
+        // didn't populate).
+        bool bSkipGiverGate = false;
+        if (UQuest* Container = Cast<UQuest>(Instance))
         {
-            FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
-            const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
-
-            // Push the prereq status to the state subsystem before publishing events. The state subsystem's
-            // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
-            // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
-            if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+            const FName DiagPinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: container '%s' pin '%s' — %d ReachableStepsByActivatePin entry(s)"),
+                *NodeTagName.ToString(), *DiagPinKey.ToString(), Container->GetReachableStepsByActivatePin().Num());
+            if (const FQuestReachableSteps* DiagReachable = Container->GetReachableStepsByActivatePin().Find(DiagPinKey))
             {
-                StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: pin '%s' found, %d reachable Step(s)"),
+                    *DiagPinKey.ToString(), DiagReachable->StepTags.Num());
+                for (const FGameplayTag& DiagStep : DiagReachable->StepTags)
+                {
+                    const FGameplayTag DiagLive = FQuestTagComposer::ResolveStateFactTag(DiagStep, EQuestStateLeaf::Live);
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag:   Step '%s' Live=%d"),
+                        *DiagStep.GetTagName().ToString(), WorldState->HasFact(DiagLive) ? 1 : 0);
+                }
             }
-
-            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
-
-            if (PrereqStatus.bSatisfied)
+            else
             {
-                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: pin '%s' NOT found in map"), *DiagPinKey.ToString());
             }
-
-            if (!Instance->PrerequisiteExpression.IsAlways())
+            
+            const FName PinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
+            if (const FQuestReachableSteps* Reachable = Container->GetReachableStepsByActivatePin().Find(PinKey))
             {
-                RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
+                if (!Reachable->StepTags.IsEmpty())
+                {
+                    bSkipGiverGate = true;
+                    for (const FGameplayTag& StepTag : Reachable->StepTags)
+                    {
+                        const FGameplayTag StepLiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
+                        if (!StepLiveFact.IsValid() || !WorldState->HasFact(StepLiveFact))
+                        {
+                            bSkipGiverGate = false;
+                            break;
+                        }
+                    }
+                }
             }
-
-            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
-                *NodeTagName.ToString(),
-                PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
         }
-        return;
+
+        if (bSkipGiverGate)
+        {
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' giver-gate skipped — all reachable Steps from pin '%s' already Live"),
+                *NodeTagName.ToString(),
+                IncomingOutcomeTag.IsValid() ? *IncomingOutcomeTag.GetTagName().ToString() : TEXT("AnyOutcome"));
+            // Fall through to Block gate, cascade-origin, params stamping, and Activate. No early return — the
+            // activation should still proceed for fan-in convergence and loop-back entry routing.
+        }
+        else
+        {
+            Instance->bWasGiverGated = true;
+            SetQuestPendingGiver(NodeTag);
+
+            if (QuestSignalSubsystem)
+            {
+                FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
+                const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
+
+                // Push the prereq status to the state subsystem before publishing events. The state subsystem's
+                // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
+                // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
+                if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+                {
+                    StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
+                }
+
+                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
+
+                if (PrereqStatus.bSatisfied)
+                {
+                    QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+                }
+
+                if (!Instance->PrerequisiteExpression.IsAlways())
+                {
+                    RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
+                }
+
+                UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
+                    *NodeTagName.ToString(),
+                    PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
+            }
+            return;
+        }
     }
 
     // Block gate — orthogonal to lifecycle. Block intentionally allows the giver-gate setup above (so the giver
@@ -689,7 +749,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
      */
     const FName SourceTagName = Node->GetQuestTag().GetTagName();
 
-    // Piece D handoff: gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
+    // Gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
     // and build the OriginChain extension (received chain + this step's tag) so downstream steps see the full history.
     FQuestObjectiveActivationParams ForwardPayload;
     TArray<FGameplayTag> ForwardChain;
@@ -808,28 +868,47 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // Enablement watch cleanup: Defensive against entry persisting after deactivation.
     ClearEnablementWatch(QuestTag);
 
-	// Active node cleanup: Use Node instead of redundant lookup
-	if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
-	{
-		if (Node)
-		{
-			Node->DeactivateInternal(QuestTag);
-		}
-		WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+    // Active node cleanup: Use Node instead of redundant lookup
+    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
+    {
+        if (Node)
+        {
+            Node->DeactivateInternal(QuestTag);
+        }
 
-		if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
-		{
-			if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
-			LiveStepTriggerHandles.Remove(QuestTag);
-		}
+        // Only Steps clear the Live fact directly. Containers' Live is derived from inner Step state; the cascading
+        // deactivation routed through NextNodesToDeactivateOnDeactivation will eventually deactivate inner Steps, and
+        // each Step's SetQuestDeactivated walks its ancestors to re-derive container Live. Skipping the direct removal
+        // here preserves the invariant that container Live always reflects inner Step state, even briefly between this
+        // method and the inner-Step cascade.
+        if (!Node || !Node->IsContainerNode())
+        {
+            WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+        }
+
+        if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(QuestTag))
+        {
+            if (QuestSignalSubsystem) QuestSignalSubsystem->UnsubscribeMessage(QuestTag, *Handle);
+            LiveStepTriggerHandles.Remove(QuestTag);
+        }
 
         if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(QuestTag))
         {
             FPrereqLeafSubscription::UnsubscribeAll(QuestSignalSubsystem, *Handles);
             DeferredCompletionPrereqHandles.Remove(QuestTag);
         }
-		DeferredCompletions.Remove(QuestTag);
-	}
+        DeferredCompletions.Remove(QuestTag);
+
+        // Ancestor walk for Steps. After the Step's Live fact has been cleared, each ancestor container
+        // re-derives its Live state. Containers skip — they don't own a Live fact directly to walk away from.
+        if (Node && Node->IsStepNode())
+        {
+            for (const FGameplayTag& AncestorTag : Cast<UQuestStep>(Node)->GetAncestorContainerTags())
+            {
+                DeriveContainerLive(AncestorTag);
+            }
+        }
+    }
 
     // Skip the Deactivated fact write + event publish if Deactivated was already asserted (the ref-count bump
     // would prevent a future ClearBlocked from fully clearing Deactivated; the event re-publish would deliver a
@@ -1388,18 +1467,30 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // are allowed to resolve multiple times (stays-Live-after-completion, or deactivate > reactivate > re-resolve), and
     // each fire should append to history and propagate signals normally.
     //
-    // Phase 4 of container lifecycle alignment — only Steps own a direct Live fact, so only Steps clear it here.
-    // For containers, Live is derived from inner Step state by DeriveContainerLive; the container's Live transitions
-    // to false naturally when the last inner Step transitions out of Live (Phase 5 wires that path symmetrically
-    // on SetQuestDeactivated and the Step-side resolution). Skipping the RemoveFact here for containers also gives
-    // loopable wrappers correct semantics — the wrapper stays Live across loop iterations as long as inner Steps
-    // remain Live, instead of flickering false on each outer outcome's chain processing.
+    // Only Steps own a direct Live fact, so only Steps clear it here. For containers, Live is derived from inner
+    // Step state by DeriveContainerLive; the container's Live transitions to false naturally when the last inner Step
+    // transitions out of Live (Phase 5 wires that path symmetrically on SetQuestDeactivated and the Step-side resolution).
+    // Skipping the RemoveFact here for containers also gives loopable wrappers correct semantics — the wrapper stays Live
+    // across loop iterations as long as inner Steps remain Live, instead of flickering false on each outer outcome's chain
+    // processing.
     UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName());
     const bool bIsContainer = Node && Node->IsContainerNode();
 
     if (!bIsContainer)
     {
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
+        
+        // Phase 5 of container lifecycle alignment — Step's Live just transitioned out, so its ancestor containers
+        // re-derive their Live state. Containers skip this branch (they don't own a Live fact directly; their Live
+        // tracks inner Step state via the Step-side ancestor walks). Wrappers being resolved as part of chain
+        // boundary processing route through this method but with bIsContainer=true and don't trigger derivation.
+        if (Node && Node->IsStepNode())
+        {
+            for (const FGameplayTag& AncestorTag : Cast<UQuestStep>(Node)->GetAncestorContainerTags())
+            {
+                DeriveContainerLive(AncestorTag);
+            }
+        }
     }
     WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
@@ -1408,6 +1499,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     {
         WorldState->AddFact(CompletedFact);
     }
+    WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
     // Path fact write to WorldState removed in the Outcome/Path data-layer migration. The resolution
     // registry (UQuestStateSubsystem) is now the canonical source of truth for outcome-keyed queries

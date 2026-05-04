@@ -117,13 +117,19 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// State-fact blockers (in declared priority order — designer can early-return on first match).
 
-	// 2. AlreadyLive — terminal: quest in flight.
+	// 2. AlreadyLive — terminal for Steps. Containers (UQuest wrappers) are exempt: their Live fact is derived
+	//    from inner Step state, so a give forwarding activation to a Live wrapper with mixed-Live inner Steps is
+	//    valid — exactly the path the path-aware giver gate (Phase 6) targets. Step Live blocks because Steps own
+	//    their Live state directly and re-activation while Live would corrupt lifecycle invariants.
 	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
 		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false)))
 	{
-		FQuestActivationBlocker Blocker;
-		Blocker.Reason = EQuestActivationBlocker::AlreadyLive;
-		Out.Add(Blocker);
+		if (!IsContainerTag(QuestTag))
+		{
+			FQuestActivationBlocker Blocker;
+			Blocker.Reason = EQuestActivationBlocker::AlreadyLive;
+			Out.Add(Blocker);
+		}
 	}
 
 	// 3. Blocked — terminal until ClearBlocked.
@@ -135,16 +141,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		Out.Add(Blocker);
 	}
 
-	// 4. Deactivated — clearable on Activate-input re-entry.
-	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false)))
-	{
-		FQuestActivationBlocker Blocker;
-		Blocker.Reason = EQuestActivationBlocker::Deactivated;
-		Out.Add(Blocker);
-	}
-
-	// 5. NotPendingGiver — quest hasn't been activated to giver-offer state.
+	// 4. NotPendingGiver — quest hasn't been activated to giver-offer state.
 	if (!WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
 		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false)))
 	{
@@ -153,7 +150,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		Out.Add(Blocker);
 	}
 
-	// 6. PrereqUnmet — read cached prereq status. Manager pushes this on giver-branch entry and on
+	// 5. PrereqUnmet — read cached prereq status. Manager pushes this on giver-branch entry and on
 	//    enablement-watch transitions, so the cache reflects the current evaluation.
 	if (const FQuestPrereqStatus* Cached = CachedPrereqStatus.Find(QuestTag))
 	{
@@ -291,3 +288,17 @@ USignalSubsystem* UQuestStateSubsystem::ResolveSignalSubsystem() const
 	}
 	return nullptr;
 }
+
+void UQuestStateSubsystem::RegisterContainerTag(FGameplayTag QuestTag)
+{
+	if (QuestTag.IsValid())
+	{
+		ContainerTags.Add(QuestTag);
+	}
+}
+
+bool UQuestStateSubsystem::IsContainerTag(FGameplayTag QuestTag) const
+{
+	return QuestTag.IsValid() && ContainerTags.Contains(QuestTag);
+}
+

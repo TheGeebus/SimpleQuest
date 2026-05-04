@@ -21,9 +21,6 @@ enum class EQuestActivationBlocker : uint8
 	/** Quest's Blocked fact is set — externally locked out via SetBlocked. ClearBlocked required to re-enable. */
 	Blocked,
 
-	/** Quest's Deactivated fact is set without Live — interrupted lifecycle. Re-entry via Activate input clears. */
-	Deactivated,
-
 	/** Quest's Live fact is set — already running. Cannot be re-given while active. */
 	AlreadyLive,
 

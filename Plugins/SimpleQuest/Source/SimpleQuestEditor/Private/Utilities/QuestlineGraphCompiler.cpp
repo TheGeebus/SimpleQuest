@@ -2011,7 +2011,13 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
         return false;
     };
 
-    auto WalkReachableFromEntries = [&](UQuest* Container, const TArray<FName>& EntryDestinations) -> TArray<FGameplayTag>
+    // Activation-immediate reachability — follow ONLY entry routes (entry pins of nested wrappers; utility
+    // node forward outputs). Skip completion outputs (NextNodesByPath / NextNodesOnAnyOutcome on Steps and
+    // wrappers): those represent "Step finishes, then next thing activates," not "this pin's give-acceptance
+    // immediately activates that Step." Phase 6's giver gate skip should fire only when all Steps that this
+    // pin's activation IMMEDIATELY enables are already Live; downstream outcome-chain Steps don't count.
+    TFunction<TArray<FGameplayTag>(UQuest*, const TArray<FName>&)> WalkEntryReachable;
+    WalkEntryReachable = [&](UQuest* Container, const TArray<FName>& EntryDestinations) -> TArray<FGameplayTag>
     {
         TSet<FName> Visited;
         TArray<FName> Frontier = EntryDestinations;
@@ -2030,26 +2036,25 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
             if (UQuestStep* Step = Cast<UQuestStep>(Node))
             {
                 if (Step->QuestTag.IsValid()) Reached.AddUnique(Step->QuestTag);
+                // Don't follow Step's outcomes — those are completion routes.
             }
             else if (UQuest* InnerWrapper = Cast<UQuest>(Node))
             {
-                // Absorb already-computed inner Steps from the nested wrapper (Step 2 populated InnerStepTags
-                // before Step 3 runs, so this is order-safe).
-                for (const FGameplayTag& T : InnerWrapper->InnerStepTags) Reached.AddUnique(T);
+                // Recurse into the nested wrapper's any-outcome entry routes. Outer's entry to inner via
+                // wrapper.Activate corresponds to inner's any-outcome entry pin (inner.EntryStepTags). Don't
+                // absorb inner.InnerStepTags or follow inner's outer outcomes — those include outcome-chain
+                // Steps that activate later, not immediately on this pin's give-acceptance.
+                const TArray<FGameplayTag> InnerReached = WalkEntryReachable(InnerWrapper, InnerWrapper->GetEntryStepTags());
+                for (const FGameplayTag& T : InnerReached) Reached.AddUnique(T);
             }
-
-            // Walk forward only into nodes still inside Container. Nested-wrapper outcomes that route to
-            // out-of-Container destinations (via the wrapper's Exit) are filtered cleanly by the structural check.
-            auto AppendIfInside = [&](FName Dest)
+            else
             {
-                if (IsInsideContainer(Dest, ContainerTagName)) Frontier.Add(Dest);
-            };
-            for (const auto& PathPair : Node->GetNextNodesByPath())
-            {
-                for (FName Dest : PathPair.Value.NodeTags) AppendIfInside(Dest);
+                // Utility / control node — follow NextNodesOnForward (activation-forward wire, not completion).
+                for (FName Dest : Node->GetNextNodesOnForward())
+                {
+                    if (IsInsideContainer(Dest, ContainerTagName)) Frontier.Add(Dest);
+                }
             }
-            for (FName Dest : Node->GetNextNodesOnAnyOutcome()) AppendIfInside(Dest);
-            for (FName Dest : Node->GetNextNodesOnForward()) AppendIfInside(Dest);
         }
         return Reached;
     };
@@ -2063,7 +2068,7 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
 
         // Any-Outcome entry pin: stored under NAME_None.
         FQuestReachableSteps AnySteps;
-        AnySteps.StepTags = WalkReachableFromEntries(Container, Container->GetEntryStepTags());
+        AnySteps.StepTags = WalkEntryReachable(Container, Container->GetEntryStepTags());
         Container->ReachableStepsByActivatePin.Add(NAME_None, MoveTemp(AnySteps));
 
         // Per-path entry pins — keys mirror EntryStepTagsByPath.
@@ -2076,7 +2081,7 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
                 PathDests.Add(Dest.DestTag);
             }
             FQuestReachableSteps PathSteps;
-            PathSteps.StepTags = WalkReachableFromEntries(Container, PathDests);
+            PathSteps.StepTags = WalkEntryReachable(Container, PathDests);
             Container->ReachableStepsByActivatePin.Add(EntryPair.Key, MoveTemp(PathSteps));
         }
     }

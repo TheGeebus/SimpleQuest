@@ -111,7 +111,7 @@ protected:
 	UPROPERTY()
 	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
 
-private:
+private:	
 	/**
 	 * Assembles a fully populated FQuestEventContext from a node instance.
 	 * Stage 1: copies NodeInfo from the node.

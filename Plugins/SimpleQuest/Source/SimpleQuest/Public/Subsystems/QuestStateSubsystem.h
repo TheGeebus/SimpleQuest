@@ -143,6 +143,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
     FQuestPrereqStatus GetQuestPrereqStatus(FGameplayTag QuestTag) const;
 
+	/**
+	 * Whether QuestTag's runtime instance is a UQuest container (wrapper). False for Steps, utility nodes, and
+	 * any tag the manager hasn't registered. Public read surface — used by the blocker query and any consumer
+	 * that needs to know a tag's structural classification.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
+	bool IsContainerTag(FGameplayTag QuestTag) const;
+
 private:
     friend class UQuestManagerSubsystem;
 
@@ -180,4 +188,17 @@ private:
     
     /** Resolves the GameInstance's SignalSubsystem for publishing FQuestResolutionRecordedEvent on RecordResolution. */
     USignalSubsystem* ResolveSignalSubsystem() const;
+
+	/**
+	 * Pushed by the manager during graph activation: marks QuestTag as a container (UQuest wrapper). Lets the
+	 * blocker query distinguish Step-vs-container semantics for the AlreadyLive blocker without cross-subsystem
+	 * coupling — containers' Live state is derived from inner Step state and shouldn't gate forward activation.
+	 */
+	void RegisterContainerTag(FGameplayTag QuestTag);
+
+	/**
+	 * Set of compiled QuestTags whose runtime instance is a UQuest container. Populated by the manager during
+	 * ActivateQuestlineGraph; read by QueryQuestActivationBlockers. Persists with the subsystem instance.
+	 */
+	TSet<FGameplayTag> ContainerTags;
 };

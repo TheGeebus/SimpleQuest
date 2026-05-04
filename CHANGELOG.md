@@ -184,8 +184,8 @@ gating on LinkedQuestline nodes now works as designers expect.
   without coupling to the giver-side flow.
 - **`FQuestActivationBlocker`** — structured "why can't this start"
   entry. `EQuestActivationBlocker` enum reasons: `PrereqUnmet`
-  (with `UnsatisfiedLeafTags`), `Blocked`, `Deactivated`,
-  `AlreadyLive`, `NotPendingGiver`, `UnknownQuest`.
+  (with `UnsatisfiedLeafTags`), `Blocked`, `AlreadyLive`,
+  `NotPendingGiver`, `UnknownQuest`.
 - **`FQuestPrereqStatus` / `FQuestPrereqLeafStatus`** — overall +
   per-leaf evaluation snapshots. `FPrerequisiteExpression::EvaluateWithLeafStatus`
   is the new single-pass walker that produces them; the existing

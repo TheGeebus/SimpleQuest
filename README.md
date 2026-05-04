@@ -7,6 +7,8 @@ A source-available Unreal Engine plugin for graph-authored, non-linear quest sys
 
 This version is for Unreal Engine 5.6.
 
+Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
+
 See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 [![License: Polyform NC 1.0](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](LICENSE)

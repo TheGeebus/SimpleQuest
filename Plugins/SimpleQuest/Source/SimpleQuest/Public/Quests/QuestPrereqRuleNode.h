@@ -21,6 +21,7 @@ public:
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
 protected:
+	virtual void OnRegisteredWithManager() override;
 	virtual void ResetTransientState() override;
 
 private:

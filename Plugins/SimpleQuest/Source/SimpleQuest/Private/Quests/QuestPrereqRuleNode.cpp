@@ -9,15 +9,23 @@
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 
+
 void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super - Rule monitors are utility nodes that do not participate in the quest lifecycle
-	// (no Active / Completed / Deactivated state facts). They subscribe to Expression leaves and publish the rule
-	// tag when the expression evaluates true.
+	// Intentionally skips Super — Rule monitors are utility nodes that do not participate in the quest lifecycle
+	// (no Active / Completed / Deactivated state facts). The subscribe + initial-publish work happens in
+	// OnRegisteredWithManager (instance lifetime), not here. Activate calls from the compiler's OutMonitorTags
+	// entry-tag registration are now harmless redundant pulses — leaving the registration in place preserves
+	// backward compatibility; could be dropped as a follow-up cleanup mirroring the Listener migration.
 	ContextualTag = InContextualTag;
+}
+
+void UQuestPrereqRuleNode::OnRegisteredWithManager()
+{
 	if (!CachedGameInstance.IsValid()) return;
 
-	// May already be satisfied at graph load (mid-session activation).
+	// May already be satisfied at graph load (mid-session activation, save-load restore, or any leaf whose
+	// fact is already asserted from a prior phase).
 	TryPublishRule();
 
 	FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
@@ -32,9 +40,8 @@ void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
 void UQuestPrereqRuleNode::ResetTransientState()
 {
 	Super::ResetTransientState();
-	// SubscriptionHandles referenced the prior PIE's SignalSubsystem. Wipe: if we left them populated, the
-	// subscribe loop in Activate would skip every leaf ("already subscribed") and the rule would never hear
-	// any leaf-fact-added events this session.
+	// SubscriptionHandles point at the prior PIE's SignalSubsystem (now destroyed). Drop them defensively
+	// so OnRegisteredWithManager subscribes cleanly via the new session's SignalSubsystem.
 	SubscriptionHandles.Reset();
 }
 

@@ -50,7 +50,6 @@ protected:
 	 *
 	 * @param Graph							The questline graph asset to compile.
 	 * @param TagPrefix						Sanitized questline ID used as the tag namespace for this graph's nodes.
-	 * @param BoundaryTagsByPath			Tags injected when an Exit_Success node is reached (empty at top level).
  	 * @param BoundaryCompletionsByPath		Inherited boundary completions keyed by Exit OutcomeTag (NAME_None for Any-Outcome catch-all).
 	 *										Mirrors BoundaryTagsByPath: consumed by ResolvePinToTags when crossing an Exit.
 	 * @param VisitedAssetPaths				Stack of asset paths currently open in the recursion, used for cycle detection.
@@ -61,7 +60,6 @@ protected:
 	virtual TArray<FName> CompileGraph(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr);	
@@ -74,7 +72,6 @@ protected:
 	 * @param FromPin						The output pin to trace.
 	 * @param TagPrefix						Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
 	 *										connections before recursing into the linked asset.
-	 * @param BoundaryTagsByPath			Forwarded to Exit_Success resolution.
      * @param BoundaryCompletionsByPath	    Inherited boundary completions for this compile context, keyed by Exit OutcomeTag. Looked up by
 	 *										the Exit-crossing branch of the walk and accumulated into OutBoundaryCompletions.
 	 * @param VisitedAssetPaths				Cycle detection stack, shared with CompileGraph.
@@ -86,7 +83,6 @@ protected:
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
 		const FString& TagPrefix,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TArray<FName>& OutTags,
@@ -265,7 +261,6 @@ private:
 	void CompileNodeRegistration(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
 		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
@@ -282,10 +277,8 @@ private:
 	/** Pass 2: route each content node's output pins into the runtime routing sets. */
 	void CompileOutputWiring(
 		const TArray<UQuestlineNode_ContentBase*>& ContentNodes,
-		const TMap<UQuestlineNode_ContentBase*,
-		UQuestNodeBase*>& NodeInstanceMap,
+		const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap,
 		const FString& TagPrefix,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths);
 
@@ -293,7 +286,6 @@ private:
 	TArray<FName> ResolveEntryTags(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath);
@@ -315,10 +307,8 @@ private:
 		UQuestlineNode_ContentBase* ContentNode,
 		const FString& TagPrefix,
 		const FString& Label,
-		const TMap<FName, TArray<FName>>& BoundaryTagsByPath,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
-		TMap<FName, TArray<FName>>& OutBoundaryByPath,
 		TMap<FName, TArray<FQuestBoundaryCompletion>>& OutBoundaryCompletionsByPath);
 	
 	UQuestlineGraph* RootGraph = nullptr;

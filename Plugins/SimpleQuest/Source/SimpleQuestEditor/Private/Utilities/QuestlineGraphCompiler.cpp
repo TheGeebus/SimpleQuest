@@ -1098,8 +1098,13 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
             }
         }
 
-        // Exit nodes: inject boundary tags for the parent graph so a child graph knows what its exits connect to on the parent level
-        // Passed to children when compilation recurses into the child graph.
+        // Exit nodes: accumulate boundary completions only — the wrapper's own ChainToNextNodes (fired by
+        // FireWrapperBoundaryCompletion at runtime, Bug 3 fix from 2026-05-02) handles the wrapper-side
+        // destinations on its own behalf. Pre-Bug-3, the only path for inner→wrapper-outcome→downstream
+        // chains was the flattening here (BoundaryTagsByPath → OutTags). Post-Bug-3, the wrapper's own
+        // outcome-chain runs from the boundary completion route, making the flattening redundant — and
+        // double-firing every chain that crossed a wrapper boundary into a destination the wrapper also
+        // wires to (loop-back wires being the most visible case: 1 fire per nesting level instead of 1).
         else if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
         {
         	if (OutVisitedExitsByPath && ExitNode->OutcomeTag.IsValid())
@@ -1107,22 +1112,15 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         		OutVisitedExitsByPath->FindOrAdd(ExitNode->OutcomeTag.GetTagName()).AddUnique(ExitNode);
         	}
 
-        	if (const TArray<FName>* BoundaryTags = BoundaryTagsByPath.Find(ExitNode->OutcomeTag.GetTagName()))
-        	{
-        		for (const FName& Tag : *BoundaryTags) OutTags.AddUnique(Tag);
-        	}
-        	else if (const TArray<FName>* AnyBoundaryTags = BoundaryTagsByPath.Find(NAME_None))
-        	{
-        		for (const FName& Tag : *AnyBoundaryTags) OutTags.AddUnique(Tag);
-        	}
-        	else if (!ExitNode->OutcomeTag.IsValid())
+        	if (!ExitNode->OutcomeTag.IsValid())
         	{
         		AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix), ExitNode);
         	}
 
-        	// Accumulate boundary completions to fire when this path is taken at runtime. Mirrors the
-        	// BoundaryTags lookup above — picks up completions inherited from the outer compile context
-        	// (which include this Exit's parent LinkedQuestline wrapper plus any further-out ancestors).
+        	// Accumulate boundary completions to fire when this path is taken at runtime. Picks up
+        	// completions inherited from the outer compile context (this Exit's parent LinkedQuestline
+        	// wrapper plus any further-out ancestors). FireWrapperBoundaryCompletion fires each
+        	// completion's wrapper through ChainToNextNodes — innermost-first cascade order.
         	if (const TArray<FQuestBoundaryCompletion>* BoundaryCompletions = BoundaryCompletionsByPath.Find(ExitNode->OutcomeTag.GetTagName()))
         	{
         		for (const FQuestBoundaryCompletion& BC : *BoundaryCompletions) OutBoundaryCompletions.AddUnique(BC);

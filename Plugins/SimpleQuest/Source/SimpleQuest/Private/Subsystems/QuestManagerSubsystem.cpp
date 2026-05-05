@@ -27,7 +27,6 @@
 #include "Events/QuestResolveRequestEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Events/QuestEntryRecordedEvent.h"
-#include "Net/RepLayout.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -40,11 +39,10 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Utilities/QuestTagComposer.h"
-#if WITH_EDITOR
-#include "Components/QuestGiverComponent.h"
-#else
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#if WITH_EDITOR
+#include "Components/QuestGiverComponent.h"
 #endif
 
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -133,18 +131,40 @@ void UQuestManagerSubsystem::Deinitialize()
 
 void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 {
-    if (!InitialQuestlines.IsEmpty())
+    // Phase 1: register all InitialQuestlines (no entry-tag fire yet). Splitting the registration phase from
+    // the activation phase guarantees every UActivationGroupListenerNode in the project (including listener-
+    // bearing graphs not in InitialQuestlines, picked up by AutoLoadListenerBearingGraphs below) is subscribed
+    // before any UActivationGroupSetterNode publishes its first signal during entry-tag firing.
+    TSet<UQuestlineGraph*> RegisteredGraphs;
+    for (const TSoftObjectPtr<UQuestlineGraph>& GraphPtr : InitialQuestlines)
     {
-        for (const TSoftObjectPtr<UQuestlineGraph>& GraphPtr : InitialQuestlines)
+        if (UQuestlineGraph* Graph = GraphPtr.LoadSynchronous())
         {
-            if (UQuestlineGraph* Graph = GraphPtr.LoadSynchronous())
-            {
-                ActivateQuestlineGraph(Graph);
-            }
-            else
-            {
-                UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::StartInitialQuestlines : failed to load questline graph asset"));
-            }
+            RegisterQuestlineGraph(Graph);
+            RegisteredGraphs.Add(Graph);
+        }
+        else
+        {
+            UE_LOG(LogSimpleQuest, Warning, TEXT("StartInitialQuests: failed to load InitialQuestlines entry"));
+        }
+    }
+
+    // Phase 2: scan the asset registry for listener-bearing graphs not already in InitialQuestlines and pre-
+    // register them so their listeners subscribe at startup. Listener instances live on the asset's
+    // CompiledNodes and need their CachedGameInstance set + OnRegisteredWithManager fired;
+    // AutoLoadListenerBearingGraphs does both via RegisterQuestlineGraph. The asset's Start node is NOT fired.
+    AutoLoadListenerBearingGraphs(RegisteredGraphs);
+
+    // Phase 3: fire entry tags for InitialQuestlines. Setter publishes during this phase reach all listeners
+    // armed in Phases 1 + 2.
+    for (UQuestlineGraph* Graph : RegisteredGraphs)
+    {
+        UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s)"),
+            *Graph->GetName(), Graph->GetEntryNodeTags().Num());
+
+        for (const FName& EntryTagName : Graph->GetEntryNodeTags())
+        {
+            ActivateNodeByTag(EntryTagName);
         }
     }
 }
@@ -174,14 +194,30 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     Step->GetLiveObjective()->DispatchTryCompleteObjective(Context);
 }
 
-void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
+void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
 
+    int32 NewlyRegistered = 0;
+    int32 SkippedAlreadyRegistered = 0;
     for (const auto& Pair : Graph->GetCompiledNodes())
     {
         if (UQuestNodeBase* Instance = Pair.Value)
         {
+            // Skip if the key is already in LoadedNodeInstances. Happens when this graph's content has been
+            // inlined into a previously-registered graph via a LinkedQuestline placement. The inline copy was
+            // registered during that parent's RegisterQuestlineGraph; this standalone copy would otherwise
+            // overwrite the parent-bound instance with one whose Expression leaves reference standalone-namespace
+            // tags instead of the contextualized parent-namespace tags actually being published at runtime —
+            // breaks PrereqRule subscriptions and similar tag-keyed dependencies. The standalone copy stays
+            // dormant (loaded but never wired up) and is harmless. Authored-key entries (utility node
+            // Util_<NodeGuid>, PrereqRule GroupTag) collide; contextualized content-node tags don't.
+            if (LoadedNodeInstances.Contains(Pair.Key))
+            {
+                ++SkippedAlreadyRegistered;
+                continue;
+            }
+
             // Compiled node instances live on the UQuestlineGraph asset and persist across PIE sessions. Wipe any
             // state the prior session left on them — subscription handles to a dead SignalSubsystem, deferred
             // contextual tags, activation scratch, completion snapshots — so this session starts clean.
@@ -219,11 +255,24 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
                     StateSubsystem->RegisterContainerTag(ResolvedTag);
                 }
             }
+            ++NewlyRegistered;
         }
     }
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — loaded %d node(s), activating %d entry tag(s)"),
-        *Graph->GetName(), Graph->GetCompiledNodes().Num(), Graph->GetEntryNodeTags().Num());
-    
+    UE_LOG(LogSimpleQuest, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered"),
+        *Graph->GetName(),
+        NewlyRegistered,
+        SkippedAlreadyRegistered);
+}
+
+void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
+{
+    if (!Graph) return;
+
+    RegisterQuestlineGraph(Graph);
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s)"),
+        *Graph->GetName(), Graph->GetEntryNodeTags().Num());
+
     for (const FName& EntryTagName : Graph->GetEntryNodeTags())
     {
         ActivateNodeByTag(EntryTagName);
@@ -1292,6 +1341,52 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
         }
     }
 #endif
+}
+
+void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs(const TSet<UQuestlineGraph*>& AlreadyRegistered)
+{
+    IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
+
+    FARFilter Filter;
+    Filter.ClassPaths.Add(UQuestlineGraph::StaticClass()->GetClassPathName());
+    Filter.bRecursiveClasses = true;
+
+    TArray<FAssetData> Assets;
+    AR.GetAssets(Filter, Assets);
+
+    int32 PreRegisteredCount = 0;
+    for (const FAssetData& Asset : Assets)
+    {
+        // The compiler stamps HasActivationGroupListener=true on assets whose CompiledNodes contains a
+        // UActivationGroupListenerNode instance (locally authored or inlined via LinkedQuestline). Assets that
+        // never compiled this flag (pre-Step-A content not yet recompiled) read missing/false and get skipped.
+        FString TagValue;
+        if (!Asset.GetTagValue(TEXT("HasActivationGroupListener"), TagValue)) continue;
+        if (TagValue != TEXT("true")) continue;
+
+        UQuestlineGraph* Graph = Cast<UQuestlineGraph>(Asset.GetAsset());
+        if (!Graph)
+        {
+            UE_LOG(LogSimpleQuest, Warning,
+                TEXT("AutoLoadListenerBearingGraphs: failed to load '%s' — skipping"),
+                *Asset.GetObjectPathString());
+            continue;
+        }
+
+        if (AlreadyRegistered.Contains(Graph)) continue;
+
+        RegisterQuestlineGraph(Graph);
+        ++PreRegisteredCount;
+
+        UE_LOG(LogSimpleQuest, Log,
+            TEXT("AutoLoadListenerBearingGraphs: pre-registered '%s' for cross-graph listener subscription"),
+            *Graph->GetName());
+    }
+
+    UE_LOG(LogSimpleQuest, Verbose,
+        TEXT("AutoLoadListenerBearingGraphs: scanned %d UQuestlineGraph asset(s); pre-registered %d listener-bearing graph(s) outside InitialQuestlines"),
+        Assets.Num(),
+        PreRegisteredCount);
 }
 
 void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)

@@ -68,7 +68,18 @@ private:
      */
     UPROPERTY()
     TMap<FName, TObjectPtr<UQuestNodeBase>> CompiledNodes;
-
+    
+    /**
+     * True if any of the compiled node instances in CompiledNodes is a UActivationGroupListenerNode. Stamped by the compiler
+     * after registration. Surfaced via GetAssetRegistryTags as "HasActivationGroupListener" so the manager can scan the
+     * asset registry at startup and pre-register listener-bearing graphs — their listeners need to subscribe at game start
+     * regardless of whether the parent asset is in InitialQuestlines. Inherits via linked-questline inlining: a wrapper
+     * asset whose linked inner contains a listener carries the flag too (the inner's listener instance ends up in the
+     * wrapper's CompiledNodes).
+     */
+    UPROPERTY()
+    bool bHasActivationGroupListener = false;
+    
     /**
      * Identifier used as the Gameplay Tag scope for all quests in this questline. Must be unique across the project. Defaults
      * to the asset name if left empty. Override this when you need a stable tag namespace independent of the asset name,

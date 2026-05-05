@@ -136,6 +136,14 @@ private:
 	FName CurrentInnerContainerTag = NAME_None;
 
 	/**
+	 * Count of UActivationGroupListenerNode instances created during this Compile() — accumulates across the
+	 * full recursive compile tree (so a wrapper asset whose linked inner contains a listener picks up the
+	 * count too via inlining). Reset to 0 at Compile() start; consumed at end of Compile() to stamp
+	 * UQuestlineGraph::bHasActivationGroupListener. Drives the manager's startup auto-load scan.
+	 */
+	int32 CompiledListenerCount = 0;
+	
+	/**
 	 * Post-compile pass — populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and
 	 * UQuestStep::AncestorContainerTags. Called from Compile() after RegisterCompiledTags so FGameplayTag
 	 * resolution succeeds.

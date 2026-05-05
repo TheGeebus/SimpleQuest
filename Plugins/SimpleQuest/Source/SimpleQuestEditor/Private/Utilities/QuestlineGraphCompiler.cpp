@@ -121,7 +121,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	GetterEdNodeByGroupAndDest.Empty();
 	ImmediateContainerByTag.Empty();
 	CurrentInnerContainerTag = NAME_None;
-	
+	CompiledListenerCount = 0;
+
     InGraph->Modify();
     InGraph->CompiledNodes.Empty(); 
     InGraph->EntryNodeTags.Empty();
@@ -149,6 +150,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
+	InGraph->bHasActivationGroupListener = CompiledListenerCount > 0;
 
     // Detect renames via GUID bridge
     DetectAndRecordTagRenames(InGraph, OldTagsByGuid);
@@ -645,6 +647,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
         UtilityNodeKeyMap.Add(Node, UtilKey);
         AllCompiledNodes.Add(UtilKey, Inst);
         AllCompiledEditorNodes.Add(UtilKey, Node);
+    	++CompiledListenerCount;
 
     	// Listeners are NOT registered as graph entry routes — subscription happens at instance lifetime via
     	// OnRegisteredWithManager (the always-armed semantic). The previous OutGetterEntryTags.Add line caused

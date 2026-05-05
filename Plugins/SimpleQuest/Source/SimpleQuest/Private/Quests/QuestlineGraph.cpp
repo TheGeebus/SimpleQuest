@@ -33,6 +33,11 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 	}
 
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
+
+	// Drives the manager's startup auto-load scan: any asset flagged true here gets pre-registered (without firing
+	// its Start node) so its UActivationGroupListenerNode instances can subscribe to their group signal channels at
+	// game start, regardless of whether the asset is in InitialQuestlines. Stamped by the compiler post-registration.
+	Context.AddTag(FAssetRegistryTag(TEXT("HasActivationGroupListener"), bHasActivationGroupListener ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
 }
 
 FText UQuestlineGraph::GetDisplayName() const

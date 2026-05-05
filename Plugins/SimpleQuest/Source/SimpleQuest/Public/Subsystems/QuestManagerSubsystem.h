@@ -76,9 +76,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="QuestMap")
 	TArray<TSoftObjectPtr<UQuestlineGraph>> InitialQuestlines;
 
-	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
-	UPROPERTY()
-	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
+	/**
+	 * Registers a graph's compiled node instances into LoadedNodeInstances WITHOUT firing entry nodes.
+	 * Wires CachedGameInstance, OnRegisteredWithManager (so e.g. UActivationGroupListenerNode can subscribe
+	 * to its group signal channel at instance lifetime), the per-node delegate binds, the per-tag deactivation
+	 * subscription, and the container-classification push to UQuestStateSubsystem. Used by both
+	 * ActivateQuestlineGraph (which calls this then fires entry tags) and the startup auto-load path for
+	 * listener-bearing graphs that aren't in InitialQuestlines. Not idempotent on the same graph — re-binding
+	 * delegates and double-subscribing deactivation handlers; callers must dedup.
+	 */
+	virtual void RegisterQuestlineGraph(UQuestlineGraph* Graph);
 	
 	/** Registers all compiled node instances from the graph into LoadedNodeInstances and activates its entry nodes. */
 	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph);
@@ -90,6 +97,10 @@ protected:
 	 * entry step fires, enabling per-source routing on duplicate paths.
 	 */
 	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None, bool bBypassGiverGate = false);
+	
+	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
+	UPROPERTY()
+	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
 	
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
@@ -175,7 +186,19 @@ private:
 	 */
 	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source);
 
-	void RegisterGiversFromAssetRegistry();	
+	void RegisterGiversFromAssetRegistry();
+	
+	/**
+	 * Scans the asset registry for UQuestlineGraph assets flagged HasActivationGroupListener=true (stamped by the
+	 * compiler whenever a graph compiles to ≥1 UActivationGroupListenerNode instance), skips any already in
+	 * AlreadyRegistered, sync-loads each remaining asset, and calls RegisterQuestlineGraph on it. The asset's
+	 * Start node is NOT fired — the goal is to bring the listener instances online (CachedGameInstance set,
+	 * OnRegisteredWithManager called, signal subscriptions live) without activating the rest of the graph.
+	 * Called from StartInitialQuests AFTER InitialQuestlines have been registered (so the dedup set carries
+	 * those graphs) and BEFORE InitialQuestlines fire their entry tags (so all Listeners are armed before any
+	 * Setter publishes its first signal).
+	 */
+	void AutoLoadListenerBearingGraphs(const TSet<UQuestlineGraph*>& AlreadyRegistered);
 
 	/**
 	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize

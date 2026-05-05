@@ -123,7 +123,7 @@ void USimpleQuestBlueprintLibrary::SetQuestBlocked(const UObject* WorldContext, 
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {
-        SS->PublishMessage(Tag_Channel_QuestBlockRequest, FQuestBlockRequestEvent(QuestTag));
+        SS->PublishMessage(Tag_Channel_QuestBlockRequest, FQuestBlockRequestEvent(QuestTag, EDeactivationSource::External));
     }
 }
 
@@ -131,7 +131,7 @@ void USimpleQuestBlueprintLibrary::ClearQuestBlocked(const UObject* WorldContext
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {
-        SS->PublishMessage(Tag_Channel_QuestClearBlockRequest, FQuestClearBlockRequestEvent(QuestTag));
+        SS->PublishMessage(Tag_Channel_QuestClearBlockRequest, FQuestClearBlockRequestEvent(QuestTag, EDeactivationSource::External));
     }
 }
 

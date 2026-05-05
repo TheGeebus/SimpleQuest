@@ -27,6 +27,8 @@
 #include "Events/QuestResolveRequestEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Events/QuestEntryRecordedEvent.h"
+#include "Events/QuestBlockedEvent.h"
+#include "Events/QuestUnblockedEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -1148,7 +1150,8 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 
     // Idempotency guard: symmetric with the already-deactivated guard in SetQuestDeactivated. Spamming a block
     // request on an already-blocked quest would otherwise bump the WorldState ref-count without reflecting a
-    // genuine state transition.
+    // genuine state transition. Also gates FQuestBlockedEvent broadcast so already-blocked re-applications stay
+    // silent at the event layer.
     if (WorldState->HasFact(BlockedFact))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
@@ -1159,8 +1162,15 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 
     // Block does NOT auto-deactivate. Block is the orthogonal re-entry gate; deactivation is the lifecycle/world
     // disabler. Callers who want both must publish FQuestDeactivateRequestEvent themselves (or use SetBlocked's
-    // bAlsoDeactivateTargets toggle on the node-driven path). A combined-event API may be added later — see TODO.
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added (no auto-deactivate)"), *QuestTag.ToString());
+    // bAlsoDeactivateTargets toggle on the node-driven path).
+    if (QuestSignalSubsystem)
+    {
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestBlockedEvent(QuestTag, Event.Source));
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
+        *QuestTag.ToString(),
+        Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 }
 
 void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)
@@ -1171,9 +1181,8 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
     if (!BlockedFact.IsValid()) return;
 
-    // Symmetric with the already-blocked guard in HandleBlockRequest. ClearFact is naturally idempotent at the
-    // WorldState layer, but suppressing the "cleared" log when there's nothing to clear keeps panel observability
-    // honest and avoids implying a state transition that didn't happen.
+    // Symmetric with the already-blocked guard in HandleBlockRequest. Also gates FQuestUnblockedEvent broadcast
+    // so clear-on-already-unblocked stays silent at the event layer.
     if (!WorldState->HasFact(BlockedFact))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleClearBlockRequest: '%s' skipped — not currently blocked"), *QuestTag.ToString());
@@ -1183,7 +1192,14 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     WorldState->ClearFact(BlockedFact);
     // Deactivated intentionally not cleared: the target's Activate input clears it on re-entry.
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared"), *QuestTag.ToString());
+    if (QuestSignalSubsystem)
+    {
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestUnblockedEvent(QuestTag, Event.Source));
+    }
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=%s)"),
+        *QuestTag.ToString(),
+        Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 }
 
 void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQuestResolveRequestEvent& Event)

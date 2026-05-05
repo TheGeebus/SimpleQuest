@@ -2,6 +2,8 @@
 
 #include "Quests/SetBlockedNode.h"
 
+#include "SimpleQuestLog.h"
+#include "Events/QuestBlockedEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
@@ -23,7 +25,21 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 				if (WS)
 				{
 					const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(Tag, EQuestStateLeaf::Blocked);
-					if (BlockedFact.IsValid()) WS->AddFact(BlockedFact);
+					// Idempotency guard: skip already-blocked targets. Without this, the WorldState fact ref-count
+					// bumps on each pulse without firing FactAdded, but FQuestBlockedEvent below would broadcast on
+					// every pulse — out of sync with the manager-handler path which guards the same way.
+					if (BlockedFact.IsValid() && !WS->HasFact(BlockedFact))
+					{
+						WS->AddFact(BlockedFact);
+
+						if (Signals)
+						{
+							Signals->PublishMessage(Tag, FQuestBlockedEvent(Tag, EDeactivationSource::Internal));
+						}
+
+						UE_LOG(LogSimpleQuest, Log, TEXT("USetBlockedNode: '%s' — Blocked fact added, FQuestBlockedEvent published (source=Internal)"),
+							*Tag.ToString());
+					}
 				}
 				// Block is purely a re-entry gate by default — leaves any in-flight lifecycle on the target alone.
 				// Designers opt into interrupting in-flight quests via the bAlsoDeactivateTargets toggle.
@@ -36,4 +52,3 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 	}
 	ForwardActivation();
 }
-

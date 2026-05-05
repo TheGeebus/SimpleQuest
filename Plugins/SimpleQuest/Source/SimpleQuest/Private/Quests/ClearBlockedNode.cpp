@@ -1,9 +1,12 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Quests/ClearBlockedNode.h"
-#include "GameplayTagsManager.h"
-#include "WorldState/WorldStateSubsystem.h"
+
+#include "SimpleQuestLog.h"
+#include "Events/QuestUnblockedEvent.h"
+#include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
+#include "WorldState/WorldStateSubsystem.h"
 
 void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {
@@ -14,14 +17,31 @@ void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 	{
 		if (UGameInstance* GI = CachedGameInstance.Get())
 		{
-			if (UWorldStateSubsystem* WS = GI->GetSubsystem<UWorldStateSubsystem>())
+			UWorldStateSubsystem* WS = GI->GetSubsystem<UWorldStateSubsystem>();
+			USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>();
+
+			for (auto Tag : TargetQuestTags)
 			{
-				for (auto Tag : TargetQuestTags)
+				if (WS)
 				{
 					const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(Tag, EQuestStateLeaf::Blocked);
-					if (BlockedFact.IsValid()) WS->ClearFact(BlockedFact);
-					// Deactivated is intentionally not cleared here. The target node's re-entry via its Activate input clears
-					// it; ClearBlocked only removes the permanent gate.
+					// Idempotency guard: skip targets that aren't currently blocked. Symmetric with USetBlockedNode's
+					// guard and the manager-handler path; keeps FQuestUnblockedEvent emission aligned with genuine
+					// fact transitions only.
+					if (BlockedFact.IsValid() && WS->HasFact(BlockedFact))
+					{
+						WS->ClearFact(BlockedFact);
+						// Deactivated is intentionally not cleared here. The target node's re-entry via its Activate input
+						// clears it; ClearBlocked only removes the permanent gate.
+
+						if (Signals)
+						{
+							Signals->PublishMessage(Tag, FQuestUnblockedEvent(Tag, EDeactivationSource::Internal));
+						}
+
+						UE_LOG(LogSimpleQuest, Log, TEXT("UClearBlockedNode: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=Internal)"),
+							*Tag.ToString());
+					}
 				}
 			}
 		}

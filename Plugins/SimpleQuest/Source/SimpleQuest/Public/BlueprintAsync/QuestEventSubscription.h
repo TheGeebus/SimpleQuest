@@ -16,6 +16,8 @@ struct FQuestEnabledEvent;
 struct FQuestStartedEvent;
 struct FQuestEndedEvent;
 struct FQuestDeactivatedEvent;
+struct FQuestBlockedEvent;
+struct FQuestUnblockedEvent;
 struct FQuestGivenEvent;
 struct FQuestProgressEvent;
 class USignalSubsystem;
@@ -39,6 +41,7 @@ enum class EQuestEventTypes : uint16
     Completed   = 1 << 6,
     Deactivated = 1 << 7,
     Blocked     = 1 << 8,
+    Unblocked   = 1 << 9,
 };
 ENUM_CLASS_FLAGS(EQuestEventTypes);
 
@@ -144,9 +147,20 @@ public:
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnDeactivated;
 
-    /** Fires when the quest enters Blocked state via a SetBlocked utility node. */
+    /**
+     * Fires when the quest's Blocked state fact transitions from absent to present (SetBlocked utility node activation
+     * or BP-driven SetQuestBlocked call). Idempotent: already-blocked re-applications don't fire.
+     */
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnBlocked;
+
+    /**
+     * Fires when the quest's Blocked state fact transitions from present to absent (ClearBlocked utility node activation
+     * or BP-driven ClearQuestBlocked call). Symmetric partner to OnBlocked. Idempotent: clear-on-already-unblocked
+     * doesn't fire. Transient transition; no catch-up.
+     */
+    UPROPERTY(BlueprintAssignable)
+    FQuestSubscriptionLifecycleDelegate OnUnblocked;
 
     /**
      * Plain C++ initializer used by the BP library's factory wrapper. Not a UFUNCTION — the library owns the
@@ -179,6 +193,8 @@ private:
     FDelegateHandle ProgressHandle;
     FDelegateHandle EndedHandle;
     FDelegateHandle DeactivatedHandle;
+    FDelegateHandle BlockedHandle;
+    FDelegateHandle UnblockedHandle;
 
     bool bCancelled = false;
 
@@ -202,6 +218,8 @@ private:
     void HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event);
     void HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event);
     void HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+    void HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event);
+    void HandleUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event);
 
     void UnbindAll();
     void RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState);

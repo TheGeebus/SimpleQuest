@@ -4,14 +4,16 @@
 
 #include "NativeGameplayTags.h"
 #include "QuestEventBase.h"
+#include "QuestDeactivatedEvent.h"
 #include "QuestBlockRequestEvent.generated.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestBlockRequest)
 
 /**
- * Publish on Tag_Channel_QuestBlockRequest to ask the manager to mark a quest as Blocked. Manager mirrors the
- * USetBlockedNode logic — adds the Blocked WorldState fact and publishes a Deactivate request with Internal source
- * so any active node tears down cleanly. BP-friendly counterpart to graph-driven SetBlocked nodes.
+ * Publish on Tag_Channel_QuestBlockRequest to ask the manager to mark a quest as Blocked. BP-friendly counterpart
+ * to graph-driven SetBlocked nodes. Manager adds the Blocked WorldState fact and publishes FQuestBlockedEvent on
+ * the quest's tag channel, threading Source through so subscribers can branch on origin (Internal = graph-driven,
+ * External = BP/external publish). Idempotent: already-blocked requests are skipped without firing the event.
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestBlockRequestEvent : public FQuestEventBase
@@ -20,4 +22,9 @@ struct SIMPLEQUEST_API FQuestBlockRequestEvent : public FQuestEventBase
 
 	FQuestBlockRequestEvent() = default;
 	explicit FQuestBlockRequestEvent(FGameplayTag InQuestTag) : FQuestEventBase(InQuestTag) {}
+	FQuestBlockRequestEvent(FGameplayTag InQuestTag, EDeactivationSource InSource)
+		: FQuestEventBase(InQuestTag), Source(InSource) {}
+
+	UPROPERTY(BlueprintReadWrite)
+	EDeactivationSource Source = EDeactivationSource::External;
 };

@@ -5,6 +5,7 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestActivatedEvent.h"
+#include "Events/QuestBlockedEvent.h"
 #include "Events/QuestDisabledEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
@@ -12,6 +13,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
+#include "Events/QuestUnblockedEvent.h"
 #include "GameplayTagsManager.h"
 #include "Signals/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
@@ -88,9 +90,17 @@ void UQuestEventSubscription::Activate()
     {
         EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnded);
     }
-    if (IsExposed(EQuestEventTypes::Deactivated) || IsExposed(EQuestEventTypes::Blocked))
+    if (IsExposed(EQuestEventTypes::Deactivated))
     {
         DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleDeactivated);
+    }
+    if (IsExposed(EQuestEventTypes::Blocked))
+    {
+        BlockedHandle = Signals->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleBlocked);
+    }
+    if (IsExposed(EQuestEventTypes::Unblocked))
+    {
+        UnblockedHandle = Signals->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleUnblocked);
     }
     
     // Defer the catch-up broadcast to next tick. The K2 node's standard async expansion calls Activate() *before*
@@ -181,26 +191,27 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
     if (bCancelled) return;
     bSawLiveDeactivated = true;
 
-    // Blocked detection: SetQuestDeactivated writes both Deactivated AND Blocked facts on a SetBlocked-driven path,
-    // and only Deactivated for an abandon/interrupt. Inspect the Blocked fact on the event's quest tag to decide
-    // whether to broadcast OnBlocked alongside OnDeactivated. Avoids an FQuestDeactivatedEvent payload change.
-    if (IsExposed(EQuestEventTypes::Blocked))
-    {
-        if (UWorldStateSubsystem* WorldState = ResolveWorldStateSubsystem())
-        {
-            const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(Event.GetQuestTag(), EQuestStateLeaf::Blocked), false);
-            if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
-            {
-                bSawLiveBlocked = true;
-                if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
-            }
-        }
-    }
+    // OnBlocked fires from its own direct subscription on FQuestBlockedEvent (HandleBlocked) — no longer
+    // piggybacks on FQuestDeactivatedEvent + Blocked-fact inspection. The block-only path (SetBlocked with
+    // bAlsoDeactivateTargets=false) now correctly fires OnBlocked, which the prior piggyback approach missed.
 
-    if (IsExposed(EQuestEventTypes::Deactivated) && OnDeactivated.IsBound())
-        OnDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
     // Persistent — no finalize here. Same rationale as HandleEnded.
 }
+
+void UQuestEventSubscription::HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
+{
+    if (bCancelled) return;
+    bSawLiveBlocked = true;
+    if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
+}
+
+void UQuestEventSubscription::HandleUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
+{
+    if (bCancelled) return;
+    if (OnUnblocked.IsBound()) OnUnblocked.Broadcast(Event.GetQuestTag(), Event.Context);
+}
+
 
 void UQuestEventSubscription::HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
@@ -220,8 +231,11 @@ void UQuestEventSubscription::UnbindAll()
     if (ProgressHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, ProgressHandle);
     if (EndedHandle.IsValid())       Signals->UnsubscribeMessage(QuestTag, EndedHandle);
     if (DeactivatedHandle.IsValid()) Signals->UnsubscribeMessage(QuestTag, DeactivatedHandle);
+    if (BlockedHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, BlockedHandle);
+    if (UnblockedHandle.IsValid())   Signals->UnsubscribeMessage(QuestTag, UnblockedHandle);
     ActivatedHandle = EnabledHandle = DisabledHandle = GiveBlockedHandle = FDelegateHandle();
     StartedHandle = ProgressHandle = EndedHandle = DeactivatedHandle = FDelegateHandle();
+    BlockedHandle = UnblockedHandle = FDelegateHandle();
 }
 
 void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState)

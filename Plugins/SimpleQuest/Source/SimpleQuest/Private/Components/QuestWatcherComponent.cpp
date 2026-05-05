@@ -2,16 +2,23 @@
 
 
 #include "Components/QuestWatcherComponent.h"
-#include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestTagComposer.h"
+
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestActivatedEvent.h"
+#include "Events/QuestBlockedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
+#include "Events/QuestDisabledEvent.h"
 #include "Events/QuestEnabledEvent.h"
 #include "Events/QuestEndedEvent.h"
+#include "Events/QuestGiveBlockedEvent.h"
+#include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
+#include "Events/QuestUnblockedEvent.h"
 #include "Signals/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "Utilities/QuestTagComposer.h"
+#include "WorldState/WorldStateSubsystem.h"
 
 
 UQuestWatcherComponent::UQuestWatcherComponent()
@@ -22,56 +29,103 @@ UQuestWatcherComponent::UQuestWatcherComponent()
 void UQuestWatcherComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
 	RegisterQuestWatcher();
 }
 
-void UQuestWatcherComponent::WatchedQuestActivatedEvent(FGameplayTag Channel, const FQuestEnabledEvent& QuestEnabledEvent)
+void UQuestWatcherComponent::HandleQuestActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
-	ActiveQuestTags.AddTag(QuestEnabledEvent.GetQuestTag());
 	if (OnQuestActivated.IsBound())
 	{
-		OnQuestActivated.Broadcast(QuestEnabledEvent.GetQuestTag());
+		OnQuestActivated.Broadcast(Event.GetQuestTag(), Event.Context, Event.PrereqStatus);
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestStartedEvent(FGameplayTag Channel, const FQuestStartedEvent& QuestStartedEvent)
+void UQuestWatcherComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+{
+	ActiveQuestTags.AddTag(Event.GetQuestTag());
+	if (OnQuestEnabled.IsBound())
+	{
+		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Event.Context);
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
+{
+	if (OnQuestDisabled.IsBound())
+	{
+		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Event.Context);
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+{
+	if (OnQuestGiveBlocked.IsBound())
+	{
+		OnQuestGiveBlocked.Broadcast(Event.GetQuestTag(), Event.Blockers, Event.GiverActor.Get());
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
 	if (OnQuestStarted.IsBound())
 	{
-		OnQuestStarted.Broadcast(QuestStartedEvent.GetQuestTag());
+		OnQuestStarted.Broadcast(Event.GetQuestTag(), Event.Context, Event.GiverActor.Get());
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestCompletedEvent(FGameplayTag Channel, const FQuestEndedEvent& QuestEndedEvent)
+void UQuestWatcherComponent::HandleQuestProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
-	ActiveQuestTags.RemoveTag(QuestEndedEvent.GetQuestTag());
-	CompletedQuestTags.AddTag(QuestEndedEvent.GetQuestTag());
+	if (OnQuestProgress.IsBound())
+	{
+		OnQuestProgress.Broadcast(Event.GetQuestTag(), Event.Context);
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
+{
+	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
+	CompletedQuestTags.AddTag(Event.GetQuestTag());
 
 	// Apply outcome filter — if the settings specify outcomes, only broadcast for matches
 	if (const FWatchedQuestEventSettings* Settings = WatchedTags.Find(Channel))
 	{
-		if (!Settings->OutcomeFilter.IsEmpty() && !Settings->OutcomeFilter.HasTagExact(QuestEndedEvent.OutcomeTag))
+		if (!Settings->OutcomeFilter.IsEmpty() && !Settings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
 		{
 			UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
-				*QuestEndedEvent.GetQuestTag().ToString(),
-				*QuestEndedEvent.OutcomeTag.ToString());
+				*Event.GetQuestTag().ToString(),
+				*Event.OutcomeTag.ToString());
 			return;
 		}
 	}
 
 	if (OnQuestCompleted.IsBound())
 	{
-		OnQuestCompleted.Broadcast(QuestEndedEvent.GetQuestTag(), QuestEndedEvent.OutcomeTag);
+		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Event.OutcomeTag, Event.Context);
 	}
 }
 
-void UQuestWatcherComponent::WatchedQuestDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& QuestDeactivatedEvent)
+void UQuestWatcherComponent::HandleQuestDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
-	ActiveQuestTags.RemoveTag(QuestDeactivatedEvent.GetQuestTag());
+	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	if (OnQuestDeactivated.IsBound())
 	{
-		OnQuestDeactivated.Broadcast(QuestDeactivatedEvent.GetQuestTag());
+		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
+{
+	if (OnQuestBlocked.IsBound())
+	{
+		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
+	}
+}
+
+void UQuestWatcherComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
+{
+	if (OnQuestUnblocked.IsBound())
+	{
+		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Event.Context);
 	}
 }
 
@@ -153,29 +207,31 @@ int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
 
 void UQuestWatcherComponent::RegisterQuestWatcher()
 {
-    if (!SignalSubsystem)
-    {
-        UE_LOG(LogSimpleQuest, Error, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : QuestSignalSubsystem is null, aborting."));
-        return;
-    }
-    if (WatchedTags.IsEmpty())
-    {
-        if (GetOwner())
-        {
-            UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : WatchedQuests is empty. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
-        }
-        return;
-    }
+	if (!SignalSubsystem)
+	{
+		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : QuestSignalSubsystem is null, aborting."));
+		return;
+	}
+	if (WatchedTags.IsEmpty())
+	{
+		if (GetOwner())
+		{
+			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : WatchedQuests is empty. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+		}
+		return;
+	}
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestWatcherComponent_RegisterQuestWatcher);
 
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-	UQuestStateSubsystem* ResolutionRegistry = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
 	for (auto& QuestPair : WatchedTags)
 	{
 		const FGameplayTag& QuestTag = QuestPair.Key;
+		const FWatchedQuestEventSettings& Settings = QuestPair.Value;
+
 		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
 			UE_LOG(LogSimpleQuest, Warning,
@@ -185,56 +241,81 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 			continue;
 		}
 
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered watcher for tag: %s"), *QuestTag.ToString());
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered watcher for tag: %s"), *QuestTag.ToString());
 
-        if (QuestPair.Value.bWatchActivation) SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestActivatedEvent);
-        if (QuestPair.Value.bWatchStart) SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestStartedEvent);
-        if (QuestPair.Value.bWatchEnd)	SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestCompletedEvent);
-    	if (QuestPair.Value.bWatchDeactivation) SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestWatcherComponent::WatchedQuestDeactivatedEvent);
+		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
+		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
+		if (Settings.bWatchActivated)    SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestActivated);
+		if (Settings.bWatchEnabled)      SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestEnabled);
+		if (Settings.bWatchDisabled)     SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestDisabled);
+		if (Settings.bWatchGiveBlocked)  SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestGiveBlocked);
+		if (Settings.bWatchStarted)      SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestStarted);
+		if (Settings.bWatchProgress)     SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestProgress);
+		if (Settings.bWatchCompleted)    SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestCompleted);
+		if (Settings.bWatchDeactivated)  SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestDeactivated);
+		if (Settings.bWatchBlocked)      SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestBlocked);
+		if (Settings.bWatchUnblocked)    SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestUnblocked);
 
-        if (!WorldState) continue;
+		if (!WorldState) continue;
 
-        // Catch-up: fire delegates immediately for facts already written before this component registered.
-        // Step start/complete are transient and not caught up — only persistent quest-level state is covered.
+		// Catch-up: fire delegates immediately for state already present at subscription time. Synthetic Context
+		// carries just QuestTag — full Context isn't recoverable from state alone (NodeInfo, CompletionContext,
+		// GameData come from the runtime publish-time AssembleEventContext call). Mirrors UQuestEventSubscription's
+		// synthetic-context pattern.
+		FQuestEventContext SyntheticContext;
+		SyntheticContext.NodeInfo.QuestTag = QuestTag;
 
-        // Quest is waiting for a giver
-        if (QuestPair.Value.bWatchActivation)
-        {
-            const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
-            if (WorldState->HasFact(PendingFact))
-            {
-                ActiveQuestTags.AddTag(QuestTag);
-                if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(QuestTag);
-            }
-        }
+		// PendingGiver fact gates both Activated and Enabled catch-up.
+		const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
+			FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
+		const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
 
-        // Quest is currently active
-        if (QuestPair.Value.bWatchStart)
-        {
-            const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false);
-            if (WorldState->HasFact(LiveFact))
-            {
-                ActiveQuestTags.AddTag(QuestTag);
-                if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(QuestTag);
-            }
-        }
-
-		// Quest has already completed — recover the actual outcome from the resolution subsystem instead of probing WorldState.
-		// The boolean Completed fact is still the gating "did this resolve at all" check (fast O(1) layer); the registry then
-		// answers "with what outcome" (rich-record layer). Together they remove the prior EmptyTag fallback and per-filter-tag
-		// probe loop in favor of a single keyed lookup that always recovers the real OutcomeTag.
-		if (QuestPair.Value.bWatchEnd)
+		FQuestPrereqStatus CachedPrereqStatus;
+		if (bIsPendingGiver && StateSubsystem)
 		{
-			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false);
-			if (WorldState->HasFact(CompletedFact))
+			CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
+		}
+
+		if (Settings.bWatchActivated && bIsPendingGiver)
+		{
+			ActiveQuestTags.AddTag(QuestTag);
+			if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(QuestTag, SyntheticContext, CachedPrereqStatus);
+		}
+
+		if (Settings.bWatchEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
+		{
+			ActiveQuestTags.AddTag(QuestTag);
+			if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(QuestTag, SyntheticContext);
+		}
+
+		if (Settings.bWatchStarted)
+		{
+			const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
+				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false);
+			if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
+			{
+				ActiveQuestTags.AddTag(QuestTag);
+				// Catch-up GiverActor is null — RecentGiverActors was consumed at start time and isn't recovered.
+				if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(QuestTag, SyntheticContext, nullptr);
+			}
+		}
+
+		// Disabled / GiveBlocked / Progress / Unblocked have no catch-up — transient or one-shot events without
+		// recoverable state.
+
+		if (Settings.bWatchCompleted)
+		{
+			const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(
+				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false);
+			if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
 			{
 				ActiveQuestTags.RemoveTag(QuestTag);
 				CompletedQuestTags.AddTag(QuestTag);
 
-				FGameplayTag RecoveredOutcome;
-				if (ResolutionRegistry)
+				FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
+				if (StateSubsystem)
 				{
-					if (const FQuestResolutionRecord* Record = ResolutionRegistry->GetQuestResolution(QuestTag))
+					if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(QuestTag))
 					{
 						if (const FQuestResolutionEntry* Latest = Record->GetLatest())
 						{
@@ -243,8 +324,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 					}
 				}
 
-				// Apply the post-hoc OutcomeFilter — same semantics as the live WatchedQuestCompletedEvent path.
-				if (!QuestPair.Value.OutcomeFilter.IsEmpty() && !QuestPair.Value.OutcomeFilter.HasTagExact(RecoveredOutcome))
+				if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
 				{
 					UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
 						*QuestTag.ToString(), *RecoveredOutcome.ToString());
@@ -253,22 +333,32 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				{
 					UE_LOG(LogSimpleQuest, Log, TEXT("QuestWatcher: catch-up for '%s' — recovered outcome '%s' from registry"),
 						*QuestTag.ToString(), *RecoveredOutcome.ToString());
-					if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(QuestTag, RecoveredOutcome);
+					if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(QuestTag, RecoveredOutcome, SyntheticContext);
 				}
 			}
 		}
-    	
-    	// Quest has been deactivated
-    	if (QuestPair.Value.bWatchDeactivation)
-    	{
-    		const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false);
-    		if (WorldState->HasFact(DeactivatedFact))
-    		{
-    			ActiveQuestTags.RemoveTag(QuestTag);
-    			if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(QuestTag);
-    		}
-    	}
-    }
+
+		if (Settings.bWatchDeactivated)
+		{
+			const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(
+				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false);
+			if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
+			{
+				ActiveQuestTags.RemoveTag(QuestTag);
+				if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(QuestTag, SyntheticContext);
+			}
+		}
+
+		if (Settings.bWatchBlocked)
+		{
+			const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(
+				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Blocked), false);
+			if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
+			{
+				if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(QuestTag, SyntheticContext);
+			}
+		}
+	}
 }
 
 FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedStepTags() const
@@ -288,4 +378,3 @@ FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedQuestKeys() co
 		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedQuestKeys ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
-

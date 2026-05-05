@@ -197,18 +197,15 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
     CompileNodeRegistration(Graph, TagPrefix, BoundaryTagsByPath, BoundaryCompletionsByPath, VisitedAssetPaths, ContentNodes, NodeInstanceMap);
 
     // ---- Pass 1b: setter nodes — create UQuestPrereqRuleNode monitors ----
-    TArray<FName> MonitorTags;
-    TArray<FName> GetterEntryTags;
-    CompileGroupSetters(Graph, TagPrefix, VisitedAssetPaths, MonitorTags, GetterEntryTags);
+    CompileGroupSetters(Graph, TagPrefix, VisitedAssetPaths);
 
     // ---- Pass 1c: utility nodes ----
     TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
     CompileUtilityNodes(Graph, UtilityEdNodes);
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGraph: [%s] %d content, %d group setter(s), %d utility node(s)"),
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGraph: [%s] %d content, %d utility node(s)"),
         *TagPrefix,
         ContentNodes.Num(),
-        MonitorTags.Num(),
         UtilityEdNodes.Num());
     
     if (bHasErrors) return {};
@@ -265,8 +262,6 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 
     // ---- Resolve entry tags from the graph's Entry node ----
     TArray<FName> EntryTags = ResolveEntryTags(Graph, TagPrefix, BoundaryTagsByPath, BoundaryCompletionsByPath, VisitedAssetPaths, OutEntryTagsByPath);
-    EntryTags.Append(MonitorTags);
-    EntryTags.Append(GetterEntryTags);
     return EntryTags;
 }
 
@@ -529,7 +524,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     }
 }
 
-void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags)
+void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_CompileGroupSetters);
 	
@@ -596,8 +591,10 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 
 	    const FName RuleTagName = RuleTag.GetTagName();
 	    AllCompiledNodes.Add(RuleTagName, Monitor);
-	    OutMonitorTags.Add(RuleTagName);
-
+		
+		// No entry-tag registration: rule monitors subscribe at instance lifetime via OnRegisteredWithManager,
+		// not at entry-tag fire time. Mirrors UActivationGroupListenerNode's always-armed semantic.
+		
 	    TArray<FGameplayTag> LeafTags;
 	    Monitor->Expression.CollectLeafTags(LeafTags);
 	    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] prereq rule '%s' — expression with %d leaf(s)"),

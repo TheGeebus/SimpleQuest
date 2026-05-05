@@ -274,9 +274,7 @@ private:
 	void CompileGroupSetters(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
-		TArray<FString>& VisitedAssetPaths,
-		TArray<FName>& OutMonitorTags,
-		TArray<FName>& OutGetterEntryTags);
+		TArray<FString>& VisitedAssetPaths);
 
 	/** Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, GroupSignal). */
 	void CompileUtilityNodes(UEdGraph* Graph, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);

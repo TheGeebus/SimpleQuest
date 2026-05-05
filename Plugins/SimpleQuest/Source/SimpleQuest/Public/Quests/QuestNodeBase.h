@@ -143,6 +143,15 @@ public:
      * and instead route through the auto-propagation walk over UQuestStep::AncestorContainerTags.
      */
     virtual bool IsContainerNode() const { return false; }
+
+    /**
+     * Called by UQuestManagerSubsystem::ActivateQuestlineGraph after the instance has been added to LoadedNodeInstances and
+     * RegisterWithGameInstance has set CachedGameInstance. Default is a no-op. Override for nodes whose subscription / wiring
+     * needs to last the full instance lifetime rather than the wrapper's Live state. Used by UActivationGroupListenerNode to
+     * subscribe to its group's signal channel; ResetTransientState clears any stale handle on PIE re-entry; BeginDestroy
+     * unsubscribes on shutdown.
+     */
+    virtual void OnRegisteredWithManager() {}
     
     /**
      * Fired by utility nodes (SetBlocked, ClearBlocked, GroupSignalSetter, GroupSignalGetter) instead of OnNodeStarted/OnNodeCompleted.

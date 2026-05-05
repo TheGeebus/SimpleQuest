@@ -13,8 +13,8 @@
 #include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"
-#include "Quests/ActivationGroupExitNode.h"
-#include "Quests/ActivationGroupEntryNode.h"
+#include "Quests/ActivationGroupListenerNode.h"
+#include "Quests/ActivationGroupSetterNode.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -614,8 +614,8 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             continue;
         }
 
-        UActivationGroupExitNode* Inst = NewObject<UActivationGroupExitNode>(RootGraph);
-        Inst->GroupTag = Setter->GroupTag;
+        UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
+    	Inst->GroupTag = Setter->GroupTag;
 
         const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
         UtilityNodeKeyMap.Add(Node, UtilKey);
@@ -638,17 +638,22 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             continue;
         }
 
-        UActivationGroupEntryNode* Inst = NewObject<UActivationGroupEntryNode>(RootGraph);
-        Inst->GroupTag = Getter->GroupTag;
+        UActivationGroupListenerNode* Inst = NewObject<UActivationGroupListenerNode>(RootGraph);
+    	Inst->GroupTag = Getter->GroupTag;
 
         const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
         UtilityNodeKeyMap.Add(Node, UtilKey);
         AllCompiledNodes.Add(UtilKey, Inst);
         AllCompiledEditorNodes.Add(UtilKey, Node);
-        OutGetterEntryTags.Add(UtilKey);
 
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation getter '%s' (entry tag)"),
-            *TagPrefix, *Getter->GroupTag.GetTagName().ToString());
+    	// Listeners are NOT registered as graph entry routes — subscription happens at instance lifetime via
+    	// OnRegisteredWithManager (the always-armed semantic). The previous OutGetterEntryTags.Add line caused
+    	// wrapper-Listener loop bugs by re-firing ActivateInternal each wrapper iteration; the signal path
+    	// handles activation cleanly without that registration.
+
+    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation listener '%s'"),
+			*TagPrefix,
+			*Getter->GroupTag.GetTagName().ToString());
     }
 }
 

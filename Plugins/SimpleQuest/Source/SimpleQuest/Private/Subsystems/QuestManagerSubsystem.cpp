@@ -193,6 +193,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
             }
             LoadedNodeInstances.Add(Pair.Key, Instance);
             Instance->RegisterWithGameInstance(GetGameInstance());
+            Instance->OnRegisteredWithManager();
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
             Instance->OnNodeStarted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeStarted);
             Instance->OnNodeForwardActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeForwardActivated);
@@ -461,8 +462,17 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
         FireWrapperBoundaryCompletion(BC);
     }
 
+    // Thread the source utility node's PendingActivationParams onto each downstream destination so any payload
+    // that arrived at the utility (via signal-driven self-stamp on UActivationGroupListenerNode, cascade, or direct
+    // upstream stamp) propagates through the forward chain. Mirrors ChainToNextNodes::StampAndActivate. Identity
+    // for utility nodes that don't carry payload (SetBlocked / ClearBlocked) — those fields stay zero-init either
+    // way so the stamp is a harmless overwrite.
     for (const FName& Tag : Node->GetNextNodesOnForward())
     {
+        if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(Tag))
+        {
+            DestInstance->PendingActivationParams = Node->PendingActivationParams;
+        }
         ActivateNodeByTag(Tag);
     }
 }

@@ -199,16 +199,24 @@ private:
     bool bCancelled = false;
 
     /**
-     * Per-phase "we already broadcast this lifecycle live" guards. Catch-up skips any phase that already
-     * fired through the live path during the one-tick deferral window. No flags for Disabled / GiveBlocked /
-     * Given / Progress — those are transient or don't have catch-up semantics.
+     * Per-phase "we already broadcast this lifecycle live" guards, keyed by publish-tag (Event.GetQuestTag()
+     * — the descendant tag the event published on, not necessarily the QuestTag the subscription was bound to).
+     * Catch-up skips any phase that already fired live for a given tag during the one-tick deferral window.
+     *
+     * Per-tag tracking matters under hierarchical / parent-prefix subscriptions: catch-up fans out across every
+     * known descendant via FQuestCatchUpFanout::EnumerateTagsForCatchUp. Without per-tag dedup, a single
+     * descendant firing live during the deferral window would suppress catch-up for every other descendant in
+     * the fan-out — under-firing the historical recovery the §1.1 fix exists to deliver.
+     *
+     * No sets for Disabled / GiveBlocked / Given / Progress / Unblocked — those are transient or don't have
+     * catch-up semantics.
      */
-    bool bSawLiveActivated = false;
-    bool bSawLiveEnabled = false;
-    bool bSawLiveStarted = false;
-    bool bSawLiveCompleted = false;
-    bool bSawLiveDeactivated = false;
-    bool bSawLiveBlocked = false;
+    TSet<FGameplayTag> TagsWithLiveActivatedSeen;
+    TSet<FGameplayTag> TagsWithLiveEnabledSeen;
+    TSet<FGameplayTag> TagsWithLiveStartedSeen;
+    TSet<FGameplayTag> TagsWithLiveCompletedSeen;
+    TSet<FGameplayTag> TagsWithLiveDeactivatedSeen;
+    TSet<FGameplayTag> TagsWithLiveBlockedSeen;
 
     void HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event);
     void HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event);

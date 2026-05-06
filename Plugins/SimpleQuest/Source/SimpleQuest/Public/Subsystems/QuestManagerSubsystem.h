@@ -12,41 +12,33 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestActivationRequestEvent;
+struct FQuestBlockRequestEvent;
 struct FQuestBoundaryCompletion;
-struct FQuestResolutionRecordedEvent;
-struct FQuestEntryRecordedEvent;
-struct FWorldStateFactRemovedEvent;
-struct FQuestActivationBlocker;
-struct FQuestPrereqStatus;
-struct FWorldStateFactAddedEvent;
+struct FQuestClearBlockRequestEvent;
 struct FQuestDeactivateRequestEvent;
+struct FQuestDeactivatedEvent;
+struct FQuestEntryRecordedEvent;
+struct FQuestEventContext;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
-struct FQuestActivationRequestEvent;
-struct FQuestDeactivatedEvent;
 struct FQuestlineStartRequestEvent;
+struct FQuestResolutionRecordedEvent;
 struct FQuestResolveRequestEvent;
-struct FQuestClearBlockRequestEvent;
-struct FQuestBlockRequestEvent;
-struct FQuestEventContext;
+struct FWorldStateFactAddedEvent;
+struct FWorldStateFactRemovedEvent;
+
 struct FInstancedStruct;
-struct FQuestText;
-struct FGameplayTag;
-struct FQuestStartedEvent;
-struct FQuestEnabledEvent;
-struct FQuestObjectiveTriggered;
 
 enum class EDeactivationSource : uint8;
+enum class EQuestActivationProvenance : uint8;
 
+class UQuestlineGraph;
+class UQuestNodeBase;
+class UQuestStateSubsystem;
 class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
-class UQuestStateSubsystem;
-class UQuestTargetInterface;
-class UQuestReward;
-class UQuestlineGraph;
-class UQuestNodeBase;
-
 
 
 /**
@@ -91,12 +83,45 @@ protected:
 	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph);
 
 	/**
-	 * Looks up the instance for NodeTag in LoadedNodeInstances and activates it. IncomingOutcomeTag carries the outcome from
-	 * the parent node for per-path entry routing in Quest nodes. IncomingSourceTag identifies the specific parent source
-	 * whose outcome fired. Quest entry routing filters source-qualified entries against this tag so only the matching spec's
-	 * entry step fires, enabling per-source routing on duplicate paths.
+	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
+	 * destination's PendingActivationParams so it rides through ActivateInternal's merge into ReceivedActivationParams;
+	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
+	 * catch-up subscribers and save/load reconstitution access to "how was this activation initiated?"
+	 *
+	 * Provenance is required at every call site by design. A defaulted Unknown value would propagate silently into
+	 * the historical record; making the value explicit forces a deliberate decision at every entry point. Forgotten
+	 * call sites become compile errors instead of inscrutable Unknown stamps in the registry.
+	 *
+	 * @param NodeTagName         FName key into LoadedNodeInstances. Resolved to FGameplayTag via UGameplayTagsManager
+	 *                            for runtime operations. Logs a warning and no-ops if no instance is loaded under
+	 *                            this key.
+	 * @param Provenance          How this activation was initiated. InitialEntry for graph entry-tag fires at startup;
+	 *                            GiverGate for HandleGiveQuestEvent's give-completion re-activation; ChainCascade for
+	 *                            outcome / forward / deactivation routing from another node; ExternalAPI for
+	 *                            FQuestActivationRequestEvent and programmatic / procedural / save-rehydration paths.
+	 * @param IncomingOutcomeTag  Outcome from the parent node for per-path entry routing in UQuest container nodes.
+	 *                            Stamped onto PendingActivationParams.IncomingOutcomeTag and consumed by the wrapper's
+	 *                            inner-entry routing. Invalid (default) for non-cascade activations.
+	 * @param IncomingSourceTag   FName of the specific parent source whose outcome fired. UQuest entry routing filters
+	 *                            source-qualified entries against this tag so only the matching spec's entry step
+	 *                            fires — enables per-source routing on duplicate paths. NAME_None (default) for
+	 *                            non-cascade activations.
+	 * @param bBypassGiverGate    When true, routes past the giver gate to Live without entering PendingGiver. Set by
+	 *                            HandleGiveQuestEvent's give-completion re-activation; the player has already accepted,
+	 *                            so re-entering PendingGiver would be incorrect. The structural giver-gated set still
+	 *                            contains the tag for the next loop iteration / external re-activation. Defaults to
+	 *                            false for all non-give paths.
+	 *
+	 * @see UQuestStateSubsystem::RecordEntry
+	 * @see UQuestManagerSubsystem::HandleOnNodeStarted
+	 * @see FQuestObjectiveActivationParams::Provenance
 	 */
-	virtual void ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag = FGameplayTag(), FName IncomingSourceTag = NAME_None, bool bBypassGiverGate = false);
+	virtual void ActivateNodeByTag(
+		FName NodeTagName,
+		EQuestActivationProvenance Provenance,
+		FGameplayTag IncomingOutcomeTag = FGameplayTag(),
+		FName IncomingSourceTag = NAME_None,
+		bool bBypassGiverGate = false);
 	
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()

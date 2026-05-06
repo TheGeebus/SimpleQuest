@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "StructUtils/InstancedStruct.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/QuestActivationProvenance.h"
 #include "QuestObjectiveActivationParams.generated.h"
 
 
@@ -80,4 +81,12 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationParams
 	 */
 	UPROPERTY(BlueprintReadWrite)
 	FGameplayTag IncomingOutcomeTag;
+	
+	/**
+	 * How this activation was initiated. Stamped by UQuestManagerSubsystem::ActivateNodeByTag onto the destination's
+	 * PendingActivationParams; preserved through the merge into ReceivedActivationParams so the live objective and the
+	 * registry's start record both see consistent provenance. Read by FQuestEntryArrival::Provenance via the snapshot.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 };

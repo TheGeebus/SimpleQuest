@@ -22,19 +22,16 @@ void UQuestStep::Activate(FGameplayTag InContextualTag)
 
 void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
-	Super::ActivateInternal(InContextualTag);
-
-	UClass* ObjClass = QuestObjective.LoadSynchronous();
-	if (!ObjClass) return;
-
-	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
-	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
-	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
-
-	// Compose activation params — Step's authored defaults plus any external params from a
-	// Tag_Channel_QuestActivationRequest publisher. Additive for compound fields (sets union, count sums);
-	// ActivationSource + CustomData come straight from external since Step has no equivalents. Position
-	// data (if any) goes through CustomData — no first-class TargetVector field on the Step anymore.
+	// Compose activation params FIRST, before Super::ActivateInternal fires OnNodeStarted. The base-class Activate-
+	// Internal's OnNodeStarted broadcast routes to UQuestManagerSubsystem::HandleOnNodeStarted, whose Step-side
+	// RecordEntry call reads GetReceivedActivationParams() for the registry snapshot. Populating ReceivedActivation-
+	// Params before Super means the snapshot captures the merged final params (ActivationSource, Provenance, the full
+	// FQuestObjectiveActivationParams shape) rather than the default-constructed empty struct.
+	//
+	// Composition rules: additive for compound fields (sets union, counts sum); ActivationSource + CustomData come
+	// straight from external since Step has no equivalents. Position data (if any) goes through CustomData. Provenance
+	// + IncomingOutcomeTag propagate so the registry's per-start record knows how this start was initiated and which
+	// outcome (if any) drove it.
 	FQuestObjectiveActivationParams Params;
 
 	Params.TargetActors = TargetActors;
@@ -51,9 +48,24 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	Params.OriginTag = PendingActivationParams.OriginTag;
 	Params.OriginChain = PendingActivationParams.OriginChain;
 
-	// Snapshot the composed params for Piece D chain propagation. ChainToNextNodes needs OriginChain to extend the
-	// forwarded chain with this step's tag when the chain reaches a downstream step.
+	Params.Provenance = PendingActivationParams.Provenance;
+	Params.IncomingOutcomeTag = PendingActivationParams.IncomingOutcomeTag;
+
+	// Snapshot the composed params before Super so OnNodeStarted's handler reads a populated struct. Also serves
+	// Piece D chain propagation — ChainToNextNodes reads OriginChain to extend the forwarded chain when the chain
+	// reaches a downstream step.
 	ReceivedActivationParams = Params;
+
+	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
+	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above.
+	Super::ActivateInternal(InContextualTag);
+
+	UClass* ObjClass = QuestObjective.LoadSynchronous();
+	if (!ObjClass) return;
+
+	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
+	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
+	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 
 	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationParams = FQuestObjectiveActivationParams{};

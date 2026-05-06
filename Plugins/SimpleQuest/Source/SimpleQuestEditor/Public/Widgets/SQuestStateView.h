@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/QuestActivationProvenance.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Views/SHeaderRow.h"
@@ -42,6 +43,22 @@ struct FQuestStateEntryRow
     FGameplayTag SourceQuestTag;
     FGameplayTag IncomingOutcomeTag;
     double       EntryTime = 0.0;
+
+    /**
+     * Historical-context fields surfaced from FQuestEntryArrival. Refreshed alongside the existing fields by
+     * RefreshEntriesFromChannel; rendered as separate columns by the row widget; included in substring filter.
+     */
+    EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
+
+    /**
+     * Display string for the giver actor (FQuestEntryArrival::ActivationParamsSnapshot.ActivationSource->GetName()).
+     * Stored as string at refresh time rather than as a TWeakObjectPtr — the snapshot may outlive the actor itself,
+     * and we only need the name for display. Empty when the start had no giver (cascade / external / initial-entry).
+     */
+    FString GiverActorName;
+
+    /** Per-source routing identity from FQuestEntryArrival::PathIdentity. NAME_None for non-cascade starts. */
+    FName PathIdentity = NAME_None;
 };
 
 /** Row data for the Prereq Status tab — one row per quest currently in PendingGiver state with a cached snapshot. */
@@ -64,9 +81,11 @@ class SIMPLEQUESTEDITOR_API SQuestStateView : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SQuestStateView) {}
-        /** Optional: stable key for persisting per-instance state (active sub-tab) to GEditorPerProjectIni.
-         *  Forwarded from the hosting SFactsPanel via the FactsPanelRegistry factory signature. Empty key
-         *  disables persistence — view defaults to Resolutions tab each construction. */
+        /**
+         * Optional: stable key for persisting per-instance state (active sub-tab) to GEditorPerProjectIni.
+         * Forwarded from the hosting SFactsPanel via the FactsPanelRegistry factory signature. Empty key
+         * disables persistence — view defaults to Resolutions tab each construction.
+         */
         SLATE_ARGUMENT(FName, PersistenceKey)
     SLATE_END_ARGS()
 

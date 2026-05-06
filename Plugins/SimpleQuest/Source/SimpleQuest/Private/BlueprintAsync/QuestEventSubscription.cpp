@@ -14,6 +14,7 @@
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
+#include "Utilities/QuestCatchUpFanout.h"
 #include "GameplayTagsManager.h"
 #include "Signals/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
@@ -142,14 +143,14 @@ void UQuestEventSubscription::Cancel()
 void UQuestEventSubscription::HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveActivated = true;
+    TagsWithLiveActivatedSeen.Add(Event.GetQuestTag());
     if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Event.Context, Event.PrereqStatus);
 }
 
 void UQuestEventSubscription::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveEnabled = true;
+    TagsWithLiveEnabledSeen.Add(Event.GetQuestTag());
     if (OnEnabled.IsBound()) OnEnabled.Broadcast(Event.GetQuestTag(), Event.Context);
 }
 
@@ -171,7 +172,7 @@ void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQue
 void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveStarted = true;
+    TagsWithLiveStartedSeen.Add(Event.GetQuestTag());
     if (OnStarted.IsBound())
     {
         OnStarted.Broadcast(Event.GetQuestTag(), Event.Context, Event.GiverActor.Get());
@@ -181,7 +182,7 @@ void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestSt
 void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveCompleted = true;
+    TagsWithLiveCompletedSeen.Add(Event.GetQuestTag());
     if (OnCompleted.IsBound()) OnCompleted.Broadcast(Event.GetQuestTag(), Event.OutcomeTag, Event.Context);
     // Persistent — no finalize here. Parent-tag subscriptions need to stay alive across multiple child completions.
 }
@@ -189,11 +190,10 @@ void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEnde
 void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveDeactivated = true;
+    TagsWithLiveDeactivatedSeen.Add(Event.GetQuestTag());
 
     // OnBlocked fires from its own direct subscription on FQuestBlockedEvent (HandleBlocked) — no longer
-    // piggybacks on FQuestDeactivatedEvent + Blocked-fact inspection. The block-only path (SetBlocked with
-    // bAlsoDeactivateTargets=false) now correctly fires OnBlocked, which the prior piggyback approach missed.
+    // piggybacks on FQuestDeactivatedEvent + Blocked-fact inspection.
 
     if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
     // Persistent — no finalize here. Same rationale as HandleEnded.
@@ -202,7 +202,7 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
 void UQuestEventSubscription::HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
 {
     if (bCancelled) return;
-    bSawLiveBlocked = true;
+    TagsWithLiveBlockedSeen.Add(Event.GetQuestTag());
     if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
 }
 
@@ -240,86 +240,90 @@ void UQuestEventSubscription::UnbindAll()
 
 void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState)
 {
-    // Catch-up runs once, deferred to the tick after Activate(). Fires each pin if a matching state fact is already
-    // set for QuestTag — gated by both ExposedEventsMask AND the bSawLive<Phase> flags so unexposed phases skip
-    // entirely and exposed phases that already fired live during the deferral window don't double-broadcast.
-    // Doesn't terminate the subscription — live events continue to flow through afterward, including for descendant
-    // tags if QuestTag is a parent.
-    FQuestEventContext SyntheticContext;
-    SyntheticContext.NodeInfo.QuestTag = QuestTag;
+    // Catch-up runs once, deferred to the tick after Activate(). For an exact-tag subscription this fires per-pin
+    // if a matching state fact is set for QuestTag itself; for a parent-prefix subscription (subscribed tag is an
+    // unknown namespace OR a known wrapper container) it fans out to every known descendant via FQuestCatchUpFanout
+    // and probes each one in turn, mirroring the signal bus's hierarchical broadcast on the live side. Each pin
+    // is gated by ExposedEventsMask AND the per-tag TagsWith*Seen sets so unexposed phases skip entirely and
+    // exposed phases that already fired live for that specific tag during the deferral window don't double-broadcast.
+    // Doesn't terminate the subscription — live events continue to flow through afterward.
+    UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem();
+    const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem);
 
-    // PendingGiver fact gates both Activated and Enabled catch-up — quest is in giver state if-and-only-if
-    // the fact is set. Activated fires regardless of prereq status; Enabled gates additionally on bSatisfied.
-    const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
-        FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
-    const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
-
-    FQuestPrereqStatus CachedPrereqStatus;
-    if (bIsPendingGiver)
+    for (const FGameplayTag& EachTag : CatchUpTags)
     {
-        if (const UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+        FQuestEventContext SyntheticContext;
+        SyntheticContext.NodeInfo.QuestTag = EachTag;
+
+        // PendingGiver fact gates both Activated and Enabled catch-up — quest is in giver state if-and-only-if
+        // the fact is set. Activated fires regardless of prereq status; Enabled gates additionally on bSatisfied.
+        const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
+        const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+
+        FQuestPrereqStatus CachedPrereqStatus;
+        if (bIsPendingGiver && StateSubsystem)
         {
-            CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
+            CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
         }
-    }
 
-    if (IsExposed(EQuestEventTypes::Activated) && !bSawLiveActivated && bIsPendingGiver)
-    {
-        if (OnActivated.IsBound()) OnActivated.Broadcast(QuestTag, SyntheticContext, CachedPrereqStatus);
-    }
-
-    if (IsExposed(EQuestEventTypes::Enabled) && !bSawLiveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
-    {
-        if (OnEnabled.IsBound()) OnEnabled.Broadcast(QuestTag, SyntheticContext);
-    }
-
-    if (IsExposed(EQuestEventTypes::Started) && !bSawLiveStarted)
-    {
-        const FGameplayTag LiveFact = UGameplayTagsManager::Get().RequestGameplayTag(
-            FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false);
-        if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
+        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && bIsPendingGiver)
         {
-            // Catch-up GiverActor is null — the manager's RecentGiverActors entry was consumed at start time
-            // and isn't recovered. Designers expecting historic giver attribution should subscribe live.
-            if (OnStarted.IsBound()) OnStarted.Broadcast(QuestTag, SyntheticContext, nullptr);
+            if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, SyntheticContext, CachedPrereqStatus);
         }
-    }
 
-    if (IsExposed(EQuestEventTypes::Completed) && !bSawLiveCompleted)
-    {
-        const FGameplayTag CompletedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false);
-        if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
+        if (IsExposed(EQuestEventTypes::Enabled) && !TagsWithLiveEnabledSeen.Contains(EachTag) && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
         {
-            FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-            if (const UQuestStateSubsystem* Resolution = ResolveQuestStateSubsystem())
+            if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, SyntheticContext);
+        }
+
+        if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
+        {
+            const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
+            if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
             {
-                if (const FQuestResolutionRecord* Record = Resolution->GetQuestResolution(QuestTag))
+                // GiverActor recovered from the registry's per-tag historical context (FQuestEntryArrival's
+                // ActivationParamsSnapshot.ActivationSource captured at start time and preserved past consumption).
+                AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
+                if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, SyntheticContext, RecoveredGiver);
+            }
+        }
+
+        if (IsExposed(EQuestEventTypes::Completed) && !TagsWithLiveCompletedSeen.Contains(EachTag))
+        {
+            const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
+            if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
+            {
+                FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
+                if (StateSubsystem)
                 {
-                    if (const FQuestResolutionEntry* Latest = Record->GetLatest())
+                    if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(EachTag))
                     {
-                        RecoveredOutcome = Latest->OutcomeTag;
+                        if (const FQuestResolutionEntry* Latest = Record->GetLatest())
+                        {
+                            RecoveredOutcome = Latest->OutcomeTag;
+                        }
                     }
                 }
+                if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, RecoveredOutcome, SyntheticContext);
             }
-            if (OnCompleted.IsBound()) OnCompleted.Broadcast(QuestTag, RecoveredOutcome, SyntheticContext);
         }
-    }
 
-    if (IsExposed(EQuestEventTypes::Deactivated) && !bSawLiveDeactivated)
-    {
-        const FGameplayTag DeactivatedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Deactivated), false);
-        if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
+        if (IsExposed(EQuestEventTypes::Deactivated) && !TagsWithLiveDeactivatedSeen.Contains(EachTag))
         {
-            if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(QuestTag, SyntheticContext);
+            const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
+            if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
+            {
+                if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, SyntheticContext);
+            }
         }
-    }
 
-    if (IsExposed(EQuestEventTypes::Blocked) && !bSawLiveBlocked)
-    {
-        const FGameplayTag BlockedFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Blocked), false);
-        if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
+        if (IsExposed(EQuestEventTypes::Blocked) && !TagsWithLiveBlockedSeen.Contains(EachTag))
         {
-            if (OnBlocked.IsBound()) OnBlocked.Broadcast(QuestTag, SyntheticContext);
+            const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
+            if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
+            {
+                if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, SyntheticContext);
+            }
         }
     }
 }

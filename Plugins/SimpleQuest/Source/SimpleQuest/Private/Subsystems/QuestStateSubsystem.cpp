@@ -3,6 +3,8 @@
 #include "Subsystems/QuestStateSubsystem.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/Actor.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestEntryRecordedEvent.h"
@@ -10,6 +12,7 @@
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
+
 
 const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplayTag QuestTag) const
 {
@@ -214,7 +217,14 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	OnAnyRegistryChanged.Broadcast();
 }
 
-void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag SourceQuestTag, FGameplayTag IncomingOutcomeTag, double EntryTime)
+void UQuestStateSubsystem::RecordEntry(
+	FGameplayTag QuestTag,
+	FGameplayTag SourceQuestTag,
+	FGameplayTag IncomingOutcomeTag,
+	double EntryTime,
+	EQuestActivationProvenance Provenance,
+	const FQuestObjectiveActivationParams& ActivationParamsSnapshot,
+	FName PathIdentity)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -223,6 +233,9 @@ void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag Sourc
 	Entry.SourceQuestTag = SourceQuestTag;
 	Entry.IncomingOutcomeTag = IncomingOutcomeTag;
 	Entry.EntryTime = EntryTime;
+	Entry.Provenance = Provenance;
+	Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
+	Entry.PathIdentity = PathIdentity;
 
 	// Index maintenance for HasEnteredWith. Skipped when IncomingOutcomeTag is invalid (defensive — the cascade
 	// path always carries a valid outcome tag in current code, but the registry stays robust against future paths
@@ -232,20 +245,136 @@ void UQuestStateSubsystem::RecordEntry(FGameplayTag QuestTag, FGameplayTag Sourc
 		EnteredOutcomesByQuest.FindOrAdd(QuestTag).Add(IncomingOutcomeTag);
 	}
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' (entry #%d at t=%.2fs)"),
+	const AActor* GiverActor = ActivationParamsSnapshot.ActivationSource;
+	UE_LOG(LogSimpleQuest, Log,
+		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
 		*SourceQuestTag.ToString(),
 		*IncomingOutcomeTag.ToString(),
+		*UEnum::GetValueAsString(Provenance),
+		GiverActor ? *GiverActor->GetName() : TEXT("null"),
+		*PathIdentity.ToString(),
+		ActivationParamsSnapshot.TargetActors.Num(),
+		ActivationParamsSnapshot.TargetClasses.Num(),
+		ActivationParamsSnapshot.NumElementsRequired,
 		Record.History.Num(),
 		EntryTime);
 
 	// Broadcast on the destination quest's tag channel. PrereqLeafSubscription consumers routed by Leaf_Entry
 	// listen here and trigger expression re-evaluation; designers can also subscribe directly for cascade-attribution
-	// audit / logging.
+	// audit / logging. The event's payload preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime)
+	// shape — subscribers wanting the new provenance / snapshot fields read the latest entry from the registry on
+	// receipt.
 	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
 	{
 		Signals->PublishMessage(QuestTag, FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
 	}
+
+	OnAnyRegistryChanged.Broadcast();
+}
+
+TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag Prefix) const
+{
+	TArray<FGameplayTag> Out;
+	if (!Prefix.IsValid()) return Out;
+	Out.Reserve(KnownQuests.Num());
+	for (const TPair<FGameplayTag, FQuestRuntimeRecord>& Pair : KnownQuests)
+	{
+		// MatchesTag returns true when the iterated key is Prefix or a descendant of Prefix — the live signal
+		// bus's hierarchical-walk semantic, applied to the registered-tag set rather than the publish stream.
+		if (Pair.Key.MatchesTag(Prefix))
+		{
+			Out.Add(Pair.Key);
+		}
+	}
+	return Out;
+}
+
+bool UQuestStateSubsystem::IsKnownQuestTag(FGameplayTag QuestTag) const
+{
+	return QuestTag.IsValid() && KnownQuests.Contains(QuestTag);
+}
+
+int32 UQuestStateSubsystem::GetKnownQuestTagCount() const
+{
+	return KnownQuests.Num();
+}
+
+const FQuestRuntimeRecord* UQuestStateSubsystem::GetQuestRuntimeRecord(FGameplayTag QuestTag) const
+{
+	return KnownQuests.Find(QuestTag);
+}
+
+AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			return Latest->ActivationParamsSnapshot.ActivationSource;
+		}
+	}
+	return nullptr;
+}
+
+EQuestActivationProvenance UQuestStateSubsystem::GetLastActivationProvenance(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			return Latest->Provenance;
+		}
+	}
+	return EQuestActivationProvenance::Unknown;
+}
+
+FQuestObjectiveActivationParams UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			return Latest->ActivationParamsSnapshot;
+		}
+	}
+	return FQuestObjectiveActivationParams();
+}
+
+FName UQuestStateSubsystem::GetLastPathIdentity(FGameplayTag QuestTag) const
+{
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			return Latest->PathIdentity;
+		}
+	}
+	return NAME_None;
+}
+
+void UQuestStateSubsystem::RegisterQuestTag(FGameplayTag QuestTag)
+{
+	if (!QuestTag.IsValid()) return;
+
+	// Idempotent on repeat calls. The inline-collision dedup case in RegisterQuestlineGraph (where a standalone
+	// copy of an inlined graph would otherwise overwrite the parent-bound instance) skips re-registration via
+	// LoadedNodeInstances.Contains, but defensive idempotency here keeps the registry correct if any future
+	// caller pushes the same tag twice. Earliest RegisteredTime wins.
+	if (KnownQuests.Contains(QuestTag)) return;
+
+	FQuestRuntimeRecord& Record = KnownQuests.Add(QuestTag);
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const UWorld* World = GI->GetWorld())
+		{
+			Record.RegisteredTime = World->GetTimeSeconds();
+		}
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose,
+		TEXT("UQuestStateSubsystem::RegisterQuestTag : '%s' registered (KnownQuests count=%d, RegisteredTime=%.2fs)"),
+		*QuestTag.ToString(), KnownQuests.Num(), Record.RegisteredTime);
 
 	OnAnyRegistryChanged.Broadcast();
 }

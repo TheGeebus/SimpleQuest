@@ -35,10 +35,13 @@ namespace QuestStateView_Resolutions_ColumnIDs
 
 namespace QuestStateView_Entries_ColumnIDs
 {
-    const FName Dest    = TEXT("Dest");
-    const FName Source  = TEXT("Source");
-    const FName Outcome = TEXT("Outcome");
-    const FName Time    = TEXT("Time");
+    const FName Dest       = TEXT("Dest");
+    const FName Source     = TEXT("Source");
+    const FName Outcome    = TEXT("Outcome");
+    const FName Time       = TEXT("Time");
+    const FName Provenance = TEXT("Provenance");
+    const FName Giver      = TEXT("Giver");
+    const FName Path       = TEXT("Path");
 }
 
 namespace QuestStateView_Prereqs_ColumnIDs
@@ -59,6 +62,22 @@ namespace QuestStateView_Style
         Opts.MinimumFractionalDigits = 2;
         Opts.MaximumFractionalDigits = 2;
         return FText::Format(LOCTEXT("TimeFmt", "{0}s"), FText::AsNumber(Seconds, &Opts));
+    }
+
+    /**
+     * Strips the "EQuestActivationProvenance::" qualifier from the reflection-formatted enum string for compact
+     * display in the Provenance column. UEnum::GetValueAsString returns "EQuestActivationProvenance::GiverGate";
+     * we want just "GiverGate".
+     */
+    static FText FormatProvenance(EQuestActivationProvenance Provenance)
+    {
+        FString Full = UEnum::GetValueAsString(Provenance);
+        int32 ColonColon = INDEX_NONE;
+        if (Full.FindLastChar(TEXT(':'), ColonColon) && ColonColon + 1 < Full.Len())
+        {
+            return FText::FromString(Full.RightChop(ColonColon + 1));
+        }
+        return FText::FromString(Full);
     }
 }
 
@@ -237,6 +256,46 @@ public:
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ]);
         }
+        if (ColumnName == QuestStateView_Entries_ColumnIDs::Provenance)
+        {
+            return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
+                [
+                    SNew(STextBlock)
+                        .Text(QuestStateView_Style::FormatProvenance(Item->Provenance))
+                        .HighlightText(HighlightText)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]);
+        }
+        if (ColumnName == QuestStateView_Entries_ColumnIDs::Giver)
+        {
+            return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
+                [
+                    SNew(STextBlock)
+                        .Text(Item->GiverActorName.IsEmpty()
+                            ? FText::FromString(TEXT("(none)"))
+                            : FText::FromString(Item->GiverActorName))
+                        .ColorAndOpacity(Item->GiverActorName.IsEmpty()
+                            ? FSlateColor(QuestStateView_Style::SubduedText)
+                            : FSlateColor::UseForeground())
+                        .HighlightText(HighlightText)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]);
+        }
+        if (ColumnName == QuestStateView_Entries_ColumnIDs::Path)
+        {
+            return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
+                [
+                    SNew(STextBlock)
+                        .Text(Item->PathIdentity.IsNone()
+                            ? FText::FromString(TEXT("(none)"))
+                            : FText::FromName(Item->PathIdentity))
+                        .ColorAndOpacity(Item->PathIdentity.IsNone()
+                            ? FSlateColor(QuestStateView_Style::SubduedText)
+                            : FSlateColor::UseForeground())
+                        .HighlightText(HighlightText)
+                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                ]);
+        }
         return SNullWidget::NullWidget;
     }
 
@@ -398,20 +457,32 @@ void SQuestStateView::Construct(const FArguments& InArgs)
 
     // Entries header + list
     TSharedRef<SHeaderRow> EntriesHeader = SNew(SHeaderRow)
-        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Dest)
-            .DefaultLabel(LOCTEXT("EntColDest", "Destination")).FillWidth(0.32f)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Dest).FillWidth(0.2f)
+            .DefaultLabel(LOCTEXT("EntriesDest", "Destination"))
             .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Dest); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
-        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Source)
-            .DefaultLabel(LOCTEXT("EntColSource", "Source")).FillWidth(0.30f)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Source).FillWidth(0.2f)
+            .DefaultLabel(LOCTEXT("EntriesSource", "Source"))
             .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Source); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
-        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Outcome)
-            .DefaultLabel(LOCTEXT("EntColOutcome", "Outcome")).FillWidth(0.23f)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Outcome).FillWidth(0.15f)
+            .DefaultLabel(LOCTEXT("EntriesOutcome", "Outcome"))
             .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Outcome); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
-        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Time)
-            .DefaultLabel(LOCTEXT("EntColTime", "Time")).FillWidth(0.15f).HAlignHeader(HAlign_Right)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Provenance)
+            .DefaultLabel(LOCTEXT("EntriesProvenance", "Provenance")).FillWidth(0.08f)
+            .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Provenance); })
+            .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Giver)
+            .DefaultLabel(LOCTEXT("EntriesGiver", "Giver")).FillWidth(0.12f)
+            .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Giver); })
+            .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Path).FillWidth(0.2f)
+            .DefaultLabel(LOCTEXT("EntriesPath", "Path"))
+            .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Path); })
+            .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Time).FillWidth(0.05f)
+            .DefaultLabel(LOCTEXT("EntriesTime", "Time")).HAlignHeader(HAlign_Right)
             .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Time); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort);
 
@@ -769,6 +840,21 @@ bool SQuestStateView::RefreshEntriesFromChannel()
             Row->SourceQuestTag     = Entry.SourceQuestTag;
             Row->IncomingOutcomeTag = Entry.IncomingOutcomeTag;
             Row->EntryTime          = Entry.EntryTime;
+            Row->Provenance         = Entry.Provenance;
+            Row->PathIdentity       = Entry.PathIdentity;
+
+            // Resolve the giver actor name at refresh time. Using GetName() rather than NameOrLabel because the
+            // snapshot may outlive the actor, and the underlying TObjectPtr<AActor> in the snapshot may be a
+            // dangling pointer to a destroyed actor — IsValid() guards. Designers see "(none)" rendered with the
+            // subdued color when no giver was attributed to the start.
+            if (const AActor* Giver = Entry.ActivationParamsSnapshot.ActivationSource)
+            {
+                if (IsValid(Giver))
+                {
+                    Row->GiverActorName = Giver->GetActorNameOrLabel();
+                }
+            }
+
             AllEntries.Add(MoveTemp(Row));
         }
     }
@@ -851,13 +937,12 @@ void SQuestStateView::SortResolutions()
             return bAsc ? A->ResolutionTime < B->ResolutionTime : A->ResolutionTime > B->ResolutionTime;
         });
     }
-    else if (ResolutionsSortColumn == QuestStateView_Resolutions_ColumnIDs::Source)
+    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Time)
     {
-        AllResolutions.Sort([bAsc](const TSharedPtr<FQuestStateResolutionRow>& A, const TSharedPtr<FQuestStateResolutionRow>& B)
+        AllEntries.Sort([bAsc](const TSharedPtr<FQuestStateEntryRow>& A, const TSharedPtr<FQuestStateEntryRow>& B)
         {
             if (!A.IsValid() || !B.IsValid()) return false;
-            return bAsc ? static_cast<uint8>(A->Source) < static_cast<uint8>(B->Source)
-                        : static_cast<uint8>(A->Source) > static_cast<uint8>(B->Source);
+            return bAsc ? A->EntryTime < B->EntryTime : A->EntryTime > B->EntryTime;
         });
     }
 }
@@ -900,6 +985,33 @@ void SQuestStateView::SortEntries()
         {
             if (!A.IsValid() || !B.IsValid()) return false;
             return bAsc ? A->EntryTime < B->EntryTime : A->EntryTime > B->EntryTime;
+        });
+    }
+    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Provenance)
+    {
+        AllEntries.Sort([bAsc](const TSharedPtr<FQuestStateEntryRow>& A, const TSharedPtr<FQuestStateEntryRow>& B)
+        {
+            if (!A.IsValid() || !B.IsValid()) return false;
+            return bAsc ? static_cast<uint8>(A->Provenance) < static_cast<uint8>(B->Provenance)
+                        : static_cast<uint8>(A->Provenance) > static_cast<uint8>(B->Provenance);
+        });
+    }
+    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Giver)
+    {
+        AllEntries.Sort([bAsc](const TSharedPtr<FQuestStateEntryRow>& A, const TSharedPtr<FQuestStateEntryRow>& B)
+        {
+            if (!A.IsValid() || !B.IsValid()) return false;
+            return bAsc ? A->GiverActorName.Compare(B->GiverActorName) < 0
+                        : A->GiverActorName.Compare(B->GiverActorName) > 0;
+        });
+    }
+    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Path)
+    {
+        AllEntries.Sort([bAsc](const TSharedPtr<FQuestStateEntryRow>& A, const TSharedPtr<FQuestStateEntryRow>& B)
+        {
+            if (!A.IsValid() || !B.IsValid()) return false;
+            return bAsc ? A->PathIdentity.LexicalLess(B->PathIdentity)
+                        : B->PathIdentity.LexicalLess(A->PathIdentity);
         });
     }
 }
@@ -952,13 +1064,18 @@ void SQuestStateView::ApplyResolutionsFilter()
     Resolutions.Reset();
     if (FilterText.IsEmpty()) { Resolutions.Append(AllResolutions); return; }
 
-    // Substring-match against tag-typed columns only. Time / Source are deliberately excluded — filter is for
-    // tag identity, not display values. Default Contains is case-insensitive.
     for (const TSharedPtr<FQuestStateResolutionRow>& Row : AllResolutions)
     {
         if (!Row.IsValid()) continue;
-        if (Row->QuestTag.GetTagName().ToString().Contains(FilterText) ||
-            Row->OutcomeTag.GetTagName().ToString().Contains(FilterText))
+
+        // Same populated-value gating as ApplyEntriesFilter — designer-authored "None" tags should retain literal
+        // meaning when typed into the filter rather than matching every row with a defaulted OutcomeTag.
+        const bool bQuestMatches   = Row->QuestTag.IsValid()
+            && Row->QuestTag.GetTagName().ToString().Contains(FilterText);
+        const bool bOutcomeMatches = Row->OutcomeTag.IsValid()
+            && Row->OutcomeTag.GetTagName().ToString().Contains(FilterText);
+
+        if (bQuestMatches || bOutcomeMatches)
         {
             Resolutions.Add(Row);
         }
@@ -973,9 +1090,26 @@ void SQuestStateView::ApplyEntriesFilter()
     for (const TSharedPtr<FQuestStateEntryRow>& Row : AllEntries)
     {
         if (!Row.IsValid()) continue;
-        if (Row->DestTag.GetTagName().ToString().Contains(FilterText)            ||
-            Row->SourceQuestTag.GetTagName().ToString().Contains(FilterText)     ||
-            Row->IncomingOutcomeTag.GetTagName().ToString().Contains(FilterText))
+
+        // Each per-field predicate gates on a populated-value check before the substring test. Unpopulated fields
+        // (invalid tag, NAME_None FName, Unknown provenance, empty giver name) are excluded from the filter so a
+        // designer-authored "None" tag retains literal meaning when typed into the filter — without this gating,
+        // "none" would match every row with any defaulted field because the cell rendering falls back to the string
+        // "None" / "(none)" for empty values.
+        const bool bDestMatches       = Row->DestTag.IsValid()
+            && Row->DestTag.GetTagName().ToString().Contains(FilterText);
+        const bool bSourceMatches     = Row->SourceQuestTag.IsValid()
+            && Row->SourceQuestTag.GetTagName().ToString().Contains(FilterText);
+        const bool bOutcomeMatches    = Row->IncomingOutcomeTag.IsValid()
+            && Row->IncomingOutcomeTag.GetTagName().ToString().Contains(FilterText);
+        const bool bProvenanceMatches = Row->Provenance != EQuestActivationProvenance::Unknown
+            && QuestStateView_Style::FormatProvenance(Row->Provenance).ToString().Contains(FilterText);
+        const bool bGiverMatches      = !Row->GiverActorName.IsEmpty()
+            && Row->GiverActorName.Contains(FilterText);
+        const bool bPathMatches       = !Row->PathIdentity.IsNone()
+            && Row->PathIdentity.ToString().Contains(FilterText);
+
+        if (bDestMatches || bSourceMatches || bOutcomeMatches || bProvenanceMatches || bGiverMatches || bPathMatches)
         {
             Entries.Add(Row);
         }

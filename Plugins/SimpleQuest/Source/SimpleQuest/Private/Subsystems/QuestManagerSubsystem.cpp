@@ -166,7 +166,7 @@ void UQuestManagerSubsystem::StartInitialQuests_Implementation()
 
         for (const FName& EntryTagName : Graph->GetEntryNodeTags())
         {
-            ActivateNodeByTag(EntryTagName);
+            ActivateNodeByTag(EntryTagName, EQuestActivationProvenance::InitialEntry);
         }
     }
 }
@@ -246,15 +246,20 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                 Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
             }
 
-            // Push container classification to the state subsystem so its blocker query (AlreadyLive split) can
-            // distinguish Step-vs-container semantics without cross-subsystem coupling. Mirrors the existing
-            // record-pushes (RecordResolution / RecordEntry / UpdateQuestPrereqStatus) — manager pushes structural
-            // info; state subsystem owns the public read surface.
-            if (Instance->IsContainerNode() && ResolvedTag.IsValid())
+            // Push structural info to the state subsystem. Single lookup serves both the KnownQuests registration
+            // (every valid quest tag — answers GetQuestTagsUnderPrefix for hierarchical catch-up subscribers and
+            // IsKnownQuestTag for runtime-instance presence) and the container classification (drives the blocker
+            // query's AlreadyLive split). Mirrors the existing record-pushes pattern (RecordResolution / RecordEntry /
+            // UpdateQuestPrereqStatus) — manager pushes structural info; state subsystem owns the public read surface.
+            if (ResolvedTag.IsValid())
             {
                 if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
                 {
-                    StateSubsystem->RegisterContainerTag(ResolvedTag);
+                    StateSubsystem->RegisterQuestTag(ResolvedTag);
+                    if (Instance->IsContainerNode())
+                    {
+                        StateSubsystem->RegisterContainerTag(ResolvedTag);
+                    }
                 }
             }
             ++NewlyRegistered;
@@ -277,7 +282,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
 
     for (const FName& EntryTagName : Graph->GetEntryNodeTags())
     {
-        ActivateNodeByTag(EntryTagName);
+        ActivateNodeByTag(EntryTagName, EQuestActivationProvenance::InitialEntry);
     }
 }
 
@@ -374,6 +379,30 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);
                 }
             }
+
+            // Step-side entry record. Captures every Step start with the merged final params snapshot delivered to the
+            // live objective (Step->ReceivedActivationParams). Mirrors the wrapper-side per-cascade RecordEntry in the
+            // UQuest branch below — wrapper records "this wrapper was entered by these cascades," Step records "this Step
+            // was activated with these merged params." Together they cover the full registry surface the §1.2 historical-
+            // context goal targets. SourceQuestTag / IncomingOutcomeTag come from the snapshot's cascade fields (invalid
+            // for non-cascade-driven Step starts). PathIdentity is NAME_None because Steps don't have per-source routing.
+            if (QuestStateSubsystem && Node->GetQuestTag().IsValid())
+            {
+                const FQuestObjectiveActivationParams& Snapshot = Step->GetReceivedActivationParams();
+                const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+                QuestStateSubsystem->RecordEntry(
+                    Node->GetQuestTag(),
+                    Snapshot.OriginTag,
+                    Snapshot.IncomingOutcomeTag,
+                    Now,
+                    Snapshot.Provenance,
+                    Snapshot,
+                    NAME_None);
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
+                    *Node->GetQuestTag().ToString(),
+                    *UEnum::GetValueAsString(Snapshot.Provenance),
+                    Snapshot.ActivationSource ? *Snapshot.ActivationSource->GetName() : TEXT("null"));
+            }
         }
     }
     // UQuest inner-entry activation. When Activate defers due to unmet prereqs, this branch doesn't run; when prereqs
@@ -423,7 +452,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         for (const FName& StepTag : QuestNode->GetEntryStepTags())
         {
             StampWithParams(StepTag, FirstCascade, AnyOutcomeChain);
-            ActivateNodeByTag(StepTag);
+            ActivateNodeByTag(StepTag, EQuestActivationProvenance::ChainCascade);
         }
 
         // Per-cascade outcome-specific routing. Each queued cascade fires its own entry routes — this is the
@@ -432,9 +461,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         for (const FQuestObjectiveActivationParams& CascadeParams : DrainedCascades)
         {
             const FGameplayTag IncomingOutcomeTag = CascadeParams.IncomingOutcomeTag;
-            const FName IncomingSourceTag = CascadeParams.OriginTag.IsValid()
-                ? CascadeParams.OriginTag.GetTagName()
-                : NAME_None;
+            const FName IncomingSourceTag = CascadeParams.OriginTag.IsValid() ? CascadeParams.OriginTag.GetTagName() : NAME_None;
 
             // Record this cascade's per-source entry into the QuestStateSubsystem entry registry. Parallel to
             // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
@@ -443,11 +470,20 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetQuestTag().IsValid())
             {
                 const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-                QuestStateSubsystem->RecordEntry(QuestNode->GetQuestTag(), CascadeParams.OriginTag, IncomingOutcomeTag, Now);
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s'"),
+                QuestStateSubsystem->RecordEntry(
+                    QuestNode->GetQuestTag(),
+                    CascadeParams.OriginTag,
+                    IncomingOutcomeTag,
+                    Now,
+                    CascadeParams.Provenance,
+                    CascadeParams,
+                    IncomingSourceTag);
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
                     *QuestNode->GetQuestTag().ToString(),
                     *CascadeParams.OriginTag.ToString(),
-                    *IncomingOutcomeTag.ToString());
+                    *IncomingOutcomeTag.ToString(),
+                    *UEnum::GetValueAsString(CascadeParams.Provenance),
+                    *IncomingSourceTag.ToString());
             }
 
             // Build chain for this cascade.
@@ -467,7 +503,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                         if (Entry.SourceFilter == IncomingSourceTag)
                         {
                             StampWithParams(Entry.DestTag, CascadeParams, InnerForwardChain);
-                            ActivateNodeByTag(Entry.DestTag);
+                            ActivateNodeByTag(Entry.DestTag, EQuestActivationProvenance::ChainCascade);
                         }
                     }
                 }
@@ -484,7 +520,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                         if (Entry.SourceFilter == IncomingSourceTag)
                         {
                             StampWithParams(Entry.DestTag, CascadeParams, InnerForwardChain);
-                            ActivateNodeByTag(Entry.DestTag);
+                            ActivateNodeByTag(Entry.DestTag, EQuestActivationProvenance::ChainCascade);
                         }
                     }
                 }
@@ -524,13 +560,12 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
         {
             DestInstance->PendingActivationParams = Node->PendingActivationParams;
         }
-        ActivateNodeByTag(Tag);
+        ActivateNodeByTag(Tag, EQuestActivationProvenance::ChainCascade);
     }
 }
 
-void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate)
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivationProvenance Provenance, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate)
 {
-
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ActivateNodeByTag);
 
     TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
@@ -539,6 +574,12 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, FGameplayTag I
         UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
         return;
     }
+
+    // Stamp activation provenance on the destination's PendingActivationParams. ActivateInternal merges this into
+    // ReceivedActivationParams, and HandleOnNodeStarted's Step-side RecordEntry reads the snapshot's Provenance into
+    // FQuestEntryArrival. Stamped after lookup, before the rest of ActivateNodeByTag's flow touches PendingActivationParams,
+    // so this value rides through the merge regardless of whether the caller pre-stamped other fields on the struct.
+    (*InstancePtr)->PendingActivationParams.Provenance = Provenance;
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
@@ -859,7 +900,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
             DestInstance->PendingActivationParams.OriginTag = Node->GetQuestTag();
             DestInstance->PendingActivationParams.OriginChain = ForwardChain;
         }
-        ActivateNodeByTag(DestTagName, OutcomeTag, SourceTagName);
+        ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
     };
 
     // Helper: route a wrapper boundary completion through the shared helper. The shared helper calls
@@ -1035,7 +1076,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     // Activate downstream nodes wired from the Deactivated output to their Activate input.
     for (const FName& Tag : Node->GetNextNodesOnDeactivation())
     {
-        ActivateNodeByTag(Tag);
+        ActivateNodeByTag(Tag, EQuestActivationProvenance::ChainCascade);
     }
     
     // Cascade deactivation to nodes wired from the Deactivated output to a Deactivate input.
@@ -1115,7 +1156,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     // bBypassGiverGate=true — this is the give-completion re-activation; the player has already accepted, so
     // route past the giver gate to Live without re-entering PendingGiver. The structural giver-gated set still
     // contains this tag for the next loop iteration / external re-activation.
-    ActivateNodeByTag(QuestTag.GetTagName(), FGameplayTag(), NAME_None, true);
+    ActivateNodeByTag(QuestTag.GetTagName(), EQuestActivationProvenance::GiverGate, FGameplayTag(), NAME_None, true);
 }
 
 void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event)
@@ -1137,7 +1178,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
         }
     }
 
-    ActivateNodeByTag(QuestTag.GetTagName());
+    ActivateNodeByTag(QuestTag.GetTagName(), EQuestActivationProvenance::ExternalAPI);
 }
 
 void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQuestBlockRequestEvent& Event)

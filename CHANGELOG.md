@@ -193,10 +193,9 @@ gating on LinkedQuestline nodes now works as designers expect.
 - **`GiverActor` field on `FQuestStartedEvent`** — giver-given
   quests carry the offering actor in the event payload so subscribers
   can correlate which NPC initiated the chain. Catch-up subscribers
-  receive `nullptr` for this field — the manager's transient bridge
-  isn't preserved across late binding (see "Richer historical context
-  on UQuestStateSubsystem" parking-lot capture in the project notes
-  for the natural extension surface here).
+  recover `GiverActor` from the registry's `FQuestEntryArrival::Activation-
+  ParamsSnapshot.ActivationSource` (see Hierarchical catch-up + Quest
+  State registry expansion below).
 
 #### Manager-orchestrator + state-registry split
 - **`UQuestStateSubsystem`** (renamed from `UQuestResolutionSubsystem`).
@@ -366,6 +365,91 @@ actually happens).
   node is allowed to re-enter via its Activate input); reporting Deactivated
   as a blocker contradicted that. Zero consumers; was already marked
   DEPRECATED in the header comment.
+
+#### Hierarchical catch-up + Quest State registry expansion (items 1.1 + 1.2)
+
+Closes the catch-up asymmetry between live subscriptions (which walk publish-
+tag → root, delivering descendant events to parent-tag subscribers) and
+historical recovery (which previously only probed the literal subscribed tag,
+leaving parent-prefix subscribers with no historical context for descendants
+already in some state at bind time). Simultaneously expands the registry's
+per-quest historical surface so save/load (0.5.0) can reconstitute live
+questline state from the registry alone — the snapshot includes the full
+`FQuestObjectiveActivationParams` delivered to the objective at activation,
+not just the cascade source identity captured pre-bundle.
+
+- **`UQuestStateSubsystem::KnownQuests`** — `TMap<FGameplayTag,
+  FQuestRuntimeRecord>` populated by `RegisterQuestTag` (called from
+  `RegisterQuestlineGraph` for every valid resolved tag, mirrors the existing
+  container / resolution / entry push pattern). The map's keys answer "what
+  quest tags has the manager registered this session" for hierarchical
+  catch-up subscribers; values hold per-quest quest-level state (`Registered-
+  Time` today; future quest-level fields land here without restructuring).
+- **`UQuestStateSubsystem::GetQuestTagsUnderPrefix(Prefix)`** — BP-callable.
+  Returns every known quest tag matching `Prefix` or descended from it (UE's
+  `MatchesTag` semantics applied to the registered-tag set). Caller fans out
+  to descendants for catch-up probing.
+- **`UQuestStateSubsystem::IsKnownQuestTag(QuestTag)`** + **`GetKnownQuest-
+  TagCount()`** — companion BP-callable predicates.
+- **`FQuestEntryArrival` extended** with `Provenance` / `ActivationParams-
+  Snapshot` / `PathIdentity`. Every start now records how it was initiated
+  (`EQuestActivationProvenance`: `GiverGate` / `ChainCascade` / `ExternalAPI`
+  / `InitialEntry` / `Unknown`), the merged-final `FQuestObjectiveActivation-
+  Params` snapshot delivered to the objective (`ActivationSource`,
+  `TargetActors`, `TargetClasses`, `NumElementsRequired`, `OriginTag`,
+  `OriginChain`, `CustomData`, `IncomingOutcomeTag`), and the per-source
+  routing identity from cascade-driven activations.
+- **Step-side `RecordEntry` call in `HandleOnNodeStarted`** — every Step
+  start now produces a registry entry record with the snapshot above.
+  Previously only UQuest containers wrote entry records (per-cascade in the
+  cascade loop); Step starts were invisible to the registry. The Step-side
+  write captures `Step->GetReceivedActivationParams()` post-merge, so the
+  snapshot reflects the actual final params delivered to the objective.
+- **`FQuestObjectiveActivationParams::Provenance`** — new field stamped by
+  `ActivateNodeByTag` onto the destination's `PendingActivationParams`. Rides
+  through `UQuestStep::ActivateInternal`'s merge into `ReceivedActivation-
+  Params` so the start-time registry capture has it. `ActivateNodeByTag`
+  gained a required `Provenance` arg in position 2 (post-`NodeTagName`);
+  every caller specifies it explicitly so forgotten call sites become
+  compile errors rather than silently propagating `Unknown`.
+- **`UQuestStep::ActivateInternal` ordering fix** — the merge into
+  `ReceivedActivationParams` now happens BEFORE `Super::ActivateInternal`
+  fires `OnNodeStarted`, so the registry's snapshot capture in
+  `HandleOnNodeStarted` reads populated values rather than the default-
+  constructed empty struct. Pre-bundle the order didn't matter (no reader);
+  the snapshot capture introduced the read dependency.
+- **Per-field BP-callable readers** on `UQuestStateSubsystem`:
+  `GetLastGiverActor`, `GetLastActivationProvenance`, `GetLastActivation-
+  ParamsSnapshot`, `GetLastPathIdentity`. Read from the latest
+  `FQuestEntryArrival` for the given quest tag.
+- **`FQuestCatchUpFanout::EnumerateTagsForCatchUp(SubscribedTag,
+  StateSubsystem)`** — shared helper consumed by both `UQuestEventSubscript-
+  ion::RunCatchUp` (the BindToQuestEvent K2 node's runtime) and
+  `UQuestWatcherComponent::RegisterQuestWatcher`. Returns `[SubscribedTag]`
+  for an exact-tag known leaf or wrapper; returns descendants for a parent-
+  prefix subscription; empty for unregistered tags. Single source of truth
+  for the "what tags should catch-up iterate?" decision so the two
+  subscribers stay parity-aligned.
+- **`UQuestEventSubscription::RunCatchUp` fanout rewrite** — wraps the
+  existing per-state probes (Live / Completed / Deactivated / Blocked /
+  PendingGiver) in a fanout loop. Per-tag dedup via six `TSet<FGameplayTag>`
+  (replacing the prior six `bSawLive*` bools) tracks which descendants fired
+  live during the deferral window so catch-up doesn't double-broadcast.
+  `OnStarted` catch-up now recovers the giver actor from
+  `StateSubsystem->GetLastGiverActor` instead of broadcasting `nullptr`.
+- **`UQuestWatcherComponent::RegisterQuestWatcher` fanout rewrite** — same
+  shape as the K2 node's. No per-tag TSet dedup needed (catch-up runs
+  synchronously inside `BeginPlay` rather than deferred to next-tick, no
+  live-event-during-deferral window). `OnQuestStarted` catch-up recovers
+  `GiverActor` from the registry; `ActiveQuestTags` / `CompletedQuestTags`
+  track per-descendant under fanout.
+- **Quest State Facts Panel (`SQuestStateView`) — three new Entries-tab
+  columns**: `Provenance`, `Giver`, `Path`. Each is sortable and included
+  in the substring filter (gated on populated values so a designer-authored
+  "None" tag retains literal meaning when typed into the filter). Provenance
+  display string trims the `EQuestActivationProvenance::` qualifier for
+  compact rendering. Same populated-value filter gating preemptively
+  applied to the Resolutions tab.
 
 #### Internal — compiler + runtime infrastructure refactors (items 2a + 2b)
 

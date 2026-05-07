@@ -295,6 +295,26 @@ private:
 	void RegisterContainerTag(FGameplayTag QuestTag);
 
 	/**
+	 * Pushed by the manager during graph activation for each AssetScopedAliasTag a node carries. Maintains both
+	 * directions of the alias map atomically — single-mutation-site discipline ensures the forward (alias →
+	 * contextuals) and reverse (contextual → aliases) views never fall out of sync. Idempotent on repeat calls
+	 * for the same (alias, contextual) pair. Skips when the two tags are equal (top-level content has no aliasing).
+	 */
+	void RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag);
+
+	/**
+	 * Translates an input tag to the list of canonical ContextualTag(s) it represents. Returns [InputTag] when
+	 * InputTag is a ContextualTag (or unknown — defensive); returns the alias-mapped contextual list when
+	 * InputTag is a registered AssetScopedAliasTag. Used by alias-aware predicate / aggregate read APIs.
+	 *
+	 * Pointer-returning APIs (GetQuestResolution, GetQuestEntry) and "latest" / "single instance" APIs
+	 * (GetLatestResolution, GetLastGiverActor, etc.) intentionally stay direct-only — cross-asset semantics for
+	 * "the single record" are ambiguous with multiple placements. Callers wanting cross-asset visibility use the
+	 * predicate / aggregate APIs (HasResolvedWith, GetResolutionHistory, etc.).
+	 */
+	TArray<FGameplayTag> ResolveCanonicalTags(FGameplayTag InputTag) const;
+
+	/**
 	 * Set of compiled QuestTags whose runtime instance is a UQuest container. Populated by the manager during
 	 * ActivateQuestlineGraph; read by QueryQuestActivationBlockers. Persists with the subsystem instance.
 	 */
@@ -306,4 +326,19 @@ private:
 	 *  RegisterQuestTag during RegisterQuestlineGraph. */
 	UPROPERTY()
 	TMap<FGameplayTag, FQuestRuntimeRecord> KnownQuests;
+
+	/**
+	 * Forward alias index — AssetScopedAliasTag → list of ContextualTags it aliases. Multiple ContextualTags
+	 * may share the same alias when a linked asset is placed multiple times across the project (each placement
+	 * gets its own ContextualTag; they share their inner asset's StandaloneTag-shape alias). Read by the alias-
+	 * walk in ResolveCanonicalTags + GetQuestTagsUnderPrefix.
+	 */
+	TMap<FGameplayTag, TArray<FGameplayTag>> ContextualTagsByAssetScopedTag;
+
+	/**
+	 * Reverse alias index — ContextualTag → list of AssetScopedAliasTags. Empty for top-level content (no
+	 * LinkedQuestline ancestors). Read by RecordResolution / RecordEntry's multi-publish so cross-asset
+	 * subscribers receive the fact-mutation events on their bound alias channels.
+	 */
+	TMap<FGameplayTag, TArray<FGameplayTag>> AssetScopedAliasTagsByContextualTag;
 };

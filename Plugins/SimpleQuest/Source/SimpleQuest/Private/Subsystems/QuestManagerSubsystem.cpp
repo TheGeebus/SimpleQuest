@@ -265,6 +265,14 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                     {
                         StateSubsystem->RegisterContainerTag(ResolvedTag);
                     }
+
+                    // Push asset-scoped alias mappings so cross-asset subscribers can resolve through the alias
+                    // index (read APIs alias-walk, RecordResolution / RecordEntry multi-publish). Empty for top-
+                    // level content — the loop body skips when AssetScopedAliasTags is empty.
+                    for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+                    {
+                        StateSubsystem->RegisterAlias(AliasTag, ResolvedTag);
+                    }
                 }
             }
             ++NewlyRegistered;

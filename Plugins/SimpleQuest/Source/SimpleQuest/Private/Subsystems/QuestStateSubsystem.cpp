@@ -15,6 +15,36 @@
 #include "WorldState/WorldStateSubsystem.h"
 
 
+namespace
+{
+	/**
+	 * Multi-publish helper — fires Event on CanonicalTag and on each AssetScopedAliasTag mapped to it via the
+	 * reverse alias index. Each publish gets its own copy of Event with Event.QuestTag set to the channel; the
+	 * by-value template parameter ensures per-channel mutation doesn't leak back to the caller. Sibling pattern
+	 * to FQuestPublish::OnAllNodeTags but for the state subsystem, which doesn't carry node references.
+	 */
+	template <typename EventType>
+	void PublishWithAliases(USignalSubsystem* Signals, FGameplayTag CanonicalTag, const TMap<FGameplayTag, TArray<FGameplayTag>>& AliasReverseMap, EventType Event)
+	{
+		if (!Signals || !CanonicalTag.IsValid()) return;
+
+		Event.QuestTag = CanonicalTag;
+		Signals->PublishMessage(CanonicalTag, Event);
+
+		if (const TArray<FGameplayTag>* Aliases = AliasReverseMap.Find(CanonicalTag))
+		{
+			for (const FGameplayTag& AliasTag : *Aliases)
+			{
+				if (AliasTag.IsValid())
+				{
+					Event.QuestTag = AliasTag;
+					Signals->PublishMessage(AliasTag, Event);
+				}
+			}
+		}
+	}
+}
+
 const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplayTag QuestTag) const
 {
 	return QuestResolutions.Find(QuestTag);
@@ -22,29 +52,50 @@ const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplay
 
 bool UQuestStateSubsystem::HasResolved(FGameplayTag QuestTag) const
 {
-	return QuestResolutions.Contains(QuestTag);
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (QuestResolutions.Contains(Tag)) return true;
+	}
+	return false;
 }
 
 bool UQuestStateSubsystem::HasResolvedWith(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const
 {
 	if (!QuestTag.IsValid() || !OutcomeTag.IsValid()) return false;
-	const TSet<FGameplayTag>* OutcomeSet = ResolvedOutcomesByQuest.Find(QuestTag);
-	return OutcomeSet && OutcomeSet->Contains(OutcomeTag);
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (const TSet<FGameplayTag>* OutcomeSet = ResolvedOutcomesByQuest.Find(Tag))
+		{
+			if (OutcomeSet->Contains(OutcomeTag)) return true;
+		}
+	}
+	return false;
 }
 
 int32 UQuestStateSubsystem::GetResolutionCount(FGameplayTag QuestTag) const
 {
-	const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag);
-	return Record ? Record->GetCount() : 0;
+	int32 Total = 0;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (const FQuestResolutionRecord* Record = QuestResolutions.Find(Tag))
+		{
+			Total += Record->GetCount();
+		}
+	}
+	return Total;
 }
 
 TArray<FQuestResolutionEntry> UQuestStateSubsystem::GetResolutionHistory(FGameplayTag QuestTag) const
 {
-	if (const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag))
+	TArray<FQuestResolutionEntry> Result;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
 	{
-		return Record->History;
+		if (const FQuestResolutionRecord* Record = QuestResolutions.Find(Tag))
+		{
+			Result.Append(Record->History);
+		}
 	}
-	return TArray<FQuestResolutionEntry>();
+	return Result;
 }
 
 FQuestResolutionEntry UQuestStateSubsystem::GetLatestResolution(FGameplayTag QuestTag) const
@@ -66,29 +117,50 @@ const FQuestEntryRecord* UQuestStateSubsystem::GetQuestEntry(FGameplayTag QuestT
 
 bool UQuestStateSubsystem::HasEntered(FGameplayTag QuestTag) const
 {
-	return QuestEntries.Contains(QuestTag);
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (QuestEntries.Contains(Tag)) return true;
+	}
+	return false;
 }
 
 bool UQuestStateSubsystem::HasEnteredWith(FGameplayTag QuestTag, FGameplayTag IncomingOutcomeTag) const
 {
 	if (!QuestTag.IsValid() || !IncomingOutcomeTag.IsValid()) return false;
-	const TSet<FGameplayTag>* OutcomeSet = EnteredOutcomesByQuest.Find(QuestTag);
-	return OutcomeSet && OutcomeSet->Contains(IncomingOutcomeTag);
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (const TSet<FGameplayTag>* OutcomeSet = EnteredOutcomesByQuest.Find(Tag))
+		{
+			if (OutcomeSet->Contains(IncomingOutcomeTag)) return true;
+		}
+	}
+	return false;
 }
 
 int32 UQuestStateSubsystem::GetEntryCount(FGameplayTag QuestTag) const
 {
-	const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag);
-	return Record ? Record->GetCount() : 0;
+	int32 Total = 0;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (const FQuestEntryRecord* Record = QuestEntries.Find(Tag))
+		{
+			Total += Record->GetCount();
+		}
+	}
+	return Total;
 }
 
 TArray<FQuestEntryArrival> UQuestStateSubsystem::GetEntryHistory(FGameplayTag QuestTag) const
 {
-	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	TArray<FQuestEntryArrival> Result;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
 	{
-		return Record->History;
+		if (const FQuestEntryRecord* Record = QuestEntries.Find(Tag))
+		{
+			Result.Append(Record->History);
+		}
 	}
-	return TArray<FQuestEntryArrival>();
+	return Result;
 }
 
 FQuestEntryArrival UQuestStateSubsystem::GetLatestEntry(FGameplayTag QuestTag) const
@@ -204,13 +276,16 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		Record.History.Num(),
 		ResolutionTime);
 
-	// Broadcast on the resolved quest's tag channel. Distinct from FQuestEndedEvent (manager-published in
-	// ChainToNextNodes for graph-driven completions). This event fires for every resolution path - graph chain,
-	// external ResolveQuest, future save rehydration - so subscribers reach a single canonical channel.
-	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
-	{
-		Signals->PublishMessage(QuestTag, FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
-	}
+	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag for cross-asset subscribers.
+	// Distinct from FQuestEndedEvent (manager-published in ChainToNextNodes for graph-driven completions). This
+	// event fires for every resolution path — graph chain, external ResolveQuest, future save rehydration — so
+	// subscribers reach a single canonical mechanism. Multi-publish via PublishWithAliases ensures Leaf_Resolution
+	// prereq leaves and any other subscribers bound through alias tags receive the event on their natural channel.
+	PublishWithAliases(
+		ResolveSignalSubsystem(),
+		QuestTag,
+		AssetScopedAliasTagsByContextualTag,
+		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
 
 	OnAnyRegistryChanged.Broadcast();
 }
@@ -258,15 +333,17 @@ void UQuestStateSubsystem::RecordEntry(
 		Record.History.Num(),
 		EntryTime);
 
-	// Broadcast on the destination quest's tag channel. PrereqLeafSubscription consumers routed by Leaf_Entry
-	// listen here and trigger expression re-evaluation; designers can also subscribe directly for cascade-attribution
-	// audit / logging. The event's payload preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime)
-	// shape — subscribers wanting the new provenance / snapshot fields read the latest entry from the registry on
-	// receipt.
-	if (USignalSubsystem* Signals = ResolveSignalSubsystem())
-	{
-		Signals->PublishMessage(QuestTag, FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
-	}
+	// Broadcast on the destination quest's tag channel + each AssetScopedAliasTag. PrereqLeafSubscription consumers
+	// routed by Leaf_Entry listen here and trigger expression re-evaluation; designers can also subscribe directly
+	// for cascade-attribution audit / logging. The event's payload preserves the legacy (QuestTag, SourceQuestTag,
+	// IncomingOutcomeTag, EntryTime) shape — subscribers wanting the new provenance / snapshot fields read the
+	// latest entry from the registry on receipt. Multi-publish via PublishWithAliases ensures cross-asset
+	// subscribers receive the event on their natural alias channel.
+	PublishWithAliases(
+		ResolveSignalSubsystem(),
+		QuestTag,
+		AssetScopedAliasTagsByContextualTag,
+		FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
 
 	OnAnyRegistryChanged.Broadcast();
 }
@@ -275,22 +352,39 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 {
 	TArray<FGameplayTag> Out;
 	if (!Prefix.IsValid()) return Out;
-	Out.Reserve(KnownQuests.Num());
+	Out.Reserve(KnownQuests.Num() + ContextualTagsByAssetScopedTag.Num());
+
+	// ContextualTags from KnownQuests — the parent-context perspective on each compiled node.
 	for (const TPair<FGameplayTag, FQuestRuntimeRecord>& Pair : KnownQuests)
 	{
 		// MatchesTag returns true when the iterated key is Prefix or a descendant of Prefix — the live signal
 		// bus's hierarchical-walk semantic, applied to the registered-tag set rather than the publish stream.
 		if (Pair.Key.MatchesTag(Prefix))
 		{
-			Out.Add(Pair.Key);
+			Out.AddUnique(Pair.Key);
 		}
 	}
+
+	// AssetScopedAliasTags — the inner-asset perspective. Cross-asset subscribers binding to an alias-shape
+	// prefix expect to enumerate descendants under that prefix too; without this walk, they'd miss alias-tag
+	// matches that are only registered through the alias index.
+	for (const TPair<FGameplayTag, TArray<FGameplayTag>>& Pair : ContextualTagsByAssetScopedTag)
+	{
+		if (Pair.Key.MatchesTag(Prefix))
+		{
+			Out.AddUnique(Pair.Key);
+		}
+	}
+
 	return Out;
 }
 
 bool UQuestStateSubsystem::IsKnownQuestTag(FGameplayTag QuestTag) const
 {
-	return QuestTag.IsValid() && KnownQuests.Contains(QuestTag);
+	if (!QuestTag.IsValid()) return false;
+	if (KnownQuests.Contains(QuestTag)) return true;
+	// Alias case — registered through the alias index even though not in KnownQuests directly.
+	return ContextualTagsByAssetScopedTag.Contains(QuestTag);
 }
 
 int32 UQuestStateSubsystem::GetKnownQuestTagCount() const
@@ -426,6 +520,50 @@ void UQuestStateSubsystem::RegisterContainerTag(FGameplayTag QuestTag)
 
 bool UQuestStateSubsystem::IsContainerTag(FGameplayTag QuestTag) const
 {
-	return QuestTag.IsValid() && ContainerTags.Contains(QuestTag);
+	if (!QuestTag.IsValid()) return false;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (ContainerTags.Contains(Tag)) return true;
+	}
+	return false;
+}
+
+void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag)
+{
+	if (!AssetScopedTag.IsValid() || !ContextualTag.IsValid()) return;
+	if (AssetScopedTag == ContextualTag) return;  // top-level content — no aliasing needed
+
+	ContextualTagsByAssetScopedTag.FindOrAdd(AssetScopedTag).AddUnique(ContextualTag);
+	AssetScopedAliasTagsByContextualTag.FindOrAdd(ContextualTag).AddUnique(AssetScopedTag);
+
+	UE_LOG(LogSimpleQuest, Verbose,
+		TEXT("UQuestStateSubsystem::RegisterAlias : '%s' → '%s' (forward index %d alias(es), reverse index %d contextual(s))"),
+		*AssetScopedTag.ToString(), *ContextualTag.ToString(),
+		ContextualTagsByAssetScopedTag.Num(), AssetScopedAliasTagsByContextualTag.Num());
+}
+
+TArray<FGameplayTag> UQuestStateSubsystem::ResolveCanonicalTags(FGameplayTag InputTag) const
+{
+	TArray<FGameplayTag> Result;
+	if (!InputTag.IsValid()) return Result;
+
+	// Always include the direct InputTag — it may be a ContextualTag with its own registry entries even when it
+	// ALSO appears as a registered alias key (e.g., when both the home asset and a linking asset are active in
+	// the same session, the home asset's standalone-form tag is a ContextualTag in the home compile AND an alias
+	// key from the linking compile). Without this, the alias-walk shadows the direct lookup and any prereq leaf
+	// referencing the home asset's standalone-form tag fails to see resolutions from the home's own compile.
+	Result.Add(InputTag);
+
+	// Alias case — append the canonical ContextualTags this alias represents. AddUnique avoids duplicates if
+	// InputTag happens to also appear in the alias-walk results (e.g., self-aliasing edge cases).
+	if (const TArray<FGameplayTag>* Contextuals = ContextualTagsByAssetScopedTag.Find(InputTag))
+	{
+		for (const FGameplayTag& Tag : *Contextuals)
+		{
+			Result.AddUnique(Tag);
+		}
+	}
+
+	return Result;
 }
 

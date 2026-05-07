@@ -38,7 +38,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 		only. NOT populated for Type=Leaf_Entry. Entry leaves render via LeafQuestTag / LeafOutcomeTag directly. */
 	UPROPERTY() FGameplayTag LeafTag;
 
-	/** Shared (QuestTag, OutcomeTag) payload for both Type=Leaf_Resolution and Type=Leaf_Entry. The runtime
+	/** Shared (ContextualTag, OutcomeTag) payload for both Type=Leaf_Resolution and Type=Leaf_Entry. The runtime
 		evaluator dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith
 		for resolution leaves, HasEnteredWith for entry leaves. Stamped by the compiler	from the outcome-pin
 		context. */
@@ -52,7 +52,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 /**
  * Per-leaf evaluation result. One entry per Leaf node in the tree, in the order CollectLeafTags walks them.
  * Designers reading this can map each leaf back to its source content node via tag matching against compiled
- * QuestTag hierarchy. Used by FQuestPrereqStatus.
+ * ContextualTag hierarchy. Used by FQuestPrereqStatus.
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestPrereqLeafStatus

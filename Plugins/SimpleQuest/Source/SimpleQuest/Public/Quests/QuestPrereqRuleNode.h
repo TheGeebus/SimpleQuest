@@ -18,7 +18,7 @@ class SIMPLEQUEST_API UQuestPrereqRuleNode : public UQuestNodeBase
 	friend class FQuestlineGraphCompiler;
 
 public:
-	virtual void Activate(FGameplayTag InContextualTag) override;
+	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 
 protected:
 	virtual void OnRegisteredWithManager() override;

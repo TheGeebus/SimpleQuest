@@ -10,14 +10,11 @@
 #include "Quests/Types/PrereqLeafSubscription.h"
 
 
-void UQuestPrereqRuleNode::Activate(FGameplayTag InContextualTag)
+void UQuestPrereqRuleNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — Rule monitors are utility nodes that do not participate in the quest lifecycle
-	// (no Active / Completed / Deactivated state facts). The subscribe + initial-publish work happens in
-	// OnRegisteredWithManager (instance lifetime), not here. Activate calls from the compiler's OutMonitorTags
-	// entry-tag registration are now harmless redundant pulses — leaving the registration in place preserves
-	// backward compatibility; could be dropped as a follow-up cleanup mirroring the Listener migration.
-	ContextualTag = InContextualTag;
+	// Intentionally skips Super — utility nodes do not publish FQuestStartedEvent. Rule monitors do their work
+	// via OnRegisteredWithManager (instance-lifetime subscription); this override exists only to suppress the
+	// base class's OnNodeStarted dispatch in case any path ever calls Activate on a Rule monitor.
 }
 
 void UQuestPrereqRuleNode::OnRegisteredWithManager()

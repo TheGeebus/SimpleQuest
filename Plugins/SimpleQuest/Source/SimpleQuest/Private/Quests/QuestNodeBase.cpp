@@ -29,7 +29,6 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 
 void UQuestNodeBase::ActivateInternal(FGameplayTag InContextualTag)
 {
-    SetContextualTag(InContextualTag);
     OnNodeStarted.ExecuteIfBound(this, InContextualTag);
 }
 
@@ -55,7 +54,6 @@ void UQuestNodeBase::ResetTransientState()
     // unsubscribing is safe: the owning subsystem is gone, there's nothing left to unsubscribe from.
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
-    ContextualTag = FGameplayTag::EmptyTag;
     bWasGiverGated = false;
     PendingActivationParams = FQuestObjectiveActivationParams{};
 }
@@ -104,19 +102,44 @@ void UQuestNodeBase::TryActivateDeferred()
     ActivateInternal(TagToActivate);
 }
 
-void UQuestNodeBase::ResolveQuestTag(FName TagName)
+void UQuestNodeBase::ResolveContextualTag(FName TagName)
 {
-    QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName, /*ErrorIfNotFound*/ false);
-    NodeInfo.QuestTag = QuestTag;
-    if (!QuestTag.IsValid())
+    ContextualTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName, false);
+    NodeInfo.QuestTag = ContextualTag;
+    if (!ContextualTag.IsValid())
     {
         UE_LOG(LogSimpleQuest, Warning,
-            TEXT("ResolveQuestTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
+            TEXT("ResolveContextualTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
             TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
             *TagName.ToString());
         return;
     }
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveQuestTag: %s → DisplayName='%s'"), *QuestTag.ToString(), *NodeInfo.DisplayName.ToString());
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveContextualTag: %s → DisplayName='%s'"), *ContextualTag.ToString(), *NodeInfo.DisplayName.ToString());
+}
+
+void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
+{
+    AssetScopedAliasTags.Reset();
+    AssetScopedAliasTags.Reserve(TagNames.Num());
+
+    UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
+    for (const FName& TagName : TagNames)
+    {
+        const FGameplayTag Resolved = Manager.RequestGameplayTag(TagName, false);
+        if (!Resolved.IsValid())
+        {
+            UE_LOG(LogSimpleQuest, Warning,
+                TEXT("ResolveAssetScopedAliasTags: '%s' is not registered in the runtime tag manager — stale compiled alias, skipping. ")
+                TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
+                *TagName.ToString());
+            continue;
+        }
+        AssetScopedAliasTags.Add(Resolved);
+    }
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveAssetScopedAliasTags: %d alias(es) resolved for '%s'"),
+        AssetScopedAliasTags.Num(),
+        *ContextualTag.ToString());
 }
 
 const TArray<FName>* UQuestNodeBase::GetNextNodesForPath(FName PathIdentity) const

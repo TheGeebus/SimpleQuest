@@ -40,7 +40,7 @@ struct SIMPLEQUEST_API FQuestActivationGroupTriggeredEvent
     UPROPERTY(BlueprintReadOnly)
     FQuestObjectiveActivationParams ForwardParams;
 
-    /** Compiled QuestTag of the upstream source whose outcome activated the Setter. Diagnostic / signal-provenance only — not chain-extended. */
+    /** Compiled ContextualTag of the upstream source whose outcome activated the Setter. Diagnostic / signal-provenance only — not chain-extended. */
     UPROPERTY(BlueprintReadOnly)
     FName SourceTag = NAME_None;
 

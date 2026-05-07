@@ -43,8 +43,11 @@
 #include "Utilities/QuestTagComposer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestPublish.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -229,7 +232,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 
             if (!Pair.Key.ToString().StartsWith(TEXT("Util_")))
             {
-                Instance->ResolveQuestTag(Pair.Key);
+                Instance->ResolveContextualTag(Pair.Key);
             }
             LoadedNodeInstances.Add(Pair.Key, Instance);
             Instance->RegisterWithGameInstance(GetGameInstance());
@@ -237,7 +240,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
             Instance->OnNodeStarted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeStarted);
             Instance->OnNodeForwardActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeForwardActivated);
-            const FGameplayTag ResolvedTag = Instance->GetQuestTag();
+            const FGameplayTag ResolvedTag = Instance->GetContextualTag();
             if (ResolvedTag.IsValid() && QuestSignalSubsystem)
             {
                 FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(ResolvedTag, this, &UQuestManagerSubsystem::HandleNodeDeactivatedEvent);
@@ -305,7 +308,7 @@ FQuestEventContext UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
 void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
 {
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s' path='%s'"),
-        *Node->GetQuestTag().ToString(), *OutcomeTag.ToString(), *PathIdentity.ToString());
+        *Node->GetContextualTag().ToString(), *OutcomeTag.ToString(), *PathIdentity.ToString());
 
     UQuestStep* Step = Cast<UQuestStep>(Node);
     if (Step
@@ -314,7 +317,7 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         && !Step->PrerequisiteExpression.IsAlways()
         && !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetQuestTag().ToString());
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetContextualTag().ToString());
         DeferChainToNextNodes(Step, OutcomeTag, PathIdentity);
         return;
     }
@@ -327,42 +330,42 @@ void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObject
     if (!Step || !QuestSignalSubsystem) return;
 
     UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeProgress: '%s' — %d/%d"),
-        *Step->GetQuestTag().ToString(),
+        *Step->GetContextualTag().ToString(),
         ProgressData.CurrentCount,
         ProgressData.RequiredCount);
 
     FQuestEventContext Context = AssembleEventContext(Step, ProgressData);
-    QuestSignalSubsystem->PublishMessage(Step->GetQuestTag(), FQuestProgressEvent(Step->GetQuestTag(), Context));
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressEvent(Step->GetContextualTag(), Context));
 }
 
 void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_HandleOnNodeStarted);
 
-    if (Node->GetQuestTag().IsValid() && Node->IsStepNode())
+    if (Node->GetContextualTag().IsValid() && Node->IsStepNode())
     {
         // Only Steps own a direct Live fact; containers' Live state is derived from inner Step state by
         // DeriveContainerLive (triggered by the Step's SetQuestLive ancestor walk). Containers still publish
         // FQuestStartedEvent below so subscribers see the activation, just without an accompanying intrinsic Live
         // fact write. The Live fact arrives later when an inner Step activates and walks up.
-        SetQuestLive(Node->GetQuestTag());
+        SetQuestLive(Node->GetContextualTag());
     }
     if (QuestSignalSubsystem)
     {
         FQuestEventContext Context = AssembleEventContext(Node, FQuestObjectiveContext());
         AActor* GiverActor = nullptr;
         
-        if (TWeakObjectPtr<AActor>* Found = RecentGiverActors.Find(Node->GetQuestTag()))
+        if (TWeakObjectPtr<AActor>* Found = RecentGiverActors.Find(Node->GetContextualTag()))
         {
             GiverActor = Found->Get();
-            RecentGiverActors.Remove(Node->GetQuestTag());
+            RecentGiverActors.Remove(Node->GetContextualTag());
         }
-        QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestStartedEvent(Node->GetQuestTag(), Context, GiverActor));
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestStartedEvent(Node->GetContextualTag(), Context, GiverActor));
         
         if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
-            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Node->GetQuestTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
-            LiveStepTriggerHandles.Add(Node->GetQuestTag(), Handle);
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Node->GetContextualTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
+            LiveStepTriggerHandles.Add(Node->GetContextualTag(), Handle);
             if (!Step->GetTargetClasses().IsEmpty())
             {
                 for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
@@ -371,7 +374,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     // keep runtime event-dispatch checks fast by caching the loaded UClass in ClassFilteredSteps (TMultiMap<FGameplayTag, UClass*>).
                     if (UClass* Loaded = SoftClass.LoadSynchronous())
                     {
-                        ClassFilteredSteps.Add(Node->GetQuestTag(), Loaded);
+                        ClassFilteredSteps.Add(Node->GetContextualTag(), Loaded);
                     }
                 }
 
@@ -388,12 +391,12 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // was activated with these merged params." Together they cover the full registry surface the §1.2 historical-
             // context goal targets. SourceQuestTag / IncomingOutcomeTag come from the snapshot's cascade fields (invalid
             // for non-cascade-driven Step starts). PathIdentity is NAME_None because Steps don't have per-source routing.
-            if (QuestStateSubsystem && Node->GetQuestTag().IsValid())
+            if (QuestStateSubsystem && Node->GetContextualTag().IsValid())
             {
                 const FQuestObjectiveActivationParams& Snapshot = Step->GetReceivedActivationParams();
                 const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
                 QuestStateSubsystem->RecordEntry(
-                    Node->GetQuestTag(),
+                    Node->GetContextualTag(),
                     Snapshot.OriginTag,
                     Snapshot.IncomingOutcomeTag,
                     Now,
@@ -401,7 +404,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     Snapshot,
                     NAME_None);
                 UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
-                    *Node->GetQuestTag().ToString(),
+                    *Node->GetContextualTag().ToString(),
                     *UEnum::GetValueAsString(Snapshot.Provenance),
                     Snapshot.ActivationSource ? *Snapshot.ActivationSource->GetName() : TEXT("null"));
             }
@@ -412,7 +415,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
     // runs and drains the per-cascade queue populated by ActivateNodeByTag.
     if (UQuest* QuestNode = Cast<UQuest>(Node))
     {
-        const FName NodeTagName = Node->GetQuestTag().GetTagName();
+        const FName NodeTagName = Node->GetContextualTag().GetTagName();
        
         // Drain the per-cascade snapshot queue. For the immediate-prereq-satisfied case, the queue holds exactly
         // one entry (the cascade that just fired this OnNodeStarted). For the deferred case, the queue may hold
@@ -434,9 +437,9 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         // cascade's stamping won via diamond convergence on subsequent calls.
         const FQuestObjectiveActivationParams& FirstCascade = DrainedCascades[0];
         TArray<FGameplayTag> AnyOutcomeChain = FirstCascade.OriginChain;
-        if (QuestNode->GetQuestTag().IsValid())
+        if (QuestNode->GetContextualTag().IsValid())
         {
-            AnyOutcomeChain.Add(QuestNode->GetQuestTag());
+            AnyOutcomeChain.Add(QuestNode->GetContextualTag());
         }
 
         auto StampWithParams = [this, &QuestNode](const FName& DestTagName,
@@ -445,7 +448,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
             {
                 DestInstance->PendingActivationParams = Params;
-                DestInstance->PendingActivationParams.OriginTag = QuestNode->GetQuestTag();
+                DestInstance->PendingActivationParams.OriginTag = QuestNode->GetContextualTag();
                 DestInstance->PendingActivationParams.OriginChain = Chain;
             }
         };
@@ -469,11 +472,11 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
             // FQuestEntryRecord and broadcasts FQuestEntryRecordedEvent on the destination's tag channel.
             // Inner-graph Leaf_Entry prereqs subscribe to that event via FPrereqLeafSubscription and re-evaluate.
-            if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetQuestTag().IsValid())
+            if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
             {
                 const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
                 QuestStateSubsystem->RecordEntry(
-                    QuestNode->GetQuestTag(),
+                    QuestNode->GetContextualTag(),
                     CascadeParams.OriginTag,
                     IncomingOutcomeTag,
                     Now,
@@ -481,7 +484,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     CascadeParams,
                     IncomingSourceTag);
                 UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
-                    *QuestNode->GetQuestTag().ToString(),
+                    *QuestNode->GetContextualTag().ToString(),
                     *CascadeParams.OriginTag.ToString(),
                     *IncomingOutcomeTag.ToString(),
                     *UEnum::GetValueAsString(CascadeParams.Provenance),
@@ -490,9 +493,9 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
 
             // Build chain for this cascade.
             TArray<FGameplayTag> InnerForwardChain = CascadeParams.OriginChain;
-            if (QuestNode->GetQuestTag().IsValid())
+            if (QuestNode->GetContextualTag().IsValid())
             {
-                InnerForwardChain.Add(QuestNode->GetQuestTag());
+                InnerForwardChain.Add(QuestNode->GetContextualTag());
             }
 
             // Outcome-specific, source-filtered entries.
@@ -546,7 +549,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
             TEXT("HandleOnNodeForwardActivated: firing boundary completion '%s' outcome='%s' (from utility '%s')"),
             *BC.WrapperTagName.ToString(),
             *BC.OutcomeTag.ToString(),
-            *Node->GetQuestTag().ToString());
+            *Node->GetContextualTag().ToString());
 
         FireWrapperBoundaryCompletion(BC);
     }
@@ -653,11 +656,11 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
                 StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
             }
 
-            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
 
             if (PrereqStatus.bSatisfied)
             {
-                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestEnabledEvent(NodeTag, Context));
             }
 
             if (!Instance->PrerequisiteExpression.IsAlways())
@@ -758,7 +761,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // step between, then the exit loops the parent wrapper — would stack-overflow because every iteration
     // synchronously re-enters the wrapper. Legitimate nested-wrapper recursion always climbs to outer tags
     // (Step → wrapper → grandparent), never revisits an in-flight tag, so this guard has no false positives.
-    const FName NodeTagName = Node->GetQuestTag().GetTagName();
+    const FName NodeTagName = Node->GetContextualTag().GetTagName();
     if (ChainRecursionTags.Contains(NodeTagName))
     {
         UE_LOG(LogSimpleQuest, Error,
@@ -783,21 +786,21 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     const TArray<FName>* PathNodes = Node->GetNextNodesForPath(ResolvedPath);
     const int32 PathCount = PathNodes ? PathNodes->Num() : 0;
     UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' - %d path + %d any-outcome downstream node(s)"),
-        *Node->GetQuestTag().ToString(),
+        *Node->GetContextualTag().ToString(),
         *OutcomeTag.ToString(),
         *ResolvedPath.ToString(),
         PathCount,
         Node->GetNextNodesOnAnyOutcome().Num());
 
-    if (Node->GetQuestTag().IsValid())
+    if (Node->GetContextualTag().IsValid())
     {
-        SetQuestResolved(Node->GetQuestTag(), OutcomeTag, EQuestResolutionSource::Graph);
+        SetQuestResolved(Node->GetContextualTag(), OutcomeTag, EQuestResolutionSource::Graph);
         if (QuestSignalSubsystem)
         {
-            if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetQuestTag()))
+            if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetContextualTag()))
             {
-                QuestSignalSubsystem->UnsubscribeMessage(Node->GetQuestTag(), *Handle);
-                LiveStepTriggerHandles.Remove(Node->GetQuestTag());
+                QuestSignalSubsystem->UnsubscribeMessage(Node->GetContextualTag(), *Handle);
+                LiveStepTriggerHandles.Remove(Node->GetContextualTag());
             }
         }
     }
@@ -805,10 +808,10 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph);
 
     /**
-     * Thread this node's compiled QuestTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
+     * Thread this node's compiled ContextualTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
      * can filter its source-qualified entries against the originator of this outcome.
      */
-    const FName SourceTagName = Node->GetQuestTag().GetTagName();
+    const FName SourceTagName = Node->GetContextualTag().GetTagName();
 
     // Gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
     // and build the OriginChain extension (received chain + this step's tag) so downstream steps see the full history.
@@ -819,9 +822,9 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ForwardPayload = CompletingStep->GetCompletionForwardParams();
         ForwardChain = CompletingStep->GetReceivedActivationParams().OriginChain;
     }
-    if (Node->GetQuestTag().IsValid())
+    if (Node->GetContextualTag().IsValid())
     {
-        ForwardChain.Add(Node->GetQuestTag());
+        ForwardChain.Add(Node->GetContextualTag());
     }
 
     auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node](const FName& DestTagName)
@@ -829,7 +832,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
         {
             DestInstance->PendingActivationParams = ForwardPayload;
-            DestInstance->PendingActivationParams.OriginTag = Node->GetQuestTag();
+            DestInstance->PendingActivationParams.OriginTag = Node->GetContextualTag();
             DestInstance->PendingActivationParams.OriginChain = ForwardChain;
         }
         ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
@@ -984,8 +987,13 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
             if (Node)
             {
                 Event = FQuestDeactivatedEvent(QuestTag, Source, AssembleEventContext(Node, FQuestObjectiveContext()));
+                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, Event);
             }
-            QuestSignalSubsystem->PublishMessage(QuestTag, Event);
+            else
+            {
+                // Fallback — no instance loaded under this tag. Single publish preserves observability.
+                QuestSignalSubsystem->PublishMessage(QuestTag, Event);
+            }
         }
     }
 }
@@ -1019,7 +1027,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
 
 void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const
 {
-    if (!QuestSignalSubsystem || !Node->GetQuestTag().IsValid()) return;
+    if (!QuestSignalSubsystem || !Node->GetContextualTag().IsValid()) return;
 
     FQuestObjectiveContext CompletionCtx;
     if (const UQuestStep* Step = Cast<UQuestStep>(Node))
@@ -1028,7 +1036,7 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
     }
 
     FQuestEventContext Context = AssembleEventContext(Node, CompletionCtx);
-    QuestSignalSubsystem->PublishMessage(Node->GetQuestTag(), FQuestEndedEvent(Node->GetQuestTag(), OutcomeTag, Source, Context));
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestEndedEvent(Node->GetContextualTag(), OutcomeTag, Source, Context));
 }
 
 void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event)
@@ -1045,13 +1053,12 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     }
     if (!Blockers.IsEmpty())
     {
-        if (QuestSignalSubsystem)
-        {
-            QuestSignalSubsystem->PublishMessage(QuestTag, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.ActivationSource));
-        }
+        FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.ActivationSource));
         UE_LOG(LogSimpleQuest, Warning,
             TEXT("HandleGiveQuestEvent: '%s' refused — %d blocker(s) present (first reason index=%d)"),
-            *QuestTag.ToString(), Blockers.Num(), static_cast<int32>(Blockers[0].Reason));
+            *QuestTag.ToString(),
+            Blockers.Num(),
+            static_cast<int32>(Blockers[0].Reason));
         return;
     }
 
@@ -1134,10 +1141,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // Block does NOT auto-deactivate. Block is the orthogonal re-entry gate; deactivation is the lifecycle/world
     // disabler. Callers who want both must publish FQuestDeactivateRequestEvent themselves (or use SetBlocked's
     // bAlsoDeactivateTargets toggle on the node-driven path).
-    if (QuestSignalSubsystem)
-    {
-        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestBlockedEvent(QuestTag, Event.Source));
-    }
+    FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source));
 
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
         *QuestTag.ToString(),
@@ -1310,18 +1314,18 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
 
         for (const FString& TagStr : TagStrings)
         {
-            const FGameplayTag QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
-            if (!QuestTag.IsValid())
+            const FGameplayTag ContextualTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
+            if (!ContextualTag.IsValid())
             {
                 UE_LOG(LogSimpleQuest, Warning,
                     TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : tag '%s' is not registered — has the questline been compiled?"),
                     *TagStr);
                 continue;
             }
-            RegisteredGiverQuestTags.Add(QuestTag);
+            RegisteredGiverQuestTags.Add(ContextualTag);
             UE_LOG(LogSimpleQuest, Verbose,
                 TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (asset registry)"),
-                *QuestTag.ToString(), *Asset.AssetName.ToString());
+                *ContextualTag.ToString(), *Asset.AssetName.ToString());
         }
     }
 #endif
@@ -1395,7 +1399,7 @@ void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FI
 
 void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTag OutcomeTag, FName PathIdentity)
 {
-    const FGameplayTag StepTag = Step->GetQuestTag();
+    const FGameplayTag StepTag = Step->GetContextualTag();
     DeferredCompletions.Add(StepTag, FQuestDeferredCompletion{ OutcomeTag, PathIdentity });
 
     TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>& Handles = DeferredCompletionPrereqHandles.FindOrAdd(StepTag);
@@ -1619,7 +1623,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // Path fact write to WorldState removed in the Outcome/Path data-layer migration. The resolution
     // registry (UQuestStateSubsystem) is now the canonical source of truth for outcome-keyed queries
     // via HasResolvedWith. Subscribers that previously watched <Quest>.Path.<Outcome> facts now subscribe
-    // to FQuestResolutionRecordedEvent on the QuestTag channel. See RegisterEnablementWatch and
+    // to FQuestResolutionRecordedEvent on the ContextualTag channel. See RegisterEnablementWatch and
     // DeferChainToNextNodes for the subscription wiring. RecordResolution below publishes the event.
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
@@ -1778,13 +1782,13 @@ void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
     {
         UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs satisfied, publishing Enabled"),
             *QuestTag.ToString());
-        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestEnabledEvent(QuestTag, Context));
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestEnabledEvent(QuestTag, Context));
     }
     else
     {
         UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs no longer satisfied, publishing Disabled"),
             *QuestTag.ToString());
-        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestDisabledEvent(QuestTag, Context));
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestDisabledEvent(QuestTag, Context));
     }
 }
 

@@ -6,13 +6,13 @@
 #include "Events/QuestActivationGroupTriggeredEvent.h"
 #include "Signals/SignalSubsystem.h"
 
+
 void UActivationGroupListenerNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — does not write Active or publish FQuestStartedEvent. Subscription is bound
-	// in OnRegisteredWithManager (instance lifetime), not here. Signal-based delivery is the only path that
-	// fires this node's forward chain. Entry-route activations from the compiler's OutGetterEntryTags
-	// registration are no-ops at this stage and disappear entirely once Step 7 drops that line.
-	ContextualTag = InContextualTag;
+	// Intentionally skips Super — utility nodes do not publish FQuestStartedEvent. Group listeners do their work
+	// via OnRegisteredWithManager (instance-lifetime signal subscription) and OnGroupSignalReceived; this override
+	// exists only to suppress the base class's OnNodeStarted dispatch in case any path ever calls Activate on a
+	// Listener instance.
 }
 
 void UActivationGroupListenerNode::OnRegisteredWithManager()

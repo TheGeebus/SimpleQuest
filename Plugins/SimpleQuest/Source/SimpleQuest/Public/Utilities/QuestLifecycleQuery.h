@@ -16,7 +16,7 @@ class UWorldStateSubsystem;
  * resolve+probe at the call site.
  *
  * Predicates are side-effect-free — no per-call logging, no tag registration, no allocation. Null WS or
- * invalid QuestTag returns false (defensive default for early-shutdown / late-construction call sites).
+ * invalid ContextualTag returns false (defensive default for early-shutdown / late-construction call sites).
  *
  * Distinct from FQuestActivationGuard, which evaluates compound activation policy (the diamond + giver-gate
  * + Block decision). These primitives answer the "is this state asserted?" question for callers regardless

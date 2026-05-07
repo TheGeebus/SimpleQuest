@@ -3,49 +3,34 @@
 #include "Quests/ClearBlockedNode.h"
 
 #include "SimpleQuestLog.h"
-#include "Events/QuestUnblockedEvent.h"
+#include "Events/QuestClearBlockRequestEvent.h"
 #include "Signals/SignalSubsystem.h"
-#include "Utilities/QuestLifecycleQuery.h"
-#include "Utilities/QuestTagComposer.h"
-#include "WorldState/WorldStateSubsystem.h"
 
 void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — utility nodes do not write Active or publish FQuestStartedEvent.
-	ContextualTag = InContextualTag;
-
+	// Intentionally skips Super — utility nodes do not write Active or publish FQuestStartedEvent. All clear-block
+	// work (idempotency guard, Blocked fact clear, FQuestUnblockedEvent multi-publish, log) routes through the
+	// manager's HandleClearBlockRequest by publishing on Tag_Channel_QuestClearBlockRequest. This keeps utility-
+	// node-driven clears and BP-callable clears on a single mechanism — the manager handles both identically,
+	// including multi-publish across asset-scoped alias tags for cross-asset subscribers. Deactivated is
+	// intentionally not cleared here either; the target node's re-entry via its Activate input clears it.
 	if (!TargetQuestTags.IsEmpty())
 	{
 		if (UGameInstance* GI = CachedGameInstance.Get())
 		{
-			UWorldStateSubsystem* WS = GI->GetSubsystem<UWorldStateSubsystem>();
-			USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>();
-
-			for (auto Tag : TargetQuestTags)
+			if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
 			{
-				if (WS)
+				for (const FGameplayTag& Tag : TargetQuestTags)
 				{
-					const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(Tag, EQuestStateLeaf::Blocked);
-					// Idempotency guard: skip targets that aren't currently blocked. Symmetric with USetBlockedNode's
-					// guard and the manager-handler path; keeps FQuestUnblockedEvent emission aligned with genuine
-					// fact transitions only.
-					if (BlockedFact.IsValid() && FQuestLifecycleQuery::IsBlocked(WS, Tag))
-					{
-						WS->ClearFact(BlockedFact);
-						// Deactivated is intentionally not cleared here. The target node's re-entry via its Activate input
-						// clears it; ClearBlocked only removes the permanent gate.
+					Signals->PublishMessage(Tag_Channel_QuestClearBlockRequest,
+						FQuestClearBlockRequestEvent(Tag, EDeactivationSource::Internal));
 
-						if (Signals)
-						{
-							Signals->PublishMessage(Tag, FQuestUnblockedEvent(Tag, EDeactivationSource::Internal));
-						}
-
-						UE_LOG(LogSimpleQuest, Log, TEXT("UClearBlockedNode: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=Internal)"),
-							*Tag.ToString());
-					}
+					UE_LOG(LogSimpleQuest, Verbose, TEXT("UClearBlockedNode: '%s' — published ClearBlockRequest (source=Internal)"),
+						*Tag.ToString());
 				}
 			}
 		}
 	}
 	ForwardActivation();
 }
+

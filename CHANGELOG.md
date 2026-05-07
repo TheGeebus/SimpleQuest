@@ -325,7 +325,7 @@ actually happens).
   (innermost-first, used by ancestor walks). Compiler infrastructure:
   `ImmediateContainerByTag` map populated during `CompileNodeRegistration`
   via `CurrentInnerContainerTag` save/restore around recursive `CompileGraph`
-  calls; `ResolveQuestTag` pre-pass at the top of `ComputeContainerReachability`
+  calls; `ResolveContextualTag` pre-pass at the top of `ComputeContainerReachability`
   ensures `QuestTag` fields are valid for the rest of the pass.
 - **`FQuestReachableSteps` USTRUCT** — wraps `TArray<FGameplayTag> Steps` so
   `TMap<FName, FQuestReachableSteps>` works under UE's reflection rules
@@ -1218,7 +1218,7 @@ investigating comment-node undo specifically).
   above + BP node swap on the demo actor. No more ensure; stale tags
   skipped silently with a Warning log pointing at the Stale Quest Tags
   panel
-- `UQuestNodeBase::ResolveQuestTag` was calling `RequestGameplayTag`
+- `UQuestNodeBase::ResolveContextualTag` was calling `RequestGameplayTag`
   without `ErrorIfNotFound=false` — the one outlier across the whole
   plugin. Latent foot-gun that would ensure on any path passing an
   unregistered `TagName`. Now passes `false` explicitly with a Warning

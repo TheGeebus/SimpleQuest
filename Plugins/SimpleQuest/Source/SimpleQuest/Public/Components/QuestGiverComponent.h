@@ -91,7 +91,7 @@ public:
 	FOnQuestDeactivatedAtGiverDelegate OnQuestDeactivated;
 	
 	/**
-	 * Give the quest identified by QuestTag to this component's owner. Publishes FQuestGivenEvent on Tag_Channel_QuestGiven;
+	 * Give the quest identified by ContextualTag to this component's owner. Publishes FQuestGivenEvent on Tag_Channel_QuestGiven;
 	 * UQuestManagerSubsystem picks it up, clears any PendingGiver state, stamps the merged params onto the target step, and
 	 * routes into the normal activation pipeline (prereq / gate checks unchanged).
 	 *

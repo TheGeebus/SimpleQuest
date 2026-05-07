@@ -9,7 +9,6 @@
 void UActivationGroupSetterNode::ActivateInternal(FGameplayTag InContextualTag)
 {
     // Intentionally skips Super — utility nodes do not write Active or publish FQuestStartedEvent.
-    ContextualTag = InContextualTag;
 
     UGameInstance* GI = CachedGameInstance.Get();
     if (!GI || !GroupTag.IsValid())

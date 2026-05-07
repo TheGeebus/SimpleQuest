@@ -45,11 +45,12 @@ public:
 
 protected:
 	/**
-	 * Compiles one graph level. Assigns QuestContentGuid and QuestTag to all content node CDOs, then resolves output pin
+	 * Compiles one graph level. Assigns QuestContentGuid and ContextualTag to all content node CDOs, then resolves output pin
 	 * wiring into NextNodesOnSuccess / NextNodesOnFailure. Recurses into linked questline graph assets.
 	 *
 	 * @param Graph							The questline graph asset to compile.
 	 * @param TagPrefix						Sanitized questline ID used as the tag namespace for this graph's nodes.
+	 * @param AssetScopedAliasPrefixes
  	 * @param BoundaryCompletionsByPath		Inherited boundary completions keyed by Exit OutcomeTag (NAME_None for Any-Outcome catch-all).
 	 *										Mirrors BoundaryTagsByPath: consumed by ResolvePinToTags when crossing an Exit.
 	 * @param VisitedAssetPaths				Stack of asset paths currently open in the recursion, used for cycle detection.
@@ -60,6 +61,7 @@ protected:
 	virtual TArray<FName> CompileGraph(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
+		const TArray<FString>& AssetScopedAliasPrefixes,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr);	
@@ -168,7 +170,7 @@ private:
 	};
 	
 	/**
-	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled QuestTag of the source content node. Used as the
+	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled ContextualTag of the source content node. Used as the
 	 * SourceFilter on entry destinations so runtime routing can discriminate per-source. Returns NAME_None when the source
 	 * cannot be located (unresolvable asset, missing node, etc.) — caller emits a warning and skips the spec.
 	 */
@@ -184,7 +186,7 @@ private:
 	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
-	 * the compiled QuestTag: SimpleQuest.Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
+	 * the compiled ContextualTag: SimpleQuest.Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
 	 * ordering — uses editor-time data only.
 	 */
 	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;
@@ -218,6 +220,14 @@ private:
 	/** Accumulates all compiled quest tags across the full recursive compilation run. Written to the top-level graph by Compile(). */
 	TArray<FName> AllCompiledQuestTags;	
 
+	/**
+	 * Per-node asset-scoped alias FName lists, keyed by ContextualTag's FName. Populated during CompileNodeRegistration
+	 * as each node materializes; consumed by ComputeContainerReachability's post-pass to call ResolveAssetScopedAliasTags
+	 * on each instance once the runtime tag manager has the alias FNames registered. Empty entry for nodes with no
+	 * LinkedQuestline ancestors (top-level content of the compile asset).
+	 */
+	TMap<FName, TArray<FName>> CompiledAliasFNamesByContextualTag;
+	
 	/**
 	 * Maps utility editor nodes to their compile-time FName keys. Keyed by editor node pointer; values are GUID-derived FNames
 	 * (Util_<NodeGuid>) used as AllCompiledNodes lookup keys. Not gameplay tags — utility nodes are internal routing only,
@@ -261,8 +271,10 @@ private:
 	void CompileNodeRegistration(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
+		const TArray<FString>& AssetScopedAliasPrefixes,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
-		TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
 		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
 
 	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */

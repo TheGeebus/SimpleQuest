@@ -111,6 +111,15 @@ namespace
             const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
             const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
 
+            // Compute the outer asset's expected prefix. After §1.4 multi-tag (A.2 landing), each outer asset's
+            // CompiledQuestTags carries both ContextualTag-form entries (rooted at the outer's own QuestlineID)
+            // AND asset-scoped alias entries that root at descendant home assets. Without the prefix filter
+            // below, suffix-matching would catch the aliases too — producing false-positive "(via OuterAsset)"
+            // attributions for watchers / givers that subscribe through the home asset's own compile only.
+            const FString OuterAssetID = AssetData.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
+            const FString EffectiveOuterID = OuterAssetID.IsEmpty() ? AssetData.AssetName.ToString() : OuterAssetID;
+            const FString OuterExpectedPrefix = FQuestTagComposer::IdentityNamespace + FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(EffectiveOuterID) + TEXT(".");
+
             TArray<FString> CompiledTagStrs;
             CompiledTagsJoined.ParseIntoArray(CompiledTagStrs, TEXT("|"));
 
@@ -118,6 +127,10 @@ namespace
             {
                 if (TagStr.Len() <= SuffixToMatch.Len()) continue;
                 if (!TagStr.EndsWith(SuffixToMatch)) continue;
+                // Only consider tags rooted under the outer asset's QuestlineID prefix. Asset-scoped alias entries
+                // (compiler-emitted under §1.4 multi-tag) start with the HOME asset's prefix and don't belong to
+                // this outer's "contextual" perspective on the home node.
+                if (!TagStr.StartsWith(OuterExpectedPrefix)) continue;
 
                 const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), false);
                 if (!ContextualTag.IsValid()) continue;

@@ -130,7 +130,7 @@ public:
 	TArray<FGameplayTag> GetQuestTagsUnderPrefix(FGameplayTag Prefix) const;
 
 	/**
-	 * True if QuestTag has been registered with the manager this session via RegisterQuestTag. Distinct from
+	 * True if ContextualTag has been registered with the manager this session via RegisterQuestTag. Distinct from
 	 * FQuestTagComposer::IsTagRegisteredInRuntime, which checks compile-time gameplay tag registration; this
 	 * predicate answers "has the runtime instance been wired up."
 	 */
@@ -141,7 +141,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
 	int32 GetKnownQuestTagCount() const;
 
-	/** Returns the runtime record for QuestTag, or nullptr if the tag isn't a known quest tag. */
+	/** Returns the runtime record for ContextualTag, or nullptr if the tag isn't a known quest tag. */
 	const FQuestRuntimeRecord* GetQuestRuntimeRecord(FGameplayTag QuestTag) const;
 
 	/**
@@ -210,7 +210,7 @@ public:
     // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
 
     /**
-     * Returns the current set of activation blockers for QuestTag — empty array means the quest is currently
+     * Returns the current set of activation blockers for ContextualTag — empty array means the quest is currently
      * startable. State-fact blockers (UnknownQuest, AlreadyLive, Blocked, Deactivated, NotPendingGiver) come
      * first; PrereqUnmet comes last with UnsatisfiedLeafTags populated. Computed from WorldState facts +
      * cached prereq status. Pure read; no manager interaction.
@@ -228,7 +228,7 @@ public:
     FQuestPrereqStatus GetQuestPrereqStatus(FGameplayTag QuestTag) const;
 
 	/**
-	 * Whether QuestTag's runtime instance is a UQuest container (wrapper). False for Steps, utility nodes, and
+	 * Whether ContextualTag's runtime instance is a UQuest container (wrapper). False for Steps, utility nodes, and
 	 * any tag the manager hasn't registered. Public read surface — used by the blocker query and any consumer
 	 * that needs to know a tag's structural classification.
 	 */
@@ -243,7 +243,7 @@ private:
 
     /**
      * Parallel O(1) index for HasResolvedWith. Maintained alongside QuestResolutions: every RecordResolution call
-     * adds the (QuestTag, OutcomeTag) pair to this map. Avoids walking History for outcome-keyed prereq queries.
+     * adds the (ContextualTag, OutcomeTag) pair to this map. Avoids walking History for outcome-keyed prereq queries.
      */
     TMap<FGameplayTag, TSet<FGameplayTag>> ResolvedOutcomesByQuest;
 
@@ -252,7 +252,7 @@ private:
 
     /**
      * Parallel O(1) index for HasEnteredWith. Maintained alongside QuestEntries: every RecordEntry call
-     * adds the (QuestTag, IncomingOutcomeTag) pair. TSet handles deduplication so repeat entries with the
+     * adds the (ContextualTag, IncomingOutcomeTag) pair. TSet handles deduplication so repeat entries with the
      * same outcome don't bloat the set.
      */
     TMap<FGameplayTag, TSet<FGameplayTag>> EnteredOutcomesByQuest;
@@ -275,7 +275,7 @@ private:
     	FName PathIdentity);
 
 	/**
-	 * Registers QuestTag into KnownQuests with a default-constructed FQuestRuntimeRecord stamped with current world time.
+	 * Registers ContextualTag into KnownQuests with a default-constructed FQuestRuntimeRecord stamped with current world time.
 	 * Idempotent — repeat calls on the same tag preserve the earliest RegisteredTime. Called from
 	 * UQuestManagerSubsystem::RegisterQuestlineGraph for every valid resolved tag in the graph's compiled nodes.
 	 */
@@ -288,7 +288,7 @@ private:
     USignalSubsystem* ResolveSignalSubsystem() const;
 
 	/**
-	 * Pushed by the manager during graph activation: marks QuestTag as a container (UQuest wrapper). Lets the
+	 * Pushed by the manager during graph activation: marks ContextualTag as a container (UQuest wrapper). Lets the
 	 * blocker query distinguish Step-vs-container semantics for the AlreadyLive blocker without cross-subsystem
 	 * coupling — containers' Live state is derived from inner Step state and shouldn't gate forward activation.
 	 */

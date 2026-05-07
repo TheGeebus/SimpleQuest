@@ -8,13 +8,13 @@
 
 namespace
 {
-    constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
+    constexpr EAutomationTestFlags ActivationGuardTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
 }
 
 
 // Step diamond - refuses on Live or PendingGiver; ordering is Live wins when both set.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_StepDiamond,
-    "SimpleQuest.ActivationGuard.StepDiamond", TestFlags)
+    "SimpleQuest.ActivationGuard.StepDiamond", ActivationGuardTestFlags)
 bool FQuestActivationGuard_StepDiamond::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -45,7 +45,7 @@ bool FQuestActivationGuard_StepDiamond::RunTest(const FString& Parameters)
 // Container reentry - Live or PendingGiver on a container falls through to giver/Block
 // check rather than refusing. Returned at the end when no giver fire and not blocked.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_ContainerReentry,
-    "SimpleQuest.ActivationGuard.ContainerReentry", TestFlags)
+    "SimpleQuest.ActivationGuard.ContainerReentry", ActivationGuardTestFlags)
 bool FQuestActivationGuard_ContainerReentry::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -74,7 +74,7 @@ bool FQuestActivationGuard_ContainerReentry::RunTest(const FString& Parameters)
 
 // Container reentry + giver - giver fire / path-aware skip preempt the ContainerReentry decision.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_ContainerReentryWithGiver,
-    "SimpleQuest.ActivationGuard.ContainerReentryWithGiver", TestFlags)
+    "SimpleQuest.ActivationGuard.ContainerReentryWithGiver", ActivationGuardTestFlags)
 bool FQuestActivationGuard_ContainerReentryWithGiver::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -103,7 +103,7 @@ bool FQuestActivationGuard_ContainerReentryWithGiver::RunTest(const FString& Par
 
 // Container reentry + Block - Block still refuses on reentry (giver gate didn't fire).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_ContainerReentryBlocked,
-    "SimpleQuest.ActivationGuard.ContainerReentryBlocked", TestFlags)
+    "SimpleQuest.ActivationGuard.ContainerReentryBlocked", ActivationGuardTestFlags)
 bool FQuestActivationGuard_ContainerReentryBlocked::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -121,7 +121,7 @@ bool FQuestActivationGuard_ContainerReentryBlocked::RunTest(const FString& Param
 
 // Giver gate fire - registered giver, not bypassed, path-aware skip not applicable.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_GiverGateFire,
-    "SimpleQuest.ActivationGuard.GiverGateFire", TestFlags)
+    "SimpleQuest.ActivationGuard.GiverGateFire", ActivationGuardTestFlags)
 bool FQuestActivationGuard_GiverGateFire::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -146,7 +146,7 @@ bool FQuestActivationGuard_GiverGateFire::RunTest(const FString& Parameters)
 
 // Path-aware skip - Container + registered giver + all reachable Steps live -> skip.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_GiverGateSkipPathAware,
-    "SimpleQuest.ActivationGuard.GiverGateSkipPathAware", TestFlags)
+    "SimpleQuest.ActivationGuard.GiverGateSkipPathAware", ActivationGuardTestFlags)
 bool FQuestActivationGuard_GiverGateSkipPathAware::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -164,7 +164,7 @@ bool FQuestActivationGuard_GiverGateSkipPathAware::RunTest(const FString& Parame
 
 // Bypass giver gate - bBypassGiverGate=true skips the entire giver section.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_BypassGiverGate,
-    "SimpleQuest.ActivationGuard.BypassGiverGate", TestFlags)
+    "SimpleQuest.ActivationGuard.BypassGiverGate", ActivationGuardTestFlags)
 bool FQuestActivationGuard_BypassGiverGate::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -190,7 +190,7 @@ bool FQuestActivationGuard_BypassGiverGate::RunTest(const FString& Parameters)
 
 // Block refusal - Blocked, no giver gate fire, no diamond hit.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_RefuseBlocked,
-    "SimpleQuest.ActivationGuard.RefuseBlocked", TestFlags)
+    "SimpleQuest.ActivationGuard.RefuseBlocked", ActivationGuardTestFlags)
 bool FQuestActivationGuard_RefuseBlocked::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -212,7 +212,7 @@ bool FQuestActivationGuard_RefuseBlocked::RunTest(const FString& Parameters)
 
 // Plain Proceed - no diamond, no giver, no Block.
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_Proceed,
-    "SimpleQuest.ActivationGuard.Proceed", TestFlags)
+    "SimpleQuest.ActivationGuard.Proceed", ActivationGuardTestFlags)
 bool FQuestActivationGuard_Proceed::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;
@@ -233,7 +233,7 @@ bool FQuestActivationGuard_Proceed::RunTest(const FString& Parameters)
 
 // Giver gate preempts Block - registered giver + Blocked = GiverGateFire (intentional).
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestActivationGuard_GiverPreemptsBlock,
-    "SimpleQuest.ActivationGuard.GiverPreemptsBlock", TestFlags)
+    "SimpleQuest.ActivationGuard.GiverPreemptsBlock", ActivationGuardTestFlags)
 bool FQuestActivationGuard_GiverPreemptsBlock::RunTest(const FString& Parameters)
 {
     FQuestActivationGuardInputs In;

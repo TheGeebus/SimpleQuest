@@ -27,7 +27,7 @@ enum class EQuestActivationBlocker : uint8
 	/** Quest is not in a giver-gated PendingGiver state — the giver isn't currently offering it. */
 	NotPendingGiver,
 
-	/** QuestTag isn't registered in the runtime tag manager. Stale or never-compiled tag. */
+	/** ContextualTag isn't registered in the runtime tag manager. Stale or never-compiled tag. */
 	UnknownQuest,
 };
 

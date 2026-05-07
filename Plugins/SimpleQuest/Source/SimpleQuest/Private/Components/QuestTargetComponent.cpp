@@ -50,14 +50,29 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
             *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
         return;
     }
-    
+
+    // Track active subscription by the canonical ContextualTag from Event.Context — invariant across multi-publish
+    // channels (Channel varies by which publish chain the bus dispatched through; Context.NodeInfo.QuestTag is the
+    // Step's canonical identity, set by AssembleEventContext to ContextualTag). This serves two ends:
+    //   (1) Dedup when StepTagsToWatch contains both ContextualTag and alias forms for the same logical Step —
+    //       multi-publish would otherwise hit both subscriptions and double-activate.
+    //   (2) Route trigger publishes (SendTriggeredEvent etc.) on ContextualTag, which is what the manager's per-
+    //       step FQuestObjectiveTriggered subscription is bound to — closing the cross-asset trigger flow that
+    //       otherwise stalls when a target is bound through an alias only.
+    // Falls back to Channel if Context isn't populated (defensive — preserves behavior for any publish path that
+    // hasn't been routed through FQuestPublish::OnAllNodeTags yet).
+    const FGameplayTag CanonicalTag = Event.Context.NodeInfo.QuestTag.IsValid()
+        ? Event.Context.NodeInfo.QuestTag
+        : Channel;
+
     // Guard against duplicate activation for the same step
-    if (ActiveStepEndHandles.Contains(Channel)) return;
+    if (ActiveStepEndHandles.Contains(CanonicalTag)) return;
 
-    FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(Channel, this, &UQuestTargetComponent::OnTargetDeactivated);
-    ActiveStepEndHandles.Add(Channel, Handle);
+    FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetDeactivated);
+    ActiveStepEndHandles.Add(CanonicalTag, Handle);
 
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s : Owner: %s"), *Channel.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
+    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s, Canonical: %s : Owner: %s"),
+        *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
     Execute_SetActivated(this, true);
 }

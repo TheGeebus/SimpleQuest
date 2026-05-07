@@ -6,6 +6,7 @@
 #include "Events/QuestBlockedEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -28,7 +29,7 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 					// Idempotency guard: skip already-blocked targets. Without this, the WorldState fact ref-count
 					// bumps on each pulse without firing FactAdded, but FQuestBlockedEvent below would broadcast on
 					// every pulse — out of sync with the manager-handler path which guards the same way.
-					if (BlockedFact.IsValid() && !WS->HasFact(BlockedFact))
+					if (BlockedFact.IsValid() && !FQuestLifecycleQuery::IsBlocked(WS, Tag))
 					{
 						WS->AddFact(BlockedFact);
 

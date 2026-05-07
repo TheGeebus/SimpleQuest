@@ -43,6 +43,7 @@
 #include "Utilities/QuestTagComposer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Utilities/QuestLifecycleQuery.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -592,8 +593,8 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
      */
     if (NodeTag.IsValid() && WorldState)
     {
-        const bool bIsLive = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live));
-        const bool bIsPendingGiver = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::PendingGiver));
+        const bool bIsLive = FQuestLifecycleQuery::IsLive(WorldState, NodeTag);
+        const bool bIsPendingGiver = FQuestLifecycleQuery::IsPendingGiver(WorldState, NodeTag);
 
         if (bIsLive || bIsPendingGiver)
         {
@@ -646,7 +647,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         {
             
             const FName DiagPinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: container '%s' pin '%s' — %d ReachableStepsByActivatePin entry(s)"),
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: container '%s' pin '%s' — %d ReachableStepsByActivatePin entry(s)"),
                 *NodeTagName.ToString(), *DiagPinKey.ToString(), Container->GetReachableStepsByActivatePin().Num());
 
             const FQuestReachableSteps* DiagReachable = nullptr;
@@ -659,25 +660,24 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
                 DiagReachable = Container->GetReachableStepsByActivatePin().Find(NAME_None);
                 if (DiagReachable)
                 {
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: per-pin '%s' miss; using AnyOutcome fallback"),
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: per-pin '%s' miss; using AnyOutcome fallback"),
                         *DiagPinKey.ToString());
                 }
             }
 
             if (DiagReachable)
             {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: %d reachable Step(s) consulted"),
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: %d reachable Step(s) consulted"),
                     DiagReachable->StepTags.Num());
                 for (const FGameplayTag& DiagStep : DiagReachable->StepTags)
                 {
-                    const FGameplayTag DiagLive = FQuestTagComposer::ResolveStateFactTag(DiagStep, EQuestStateLeaf::Live);
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag:   Step '%s' Live=%d"),
-                        *DiagStep.GetTagName().ToString(), WorldState->HasFact(DiagLive) ? 1 : 0);
+                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip:   Step '%s' Live=%d"),
+                        *DiagStep.GetTagName().ToString(), FQuestLifecycleQuery::IsLive(WorldState, DiagStep) ? 1 : 0);
                 }
             }
             else
             {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Phase6 diag: NO reachable data found for any key"));
+                UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: NO reachable data found for any key"));
             }
                         
             // Lookup with Any-Outcome fallback. Try the outcome-tag-keyed per-path entry first; if the wrapper
@@ -700,8 +700,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
                 bSkipGiverGate = true;
                 for (const FGameplayTag& StepTag : Reachable->StepTags)
                 {
-                    const FGameplayTag StepLiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
-                    if (!StepLiveFact.IsValid() || !WorldState->HasFact(StepLiveFact))
+                    if (!FQuestLifecycleQuery::IsLive(WorldState, StepTag))
                     {
                         bSkipGiverGate = false;
                         break;
@@ -761,8 +760,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // mirrors HandleGiveQuestEvent's blocker check at the give step: gives on Blocked quests are refused with
     // FQuestGiveBlockedEvent, and direct/cascade activations on Blocked quests are refused here. Together these
     // make Block a pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
-    if (NodeTag.IsValid() && WorldState &&
-        WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Blocked)))
+    if (FQuestLifecycleQuery::IsBlocked(WorldState, NodeTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
             *NodeTagName.ToString());
@@ -948,9 +946,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // back to own Activate), where Completed remains asserted across loop iterations alongside a freshly-set
     // Live fact. Asking "is there an active lifecycle?" answers the actual question; "is it not yet completed?"
     // produces false negatives on multi-resolution quests.
-    const bool bHasLive = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
-    const bool bHasPendingGiver = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
-    if (!bHasLive && !bHasPendingGiver)
+    if (!FQuestLifecycleQuery::HasActiveLifecycle(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - no Live or PendingGiver lifecycle to interrupt"), *QuestTag.ToString());
         return;
@@ -963,7 +959,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // re-asserting Deactivated (would bump the WorldState ref-count, leaving Deactivated pinned past a future
     // ClearBlocked / similar) and the FQuestDeactivatedEvent re-publish (subscribers already saw the original
     // transition).
-    const bool bWasAlreadyDeactivated = WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated));
+    const bool bWasAlreadyDeactivated = FQuestLifecycleQuery::IsDeactivated(WorldState, QuestTag);
     if (bWasAlreadyDeactivated)
     {
         UE_LOG(LogSimpleQuest, Warning,
@@ -989,7 +985,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // PendingGiver cleanup. Don't mutate RegisteredGiverQuestTags — it's the structural "this quest has a giver"
     // set, sticky across the session. After deactivation, the next activation re-engages the giver gate
     // normally because the tag is still in the set.
-    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver)))
+    if (FQuestLifecycleQuery::IsPendingGiver(WorldState, QuestTag))
     {
         ClearQuestPendingGiver(QuestTag);
     }
@@ -998,7 +994,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     ClearEnablementWatch(QuestTag);
 
     // Active node cleanup: Use Node instead of redundant lookup
-    if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
+    if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
         if (Node)
         {
@@ -1193,7 +1189,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // request on an already-blocked quest would otherwise bump the WorldState ref-count without reflecting a
     // genuine state transition. Also gates FQuestBlockedEvent broadcast so already-blocked re-applications stay
     // silent at the event layer.
-    if (WorldState->HasFact(BlockedFact))
+    if (FQuestLifecycleQuery::IsBlocked(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
         return;
@@ -1224,7 +1220,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
     // Symmetric with the already-blocked guard in HandleBlockRequest. Also gates FQuestUnblockedEvent broadcast
     // so clear-on-already-unblocked stays silent at the event layer.
-    if (!WorldState->HasFact(BlockedFact))
+    if (!FQuestLifecycleQuery::IsBlocked(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleClearBlockRequest: '%s' skipped — not currently blocked"), *QuestTag.ToString());
         return;
@@ -1250,17 +1246,14 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
 
     // Override guard — skip if already in a terminal state unless designer explicitly opts in. Default-false
     // protects against accidental double-broadcast; opt-in true appends additively (never removes prior facts).
-    if (!Event.bOverrideExisting)
+    if (!Event.bOverrideExisting && FQuestLifecycleQuery::IsTerminal(WorldState, QuestTag))
     {
-        if (WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed))
-            || WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Deactivated)))
-        {
-            UE_LOG(LogSimpleQuest, Warning,
-                TEXT("HandleResolveRequest: '%s' skipped — already in terminal state. Pass bOverrideExisting=true to append a new resolution entry additively."),
-                *QuestTag.ToString());
-            return;
-        }
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("HandleResolveRequest: '%s' skipped — already in terminal state. Pass bOverrideExisting=true to append a new resolution entry additively."),
+            *QuestTag.ToString());
+        return;
     }
+
 
     SetQuestResolved(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External);
 
@@ -1545,7 +1538,7 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
     RegisteredGiverQuestTags.Add(QuestTag);
     UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
 
-    if (WorldState && WorldState->HasFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live)))
+    if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Warning,
             TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
@@ -1582,7 +1575,7 @@ void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
     // through here once per cascade and would otherwise bump the WorldState ref-count to 2. The single RemoveFact on
     // completion or deactivation then leaves a residual Live assertion stuck on. Signal propagation upstream still
     // fires per cascade, only the boolean state fact is gated here.
-    if (WorldState->HasFact(LiveFact))
+    if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s' already live, skipping (convergence)"), *QuestTag.ToString());
         return;
@@ -1621,8 +1614,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     bool bAnyInnerLive = false;
     for (const FGameplayTag& InnerStepTag : Container->GetInnerStepTags())
     {
-        const FGameplayTag InnerLiveFact = FQuestTagComposer::ResolveStateFactTag(InnerStepTag, EQuestStateLeaf::Live);
-        if (InnerLiveFact.IsValid() && WorldState->HasFact(InnerLiveFact))
+        if (FQuestLifecycleQuery::IsLive(WorldState, InnerStepTag))
         {
             bAnyInnerLive = true;
             break;
@@ -1632,7 +1624,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     const FGameplayTag ContainerLiveFact = FQuestTagComposer::ResolveStateFactTag(ContainerTag, EQuestStateLeaf::Live);
     if (!ContainerLiveFact.IsValid()) return;
 
-    const bool bCurrentlyLive = WorldState->HasFact(ContainerLiveFact);
+    const bool bCurrentlyLive = FQuestLifecycleQuery::IsLive(WorldState, ContainerTag);
     if (bAnyInnerLive && !bCurrentlyLive)
     {
         WorldState->AddFact(ContainerLiveFact);
@@ -1684,7 +1676,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
     const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed);
-    if (CompletedFact.IsValid() && !WorldState->HasFact(CompletedFact))
+    if (CompletedFact.IsValid() && !FQuestLifecycleQuery::IsCompleted(WorldState, QuestTag))
     {
         WorldState->AddFact(CompletedFact);
     }
@@ -1724,7 +1716,7 @@ void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
     // short-circuit (top of activation) already intercepts a second cascade arriving while PendingGiver is asserted,
     // so this is belt-and-braces, but keeping the Set* methods uniformly idempotent means any future caller reaching
     // here can't accidentally bump the ref-count past 1 on a state that's semantically a boolean.
-    if (WorldState->HasFact(PendingGiverFact))
+    if (FQuestLifecycleQuery::IsPendingGiver(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s' already pending, skipping"), *QuestTag.ToString());
         return;

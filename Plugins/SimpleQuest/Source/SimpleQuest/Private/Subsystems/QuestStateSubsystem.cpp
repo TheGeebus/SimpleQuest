@@ -10,6 +10,7 @@
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -124,8 +125,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 	//    from inner Step state, so a give forwarding activation to a Live wrapper with mixed-Live inner Steps is
 	//    valid — exactly the path the path-aware giver gate (Phase 6) targets. Step Live blocks because Steps own
 	//    their Live state directly and re-activation while Live would corrupt lifecycle invariants.
-	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false)))
+	if (FQuestLifecycleQuery::IsLive(WS, QuestTag))
 	{
 		if (!IsContainerTag(QuestTag))
 		{
@@ -136,8 +136,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 	}
 
 	// 3. Blocked — terminal until ClearBlocked.
-	if (WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Blocked), false)))
+	if (FQuestLifecycleQuery::IsBlocked(WS, QuestTag))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::Blocked;
@@ -145,8 +144,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 	}
 
 	// 4. NotPendingGiver — quest hasn't been activated to giver-offer state.
-	if (!WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false)))
+	if (!FQuestLifecycleQuery::IsPendingGiver(WS, QuestTag))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::NotPendingGiver;

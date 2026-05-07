@@ -5,6 +5,7 @@
 #include "SimpleQuestLog.h"
 #include "Events/QuestUnblockedEvent.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldState/WorldStateSubsystem.h"
 
@@ -28,7 +29,7 @@ void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 					// Idempotency guard: skip targets that aren't currently blocked. Symmetric with USetBlockedNode's
 					// guard and the manager-handler path; keeps FQuestUnblockedEvent emission aligned with genuine
 					// fact transitions only.
-					if (BlockedFact.IsValid() && WS->HasFact(BlockedFact))
+					if (BlockedFact.IsValid() && FQuestLifecycleQuery::IsBlocked(WS, Tag))
 					{
 						WS->ClearFact(BlockedFact);
 						// Deactivated is intentionally not cleared here. The target node's re-entry via its Activate input

@@ -3,6 +3,7 @@
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
+#include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
 #include "GameplayTagsManager.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
@@ -56,20 +57,17 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 
 bool USimpleQuestBlueprintLibrary::IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Live), false));
+    return FQuestLifecycleQuery::IsLive(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::Completed), false));
+    return FQuestLifecycleQuery::IsCompleted(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false));
+    return FQuestLifecycleQuery::IsPendingGiver(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)

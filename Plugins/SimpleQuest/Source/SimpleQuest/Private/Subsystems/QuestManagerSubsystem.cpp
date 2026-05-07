@@ -43,6 +43,7 @@
 #include "Utilities/QuestTagComposer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
@@ -576,194 +577,130 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         return;
     }
 
+    UQuestNodeBase* Instance = *InstancePtr;
+
     // Stamp activation provenance on the destination's PendingActivationParams. ActivateInternal merges this into
     // ReceivedActivationParams, and HandleOnNodeStarted's Step-side RecordEntry reads the snapshot's Provenance into
-    // FQuestEntryArrival. Stamped after lookup, before the rest of ActivateNodeByTag's flow touches PendingActivationParams,
-    // so this value rides through the merge regardless of whether the caller pre-stamped other fields on the struct.
-    (*InstancePtr)->PendingActivationParams.Provenance = Provenance;
+    // FQuestEntryArrival. Stamped after lookup, before the rest of ActivateNodeByTag's flow touches PendingActivation-
+    // Params, so this value rides through the merge regardless of whether the caller pre-stamped other fields on the struct.
+    Instance->PendingActivationParams.Provenance = Provenance;
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
-    /**
-     * Diamond convergence guard: refuses activation if the node is already running or waiting for a giver. Blocked is
-     * intentionally NOT in this set — Block is orthogonal to the lifecycle, so a giver-gated quest under Block should
-     * still publish FQuestEnabledEvent and let the giver remain visible/interactable. The actual SetQuestLive
-     * transition is gated by the post-giver Block check further down, which mirrors HandleGiveQuestEvent's
-     * blocker-refusal at the give step. Completed is intentionally excluded so loops and repeatable quests can re-enter.
-     */
+    // Route the diamond + giver-gate + Block-gate decision through the centralized policy evaluator. ActivateNodeByTag
+    // becomes a switch over the decision; existing handlers (logging, SetQuestPendingGiver + event publishes + watch
+    // registration, the Deactivated clear, the cascade-origin / IncomingOutcomeTag / PendingEntryActivations side effects,
+    // the Activate call) stay verbatim, just relocated under their decision case. See FQuestActivationGuard for the
+    // policy logic and EQuestActivationGuardDecision for the case enumeration.
+    const bool bHasRegisteredGiver = NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag);
+    const EQuestActivationGuardDecision Decision = FQuestActivationGuard::Evaluate(
+        Instance, NodeTag, IncomingOutcomeTag, bBypassGiverGate, bHasRegisteredGiver, WorldState);
+
+    // Step diamond refusal — early out BEFORE the Deactivated clear (matches original behavior where Step refusal
+    // returned before reaching the clear). Steps own their state directly; re-firing would corrupt lifecycle invariants
+    // and double-publish FQuestStartedEvent.
+    if (Decision == EQuestActivationGuardDecision::RefuseStepAlreadyLive)
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already live)"),
+            *NodeTagName.ToString());
+        return;
+    }
+    if (Decision == EQuestActivationGuardDecision::RefuseStepAlreadyPendingGiver)
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already pending giver)"),
+            *NodeTagName.ToString());
+        return;
+    }
+
+    // Clear Deactivated for any non-Step-refusal path. Matches the original behavior where ANY Activate-input pulse
+    // clears Deactivated, even if downstream guards (Block) ultimately refuse the activation. A deactivated node is
+    // allowed to re-enter via its Activate input.
     if (NodeTag.IsValid() && WorldState)
     {
-        const bool bIsLive = FQuestLifecycleQuery::IsLive(WorldState, NodeTag);
-        const bool bIsPendingGiver = FQuestLifecycleQuery::IsPendingGiver(WorldState, NodeTag);
-
-        if (bIsLive || bIsPendingGiver)
-        {
-            UQuestNodeBase* Instance = *InstancePtr;
-            const bool bIsContainer = Instance && Instance->IsContainerNode();
-
-            /**
-             * STEP PATH: refuse re-entry on Live or PendingGiver. Steps own their state directly; re-firing would
-             * corrupt lifecycle invariants and double-publish FQuestStartedEvent.
-             */
-            if (!bIsContainer)
-            {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already %s)"),
-                    *NodeTagName.ToString(),
-                    bIsLive ? TEXT("live") : TEXT("pending giver"));
-                return;
-            }
-
-            /**
-             * CONTAINER PATH: containers always fall through to the full activation flow when re-activated while
-             * Live. Containers don't directly write the Live fact, and inner Step diamond guards refuse re-Live
-             * for already-Live Steps so spurious re-fires of entry routes are idempotent. HandleOnNodeStarted's
-             * container branch handles Any-Outcome and per-path entries, records entry to UQuestStateSubsystem,
-             * and re-publishes FQuestStartedEvent. Per-cascade fan-in is handled by the PendingEntryActivations
-             * queue stamped further below. Loop-back wires (own outer outcome → own Activate) and external fan-in
-             * both route through here equivalently.
-             */
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' re-activating container while %s"),
-                *NodeTagName.ToString(),
-                bIsLive ? TEXT("live") : TEXT("pending giver"));
-            // Fall through to Block gate, giver gate, and normal activation flow below.
-        }
-        // Clear Deactivated if present. A deactivated node is allowed to re-enter via its Activate input.
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Deactivated));
     }
 
-    if (!bBypassGiverGate && NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag))
+    switch (Decision)
     {
-        UQuestNodeBase* Instance = *InstancePtr;
-
-        // Path-aware skip. For containers, look up which inner Steps are reachable from the entered Activate pin
-        // (compile-time populated by ComputeContainerReachability into UQuest::ReachableStepsByActivatePin). If all
-        // reachable Steps are already Live, there's no work for the giver to enable, so skip the gate and fall through
-        // to normal activation. This covers loop-back wires, fan-in re-entry, and any case where the entered path's
-        // targets are already running — preventing the giver from spuriously re-firing each iteration. Empty reachable
-        // set falls through to fire the gate as before (preserves behavior for non-container giver-gated nodes and edge
-        // cases where reachability data didn't populate).
-        bool bSkipGiverGate = false;
-        if (UQuest* Container = Cast<UQuest>(Instance))
-        {
-            
-            const FName DiagPinKey = IncomingOutcomeTag.IsValid() ? IncomingOutcomeTag.GetTagName() : NAME_None;
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: container '%s' pin '%s' — %d ReachableStepsByActivatePin entry(s)"),
-                *NodeTagName.ToString(), *DiagPinKey.ToString(), Container->GetReachableStepsByActivatePin().Num());
-
-            const FQuestReachableSteps* DiagReachable = nullptr;
-            if (IncomingOutcomeTag.IsValid())
-            {
-                DiagReachable = Container->GetReachableStepsByActivatePin().Find(IncomingOutcomeTag.GetTagName());
-            }
-            if (!DiagReachable)
-            {
-                DiagReachable = Container->GetReachableStepsByActivatePin().Find(NAME_None);
-                if (DiagReachable)
-                {
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: per-pin '%s' miss; using AnyOutcome fallback"),
-                        *DiagPinKey.ToString());
-                }
-            }
-
-            if (DiagReachable)
-            {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: %d reachable Step(s) consulted"),
-                    DiagReachable->StepTags.Num());
-                for (const FGameplayTag& DiagStep : DiagReachable->StepTags)
-                {
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip:   Step '%s' Live=%d"),
-                        *DiagStep.GetTagName().ToString(), FQuestLifecycleQuery::IsLive(WorldState, DiagStep) ? 1 : 0);
-                }
-            }
-            else
-            {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("Path-aware skip: NO reachable data found for any key"));
-            }
-                        
-            // Lookup with Any-Outcome fallback. Try the outcome-tag-keyed per-path entry first; if the wrapper
-            // has no per-path Activate pin matching this outcome (the common case — most wrappers expose only
-            // Any-Outcome), fall back to the Any-Outcome (NAME_None) reachability. Activation pulses always
-            // fire Any-Outcome entries regardless of source outcome tag, so NAME_None reachability is the right
-            // baseline. Future refinement: when per-path entries DO match, the value should be the union of
-            // Any-Outcome ∪ per-path-reachable Steps; for now per-path keys store only their own reachability.
-            const FQuestReachableSteps* Reachable = nullptr;
-            if (IncomingOutcomeTag.IsValid())
-            {
-                Reachable = Container->GetReachableStepsByActivatePin().Find(IncomingOutcomeTag.GetTagName());
-            }
-            if (!Reachable)
-            {
-                Reachable = Container->GetReachableStepsByActivatePin().Find(NAME_None);
-            }
-            if (Reachable && !Reachable->StepTags.IsEmpty())
-            {
-                bSkipGiverGate = true;
-                for (const FGameplayTag& StepTag : Reachable->StepTags)
-                {
-                    if (!FQuestLifecycleQuery::IsLive(WorldState, StepTag))
-                    {
-                        bSkipGiverGate = false;
-                        break;
-                    }
-                }
-            }
-        }
-
-        if (bSkipGiverGate)
-        {
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' giver-gate skipped — all reachable Steps from pin '%s' already Live"),
-                *NodeTagName.ToString(),
-                IncomingOutcomeTag.IsValid() ? *IncomingOutcomeTag.GetTagName().ToString() : TEXT("AnyOutcome"));
-            // Fall through to Block gate, cascade-origin, params stamping, and Activate. No early return — the
-            // activation should still proceed for fan-in convergence and loop-back entry routing.
-        }
-        else
-        {
-            Instance->bWasGiverGated = true;
-            SetQuestPendingGiver(NodeTag);
-
-            if (QuestSignalSubsystem)
-            {
-                FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
-                const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
-
-                // Push the prereq status to the state subsystem before publishing events. The state subsystem's
-                // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
-                // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
-                if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
-                {
-                    StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
-                }
-
-                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
-
-                if (PrereqStatus.bSatisfied)
-                {
-                    QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
-                }
-
-                if (!Instance->PrerequisiteExpression.IsAlways())
-                {
-                    RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
-                }
-
-                UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
-                    *NodeTagName.ToString(),
-                    PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
-            }
-            return;
-        }
-    }
-
-    // Block gate — orthogonal to lifecycle. Block intentionally allows the giver-gate setup above (so the giver
-    // stays visible and the player can attempt to interact) but refuses the actual SetQuestLive transition. This
-    // mirrors HandleGiveQuestEvent's blocker check at the give step: gives on Blocked quests are refused with
-    // FQuestGiveBlockedEvent, and direct/cascade activations on Blocked quests are refused here. Together these
-    // make Block a pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
-    if (FQuestLifecycleQuery::IsBlocked(WorldState, NodeTag))
-    {
+    case EQuestActivationGuardDecision::RefuseBlocked:
+        // Block gate — orthogonal to lifecycle. Block intentionally allows the giver-gate fire (so the giver stays
+        // visible and the player can attempt to interact) but refuses the actual SetQuestLive transition. This mirrors
+        // HandleGiveQuestEvent's blocker check at the give step: gives on Blocked quests are refused with FQuestGive-
+        // BlockedEvent, and direct/cascade activations on Blocked quests are refused here. Together these make Block a
+        // pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
             *NodeTagName.ToString());
+        return;
+
+    case EQuestActivationGuardDecision::GiverGateFire:
+        // Giver gate — sets PendingGiver state, publishes FQuestActivatedEvent (always) plus FQuestEnabledEvent if
+        // prereqs are already satisfied, and registers an EnablementWatch when prereqs are non-Always so the gate can
+        // re-publish Enabled when leaves satisfy mid-PendingGiver. Block is intentionally NOT pre-checked — Block-on-
+        // giver-gated quests still publishes the activation events so the giver stays visible/interactive.
+        Instance->bWasGiverGated = true;
+        SetQuestPendingGiver(NodeTag);
+
+        if (QuestSignalSubsystem)
+        {
+            FQuestEventContext Context = AssembleEventContext(Instance, FQuestObjectiveContext());
+            const FQuestPrereqStatus PrereqStatus = Instance->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
+
+            // Push the prereq status to the state subsystem before publishing events. The state subsystem's
+            // QueryQuestActivationBlockers reads this cache; subsequent designer queries (or our own
+            // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
+            if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+            {
+                StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
+            }
+
+            QuestSignalSubsystem->PublishMessage(NodeTag, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
+
+            if (PrereqStatus.bSatisfied)
+            {
+                QuestSignalSubsystem->PublishMessage(NodeTag, FQuestEnabledEvent(NodeTag, Context));
+            }
+
+            if (!Instance->PrerequisiteExpression.IsAlways())
+            {
+                RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
+            }
+
+            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
+                *NodeTagName.ToString(),
+                PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
+        }
+        return;
+
+    case EQuestActivationGuardDecision::ContainerReentry:
+        // Container reentry — containers don't directly write the Live fact; their Live state derives from inner Step
+        // state. Re-activating while already Live falls through to the full activation flow so HandleOnNodeStarted's
+        // container branch processes Any-Outcome and per-path entries, records entry to UQuestStateSubsystem, and re-
+        // publishes FQuestStartedEvent. Loop-back wires (own outer outcome → own Activate) and external fan-in both
+        // route through here equivalently. Inner Step diamond guards handle idempotency for already-Live Steps.
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' re-activating container while %s"),
+            *NodeTagName.ToString(),
+            FQuestLifecycleQuery::IsLive(WorldState, NodeTag) ? TEXT("live") : TEXT("pending giver"));
+        break;
+
+    case EQuestActivationGuardDecision::GiverGateSkipPathAware:
+        // Path-aware giver-gate skip — for containers, all Steps reachable from the entered Activate pin (compile-time
+        // populated by ComputeContainerReachability into UQuest::ReachableStepsByActivatePin) are already Live. There's
+        // no work for the giver to enable, so skip the gate and fall through to normal activation. Covers loop-back
+        // wires, fan-in re-entry, and any case where the entered path's targets are already running — preventing the
+        // giver from spuriously re-firing each iteration.
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' giver-gate skipped — all reachable Steps from pin '%s' already Live"),
+            *NodeTagName.ToString(),
+            IncomingOutcomeTag.IsValid() ? *IncomingOutcomeTag.GetTagName().ToString() : TEXT("AnyOutcome"));
+        break;
+
+    case EQuestActivationGuardDecision::Proceed:
+        // No diamond hit, no giver gate, not blocked — normal forward activation.
+        break;
+
+    case EQuestActivationGuardDecision::RefuseStepAlreadyLive:
+    case EQuestActivationGuardDecision::RefuseStepAlreadyPendingGiver:
+        // Unreachable — handled by the early-return block above. Listed explicitly so future enum additions force a
+        // compiler -Wswitch warning if someone forgets to handle a new decision case.
         return;
     }
 
@@ -773,8 +710,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // ChainToNextNodes isn't stomped with a double-append.
     if (IncomingSourceTag != NAME_None)
     {
-        UQuestNodeBase* Instance = *InstancePtr;
-        if (Instance && Instance->PendingActivationParams.OriginChain.Num() == 0)
+        if (Instance->PendingActivationParams.OriginChain.Num() == 0)
         {
             const FGameplayTag SourceTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
             if (SourceTag.IsValid())
@@ -788,27 +724,25 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // Stash the incoming outcome on the instance so HandleOnNodeStarted's UQuest branch can route inner entries
     // post-prereq-gate. UQuest's inner-entry activation used to run inline below this Activate call (pre-fix),
     // bypassing UQuestNodeBase::Activate's deferred-prereq path. Routing it through HandleOnNodeStarted ensures
-    // inner entries activate only after ActivateInternal actually fires - synchronously when prereqs are
-    // satisfied immediately, or later via TryActivateDeferred when a leaf fact arrives.
-    (*InstancePtr)->PendingActivationParams.IncomingOutcomeTag = IncomingOutcomeTag;
+    // inner entries activate only after ActivateInternal actually fires - synchronously when prereqs are satisfied
+    // immediately, or later via TryActivateDeferred when a leaf fact arrives.
+    Instance->PendingActivationParams.IncomingOutcomeTag = IncomingOutcomeTag;
 
-    // For UQuest containers, snapshot this cascade's params into the per-cascade queue. HandleOnNodeStarted
-    // drains the queue and fires entry routes for each cascade - necessary so fan-in convergence patterns
-    // (multiple upstream outcomes converging at a single deferred Quest) all route correctly when the prereq
-    // satisfies. Without this snapshot, only the most-recently-stamped IncomingOutcomeTag would survive,
-    // dropping earlier cascades.
-    if (UQuest* QuestNode = Cast<UQuest>(*InstancePtr))
+    // For UQuest containers, snapshot this cascade's params into the per-cascade queue. HandleOnNodeStarted drains the
+    // queue and fires entry routes for each cascade - necessary so fan-in convergence patterns (multiple upstream
+    // outcomes converging at a single deferred Quest) all route correctly when the prereq satisfies. Without this
+    // snapshot, only the most-recently-stamped IncomingOutcomeTag would survive, dropping earlier cascades.
+    if (UQuest* QuestNode = Cast<UQuest>(Instance))
     {
         QuestNode->PendingEntryActivations.Add(QuestNode->PendingActivationParams);
     }
 
-    (*InstancePtr)->Activate(NodeTag);
-    
+    Instance->Activate(NodeTag);
+
     UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
         *NodeTagName.ToString(),
         *IncomingSourceTag.ToString(),
         *IncomingOutcomeTag.ToString());
-
 }
 
 void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)

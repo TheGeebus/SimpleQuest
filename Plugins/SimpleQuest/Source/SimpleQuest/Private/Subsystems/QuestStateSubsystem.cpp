@@ -191,43 +191,59 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 	UWorldStateSubsystem* WS = ResolveWorldState();
 	if (!WS) return Out;
 
+	// Resolve canonical placements so quest-by-name lifecycle checks consider every active placement (standalone
+	// + every aliased contextual). Without this, a quest reached only through a LinkedQuestline can never be given
+	// — the giver fires against the standalone-perspective tag (which has no PendingGiver fact set when only the
+	// inlined placement is active), and an exact-match check would refuse the give with NotPendingGiver despite
+	// the inlined placement being ready to receive. Top-level / non-aliased input collapses to a single iteration.
+	const TArray<FGameplayTag> CanonicalTags = ResolveCanonicalTags(QuestTag);
+	auto AnyCanonical = [&CanonicalTags](TFunctionRef<bool(const FGameplayTag&)> Predicate) -> bool
+	{
+		for (const FGameplayTag& CanonicalTag : CanonicalTags)
+		{
+			if (Predicate(CanonicalTag)) return true;
+		}
+		return false;
+	};
+
 	// State-fact blockers (in declared priority order — designer can early-return on first match).
 
 	// 2. AlreadyLive — terminal for Steps. Containers (UQuest wrappers) are exempt: their Live fact is derived
 	//    from inner Step state, so a give forwarding activation to a Live wrapper with mixed-Live inner Steps is
-	//    valid — exactly the path the path-aware giver gate (Phase 6) targets. Step Live blocks because Steps own
+	//    valid — exactly the path the path-aware giver gate targets. Step Live blocks because Steps own
 	//    their Live state directly and re-activation while Live would corrupt lifecycle invariants.
-	if (FQuestLifecycleQuery::IsLive(WS, QuestTag))
+	if (AnyCanonical([WS, this](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsLive(WS, Tag) && !IsContainerTag(Tag); }))
 	{
-		if (!IsContainerTag(QuestTag))
-		{
-			FQuestActivationBlocker Blocker;
-			Blocker.Reason = EQuestActivationBlocker::AlreadyLive;
-			Out.Add(Blocker);
-		}
+		FQuestActivationBlocker Blocker;
+		Blocker.Reason = EQuestActivationBlocker::AlreadyLive;
+		Out.Add(Blocker);
 	}
 
 	// 3. Blocked — terminal until ClearBlocked.
-	if (FQuestLifecycleQuery::IsBlocked(WS, QuestTag))
+	if (AnyCanonical([WS](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsBlocked(WS, Tag); }))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::Blocked;
 		Out.Add(Blocker);
 	}
 
-	// 4. NotPendingGiver — quest hasn't been activated to giver-offer state.
-	if (!FQuestLifecycleQuery::IsPendingGiver(WS, QuestTag))
+	// 4. NotPendingGiver — quest hasn't been activated to giver-offer state on any placement. The give can target
+	//    whichever placement is in PendingGiver; only refuse when none is.
+	if (!AnyCanonical([WS](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsPendingGiver(WS, Tag); }))
 	{
 		FQuestActivationBlocker Blocker;
 		Blocker.Reason = EQuestActivationBlocker::NotPendingGiver;
 		Out.Add(Blocker);
 	}
 
-	// 5. PrereqUnmet — read cached prereq status. Manager pushes this on giver-branch entry and on
-	//    enablement-watch transitions, so the cache reflects the current evaluation.
-	if (const FQuestPrereqStatus* Cached = CachedPrereqStatus.Find(QuestTag))
+	// 5. PrereqUnmet — read cached prereq status. Manager pushes this on giver-branch entry and on enablement-
+	//    watch transitions, so the cache reflects the current evaluation. Walk canonicals so the cache entry from
+	//    whichever placement was activated is found, even when the give event fires against the standalone-form
+	//    alias and the inlined placement holds the cached status.
+	for (const FGameplayTag& CanonicalTag : CanonicalTags)
 	{
-		if (!Cached->bIsAlways && !Cached->bSatisfied)
+		const FQuestPrereqStatus* Cached = CachedPrereqStatus.Find(CanonicalTag);
+		if (Cached && !Cached->bIsAlways && !Cached->bSatisfied)
 		{
 			FQuestActivationBlocker Blocker;
 			Blocker.Reason = EQuestActivationBlocker::PrereqUnmet;
@@ -236,9 +252,9 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 				if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
 			}
 			Out.Add(Blocker);
+			break;  // First unsatisfied placement reported; aggregate-leaf detail comes from that placement's cache.
 		}
 	}
-
 	return Out;
 }
 

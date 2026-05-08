@@ -54,7 +54,7 @@ namespace QuestStateView_Prereqs_ColumnIDs
 
 namespace QuestStateView_Style
 {
-    const FLinearColor SubduedText = FLinearColor(0.55f, 0.55f, 0.55f);
+    const FLinearColor SubduedText = FLinearColor(0.15f, 0.15f, 0.15f);
 
     static FText FormatTime(double Seconds)
     {
@@ -232,9 +232,10 @@ public:
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
                     SNew(STextBlock)
-                        .Text(FQuestTagComposer::FormatTagForDisplay(Item->SourceQuestTag.GetTagName()))
+                        .Text(Item->SourceQuestTag.IsValid() ? FQuestTagComposer::FormatTagForDisplay(Item->SourceQuestTag.GetTagName()) : FText::FromString(TEXT("(none)")))
+                        .ColorAndOpacity(Item->SourceQuestTag.IsValid() ? FSlateColor::UseForeground() : FSlateColor(QuestStateView_Style::SubduedText))
                         .HighlightText(HighlightText)
-                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                        .Font(FCoreStyle::GetDefaultFontStyle(Item->SourceQuestTag.IsValid() ? "Regular" : "Italic", 9))
                 ], Item->SourceQuestTag);
         }
         if (ColumnName == QuestStateView_Entries_ColumnIDs::Outcome)
@@ -242,9 +243,10 @@ public:
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
                     SNew(STextBlock)
-                        .Text(FQuestTagComposer::FormatTagForDisplay(Item->IncomingOutcomeTag.GetTagName()))
+                        .Text(Item->IncomingOutcomeTag.IsValid() ? FQuestTagComposer::FormatTagForDisplay(Item->IncomingOutcomeTag.GetTagName()) : FText::FromString(TEXT("(none)")))
+                        .ColorAndOpacity(Item->IncomingOutcomeTag.IsValid() ? FSlateColor::UseForeground() : FSlateColor(QuestStateView_Style::SubduedText))
                         .HighlightText(HighlightText)
-                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                        .Font(FCoreStyle::GetDefaultFontStyle(Item->IncomingOutcomeTag.IsValid() ? "Regular" : "Italic", 9))
                 ], Item->IncomingOutcomeTag);
         }
         if (ColumnName == QuestStateView_Entries_ColumnIDs::Time)
@@ -271,14 +273,10 @@ public:
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
                     SNew(STextBlock)
-                        .Text(Item->GiverActorName.IsEmpty()
-                            ? FText::FromString(TEXT("(none)"))
-                            : FText::FromString(Item->GiverActorName))
-                        .ColorAndOpacity(Item->GiverActorName.IsEmpty()
-                            ? FSlateColor(QuestStateView_Style::SubduedText)
-                            : FSlateColor::UseForeground())
+                        .Text(Item->GiverActorName.IsEmpty() ? FText::FromString(TEXT("(none)")) : FText::FromString(Item->GiverActorName))
+                        .ColorAndOpacity(Item->GiverActorName.IsEmpty() ? FSlateColor(QuestStateView_Style::SubduedText) : FSlateColor::UseForeground())
                         .HighlightText(HighlightText)
-                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                        .Font(FCoreStyle::GetDefaultFontStyle(Item->GiverActorName.IsEmpty() ? "Italic" : "Regular", 9))
                 ]);
         }
         if (ColumnName == QuestStateView_Entries_ColumnIDs::Path)
@@ -286,14 +284,10 @@ public:
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
                     SNew(STextBlock)
-                        .Text(Item->PathIdentity.IsNone()
-                            ? FText::FromString(TEXT("(none)"))
-                            : FText::FromName(Item->PathIdentity))
-                        .ColorAndOpacity(Item->PathIdentity.IsNone()
-                            ? FSlateColor(QuestStateView_Style::SubduedText)
-                            : FSlateColor::UseForeground())
+                        .Text(Item->PathIdentity.IsNone() ? FText::FromString(TEXT("(none)")) : FText::FromName(Item->PathIdentity))
+                        .ColorAndOpacity(Item->PathIdentity.IsNone() ? FSlateColor(QuestStateView_Style::SubduedText) : FSlateColor::UseForeground())
                         .HighlightText(HighlightText)
-                        .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+                        .Font(FCoreStyle::GetDefaultFontStyle(Item->PathIdentity.IsNone() ? "Italic" : "Regular", 9))
                 ]);
         }
         return SNullWidget::NullWidget;
@@ -1241,14 +1235,17 @@ void SQuestStateView::CopySelectedRowsAsTSV()
     case EQuestStateViewTab::Entries:
         if (EntriesList.IsValid())
         {
-            Lines.Add(TEXT("Destination\tSource\tOutcome\tTime"));
+            Lines.Add(TEXT("Destination\tSource\tOutcome\tProvenance\tGiver\tPath\tTime"));
             for (const TSharedPtr<FQuestStateEntryRow>& Row : Entries)
             {
                 if (!Row.IsValid() || !EntriesList->IsItemSelected(Row)) continue;
-                Lines.Add(FString::Printf(TEXT("%s\t%s\t%s\t%.2f"),
+                Lines.Add(FString::Printf(TEXT("%s\t%s\t%s\t%s\t%s\t%s\t%.2f"),
                     *Row->DestTag.GetTagName().ToString(),
-                    *Row->SourceQuestTag.GetTagName().ToString(),
-                    *Row->IncomingOutcomeTag.GetTagName().ToString(),
+                    Row->SourceQuestTag.IsValid() ? *Row->SourceQuestTag.GetTagName().ToString() : TEXT("(none)"),
+                    Row->IncomingOutcomeTag.IsValid() ? *Row->IncomingOutcomeTag.GetTagName().ToString() : TEXT("(none)"),
+                    *QuestStateView_Style::FormatProvenance(Row->Provenance).ToString(),
+                    Row->GiverActorName.IsEmpty() ? TEXT("(none)") : *Row->GiverActorName,
+                    Row->PathIdentity.IsNone() ? TEXT("(none)") : *Row->PathIdentity.ToString(),                    
                     Row->EntryTime));
             }
         }

@@ -123,6 +123,25 @@ namespace
             TArray<FString> CompiledTagStrs;
             CompiledTagsJoined.ParseIntoArray(CompiledTagStrs, TEXT("|"));
 
+            // Build a lookup of outer's compiler-stamped contextual→alias pairs so we can verify each suffix-matched
+            // contextual is actually an inlining of THIS home node (carries an alias equal to home's compiled tag),
+            // not just a coincidental leaf-name collision in the outer's own top-level structure.
+            const FString AliasPairsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledNodeAliases"));
+            TMap<FString, TArray<FString>> OuterAliasesByContextual;
+            if (!AliasPairsJoined.IsEmpty())
+            {
+                TArray<FString> PairStrs;
+                AliasPairsJoined.ParseIntoArray(PairStrs, TEXT("|"));
+                for (const FString& PairStr : PairStrs)
+                {
+                    FString ContextualPart, AliasPart;
+                    if (PairStr.Split(TEXT("="), &ContextualPart, &AliasPart))
+                    {
+                        OuterAliasesByContextual.FindOrAdd(ContextualPart).Add(AliasPart);
+                    }
+                }
+            }
+
             for (const FString& TagStr : CompiledTagStrs)
             {
                 if (TagStr.Len() <= SuffixToMatch.Len()) continue;
@@ -131,6 +150,12 @@ namespace
                 // (compiler-emitted under multi-tag) start with the HOME asset's prefix and don't belong to
                 // this outer's "contextual" perspective on the home node.
                 if (!TagStr.StartsWith(OuterExpectedPrefix)) continue;
+
+                // Discriminate legitimate inlinings from coincidental leaf-name collisions. A legitimate inlining of
+                // this home node carries an alias matching the home's compiled tag (its standalone-perspective form);
+                // an unrelated top-level node in the outer that happens to share a leaf name has no such alias.
+                const TArray<FString>* AliasList = OuterAliasesByContextual.Find(TagStr);
+                if (!AliasList || !AliasList->Contains(CompiledTagStr)) continue;
 
                 const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), false);
                 if (!ContextualTag.IsValid()) continue;

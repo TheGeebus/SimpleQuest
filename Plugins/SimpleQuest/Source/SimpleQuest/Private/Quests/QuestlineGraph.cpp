@@ -31,6 +31,19 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 		}
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledQuestTags"), FString::Join(TagStrings, TEXT("|")),	FAssetRegistryTag::TT_Hidden));
 	}
+	
+	// CompiledNodeAliases — pipe-separated list of "Contextual=Alias" pairs. Lets editor utilities discriminate cross-asset
+	// inlinings from coincidental leaf-name matches when scanning the asset registry without loading each candidate asset.
+	if (!CompiledNodeAliases.IsEmpty())
+	{
+		TArray<FString> PairStrings;
+		PairStrings.Reserve(CompiledNodeAliases.Num());
+		for (const FQuestCompiledNodeAlias& Pair : CompiledNodeAliases)
+		{
+			PairStrings.Add(FString::Printf(TEXT("%s=%s"), *Pair.ContextualFName.ToString(), *Pair.AliasFName.ToString()));
+		}
+		Context.AddTag(FAssetRegistryTag(TEXT("CompiledNodeAliases"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
 
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
 

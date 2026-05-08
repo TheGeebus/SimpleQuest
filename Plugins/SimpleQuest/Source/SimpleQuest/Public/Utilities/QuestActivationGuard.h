@@ -76,11 +76,11 @@ namespace FQuestActivationGuard
      * checks and fall through to the downstream Activate call).
      */
     SIMPLEQUEST_API EQuestActivationGuardDecision Evaluate(
+        const UWorldStateSubsystem* WS,
         const UQuestNodeBase* Instance,
         FGameplayTag NodeTag,
         FGameplayTag IncomingOutcomeTag,
         bool bBypassGiverGate,
-        bool bHasRegisteredGiver,
-        const UWorldStateSubsystem* WS);
+        bool bHasRegisteredGiver);
 }
 

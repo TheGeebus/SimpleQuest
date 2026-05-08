@@ -54,12 +54,12 @@ namespace FQuestActivationGuard
     }
 
     EQuestActivationGuardDecision Evaluate(
+        const UWorldStateSubsystem* WS,
         const UQuestNodeBase* Instance,
         FGameplayTag NodeTag,
         FGameplayTag IncomingOutcomeTag,
         bool bBypassGiverGate,
-        bool bHasRegisteredGiver,
-        const UWorldStateSubsystem* WS)
+        bool bHasRegisteredGiver)
     {
         if (!Instance || !NodeTag.IsValid())
         {

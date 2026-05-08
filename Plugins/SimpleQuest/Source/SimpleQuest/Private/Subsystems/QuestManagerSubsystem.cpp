@@ -603,9 +603,25 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // registration, the Deactivated clear, the cascade-origin / IncomingOutcomeTag / PendingEntryActivations side effects,
     // the Activate call) stay verbatim, just relocated under their decision case. See FQuestActivationGuard for the
     // policy logic and EQuestActivationGuardDecision for the case enumeration.
-    const bool bHasRegisteredGiver = NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag);
-    const EQuestActivationGuardDecision Decision = FQuestActivationGuard::Evaluate(
-        Instance, NodeTag, IncomingOutcomeTag, bBypassGiverGate, bHasRegisteredGiver, WorldState);
+
+    // Multi-tag aware giver-presence check. A giver actor authored against a step's standalone-perspective tag (the
+    // natural authoring form) registers under that tag in RegisteredGiverQuestTags. When the same step is reached via
+    // a LinkedQuestline placement, its NodeTag is the contextualized form (parent-prefixed) and its AssetScopedAlias-
+    // Tags carry the standalone form. Walk both so the giver gate fires on inlined steps the same way it fires on
+    // top-level ones — without this, every inlined step bypasses its giver gate and activates immediately.
+    bool bHasRegisteredGiver = NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag);
+    if (!bHasRegisteredGiver)
+    {
+        for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+        {
+            if (AliasTag.IsValid() && RegisteredGiverQuestTags.Contains(AliasTag))
+            {
+                bHasRegisteredGiver = true;
+                break;
+            }
+        }
+    }
+    const EQuestActivationGuardDecision Decision = FQuestActivationGuard::Evaluate(WorldState, Instance, NodeTag, IncomingOutcomeTag, bBypassGiverGate, bHasRegisteredGiver);
 
     // Step diamond refusal — early out BEFORE the Deactivated clear (matches original behavior where Step refusal
     // returned before reaching the clear). Steps own their state directly; re-firing would corrupt lifecycle invariants
@@ -1052,56 +1068,91 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid()) return;
 
-    // Blocker gate — check before mutating state. State subsystem owns blocker computation; we read its
-    // result. Refused gives don't disrupt the quest's PendingGiver state.
+    // Blocker gate — quest-level identity check, evaluated against the input tag (the standalone-perspective form
+    // the giver actor authored against). State subsystem owns blocker computation; we read its result. Refused
+    // gives don't disrupt the quest's PendingGiver state.
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     TArray<FQuestActivationBlocker> Blockers;
-    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    if (StateSubsystem)
     {
         Blockers = StateSubsystem->QueryQuestActivationBlockers(QuestTag);
     }
     if (!Blockers.IsEmpty())
     {
         FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.ActivationSource));
-        UE_LOG(LogSimpleQuest, Warning,
-            TEXT("HandleGiveQuestEvent: '%s' refused — %d blocker(s) present (first reason index=%d)"),
+
+        // Build the debug warning message, showing each blocker in a bulleted list, with sub-bullets for specific unmet prereq leaves
+        FString Message = FString::Printf(TEXT("HandleGiveQuestEvent: '%s' refused — %d blocker%s:"),
             *QuestTag.ToString(),
             Blockers.Num(),
-            static_cast<int32>(Blockers[0].Reason));
+            Blockers.Num() == 1 ? TEXT("") : TEXT("s"));
+
+        // Bullet per blocker
+        const UEnum* BlockerEnum = StaticEnum<EQuestActivationBlocker>();
+        for (const FQuestActivationBlocker& Blocker : Blockers)
+        {
+            const FString ReasonName = BlockerEnum
+                ? BlockerEnum->GetNameStringByValue(static_cast<int64>(Blocker.Reason)) // drop the scope identifier with GetNameStringByValue
+                : FString::FromInt(static_cast<int32>(Blocker.Reason));                 // fallback to the numeric index if lookup fails
+            Message += FString::Printf(TEXT("\n  • %s"), *ReasonName);
+
+            // Build sub-bullets for unmet prereqs
+            if (Blocker.Reason == EQuestActivationBlocker::PrereqUnmet && !Blocker.UnsatisfiedLeafTags.IsEmpty())
+            {
+                for (const FGameplayTag& LeafTag : Blocker.UnsatisfiedLeafTags)
+                {
+                    Message += FString::Printf(TEXT("\n      - %s"), *LeafTag.ToString());
+                }
+            }
+        }
+        // Log it.
+        UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *Message);
         return;
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating (CustomData %s, ActivationSource %s)"),
+    // Resolve canonical tags so each placement (standalone + every aliased contextual) gets the give-completion
+    // side effects independently. Single-instance case (no LinkedQuestline placements) collapses to one iteration.
+    // Without this, a giver firing for a quest reached via a LinkedQuestline would only target the standalone
+    // placement and leave the inlined contextual stuck in PendingGiver. RegisteredGiverQuestTags is the structural
+    // "this quest has a giver" set, populated at startup and never mutated at runtime; bBypassGiverGate=true on the
+    // ActivateNodeByTag below routes past the gate without re-entering PendingGiver while leaving the set intact
+    // for the next loop iteration / external re-activation.
+    TArray<FGameplayTag> CanonicalTags = StateSubsystem ? StateSubsystem->ResolveCanonicalTags(QuestTag) : TArray<FGameplayTag>{ QuestTag };
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating %d placement(s) (CustomData %s, ActivationSource %s)"),
         *QuestTag.ToString(),
+        CanonicalTags.Num(),
         Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
         Event.Params.ActivationSource ? *Event.Params.ActivationSource->GetName() : TEXT("null"));
 
-    if (Event.Params.ActivationSource)
+    for (const FGameplayTag& CanonicalTag : CanonicalTags)
     {
-        RecentGiverActors.Add(QuestTag, Event.Params.ActivationSource);
-    }
+        if (!CanonicalTag.IsValid()) continue;
 
-    // RegisteredGiverQuestTags is the structural "this quest has a giver" set — populated at startup by
-    // RegisterGiversFromAssetRegistry, never mutated at runtime. The give-completion path bypasses the giver
-    // gate explicitly via the bBypassGiverGate flag passed to ActivateNodeByTag below; loop-back iterations
-    // see the tag still in the set and correctly re-route through PendingGiver again.
-    ClearQuestPendingGiver(QuestTag);
-    ClearEnablementWatch(QuestTag);
+        UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName());
+        if (!Instance) continue;  // Skip canonicals with no loaded instance — avoids ActivateNodeByTag's noisy warning.
 
-    // Mirror of HandleActivationRequest: stash the giver-authored params on the target step so ActivateInternal
-    // merges them with the step's authored defaults. Empty Params stamps cleanly. Additive merge preserves the
-    // step's defaults in that case.
-    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
-    {
+        if (Event.Params.ActivationSource)
+        {
+            // Stored under each placement's ContextualTag so HandleOnNodeStarted's per-instance lookup
+            // (RecentGiverActors.Find(Node->GetContextualTag())) recovers the giver actor for FQuestStartedEvent
+            // attribution on every placement that activates from this give.
+            RecentGiverActors.Add(CanonicalTag, Event.Params.ActivationSource);
+        }
+
+        ClearQuestPendingGiver(CanonicalTag);
+        ClearEnablementWatch(CanonicalTag);
+
+        // Mirror of HandleActivationRequest: stash the giver-authored params on the target step so ActivateInternal
+        // merges them with the step's authored defaults. Empty Params stamps cleanly. Additive merge preserves the
+        // step's defaults in that case.
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {
             Step->PendingActivationParams = Event.Params;
         }
-    }
 
-    // bBypassGiverGate=true — this is the give-completion re-activation; the player has already accepted, so
-    // route past the giver gate to Live without re-entering PendingGiver. The structural giver-gated set still
-    // contains this tag for the next loop iteration / external re-activation.
-    ActivateNodeByTag(QuestTag.GetTagName(), EQuestActivationProvenance::GiverGate, FGameplayTag(), NAME_None, true);
+        ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::GiverGate, FGameplayTag(), NAME_None, true);
+    }
 }
 
 void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const FQuestActivationRequestEvent& Event)
@@ -1109,21 +1160,34 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     const FGameplayTag QuestTag = Event.GetQuestTag();
     if (!QuestTag.IsValid()) return;
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — activating with external params (CustomData %s)"),
+    // Resolve canonical tags so a request authored against the standalone-perspective form (the natural BP-side
+    // authoring tag) reaches every active placement — standalone + every aliased contextual. Without this, an
+    // external RequestActivation against an alias-form tag only targets the standalone placement and leaves
+    // inlined contextual placements stranded. Single-instance / non-aliased case collapses to one iteration.
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    TArray<FGameplayTag> CanonicalTags = StateSubsystem ? StateSubsystem->ResolveCanonicalTags(QuestTag) : TArray<FGameplayTag>{ QuestTag };
+
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — activating %d placement(s) with external params (CustomData %s)"),
         *QuestTag.ToString(),
+        CanonicalTags.Num(),
         Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
-    // Stash params on the target step (if it IS a step) before activation, so ActivateInternal merges them with
-    // the Step's authored defaults.
-    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    for (const FGameplayTag& CanonicalTag : CanonicalTags)
     {
+        if (!CanonicalTag.IsValid()) continue;
+
+        UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName());
+        if (!Instance) continue;  // Skip canonicals with no loaded instance — avoids ActivateNodeByTag's noisy warning.
+
+        // Stash params on the target step (if it IS a step) before activation, so ActivateInternal merges them
+        // with the Step's authored defaults.
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {
             Step->PendingActivationParams = Event.Params;
         }
-    }
 
-    ActivateNodeByTag(QuestTag.GetTagName(), EQuestActivationProvenance::ExternalAPI);
+        ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::ExternalAPI);
+    }
 }
 
 void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQuestBlockRequestEvent& Event)
@@ -1554,13 +1618,15 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     UQuest* Container = Cast<UQuest>(LoadedNodeInstances.FindRef(ContainerTag.GetTagName()));
     if (!Container) return;  // not a container — nothing to derive
 
-    // A container is Live whenever any inner Step at any depth has its Live fact set in WorldState. InnerStepTags
-    // is compile-time populated by ComputeContainerReachability and bounded by the number of Steps inside this
-    // wrapper (typically a handful), so the linear scan is cheap. Short-circuits on the first Live inner Step.
+    // A container is Live whenever any inner Step at any depth has an active lifecycle (Live or PendingGiver) —
+    // a giver-gated inner Step keeps its container visibly in-progress because the player can interact with the
+    // giver to advance. InnerStepTags is compile-time populated by ComputeContainerReachability and bounded by
+    // the number of Steps inside this wrapper (typically a handful), so the linear scan is cheap. Short-circuits
+    // on the first active inner Step.
     bool bAnyInnerLive = false;
     for (const FGameplayTag& InnerStepTag : Container->GetInnerStepTags())
     {
-        if (FQuestLifecycleQuery::IsLive(WorldState, InnerStepTag))
+        if (FQuestLifecycleQuery::HasActiveLifecycle(WorldState, InnerStepTag))
         {
             bAnyInnerLive = true;
             break;
@@ -1670,6 +1736,22 @@ void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
 
     WorldState->AddFact(PendingGiverFact);
     UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
+
+    // Ancestor walk for Steps. Container Live derives off any-inner-step-active (Live or PendingGiver), so a Step
+    // entering PendingGiver propagates upward: each ancestor container re-derives its Live fact based on whether
+    // any inner Step is now active. Mirrors SetQuestLive's pattern. Without this walk, a giver-gated inner Step's
+    // ancestor containers stay incorrectly inactive in debug surfaces (halos, prereq examiner) until a Step
+    // transitions all the way to Live. Containers don't reach here themselves; they don't own a PendingGiver fact.
+    if (UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    {
+        if (Node->IsStepNode())
+        {
+            for (const FGameplayTag& AncestorTag : Cast<UQuestStep>(Node)->GetAncestorContainerTags())
+            {
+                DeriveContainerLive(AncestorTag);
+            }
+        }
+    }
 }
 
 void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)

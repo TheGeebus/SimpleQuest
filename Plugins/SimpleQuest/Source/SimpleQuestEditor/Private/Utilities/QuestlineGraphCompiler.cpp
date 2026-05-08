@@ -127,6 +127,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes.Empty(); 
     InGraph->EntryNodeTags.Empty();
     InGraph->CompiledQuestTags.Empty();
+	InGraph->CompiledNodeAliases.Empty();
     AllCompiledNodes.Empty();
     UtilityNodeKeyMap.Empty();
 	CompiledAliasFNamesByContextualTag.Empty();
@@ -151,6 +152,19 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
+
+	// Flatten contextual→alias map into the persisted pairs array. One entry per (Contextual, Alias) pair so a node with
+	// N aliases produces N entries; nodes without aliases (top-level, no LinkedQuestline ancestors) produce none.
+	for (const TPair<FName, TArray<FName>>& Entry : CompiledAliasFNamesByContextualTag)
+	{
+		for (const FName& AliasFName : Entry.Value)
+		{
+			FQuestCompiledNodeAlias Pair;
+			Pair.ContextualFName = Entry.Key;
+			Pair.AliasFName = AliasFName;
+			InGraph->CompiledNodeAliases.Add(Pair);
+		}
+	}
 	InGraph->bHasActivationGroupListener = CompiledListenerCount > 0;
 
     // Detect renames via GUID bridge

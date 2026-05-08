@@ -20,6 +20,7 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
 
 	TSet<FGameplayTag> VisitedTags;
 	FGameplayTag CurrentTag = Channel;
+	int32 LevelsFired = 0;
 
 	while (CurrentTag.IsValid())
 	{
@@ -30,9 +31,15 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
 		{
 			FSignalEventMulticast DelegateCopy = *Delegate;
 			DelegateCopy.Broadcast(Channel, Payload);
+			++LevelsFired;
 		}
 		CurrentTag = CurrentTag.RequestDirectParent();
 	}
+
+	UE_LOG(LogSimpleCore, VeryVerbose, TEXT("Signal::Publish: channel='%s' payload='%s' levelsFired=%d"),
+		*Channel.ToString(),
+		Payload.GetScriptStruct() ? *Payload.GetScriptStruct()->GetName() : TEXT("<empty>"),
+		LevelsFired);
 }
 
 void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDelegateHandle Handle)

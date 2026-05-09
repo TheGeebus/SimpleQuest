@@ -1,5 +1,5 @@
-
 # SimpleQuest
+[![License](https://img.shields.io/github/license/TheGeebus/SimpleQuest)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
 
 A source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data. Currently free for non-commercial use, with an MIT-licensed free-use release planned following a future funding milestone.
 
@@ -10,9 +10,6 @@ This version is for Unreal Engine 5.6.
 Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
-
-[![License: Polyform NC 1.0](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](LICENSE)
-![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
 
 ---
 

@@ -49,35 +49,45 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
  * BP-facing delegate for quest lifecycle events other than completion. Matches the UQuestWatcherComponent pattern
  * but carries the full FQuestEventContext so designers reach TriggeredActor, Instigator, NodeInfo, CustomData
  * without a separate lookup.
+ *
+ * QuestTag is the canonical event identity (the publishing instance's ContextualTag / Stack[0]). MatchedChannel is
+ * delivery metadata — the channel from this publish set most specific to this subscription's bound tag (longest
+ * descendant where the bound tag is a prefix). In single-channel publishes the two are equal; in multi-channel
+ * publishes (e.g., a Step inlined under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical
+ * across all subscribers, MatchedChannel reflects each subscriber's own perspective. Branch on QuestTag for "what
+ * is this event"; branch on MatchedChannel for "which of my subscription's channels did this match."
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestSubscriptionLifecycleDelegate,
-    FGameplayTag, QuestTag, FQuestEventContext, Context);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
 
 /**
  * Completion variant — adds the OutcomeTag. Designers typically branch on OutcomeTag with a Switch or equality
- * check rather than filtering at subscription time, matching the watcher's post-Piece-C pattern.
+ * check rather than filtering at subscription time, matching the watcher's post-Piece-C pattern. See the
+ * lifecycle-delegate doc comment above for the QuestTag vs MatchedChannel contract.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionCompletedDelegate,
-    FGameplayTag, QuestTag, FGameplayTag, OutcomeTag, FQuestEventContext, Context);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionCompletedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventContext, Context);
 
-/** Activated variant — adds the PrereqStatus payload so designers don't need to query separately. */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionActivatedDelegate,
-    FGameplayTag, QuestTag, FQuestEventContext, Context, FQuestPrereqStatus, PrereqStatus);
+/** Activated variant — adds the PrereqStatus payload so designers don't need to query separately. See the
+ *  lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionActivatedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, FQuestPrereqStatus, PrereqStatus);
 
 /**
  * Started variant — adds the GiverActor payload. Populated when the quest was given via a giver; null when
- * the quest started from a non-giver activation path.
+ * the quest started from a non-giver activation path. See the lifecycle-delegate doc comment for the QuestTag
+ * vs MatchedChannel contract.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionStartedDelegate,
-    FGameplayTag, QuestTag, FQuestEventContext, Context, AActor*, GiverActor);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionStartedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, AActor*, GiverActor);
 
 /**
- * Give-blocked variant — carries the structured blocker array and the giver actor that initiated the
- * refused attempt. AActor* (raw pointer) for BP friendliness; the underlying TWeakObjectPtr is resolved
- * in the handler before broadcast.
+ * Give-blocked variant — carries the structured blocker array and the giver actor that initiated the refused
+ * attempt. AActor* (raw pointer) for BP friendliness; the underlying TWeakObjectPtr is resolved in the handler
+ * before broadcast. See the lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionGiveBlockedDelegate,
-    FGameplayTag, QuestTag, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionGiveBlockedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 /**
  * Async BP action — "Bind To Quest Event". Subscribes to the lifecycle channels selected via the K2 node's

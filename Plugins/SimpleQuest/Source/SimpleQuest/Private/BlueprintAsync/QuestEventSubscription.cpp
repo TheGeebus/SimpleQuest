@@ -144,20 +144,20 @@ void UQuestEventSubscription::HandleActivated(FGameplayTag Channel, const FQuest
 {
     if (bCancelled) return;
     TagsWithLiveActivatedSeen.Add(Event.GetQuestTag());
-    if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Event.Context, Event.PrereqStatus);
+    if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.PrereqStatus);
 }
 
 void UQuestEventSubscription::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveEnabledSeen.Add(Event.GetQuestTag());
-    if (OnEnabled.IsBound()) OnEnabled.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnEnabled.IsBound()) OnEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 }
 
 void UQuestEventSubscription::HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
 {
     if (bCancelled) return;
-    if (OnDisabled.IsBound()) OnDisabled.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnDisabled.IsBound()) OnDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 }
 
 void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
@@ -165,7 +165,7 @@ void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQue
     if (bCancelled) return;
     if (OnGiveBlocked.IsBound())
     {
-        OnGiveBlocked.Broadcast(Event.GetQuestTag(), Event.Blockers, Event.GiverActor.Get());
+        OnGiveBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Blockers, Event.GiverActor.Get());
     }
 }
 
@@ -175,7 +175,7 @@ void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestSt
     TagsWithLiveStartedSeen.Add(Event.GetQuestTag());
     if (OnStarted.IsBound())
     {
-        OnStarted.Broadcast(Event.GetQuestTag(), Event.Context, Event.GiverActor.Get());
+        OnStarted.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.GiverActor.Get());
     }
 }
 
@@ -183,7 +183,7 @@ void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEnde
 {
     if (bCancelled) return;
     TagsWithLiveCompletedSeen.Add(Event.GetQuestTag());
-    if (OnCompleted.IsBound()) OnCompleted.Broadcast(Event.GetQuestTag(), Event.OutcomeTag, Event.Context);
+    if (OnCompleted.IsBound()) OnCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Context);
     // Persistent — no finalize here. Parent-tag subscriptions need to stay alive across multiple child completions.
 }
 
@@ -195,7 +195,7 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
     // OnBlocked fires from its own direct subscription on FQuestBlockedEvent (HandleBlocked) — no longer
     // piggybacks on FQuestDeactivatedEvent + Blocked-fact inspection.
 
-    if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
     // Persistent — no finalize here. Same rationale as HandleEnded.
 }
 
@@ -203,20 +203,20 @@ void UQuestEventSubscription::HandleBlocked(FGameplayTag Channel, const FQuestBl
 {
     if (bCancelled) return;
     TagsWithLiveBlockedSeen.Add(Event.GetQuestTag());
-    if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 }
 
 void UQuestEventSubscription::HandleUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
 {
     if (bCancelled) return;
-    if (OnUnblocked.IsBound()) OnUnblocked.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnUnblocked.IsBound()) OnUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 }
 
 
 void UQuestEventSubscription::HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
     if (bCancelled) return;
-    if (OnProgress.IsBound()) OnProgress.Broadcast(Event.GetQuestTag(), Event.Context);
+    if (OnProgress.IsBound()) OnProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 }
 
 void UQuestEventSubscription::UnbindAll()
@@ -252,6 +252,10 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
     for (const FGameplayTag& EachTag : CatchUpTags)
     {
+        // Catch-up synthesizes a delivery for the EachTag perspective. QuestTag and MatchedChannel both equal
+        // EachTag here — the synthetic broadcast represents "the canonical of this perspective" (QuestTag) and
+        // "the channel from the subscription's perspective" (MatchedChannel) as the same thing, since we're
+        // catching up to a known historical state, not delivering a live multi-channel publish.
         FQuestEventContext SyntheticContext;
         SyntheticContext.NodeInfo.QuestTag = EachTag;
 
@@ -268,12 +272,12 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
         if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && bIsPendingGiver)
         {
-            if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, SyntheticContext, CachedPrereqStatus);
+            if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, EachTag, SyntheticContext, CachedPrereqStatus);
         }
 
         if (IsExposed(EQuestEventTypes::Enabled) && !TagsWithLiveEnabledSeen.Contains(EachTag) && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
         {
-            if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, SyntheticContext);
+            if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, EachTag, SyntheticContext);
         }
 
         if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
@@ -284,7 +288,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
                 // GiverActor recovered from the registry's per-tag historical context (FQuestEntryArrival's
                 // ActivationParamsSnapshot.ActivationSource captured at start time and preserved past consumption).
                 AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-                if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, SyntheticContext, RecoveredGiver);
+                if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, EachTag, SyntheticContext, RecoveredGiver);
             }
         }
 
@@ -304,7 +308,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
                         }
                     }
                 }
-                if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, RecoveredOutcome, SyntheticContext);
+                if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, EachTag, RecoveredOutcome, SyntheticContext);
             }
         }
 
@@ -313,7 +317,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
             const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
             if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
             {
-                if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, SyntheticContext);
+                if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, EachTag, SyntheticContext);
             }
         }
 
@@ -322,7 +326,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
             const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
             if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
             {
-                if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, SyntheticContext);
+                if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, EachTag, SyntheticContext);
             }
         }
     }

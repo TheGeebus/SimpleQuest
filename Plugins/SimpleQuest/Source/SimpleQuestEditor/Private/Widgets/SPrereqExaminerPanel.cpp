@@ -1675,7 +1675,9 @@ EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
     switch (Node.Type)
     {
     case EPrereqExaminerNodeType::Leaf:
-        return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag, Cast<UQuestlineNode_ContentBase>(Node.SourceNode.Get()));
+        {
+            return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag);
+        }
     case EPrereqExaminerNodeType::And:
     {
         // True iff every child Satisfied. Any Unknown propagates up (we can't confidently paint the combinator).

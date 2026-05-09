@@ -4,6 +4,26 @@
 #include "Engine/DeveloperSettings.h"
 #include "SimpleQuestSettings.generated.h"
 
+
+/**
+ * BP-friendly mirror of ELogVerbosity::Type for the log-category settings on USimpleQuestSettings. Maps 1:1 to UE's
+ * underlying enum via ToELogVerbosity in SimpleQuestSettings.cpp; kept separate so the Project Settings dropdown
+ * shows clean designer-facing labels without exposing the engine enum.
+ */
+UENUM(BlueprintType)
+enum class EQuestLogVerbosity : uint8
+{
+	NoLogging   UMETA(DisplayName = "Off"),
+	Fatal       UMETA(DisplayName = "Fatal"),
+	Error       UMETA(DisplayName = "Error"),
+	Warning     UMETA(DisplayName = "Warning"),
+	Display     UMETA(DisplayName = "Display"),
+	Log         UMETA(DisplayName = "Log"),
+	Verbose     UMETA(DisplayName = "Verbose"),
+	VeryVerbose UMETA(DisplayName = "Very Verbose"),
+};
+
+
 class UQuestManagerSubsystem;
 
 UCLASS(config=SimpleQuest, DefaultConfig, meta=(DisplayName="Simple Quest"))
@@ -18,7 +38,34 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Initialization")
 	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(FSoftObjectPath(TEXT("/SimpleQuest/BP_QuestManager.BP_QuestManager_C")));
 
+	/**
+	 * Verbosity for LogSimpleQuest. Live-applied — changing this in Project Settings updates the log filter
+	 * immediately without restart. Persists via UDeveloperSettings's Config save. Equivalent to setting
+	 * `LogSimpleQuest=<verbosity>` in DefaultEngine.ini's [Core.Log] section, but designer-facing.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Verbosity for LogSimpleCore. Same live-apply behavior as LogSimpleQuestVerbosity. SimpleCore covers the
+	 * underlying signal bus and world-state subsystems; raise to Verbose or VeryVerbose for diagnostic runs.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleCoreVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Pushes both verbosity values to their log categories. Called from PostEditChangeProperty for live-apply
+	 * during editor sessions, and from FSimpleQuest::StartupModule on engine startup so settings take effect
+	 * before any UE_LOG fires.
+	 */
+	void ApplyLogVerbosity() const;
+	
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 #if WITH_EDITORONLY_DATA
+
 	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
 	FLinearColor ActivationWireColor = FLinearColor::White;
 

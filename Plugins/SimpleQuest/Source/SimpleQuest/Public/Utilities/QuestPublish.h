@@ -9,20 +9,21 @@
 
 
 /**
- * Multi-tag publish helper. Routes a quest event to every channel a node carries — ContextualTag (primary
- * parent-context channel) plus every entry in AssetScopedAliasTags (one per enclosing LinkedQuestline asset
- * perspective). Centralizes the multi-publish discipline at a single mutation site so subscribers reach via
- * any asset-scoped perspective without forcing every caller to hand-roll the iteration.
+ * Multi-tag publish helper. Routes a quest event to every channel a node carries — ContextualTag (canonical
+ * Stack[0], the deepest contextualization) plus every entry in AssetScopedAliasTags (one per enclosing
+ * LinkedQuestline asset perspective). Centralizes the multi-publish discipline at a single mutation site so
+ * subscribers reach via any asset-scoped perspective without forcing every caller to hand-roll the iteration.
  *
- * Each publish gets its own copy of Event with Event.QuestTag set to the channel being published on;
- * subscribers' Event.GetQuestTag() reflects the channel they subscribed via. Event.Context (when present,
- * e.g. on FQuestStartedEvent) stays invariant across publishes — Context.NodeInfo.QuestTag is the canonical
- * ContextualTag, set during AssembleEventContext before this helper fires.
+ * Channels route, payloads decide. The bus delivers identical payloads across all subscribers; one delivery per
+ * subscription handle by default (deduplicate-on). Event.QuestTag is set once to ContextualTag (canonical) before
+ * publishing — subscribers reading Event.QuestTag for "what fired" semantics see the canonical perspective uniformly.
+ * The callback's first arg carries delivery metadata: which channel from the publishing set best matched this
+ * subscription's bound tag. Subscribers bound at broad ancestors (e.g. SimpleQuest.Quest root) fire exactly once
+ * per logical publish, with the callback arg set to the longest descendant channel in the publishing set; subscribers
+ * bound at a specific asset perspective fire once with the callback arg set to that perspective's channel.
  *
- * Architectural note: a subscriber bound to a common ancestor across multiple publish channels (e.g. the
- * SimpleQuest.Quest root) will see one event per publish call. That's intentional — subscribers at narrower
- * asset-perspectives see exactly one event matching their natural perspective. Filter via Event.QuestTag if
- * root-level dedup is needed.
+ * Event.Context (when present, e.g. on FQuestStartedEvent) stays invariant across deliveries — Context.NodeInfo
+ * .QuestTag is also the canonical ContextualTag, set during AssembleEventContext before this helper fires.
  *
  * Sibling to FQuestLifecycleQuery / FQuestActivationGuard / FQuestCatchUpFanout in Public/Utilities/.
  */
@@ -41,21 +42,25 @@ namespace FQuestPublish
     {
         if (!Signals || !Node) return;
 
+        TArray<FGameplayTag> Channels;
+        Channels.Reserve(1 + Node->GetAssetScopedAliasTags().Num());
+
         const FGameplayTag ContextualTag = Node->GetContextualTag();
-        if (ContextualTag.IsValid())
-        {
-            Event.QuestTag = ContextualTag;
-            Signals->PublishMessage(ContextualTag, Event);
-        }
+        if (ContextualTag.IsValid()) Channels.Add(ContextualTag);
 
         for (const FGameplayTag& AliasTag : Node->GetAssetScopedAliasTags())
         {
-            if (AliasTag.IsValid())
-            {
-                Event.QuestTag = AliasTag;
-                Signals->PublishMessage(AliasTag, Event);
-            }
+            if (AliasTag.IsValid()) Channels.Add(AliasTag);
         }
+
+        if (Channels.IsEmpty()) return;
+
+        // Set canonical identity once on the payload — Stack[0] / ContextualTag is the publisher's "what this event IS"
+        // signal. Subscribers reading Event.QuestTag for branch logic see this canonical perspective uniformly across
+        // every delivery. The bus's per-delivery best-match channel arrives separately as the callback's first arg
+        // (delivery metadata; see SimpleCore signal subsystem's MULTI-CHANNEL PUBLISH CONTRACT).
+        Event.QuestTag = Channels[0];
+        Signals->PublishMessageOnChannels(MoveTemp(Channels), Event);
     }
 
     /**

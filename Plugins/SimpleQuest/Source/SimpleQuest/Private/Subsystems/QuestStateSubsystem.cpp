@@ -18,30 +18,32 @@
 namespace
 {
 	/**
-	 * Multi-publish helper — fires Event on CanonicalTag and on each AssetScopedAliasTag mapped to it via the
-	 * reverse alias index. Each publish gets its own copy of Event with Event.QuestTag set to the channel; the
-	 * by-value template parameter ensures per-channel mutation doesn't leak back to the caller. Sibling pattern
-	 * to FQuestPublish::OnAllNodeTags but for the state subsystem, which doesn't carry node references.
+	 * State-side multi-channel publish helper. Builds the channel set as canonical + each registered alias from
+	 * the reverse-alias map and forwards to the bus's multi-channel publish primitive (Phase F.2). Treats the call
+	 * as one event instance addressable under all channels — subscribers bound to any perspective receive once
+	 * (default dedup-on), with matched-channel attribution in the callback's first arg per the channels-route /
+	 * payloads-decide contract. Event.QuestTag (set canonically by the caller's event constructor) stays invariant
+	 * across deliveries; payload identity vs delivery metadata are kept distinct.
+	 *
+	 * Sibling pattern to FQuestPublish::OnAllNodeTags, but uses the state subsystem's tag-keyed alias map rather
+	 * than per-node alias arrays — the state subsystem's events don't carry a node reference at this layer.
 	 */
 	template <typename EventType>
 	void PublishWithAliases(USignalSubsystem* Signals, FGameplayTag CanonicalTag, const TMap<FGameplayTag, TArray<FGameplayTag>>& AliasReverseMap, EventType Event)
 	{
 		if (!Signals || !CanonicalTag.IsValid()) return;
 
-		Event.QuestTag = CanonicalTag;
-		Signals->PublishMessage(CanonicalTag, Event);
-
+		TArray<FGameplayTag> Channels;
+		Channels.Add(CanonicalTag);
 		if (const TArray<FGameplayTag>* Aliases = AliasReverseMap.Find(CanonicalTag))
 		{
 			for (const FGameplayTag& AliasTag : *Aliases)
 			{
-				if (AliasTag.IsValid())
-				{
-					Event.QuestTag = AliasTag;
-					Signals->PublishMessage(AliasTag, Event);
-				}
+				if (AliasTag.IsValid()) Channels.Add(AliasTag);
 			}
 		}
+
+		Signals->PublishMessageOnChannels(MoveTemp(Channels), Event);
 	}
 }
 
@@ -292,11 +294,12 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		Record.History.Num(),
 		ResolutionTime);
 
-	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag for cross-asset subscribers.
-	// Distinct from FQuestEndedEvent (manager-published in ChainToNextNodes for graph-driven completions). This
-	// event fires for every resolution path — graph chain, external ResolveQuest, future save rehydration — so
-	// subscribers reach a single canonical mechanism. Multi-publish via PublishWithAliases ensures Leaf_Resolution
-	// prereq leaves and any other subscribers bound through alias tags receive the event on their natural channel.
+	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag. PublishWithAliases wraps the bus's
+	// multi-channel publish primitive (F.2) — one event instance addressable under all aliases; subscribers bound
+	// to any perspective receive once with matched-channel attribution in the callback's first arg. Distinct from
+	// FQuestEndedEvent (manager-published in ChainToNextNodes for graph-driven completions); this event fires for
+	// every resolution path — graph chain, external ResolveQuest, future save rehydration — so Leaf_Resolution
+	// prereq leaves and any other subscribers reach a single canonical mechanism.
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
@@ -353,8 +356,8 @@ void UQuestStateSubsystem::RecordEntry(
 	// routed by Leaf_Entry listen here and trigger expression re-evaluation; designers can also subscribe directly
 	// for cascade-attribution audit / logging. The event's payload preserves the legacy (QuestTag, SourceQuestTag,
 	// IncomingOutcomeTag, EntryTime) shape — subscribers wanting the new provenance / snapshot fields read the
-	// latest entry from the registry on receipt. Multi-publish via PublishWithAliases ensures cross-asset
-	// subscribers receive the event on their natural alias channel.
+	// latest entry from the registry on receipt. PublishWithAliases wraps the bus's multi-channel publish primitive
+	// (F.2) — cross-asset subscribers bound through alias tags receive the event once on their natural channel.
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,

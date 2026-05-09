@@ -83,7 +83,7 @@ public:
 	 * the source content node it reads from. Returns Unknown when not in PIE or when either tag is invalid. See
 	 * EPrereqDebugState for the classification semantics.
 	 */
-	EPrereqDebugState QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag, const UQuestlineNode_ContentBase* LeafSourceNode = nullptr) const;
+	EPrereqDebugState QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag) const;
 
 	/** Convenience raw-fact lookup — returns true if the PIE world's WorldState has the given fact asserted. False otherwise
 		(including when not in PIE). */

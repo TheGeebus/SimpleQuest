@@ -234,6 +234,20 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
 	bool IsContainerTag(FGameplayTag QuestTag) const;
+	
+	/**
+	 * Translates an input tag to the list of canonical ContextualTag(s) it represents. Returns [InputTag] when
+	 * InputTag is a ContextualTag (or unknown — defensive); returns the alias-mapped contextual list when
+	 * InputTag is a registered AssetScopedAliasTag. Used by alias-aware predicate / aggregate read APIs and by
+	 * any consumer that needs to enumerate the active placements behind a tag (debug surfaces, designer tools,
+	 * future BP integrations).
+	 *
+	 * Pointer-returning APIs (GetQuestResolution, GetQuestEntry) and "latest" / "single instance" APIs
+	 * (GetLatestResolution, GetLastGiverActor, etc.) intentionally stay direct-only — cross-asset semantics for
+	 * "the single record" are ambiguous with multiple placements. Callers wanting cross-asset visibility use the
+	 * predicate / aggregate APIs (HasResolvedWith, GetResolutionHistory, etc.).
+	 */
+	TArray<FGameplayTag> ResolveCanonicalTags(FGameplayTag InputTag) const;
 
 private:
     friend class UQuestManagerSubsystem;
@@ -301,18 +315,6 @@ private:
 	 * for the same (alias, contextual) pair. Skips when the two tags are equal (top-level content has no aliasing).
 	 */
 	void RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag);
-
-	/**
-	 * Translates an input tag to the list of canonical ContextualTag(s) it represents. Returns [InputTag] when
-	 * InputTag is a ContextualTag (or unknown — defensive); returns the alias-mapped contextual list when
-	 * InputTag is a registered AssetScopedAliasTag. Used by alias-aware predicate / aggregate read APIs.
-	 *
-	 * Pointer-returning APIs (GetQuestResolution, GetQuestEntry) and "latest" / "single instance" APIs
-	 * (GetLatestResolution, GetLastGiverActor, etc.) intentionally stay direct-only — cross-asset semantics for
-	 * "the single record" are ambiguous with multiple placements. Callers wanting cross-asset visibility use the
-	 * predicate / aggregate APIs (HasResolvedWith, GetResolutionHistory, etc.).
-	 */
-	TArray<FGameplayTag> ResolveCanonicalTags(FGameplayTag InputTag) const;
 
 	/**
 	 * Set of compiled QuestTags whose runtime instance is a UQuest container. Populated by the manager during

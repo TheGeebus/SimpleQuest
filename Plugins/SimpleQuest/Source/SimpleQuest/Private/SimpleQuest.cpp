@@ -7,6 +7,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Quests/QuestlineGraph.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestTagComposer.h"
 
 #define LOCTEXT_NAMESPACE "FSimpleQuestModule"
@@ -16,6 +17,12 @@ DEFINE_LOG_CATEGORY(LogSimpleQuest);
 void FSimpleQuest::StartupModule()
 {
 	UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterCompiledQuestTags);
+    
+    // Apply log verbosity from Project Settings. UDeveloperSettings's Config flow loads the values during
+    // engine boot before module startup, so GetDefault here returns settings already populated from
+    // DefaultSimpleQuest.ini. Replaces the need for designers to edit DefaultEngine.ini's [Core.Log] section
+    // by hand — Project Settings → Plugins → Simple Quest → Logging is the single source.
+    GetDefault<USimpleQuestSettings>()->ApplyLogVerbosity();
 }
 
 void FSimpleQuest::RegisterCompiledQuestTags()

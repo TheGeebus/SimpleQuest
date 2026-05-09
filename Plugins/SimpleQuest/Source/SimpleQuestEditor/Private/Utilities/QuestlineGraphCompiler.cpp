@@ -766,10 +766,13 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
 			}
 		}
 
-		// Output wiring + source-tag formula + bCompletesParentGraph specifically don't apply to
-		// LinkedQuestlines — those have their downstream routing built earlier via the boundary-tag map
-		// in CompileNodeRegistration's LinkedQuestline branch.
-		if (Cast<UQuestlineNode_LinkedQuestline>(ContentNode)) continue;
+		// Output wiring runs for ALL content nodes including LinkedQuestlines. The wrapper's NextNodesByPath /
+		// NextNodesOnAnyOutcome populated here drive ChainToNextNodes when FireWrapperBoundaryCompletion fires
+		// the wrapper post-inner-cascade — without these, downstream nodes wired to the Linked-Questline's
+		// outcome pins in the parent graph never activate. The earlier ComputeInnerBoundaryMaps call in
+		// CompileNodeRegistration's LinkedQuestline branch builds the boundary-completion map for the INNER
+		// graph's compile context (used by inner Steps to populate their BoundaryCompletionsOnForward) — that's
+		// orthogonal to this loop, which builds the LinkedQuestline NodeInstance's own outer-graph routing.
 
 		Instance->NextNodesByPath.Empty();
         Instance->NextNodesOnAnyOutcome.Empty();
@@ -1166,17 +1169,25 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         		AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix), ExitNode);
         	}
 
-        	// Accumulate boundary completions to fire when this path is taken at runtime. Picks up
-        	// completions inherited from the outer compile context (this Exit's parent LinkedQuestline
-        	// wrapper plus any further-out ancestors). FireWrapperBoundaryCompletion fires each
-        	// completion's wrapper through ChainToNextNodes — innermost-first cascade order.
+        	// Accumulate the IMMEDIATE wrapper's boundary completion only — bucket[0] is the Exit's own
+        	// wrapper (insert-at-front discipline maintained by ComputeInnerBoundaryMaps). Outer-cascade
+        	// entries (bucket[1..N]) are picked up by THAT outer wrapper's own pin-walk at compile time
+        	// and become its NextNodesByPath BCs; the wrapper-to-wrapper chain at runtime fires them in
+        	// innermost-first order. Pulling the entire bucket here would double-cascade — every wrapper
+        	// would fire once via the inner chain AND once via the inner Step's direct BC entry.
         	if (const TArray<FQuestBoundaryCompletion>* BoundaryCompletions = BoundaryCompletionsByPath.Find(ExitNode->OutcomeTag.GetTagName()))
         	{
-        		for (const FQuestBoundaryCompletion& BC : *BoundaryCompletions) OutBoundaryCompletions.AddUnique(BC);
+        		if (!BoundaryCompletions->IsEmpty())
+        		{
+        			OutBoundaryCompletions.AddUnique((*BoundaryCompletions)[0]);
+        		}
         	}
         	else if (const TArray<FQuestBoundaryCompletion>* AnyBoundaryCompletions = BoundaryCompletionsByPath.Find(NAME_None))
         	{
-        		for (const FQuestBoundaryCompletion& BC : *AnyBoundaryCompletions) OutBoundaryCompletions.AddUnique(BC);
+        		if (!AnyBoundaryCompletions->IsEmpty())
+        		{
+        			OutBoundaryCompletions.AddUnique((*AnyBoundaryCompletions)[0]);
+        		}
         	}
         }
 

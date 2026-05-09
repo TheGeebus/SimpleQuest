@@ -149,25 +149,10 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
     }
 }
 
+
 // -------------------------------------------------------------------------
-// World state
+// Bind to Quest Event
 // -------------------------------------------------------------------------
-
-void USimpleQuestBlueprintLibrary::AddWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->AddFact(FactTag);
-}
-
-void USimpleQuestBlueprintLibrary::RemoveWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->RemoveFact(FactTag);
-}
-
-bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(FactTag);
-}
 
 UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents)
 {

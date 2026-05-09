@@ -19,6 +19,7 @@
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestCatchUpFanout.h"
 #include "Utilities/QuestTagComposer.h"
+#include "Utilities/SignalChannelUtils.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 
@@ -37,7 +38,7 @@ void UQuestWatcherComponent::HandleQuestActivated(FGameplayTag Channel, const FQ
 {
 	if (OnQuestActivated.IsBound())
 	{
-		OnQuestActivated.Broadcast(Event.GetQuestTag(), Event.Context, Event.PrereqStatus);
+		OnQuestActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.PrereqStatus);
 	}
 }
 
@@ -46,7 +47,7 @@ void UQuestWatcherComponent::HandleQuestEnabled(FGameplayTag Channel, const FQue
 	ActiveQuestTags.AddTag(Event.GetQuestTag());
 	if (OnQuestEnabled.IsBound())
 	{
-		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -54,7 +55,7 @@ void UQuestWatcherComponent::HandleQuestDisabled(FGameplayTag Channel, const FQu
 {
 	if (OnQuestDisabled.IsBound())
 	{
-		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -62,7 +63,7 @@ void UQuestWatcherComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const 
 {
 	if (OnQuestGiveBlocked.IsBound())
 	{
-		OnQuestGiveBlocked.Broadcast(Event.GetQuestTag(), Event.Blockers, Event.GiverActor.Get());
+		OnQuestGiveBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Blockers, Event.GiverActor.Get());
 	}
 }
 
@@ -70,7 +71,7 @@ void UQuestWatcherComponent::HandleQuestStarted(FGameplayTag Channel, const FQue
 {
 	if (OnQuestStarted.IsBound())
 	{
-		OnQuestStarted.Broadcast(Event.GetQuestTag(), Event.Context, Event.GiverActor.Get());
+		OnQuestStarted.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.GiverActor.Get());
 	}
 }
 
@@ -78,7 +79,7 @@ void UQuestWatcherComponent::HandleQuestProgress(FGameplayTag Channel, const FQu
 {
 	if (OnQuestProgress.IsBound())
 	{
-		OnQuestProgress.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -87,21 +88,48 @@ void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQ
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	CompletedQuestTags.AddTag(Event.GetQuestTag());
 
-	// Apply outcome filter — if the settings specify outcomes, only broadcast for matches
-	if (const FWatchedQuestEventSettings* Settings = WatchedTags.Find(Channel))
+	// Find the most-specific watched entry whose key is an ancestor of (or equals) Channel — that's the
+	// authored binding this delivery corresponds to. Direct WatchedTags.Find(Channel) was the prior shape,
+	// which silently bypassed the outcome filter for parent-prefix subscriptions: a watcher authored at
+	// SimpleQuest.Quest.MyLine receiving an event published on SimpleQuest.Quest.MyLine.Step1 has Channel
+	// = the descendant, but WatchedTags is keyed by the authored ancestor — direct lookup returned null
+	// and the filter never applied. Walk the entries instead, picking the longest matching ancestor (most
+	// specific authored binding wins when multiple match — typical case is one authored binding per event).
+	const FWatchedQuestEventSettings* MatchingSettings = nullptr;
+	int32 BestKeyDepth = -1;
+	for (const TPair<FGameplayTag, FWatchedQuestEventSettings>& Pair : WatchedTags)
 	{
-		if (!Settings->OutcomeFilter.IsEmpty() && !Settings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
+		if (!Channel.MatchesTag(Pair.Key)) continue;  // Pair.Key must be ancestor of (or equal) Channel
+
+		int32 KeyDepth = 0;
+		FGameplayTag Walker = Pair.Key;
+		while (Walker.IsValid())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
-				*Event.GetQuestTag().ToString(),
-				*Event.OutcomeTag.ToString());
-			return;
+			++KeyDepth;
+			Walker = Walker.RequestDirectParent();
 		}
+		if (KeyDepth > BestKeyDepth)
+		{
+			MatchingSettings = &Pair.Value;
+			BestKeyDepth = KeyDepth;
+		}
+	}
+
+	// Apply outcome filter from the most-specific matching authored binding. If no entries match (defensive —
+	// shouldn't happen since this callback only fires for subscriptions made from WatchedTags), fall through
+	// to broadcast unfiltered.
+	if (MatchingSettings && !MatchingSettings->OutcomeFilter.IsEmpty()
+		&& !MatchingSettings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
+	{
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
+			*Event.GetQuestTag().ToString(),
+			*Event.OutcomeTag.ToString());
+		return;
 	}
 
 	if (OnQuestCompleted.IsBound())
 	{
-		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Event.OutcomeTag, Event.Context);
+		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Context);
 	}
 }
 
@@ -110,7 +138,7 @@ void UQuestWatcherComponent::HandleQuestDeactivated(FGameplayTag Channel, const 
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	if (OnQuestDeactivated.IsBound())
 	{
-		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -118,7 +146,7 @@ void UQuestWatcherComponent::HandleQuestBlocked(FGameplayTag Channel, const FQue
 {
 	if (OnQuestBlocked.IsBound())
 	{
-		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -126,7 +154,7 @@ void UQuestWatcherComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQ
 {
 	if (OnQuestUnblocked.IsBound())
 	{
-		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Event.Context);
+		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
 	}
 }
 
@@ -275,6 +303,21 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 
 		for (const FGameplayTag& EachTag : CatchUpTags)
 		{
+			// EachTag is the canonical for this catch-up entry (post-GetQuestTagsUnderPrefix's alias-resolution).
+			// Build the channel set [canonical, ...aliases] and pick the best match for this watched-key tag —
+			// same selection the live bus dispatcher uses, so watcher delegates see consistent MatchedChannel
+			// values across catch-up and live deliveries (no need to branch by delivery path).
+			TArray<FGameplayTag> ChannelSet;
+			ChannelSet.Add(EachTag);
+			if (StateSubsystem)
+			{
+				for (const FGameplayTag& AliasTag : StateSubsystem->GetAssetScopedAliasTagsForCanonical(EachTag))
+				{
+					ChannelSet.Add(AliasTag);
+				}
+			}
+			const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, QuestTag);
+
 			FQuestEventContext SyntheticContext;
 			SyntheticContext.NodeInfo.QuestTag = EachTag;
 
@@ -291,13 +334,13 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 			if (Settings.bWatchActivated && bIsPendingGiver)
 			{
 				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, SyntheticContext, CachedPrereqStatus);
+				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, SyntheticContext, CachedPrereqStatus);
 			}
 
 			if (Settings.bWatchEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
 			{
 				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, SyntheticContext);
+				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, SyntheticContext);
 			}
 
 			if (Settings.bWatchStarted)
@@ -306,12 +349,8 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
 				{
 					ActiveQuestTags.AddTag(EachTag);
-					// GiverActor recovered from the registry's per-tag historical context (FQuestEntryArrival's
-					// ActivationParamsSnapshot.ActivationSource captured at start time and preserved past consumption).
-					// Pre-§1.2 this catch-up fired with nullptr because the manager's RecentGiverActors map was a
-					// single-shot consume-at-broadcast record; now the registry retains the giver attribution.
 					AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, SyntheticContext, RecoveredGiver);
+					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, SyntheticContext, RecoveredGiver);
 				}
 			}
 
@@ -347,7 +386,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 					{
 						UE_LOG(LogSimpleQuest, Log, TEXT("QuestWatcher: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
-						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, RecoveredOutcome, SyntheticContext);
+						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, SyntheticContext);
 					}
 				}
 			}
@@ -358,7 +397,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
 				{
 					ActiveQuestTags.RemoveTag(EachTag);
-					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, SyntheticContext);
+					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, SyntheticContext);
 				}
 			}
 
@@ -367,7 +406,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
 				if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
 				{
-					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, SyntheticContext);
+					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, SyntheticContext);
 				}
 			}
 		}

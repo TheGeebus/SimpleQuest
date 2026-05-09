@@ -95,6 +95,7 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
     StripIfHidden(TEXT("OnDeactivated"), bExposeOnDeactivated);
     StripIfHidden(TEXT("OnProgress"),    bExposeOnProgress);
     StripIfHidden(TEXT("OnBlocked"),     bExposeOnBlocked);
+    StripIfHidden(TEXT("OnUnblocked"),   bExposeOnUnblocked);
     
     // Strip exec-unique data pins when their owning exec is hidden.
     if (!bExposeOnActivated)
@@ -149,6 +150,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     EnsureExecPin(TEXT("OnDeactivated"), bExposeOnDeactivated);
     EnsureExecPin(TEXT("OnProgress"),    bExposeOnProgress);
     EnsureExecPin(TEXT("OnBlocked"),     bExposeOnBlocked);
+    EnsureExecPin(TEXT("OnUnblocked"),   bExposeOnUnblocked);
 
     // Same recreate for the unique-to-one-delegate data pins. Super's iteration also looks for the delegate's
     // parameter pins by name when expanding each handler; if PrereqStatus / Blockers / GiverActor / OutcomeTag
@@ -458,9 +460,25 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
             HoverTextOut = TEXT(
                 "Quest Tag\n"
                 "Gameplay Tag Structure\n\n"
-                "Which quest this event fired for. When subscribing on a parent tag, this is the specific "
-                "descendant quest that triggered — use it to identify which child of the watched line is "
-                "active right now.");
+                "The canonical address of this event from the perspective of the graph asset that originated "
+                "it — answers 'what graph asset and node sent me this event?' When the publishing node lives "
+                "in a LinkedQuestline graph that's been inlined under another, this can be the inlining outer "
+                "graph's address rather than the linked asset's, and may not be a descendant of your actual "
+                "subscription tag. Use Matched Channel for the address relative to what you subscribed to.");
+            return;
+        }
+        if (PinName == TEXT("MatchedChannel"))
+        {
+            HoverTextOut = TEXT(
+                "Matched Channel\n"
+                "Gameplay Tag Structure\n\n"
+                "The address of this event in the context you actually subscribed to — the longest channel "
+                "from the publish set where your subscription tag is a prefix. Guaranteed to be either your "
+                "subscription tag itself or a descendant of it. Answers 'what's the address of this event "
+                "in the context I cared about?' For subscribers bound at a parent tag, this is the specific "
+                "descendant that matched your subscription's hierarchy walk; for subscribers bound at an "
+                "inlined-asset perspective, this is the perspective's address even when the originating "
+                "graph is a different one.");
             return;
         }
         if (PinName == TEXT("OutcomeTag"))
@@ -468,6 +486,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
             HoverTextOut = TEXT(
                 "Outcome Tag\n"
                 "Gameplay Tag Structure\n\n"
+                "Only relevant to On Completed.\n\n"
                 "The outcome the quest resolved with — only meaningful on the On Completed pin. For catch-up "
                 "notifications (quest already resolved before binding), the outcome is recovered from this "
                 "session's resolution registry. Empty (no tag) only when no record exists for this quest "
@@ -501,6 +520,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
             HoverTextOut = TEXT(
                 "Prereq Status\n"
                 "Quest Prereq Status Structure\n\n"
+                "Only relevant to On Activated.\n\n"
                 "Snapshot of the quest's prereq evaluation at the moment On Activated fired. bSatisfied tells "
                 "you if the quest is currently accept-ready; Leaves carries per-leaf evaluation detail "
                 "(designers filter to !bSatisfied entries to know which prereqs are unmet). bIsAlways is true "
@@ -511,7 +531,8 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         {
             HoverTextOut = TEXT(
                 "Blockers\n"
-                "Array of Quest Activation Blocker\n\n"
+                "Array of Quest Activation Blocker Structures\n\n"
+                "Only relevant to On Give Blocked.\n\n"
                 "Structured reasons the give attempt was refused. State-fact blockers (UnknownQuest, AlreadyLive, "
                 "Blocked, Deactivated, NotPendingGiver) come first; PrereqUnmet last with UnsatisfiedLeafTags "
                 "populated. Designer branches on Reason to produce contextual refusal dialogue.");
@@ -522,6 +543,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
             HoverTextOut = TEXT(
                 "Giver Actor\n"
                 "Actor Object Reference\n\n"
+                "Only relevant to On Started or On Give Blocked.\n\n"
                 "The giver actor associated with this event. On On Started, this is the actor whose component "
                 "delivered the quest — null if the quest started without giver involvement (non-giver "
                 "activation path). On On Give Blocked, this is the actor whose component initiated the refused "
@@ -570,7 +592,7 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     // this node wraps and can't auto-generate input + output pins. Mirrors what the base's GetMenuActions does.
     TWeakObjectPtr<UFunction> FactoryFuncWeak = MakeWeakObjectPtr(FactoryFunc);
     Spawner->CustomizeNodeDelegate = UBlueprintFunctionNodeSpawner::FCustomizeNodeDelegate::CreateLambda(
-        [FactoryFuncWeak](UEdGraphNode* NewNode, bool /*bIsTemplateNode*/)
+        [FactoryFuncWeak](UEdGraphNode* NewNode, bool bIsTemplateNode)
         {
             UK2Node_BindToQuestEvent* AsyncNode = CastChecked<UK2Node_BindToQuestEvent>(NewNode);
             if (UFunction* Func = FactoryFuncWeak.Get())
@@ -644,6 +666,8 @@ void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraph
             const_cast<bool*>(&bExposeOnDeactivated));
         AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnBlocked", "On Blocked"),
             const_cast<bool*>(&bExposeOnBlocked));
+        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnUnblocked", "On Unblocked"),
+            const_cast<bool*>(&bExposeOnUnblocked));
     }
 }
 
@@ -659,5 +683,6 @@ int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
     if (bExposeOnCompleted)   Mask |= static_cast<int32>(EQuestEventTypes::Completed);
     if (bExposeOnDeactivated) Mask |= static_cast<int32>(EQuestEventTypes::Deactivated);
     if (bExposeOnBlocked)     Mask |= static_cast<int32>(EQuestEventTypes::Blocked);
+    if (bExposeOnUnblocked)   Mask |= static_cast<int32>(EQuestEventTypes::Unblocked);
     return Mask;
 }

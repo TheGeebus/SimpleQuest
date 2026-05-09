@@ -122,9 +122,16 @@ public:
 	// isn't tied to an individual start arrival (per-start detail lives on FQuestEntryArrival).
 
 	/**
-	 * Returns every known quest tag that matches Prefix or is a descendant of Prefix. Used by hierarchical
-	 * catch-up subscribers to enumerate descendants of a parent-prefix subscription. Empty result for an
-	 * invalid Prefix or when no descendants are known.
+	 * Returns every known canonical quest tag whose canonical-or-alias perspective matches Prefix or is a
+	 * descendant of Prefix. Used by hierarchical catch-up subscribers to enumerate descendants of a parent-
+	 * prefix subscription. Empty result for an invalid Prefix or when no descendants are known.
+	 *
+	 * Aliases get resolved to their underlying canonicals before return, so callers receive a uniform
+	 * canonical-tag set suitable for fact lookups (which are keyed by canonical) and instance lookups in
+	 * LoadedNodeInstances. A subscriber binding to an alias-shape prefix (e.g. SimpleQuest.Quest.NewTest
+	 * when NewTest is loaded only as inlined content under another asset's compile) gets the canonical tags
+	 * of the inlined nodes whose alias arrays contain a descendant of Prefix — the bus's hierarchical-walk
+	 * semantic, applied to the registered-tag set.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|State")
 	TArray<FGameplayTag> GetQuestTagsUnderPrefix(FGameplayTag Prefix) const;
@@ -248,6 +255,13 @@ public:
 	 * predicate / aggregate APIs (HasResolvedWith, GetResolutionHistory, etc.).
 	 */
 	TArray<FGameplayTag> ResolveCanonicalTags(FGameplayTag InputTag) const;
+	
+	/**
+	 * Returns the AssetScopedAliasTags registered for ContextualTag (the inverse of ResolveCanonicalTags's alias
+	 * walk). Empty when ContextualTag is unknown or has no registered aliases (top-level content). Used by
+	 * catch-up dispatchers to build the channel set [canonical, ...aliases] for matched-channel selection.
+	 */
+	TArray<FGameplayTag> GetAssetScopedAliasTagsForCanonical(FGameplayTag ContextualTag) const;
 
 private:
     friend class UQuestManagerSubsystem;

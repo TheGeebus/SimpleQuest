@@ -2,6 +2,7 @@
 
 #include "Signals/SignalSubsystem.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Utilities/SignalChannelUtils.h"
 
 
 void USignalSubsystem::Deinitialize()
@@ -150,7 +151,7 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
                         if (Delivered.Contains(Record.Handle)) { ++DedupedSkipped; continue; }
                         if (!Record.Listener.IsValid()) continue;
 
-                        const FGameplayTag MatchedChannel = PickBestMatchChannel(Channels, CurrentTag);
+                        const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(Channels, CurrentTag);
                         Record.Dispatcher(MatchedChannel, Payload);
                         Delivered.Add(Record.Handle);
                         bAnyFiredAtThisLevel = true;
@@ -169,35 +170,5 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
         bAllChannels ? TEXT("true") : TEXT("false"),
         LevelsFired,
         DedupedSkipped);
-}
-
-FGameplayTag USignalSubsystem::PickBestMatchChannel(const TArray<FGameplayTag>& Channels, const FGameplayTag& BoundTag)
-{
-    // Best-match = longest channel C from Channels where BoundTag is an ancestor of C (or equal). Tie-break by input order
-    // (first occurrence wins). Depth measured by walking parents until invalid; idiomatic for gameplay tags and avoids any
-    // string-format assumption.
-    FGameplayTag Best;
-    int32 BestDepth = -1;
-    for (const FGameplayTag& C : Channels)
-    {
-        // C.MatchesTag(BoundTag) is true when C is BoundTag itself or a descendant — i.e., when BoundTag appears on C's
-        // ancestor walk to root. That's the relation we want: a subscriber bound at BoundTag legitimately receives events
-        // published on C if and only if this is true.
-        if (!C.MatchesTag(BoundTag)) continue;
-
-        int32 Depth = 0;
-        FGameplayTag Walker = C;
-        while (Walker.IsValid())
-        {
-            ++Depth;
-            Walker = Walker.RequestDirectParent();
-        }
-        if (Depth > BestDepth)
-        {
-            Best = C;
-            BestDepth = Depth;
-        }
-    }
-    return Best;
 }
 

@@ -40,8 +40,10 @@ public:
     /**
      * Publish a pre-packed FInstancedStruct on Channel. Same tag-hierarchy walk as PublishMessage. Use when forwarding an event
      * received from another subscription without re-packing (avoids type-slicing).
+     *
+     * Public C++ surface only — BP code reaches this via USimpleCoreBlueprintLibrary::PublishMessage, which handles the
+     * WorldContext → World → GameInstance → Subsystem resolution.
      */
-    UFUNCTION(BlueprintCallable)
     void PublishRawMessage(FGameplayTag Channel, const FInstancedStruct& Payload);
     
     /**
@@ -93,9 +95,6 @@ private:
      * PublishMessageOnChannelsRaw enforces. Implements the deduplication-on / sibling-publish split based on bAllChannels.
      */
     void DispatchOnChannels(const TArray<FGameplayTag>& Channels, const FInstancedStruct& Payload, bool bAllChannels);
-
-    /** Picks the longest channel from Channels where BoundTag is an ancestor (or equal). Tie-break: array order. */
-    static FGameplayTag PickBestMatchChannel(const TArray<FGameplayTag>& Channels, const FGameplayTag& BoundTag);
 
     TMap<FGameplayTag, TArray<FSignalSubscriberRecord>> ChannelSubscribers;
     bool bIsShuttingDown = false;

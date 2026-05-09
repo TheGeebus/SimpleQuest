@@ -22,26 +22,41 @@ class SIMPLEQUEST_API USimpleQuestBlueprintLibrary : public UBlueprintFunctionLi
 
 public:
     /**
-     * Subscribe to a quest's lifecycle events. Wire any of the four output exec pins you care about:
-     *  - On Activated — quest is enabled and ready (may be waiting on a giver).
-     *  - On Started — quest is actively running; objectives are live.
-     *  - On Completed — quest resolved. The Outcome Tag output tells you which outcome fired — switch on it to branch
-     *                                      by Victory / Defeat / Negotiated / etc.
-     *  - On Deactivated — quest was blocked or torn down without completing.
+     * Subscribe to a quest's lifecycle events. Configure which exec pins to expose via the checkboxes in
+     * the Details panel — defaults to On Enabled / On Started / On Completed; opt in to others as needed.
      *
-     * Hierarchical subscription: pass a parent tag like SimpleQuest.Quest.MyLine and you'll receive events for every
-     * descendant quest under it (SimpleQuest.Quest.MyLine.Step1, SimpleQuest.Quest.MyLine.Step2, ...). Every pin fires
-     * every time a matching event arrives — not one-shot.
+     * Available events organized by phase:
      *
-     * Catch-up: if the quest already reached one of these states before you subscribed, the matching pin fires immediately
-     * on bind. Late binders aren't left waiting on events that already happened.
+     *  Offer phase:
+     *   - On Activated — quest reached a giver-gated waypoint. Prereq Status says whether prereqs are met.
+     *   - On Enabled — quest became accept-ready (Activated AND prereqs satisfy).
+     *   - On Disabled — accept-ready quest became no-longer-ready (NOT-prereq edge cases; rare).
+     *   - On Give Blocked — a give attempt was refused. Blockers carries the structured reasons.
      *
-     * Context output carries the full event context — Triggered Actor, Instigator, Node Info, Custom Data — so you don't
-     * need a separate lookup for who triggered the event or what payload came with it.
+     *  Run phase:
+     *   - On Started — quest entered Live state; objectives are bound and ticking.
+     *   - On Progress — objective progress tick (transient, no catch-up).
      *
-     * The subscription persists until you call Cancel on the returned node or the Game Instance tears down. Typical pattern:
-     * bind in Begin Play, wire pins into your UI / rewards / progression logic, optionally call Cancel from End Play if you
-     * want tighter per-actor lifetime.
+     *  End phase:
+     *   - On Completed — quest resolved with an outcome. Outcome Tag tells you which (Victory / Defeat / etc.).
+     *   - On Deactivated — quest was interrupted before completing.
+     *   - On Blocked — Blocked-state fact transitioned absent → present (SetBlocked utility node fired).
+     *   - On Unblocked — Blocked-state fact transitioned present → absent (ClearBlocked utility node fired).
+     *
+     * Subscribe at any tag — pass a leaf to watch one quest, or a parent like SimpleQuest.Quest.MyLine to
+     * receive events from every descendant under it. With LinkedQuestline graphs you can also subscribe at
+     * any of an inlined node's perspectives (its standalone form OR any inlining context's form). Quest Tag
+     * output gives the canonical event identity (where the event originated); Matched Channel output gives
+     * the address relative to what you subscribed to.
+     *
+     * Catch-up: if the quest already reached one of these states before you subscribed, the matching pin
+     * fires immediately on bind. Late binders aren't left waiting on events that already happened.
+     *
+     * Context output carries the full event payload — Triggered Actor, Instigator, Node Info, Custom Data —
+     * so you don't need a separate lookup for who triggered the event or what payload came with it.
+     *
+     * The subscription persists until you call Cancel on the returned node or the Game Instance tears down.
+     * Typical pattern: bind in Begin Play, wire pins, optionally call Cancel from End Play for per-actor lifetime.
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Events",
         meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
@@ -115,19 +130,6 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
-
-    // -------------------------------------------------------------------------------------------------------------
-    // World state: general fact store, for power users and external prereqs (relocate to SimpleCore?)
-    // -------------------------------------------------------------------------------------------------------------
-
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|World State", meta = (WorldContext = "WorldContext"))
-    static void AddWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag);
-
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|World State", meta = (WorldContext = "WorldContext"))
-    static void RemoveWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag);
-
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|World State", meta = (WorldContext = "WorldContext"))
-    static bool HasWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag);
 
 private:
     static UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);

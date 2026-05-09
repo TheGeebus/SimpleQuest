@@ -385,13 +385,19 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 	}
 
 	// AssetScopedAliasTags — the inner-asset perspective. Cross-asset subscribers binding to an alias-shape
-	// prefix expect to enumerate descendants under that prefix too; without this walk, they'd miss alias-tag
-	// matches that are only registered through the alias index.
+	// prefix expect to enumerate the canonicals their subscription would legitimately reach via the bus's
+	// hierarchical-walk semantic. Resolve alias-prefix matches to their underlying canonicals (the value side
+	// of the forward map) so callers get a uniform canonical-tag set for fact lookups, instance lookups, and
+	// any other key-by-canonical operation. AddUnique handles the case where a canonical reaches the result
+	// via both the direct KnownQuests match (above) AND an alias-prefix match here.
 	for (const TPair<FGameplayTag, TArray<FGameplayTag>>& Pair : ContextualTagsByAssetScopedTag)
 	{
 		if (Pair.Key.MatchesTag(Prefix))
 		{
-			Out.AddUnique(Pair.Key);
+			for (const FGameplayTag& Canonical : Pair.Value)
+			{
+				Out.AddUnique(Canonical);
+			}
 		}
 	}
 
@@ -584,5 +590,15 @@ TArray<FGameplayTag> UQuestStateSubsystem::ResolveCanonicalTags(FGameplayTag Inp
 	}
 
 	return Result;
+}
+
+TArray<FGameplayTag> UQuestStateSubsystem::GetAssetScopedAliasTagsForCanonical(FGameplayTag ContextualTag) const
+{
+	if (!ContextualTag.IsValid()) return {};
+	if (const TArray<FGameplayTag>* Aliases = AssetScopedAliasTagsByContextualTag.Find(ContextualTag))
+	{
+		return *Aliases;
+	}
+	return {};
 }
 

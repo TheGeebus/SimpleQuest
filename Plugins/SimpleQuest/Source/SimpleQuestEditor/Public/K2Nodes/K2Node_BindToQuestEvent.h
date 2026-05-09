@@ -58,6 +58,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Pins|End Phase", meta = (DisplayName = "On Blocked"))
 	bool bExposeOnBlocked = false;
 
+	/** Symmetric partner to On Blocked — Blocked-state fact transitioned present → absent. */
+	UPROPERTY(EditAnywhere, Category = "Pins|End Phase", meta = (DisplayName = "On Unblocked"))
+	bool bExposeOnUnblocked = false;
+	
 	virtual void AllocateDefaultPins() override;
 	virtual void ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph) override;
 	virtual void PostPlacedNewNode() override;

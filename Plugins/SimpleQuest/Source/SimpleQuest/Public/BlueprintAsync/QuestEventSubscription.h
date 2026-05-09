@@ -50,12 +50,26 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
  * but carries the full FQuestEventContext so designers reach TriggeredActor, Instigator, NodeInfo, CustomData
  * without a separate lookup.
  *
- * QuestTag is the canonical event identity (the publishing instance's ContextualTag / Stack[0]). MatchedChannel is
- * delivery metadata — the channel from this publish set most specific to this subscription's bound tag (longest
- * descendant where the bound tag is a prefix). In single-channel publishes the two are equal; in multi-channel
- * publishes (e.g., a Step inlined under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical
- * across all subscribers, MatchedChannel reflects each subscriber's own perspective. Branch on QuestTag for "what
- * is this event"; branch on MatchedChannel for "which of my subscription's channels did this match."
+ * Linking Questline graphs means that a single node may broadcast events on several tagged channels
+ * that each refer to its address in a different graph hierarchy. Subscribers can listen for any
+ * ancestor tag in any of those graphs to receive an event broadcast. Both the true event origin and
+ * the signal pathway that resulted in event delivery are provided as separate gameplay tags.
+ *
+ * QuestTag is the canonical event identity (publishing instance's ContextualTag / Stack[0]). It is
+ * the address of the event as seen from the perspective of the graph asset instance responsible for
+ * originating the event. It may not be a direct descendant of the bound tag.
+ *  - It answers: what graph asset and node sent me this event?
+ *
+ * MatchedChannel is delivery metadata — the channel from this publish set most specific to this
+ * subscription's bound tag (longest descendant where the bound tag is a prefix). Guaranteed to be either
+ * the bound tag or a descendant of the bound tag.
+ *  - It answers: what's the address of this event in the context I cared about?
+ *
+ * In single-channel publishes the two are equal; in multi-channel publishes (e.g., a Step inlined
+ * under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
+ * subscribers, MatchedChannel reflects each subscriber's own perspective. Branch on QuestTag for "what quest
+ * instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
+ * Mirrors UQuestWatcherComponent's delegate contract; same shape, same semantics.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);

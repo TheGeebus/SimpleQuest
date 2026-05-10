@@ -264,9 +264,9 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
 ## Contributing
 
-Community feedback is welcome and valuable at this stage. If you encounter a bug, a compatibility issue, or have a feature request, please open an issue with the engine version and a description of the problem or suggestion.
+Community feedback is welcome and valuable at this stage. If you encounter a bug, a compatibility issue, or have a feature request, please open an issue with the engine version and a description of the problem or suggestion. For faster support, join the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS).
 
-Code contributions via pull request are not being accepted during the current pre-release phase while licensing terms are being finalized. This will be revisited ahead of the first public release. Watch the repository for updates.
+Code contributions via pull request will be reviewed by the author. For contribution guidelines, see the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS).
 
 For bug reports, include the engine version, a minimal reproduction case, and any relevant output from the `LogSimpleQuest` and `LogSimpleCore` log categories.
 

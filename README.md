@@ -1,7 +1,7 @@
 # SimpleQuest
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
 
-A source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data. Currently free for non-commercial use, with an MIT-licensed free-use release planned following a future funding milestone.
+MIT licensed, source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data.
 
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 

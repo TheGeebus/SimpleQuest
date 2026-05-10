@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestActivationGroupTriggeredEvent.generated.h"
 
@@ -29,8 +30,10 @@ struct SIMPLEQUEST_API FQuestActivationGroupTriggeredEvent
     FQuestActivationGroupTriggeredEvent() = default;
 
     FQuestActivationGroupTriggeredEvent(FGameplayTag InGroupTag, const FQuestObjectiveActivationParams& InForwardParams,
-        FName InSourceTag, const TArray<FGameplayTag>& InOriginChain)
-        : GroupTag(InGroupTag), ForwardParams(InForwardParams), SourceTag(InSourceTag), OriginChain(InOriginChain) {}
+        FName InSourceTag, const TArray<FGameplayTag>& InOriginChain,
+        const FOriginatingEventID& InOriginatingEventID = FOriginatingEventID())
+        : GroupTag(InGroupTag), ForwardParams(InForwardParams), SourceTag(InSourceTag), OriginChain(InOriginChain),
+          OriginatingEventID(InOriginatingEventID) {}
 
     /** The group's gameplay tag — also the signal channel. */
     UPROPERTY(BlueprintReadOnly)
@@ -47,4 +50,13 @@ struct SIMPLEQUEST_API FQuestActivationGroupTriggeredEvent
     /** Activation chain reaching the Setter, threaded transparently through the group (Listener doesn't append its own tag). */
     UPROPERTY(BlueprintReadOnly)
     TArray<FGameplayTag> OriginChain;
+
+    /**
+     * Cascade event ID threaded transparently through the group (Listener doesn't mutate; just propagates onto
+     * destinations). Mirrors the OriginChain duplication pattern: lives both inside ForwardParams AND as a first-
+     * class event field for designer BP introspection — designers reading the event payload see "what triggered
+     * this group fire?" without reaching into ForwardParams.
+     */
+    UPROPERTY(BlueprintReadOnly)
+    FOriginatingEventID OriginatingEventID;
 };

@@ -211,14 +211,12 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
     {
         if (UQuestNodeBase* Instance = Pair.Value)
         {
-            // Skip if the key is already in LoadedNodeInstances. Happens when this graph's content has been
-            // inlined into a previously-registered graph via a LinkedQuestline placement. The inline copy was
-            // registered during that parent's RegisterQuestlineGraph; this standalone copy would otherwise
-            // overwrite the parent-bound instance with one whose Expression leaves reference standalone-namespace
-            // tags instead of the contextualized parent-namespace tags actually being published at runtime —
-            // breaks PrereqRule subscriptions and similar tag-keyed dependencies. The standalone copy stays
-            // dormant (loaded but never wired up) and is harmless. Authored-key entries (utility node
-            // Util_<NodeGuid>, PrereqRule GroupTag) collide; contextualized content-node tags don't.
+            // PrereqRule monitors are singleton-per-rule by design — the same RuleTagName key is emitted by every
+            // compile context that references the rule (each emits its own Monitor instance with its own
+            // Expression compiled against that context's leaves). This deduplication keeps the first-registered
+            // Monitor and skips the rest so the rule has exactly one wired-up evaluator + subscription set in
+            // LoadedNodeInstances. The skipped Monitor instances stay dormant in their owning graph's
+            // CompiledNodes but never get OnRegisteredWithManager called.
             if (LoadedNodeInstances.Contains(Pair.Key))
             {
                 ++SkippedAlreadyRegistered;
@@ -330,7 +328,20 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         return;
     }
 
-    ChainToNextNodes(Node, OutcomeTag, PathIdentity);
+    // Mint the cascade event ID at the originating Step's completion. Multi-tag-stable AuthoredNodeGuid (same
+    // authored Step in two compile contexts shares it) + per-tick-stable timestamp distinguishes cascades from
+    // genuinely different gameplay events. Threaded through ChainToNextNodes onto every destination's
+    // PendingActivationParams and into every FireWrapperBoundaryCompletion call.
+    FOriginatingEventID OriginatingEventID;
+    OriginatingEventID.AuthoredNodeGuid = Node->GetAuthoredNodeGuid();
+    OriginatingEventID.ResolutionTimestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    UE_LOG(LogSimpleQuest, Verbose,
+        TEXT("HandleOnNodeCompleted: '%s' minted cascade event ID — guid=%s ts=%.3f"),
+        *Node->GetContextualTag().ToString(),
+        *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short),
+        OriginatingEventID.ResolutionTimestamp);
+
+    ChainToNextNodes(Node, OutcomeTag, PathIdentity, OriginatingEventID);
 }
 
 void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData)
@@ -368,7 +379,28 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             GiverActor = Found->Get();
             RecentGiverActors.Remove(Node->GetContextualTag());
         }
-        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestStartedEvent(Node->GetContextualTag(), Context, GiverActor));
+
+        // Suppress QuestStartedEvent for wrappers re-entering while already Live (loop-back wires, fan-in
+        // re-entry, GiverGateSkipPathAware / ContainerReentry decisions). The event semantically means
+        // "transitioned to Live" — firing it on a no-op re-entry tells subscribers a false transition
+        // happened, breaking state machines that pair QuestStarted/QuestEnded as Live-cycle markers (the
+        // giver component's container management is one such consumer). For real first-time activation,
+        // the wrapper isn't yet Live at this point — the inner Step's SetQuestLive runs later in the same
+        // call stack via DeriveContainerLive's ancestor walk — so the check below correctly publishes.
+        // Steps don't need this guard: their RefuseStepAlreadyLive decision returns early in
+        // ActivateNodeByTag, before reaching HandleOnNodeStarted at all. Re-entry awareness for designer
+        // observation lives in the entry-record events (FQuestEntryRecordedEvent), which still fire below.
+        const bool bIsWrapperReentry = Node->IsContainerNode() && FQuestLifecycleQuery::IsLive(WorldState, Node->GetContextualTag());
+        if (!bIsWrapperReentry)
+        {
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestStartedEvent(Node->GetContextualTag(), Context, GiverActor));
+        }
+        else
+        {
+            UE_LOG(LogSimpleQuest, Verbose,
+                TEXT("HandleOnNodeStarted: '%s' re-entering while already Live — suppressing QuestStartedEvent (no-op re-activation)"),
+                *Node->GetContextualTag().ToString());
+        }
         
         if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
@@ -546,6 +578,13 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
 {
     if (!Node) return;
 
+    // The utility node's PendingActivationParams was populated by the upstream activation (cascade stamp, or
+    // signal-driven self-stamp on UActivationGroupListenerNode). Its OriginatingEventID identifies the gameplay
+    // event that drove the upstream cascade — pass it to FireWrapperBoundaryCompletion so the wrapper gate
+    // sees the same identity that already-cascade-bearing destinations would. The wholesale
+    // PendingActivationParams copy below carries OriginatingEventID onto downstream destinations naturally.
+    const FOriginatingEventID& InheritedEventID = Node->PendingActivationParams.OriginatingEventID;
+
     // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
     // downstream prereq evaluation runs. Routes through the shared FireWrapperBoundaryCompletion helper so
     // the wrapper's full outcome chain fires (including loop-back wires) — symmetric with ChainToNextNodes's
@@ -559,14 +598,14 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
             *BC.OutcomeTag.ToString(),
             *Node->GetContextualTag().ToString());
 
-        FireWrapperBoundaryCompletion(BC);
+        FireWrapperBoundaryCompletion(BC, InheritedEventID);
     }
 
     // Thread the source utility node's PendingActivationParams onto each downstream destination so any payload
     // that arrived at the utility (via signal-driven self-stamp on UActivationGroupListenerNode, cascade, or direct
     // upstream stamp) propagates through the forward chain. Mirrors ChainToNextNodes::StampAndActivate. Identity
     // for utility nodes that don't carry payload (SetBlocked / ClearBlocked) — those fields stay zero-init either
-    // way so the stamp is a harmless overwrite.
+    // way so the stamp is a harmless overwrite. OriginatingEventID rides through this wholesale copy.
     for (const FName& Tag : Node->GetNextNodesOnForward())
     {
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(Tag))
@@ -772,7 +811,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         *IncomingOutcomeTag.ToString());
 }
 
-void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
     if (!Node) return;
 
@@ -851,25 +890,16 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ForwardChain.Add(Node->GetContextualTag());
     }
 
-    auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node](const FName& DestTagName)
+    auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node, &OriginatingEventID](const FName& DestTagName)
     {
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
         {
             DestInstance->PendingActivationParams = ForwardPayload;
             DestInstance->PendingActivationParams.OriginTag = Node->GetContextualTag();
             DestInstance->PendingActivationParams.OriginChain = ForwardChain;
+            DestInstance->PendingActivationParams.OriginatingEventID = OriginatingEventID;
         }
         ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
-    };
-
-    // Helper: route a wrapper boundary completion through the shared helper. The shared helper calls
-    // ChainToNextNodes on the wrapper so its full outcome-chain processing fires (SetQuestResolved +
-    // PublishQuestEndedEvent + the wrapper's own destination wires, including loop-back wires that
-    // close outer-Quest-loops-on-itself topologies). HandleOnNodeForwardActivated uses the same helper
-    // so utility-forward paths (Set Blocked, Clear Blocked, Activation Group) are symmetric.
-    auto FireBoundaryCompletion = [this](const FQuestBoundaryCompletion& BC)
-    {
-        FireWrapperBoundaryCompletion(BC);
     };
 
     // Named-outcome path: fire boundary completions first so wrapper Path facts exist before the destination
@@ -879,7 +909,10 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     {
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
-            FireBoundaryCompletion(BC);
+            // OriginatingEventID is inherited from the current cascade — wrapper completion is part of
+            // the same logical event, not a fresh origin. ChainToNextNodes inside FireWrapperBoundaryCompletion
+            // threads it onward to the wrapper's own NextNodes / nested BCs.
+            FireWrapperBoundaryCompletion(BC, OriginatingEventID);
         }
         for (const FName& Tag : PathList->NodeTags)
         {
@@ -890,7 +923,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // Any-outcome path: same pattern.
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
-        FireBoundaryCompletion(BC);
+        FireWrapperBoundaryCompletion(BC, OriginatingEventID);
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
@@ -1537,7 +1570,14 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
     FQuestDeferredCompletion Pending;
     DeferredCompletions.RemoveAndCopyValue(StepTag, Pending);
 
-    ChainToNextNodes(Step, Pending.OutcomeTag, Pending.PathIdentity);
+    // Mint the cascade event ID at the deferred fire moment — that's when the gameplay event actually happens
+    // in player-perceptible time (the original completion was deferred until prereqs satisfied). Mirrors
+    // HandleOnNodeCompleted's minting pattern.
+    FOriginatingEventID OriginatingEventID;
+    OriginatingEventID.AuthoredNodeGuid = Step->GetAuthoredNodeGuid();
+    OriginatingEventID.ResolutionTimestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+
+    ChainToNextNodes(Step, Pending.OutcomeTag, Pending.PathIdentity, OriginatingEventID);
 }
 
 void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event)
@@ -1645,7 +1685,15 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     else if (!bAnyInnerLive && bCurrentlyLive)
     {
         WorldState->RemoveFact(ContainerLiveFact);
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("DeriveContainerLive: '%s' → not Live (no inner Steps active)"), *ContainerTag.ToString());
+        // ResolvedByEvents is intentionally NOT cleared here. Under multi-tag fanout, a single logical gameplay
+        // event can produce two sequential cascades (one per per-context Step), and the first cascade's resolution
+        // causes this branch to fire mid-event — clearing the set here would empty it before the second cascade
+        // arrives at the wrapper, defeating the gate. The set is kept bounded by the prune-on-add logic in
+        // FireWrapperBoundaryCompletion's gate (entries with strictly earlier timestamps are pruned when a
+        // new event lands), so growth is naturally limited to events from the current tick.
+        UE_LOG(LogSimpleQuest, Verbose,
+            TEXT("DeriveContainerLive: '%s' → not Live (no inner Steps active)"),
+            *ContainerTag.ToString());
     }
     // else: container's Live state already matches what's derived — no action needed.
 }
@@ -1673,10 +1721,10 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     {
         WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live));
         
-        // Phase 5 of container lifecycle alignment — Step's Live just transitioned out, so its ancestor containers
-        // re-derive their Live state. Containers skip this branch (they don't own a Live fact directly; their Live
-        // tracks inner Step state via the Step-side ancestor walks). Wrappers being resolved as part of chain
-        // boundary processing route through this method but with bIsContainer=true and don't trigger derivation.
+        // Step's Live just transitioned out, so its ancestor containers re-derive their Live state. Containers
+        // skip this branch (they don't own a Live fact directly; their Live tracks inner Step state via the Step-side
+        // ancestor walks). Wrappers being resolved as part of chain boundary processing route through this method but
+        // with bIsContainer=true and don't trigger derivation.
         if (Node && Node->IsStepNode())
         {
             for (const FGameplayTag& AncestorTag : Cast<UQuestStep>(Node)->GetAncestorContainerTags())
@@ -1687,8 +1735,14 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     }
     WorldState->RemoveFact(FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::PendingGiver));
 
+    // Each SetQuestResolved call appends to the resolution registry (Layer 2 below) and bumps the WorldState
+    // Completed fact's ref-count. Pre-multi-resolution, this site guarded against double-add via an
+    // !IsCompleted check — that guard predates the explicit "quests resolve multiple times" semantic
+    // documented in the layer comment above and erased the per-resolution count the ref-count is meant to
+    // carry. Removing the guard restores the count semantic: ref-count == number of resolutions in the
+    // current session for this canonical (matches Layer 2's resolution record count).
     const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Completed);
-    if (CompletedFact.IsValid() && !FQuestLifecycleQuery::IsCompleted(WorldState, QuestTag))
+    if (CompletedFact.IsValid())
     {
         WorldState->AddFact(CompletedFact);
     }
@@ -1763,17 +1817,57 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     }
 }
 
-void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC)
+void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC,
+    const FOriginatingEventID& OriginatingEventID)
 {
     const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
     if (!WrapperTag.IsValid()) return;
 
     if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
     {
+        // Event-keyed dedup gate: a single gameplay event (Step resolution → cascade → wrapper completion)
+        // can reach the same wrapper through multiple paths under multi-tag fanout — e.g., both this
+        // context's Listener and another context's Listener forwarding their BoundaryCompletions to this
+        // wrapper after their respective Setters publish on the shared GroupTag channel. Without this gate,
+        // the wrapper resolves once per arriving cascade, doubling (or N-tupling) records for one logical event.
+        // With the gate, the second arrival with a matching event ID is recognized as already-handled and
+        // skipped; loops that re-resolve at a later moment (different timestamp) or multi-resolution within
+        // a single Live phase from a different originating Step (different authored GUID) produce distinct
+        // event IDs and proceed normally. Invalid event IDs (default-constructed — non-cascade origin like
+        // direct external API resolution) skip the dedup logic entirely so non-cascade paths aren't filtered.
+        if (UQuest* WrapperContainer = Cast<UQuest>(WrapperNode); WrapperContainer && OriginatingEventID.IsValid())
+        {
+            if (WrapperContainer->ResolvedByEvents.Contains(OriginatingEventID))
+            {
+                UE_LOG(LogSimpleQuest, Verbose,
+                    TEXT("FireWrapperBoundaryCompletion: skipping '%s' outcome='%s' — already resolved by event guid=%s ts=%.3f"),
+                    *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
+                    *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short),
+                    OriginatingEventID.ResolutionTimestamp);
+                return;
+            }
+            
+            // Prune entries with strictly earlier timestamps before adding the new one. Within one logical
+            // event's multi-tag fanout every cascade shares the same ResolutionTimestamp; entries with older
+            // timestamps belong to events from prior ticks that cannot recur (the same authored Step at the
+            // same world time would produce an identical entry already in the set, caught by the Contains
+            // check above). Keeps the set bounded to events from the current tick — typically 1 entry,
+            // occasionally a few for multi-resolution scenarios. No unbounded growth across session length.
+            for (auto It = WrapperContainer->ResolvedByEvents.CreateIterator(); It; ++It)
+            {
+                if (It->ResolutionTimestamp < OriginatingEventID.ResolutionTimestamp)
+                {
+                    It.RemoveCurrent();
+                }
+            }
+            WrapperContainer->ResolvedByEvents.Add(OriginatingEventID);
+        }
+
         UE_LOG(LogSimpleQuest, Verbose,
-            TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes"),
-            *WrapperTag.ToString(), *BC.OutcomeTag.ToString());
-        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName());
+            TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes (eventGuid=%s)"),
+            *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
+            *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
+        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName(), OriginatingEventID);
     }
     else
     {

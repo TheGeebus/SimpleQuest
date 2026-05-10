@@ -6,4 +6,5 @@ void UQuest::ResetTransientState()
 {
 	Super::ResetTransientState();
 	PendingEntryActivations.Reset();
+	ResolvedByEvents.Reset();
 }

@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
+#include "Quests/Types/OriginatingEventID.h"
 #include "Quest.generated.h"
 
 /**
@@ -64,8 +65,23 @@ protected:
 	 */
 	UPROPERTY(Transient)
 	TArray<FQuestObjectiveActivationParams> PendingEntryActivations;
+	
+	/**
+	 * Set of cascade event IDs that have already resolved this wrapper in the current tick. Populated by
+	 * FireWrapperBoundaryCompletion's gate when an OriginatingEventID first reaches the wrapper; checked
+	 * on subsequent fires so the multi-tag fanout of a single gameplay event produces exactly one
+	 * resolution record per perspective. The gate prunes entries with strictly earlier timestamps when a new
+	 * event lands — keeps the set bounded to events from the current tick (typically 1 entry, a few in
+	 * multi-resolution scenarios). PIE re-entry clears via ResetTransientState. Invalid (default-constructed)
+	 * event IDs are never added — non-cascade resolution paths skip the gate entirely.
+	 */
+	UPROPERTY(Transient)
+	TSet<FOriginatingEventID> ResolvedByEvents;
 
-	/** Clears the per-cascade queue between PIE sessions. Base ResetTransientState handles PendingActivationParams. */
+	/**
+	 * Clears the per-cascade queue and the per-Live-phase resolved-events set between PIE sessions. Base
+	 * ResetTransientState handles PendingActivationParams.
+	 */
 	virtual void ResetTransientState() override;
 
 public:

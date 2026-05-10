@@ -1,8 +1,7 @@
-
 # SimpleQuest
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
 
-A source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data. Currently free for non-commercial use, with an MIT-licensed free-use release planned following a future funding milestone.
-
+MIT licensed, source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data.
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
 This version is for Unreal Engine 5.6.
@@ -10,9 +9,6 @@ This version is for Unreal Engine 5.6.
 Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
-
-[![License: Polyform NC 1.0](https://img.shields.io/badge/License-Polyform%20NC%201.0-blue.svg)](LICENSE)
-![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
 
 ---
 
@@ -278,6 +274,4 @@ For bug reports, include the engine version, a minimal reproduction case, and an
 
 ## License
 
-SimpleQuest is licensed under [Polyform Noncommercial 1.0.0](LICENSE). It is free to use, modify, and distribute for any non-commercial purpose. Commercial use requires a separate license.
-
-The project is planned to relicense to MIT upon a future funding milestone, at which point it will be free for all uses without restriction. Commercial licensing terms will be announced separately ahead of that transition.
+SimpleQuest is licensed under the standard [MIT License](LICENSE).

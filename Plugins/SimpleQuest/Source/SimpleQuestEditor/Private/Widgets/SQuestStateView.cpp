@@ -845,7 +845,7 @@ bool SQuestStateView::RefreshEntriesFromChannel()
             {
                 if (IsValid(Giver))
                 {
-                    Row->GiverActorName = Giver->GetActorNameOrLabel();
+                    Row->GiverActorName = Giver->GetName();
                 }
             }
 

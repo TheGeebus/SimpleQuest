@@ -30,11 +30,6 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	FText NodeLabel;
 
-	// Stable identity for this node. Used to derive QuestID at compile time. Generated once on placement and regenerated
-	// on duplication. Never hand-edited.
-	UPROPERTY(VisibleAnywhere, Category = "Quest")
-	FGuid QuestGuid;
-
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
 
@@ -62,7 +57,7 @@ protected:
 	 * upward — so "GetBook_1" re-duplicated becomes "GetBook_2", not "GetBook_1_1". Fresh placements where
 	 * NodeLabel is empty fall back to GetDefaultNodeBaseName().
 	 */
-	void EnsureFreshIdentityAndUniqueLabel();
+	void EnsureUniqueLabel();
 	
 	/**
 	 * Override to insert custom output pins between Prerequisites and Any Outcome. Do NOT override AllocateDefaultPins — the

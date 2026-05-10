@@ -215,7 +215,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 
     // ---- Pass 1c: utility nodes ----
     TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
-    CompileUtilityNodes(Graph, UtilityEdNodes);
+    CompileUtilityNodes(Graph, TagPrefix, UtilityEdNodes);
 
     UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGraph: [%s] %d content, %d utility node(s)"),
         *TagPrefix,
@@ -519,6 +519,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
         if (!Instance) continue;
         
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
+    	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
         Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
         AllCompiledQuestTags.Add(TagName);
     	for (const FName& AliasFName : AliasFNames)
@@ -622,6 +623,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 		
 	    UQuestPrereqRuleNode* Monitor = NewObject<UQuestPrereqRuleNode>(RootGraph);
 	    Monitor->GroupTag = RuleTag;
+		Monitor->AuthoredNodeGuid = Entries[0]->QuestGuid;
 
 	    UQuestlineNode_PrerequisiteRuleEntry* PrimaryEntry = Entries[0];
 	    if (Entries.Num() > 1)
@@ -665,14 +667,17 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 
         UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
     	Inst->GroupTag = Setter->GroupTag;
+    	Inst->AuthoredNodeGuid = Setter->QuestGuid;
 
-        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
+        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s__%s"), *Node->NodeGuid.ToString(), *TagPrefix));
         UtilityNodeKeyMap.Add(Node, UtilKey);
         AllCompiledNodes.Add(UtilKey, Inst);
         AllCompiledEditorNodes.Add(UtilKey, Node);
 
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation setter '%s'"),
-            *TagPrefix, *Setter->GroupTag.GetTagName().ToString());
+    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation setter '%s' — key='%s'"),
+			*TagPrefix,
+			*Setter->GroupTag.GetTagName().ToString(),
+			*UtilKey.ToString());
     }
 
     // ---- Activation Group Exits: source nodes — subscribe to the group tag, add to entry tags for graph-start activation ----
@@ -689,8 +694,9 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 
         UActivationGroupListenerNode* Inst = NewObject<UActivationGroupListenerNode>(RootGraph);
     	Inst->GroupTag = Getter->GroupTag;
+    	Inst->AuthoredNodeGuid = Getter->QuestGuid;
 
-        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
+        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s__%s"), *Node->NodeGuid.ToString(), *TagPrefix));
         UtilityNodeKeyMap.Add(Node, UtilKey);
         AllCompiledNodes.Add(UtilKey, Inst);
         AllCompiledEditorNodes.Add(UtilKey, Node);
@@ -701,13 +707,14 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
     	// wrapper-Listener loop bugs by re-firing ActivateInternal each wrapper iteration; the signal path
     	// handles activation cleanly without that registration.
 
-    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation listener '%s'"),
+    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation listener '%s' — key='%s'"),
 			*TagPrefix,
-			*Getter->GroupTag.GetTagName().ToString());
+			*Getter->GroupTag.GetTagName().ToString(),
+			*UtilKey.ToString());
     }
 }
 
-void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes)
+void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_CompileUtilityNodes);
 
@@ -723,22 +730,24 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, TArray<UQuest
     		USetBlockedNode* Inst = NewObject<USetBlockedNode>(RootGraph);
     		Inst->TargetQuestTags = BlockNode->TargetQuestTags;
     		Inst->bAlsoDeactivateTargets = BlockNode->bAlsoDeactivateTargets;
-            Instance = Inst;
-        }
-        else if (UQuestlineNode_ClearBlocked* ClearBlockNode = Cast<UQuestlineNode_ClearBlocked>(UtilEdNode))
-        {
-            UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
-            Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
-            Instance = Inst;
-        }
+    		Inst->AuthoredNodeGuid = BlockNode->QuestGuid;
+    		Instance = Inst;
+    	}
+    	else if (UQuestlineNode_ClearBlocked* ClearBlockNode = Cast<UQuestlineNode_ClearBlocked>(UtilEdNode))
+    	{
+    		UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
+    		Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
+    		Inst->AuthoredNodeGuid = ClearBlockNode->QuestGuid;
+    		Instance = Inst;
+    	}
 
-        if (!Instance) continue;
+    	if (!Instance) continue;
 
-        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s"), *Node->NodeGuid.ToString()));
-        OutUtilityEdNodes.Add(UtilEdNode);
-        UtilityNodeKeyMap.Add(Node, UtilKey);
-        AllCompiledNodes.Add(UtilKey, Instance);
-        AllCompiledEditorNodes.Add(UtilKey, Node);
+    	const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s__%s"), *Node->NodeGuid.ToString(), *TagPrefix));
+    	OutUtilityEdNodes.Add(UtilEdNode);
+    	UtilityNodeKeyMap.Add(Node, UtilKey);
+    	AllCompiledNodes.Add(UtilKey, Instance);
+    	AllCompiledEditorNodes.Add(UtilKey, Node);
     }
 }
 

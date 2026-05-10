@@ -213,6 +213,15 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FGuid QuestContentGuid;
+    
+    /**
+     * Authored node identity — equals the editor node's QuestGuid before any placement-chain combination. Multi-tag-stable:
+     * inlined and standalone instances of the same authored node share this value, whereas QuestContentGuid combines the
+     * outer placement chain and differs per compile context. Used as the AuthoredNodeGuid component of the cascade event
+     * ID that gates redundant wrapper-completion records under multi-tag fanout (see FOriginatingEventID, F.3 Chunk B).
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    FGuid AuthoredNodeGuid;
 
     /**
      * True for runtime instances that originate from a UQuestlineNode_LinkedQuestline editor placement (inline Quest
@@ -356,6 +365,7 @@ private:
     
 public:
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
+    FORCEINLINE FGuid GetAuthoredNodeGuid() const { return AuthoredNodeGuid; }
     FORCEINLINE bool IsLinkedQuestlinePlacement() const { return bIsLinkedQuestlinePlacement; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE const TArray<FGameplayTag>& GetAssetScopedAliasTags() const { return AssetScopedAliasTags; }

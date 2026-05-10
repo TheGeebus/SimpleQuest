@@ -187,6 +187,29 @@ void UQuestlineNodeBase::PostEditUndo()
 	}
 }
 
+void UQuestlineNodeBase::PostPlacedNewNode()
+{
+	Super::PostPlacedNewNode();
+	QuestGuid = FGuid::NewGuid();
+}
+
+void UQuestlineNodeBase::PostDuplicate(bool bDuplicateForPIE)
+{
+	Super::PostDuplicate(bDuplicateForPIE);
+	// StaticDuplicateObject path. Defense-in-depth alongside PostPasteNode (which handles the user-facing
+	// Ctrl-D / copy-paste route). Both regenerate to ensure a duplicated node never inherits its source's GUID.
+	QuestGuid = FGuid::NewGuid();
+}
+
+void UQuestlineNodeBase::PostPasteNode()
+{
+	Super::PostPasteNode();
+	// THE user-facing duplicate path. SGraphEditor's Ctrl-D and copy-paste both go through ExportText/ImportText
+	// which instantiates via NewObject and calls PostPasteNode (not PostDuplicate). Without this override, pasted
+	// nodes retain the source's QuestGuid, which the compiler rejects as duplicate identity.
+	QuestGuid = FGuid::NewGuid();
+}
+
 void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)
 {
     if (!FromPin) return;

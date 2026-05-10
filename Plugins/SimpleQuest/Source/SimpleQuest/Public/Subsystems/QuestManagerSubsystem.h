@@ -3,9 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/PrerequisiteExpression.h"
-#include "Subsystems/GameInstanceSubsystem.h"
+#include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
@@ -128,7 +129,11 @@ protected:
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
 	
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
-	virtual void ChainToNextNodes(UQuestNodeBase* CompletedNode, FGameplayTag OutcomeTag, FName PathIdentity);
+	virtual void ChainToNextNodes(
+		UQuestNodeBase* CompletedNode,
+		FGameplayTag OutcomeTag,
+		FName PathIdentity,
+		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
 
 	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;
 
@@ -313,8 +318,12 @@ private:
 	 * Keeping both call sites symmetric ensures wrapper outcome wires fire regardless of which
 	 * inner mechanism reached the boundary — Step completion vs utility forward (Set Blocked,
 	 * Clear Blocked, Activation Group). Falls back to direct SetQuestResolved + publish if the
-	 * wrapper instance isn't loaded for some reason. */
-	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC);
+	 * wrapper instance isn't loaded for some reason.
+	 *
+	 * OriginatingEventID is inherited from the cascade and threaded through the recursive
+	 * ChainToNextNodes call.
+	 */
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
 
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

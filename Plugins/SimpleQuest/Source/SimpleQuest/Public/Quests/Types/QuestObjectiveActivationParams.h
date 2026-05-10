@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "StructUtils/InstancedStruct.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestActivationProvenance.h"
 #include "QuestObjectiveActivationParams.generated.h"
 
@@ -64,7 +65,18 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationParams
 	 */
 	UPROPERTY(BlueprintReadWrite)
 	TArray<FGameplayTag> OriginChain;
-
+	
+	/**
+	 * Cascade event ID — multi-tag-stable identity of the gameplay event that originated this cascade. Minted by
+	 * UQuestManagerSubsystem::SetQuestResolved at the originating Step's resolution; threaded through ChainToNextNodes
+	 * onto every PendingActivationParams the cascade touches. Read by FireWrapperBoundaryCompletion's event-keyed
+	 * deduplication gate — a wrapper that has already resolved with this exact ID in its current Live phase
+	 * skips redundant resolutions from the multi-tag fanout. Default-constructed (invalid) for activations that
+	 * don't originate from a Step resolution (top-level entries, direct external API requests).
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	FOriginatingEventID OriginatingEventID;
+	
 	/**
 	 * Type-erased extension point for game-specific activation-time data. Populated by procedural generators,
 	 * dialogue systems, save/load rehydration, etc. Read via CustomData.Get<FYourType>() in subclass overrides.

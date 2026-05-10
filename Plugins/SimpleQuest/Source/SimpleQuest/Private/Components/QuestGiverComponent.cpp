@@ -149,33 +149,36 @@ void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, con
 {
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : '%s' is now accept-ready"), *Channel.ToString());
 
-	const FGameplayTag QuestTag = Event.GetQuestTag();
-	EnabledQuestTags.AddTag(QuestTag);
-	if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(QuestTag);
+	// Track what we're subscribed on (Channel — the tag this giver registered for via QuestTagsToGive),
+	// NOT the publisher's canonical (Event.GetQuestTag()). Under multi-tag publish, a single subscription
+	// receives multiple deliveries with different Event.QuestTag values (one per perspective canonical of
+	// the same logical quest); using Event.QuestTag would pollute the container with per-perspective
+	// canonicals the designer never authored. Channel is the giver's authored identity for this quest;
+	// GiveQuestByTag(Channel) alias-walks naturally to all placements.
+	EnabledQuestTags.AddTag(Channel);
+	if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(Channel);
 }
 
 void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
-	const FGameplayTag QuestTag = Event.GetQuestTag();
-	ActivatedQuestTags.RemoveTag(QuestTag);
-	EnabledQuestTags.RemoveTag(QuestTag);
+	ActivatedQuestTags.RemoveTag(Channel);
+	EnabledQuestTags.RemoveTag(Channel);
 
 	// FQuestStartedEvent is the symmetric "Yes" partner to FQuestGiveBlockedEvent — clear any pending blocker
 	// subscription for this quest tag. Either response (Blocked or Started) closes the give-attempt cycle.
-	UnsubscribePendingGiveBlocked(QuestTag);
+	UnsubscribePendingGiveBlocked(Channel);
 
-	if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(QuestTag);
+	if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(Channel);
 }
 
 void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
-	const FGameplayTag QuestTag = Event.GetQuestTag();
-	ActivatedQuestTags.RemoveTag(QuestTag);
-	EnabledQuestTags.RemoveTag(QuestTag);
+	ActivatedQuestTags.RemoveTag(Channel);
+	EnabledQuestTags.RemoveTag(Channel);
 
-	UnsubscribePendingGiveBlocked(QuestTag);  // quest interruption ends the attempt cycle
+	UnsubscribePendingGiveBlocked(Channel);  // quest interruption ends the attempt cycle
 
-	if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(QuestTag);
+	if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(Channel);
 }
 
 void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const
@@ -261,12 +264,12 @@ bool UQuestGiverComponent::IsQuestEnabled(FGameplayTag QuestTag)
 
 void UQuestGiverComponent::OnQuestActivatedEventReceived(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
-	const FGameplayTag QuestTag = Event.GetQuestTag();
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestActivatedEventReceived : '%s' (prereqs satisfied=%d)"),
-		*QuestTag.ToString(), Event.PrereqStatus.bSatisfied ? 1 : 0);
+		*Channel.ToString(),
+		Event.PrereqStatus.bSatisfied ? 1 : 0);
 
-	ActivatedQuestTags.AddTag(QuestTag);
-	if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(QuestTag, Event.PrereqStatus);
+	ActivatedQuestTags.AddTag(Channel);
+	if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(Channel, Event.PrereqStatus);
 }
 
 void UQuestGiverComponent::OnQuestDisabledEventReceived(FGameplayTag Channel, const FQuestDisabledEvent& Event)

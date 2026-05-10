@@ -12,7 +12,6 @@
 #include "QuestGiverComponent.generated.h"
 
 
-class UQuestStateSubsystem;
 struct FQuestGiverRegisteredEvent;
 struct FQuestDeactivatedEvent;
 struct FQuestEnabledEvent;
@@ -20,7 +19,9 @@ struct FQuestActivatedEvent;
 struct FQuestDisabledEvent;
 struct FQuestGiveBlockedEvent;
 struct FQuestActivationBlocker;
+
 class UQuestManagerSubsystem;
+class UQuestStateSubsystem;
 
 
 /**

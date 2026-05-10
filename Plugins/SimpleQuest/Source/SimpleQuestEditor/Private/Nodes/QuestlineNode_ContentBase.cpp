@@ -31,7 +31,7 @@ void UQuestlineNode_ContentBase::PostPlacedNewNode()
 
 	// Seed with subclass's default base name; helper sweeps for uniqueness (suffixing "_N" if needed).
 	NodeLabel = FText::FromString(GetDefaultNodeBaseName());
-	EnsureFreshIdentityAndUniqueLabel();
+	EnsureUniqueLabel();
 }
 
 void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
@@ -39,7 +39,7 @@ void UQuestlineNode_ContentBase::PostDuplicate(bool bDuplicateForPIE)
 	Super::PostDuplicate(bDuplicateForPIE);
 	// StaticDuplicateObject path — defense-in-depth. Not the user Ctrl-D / paste path (that's PostPasteNode)
 	// but anything that duplicates programmatically lands here.
-	EnsureFreshIdentityAndUniqueLabel();
+	EnsureUniqueLabel();
 }
 
 void UQuestlineNode_ContentBase::PostPasteNode()
@@ -48,13 +48,16 @@ void UQuestlineNode_ContentBase::PostPasteNode()
 	// THE user-facing duplicate path. SGraphEditor's Ctrl-D and copy-paste both go through ExportText/ImportText
 	// which instantiates via NewObject and calls PostPasteNode (not PostDuplicate). Without this override, pasted
 	// nodes retained the source's QuestGuid and NodeLabel, which the compiler rejects as duplicate identity.
-	EnsureFreshIdentityAndUniqueLabel();
+	EnsureUniqueLabel();
 }
 
-void UQuestlineNode_ContentBase::EnsureFreshIdentityAndUniqueLabel()
+void UQuestlineNode_ContentBase::EnsureUniqueLabel()
 {
-	QuestGuid = FGuid::NewGuid();
-
+	// QuestGuid regeneration moved to UQuestlineNodeBase::PostPlacedNewNode / PostDuplicate / PostPasteNode.
+	// Every editor node type now uniformly gets a fresh GUID on placement / duplication / paste. This method
+	// retains the label-uniqueness sweep below — content-specific behavior that doesn't apply to utility / portal
+	// nodes.
+	
 	const UEdGraph* Graph = GetGraph();
 	if (!Graph) return;
 

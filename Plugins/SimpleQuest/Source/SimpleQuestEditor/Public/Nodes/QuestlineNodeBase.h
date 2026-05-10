@@ -58,7 +58,17 @@ public:
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 	virtual void PostEditUndo() override;
 
-
+	/**
+	 * Lifecycle overrides that regenerate QuestGuid on placement / duplication / paste. Promoted from
+	 * UQuestlineNode_ContentBase so every editor node type — content nodes, utility nodes, portal entry/exit
+	 * nodes — gets a uniform stable identity. Subclasses that override these MUST call Super first so the
+	 * fresh GUID lands before any subclass-specific work runs (e.g., ContentBase's label-uniqueness sweep
+	 * reads QuestGuid for collision checks against siblings' guids during the same paste batch).
+	 */
+	virtual void PostPlacedNewNode() override;
+	virtual void PostDuplicate(bool bDuplicateForPIE) override;
+	virtual void PostPasteNode() override;
+	
 	/**
 	 * Auto-wire a newly-placed node to the pin the user dragged from. Walks candidate pins on this node in priority order matching
 	 * natural semantic pairing — outcome output prefers Activate input, prereq output prefers Prerequisites, deactivated output
@@ -78,6 +88,16 @@ public:
 
 	/** Breaks all links on orphaned pins and removes them from the node. */
 	void RemoveStalePins();
+	
+	/**
+	 * Stable per-placement identity for this editor node. Generated fresh on PostPlacedNewNode / PostDuplicate /
+	 * PostPasteNode (via the overrides above), regenerated on Ctrl-D / paste so every placement carries a unique
+	 * GUID. Promoted from UQuestlineNode_ContentBase to UQuestlineNodeBase so that all editor node types (content,
+	 * utility, portal) share the same stable identity surface — required by F.3's cascade event ID, which keys
+	 * wrapper completion dedup against the originating node's GUID. Never hand-edited.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	FGuid QuestGuid;
 	
 protected:
 	/**

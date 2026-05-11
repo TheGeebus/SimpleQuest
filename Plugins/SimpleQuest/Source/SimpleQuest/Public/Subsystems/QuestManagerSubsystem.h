@@ -121,6 +121,35 @@ protected:
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
 	
+	/**
+	 * Parallel index: AuthoredNodeGuid → the FName key used in LoadedNodeInstances. Enforces a "one instance per
+	 * authored node" invariant at registration time. The same authored node can be compiled into multiple questline
+	 * assets (standalone compile of an asset + inlined compile when the asset is a LinkedQuestline target inside
+	 * another asset). Both compiles produce separate UQuestNodeBase instances under different FName keys (different
+	 * ContextualTag perspectives). Without dedup, both instances register, both have their delegates bound, and
+	 * every event fires twice — manifests as watcher duplication, giver missed-add on loop, and other multi-tag
+	 * delivery anomalies that look like broadcast bugs but root at duplicate registration.
+	 *
+	 * Excluded from this dedup: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
+	 * different cascade behavior per perspective) and prereq rule monitors (already deduped via shared FName key
+	 * in LoadedNodeInstances; see the comment on the FName-key dedup loop in RegisterQuestlineGraph).
+	 */
+	TMap<FGuid, FName> LoadedInstancesByAuthoredNodeGuid;
+
+	/**
+	 * Folds a deduped (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
+	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
+	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance
+	 * carries every perspective the deduped instance would have had — events publish on all forms, alias-walks
+	 * find the canonical from any form, state subsystem queries resolve through cross-asset perspectives.
+	 *
+	 * Also populates LoadedNodeInstances under each merged alias key (same pointer, additional keys) so every
+	 * existing direct-lookup site (Find / FindRef / Contains) resolves transparently from any perspective. No
+	 * per-call-site alias-walk needed — iteration sites don't exist (verified) so duplicate visits aren't a
+	 * concern.
+	 */
+	void MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming);
+	
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(
 		UQuestNodeBase* CompletedNode,

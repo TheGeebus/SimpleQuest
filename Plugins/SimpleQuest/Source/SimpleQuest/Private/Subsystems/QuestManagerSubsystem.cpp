@@ -186,6 +186,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 
     int32 NewlyRegistered = 0;
     int32 SkippedAlreadyRegistered = 0;
+    int32 SkippedDuplicateAuthoredGuid = 0;
     for (const auto& Pair : Graph->GetCompiledNodes())
     {
         if (UQuestNodeBase* Instance = Pair.Value)
@@ -202,16 +203,60 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                 continue;
             }
 
+            // Per-AuthoredNodeGuid singleton enforcement + perspective merge. The same authored node compiled
+            // into multiple assets (standalone compile + inlined-by-LinkedQuestline compile) produces separate
+            // UQuestNodeBase instances under different FName keys (different ContextualTag perspectives).
+            // Without dedup, both bind their delegates and every event fires twice. With dedup-and-skip alone,
+            // the second instance's perspectives are lost — subscribers / cascades bound to those forms have
+            // no runtime. With dedup-and-merge, the deduped instance's perspectives are folded onto the
+            // existing canonical's alias set, and LoadedNodeInstances gains entries under each merged alias
+            // pointing at the canonical so lookups by any perspective resolve transparently. Excluded:
+            // Util_ keys (per-context utility instances are intentional) and instances whose AuthoredNodeGuid
+            // is invalid (synthetic or legacy nodes without a stable identity).
+            const bool bIsUtilityKey = Pair.Key.ToString().StartsWith(TEXT("Util_"));
+            const FGuid InstanceAuthoredGuid = Instance->GetAuthoredNodeGuid();
+            if (!bIsUtilityKey && InstanceAuthoredGuid.IsValid())
+            {
+                if (const FName* ExistingKey = LoadedInstancesByAuthoredNodeGuid.Find(InstanceAuthoredGuid))
+                {
+                    if (UQuestNodeBase* Existing = LoadedNodeInstances.FindRef(*ExistingKey))
+                    {
+                        UE_LOG(LogSimpleQuest, Verbose,
+                            TEXT("RegisterQuestlineGraph: '%s' — merging perspectives from '%s' into '%s' (AuthoredNodeGuid %s)"),
+                            *Graph->GetName(), *Pair.Key.ToString(), *ExistingKey->ToString(),
+                            *InstanceAuthoredGuid.ToString(EGuidFormats::Short));
+                        MergePerspectiveTagsInto(Existing, *ExistingKey, Instance);
+                    }
+                    ++SkippedDuplicateAuthoredGuid;
+                    continue;
+                }
+            }
+
             // Compiled node instances live on the UQuestlineGraph asset and persist across PIE sessions. Wipe any
             // state the prior session left on them — subscription handles to a dead SignalSubsystem, deferred
             // contextual tags, activation scratch, completion snapshots — so this session starts clean.
             Instance->ResetTransientState();
 
-            if (!Pair.Key.ToString().StartsWith(TEXT("Util_")))
+            if (!bIsUtilityKey)
             {
                 Instance->ResolveContextualTag(Pair.Key);
             }
             LoadedNodeInstances.Add(Pair.Key, Instance);
+            if (!bIsUtilityKey && InstanceAuthoredGuid.IsValid())
+            {
+                LoadedInstancesByAuthoredNodeGuid.Add(InstanceAuthoredGuid, Pair.Key);
+            }
+            // Also populate LoadedNodeInstances under each alias FName so any-perspective lookups resolve to
+            // this canonical instance. The same Instance pointer lives under its ContextualTag key (Pair.Key)
+            // AND under each AssetScopedAliasTag's name. Direct-lookup sites (ActivateNodeByTag,
+            // FireWrapperBoundaryCompletion, etc.) work transparently with this — no alias-walk helper needed.
+            for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+            {
+                if (AliasTag.IsValid() && !LoadedNodeInstances.Contains(AliasTag.GetTagName()))
+                {
+                    LoadedNodeInstances.Add(AliasTag.GetTagName(), Instance);
+                }
+            }
             Instance->RegisterWithGameInstance(GetGameInstance());
             Instance->OnRegisteredWithManager();
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
@@ -256,10 +301,72 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             ++NewlyRegistered;
         }
     }
-    UE_LOG(LogSimpleQuest, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered"),
+    UE_LOG(LogSimpleQuest, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName), %d duplicate authored-guid"),
         *Graph->GetName(),
         NewlyRegistered,
-        SkippedAlreadyRegistered);
+        SkippedAlreadyRegistered,
+        SkippedDuplicateAuthoredGuid);
+}
+
+void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
+{
+    if (!Existing || !Incoming) return;
+
+    // Collect every FName the merged instance should carry as an alias: the existing instance's current aliases,
+    // plus the incoming instance's ContextualTag, plus the incoming instance's own aliases. Exclude the existing
+    // canonical name itself — that stays the canonical, not an alias of itself.
+    TSet<FName> MergedAliasSet;
+    for (const FGameplayTag& T : Existing->GetAssetScopedAliasTags())
+    {
+        if (T.IsValid()) MergedAliasSet.Add(T.GetTagName());
+    }
+    const FGameplayTag IncomingContextual = Incoming->GetContextualTag();
+    if (IncomingContextual.IsValid() && IncomingContextual.GetTagName() != ExistingCanonicalName)
+    {
+        MergedAliasSet.Add(IncomingContextual.GetTagName());
+    }
+    for (const FGameplayTag& T : Incoming->GetAssetScopedAliasTags())
+    {
+        if (T.IsValid() && T.GetTagName() != ExistingCanonicalName)
+        {
+            MergedAliasSet.Add(T.GetTagName());
+        }
+    }
+
+    // Rebuild the existing instance's AssetScopedAliasTags from the merged set. ResolveAssetScopedAliasTags
+    // resets the array each call and re-resolves FName → FGameplayTag, so this is a clean replace with the
+    // union semantics we want.
+    Existing->ResolveAssetScopedAliasTags(MergedAliasSet.Array());
+
+    // Populate LoadedNodeInstances under every merged alias key so any-perspective direct lookups resolve to
+    // the existing canonical instance.
+    for (const FName& AliasName : MergedAliasSet)
+    {
+        if (!LoadedNodeInstances.Contains(AliasName))
+        {
+            LoadedNodeInstances.Add(AliasName, Existing);
+        }
+    }
+
+    // Register the new aliases with the state subsystem so cross-asset query paths (HasResolvedWith,
+    // HasEnteredWith, alias-walk in catch-up) resolve through the merged perspectives. Existing aliases were
+    // already registered when the existing instance was first added; re-registering them is harmless (TMap
+    // overwrite with the same value).
+    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    {
+        const FGameplayTag ExistingContextual = Existing->GetContextualTag();
+        if (ExistingContextual.IsValid())
+        {
+            for (const FName& AliasName : MergedAliasSet)
+            {
+                const FGameplayTag AliasTag = UGameplayTagsManager::Get().RequestGameplayTag(AliasName, false);
+                if (AliasTag.IsValid())
+                {
+                    StateSubsystem->RegisterAlias(AliasTag, ExistingContextual);
+                }
+            }
+        }
+    }
 }
 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
@@ -624,11 +731,26 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // policy logic and EQuestActivationGuardDecision for the case enumeration.
 
     // Multi-tag aware giver-presence check. A giver actor authored against a step's standalone-perspective tag (the
-    // natural authoring form) registers under that tag in RegisteredGiverQuestTags. When the same step is reached via
-    // a LinkedQuestline placement, its NodeTag is the contextualized form (parent-prefixed) and its AssetScopedAlias-
-    // Tags carry the standalone form. Walk both so the giver gate fires on inlined steps the same way it fires on
-    // top-level ones — without this, every inlined step bypasses its giver gate and activates immediately.
+    // natural authoring form) registers under that tag in RegisteredGiverQuestTags. The same step can be reached
+    // via three different tag forms at activation time:
+    //   1. NodeTag — the FName key the caller used to look up the instance. May be the instance's ContextualTag
+    //      OR an alias key (since LoadedNodeInstances is populated under both the canonical key and each alias).
+    //   2. Instance->GetContextualTag() — the canonical form of the instance itself, which may differ from
+    //      NodeTag when the lookup resolved via an alias key.
+    //   3. Instance->GetAssetScopedAliasTags() — every other perspective the instance carries.
+    // The giver could have been authored against any of these, depending on which asset's content the designer
+    // was working in. All three need to be checked or inlined-step givers silently miss the gate. Pre-AuthoredGuid-
+    // deduplicate this loop got away with checking just (1) + (3) because (1) matched the instance's ContextualTag in
+    // practice; post-deduplication the canonical instance may sit under an alias-key lookup and (1) ≠ ContextualTag.
     bool bHasRegisteredGiver = NodeTag.IsValid() && RegisteredGiverQuestTags.Contains(NodeTag);
+    if (!bHasRegisteredGiver)
+    {
+        const FGameplayTag ContextualTag = Instance->GetContextualTag();
+        if (ContextualTag.IsValid() && RegisteredGiverQuestTags.Contains(ContextualTag))
+        {
+            bHasRegisteredGiver = true;
+        }
+    }
     if (!bHasRegisteredGiver)
     {
         for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
@@ -679,12 +801,23 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         return;
 
     case EQuestActivationGuardDecision::GiverGateFire:
+    {
         // Giver gate — sets PendingGiver state, publishes FQuestActivatedEvent (always) plus FQuestEnabledEvent if
         // prereqs are already satisfied, and registers an EnablementWatch when prereqs are non-Always so the gate can
         // re-publish Enabled when leaves satisfy mid-PendingGiver. Block is intentionally NOT pre-checked — Block-on-
         // giver-gated quests still publishes the activation events so the giver stays visible/interactive.
+        //
+        // State writes and watch registrations are keyed by the instance's CANONICAL ContextualTag, not the cascade's
+        // NodeTag (which may be an alias-key form after the AuthoredGuid-dedup merge in RegisterQuestlineGraph).
+        // SetQuestPendingGiver / UpdateQuestPrereqStatus / RegisterEnablementWatch must all align with the canonical
+        // form the state subsystem's queries alias-walk to — writing under an alias form leaves the canonical fact
+        // missing, and QueryQuestActivationBlockers returns NotPendingGiver despite the gate having fired. Mirrors
+        // the convention SetQuestLive / SetQuestResolved already follow at their respective call sites.
+        const FGameplayTag CanonicalTag = Instance->GetContextualTag().IsValid() ? Instance->GetContextualTag() : NodeTag;
+        const FName CanonicalTagName = CanonicalTag.GetTagName();
+
         Instance->bWasGiverGated = true;
-        SetQuestPendingGiver(NodeTag);
+        SetQuestPendingGiver(CanonicalTag);
 
         if (QuestSignalSubsystem)
         {
@@ -696,26 +829,28 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
             // HandleGiveQuestEvent acceptance gate) will see the correct PrereqUnmet status.
             if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
             {
-                StateSubsystem->UpdateQuestPrereqStatus(NodeTag, PrereqStatus);
+                StateSubsystem->UpdateQuestPrereqStatus(CanonicalTag, PrereqStatus);
             }
 
-            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivatedEvent(NodeTag, Context, PrereqStatus));
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivatedEvent(CanonicalTag, Context, PrereqStatus));
 
             if (PrereqStatus.bSatisfied)
             {
-                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestEnabledEvent(NodeTag, Context));
+                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestEnabledEvent(CanonicalTag, Context));
             }
 
             if (!Instance->PrerequisiteExpression.IsAlways())
             {
-                RegisterEnablementWatch(NodeTag, NodeTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
+                RegisterEnablementWatch(CanonicalTag, CanonicalTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
             }
 
-            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' gated by giver — Activated published, prereqs %s"),
+            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' (canonical '%s') gated by giver — Activated published, prereqs %s"),
                 *NodeTagName.ToString(),
+                *CanonicalTagName.ToString(),
                 PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
         }
         return;
+    }
 
     case EQuestActivationGuardDecision::ContainerReentry:
         // Container reentry — containers don't directly write the Live fact; their Live state derives from inner Step

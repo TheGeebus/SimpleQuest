@@ -123,15 +123,21 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CurrentInnerContainerTag = NAME_None;
 	CompiledListenerCount = 0;
 
-    InGraph->Modify();
-    InGraph->CompiledNodes.Empty(); 
-    InGraph->EntryNodeTags.Empty();
-    InGraph->CompiledQuestTags.Empty();
+	InGraph->Modify();
+	InGraph->CompiledNodes.Empty(); 
+	InGraph->EntryNodeTags.Empty();
+	InGraph->CompiledQuestTags.Empty();
 	InGraph->CompiledNodeAliases.Empty();
-    AllCompiledNodes.Empty();
-    UtilityNodeKeyMap.Empty();
+	AllCompiledNodes.Empty();
+	UtilityNodeKeyMap.Empty();
 	CompiledAliasFNamesByContextualTag.Empty();
-    RootGraph = InGraph;
+	RootGraph = InGraph;
+
+	// Compose the root asset's identity tag (SimpleQuest.Questline.<AssetSegment>) so any Exit visited at
+	// the root asset's root scope can attribute its graph-resolution publish to this asset. Save/restore
+	// around LinkedQuestline recursion (below) so inner asset Exits attribute to the linked asset instead.
+	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(
+		FQuestTagComposer::MakeIdentityTag(TagPrefix, {}), false);
 
     // Refresh outcome pins on all step nodes so that changes to outcomes on an objective class are reflected without
     // the designer having to touch ObjectiveClass again.
@@ -504,7 +510,17 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 				// registrations record this LinkedQuestline placement as their immediate container.
 				const FName PreviousContainer = CurrentInnerContainerTag;
 				CurrentInnerContainerTag = TagName;
+
+				// Save/restore CurrentAssetIdentityTag around the linked inner CompileGraph so any Exits
+				// inside the linked asset attribute their graph-resolution publish to the linked asset's
+				// identity tag (not the outer asset's). Symmetric save/restore with CurrentInnerContainerTag.
+				const FGameplayTag PreviousAssetIdentity = CurrentAssetIdentityTag;
+				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(
+					FQuestTagComposer::MakeIdentityTag(LinkedAssetPrefix, {}), false);
+
 				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
+
+				CurrentAssetIdentityTag = PreviousAssetIdentity;
 				CurrentInnerContainerTag = PreviousContainer;
 
 				QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
@@ -814,8 +830,9 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
 
         	TArray<FName> ResolvedTags;
         	TArray<FQuestBoundaryCompletion> ResolvedBoundaryCompletions;
+        	TArray<FGameplayTag> ResolvedExitedGraphTags;
         	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>> VisitedExitsByPath;
-        	ResolvePinToTags(Pin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ResolvedTags, ResolvedBoundaryCompletions, &VisitedExitsByPath);
+        	ResolvePinToTags(Pin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ResolvedTags, ResolvedBoundaryCompletions, &VisitedExitsByPath, &ResolvedExitedGraphTags);
 
         	// Duplicate-path-routing check: one outcome pin reaching multiple distinct Outcome terminals that share
         	// a path identity is almost always an authoring mistake. The compiler accepts the union of their destinations
@@ -829,9 +846,11 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
         		}
         	}
         	
-        	// Allow boundary completions through even when no Activate destinations resolved. Common when the
-        	// LinkedQuestline's outer-side outcome pin only feeds a prereq expression (no QuestActivation wire).
-        	if (ResolvedTags.IsEmpty() && ResolvedBoundaryCompletions.IsEmpty()) continue;
+        	// Allow boundary completions and graph-exit attributions through even when no Activate destinations
+        	// resolved. Common when the LinkedQuestline's outer-side outcome pin only feeds a prereq expression
+        	// (no QuestActivation wire), and for the outermost root-asset Exit case where the chain has no
+        	// downstream destinations at all but still needs the asset-resolution publish to fire.
+        	if (ResolvedTags.IsEmpty() && ResolvedBoundaryCompletions.IsEmpty() && ResolvedExitedGraphTags.IsEmpty()) continue;
 
         	if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
         	{
@@ -847,6 +866,12 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
         		for (const FQuestBoundaryCompletion& BC : ResolvedBoundaryCompletions)
         		{
         			List.BoundaryCompletions.AddUnique(BC);
+        		}
+        		// Parallel append for graph-resolution attributions — each entry causes ChainToNextNodes to
+        		// publish a resolution on that asset's identity tag, inner-first before BoundaryCompletions fire.
+        		for (const FGameplayTag& GraphTag : ResolvedExitedGraphTags)
+        		{
+        			List.ExitedGraphTags.AddUnique(GraphTag);
         		}
         		// Record per-destination direct reach for (source, specific-path).
         		const FSourcePathKey Key{ SourceTag, Pin->PinName };
@@ -865,6 +890,11 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
         		for (const FQuestBoundaryCompletion& BC : ResolvedBoundaryCompletions)
         		{
         			Instance->BoundaryCompletionsOnAnyOutcome.AddUnique(BC);
+        		}
+        		// Parallel append for Any-Outcome graph-resolution attributions.
+        		for (const FGameplayTag& GraphTag : ResolvedExitedGraphTags)
+        		{
+        			Instance->ExitedGraphTagsOnAnyOutcome.AddUnique(GraphTag);
         		}
         		// Record per-destination direct reach for (source, any-path). NAME_None encodes "any path from
         		// this source" — collision test absorbs specific-path keys from the same source.
@@ -1143,9 +1173,16 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
 // ResolvePinToTags - the node traversal engine
 // -------------------------------------------------------------------------------------------------
 
-void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FName,
-	                                               TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags, TArray
-                                               <FQuestBoundaryCompletion>& OutBoundaryCompletions, TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath)
+void FQuestlineGraphCompiler::ResolvePinToTags(
+	UEdGraphPin* FromPin,
+	const FString& TagPrefix,
+	const TMap<FName,
+	TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+	TArray<FString>& VisitedAssetPaths,
+	TArray<FName>& OutTags,
+	TArray <FQuestBoundaryCompletion>& OutBoundaryCompletions,
+	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath,
+	TArray<FGameplayTag>* OutExitedGraphTags)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
@@ -1156,7 +1193,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         {
             if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
             {
-                ResolvePinToTags(KnotOut, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, OutTags, OutBoundaryCompletions, OutVisitedExitsByPath);
+                ResolvePinToTags(KnotOut, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, OutTags, OutBoundaryCompletions, OutVisitedExitsByPath, OutExitedGraphTags);
             }
         }
 
@@ -1176,6 +1213,21 @@ void FQuestlineGraphCompiler::ResolvePinToTags(UEdGraphPin* FromPin, const FStri
         	if (!ExitNode->OutcomeTag.IsValid())
         	{
         		AddWarning(FString::Printf(TEXT("[%s] An exit node has no OutcomeTag set."), *TagPrefix), ExitNode);
+        	}
+
+        	// Asset-root-scope Exit detection: when the Exit's owning UEdGraph is the current asset's own
+        	// QuestlineEdGraph (not a Quest container's inner graph), this is a terminus for the current
+        	// questline asset. Record the asset's identity tag so ChainToNextNodes publishes a graph-scope
+        	// resolution at runtime. Quest container Exits are skipped — the container's own resolution
+        	// publish (FQuestEndedEvent on the container node) already covers that case.
+        	if (OutExitedGraphTags && CurrentAssetIdentityTag.IsValid())
+        	{
+        		const UEdGraph* OwningGraph = ExitNode->GetGraph();
+        		const UQuestlineGraph* OwningAsset = OwningGraph ? Cast<UQuestlineGraph>(OwningGraph->GetOuter()) : nullptr;
+        		if (OwningAsset && OwningGraph == OwningAsset->QuestlineEdGraph)
+        		{
+        			OutExitedGraphTags->AddUnique(CurrentAssetIdentityTag);
+        		}
         	}
 
         	// Accumulate the IMMEDIATE wrapper's boundary completion only — bucket[0] is the Exit's own

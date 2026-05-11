@@ -81,6 +81,7 @@ protected:
 	 * @param OutBoundaryCompletions		Out-accumulator for boundary completions picked up as the walk crosses Exits. Caller appends
 	 *										these to the corresponding routing table so ChainToNextNodes can fire them at runtime.
 	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
+	 * @param OutExitedGraphTags
 	 */
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
@@ -89,7 +90,8 @@ protected:
 		TArray<FString>& VisitedAssetPaths,
 		TArray<FName>& OutTags,
 		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
-		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr);
+		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
+		TArray<FGameplayTag>* OutExitedGraphTags = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -132,6 +134,15 @@ private:
 	 * inner registration sees its direct container. Cleared at Compile() start.
 	 */
 	FName CurrentInnerContainerTag = NAME_None;
+	
+	/**
+	 * The questline asset whose root scope is being compiled at the current recursion depth. Set at the top of
+	 * Compile() to the root asset's identity tag, and save/restore-guarded around each LinkedQuestline inner
+	 * CompileGraph recursion to the linked asset's identity. Unchanged across Quest container inner-graph
+	 * recursion (containers don't change the asset). Read by the Exit-visit branch of ResolvePinToTags to
+	 * attribute root-scope Exit reaches to the right asset for graph-resolution publishing.
+	 */
+	FGameplayTag CurrentAssetIdentityTag;
 
 	/**
 	 * Count of UActivationGroupListenerNode instances created during this Compile() — accumulates across the

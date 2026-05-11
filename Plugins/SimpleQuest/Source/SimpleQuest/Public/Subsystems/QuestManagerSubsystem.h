@@ -318,6 +318,16 @@ private:
 	 */
 	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
 
+	/**
+	 * Publishes a resolution event on each questline asset's identity tag in GraphTags via UQuestStateSubsystem::
+	 * RecordResolution. Called from ChainToNextNodes before BoundaryCompletions fire, so the inner asset
+	 * publishes its resolution before the wrapper-boundary cascade activates outer-asset destinations
+	 * (cascade-direction event-order invariant: inner-first on outward flow). Symmetric with how an inner
+	 * Quest container publishes FQuestEndedEvent on its own tag when its inner chain reaches an Exit —
+	 * the asset-level equivalent uses the resolution registry's standard publish path.
+	 */
+	void PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;
+	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
 	void OnEnablementLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);

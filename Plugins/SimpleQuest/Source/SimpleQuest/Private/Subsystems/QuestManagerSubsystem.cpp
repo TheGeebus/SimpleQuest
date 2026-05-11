@@ -882,16 +882,22 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
     };
 
-    // Named-outcome path: fire boundary completions first so wrapper Path facts exist before the destination
-    // node's prereq evaluation runs (otherwise the destination node defers waiting on a fact we're about to
-    // write — defer-then-recover would also work but produces unnecessary one-tick latency).
+    // Named-outcome path: when this path terminates at the OUTERMOST root scope (no wrapper to cascade into),
+    // the inner-most asset-level resolution publishes first (cascade-direction event-order invariant: outward
+    // flow → inner publishes first). When a wrapper IS available, skip the explicit graph-resolution publish
+    // here — the wrapper's resolution downstream publishes on its ContextualTag + AssetScopedAliasTags via
+    // PublishWithAliases, and the wrapper's alias array includes the inner asset's identity tag. So the
+    // wrapper's resolution already publishes on the inner asset's identity. Firing here too would double-publish.
+    // After resolution: boundary completions fire so wrapper Path facts exist before destination prereq
+    // evaluation runs; direct downstream destinations activate last.
     if (const FQuestPathNodeList* PathList = Node->GetNextNodesByPath().Find(ResolvedPath))
     {
+        if (PathList->BoundaryCompletions.IsEmpty())
+        {
+            PublishGraphResolutions(PathList->ExitedGraphTags, OutcomeTag, EQuestResolutionSource::Graph);
+        }
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
-            // OriginatingEventID is inherited from the current cascade — wrapper completion is part of
-            // the same logical event, not a fresh origin. ChainToNextNodes inside FireWrapperBoundaryCompletion
-            // threads it onward to the wrapper's own NextNodes / nested BCs.
             FireWrapperBoundaryCompletion(BC, OriginatingEventID);
         }
         for (const FName& Tag : PathList->NodeTags)
@@ -900,7 +906,11 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         }
     }
 
-    // Any-outcome path: same pattern.
+    // Any-outcome path: same ordering and same dedup rule. Wrapper alias-publish handles the inner-asset case.
+    if (Node->GetBoundaryCompletionsOnAnyOutcome().IsEmpty())
+    {
+        PublishGraphResolutions(Node->GetExitedGraphTagsOnAnyOutcome(), OutcomeTag, EQuestResolutionSource::Graph);
+    }
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
         FireWrapperBoundaryCompletion(BC, OriginatingEventID);
@@ -1853,6 +1863,27 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
             TEXT("FireWrapperBoundaryCompletion: wrapper '%s' instance not loaded — falling back to direct SetQuestResolved + publish"),
             *WrapperTag.ToString());
         SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
+    }
+}
+
+void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag,
+    EQuestResolutionSource Source) const
+{
+    if (GraphTags.IsEmpty()) return;
+
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!StateSubsystem) return;
+
+    const double ResolutionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    for (const FGameplayTag& GraphTag : GraphTags)
+    {
+        if (GraphTag.IsValid())
+        {
+            UE_LOG(LogSimpleQuest, Verbose, TEXT("PublishGraphResolutions: '%s' outcome='%s'"),
+                *GraphTag.ToString(),
+                *OutcomeTag.ToString());
+            StateSubsystem->RecordResolution(GraphTag, OutcomeTag, ResolutionTime, Source);
+        }
     }
 }
 

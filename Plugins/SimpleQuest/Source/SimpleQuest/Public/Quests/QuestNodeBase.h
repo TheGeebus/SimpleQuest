@@ -94,6 +94,17 @@ struct FQuestPathNodeList
      */
     UPROPERTY(VisibleDefaultsOnly)
     TArray<FQuestBoundaryCompletion> BoundaryCompletions;
+
+    /**
+     * Questline asset identity tags whose root-scope Exit this path reaches. Populated by the compiler when
+     * a pin-walk visits an Exit at an asset's root scope. Distinct from BoundaryCompletions: the BC list tells
+     * ChainToNextNodes which wrapper(s) to cascade through; ExitedGraphTags tells it which questline assets
+     * reached their terminus and should publish a resolution event on their identity tag. Inner-first on
+     * outward flow — published before BoundaryCompletions fire. At the outermost root scope only this list
+     * may be populated (BC list empty) — asset resolves with no wrapper to cascade to.
+     */
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FGameplayTag> ExitedGraphTags;
 };
 
 /**
@@ -290,6 +301,13 @@ protected:
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnAnyOutcome;
 
+    /**
+     * Any-Outcome parallel to FQuestPathNodeList::ExitedGraphTags. Same semantic — questline assets whose
+     * root-scope Exit is reached when this node resolves on the Any-Outcome path.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TArray<FGameplayTag> ExitedGraphTagsOnAnyOutcome;
+
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
     
@@ -381,5 +399,6 @@ public:
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
     FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
-    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }    
+    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }
+    FORCEINLINE const TArray<FGameplayTag>& GetExitedGraphTagsOnAnyOutcome() const { return ExitedGraphTagsOnAnyOutcome; }
 };

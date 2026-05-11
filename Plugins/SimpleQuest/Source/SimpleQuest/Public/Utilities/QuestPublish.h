@@ -55,12 +55,6 @@ namespace FQuestPublish
 
         if (Channels.IsEmpty()) return;
 
-        // TEMP DIAGNOSTIC for F.5 investigation — confirm per-node alias count at publish time.
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPublish::OnAllNodeTags: canonical='%s' aliasCount=%d eventType='%s'"),
-            *ContextualTag.ToString(),
-            Node->GetAssetScopedAliasTags().Num(),
-            *EventType::StaticStruct()->GetName());
-
         // Set canonical identity once on the payload — Stack[0] / ContextualTag is the publisher's "what this event IS"
         // signal. Subscribers reading Event.QuestTag for branch logic see this canonical perspective uniformly across
         // every delivery. The bus's per-delivery best-match channel arrives separately as the callback's first arg

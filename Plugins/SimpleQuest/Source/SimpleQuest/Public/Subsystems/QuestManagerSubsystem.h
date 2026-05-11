@@ -46,7 +46,7 @@ class UWorldStateSubsystem;
  * This class manages quests and quest givers, loading and unloading quests as needed. It handles the registration of actors
  * who have a quest giver component when they begin play. 
  */
-UCLASS(Abstract, Blueprintable, config = Game)
+UCLASS(Blueprintable, config = Game)
 class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
@@ -62,21 +62,14 @@ protected:
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-	void StartInitialQuests();
-	
-	/** Questline graph assets to activate when the game launches. Prefer this over InitialQuests for graphs compiled with the current compiler. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="QuestMap")
-	TArray<TSoftObjectPtr<UQuestlineGraph>> InitialQuestlines;
-
 	/**
 	 * Registers a graph's compiled node instances into LoadedNodeInstances WITHOUT firing entry nodes.
 	 * Wires CachedGameInstance, OnRegisteredWithManager (so e.g. UActivationGroupListenerNode can subscribe
 	 * to its group signal channel at instance lifetime), the per-node delegate binds, the per-tag deactivation
 	 * subscription, and the container-classification push to UQuestStateSubsystem. Used by both
-	 * ActivateQuestlineGraph (which calls this then fires entry tags) and the startup auto-load path for
-	 * listener-bearing graphs that aren't in InitialQuestlines. Not idempotent on the same graph — re-binding
-	 * delegates and double-subscribing deactivation handlers; callers must dedup.
+	 * ActivateQuestlineGraph (which calls this then fires entry tags) and the startup autoload path for
+	 * listener-bearing graphs picked up via HasActivationGroupListener asset registry scan. Not idempotent on
+	 * the same graph — re-binding delegates and double-subscribing deactivation handlers; callers must deduplicate.
 	 */
 	virtual void RegisterQuestlineGraph(UQuestlineGraph* Graph);
 	
@@ -220,15 +213,15 @@ private:
 	
 	/**
 	 * Scans the asset registry for UQuestlineGraph assets flagged HasActivationGroupListener=true (stamped by the
-	 * compiler whenever a graph compiles to ≥1 UActivationGroupListenerNode instance), skips any already in
-	 * AlreadyRegistered, sync-loads each remaining asset, and calls RegisterQuestlineGraph on it. The asset's
-	 * Start node is NOT fired — the goal is to bring the listener instances online (CachedGameInstance set,
-	 * OnRegisteredWithManager called, signal subscriptions live) without activating the rest of the graph.
-	 * Called from StartInitialQuests AFTER InitialQuestlines have been registered (so the dedup set carries
-	 * those graphs) and BEFORE InitialQuestlines fire their entry tags (so all Listeners are armed before any
-	 * Setter publishes its first signal).
+	 * compiler whenever a graph compiles to ≥1 UActivationGroupListenerNode instance), sync-loads each, and calls
+	 * RegisterQuestlineGraph on it. The asset's Start node is NOT fired — the goal is to bring the listener
+	 * instances online (CachedGameInstance set, OnRegisteredWithManager called, signal subscriptions live) without
+	 * activating the rest of the graph. Called once from Initialize (synchronously if AR is ready; via AR's
+	 * OnFilesLoaded delegate otherwise) so every project-wide listener is armed before any caller can publish a
+	 * setter event. Idempotent across re-entry: RegisterQuestlineGraph's per-node LoadedNodeInstances.Contains
+	 * dedup makes a second call on the same graph a no-op.
 	 */
-	void AutoLoadListenerBearingGraphs(const TSet<UQuestlineGraph*>& AlreadyRegistered);
+	void AutoLoadListenerBearingGraphs();
 
 	/**
 	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize

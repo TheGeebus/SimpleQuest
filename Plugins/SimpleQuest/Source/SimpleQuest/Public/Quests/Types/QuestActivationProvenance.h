@@ -25,6 +25,6 @@ enum class EQuestActivationProvenance : uint8
 	/** Activated by external code via FQuestActivationRequestEvent or USimpleQuestBlueprintLibrary equivalents. */
 	ExternalAPI,
 
-	/** Activated by an entry-tag fire at graph activation time (StartInitialQuests / ActivateQuestlineGraph). */
+	/** Activated by an entry-tag fire at graph activation time (via ActivateQuestlineGraph). */
 	InitialEntry,
 };

@@ -56,6 +56,15 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
+    // Force-init dependencies before any GetSubsystem<T> lookup further down. UE's subsystem collection
+    // initializes registered subsystems in arbitrary order; without this, downstream GetSubsystem calls can
+    // return null (or a partially-initialized instance) when our Initialize fires before theirs in the
+    // collection's iteration order. With these calls, the dependencies are guaranteed fully initialized
+    // before we cache their pointers or call into them.
+    Collection.InitializeDependency<UWorldStateSubsystem>();
+    Collection.InitializeDependency<UQuestStateSubsystem>();
+    Collection.InitializeDependency<USignalSubsystem>();
+    
     if (UGameInstance* GameInstance = GetGameInstance())
     {
         WorldState = GameInstance->GetSubsystem<UWorldStateSubsystem>();
@@ -77,9 +86,19 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     RegisterGiversFromAssetRegistry();
     
     UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
-    if (const UWorld* World = GetWorld())
+
+    // Bring all listener-bearing graphs online before any StartQuestline caller can publish a setter event. AR is
+    // typically loaded by the time game-instance subsystems initialize (editor PIE always; cooked starts almost
+    // always — cooked AR is serialized as a single early-loaded blob). The OnFilesLoaded fallback covers the
+    // narrow cooked-cold-start window where AR is still streaming when this fires.
+    IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
+    if (AR.IsLoadingAssets())
     {
-        World->GetTimerManager().SetTimerForNextTick(this, &UQuestManagerSubsystem::StartInitialQuests);
+        AR.OnFilesLoaded().AddUObject(this, &UQuestManagerSubsystem::AutoLoadListenerBearingGraphs);
+    }
+    else
+    {
+        AutoLoadListenerBearingGraphs();
     }
 }
 
@@ -134,46 +153,6 @@ void UQuestManagerSubsystem::Deinitialize()
         RecentGiverActors.Reset();
     }
     Super::Deinitialize();
-}
-
-void UQuestManagerSubsystem::StartInitialQuests_Implementation()
-{
-    // Phase 1: register all InitialQuestlines (no entry-tag fire yet). Splitting the registration phase from
-    // the activation phase guarantees every UActivationGroupListenerNode in the project (including listener-
-    // bearing graphs not in InitialQuestlines, picked up by AutoLoadListenerBearingGraphs below) is subscribed
-    // before any UActivationGroupSetterNode publishes its first signal during entry-tag firing.
-    TSet<UQuestlineGraph*> RegisteredGraphs;
-    for (const TSoftObjectPtr<UQuestlineGraph>& GraphPtr : InitialQuestlines)
-    {
-        if (UQuestlineGraph* Graph = GraphPtr.LoadSynchronous())
-        {
-            RegisterQuestlineGraph(Graph);
-            RegisteredGraphs.Add(Graph);
-        }
-        else
-        {
-            UE_LOG(LogSimpleQuest, Warning, TEXT("StartInitialQuests: failed to load InitialQuestlines entry"));
-        }
-    }
-
-    // Phase 2: scan the asset registry for listener-bearing graphs not already in InitialQuestlines and pre-
-    // register them so their listeners subscribe at startup. Listener instances live on the asset's
-    // CompiledNodes and need their CachedGameInstance set + OnRegisteredWithManager fired;
-    // AutoLoadListenerBearingGraphs does both via RegisterQuestlineGraph. The asset's Start node is NOT fired.
-    AutoLoadListenerBearingGraphs(RegisteredGraphs);
-
-    // Phase 3: fire entry tags for InitialQuestlines. Setter publishes during this phase reach all listeners
-    // armed in Phases 1 + 2.
-    for (UQuestlineGraph* Graph : RegisteredGraphs)
-    {
-        UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s)"),
-            *Graph->GetName(), Graph->GetEntryNodeTags().Num());
-
-        for (const FName& EntryTagName : Graph->GetEntryNodeTags())
-        {
-            ActivateNodeByTag(EntryTagName, EQuestActivationProvenance::InitialEntry);
-        }
-    }
 }
 
 void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)
@@ -267,7 +246,8 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                     // Push asset-scoped alias mappings so cross-asset subscribers can resolve through the alias
                     // index (read APIs alias-walk, RecordResolution / RecordEntry multi-publish). Empty for top-
                     // level content — the loop body skips when AssetScopedAliasTags is empty.
-                    for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+                    const TArray<FGameplayTag>& AliasesAtCallSite = Instance->GetAssetScopedAliasTags();
+                    for (const FGameplayTag& AliasTag : AliasesAtCallSite)
                     {
                         StateSubsystem->RegisterAlias(AliasTag, ResolvedTag);
                     }
@@ -1436,7 +1416,7 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
 #endif
 }
 
-void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs(const TSet<UQuestlineGraph*>& AlreadyRegistered)
+void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs()
 {
     IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
 
@@ -1466,8 +1446,6 @@ void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs(const TSet<UQuestline
             continue;
         }
 
-        if (AlreadyRegistered.Contains(Graph)) continue;
-
         RegisterQuestlineGraph(Graph);
         ++PreRegisteredCount;
 
@@ -1477,7 +1455,7 @@ void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs(const TSet<UQuestline
     }
 
     UE_LOG(LogSimpleQuest, Verbose,
-        TEXT("AutoLoadListenerBearingGraphs: scanned %d UQuestlineGraph asset(s); pre-registered %d listener-bearing graph(s) outside InitialQuestlines"),
+        TEXT("AutoLoadListenerBearingGraphs: scanned %d UQuestlineGraph asset(s); pre-registered %d listener-bearing graph(s)"),
         Assets.Num(),
         PreRegisteredCount);
 }

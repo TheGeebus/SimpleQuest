@@ -548,6 +548,20 @@ Pre-flight for the data-layer migrations:
   consumers that bound `OnEnabled` for the "first notice" affordance
   should rewire to `OnActivated`.
 
+- **Plugin visual defaults relocated from project ini to plugin
+  ini.** Wire / pin / node color defaults that were sitting in
+  the project's `Config/DefaultSimpleQuest.ini` now live in the
+  plugin's `Plugins/SimpleQuest/Config/DefaultSimpleQuest.ini`.
+  Adopters copying the plugin folder into a fresh project now
+  inherit the plugin maintainer's color choices automatically.
+  Adopter overrides still save to the project ini via UE's normal
+  `DefaultConfig` hierarchy. Log-verbosity settings stay project-
+  side (those are per-project diagnostic preferences). The
+  `QuestManagerClass` UPROPERTY default in `USimpleQuestSettings.h`
+  also updated to explicitly point at the native
+  `UQuestManagerSubsystem` class (was a stale BP path that
+  resolved to null at load and fell through to the same fallback).
+
 ### Fixed
 
 - **Prereqs on `UQuestlineNode_LinkedQuestline` nodes never compiled
@@ -587,6 +601,46 @@ Pre-flight for the data-layer migrations:
 - Anonymous-namespace `ScanActorForStaleTags` reverted alias from
   pre-namespace cleanup pass (already removed in 0.3.5; noted here
   for symmetry with the broader migration story).
+
+- **`UQuestManagerSubsystem::InitialQuestlines` property and
+  `StartInitialQuests` BlueprintNativeEvent — adopter migration
+  required (breaking change).** The startup pathway that drove
+  questline activation via designer-configured arrays on a BP
+  subclass of `UQuestManagerSubsystem` is gone. Designers now drive
+  activation exclusively through `USimpleQuestBlueprintLibrary::Start
+  Questline` from a startup hook of their choice (character
+  `BeginPlay`, GameMode `BeginPlay`, custom subsystem, etc.). One
+  pattern serves static startup, procedural orchestration, dialogue-
+  driven branching, and (when 0.5.0 lands) save/load rehydration.
+  - `UCLASS(Abstract)` dropped from `UQuestManagerSubsystem`. The
+    native class auto-instantiates by default; subclassing remains
+    available via the `QuestManagerClass` setting under Project
+    Settings → Plugins → Simple Quest (defaults to the native
+    `UQuestManagerSubsystem` class).
+  - `AutoLoadListenerBearingGraphs` runs once at `Initialize` after
+    `Collection.InitializeDependency<UWorldStateSubsystem /
+    UQuestStateSubsystem / USignalSubsystem>()` declares the
+    cross-subsystem dependencies UE needs to honor before our
+    synchronous registration work begins. Replaces the pre-§1.5
+    `SetTimerForNextTick` one-tick deferral (which had been load-
+    bearing for the same subsystem-ordering condition without
+    being explicit about it). No `AlreadyRegistered` argument; the
+    dedup is the existing per-node `LoadedNodeInstances.Contains`
+    check inside `RegisterQuestlineGraph`.
+  - Closes the legacy BP-recompile-during-PIE crash class for
+    adopters who don't subclass the manager. With no `Abstract`
+    requirement, the typical adopter doesn't reach into the
+    manager BP at all, so the reinstancing path that caused the
+    crash isn't triggered.
+
+  Migration: relocate the project's startup questline list from
+  the manager BP's `InitialQuestlines` array to a `BeginPlay`
+  handler that calls `Start Questline` per entry. The plugin's
+  demo content shows the recommended pattern
+  (`BP_QuestPlayerExample::BeginPlay → Start Questline(QL_Main)`).
+  `BP_QuestManagerDemo` was removed from demo content; the demo
+  now uses the native manager class via the empty / default
+  `QuestManagerClass` setting.
 
 ### Known Limitations
 

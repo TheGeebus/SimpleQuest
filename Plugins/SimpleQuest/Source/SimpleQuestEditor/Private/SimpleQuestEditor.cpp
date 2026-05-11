@@ -71,7 +71,13 @@ IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
 FString FSimpleQuestEditor::GetCompiledTagsIniPath()
 {
-	return FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/CompiledTags.ini"));
+	// Plugin's Config/Tags/ is auto-loaded by UE's tag manager at plugin load — adopters copying the plugin
+	// folder inherit the compiled tags automatically. Replaces the prior <Project>/Config/SimpleQuest/CompiledTags.ini
+	// target which only existed in the project's config dir and didn't travel with the plugin.
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SimpleQuest"));
+	return Plugin.IsValid()
+		? FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Config/Tags/SimpleQuestCompiledTags.ini"))
+		: FString();
 }
 
 class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
@@ -664,11 +670,23 @@ void FSimpleQuestEditor::LoadCompiledTagsFromIni()
 
 void FSimpleQuestEditor::MigrateLegacyTagsIni()
 {
-	const FString LegacyPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini"));
-	if (FPaths::FileExists(LegacyPath))
+	// Two prior locations to clean up on upgrade — both written by older versions of this module before the current
+	// plugin-local destination was adopted. Either being present at startup indicates the project hasn't been
+	// recompiled since the upgrade; the next Compile All Questlines pass writes to the new plugin location.
+	const TArray<FString> LegacyPaths = {
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini")),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/CompiledTags.ini")),
+	};
+
+	for (const FString& LegacyPath : LegacyPaths)
 	{
-		IFileManager::Get().Delete(*LegacyPath);
-		UE_LOG(LogSimpleQuest, Display,	TEXT("MigrateLegacyTagsIni — deleted legacy INI at Config/Tags/. Tags now managed via Config/SimpleQuest/."));
+		if (FPaths::FileExists(LegacyPath))
+		{
+			IFileManager::Get().Delete(*LegacyPath);
+			UE_LOG(LogSimpleQuest, Display,
+				TEXT("MigrateLegacyTagsIni — deleted legacy INI at '%s'. Tags now managed via plugin Config/Tags/."),
+				*LegacyPath);
+		}
 	}
 }
 

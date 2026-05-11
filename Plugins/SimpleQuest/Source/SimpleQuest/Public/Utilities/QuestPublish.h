@@ -18,7 +18,7 @@
  * subscription handle by default (deduplicate-on). Event.QuestTag is set once to ContextualTag (canonical) before
  * publishing — subscribers reading Event.QuestTag for "what fired" semantics see the canonical perspective uniformly.
  * The callback's first arg carries delivery metadata: which channel from the publishing set best matched this
- * subscription's bound tag. Subscribers bound at broad ancestors (e.g. SimpleQuest.Quest root) fire exactly once
+ * subscription's bound tag. Subscribers bound at broad ancestors (e.g. SimpleQuest.Questline.root) fire exactly once
  * per logical publish, with the callback arg set to the longest descendant channel in the publishing set; subscribers
  * bound at a specific asset perspective fire once with the callback arg set to that perspective's channel.
  *

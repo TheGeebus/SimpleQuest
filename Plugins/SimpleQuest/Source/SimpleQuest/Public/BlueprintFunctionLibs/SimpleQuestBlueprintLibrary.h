@@ -43,7 +43,7 @@ public:
      *   - On Blocked — Blocked-state fact transitioned absent → present (SetBlocked utility node fired).
      *   - On Unblocked — Blocked-state fact transitioned present → absent (ClearBlocked utility node fired).
      *
-     * Subscribe at any tag — pass a leaf to watch one quest, or a parent like SimpleQuest.Quest.MyLine to
+     * Subscribe at any tag — pass a leaf to watch one quest, or a parent like SimpleQuest.Questline.MyLine to
      * receive events from every descendant under it. With LinkedQuestline graphs you can also subscribe at
      * any of an inlined node's perspectives (its standalone form OR any inlining context's form). Quest Tag
      * output gives the canonical event identity (where the event originated); Matched Channel output gives
@@ -62,7 +62,7 @@ public:
         meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
                 HidePin = "WorldContextObject,ExposedEvents", DefaultToSelf = "WorldContextObject",
                 DisplayName = "Bind To Quest Event"))
-    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag, UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255);
+    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255);
 
     /**
      * C++ one-liner for subscribing to a quest event. Resolves the SignalSubsystem from the world context, subscribes
@@ -91,44 +91,44 @@ public:
     // Quest state queries: read directly from WorldState and/or QuestState
     // -------------------------------------------------------------------------------------------------------------
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static bool IsQuestLive(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest.Questline.State", meta = (WorldContext = "WorldContext"))
+    static bool IsQuestLive(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static bool IsQuestCompleted(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest.Questline.State", meta = (WorldContext = "WorldContext"))
+    static bool IsQuestCompleted(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static bool IsQuestPendingGiver(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest.Questline.State", meta = (WorldContext = "WorldContext"))
+    static bool IsQuestPendingGiver(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.QuestOutcome"))FGameplayTag OutcomeTag);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest.Questline.State", meta = (WorldContext = "WorldContext"))
+    static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Quest State", meta = (WorldContext = "WorldContext"))
-    static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest.Questline.State", meta = (WorldContext = "WorldContext"))
+    static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
     // -------------------------------------------------------------------------------------------------------------
     // Quest actions: publish to the signal bus; designer never touches the bus
     // -------------------------------------------------------------------------------------------------------------
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void DeactivateQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void DeactivateQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void GiveQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void GiveQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void ActivateQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void ActivateQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void SetQuestBlocked(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void SetQuestBlocked(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void ClearQuestBlocked(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void ClearQuestBlocked(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
-    static void ResolveQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Quest"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.QuestOutcome"))FGameplayTag OutcomeTag, bool bOverrideExisting = false);
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
+    static void ResolveQuest(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag, bool bOverrideExisting = false);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Quest Actions", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest.Questline.Actions", meta = (WorldContext = "WorldContext"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
 
 private:

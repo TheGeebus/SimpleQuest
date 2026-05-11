@@ -13,16 +13,16 @@
 enum class EQuestTagKind : uint8
 {
 	Unknown,
-	Identity,           // SimpleQuest.Quest.*           — designer-authored or compiler-emitted node identity
-	State,              // SimpleQuest.QuestState.*      — runtime-managed state facts
-	Outcome,            // SimpleQuest.QuestOutcome.*    — designer-authored outcome identifiers
-	PrereqRule,         // SimpleQuest.QuestPrereqRule.* — designer-authored prereq rule group identity
-	ActivationGroup,    // SimpleQuest.QuestActivationGroup.*
+	Identity,           // SimpleQuest.Questline.*           — designer-authored or compiler-emitted node identity
+	State,              // SimpleQuest.State.*      — runtime-managed state facts
+	Outcome,            // SimpleQuest.Outcome.*    — designer-authored outcome identifiers
+	PrereqRule,         // SimpleQuest.PrereqRule.* — designer-authored prereq rule group identity
+	ActivationGroup,    // SimpleQuest.ActivationGroup.*
 	LegacyOutcome,      // Quest.Outcome.*               — pre-0.4.0 outcome (transitional)
 };
 
 /**
- * Per-quest lifecycle leaf, written under SimpleQuest.QuestState.<Path>.<Leaf>. Replaces the prior FString-keyed
+ * Per-quest lifecycle leaf, written under SimpleQuest.State.<Path>.<Leaf>. Replaces the prior FString-keyed
  * Leaf_X constants: typo-proof, switch-exhaustive, iterates cleanly via FQuestTagComposer::AllStateLeaves.
  */
 enum class EQuestStateLeaf : uint8
@@ -66,11 +66,11 @@ public:
 	// ------------------------------------------------------------------------------------------------
 
 	inline static const FString PluginPrefix				= TEXT("SimpleQuest");
-	inline static const FString QuestSubPrefix				= TEXT("Quest");
-	inline static const FString StateSubPrefix				= TEXT("QuestState");
-	inline static const FString OutcomeSubPrefix			= TEXT("QuestOutcome");
-	inline static const FString PrereqRuleSubPrefix			= TEXT("QuestPrereqRule");
-	inline static const FString ActivationGroupSubPrefix	= TEXT("QuestActivationGroup");
+	inline static const FString QuestSubPrefix				= TEXT("Questline");
+	inline static const FString StateSubPrefix				= TEXT("State");
+	inline static const FString OutcomeSubPrefix			= TEXT("Outcome");
+	inline static const FString PrereqRuleSubPrefix			= TEXT("PrereqRule");
+	inline static const FString ActivationGroupSubPrefix	= TEXT("ActivationGroup");
 	// Pre-0.4.0 outcome tag prefix retained for defensive runtime support — assets compiled
 	// before the namespace consolidation may still carry "Quest.Outcome.*" tags. Removal is
 	// a 0.4.1 polish item, gated on every authored asset being recompiled at least once
@@ -144,14 +144,14 @@ public:
 	/** Builds an identity tag from an asset prefix + ordered child segments. */
 	static FName MakeIdentityTag(const FString& AssetPrefix, TArrayView<const FString> Segments);
 
-	/** Per-node lifecycle state fact: SimpleQuest.QuestState.<NodePath>.<Leaf>. */
+	/** Per-node lifecycle state fact: SimpleQuest.State.<NodePath>.<Leaf>. */
 	static FName MakeStateFact(FName IdentityTagName, EQuestStateLeaf Leaf);
 	static FName MakeStateFact(FGameplayTag IdentityTag, EQuestStateLeaf Leaf);
 
-	/** Per-node path resolution fact: SimpleQuest.QuestState.<NodePath>.Path.<Outcome>. */
+	/** Per-node path resolution fact: SimpleQuest.State.<NodePath>.Path.<Outcome>. */
 	static FName MakeNodePathFact(FName IdentityTagName, FName PathIdentity);
 
-	/** Per-quest entry path fact: SimpleQuest.QuestState.<NodePath>.EntryPath.<Outcome>. */
+	/** Per-quest entry path fact: SimpleQuest.State.<NodePath>.EntryPath.<Outcome>. */
 	static FName MakeEntryPathFact(FName IdentityTagName, FName PathIdentity);
 
 	/** Resolves a state-fact name to a registered FGameplayTag. Returns invalid tag if not registered. */
@@ -164,10 +164,10 @@ public:
 	// Decompose: extract structured pieces from tag names.
 	// ------------------------------------------------------------------------------------------------
 
-	/** Returns the trailing dot-delimited segment ("SimpleQuest.Quest.A.B" → "B"). */
+	/** Returns the trailing dot-delimited segment ("SimpleQuest.Questline.A.B" → "B"). */
 	static FString GetLeafSegment(FName TagName);
 
-	/** Strips the trailing dot-delimited segment ("SimpleQuest.Quest.A.B" → "SimpleQuest.Quest.A").
+	/** Strips the trailing dot-delimited segment ("SimpleQuest.Questline.A.B" → "SimpleQuest.Questline.A").
 	 *  Returns false if TagName has no '.' separator (already at root). */
 	static bool TryGetParentTag(FName TagName, FName& OutParentTag);
 
@@ -176,7 +176,7 @@ public:
 	static void EnumerateAncestors(FName TagName, TFunctionRef<bool(FName)> Visitor);
 
 	/** Strips the outcome namespace prefix from PathString in-place if present. Handles BOTH the modern
-	 *  SimpleQuest.QuestOutcome. namespace AND the legacy Quest.Outcome. prefix. Returns true if a strip occurred. */
+	 *  SimpleQuest.Outcome. namespace AND the legacy Quest.Outcome. prefix. Returns true if a strip occurred. */
 	static bool TryStripOutcomePrefix(FString& InOutPathString);
 
 	/** Canonical "Combat: Boss Defeated" formatter for outcome-tag display. Strips the outcome prefix, splits
@@ -192,10 +192,10 @@ public:
 	 *  use the raw tag.
 	 *
 	 *  Examples:
-	 *    "SimpleQuest.Quest.MyAsset.Step1"               → "Quest.MyAsset.Step1"
-	 *    "SimpleQuest.QuestState.MyAsset.Step1.Live"     → "QuestState.MyAsset.Step1.Live"
-	 *    "SimpleQuest.QuestOutcome.Combat.BossDefeated"  → "QuestOutcome.Combat.BossDefeated"
-	 *    "SimpleQuest.QuestPrereqRule.MyRule"            → "QuestPrereqRule.MyRule"
+	 *    "SimpleQuest.Questline.MyAsset.Step1"               → "Quest.MyAsset.Step1"
+	 *    "SimpleQuest.State.MyAsset.Step1.Live"     → "QuestState.MyAsset.Step1.Live"
+	 *    "SimpleQuest.Outcome.Combat.BossDefeated"  → "QuestOutcome.Combat.BossDefeated"
+	 *    "SimpleQuest.PrereqRule.MyRule"            → "QuestPrereqRule.MyRule"
 	 *    "Game.Foo.Bar" (foreign — no PluginPrefix)      → "Game.Foo.Bar"
 	 *    NAME_None                                       → ""              (empty FText) */
 	static FText FormatTagForDisplay(FName TagName);

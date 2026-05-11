@@ -64,16 +64,17 @@ namespace
 {
 	/** ViewID for the Quest State view in the generic FactsPanelRegistry. Stable string used as the dropdown
 	 *  selection key inside SFactsPanel. File-scope since no other translation unit needs to reference it. */
-	const FName QuestStateViewId(TEXT("SimpleQuest.QuestState"));
+	const FName QuestStateViewId(TEXT("SimpleQuest.Questline.tate"));
 }
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
 FString FSimpleQuestEditor::GetCompiledTagsIniPath()
 {
-	// Plugin's Config/Tags/ is auto-loaded by UE's tag manager at plugin load — adopters copying the plugin
-	// folder inherit the compiled tags automatically. Replaces the prior <Project>/Config/SimpleQuest/CompiledTags.ini
-	// target which only existed in the project's config dir and didn't travel with the plugin.
+	// Plugin-local Config/Tags/ destination travels with the plugin folder, so adopters inherit the compiled
+	// tags by copying the plugin. The runtime module registers this directory with UGameplayTagsManager via
+	// AddTagIniSearchPath (UE only auto-scans the PROJECT's Config/Tags/, not plugin directories).
+	// Replaces the prior <Project>/Config/SimpleQuest/CompiledTags.ini target which didn't travel.
 	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SimpleQuest"));
 	return Plugin.IsValid()
 		? FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Config/Tags/SimpleQuestCompiledTags.ini"))

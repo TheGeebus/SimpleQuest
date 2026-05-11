@@ -345,8 +345,8 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
         HoverTextOut = TEXT(
             "Quest Tag\n"
             "Gameplay Tag Structure\n\n"
-            "The quest tag to subscribe to. Pass a leaf tag (e.g. SimpleQuest.Quest.MyLine.Step1) to watch a "
-            "specific quest, or a parent tag (e.g. SimpleQuest.Quest.MyLine) to receive events from every "
+            "The quest tag to subscribe to. Pass a leaf tag (e.g. SimpleQuest.Questline.MyLine.Step1) to watch a "
+            "specific quest, or a parent tag (e.g. SimpleQuest.Questline.MyLine) to receive events from every "
             "descendant quest under it.");
         return;
     }

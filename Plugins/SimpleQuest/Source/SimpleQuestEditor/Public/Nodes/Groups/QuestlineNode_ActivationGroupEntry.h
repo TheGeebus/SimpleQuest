@@ -21,11 +21,11 @@ public:
 	
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
-	virtual FString GetTagFilterString() const override { return TEXT("SimpleQuest.QuestActivationGroup"); }
+	virtual FString GetTagFilterString() const override { return TEXT("SimpleQuest.ActivationGroup"); }
 
 	/** Single-input setter: no dynamic-pin UI. Designers merge multiple upstream signals via a knot. */
 	virtual bool CanAddInputPin() const override { return false; }
 
-	UPROPERTY(EditAnywhere, Category="Activation Group", meta=(Categories="SimpleQuest.QuestActivationGroup"))
+	UPROPERTY(EditAnywhere, Category="Activation Group", meta=(Categories="SimpleQuest.ActivationGroup"))
 	FGameplayTag GroupTag;
 };

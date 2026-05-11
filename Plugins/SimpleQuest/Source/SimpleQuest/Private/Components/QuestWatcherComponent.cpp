@@ -91,7 +91,7 @@ void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQ
 	// Find the most-specific watched entry whose key is an ancestor of (or equals) Channel — that's the
 	// authored binding this delivery corresponds to. Direct WatchedTags.Find(Channel) was the prior shape,
 	// which silently bypassed the outcome filter for parent-prefix subscriptions: a watcher authored at
-	// SimpleQuest.Quest.MyLine receiving an event published on SimpleQuest.Quest.MyLine.Step1 has Channel
+	// SimpleQuest.Questline.MyLine receiving an event published on SimpleQuest.Questline.MyLine.Step1 has Channel
 	// = the descendant, but WatchedTags is keyed by the authored ancestor — direct lookup returned null
 	// and the filter never applied. Walk the entries instead, picking the longest matching ancestor (most
 	// specific authored binding wins when multiple match — typical case is one authored binding per event).

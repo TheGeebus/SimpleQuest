@@ -322,7 +322,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     	
     	if (ReservedSegments.Contains(Label))
     	{
-    		AddWarning(FString::Printf(TEXT("[%s] Node label '%s' matches a reserved tag segment — compiles to an ambiguous tag (e.g. SimpleQuest.Quest.<...>.%s). "
+    		AddWarning(FString::Printf(TEXT("[%s] Node label '%s' matches a reserved tag segment — compiles to an ambiguous tag (e.g. SimpleQuest.Questline.<...>.%s). "
 				"Recommend renaming. (Warning only — compile proceeds.)"), *TagPrefix, *Label, *Label), ContentNode);
     	}
     	LabelMap.Add(Label, ContentNode);
@@ -562,7 +562,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     					UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileNodeRegistration[%s]: skipping bare PathIdentity '%s' "
 							"(dynamic — not registering at tag manager root)"), *TagName.ToString(), *Desc.Identity.ToString());
     				}
-    				// The path-fact tag is always properly namespaced (SimpleQuest.QuestState.<Quest>.Path.<PathID>),
+    				// The path-fact tag is always properly namespaced (SimpleQuest.State.<Quest>.Path.<PathID>),
     				// so registering it never causes pollution regardless of static / dynamic provenance.
     				AllCompiledQuestTags.AddUnique(FQuestTagComposer::MakeNodePathFact(TagName, Desc.Identity));
     			}

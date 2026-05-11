@@ -2,4 +2,4 @@
 
 #include "Events/QuestClearBlockRequestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestClearBlockRequest, "SimpleQuest.QuestChannel.ClearBlockRequest")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestClearBlockRequest, "SimpleQuest.Channel.ClearBlockRequest")

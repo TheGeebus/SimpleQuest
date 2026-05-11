@@ -128,7 +128,7 @@ public:
 	 *
 	 * Aliases get resolved to their underlying canonicals before return, so callers receive a uniform
 	 * canonical-tag set suitable for fact lookups (which are keyed by canonical) and instance lookups in
-	 * LoadedNodeInstances. A subscriber binding to an alias-shape prefix (e.g. SimpleQuest.Quest.NewTest
+	 * LoadedNodeInstances. A subscriber binding to an alias-shape prefix (e.g. SimpleQuest.Questline.NewTest
 	 * when NewTest is loaded only as inlined content under another asset's compile) gets the canonical tags
 	 * of the inlined nodes whose alias arrays contain a descendant of Prefix — the bus's hierarchical-walk
 	 * semantic, applied to the registered-tag set.

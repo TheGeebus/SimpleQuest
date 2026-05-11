@@ -2,4 +2,4 @@
 
 #include "Events/QuestBlockRequestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestBlockRequest, "SimpleQuest.QuestChannel.BlockRequest")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestBlockRequest, "SimpleQuest.Channel.BlockRequest")

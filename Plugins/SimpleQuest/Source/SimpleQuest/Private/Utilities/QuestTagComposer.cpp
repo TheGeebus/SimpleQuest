@@ -157,6 +157,17 @@ bool FQuestTagComposer::TryStripOutcomePrefix(FString& InOutPathString)
 		InOutPathString.RightChopInline(OutcomeNamespace.Len());
 		return true;
 	}
+	// 0.4.0-era prefix (post-namespace-consolidation, pre-Phase-D). BP-authored
+	// objectives may still carry K2 pin default values under this intermediate form
+	// because pin-default strings aren't auto-rewritten by GameplayTagRedirects. Removal
+	// slot after every authored asset has been recompiled under post-Phase-D code (§4.2-
+	// adjacent — same "transitional safeguard" pattern as LegacyOutcomeSubPrefix).
+	static const FString IntermediateOutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
+	if (InOutPathString.StartsWith(IntermediateOutcomePrefix))
+	{
+		InOutPathString.RightChopInline(IntermediateOutcomePrefix.Len());
+		return true;
+	}
 	if (InOutPathString.StartsWith(LegacyOutcomeSubPrefix))
 	{
 		InOutPathString.RightChopInline(LegacyOutcomeSubPrefix.Len());

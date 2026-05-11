@@ -420,7 +420,7 @@ FString UK2Node_CompleteObjectiveWithOutcome::GetPinMetaData(FName InPinName, FN
 	// FGameplayTag struct-pin customization reads "Categories" key to filter the picker namespace.
 	if (InPinName == TEXT("OutcomeTag") && InKey == TEXT("Categories"))
 	{
-		return TEXT("SimpleQuest.QuestOutcome");
+		return TEXT("SimpleQuest.Outcome");
 	}
 	return Super::GetPinMetaData(InPinName, InKey);
 }

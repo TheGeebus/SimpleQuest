@@ -23,7 +23,7 @@ class FQuestlineGraphTraversalPolicy;
  *
  * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
  * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
- * (SimpleQuest.Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner
+ * (SimpleQuest.Questline.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner
  * routing but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
@@ -186,7 +186,7 @@ private:
 	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
-	 * the compiled ContextualTag: SimpleQuest.Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
+	 * the compiled ContextualTag: SimpleQuest.Questline.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
 	 * ordering — uses editor-time data only.
 	 */
 	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;

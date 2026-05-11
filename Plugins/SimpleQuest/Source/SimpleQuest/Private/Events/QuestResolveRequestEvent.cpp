@@ -2,4 +2,4 @@
 
 #include "Events/QuestResolveRequestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestResolveRequest, "SimpleQuest.QuestChannel.ResolveRequest")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestResolveRequest, "SimpleQuest.Channel.ResolveRequest")

@@ -14,7 +14,7 @@
  * node in the questline graph editor — no manual sync between outcome / path declarations and completion call sites.
  *
  * Two authoring modes:
- *   Static  — leave PathName empty. Set the OutcomeTag via the pin's tag picker (filtered to SimpleQuest.QuestOutcome).
+ *   Static  — leave PathName empty. Set the OutcomeTag via the pin's tag picker (filtered to SimpleQuest.Outcome).
  *             PathIdentity auto-derives from OutcomeTag.GetTagName(); the Step's exec pin shows the outcome leaf as
  *             its label. This is the common case and matches the pre-Bundle-Y authoring shape.
  *   Dynamic — set PathName to a short authored identity (e.g., "DynamicVictory"). Wire a runtime FGameplayTag into
@@ -88,7 +88,7 @@ public:
 	virtual bool IsConnectionDisallowed(const UEdGraphPin* MyPin, const UEdGraphPin* OtherPin, FString& OutReason) const override;
 
 	/**
-	 * Filter the OutcomeTag pin's gameplay tag picker to the SimpleQuest.QuestOutcome namespace. UE's struct-pin
+	 * Filter the OutcomeTag pin's gameplay tag picker to the SimpleQuest.Outcome namespace. UE's struct-pin
 	 * customization for FGameplayTag reads the "Categories" metadata via this override.
 	 */
 	virtual FString GetPinMetaData(FName InPinName, FName InKey) override;

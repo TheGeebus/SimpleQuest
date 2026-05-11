@@ -6,6 +6,7 @@
 #include "SimpleQuestLog.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Interfaces/IPluginManager.h"
 #include "Quests/QuestlineGraph.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestTagComposer.h"
@@ -16,8 +17,9 @@ DEFINE_LOG_CATEGORY(LogSimpleQuest);
 
 void FSimpleQuest::StartupModule()
 {
-	UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterCompiledQuestTags);
-    
+    UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterCompiledQuestTags);
+    UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterAuthoredQuestTags);
+
     // Apply log verbosity from Project Settings. UDeveloperSettings's Config flow loads the values during
     // engine boot before module startup, so GetDefault here returns settings already populated from
     // DefaultSimpleQuest.ini. Replaces the need for designers to edit DefaultEngine.ini's [Core.Log] section
@@ -71,6 +73,42 @@ void FSimpleQuest::RegisterCompiledQuestTags()
     UE_LOG(LogSimpleQuest, Log, TEXT("RegisterCompiledQuestTags — registered %d tag(s) "
         "(incl. state facts) from %d questline asset(s)"), TotalTags, Assets.Num());
 }
+
+void FSimpleQuest::RegisterAuthoredQuestTags()
+{
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SimpleQuest"));
+    if (!Plugin.IsValid()) return;
+
+    const FString IniPath = Plugin->GetBaseDir() / TEXT("Config/Tags/SimpleQuestAuthoredTags.ini");
+
+    FString Content;
+    if (!FFileHelper::LoadFileToString(Content, *IniPath))
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("RegisterAuthoredQuestTags — file not found: %s"), *IniPath);
+        return;
+    }
+
+    UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
+    TArray<FString> Lines;
+    Content.ParseIntoArrayLines(Lines);
+
+    int32 Count = 0;
+    for (const FString& Line : Lines)
+    {
+        const int32 TagStart = Line.Find(TEXT("Tag=\""));
+        if (TagStart == INDEX_NONE) continue;
+        const int32 ValueStart = TagStart + 5;
+        const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase, ESearchDir::FromStart, ValueStart);
+        if (ValueEnd == INDEX_NONE) continue;
+
+        const FName TagName(*Line.Mid(ValueStart, ValueEnd - ValueStart));
+        Manager.AddNativeGameplayTag(TagName);
+        ++Count;
+    }
+
+    UE_LOG(LogSimpleQuest, Display, TEXT("RegisterAuthoredQuestTags — registered %d tag(s) from %s"), Count, *IniPath);
+}
+
 void FSimpleQuest::ShutdownModule()
 {
 

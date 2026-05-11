@@ -112,7 +112,7 @@ private:
      * to the asset name if left empty. Override this when you need a stable tag namespace independent of the asset name,
      * or to disambiguate duplicate assets.
      *
-     * Format: SimpleQuest.Quest.<QuestlineID>.<QuestNodeLabel>
+     * Format: SimpleQuest.Questline.<QuestlineID>.<QuestNodeLabel>
      */
     UPROPERTY(EditAnywhere)
     FString QuestlineID;

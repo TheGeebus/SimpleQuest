@@ -3,7 +3,7 @@
 #include "Objectives/Examples/GoToQuestObjective.h"
 
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "SimpleQuest.QuestOutcome.Reached")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "SimpleQuest.Outcome.Reached")
 
 UGoToQuestObjective::UGoToQuestObjective()
 {

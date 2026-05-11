@@ -85,7 +85,7 @@ struct FWatchedQuestEventSettings
 	 * If non-empty, OnQuestCompleted only fires when the completion outcome matches one of these tags. If empty,
 	 * fires for any outcome (default). Only relevant when bWatchCompleted is true.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.QuestOutcome", EditCondition = "bWatchCompleted"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.Outcome", EditCondition = "bWatchCompleted"))
 	FGameplayTagContainer OutcomeFilter;
 };
 
@@ -206,16 +206,16 @@ protected:
 	void RegisterQuestWatcher();
 
 private:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Quest", AllowPrivateAccess=true))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FWatchedQuestEventSettings> WatchedTags;
 
 	// DEPRECATED — add Tag/Settings pairs to UQuestWatcherComponent::WatchedTags TMap instead
 	FGameplayTagContainer WatchedStepTags;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Quest", AllowPrivateAccess=true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer ActiveQuestTags;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Quest", AllowPrivateAccess=true))
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer CompletedQuestTags;
 
 public:

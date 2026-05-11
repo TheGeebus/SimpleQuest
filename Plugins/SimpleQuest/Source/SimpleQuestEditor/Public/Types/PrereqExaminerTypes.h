@@ -37,9 +37,9 @@ struct FPrereqExaminerNode
     UPROPERTY() FText LeafSourceLabel;
 
     /** Leaf-only: path's tag-picker category prefix for static-OutcomeTag-derived path identities (everything after
-        "SimpleQuest.QuestOutcome." up to and including the last dot, e.g., "Combat." for
-        SimpleQuest.QuestOutcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome"), for outcomes that are
-        direct children of SimpleQuest.QuestOutcome, and for dynamic path identities (bare designer-authored or
+        "SimpleQuest.Outcome." up to and including the last dot, e.g., "Combat." for
+        SimpleQuest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome"), for outcomes that are
+        direct children of SimpleQuest.Outcome, and for dynamic path identities (bare designer-authored or
         "Dynamic N" auto-numbered names). Rendered de-emphasized above LeafPathLabel in the leaf widget. */
     UPROPERTY() FText LeafPathCategory;
 
@@ -54,7 +54,7 @@ struct FPrereqExaminerNode
         ResolveLeafFactForOutputPin (rare. Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
     UPROPERTY() FGameplayTag LeafTag;
 
-    /** Source content node's compiled runtime tag (e.g., "SimpleQuest.Quest.Demo.Step1"). Paired with LeafTag so the debug channel
+    /** Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
         can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
         Leaf-only; invalid on other node types. */
     UPROPERTY() FGameplayTag LeafSourceTag;

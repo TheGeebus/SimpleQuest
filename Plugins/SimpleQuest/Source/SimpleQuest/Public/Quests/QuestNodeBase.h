@@ -237,7 +237,7 @@ protected:
      * routing on the contextualized channel; will pair with StandaloneTag (Phase A of §1.4 dual-tag finalization)
      * for cross-asset subscriber compatibility.
      *
-     * Format: SimpleQuest.Quest.<ParentPath>.<...>.<SanitizedNodeLabel>
+     * Format: SimpleQuest.Questline.<ParentPath>.<...>.<SanitizedNodeLabel>
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FGameplayTag ContextualTag;
@@ -248,7 +248,7 @@ protected:
      * contains this node, the array is [X-perspective, Y-perspective, Z-perspective]. ContextualTag carries the
      * Project (top-level) perspective; the array carries every other perspective.
      *
-     * Use case: a watcher placed in a level binds to "SimpleQuest.Quest.Y.LinkZ.S" — Y's natural perspective on
+     * Use case: a watcher placed in a level binds to "SimpleQuest.Questline.Y.LinkZ.S" — Y's natural perspective on
      * Step S — and receives events from EVERY placement of Y across the project, regardless of how deeply Y is
      * nested in the parent compile chain. The bus's hierarchical walk handles parent-prefix subscription within
      * each tag's chain; multi-publish covers cross-chain subscribers.
@@ -256,7 +256,7 @@ protected:
      * Empty for content compiled at the top level of its asset (no LinkedQuestline ancestor) — the multi-publish
      * silently degenerates to single publish on ContextualTag alone.
      *
-     * Format per entry: SimpleQuest.Quest.<EnclosingAssetQuestlineID>.<RemainingLinkChain>.<...>.<SanitizedNodeLabel>
+     * Format per entry: SimpleQuest.Questline.<EnclosingAssetQuestlineID>.<RemainingLinkChain>.<...>.<SanitizedNodeLabel>
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TArray<FGameplayTag> AssetScopedAliasTags;

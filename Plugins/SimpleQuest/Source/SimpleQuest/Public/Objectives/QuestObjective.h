@@ -52,11 +52,11 @@ public:
 	 *    - The editor discovers tagged properties via TFieldIterator reflection scan.
 	 *																									
 	 *        - In the header:																						<br>
-	 *			   UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.QuestOutcome", ObjectiveOutcome))	<br>
+	 *			   UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))	<br>
 	 *			   FGameplayTag Outcome_Reached;	
 	 *																									
 	 *        - In the .cpp (file scope):																			<br>
-	 *			   UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "SimpleQuest.QuestOutcome.Reached")
+	 *			   UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "SimpleQuest.Outcome.Reached")
 	 *
 	 *        - In the constructor:																					<br>
 	 *			   Outcome_Reached = Tag_Outcome_Reached;
@@ -76,7 +76,7 @@ public:
 	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
 	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes
 	 * computed at CDO construction time. Tags returned here are not constrained to the
-	 * SimpleQuest.QuestOutcome namespace. Base implementation returns an empty array.
+	 * SimpleQuest.Outcome namespace. Base implementation returns an empty array.
 	 *
 	 * @see FSimpleQuestEditorUtilities::DiscoverObjectivePaths
 	 * @see UK2Node_CompleteObjectiveWithOutcome

@@ -22,15 +22,15 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_Classify, "SimpleQuest.TagCom
 bool FQuestTagComposer_Classify::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Identity tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.Quest.MyAsset.Step1")), EQuestTagKind::Identity);
+		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.Questline.MyAsset.Step1")), EQuestTagKind::Identity);
 	TestEqual(TEXT("State tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Live")), EQuestTagKind::State);
+		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.State.MyAsset.Step1.Live")), EQuestTagKind::State);
 	TestEqual(TEXT("Outcome tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.QuestOutcome.Combat.Victory")), EQuestTagKind::Outcome);
+		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.Outcome.Combat.Victory")), EQuestTagKind::Outcome);
 	TestEqual(TEXT("PrereqRule tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.QuestPrereqRule.MyRule")), EQuestTagKind::PrereqRule);
+		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.PrereqRule.MyRule")), EQuestTagKind::PrereqRule);
 	TestEqual(TEXT("ActivationGroup tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.QuestActivationGroup.MyGroup")), EQuestTagKind::ActivationGroup);
+		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.ActivationGroup.MyGroup")), EQuestTagKind::ActivationGroup);
 	TestEqual(TEXT("Legacy outcome tag"),
 		FQuestTagComposer::ClassifyTag(TEXT("Quest.Outcome.Victory")), EQuestTagKind::LegacyOutcome);
 	TestEqual(TEXT("Foreign tag"),
@@ -39,13 +39,13 @@ bool FQuestTagComposer_Classify::RunTest(const FString& Parameters)
 		FQuestTagComposer::ClassifyTag(NAME_None), EQuestTagKind::Unknown);
 
 	// IsXTag accessors mirror ClassifyTag dispatch.
-	TestTrue(TEXT("IsIdentityTag yes"), FQuestTagComposer::IsIdentityTag(TEXT("SimpleQuest.Quest.X")));
-	TestFalse(TEXT("IsIdentityTag no"), FQuestTagComposer::IsIdentityTag(TEXT("SimpleQuest.QuestState.X.Live")));
+	TestTrue(TEXT("IsIdentityTag yes"), FQuestTagComposer::IsIdentityTag(TEXT("SimpleQuest.Questline.X")));
+	TestFalse(TEXT("IsIdentityTag no"), FQuestTagComposer::IsIdentityTag(TEXT("SimpleQuest.State.X.Live")));
 
 	// IsOutcomeTag covers BOTH modern and legacy: closes the asymmetry bug.
-	TestTrue(TEXT("IsOutcomeTag modern"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.QuestOutcome.X")));
+	TestTrue(TEXT("IsOutcomeTag modern"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.Outcome.X")));
 	TestTrue(TEXT("IsOutcomeTag legacy"), FQuestTagComposer::IsOutcomeTag(TEXT("Quest.Outcome.X")));
-	TestFalse(TEXT("IsOutcomeTag identity"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.Quest.X")));
+	TestFalse(TEXT("IsOutcomeTag identity"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.Questline.X")));
 
 	return true;
 }
@@ -61,53 +61,53 @@ bool FQuestTagComposer_MakeIdentityTag::RunTest(const FString& Parameters)
 	const FString MultiChildren[] = { TEXT("Step1"), TEXT("SubStep") };
 	TestEqual(TEXT("Multi-segment identity"),
 		FQuestTagComposer::MakeIdentityTag(TEXT("MyAsset"), MultiChildren),
-		FName(TEXT("SimpleQuest.Quest.MyAsset.Step1.SubStep")));
+		FName(TEXT("SimpleQuest.Questline.MyAsset.Step1.SubStep")));
 
 	const FString SingleChild[] = { TEXT("Step1") };
 	TestEqual(TEXT("Single-segment identity"),
 		FQuestTagComposer::MakeIdentityTag(TEXT("MyAsset"), SingleChild),
-		FName(TEXT("SimpleQuest.Quest.MyAsset.Step1")));
+		FName(TEXT("SimpleQuest.Questline.MyAsset.Step1")));
 
 	TestEqual(TEXT("Empty children — asset-only identity"),
 		FQuestTagComposer::MakeIdentityTag(TEXT("MyAsset"), TArrayView<const FString>{}),
-		FName(TEXT("SimpleQuest.Quest.MyAsset")));
+		FName(TEXT("SimpleQuest.Questline.MyAsset")));
 	return true;
 }
 
 // -------------------------------------------------------------------------------------------------
-// MakeStateFact: identity tag to state-fact with namespace transition. The "SimpleQuest.Quest.X"
-// to "SimpleQuest.QuestState.X.<Leaf>" swap that historically lived as Mid(18) magic at 5+ sites.
+// MakeStateFact: identity tag to state-fact with namespace transition. The "SimpleQuest.Questline.X"
+// to "SimpleQuest.State.X.<Leaf>" swap that historically lived as Mid(18) magic at 5+ sites.
 // -------------------------------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_MakeStateFact, "SimpleQuest.TagComposer.MakeStateFact", TestFlags)
 bool FQuestTagComposer_MakeStateFact::RunTest(const FString& Parameters)
 {
-	const FName Identity = TEXT("SimpleQuest.Quest.MyAsset.Step1");
+	const FName Identity = TEXT("SimpleQuest.Questline.MyAsset.Step1");
 
 	TestEqual(TEXT("Live"),
 		FQuestTagComposer::MakeStateFact(Identity, EQuestStateLeaf::Live),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Live")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Live")));
 	TestEqual(TEXT("Completed"),
 		FQuestTagComposer::MakeStateFact(Identity, EQuestStateLeaf::Completed),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Completed")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Completed")));
 	TestEqual(TEXT("PendingGiver"),
 		FQuestTagComposer::MakeStateFact(Identity, EQuestStateLeaf::PendingGiver),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.PendingGiver")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.PendingGiver")));
 	TestEqual(TEXT("Deactivated"),
 		FQuestTagComposer::MakeStateFact(Identity, EQuestStateLeaf::Deactivated),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Deactivated")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Deactivated")));
 	TestEqual(TEXT("Blocked"),
 		FQuestTagComposer::MakeStateFact(Identity, EQuestStateLeaf::Blocked),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Blocked")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Blocked")));
 
 	TestEqual(TEXT("None input → None output"),
 		FQuestTagComposer::MakeStateFact(NAME_None, EQuestStateLeaf::Live), NAME_None);
 
 	// Tag already in state namespace passes through (no double-transition).
-	const FName AlreadyState = TEXT("SimpleQuest.QuestState.MyAsset.Step1");
+	const FName AlreadyState = TEXT("SimpleQuest.State.MyAsset.Step1");
 	TestEqual(TEXT("State-namespace input — leaf appended without re-rooting"),
 		FQuestTagComposer::MakeStateFact(AlreadyState, EQuestStateLeaf::Live),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Live")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Live")));
 	return true;
 }
 
@@ -119,10 +119,10 @@ bool FQuestTagComposer_MakeStateFact::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_SwapNamespacePrefix, "SimpleQuest.TagComposer.SwapNamespacePrefix", TestFlags)
 bool FQuestTagComposer_SwapNamespacePrefix::RunTest(const FString& Parameters)
 {
-	const FName Identity = TEXT("SimpleQuest.Quest.A.B");
+	const FName Identity = TEXT("SimpleQuest.Questline.A.B");
 	const FName State = FQuestTagComposer::SwapNamespacePrefix(Identity,
 		FQuestTagComposer::IdentityNamespace, FQuestTagComposer::StateNamespace);
-	TestEqual(TEXT("Identity → State"), State, FName(TEXT("SimpleQuest.QuestState.A.B")));
+	TestEqual(TEXT("Identity → State"), State, FName(TEXT("SimpleQuest.State.A.B")));
 
 	const FName BackToIdentity = FQuestTagComposer::SwapNamespacePrefix(State,
 		FQuestTagComposer::StateNamespace, FQuestTagComposer::IdentityNamespace);
@@ -145,14 +145,14 @@ bool FQuestTagComposer_SwapNamespacePrefix::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_LeafAndParent, "SimpleQuest.TagComposer.LeafAndParent", TestFlags)
 bool FQuestTagComposer_LeafAndParent::RunTest(const FString& Parameters)
 {
-	const FName Multi = TEXT("SimpleQuest.Quest.MyAsset.Step1.SubStep");
+	const FName Multi = TEXT("SimpleQuest.Questline.MyAsset.Step1.SubStep");
 
 	TestEqual(TEXT("GetLeafSegment trailing"),
 		FQuestTagComposer::GetLeafSegment(Multi), FString(TEXT("SubStep")));
 
 	FName Parent;
 	TestTrue(TEXT("TryGetParentTag succeeds"), FQuestTagComposer::TryGetParentTag(Multi, Parent));
-	TestEqual(TEXT("Parent matches"), Parent, FName(TEXT("SimpleQuest.Quest.MyAsset.Step1")));
+	TestEqual(TEXT("Parent matches"), Parent, FName(TEXT("SimpleQuest.Questline.MyAsset.Step1")));
 
 	// Round-trip: concatenation of parent + "." + leaf reproduces input.
 	const FString Recombined = Parent.ToString() + TEXT(".") + FQuestTagComposer::GetLeafSegment(Multi);
@@ -176,7 +176,7 @@ bool FQuestTagComposer_LeafAndParent::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_EnumerateAncestors, "SimpleQuest.TagComposer.EnumerateAncestors", TestFlags)
 bool FQuestTagComposer_EnumerateAncestors::RunTest(const FString& Parameters)
 {
-	const FName Deep = TEXT("SimpleQuest.Quest.A.B.C");
+	const FName Deep = TEXT("SimpleQuest.Questline.A.B.C");
 
 	// Walks all ancestors, leaf to root.
 	TArray<FName> Visited;
@@ -186,9 +186,9 @@ bool FQuestTagComposer_EnumerateAncestors::RunTest(const FString& Parameters)
 		return true;
 	});
 	TestEqual(TEXT("Ancestor count"), Visited.Num(), 4);
-	TestEqual(TEXT("Ancestor [0]"), Visited[0], FName(TEXT("SimpleQuest.Quest.A.B")));
-	TestEqual(TEXT("Ancestor [1]"), Visited[1], FName(TEXT("SimpleQuest.Quest.A")));
-	TestEqual(TEXT("Ancestor [2]"), Visited[2], FName(TEXT("SimpleQuest.Quest")));
+	TestEqual(TEXT("Ancestor [0]"), Visited[0], FName(TEXT("SimpleQuest.Questline.A.B")));
+	TestEqual(TEXT("Ancestor [1]"), Visited[1], FName(TEXT("SimpleQuest.Questline.A")));
+	TestEqual(TEXT("Ancestor [2]"), Visited[2], FName(TEXT("SimpleQuest.Questline")));
 	TestEqual(TEXT("Ancestor [3]"), Visited[3], FName(TEXT("SimpleQuest")));
 
 	// Short-circuit on first match.
@@ -196,10 +196,10 @@ bool FQuestTagComposer_EnumerateAncestors::RunTest(const FString& Parameters)
 	FQuestTagComposer::EnumerateAncestors(Deep, [&](FName Ancestor) -> bool
 	{
 		Partial.Add(Ancestor);
-		return Ancestor != FName(TEXT("SimpleQuest.Quest.A"));  // stop after this one
+		return Ancestor != FName(TEXT("SimpleQuest.Questline.A"));  // stop after this one
 	});
 	TestEqual(TEXT("Short-circuit visited count"), Partial.Num(), 2);
-	TestEqual(TEXT("Short-circuit last visited"), Partial.Last(), FName(TEXT("SimpleQuest.Quest.A")));
+	TestEqual(TEXT("Short-circuit last visited"), Partial.Last(), FName(TEXT("SimpleQuest.Questline.A")));
 	return true;
 }
 
@@ -211,7 +211,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_StripOutcomePrefix, "SimpleQu
 bool FQuestTagComposer_StripOutcomePrefix::RunTest(const FString& Parameters)
 {
 	{
-		FString Modern = TEXT("SimpleQuest.QuestOutcome.Combat.Victory");
+		FString Modern = TEXT("SimpleQuest.Outcome.Combat.Victory");
 		TestTrue(TEXT("Modern strip reports true"), FQuestTagComposer::TryStripOutcomePrefix(Modern));
 		TestEqual(TEXT("Modern stripped"), Modern, FString(TEXT("Combat.Victory")));
 	}
@@ -237,10 +237,10 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_FormatOutcomeForDisplay, "Sim
 bool FQuestTagComposer_FormatOutcomeForDisplay::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Modern multi-segment"),
-		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("SimpleQuest.QuestOutcome.Combat.BossDefeated")).ToString(),
+		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("SimpleQuest.Outcome.Combat.BossDefeated")).ToString(),
 		FString(TEXT("Combat: Boss Defeated")));
 	TestEqual(TEXT("Modern single-segment"),
-		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("SimpleQuest.QuestOutcome.Victory")).ToString(),
+		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("SimpleQuest.Outcome.Victory")).ToString(),
 		FString(TEXT("Victory")));
 	TestEqual(TEXT("Legacy multi-segment"),
 		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("Quest.Outcome.Combat.BossDefeated")).ToString(),
@@ -259,19 +259,19 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_FormatTagForDisplay, "SimpleQ
 bool FQuestTagComposer_FormatTagForDisplay::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Identity tag"),
-		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Quest.MyAsset.Step1")).ToString(),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Questline.MyAsset.Step1")).ToString(),
 		FString(TEXT("Quest.MyAsset.Step1")));
 	TestEqual(TEXT("State tag"),
-		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Live")).ToString(),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.State.MyAsset.Step1.Live")).ToString(),
 		FString(TEXT("QuestState.MyAsset.Step1.Live")));
 	TestEqual(TEXT("Outcome tag"),
-		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestOutcome.Combat.BossDefeated")).ToString(),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Outcome.Combat.BossDefeated")).ToString(),
 		FString(TEXT("QuestOutcome.Combat.BossDefeated")));
 	TestEqual(TEXT("PrereqRule tag"),
-		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestPrereqRule.MyRule")).ToString(),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.PrereqRule.MyRule")).ToString(),
 		FString(TEXT("QuestPrereqRule.MyRule")));
 	TestEqual(TEXT("ActivationGroup tag"),
-		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.QuestActivationGroup.MyGroup")).ToString(),
+		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.ActivationGroup.MyGroup")).ToString(),
 		FString(TEXT("QuestActivationGroup.MyGroup")));
 	TestEqual(TEXT("Legacy outcome (no PluginPrefix) passes through"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("Quest.Outcome.Combat.BossDefeated")).ToString(),
@@ -293,22 +293,22 @@ bool FQuestTagComposer_FormatTagForDisplay::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_PathFacts, "SimpleQuest.TagComposer.PathFacts", TestFlags)
 bool FQuestTagComposer_PathFacts::RunTest(const FString& Parameters)
 {
-	const FName Node = TEXT("SimpleQuest.Quest.MyAsset.Step1");
-	const FName Outcome = TEXT("SimpleQuest.QuestOutcome.Victory");
+	const FName Node = TEXT("SimpleQuest.Questline.MyAsset.Step1");
+	const FName Outcome = TEXT("SimpleQuest.Outcome.Victory");
 
 	TestEqual(TEXT("MakeNodePathFact strips outcome prefix"),
 		FQuestTagComposer::MakeNodePathFact(Node, Outcome),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Path.Victory")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Path.Victory")));
 
 	TestEqual(TEXT("MakeEntryPathFact strips outcome prefix"),
 		FQuestTagComposer::MakeEntryPathFact(Node, Outcome),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.EntryPath.Victory")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.EntryPath.Victory")));
 
 	// Bare path identity (dynamic placement): no prefix to strip.
 	const FName BarePath = TEXT("DynamicVictory");
 	TestEqual(TEXT("MakeNodePathFact passes bare identity"),
 		FQuestTagComposer::MakeNodePathFact(Node, BarePath),
-		FName(TEXT("SimpleQuest.QuestState.MyAsset.Step1.Path.DynamicVictory")));
+		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Path.DynamicVictory")));
 
 	// None path identity: None output.
 	TestEqual(TEXT("MakeNodePathFact None → None"),

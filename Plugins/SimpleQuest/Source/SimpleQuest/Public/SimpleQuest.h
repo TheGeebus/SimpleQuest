@@ -14,4 +14,5 @@ public:
 	virtual void ShutdownModule() override;
 
 	static void RegisterCompiledQuestTags();
+	static void RegisterAuthoredQuestTags();
 };

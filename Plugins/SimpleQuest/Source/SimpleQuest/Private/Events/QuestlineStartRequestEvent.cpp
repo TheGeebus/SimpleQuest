@@ -2,4 +2,4 @@
 
 #include "Events/QuestlineStartRequestEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestlineStartRequest, "SimpleQuest.QuestChannel.QuestlineStartRequest")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestlineStartRequest, "SimpleQuest.Channel.QuestlineStartRequest")

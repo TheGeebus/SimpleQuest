@@ -38,7 +38,7 @@ namespace FQuestCatchUpFanout
 	 *   - SubscribedTag is a known wrapper (UQuest container) with inner Steps: returns the wrapper plus all
 	 *     descendant Step / wrapper tags. Mirrors the signal bus's hierarchical broadcast — live events from
 	 *     descendants reach a parent-tag subscriber, so catch-up should reach those descendants too.
-	 *   - SubscribedTag is an unknown parent prefix (namespace, e.g. SimpleQuest.Questline.Procedural): returns
+	 *   - SubscribedTag is an unknown parent prefix (namespace, e.g. SimpleQuest.Questline.ine.Procedural): returns
 	 *     all known descendants. Closes the parent-prefix-subscription gap §1.1 was scoped to fix.
 	 *
 	 * Null / invalid inputs return empty without warning — defensive default for early-shutdown / late-construction

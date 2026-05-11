@@ -566,8 +566,8 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, false);
 
 	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
-	// branch. AnyOutcome → SimpleQuest.QuestState.<src>.Completed (source done, regardless of path). Named path →
-	// SimpleQuest.QuestState.<src>.Path.<leaf>.
+	// branch. AnyOutcome → SimpleQuest.State.<src>.Completed (source done, regardless of path). Named path →
+	// SimpleQuest.State.<src>.Path.<leaf>.
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
@@ -1034,7 +1034,7 @@ namespace PrereqExaminer_Internal
     	}
     	else
     	{
-    		// Tag-picker syntax: strip the SimpleQuest.QuestOutcome. root (present on static outcome-derived pin
+    		// Tag-picker syntax: strip the SimpleQuest.Outcome. root (present on static outcome-derived pin
     		// names), then split the remainder into category prefix and leaf so the widget can render the hierarchy
     		// de-emphasized above the leaf. Bare path identities (dynamic placements) lack the prefix and the dot -
     		// they fall through to the no-LastDot branch with the whole identity going to LeafPathLabel.

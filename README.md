@@ -1,10 +1,10 @@
 # SimpleQuest
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6-dea309?style=flat&logo=unrealengine)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6%20%7C%205.7-dea309?style=flat&logo=unrealengine)
 
 MIT licensed, source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data.
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
-This version is for Unreal Engine 5.6.
+This version targets Unreal Engine 5.6 and is verified compatible with 5.7 (no source changes required).
 
 Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
 
@@ -45,24 +45,29 @@ Quest and narrative system. Runtime + editor modules, with an optional Electroni
 
 - Tag-addressed, instance-based runtime. Every compiled quest node is a `UObject` addressed by gameplay tag. The manager subsystem, components, and signal bus all route by tag.
 - Pull-based prerequisite activation. Deferred nodes subscribe to WorldState changes per leaf tag. When all conditions are met the node activates — no polling, no ticking.
-- Hierarchical catch-up with comprehensive historical context. Givers, watchers, and `BindToQuestEvent` subscribers that register after quest events have already fired receive the current state immediately. Parent-prefix subscriptions (e.g. `SimpleQuest.Quest.MyArc`) fan out to every known descendant on bind — mirroring the live signal bus's hierarchical broadcast on the catch-up side. Recovered context includes the original `OutcomeTag`, prereq snapshot, activation-blocker structure, the giver actor that initiated the start, the activation provenance (giver-gate / cascade / external API / initial entry), and the merged-final activation params snapshot — sufficient to reconstitute live questline state, with save/load consuming the same data. All exposed via `UQuestStateSubsystem`, the rich-record half of the two-layer state architecture (WorldState answers "did it happen?"; the state subsystem answers "what's the structured detail?"). The manager subsystem orchestrates writes; the state subsystem owns the public read API. Future suite plugins will follow the same convention (`...StateSubsystem` = externally accessible fact registry with potentially limited write access).
+- Hierarchical catch-up with comprehensive historical context. Givers, watchers, and `BindToQuestEvent` subscribers that register after quest events have already fired receive the current state immediately. Parent-prefix subscriptions (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind — mirroring the live signal bus's hierarchical broadcast on the catch-up side. Recovered context includes the original `OutcomeTag`, prereq snapshot, activation-blocker structure, the giver actor that initiated the start, the activation provenance (giver-gate / cascade / external API / initial entry), and the merged-final activation params snapshot — sufficient to reconstitute live questline state, with save/load consuming the same data. All exposed via `UQuestStateSubsystem`, the rich-record half of the two-layer state architecture (WorldState answers "did it happen?"; the state subsystem answers "what's the structured detail?"). The manager subsystem orchestrates writes; the state subsystem owns the public read API. Future suite plugins will follow the same convention (`...StateSubsystem` = externally accessible fact registry with potentially limited write access).
 - Outcome-filtered watchers. A watcher component can filter which outcomes it responds to; empty filter = all outcomes.
 
 ---
 
 ## Requirements
 
-- Unreal Engine 5.6 or later
+- Unreal Engine 5.6 or 5.7
 - Visual Studio 2022 (Windows) or Xcode (Mac) with C++20 support enabled
+- [Git LFS](https://git-lfs.com/) installed locally (required for cloning — see below)
 
 ---
 
 ## Installation
 
-1. Copy the `SimpleCore` and `SimpleQuest` folders into your project's `Plugins/` directory.
-2. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
-3. Open the solution and build the **Development Editor** target.
-4. Enable both plugins in **Edit > Plugins** if they are not already active.
+> **Important — do not use GitHub's "Code → Download ZIP" button.** This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a Release artifact instead.
+
+1. Install [Git LFS](https://git-lfs.com/) and run `git lfs install` once.
+2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuestDemo.git` — LFS pointers resolve automatically during clone.
+3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config — compiled tags, designer-authored tags, and demo content all travel with the plugin folders.
+4. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
+5. Open the solution and build the **Development Editor** target.
+6. Enable both plugins in **Edit > Plugins** if they are not already active.
 
 To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"` (and `"SimpleCore"` where coordination APIs are consumed directly) to your `.uplugin` or `Build.cs` dependencies.
 
@@ -90,11 +95,13 @@ The Questline Outliner tab, Group Examiner, and Prereq Expression Examiner panel
 
 Hit the **Compile** button on the graph editor toolbar (or **Compile All** from the editor's main menu). The compiler generates runtime node instances and registers the required Gameplay Tags. Errors and warnings appear in the message log with clickable navigation to the offending node.
 
-### 4. Register at game start
+### 4. Activate at runtime
 
-Subclass `UQuestManagerSubsystem` (Blueprint or C++), add your compiled questline to the subclass's `InitialQuestlines` array, and register the subclass in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. The subsystem activates everything in `InitialQuestlines` on game start.
+Call `USimpleQuestBlueprintLibrary::StartQuestline(UQuestlineGraph*)` from any startup hook of your choosing — player pawn `BeginPlay`, GameMode `BeginPlay`, a custom GameInstance subsystem, a dialogue trigger, save-load rehydration, level-streaming callback, etc. One pattern serves static startup, procedural orchestration, and dynamic activation alike.
 
-For programmatic activation (e.g. from a dialogue trigger, save-load handler, or level streaming callback), call `ActivateQuestlineGraph(UQuestlineGraph*)` on the running subsystem instance.
+The plugin's demo content shows the canonical static-startup pattern: `BP_QuestPlayerExample::BeginPlay` calls `Start Questline(QL_Main)`. Drop that BP into your player pawn slot and the demo questline runs end-to-end.
+
+If you need custom orchestration logic (analytics, save integration, bespoke activation gating), subclass `UQuestManagerSubsystem` and register your subclass under **Project Settings > Plugins > Simple Quest > QuestManagerClass**. The default native class works without configuration.
 
 ### 5. Attach components to actors
 
@@ -206,7 +213,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 ### Reacting to Quest Events
 
-**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Quest.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventContext` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
+**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventContext` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
 
 **C++** — use the library template for direct handle-based subscriptions:
 
@@ -239,7 +246,9 @@ LogSimpleCore=Verbose
 
 Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
-**Compiled tags INI** — the compiler persists registered Gameplay Tags to `Config/SimpleQuest/CompiledTags.ini` for startup availability before the Asset Registry finishes loading. This file is auto-generated; manual edits are overwritten on each compile.
+**Compiled tags INI** — the compiler persists registered Gameplay Tags to `Plugins/SimpleQuest/Config/Tags/SimpleQuestCompiledTags.ini` for startup availability before the Asset Registry finishes loading. This file is auto-generated; manual edits are overwritten on each compile. It lives in the plugin folder so adopters inherit the demo's compiled tags by copying the plugin in, zero-config.
+
+**Authored tags INI** — the plugin ships a default tag set in `Plugins/SimpleQuest/Config/Tags/SimpleQuestAuthoredTags.ini` (the example activation groups, prereq rule groups, and named outcomes the demo content references). Your project's own gameplay tags should go in `<YourProject>/Config/Tags/*.ini` per standard UE convention — Unreal auto-scans the project's tag config directory. Edit the plugin's authored-tags file only if you're contributing to SimpleQuest itself; project-level edits won't be clobbered on plugin upgrade.
 
 ---
 
@@ -253,8 +262,8 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestResolutionSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
 | Q2 2026 | Stale Quest Tags Tier 2 — project-wide stale-tag scanning (Actor Blueprint defaults + unloaded levels including World Partition; editor panel Full Project Scan + headless commandlet with CI-friendly exit codes) | **Shipped** (v0.3.4) |
 | Q2 2026 | Stale Quest Tags polish + design captures (multi-row mass-clear with confirmation + atomic undo, sortable Level column, sub-millisecond per-actor PostUndo rescan, designer-facing log clarity pass; rewards-design + scope-tag system docs) | **Shipped** (v0.3.5) |
-| Q2 2026 | Quest lifecycle architecture pass + tag namespace consolidation — Activated / Enabled / GiveBlocked event split with structured blocker info; manager-orchestrator + state-registry pattern (`UQuestStateSubsystem`); `Active → Live` state rename; `BindToQuestEvent` exposes 9 lifecycle events with per-instance pin configurability; six designer-facing BP delegates on `UQuestGiverComponent`; `QueryQuestActivationBlockers` BP-callable query API; tag namespace migration to `SimpleQuest.*` root with `GameplayTagRedirects` for transparent migration; LinkedQuestline-prereq compilation bug fix | In development (v0.4.0) |
-| Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned |
+| Q2 2026 | Quest lifecycle architecture pass + tag namespace consolidation — Activated / Enabled / GiveBlocked event split with structured blocker info; manager-orchestrator + state-registry pattern (`UQuestStateSubsystem`); `Active → Live` state rename; `BindToQuestEvent` exposes 9 lifecycle events with per-instance pin configurability; six designer-facing BP delegates on `UQuestGiverComponent`; `QueryQuestActivationBlockers` BP-callable query API; tag namespace finalization to `SimpleQuest.Questline.* / .State.* / .Outcome.* / .PrereqRule.* / .ActivationGroup.* / .Channel.*` with `GameplayTagRedirects` for transparent migration; plugin-folder tag travel (compiled + authored tags live with the plugin for zero-config adoption); `InitialQuestlines` pathway eliminated in favor of `Start Questline` BP-callable; UE 5.7 compatibility verified; LinkedQuestline-prereq compilation bug fix | In development (v0.4.0) |
+| Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling. Primary deliverable for 0.5.0. | Planned (v0.5.0) |
 | Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
 | Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |
 | Q1 2027 | Expanded objective library — timed, escort, collection, and conversation objectives | Planned |

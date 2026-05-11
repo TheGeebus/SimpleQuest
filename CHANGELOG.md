@@ -38,7 +38,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.4.0] — TBD — Quest Lifecycle Architecture + Tag Namespace Consolidation
 
 A multi-theme architectural pass that lays the foundations for the
-0.6.0 save/load work by locking down tag identity, splitting
+0.5.0 save/load work by locking down tag identity, splitting
 orchestration from fact-registry read access, and rebuilding the
 quest event lifecycle around an Activated / Enabled / Started /
 GiveBlocked vocabulary that lets designer-side UI choose between
@@ -52,7 +52,7 @@ Three intertwined themes:
    plugin-introduced gameplay tag now lives under a single parent.
    Designers opening the Gameplay Tag Manager see a clean separation
    between plugin tags and game-authored tags. Locks tag string
-   identity before the save format freezes in 0.6.0.
+   identity before the save format freezes in 0.5.0.
 
 2. **Quest event lifecycle redesign** — `Activated` (execution reached
    this giver-gated quest, with prereq snapshot) and `Enabled`
@@ -81,16 +81,34 @@ matching the new lifecycle granularity.
 
 ### Tag namespace migration table
 
-Six namespace roots migrated:
+Six namespace roots migrated. The 0.4.0 pass landed in two stages — an
+initial `SimpleQuest.*` consolidation that kept "Quest" as a secondary
+prefix, then a Phase D pass that dropped the redundant "Quest" substring
+and renamed the identity prefix to "Questline" (matches `UQuestlineGraph`
+the asset class — the prior "Quest" identity was misleading because Step
+and Prereq Rule identities also lived under it). Adopters of pre-0.4.0
+content get redirects for both stages so the migration is one-shot, not
+two-step.
 
-| Was | Now |
+| Was (pre-0.4.0) | Final (0.4.0) |
 |---|---|
-| `Quest.*` (quest identifiers) | `SimpleQuest.Quest.*` |
-| `Quest.Outcome.*` (named outcomes) | `SimpleQuest.QuestOutcome.*` *(promoted out of Quest — outcomes are decorators, not lifecycle events)* |
-| `QuestState.*` (state facts) | `SimpleQuest.QuestState.*` |
-| `QuestPrereqRule.*` | `SimpleQuest.QuestPrereqRule.*` |
-| `QuestActivationGroup.*` | `SimpleQuest.QuestActivationGroup.*` |
-| `Quest.Channel.*` (signal-bus channels) | `SimpleQuest.QuestChannel.*` |
+| `Quest.*` (quest identifiers) | `SimpleQuest.Questline.*` |
+| `Quest.Outcome.*` (named outcomes) | `SimpleQuest.Outcome.*` *(promoted out of Quest — outcomes are decorators, not lifecycle events)* |
+| `QuestState.*` (state facts) | `SimpleQuest.State.*` |
+| `QuestPrereqRule.*` | `SimpleQuest.PrereqRule.*` |
+| `QuestActivationGroup.*` | `SimpleQuest.ActivationGroup.*` |
+| `Quest.Channel.*` (signal-bus channels) | `SimpleQuest.Channel.*` |
+
+Resulting authored tag shapes:
+
+```
+SimpleQuest.Questline.MyAsset.Step1
+SimpleQuest.State.MyAsset.Step1.Live
+SimpleQuest.Outcome.Combat.Victory
+SimpleQuest.PrereqRule.MyRule
+SimpleQuest.ActivationGroup.MyGroup
+SimpleQuest.Channel.Given
+```
 
 The 0.3.4 stale-tag commandlet was the pre-flight + post-flight
 verification surface — the post-rename scan came back **byte-identical**
@@ -119,15 +137,43 @@ gating on LinkedQuestline nodes now works as designers expect.
 
 #### `SimpleQuest.*` namespace as the new tag tree root
 - All plugin-introduced gameplay tags now live under a single
-  `SimpleQuest.*` parent. Picker filters set on `Categories="SimpleQuest.Quest"`,
-  `Categories="SimpleQuest.QuestOutcome"`, etc. scope correctly to the
-  new tree.
-- The compiler emits node identifier tags as `SimpleQuest.Quest.<QuestlineID>.<NodeName>`;
-  state facts as `SimpleQuest.QuestState.<...>.Live` /
+  `SimpleQuest.*` parent. Picker filters set on `Categories="SimpleQuest.Questline"`,
+  `Categories="SimpleQuest.Outcome"`, `Categories="SimpleQuest.PrereqRule"`,
+  `Categories="SimpleQuest.ActivationGroup"`, etc. scope correctly to
+  the new tree.
+- The compiler emits node identifier tags as `SimpleQuest.Questline.<QuestlineID>.<NodeName>`;
+  state facts as `SimpleQuest.State.<...>.Live` /
   `.Completed` / `.PendingGiver` / `.Deactivated` / `.Blocked`;
-  per-node outcome facts as `SimpleQuest.QuestState.<...>.Outcome.<leaf>`.
+  per-node outcome facts as `SimpleQuest.State.<...>.Outcome.<leaf>`.
 - `FNativeGameplayTag` registration uses `SimpleQuest.SimpleQuest`
   module + plugin names, consistent with the new top-level identity.
+
+#### Phase D — namespace finalization (secondary prefixes slimmed)
+- After the initial `SimpleQuest.*` consolidation, a second sweep
+  dropped the redundant `Quest` substring from secondary prefixes
+  and renamed the identity prefix from `Quest` to `Questline`. Five
+  `FQuestTagComposer` constants changed:
+  `QuestSubPrefix "Quest" → "Questline"`;
+  `StateSubPrefix "QuestState" → "State"`;
+  `OutcomeSubPrefix "QuestOutcome" → "Outcome"`;
+  `PrereqRuleSubPrefix "QuestPrereqRule" → "PrereqRule"`;
+  `ActivationGroupSubPrefix "QuestActivationGroup" → "ActivationGroup"`.
+- Twelve `UE_DEFINE_GAMEPLAY_TAG` macro values updated (10 channel +
+  2 outcome). C++ constant names unchanged (`Tag_Channel_QuestGiven`
+  still refers to the constant, but its value is now
+  `"SimpleQuest.Channel.Given"` rather than `"SimpleQuest.QuestChannel.Given"`).
+- ~20 `UPROPERTY meta=(Categories=...)` tag-picker filter strings
+  updated across objectives, nodes, and components.
+- `GetTagFilterString()` overrides in the four group node headers
+  point at the new namespace.
+- Designer-facing motivation: the `Quest` substring repetition was
+  semantic noise in the picker — every leaf showed up under a
+  double-Quest path. The slimmer namespace pairs with the upcoming
+  picker filter (Phase B, in development) to make common-node
+  authoring less visually busy. The `Questline` identity rename
+  also fixes a category mistake — `UQuestStep` /
+  `UQuestPrereqRuleNode` identities were living under a `Quest.*`
+  prefix that suggested they were quests.
 
 #### `GameplayTagRedirects` block in `Config/DefaultGameplayTags.ini`
 - Every namespace root has an explicit redirect:
@@ -451,6 +497,48 @@ not just the cascade source identity captured pre-bundle.
   compact rendering. Same populated-value filter gating preemptively
   applied to the Resolutions tab.
 
+#### Plugin tag travel — compiled + authored tags live with the plugin
+- `GetCompiledTagsIniPath()` returns
+  `Plugins/SimpleQuest/Config/Tags/SimpleQuestCompiledTags.ini`
+  (resolved via `IPluginManager::FindPlugin("SimpleQuest")->GetBaseDir()`),
+  not the prior project-side path
+  `<Project>/Config/SimpleQuest/CompiledTags.ini`. Adopters copying the
+  plugin folder now inherit the demo's compiled tags zero-config.
+- `MigrateLegacyTagsIni()` runs at module init and deletes any of the
+  prior two legacy locations
+  (`<Project>/Config/Tags/SimpleQuestCompiledTags.ini`,
+  `<Project>/Config/SimpleQuest/CompiledTags.ini`) — a one-shot upgrade
+  cleanup for existing adopters; new adopters never see either path.
+- Designer-authored default tag set ships in
+  `Plugins/SimpleQuest/Config/Tags/SimpleQuestAuthoredTags.ini`
+  (example `ActivationGroup` / `PrereqRule` / `Outcome` entries the
+  demo content references). `FSimpleQuest::RegisterAuthoredQuestTags`
+  on `OnLastChanceToAddNativeTags` parses the file line-by-line and
+  registers each entry via `AddNativeGameplayTag` — same pattern as
+  `RegisterCompiledQuestTags`. UE does not auto-scan plugin `Config/Tags/`
+  directories (only the project's), so explicit registration is
+  required.
+- `GameplayTagRedirects` live in the **project**'s `Config/DefaultGameplayTags.ini`,
+  not the plugin's. Plugin `LoadingPhase=Default` fires after the
+  GameplayTagsManager's initial tag tree construction, so redirects
+  placed in plugin config load too late to translate BP CDO / `.uasset`
+  references at startup. Redirects are an adopter-side migration concern,
+  not plugin runtime infrastructure — fresh post-0.4.0 adopters don't
+  need them at all (they author against the final namespace from day
+  one). The redirect block is provided as a reference for upgrading
+  pre-0.4.0 content.
+
+#### UE 5.7 compatibility verified
+- `DefaultBuildSettings` in `Source/SimpleQuestDemo.Target.cs` and
+  `Source/SimpleQuestDemoEditor.Target.cs` switched from `V5` to
+  `BuildSettingsVersion.Latest`. `Latest` is an auto-tracking sentinel
+  that resolves to `V5` under UE 5.6 and `V6` under UE 5.7+ — forward
+  and backward compatible without hardcoding a version-tied value.
+- Engine version stays 5.6 as the source-of-truth target; 5.7 pull-
+  forward verified via temporary `.uproject` bump + full build + PIE
+  walkthrough on demo content. No source changes required for the
+  pull-forward beyond the `BuildSettingsVersion` switch.
+
 #### Internal — compiler + runtime infrastructure refactors (items 2a + 2b)
 
 Pre-flight for the data-layer migrations:
@@ -645,15 +733,25 @@ Pre-flight for the data-layer migrations:
 ### Known Limitations
 
 - **Inert legacy tag string fragments persist in some questline
-  `.uasset` binaries.** Functionally inert — `CompiledTags.ini` is
-  fully `SimpleQuest.*` (524 entries, 0 legacy), runtime tag
-  registry is fully migrated, post-flight scan matches pre-flight
-  byte-for-byte. The leftover bytes are in stale FName tables or
+  `.uasset` binaries.** Functionally inert — `SimpleQuestCompiledTags.ini`
+  is fully `SimpleQuest.*` under the post-Phase-D namespace, runtime
+  tag registry is fully migrated, clean-test-project verification
+  (cloned plugin folder dropped into a fresh project) confirms demo
+  runs zero-config. The leftover bytes are in stale FName tables or
   serialization buffers (UE asset serialization sometimes appends
   rather than replaces). They `grep` but don't affect runtime
   behavior; will compress out via natural authoring activity over
   time. BP CDO assets cleaned fully via `ResavePackages`; questline
   binary fragments are aesthetic, not load-bearing.
+
+- **GitHub "Download ZIP" produces broken assets.** This repository
+  uses Git LFS for `.uasset` and `.umap` binaries. GitHub's archive
+  endpoint (the green "Code → Download ZIP" button) does not resolve
+  LFS pointers — the download contains ~130-byte stub files instead
+  of the real binaries. Adopters must `git clone` with `git-lfs`
+  installed, OR use the zip artifact attached to the corresponding
+  GitHub Release once Release-based distribution lands. See the
+  README's Installation section for the recommended path.
 
 ### Internal — audit playbook updates
 

@@ -12,6 +12,7 @@
 #include "QuestGiverComponent.generated.h"
 
 
+struct FQuestEndedEvent;
 struct FQuestGiverRegisteredEvent;
 struct FQuestDeactivatedEvent;
 struct FQuestEnabledEvent;
@@ -176,7 +177,16 @@ private:
 	void RegisterQuestGiver();
 	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	void OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	void OnQuestEndedEventReceived(FGameplayTag Channel, const FQuestEndedEvent& Event);
 	void OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+
+	/**
+	 * Shared body for OnQuestDeactivatedEventReceived and OnQuestEndedEventReceived. Clears internal tracking
+	 * for Channel, unsubscribes any pending give-blocked subscription, and broadcasts OnQuestDeactivated as
+	 * the unified "quest left the giver's offering surface" signal.
+	 */
+	void HandleQuestLeftGiverSurface(FGameplayTag Channel);
+	
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
 public:

@@ -14,6 +14,7 @@
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestDisabledEvent.h"
+#include "Events/QuestEndedEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
@@ -113,6 +114,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestStartedEventReceived);
 			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestEndedEventReceived);
 			SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
 		}
 
@@ -172,6 +174,22 @@ void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, con
 }
 
 void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
+{
+	HandleQuestLeftGiverSurface(Channel);
+}
+
+void UQuestGiverComponent::OnQuestEndedEventReceived(FGameplayTag Channel, const FQuestEndedEvent& Event)
+{
+	// Only act when the quest is still in this giver's tracked state — i.e., it left without going through the
+	// usual Started path (force-resolved while PendingGiver, save-rehydration of an already-resolved quest,
+	// etc.). Completed-after-Started quests already cleared their state on OnQuestStartedEventReceived; the
+	// RemoveTag calls below would be no-ops for those, but the early-return saves a delegate broadcast.
+	if (!ActivatedQuestTags.HasTag(Channel) && !EnabledQuestTags.HasTag(Channel)) return;
+
+	HandleQuestLeftGiverSurface(Channel);
+}
+
+void UQuestGiverComponent::HandleQuestLeftGiverSurface(FGameplayTag Channel)
 {
 	ActivatedQuestTags.RemoveTag(Channel);
 	EnabledQuestTags.RemoveTag(Channel);

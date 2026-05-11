@@ -2,6 +2,7 @@
 
 #include "Components/QuestTargetComponent.h"
 #include "SimpleQuestLog.h"
+#include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveInteracted.h"
 #include "Events/QuestObjectiveKilled.h"
@@ -68,8 +69,14 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
     // Guard against duplicate activation for the same step
     if (ActiveStepEndHandles.Contains(CanonicalTag)) return;
 
-    FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetDeactivated);
-    ActiveStepEndHandles.Add(CanonicalTag, Handle);
+    // Subscribe to BOTH end-event types — completion and deactivation are independent signal paths and either
+    // should end the target's active state. ActiveStepEndHandles tracks the completion-side handle (one slot
+    // per Channel); the deactivation-side handle is tracked separately so each can be unsubscribed cleanly
+    // when its corresponding event fires.
+    FDelegateHandle EndedHandle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetStepCompleted);
+    FDelegateHandle DeactivatedHandle = SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetStepDeactivated);
+    ActiveStepEndHandles.Add(CanonicalTag, EndedHandle);
+    ActiveStepDeactivatedHandles.Add(CanonicalTag, DeactivatedHandle);
 
     UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s, Canonical: %s : Owner: %s"),
         *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
@@ -77,7 +84,17 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
     Execute_SetActivated(this, true);
 }
 
-void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQuestEndedEvent& Event)
+void UQuestTargetComponent::OnTargetStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
+{
+    OnTargetStepEnded(Channel);
+}
+
+void UQuestTargetComponent::OnTargetStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
+{
+    OnTargetStepEnded(Channel);
+}
+
+void UQuestTargetComponent::OnTargetStepEnded(FGameplayTag Channel)
 {
     if (SignalSubsystem)
     {
@@ -85,12 +102,21 @@ void UQuestTargetComponent::OnTargetDeactivated(FGameplayTag Channel, const FQue
         {
             SignalSubsystem->UnsubscribeMessage(Channel, *Handle);
         }
+        if (FDelegateHandle* Handle = ActiveStepDeactivatedHandles.Find(Channel))
+        {
+            SignalSubsystem->UnsubscribeMessage(Channel, *Handle);
+        }
         ActiveStepEndHandles.Remove(Channel);
+        ActiveStepDeactivatedHandles.Remove(Channel);
     }
-    
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetDeactivated : Channel: %s : Owner: %s"), *Channel.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-    // Only visually deactivate when no steps remain active
+    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetStepEnded : Channel: %s : Owner: %s"),
+        *Channel.ToString(),
+        *GetOwner()->GetClass()->GetFName().ToString());
+
+    // Only visually deactivate when no other watched steps remain active. Both subscription maps are kept in
+    // sync (each (Channel, end-event-type) pair adds and removes together), so either map's emptiness is a
+    // sufficient check — but using ActiveStepEndHandles keeps a single canonical source of truth.
     if (ActiveStepEndHandles.IsEmpty())
     {
         Execute_SetActivated(this, false);

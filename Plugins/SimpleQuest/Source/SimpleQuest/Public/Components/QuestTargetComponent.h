@@ -12,6 +12,7 @@
 #include "QuestTargetComponent.generated.h"
 
 
+struct FQuestDeactivatedEvent;
 struct FQuestStartedEvent;
 struct FQuestEndedEvent;
 class UQuestManagerSubsystem;
@@ -50,10 +51,22 @@ protected:
 	virtual void BeginPlay() override;
 
 	virtual void OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
-	virtual void OnTargetDeactivated(FGameplayTag Channel, const FQuestEndedEvent& Event);
+
+	/** Step-completion handler. Routes to OnTargetStepEnded so completion + deactivation share the same
+	 *  "step no longer active" cleanup path. */
+	virtual void OnTargetStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event);
+
+	/** Step-deactivation handler. Routes to OnTargetStepEnded for shared cleanup. Subscribed alongside
+	 *  the completion handler because targets disable on either kind of end — completion AND mid-flight
+	 *  interruption both indicate "this step is no longer active and this target shouldn't respond." */
+	virtual void OnTargetStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+
+protected:
 	
-	// Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
-	// The subsystem publishes step events on the step tag; any target configured with that tag activates.
+	/**
+	 * Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
+	 * The subsystem publishes step events on the step tag; any target configured with that tag activates.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "SimpleQuest.Questline"))
 	FGameplayTagContainer StepTagsToWatch;
 
@@ -62,10 +75,24 @@ protected:
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 	
 private:
+
+	/**
+	 * Shared cleanup body for both completion and deactivation routes. Unsubscribes the step end handle for
+	 * Channel; if no other watched steps remain active, calls SetActivated(false).
+	 */
+	void OnTargetStepEnded(FGameplayTag Channel);
+	
 	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
 	
-	// Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously
+	/** Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously */
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
+	
+	/**
+	 * Per-step deactivation subscription handle. Parallel to ActiveStepEndHandles; subscribed at the same time
+	 * to FQuestDeactivatedEvent on the same Channel.
+	 */
+	TMap<FGameplayTag, FDelegateHandle> ActiveStepDeactivatedHandles;
+	
 
 public:
 	/**

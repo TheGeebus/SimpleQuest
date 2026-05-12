@@ -308,6 +308,21 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         SkippedDuplicateAuthoredGuid);
 }
 
+FGameplayTag UQuestManagerSubsystem::ResolveToCanonicalTag(FGameplayTag InputTag) const
+{
+    if (!InputTag.IsValid()) return FGameplayTag();
+
+    if (TObjectPtr<UQuestNodeBase> const* InstancePtr = LoadedNodeInstances.Find(InputTag.GetTagName()))
+    {
+        if (*InstancePtr)
+        {
+            const FGameplayTag Canonical = (*InstancePtr)->GetContextualTag();
+            if (Canonical.IsValid()) return Canonical;
+        }
+    }
+    return InputTag;
+}
+
 void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
 {
     if (!Existing || !Incoming) return;
@@ -807,13 +822,14 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         // re-publish Enabled when leaves satisfy mid-PendingGiver. Block is intentionally NOT pre-checked — Block-on-
         // giver-gated quests still publishes the activation events so the giver stays visible/interactive.
         //
-        // State writes and watch registrations are keyed by the instance's CANONICAL ContextualTag, not the cascade's
-        // NodeTag (which may be an alias-key form after the AuthoredGuid-dedup merge in RegisterQuestlineGraph).
-        // SetQuestPendingGiver / UpdateQuestPrereqStatus / RegisterEnablementWatch must all align with the canonical
-        // form the state subsystem's queries alias-walk to — writing under an alias form leaves the canonical fact
-        // missing, and QueryQuestActivationBlockers returns NotPendingGiver despite the gate having fired. Mirrors
-        // the convention SetQuestLive / SetQuestResolved already follow at their respective call sites.
-        const FGameplayTag CanonicalTag = Instance->GetContextualTag().IsValid() ? Instance->GetContextualTag() : NodeTag;
+        // State writes and watch registrations route the cascade's NodeTag through ResolveToCanonicalTag so every
+        // call below targets the canonical ContextualTag the state subsystem's queries alias-walk to. Under
+        // AuthoredGuid-dedup the cascade's NodeTag may be an alias-key form; writing under that form leaves the
+        // canonical fact missing and QueryQuestActivationBlockers returns NotPendingGiver despite the gate having
+        // fired. Matches the canonical-resolution pattern used by the request-side BP handlers (HandleResolveRequest,
+        // HandleNodeDeactivationRequest, etc.) and the Node->GetContextualTag() convention used by SetQuestLive /
+        // SetQuestResolved at their respective call sites.
+        const FGameplayTag CanonicalTag = ResolveToCanonicalTag(NodeTag);
         const FName CanonicalTagName = CanonicalTag.GetTagName();
 
         Instance->bWasGiverGated = true;
@@ -1199,11 +1215,16 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
         ActivateNodeByTag(Tag, EQuestActivationProvenance::ChainCascade);
     }
     
-    // Cascade deactivation to nodes wired from the Deactivated output to a Deactivate input.
+    // Cascade deactivation to nodes wired from the Deactivated output to a Deactivate input. Each compile-time
+    // FName is in the deactivating node's compile-context perspective; under AuthoredGuid-dedup the target's
+    // canonical may sit under a different perspective (whichever asset registered first), making the FName an
+    // alias-key form. ResolveToCanonicalTag converts to the perspective queries alias-walk to so SetQuestDeactivated's
+    // fact write lands where IsDeactivated lookups can find it.
     for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
     {
         const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
-        if (TargetTag.IsValid()) SetQuestDeactivated(TargetTag, Event.Source);
+        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+        if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, Event.Source);
     }
 }
 
@@ -1350,7 +1371,10 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
 
 void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQuestBlockRequestEvent& Event)
 {
-    const FGameplayTag QuestTag = Event.GetQuestTag();
+    // Resolve input to canonical so the Blocked fact is written at the perspective queries alias-walk to find.
+    // Without this, an alias-form input writes State.<alias>.Blocked which no query touches, and the quest
+    // appears unblocked everywhere despite the request succeeding.
+    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
@@ -1380,7 +1404,8 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 
 void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)
 {
-    const FGameplayTag QuestTag = Event.GetQuestTag();
+    // Resolve input to canonical so the Blocked-fact clear lands at the perspective the write went to.
+    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Blocked);
@@ -1409,7 +1434,8 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
 void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQuestResolveRequestEvent& Event)
 {
-    const FGameplayTag QuestTag = Event.GetQuestTag();
+    // Resolve input to canonical so IsTerminal and SetQuestResolved target the perspective state facts live at.
+    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     // Override guard — skip if already in a terminal state unless designer explicitly opts in. Default-false
@@ -1721,8 +1747,11 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
 
 void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event)
 {
-    FGameplayTag EventTag = Event.GetQuestTag();
-    if (EventTag.IsValid()) SetQuestDeactivated(EventTag, Event.Source);
+    // Resolve input to canonical so SetQuestDeactivated's IsActiveLifecycle / fact-write paths target the
+    // perspective state facts were actually written under. BP callers (DeactivateQuest helper) may pass any
+    // perspective form; state lives at the canonical ContextualTag of the underlying instance.
+    const FGameplayTag CanonicalTag = ResolveToCanonicalTag(Event.GetQuestTag());
+    if (CanonicalTag.IsValid()) SetQuestDeactivated(CanonicalTag, Event.Source);
 }
 
 int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) const

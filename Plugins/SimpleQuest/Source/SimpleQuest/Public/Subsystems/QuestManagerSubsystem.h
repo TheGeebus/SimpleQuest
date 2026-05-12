@@ -137,6 +137,23 @@ protected:
 	TMap<FGuid, FName> LoadedInstancesByAuthoredNodeGuid;
 
 	/**
+	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
+	 * for state facts and registry entries. Layer 2 dedup populates LoadedNodeInstances under the canonical key
+	 * AND every alias key (all pointing at the same instance), so any-perspective input here resolves the same
+	 * instance, and the instance's ContextualTag is always the canonical regardless of which key was used to
+	 * look it up.
+	 *
+	 * Request-side BP APIs (DeactivateQuest, BlockQuest, ClearBlockedQuest, ResolveQuest) receive user-authored
+	 * tags that may be any perspective. State facts are written and queried at the canonical, so handlers MUST
+	 * resolve before acting — otherwise IsActiveLifecycle / IsBlocked / IsTerminal queries miss, and AddFact
+	 * writes leak to alias-perspective fact tags that no query will ever read.
+	 *
+	 * Pass-through behavior: returns InputTag unchanged if not in LoadedNodeInstances (legacy, external,
+	 * pre-registration, or unregistered tag). Callers must still handle invalid-tag fallthroughs.
+	 */
+	FGameplayTag ResolveToCanonicalTag(FGameplayTag InputTag) const;
+
+	/**
 	 * Folds a deduped (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
 	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
 	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance

@@ -3,8 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include <concepts>
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameplayTagContainer.h"
+#include "Engine/AssetManager.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveContext.h"
@@ -42,6 +44,14 @@ class UQuestStep;
 class USignalSubsystem;
 class UWorldStateSubsystem;
 
+
+/**
+ * UObject-derived constraint for the soft-loading helpers below. TSoftObjectPtr<T> and TSoftClassPtr<T>
+ * already require T to derive from UObject under the hood, but surfacing that as a concept gives clean
+ * compile errors at the caller rather than cascading failures inside the template body.
+ */
+template<typename T>
+concept CSoftLoadable = std::derived_from<T, UObject>;
 
 /**
  * This class manages quests and quest givers, loading and unloading quests as needed. It handles the registration of actors
@@ -210,6 +220,78 @@ protected:
 	 */
 	UPROPERTY()
 	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
+	
+	/**
+	 * Async-load a soft asset reference with weak-bound completion callback. Hot path (already-loaded
+	 * asset; SoftPtr.Get() non-null) calls OnComplete synchronously on the same frame. Cold path
+	 * schedules an async load via FStreamableManager and invokes OnComplete on load completion. Null
+	 * SoftPtr fires OnComplete synchronously with nullptr so the contract is uniform regardless of input.
+	 *
+	 * WeakBindContext is the UObject the callback is weakly bound to — if it tears down mid-load,
+	 * OnComplete becomes a no-op rather than a use-after-free. Typically `this` when called from a
+	 * UObject method.
+	 *
+	 * Post-load nullptr is tolerated (load failure, deleted-but-still-referenced asset); OnComplete
+	 * receives the result either way and is responsible for any null check.
+	 */
+	template<CSoftLoadable TAsset>
+	static void AsyncLoadAndActivate(
+		UObject* WeakBindContext,
+		const TSoftObjectPtr<TAsset>& SoftPtr,
+		TFunction<void(TAsset*)> OnComplete)
+	{
+		if (SoftPtr.IsNull())
+		{
+			if (OnComplete) OnComplete(nullptr);
+			return;
+		}
+		if (TAsset* HotResult = SoftPtr.Get())
+		{
+			if (OnComplete) OnComplete(HotResult);
+			return;
+		}
+		FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+		const TSoftObjectPtr<TAsset> SoftCapture = SoftPtr;
+		Streamable.RequestAsyncLoad(
+			SoftPtr.ToSoftObjectPath(),
+			FStreamableDelegate::CreateWeakLambda(WeakBindContext,
+				[SoftCapture, OnCompleteCapture = MoveTemp(OnComplete)]()
+				{
+					if (OnCompleteCapture) OnCompleteCapture(SoftCapture.Get());
+				}));
+	}
+
+	/**
+	 * TSoftClassPtr counterpart of AsyncLoadAndActivate. Same hot/cold path split; OnComplete receives
+	 * the resolved UClass* (nullptr-tolerant on load failure). Asset-typed return is replaced with
+	 * UClass*; the caller can cast back to TSubclassOf<TClass> if needed.
+	 */
+	template<CSoftLoadable TClass>
+	static void AsyncLoadAndActivateClass(
+		UObject* WeakBindContext,
+		const TSoftClassPtr<TClass>& SoftClassPtr,
+		TFunction<void(UClass*)> OnComplete)
+	{
+		if (SoftClassPtr.IsNull())
+		{
+			if (OnComplete) OnComplete(nullptr);
+			return;
+		}
+		if (UClass* HotResult = SoftClassPtr.Get())
+		{
+			if (OnComplete) OnComplete(HotResult);
+			return;
+		}
+		FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+		const TSoftClassPtr<TClass> SoftCapture = SoftClassPtr;
+		Streamable.RequestAsyncLoad(
+			SoftClassPtr.ToSoftObjectPath(),
+			FStreamableDelegate::CreateWeakLambda(WeakBindContext,
+				[SoftCapture, OnCompleteCapture = MoveTemp(OnComplete)]()
+				{
+					if (OnCompleteCapture) OnCompleteCapture(SoftCapture.Get());
+				}));
+	}
 
 private:	
 	/**

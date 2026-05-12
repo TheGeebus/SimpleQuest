@@ -271,6 +271,19 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             if (UQuestStep* Step = Cast<UQuestStep>(Instance))
             {
                 Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
+                
+                // Pre-warm target classes so HandleOnNodeStarted's hot-path .Get() skips the LoadSynchronous
+                // stall when the step activates. The engine's loaded-asset cache keeps async-loaded UClasses
+                // resident — the completion callback is a no-op because the load itself is the side effect we
+                // care about. Cold fallback at HandleOnNodeStarted handles the edge case where activation
+                // outraces the pre-warm (rare with normal graph activation cadence).
+                for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
+                {
+                    if (!SoftClass.IsNull() && SoftClass.Get() == nullptr)
+                    {
+                        AsyncLoadAndActivateClass<AActor>(this, SoftClass, [](UClass* Loaded) {});
+                    }
+                }
             }
 
             // Push structural info to the state subsystem. Single lookup serves both the KnownQuests registration
@@ -615,15 +628,27 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             {
                 for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
                 {
-                    // LoadSynchronous at step activation — pay the load cost once per target class when the step goes live,
-                    // keep runtime event-dispatch checks fast by caching the loaded UClass in ClassFilteredSteps (TMultiMap<FGameplayTag, UClass*>).
-                    if (UClass* Loaded = SoftClass.LoadSynchronous())
+                    // Hot path: target class was pre-warmed at RegisterQuestlineGraph time via
+                    // AsyncLoadAndActivateClass, so .Get() typically returns the loaded class without
+                    // stalling the activation frame. Cold fallback covers the edge case where the step
+                    // activates before the pre-warm completes; verbose log makes pre-warm gaps visible
+                    // in traces so they can be addressed at the registration site if they recur.
+                    UClass* Loaded = SoftClass.Get();
+                    if (!Loaded)
+                    {
+                        UE_LOG(LogSimpleQuest, Verbose,
+                            TEXT("HandleOnNodeStarted: '%s' target class '%s' not pre-warmed; falling back to LoadSynchronous"),
+                            *Node->GetContextualTag().ToString(),
+                            *SoftClass.ToSoftObjectPath().ToString());
+                        Loaded = SoftClass.LoadSynchronous();
+                    }
+                    if (Loaded)
                     {
                         ClassFilteredSteps.Add(Node->GetContextualTag(), Loaded);
                     }
                 }
 
-                // Subscribe once to global channel if this is the first class-filtered step
+                // Subscribe once to global channel if this is the first class-filtered step.
                 if (!ClassBridgeHandle.IsValid())
                 {
                     ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTarget, this, &UQuestManagerSubsystem::CheckClassObjectives);
@@ -1584,36 +1609,21 @@ void UQuestManagerSubsystem::HandleQuestlineStartRequest(FGameplayTag Channel, c
         return;
     }
 
-    // Hot path: already-loaded graph activates immediately.
-    if (UQuestlineGraph* AlreadyLoaded = Event.Graph.Get())
-    {
-        UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' already loaded, activating immediately"), *AlreadyLoaded->GetName());
-        ActivateQuestlineGraph(AlreadyLoaded);
-        return;
-    }
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and activate"), *Event.Graph.ToString());
 
-    // Cold path: async load via FStreamableManager, activate on completion. CreateWeakLambda binds the lambda
-    // to this UObject's weak pointer so a manager Deinitialize mid-load makes the callback a no-op rather than
-    // a crash. Pattern prototype for 0.5.0's runtime asset loading pass.
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' cold, async-loading"), *Event.Graph.ToString());
-
-    FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
-    const TSoftObjectPtr<UQuestlineGraph> SoftGraph = Event.Graph;
-    StreamableManager.RequestAsyncLoad(
-        SoftGraph.ToSoftObjectPath(),
-        FStreamableDelegate::CreateWeakLambda(this, [this, SoftGraph]()
+    AsyncLoadAndActivate<UQuestlineGraph>(this, Event.Graph,
+        [this](UQuestlineGraph* Graph)
         {
-            if (UQuestlineGraph* Graph = SoftGraph.Get())
+            if (Graph)
             {
-                UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: async-load complete for '%s', activating"), *Graph->GetName());
+                UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
                 ActivateQuestlineGraph(Graph);
             }
             else
             {
-                UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: async-load completed but graph still null"));
+                UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: load completed but graph still null"));
             }
-        })
-    );
+        });
 }
 
 void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()

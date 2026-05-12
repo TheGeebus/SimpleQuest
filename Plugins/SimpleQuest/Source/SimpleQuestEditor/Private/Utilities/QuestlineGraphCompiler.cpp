@@ -136,8 +136,13 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// Compose the root asset's identity tag (SimpleQuest.Questline.<AssetSegment>) so any Exit visited at
 	// the root asset's root scope can attribute its graph-resolution publish to this asset. Save/restore
 	// around LinkedQuestline recursion (below) so inner asset Exits attribute to the linked asset instead.
-	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(
-		FQuestTagComposer::MakeIdentityTag(TagPrefix, {}), false);
+	// Add to AllCompiledQuestTags so RegisterCompiledQuestTags expands the asset-identity state-leaf facts
+	// (SimpleQuest.State.<AssetSegment>.{Live, Completed, ...}) at module init — required for the runtime
+	// PublishGraphResolutions WSV write to land at a registered fact tag rather than no-op on an unregistered
+	// one.
+	const FName RootAssetIdentityName = FQuestTagComposer::MakeIdentityTag(TagPrefix, {});
+	AllCompiledQuestTags.Add(RootAssetIdentityName);
+	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(RootAssetIdentityName, false);
 
     // Refresh outcome pins on all step nodes so that changes to outcomes on an objective class are reflected without
     // the designer having to touch ObjectiveClass again.
@@ -514,9 +519,13 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 				// Save/restore CurrentAssetIdentityTag around the linked inner CompileGraph so any Exits
 				// inside the linked asset attribute their graph-resolution publish to the linked asset's
 				// identity tag (not the outer asset's). Symmetric save/restore with CurrentInnerContainerTag.
+				// Linked asset identity also added to AllCompiledQuestTags so its state-leaf facts get
+				// registered at module init even when the inner asset isn't auto-loaded standalone — outer
+				// asset's compile is the sole source of registration in that scenario.
 				const FGameplayTag PreviousAssetIdentity = CurrentAssetIdentityTag;
-				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(
-					FQuestTagComposer::MakeIdentityTag(LinkedAssetPrefix, {}), false);
+				const FName LinkedAssetIdentityName = FQuestTagComposer::MakeIdentityTag(LinkedAssetPrefix, {});
+				AllCompiledQuestTags.AddUnique(LinkedAssetIdentityName);
+				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(LinkedAssetIdentityName, false);
 
 				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
 

@@ -260,19 +260,19 @@ bool FQuestTagComposer_FormatTagForDisplay::RunTest(const FString& Parameters)
 {
 	TestEqual(TEXT("Identity tag"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Questline.MyAsset.Step1")).ToString(),
-		FString(TEXT("Quest.MyAsset.Step1")));
+		FString(TEXT("Questline.MyAsset.Step1")));
 	TestEqual(TEXT("State tag"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.State.MyAsset.Step1.Live")).ToString(),
-		FString(TEXT("QuestState.MyAsset.Step1.Live")));
+		FString(TEXT("State.MyAsset.Step1.Live")));
 	TestEqual(TEXT("Outcome tag"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.Outcome.Combat.BossDefeated")).ToString(),
-		FString(TEXT("QuestOutcome.Combat.BossDefeated")));
+		FString(TEXT("Outcome.Combat.BossDefeated")));
 	TestEqual(TEXT("PrereqRule tag"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.PrereqRule.MyRule")).ToString(),
-		FString(TEXT("QuestPrereqRule.MyRule")));
+		FString(TEXT("PrereqRule.MyRule")));
 	TestEqual(TEXT("ActivationGroup tag"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("SimpleQuest.ActivationGroup.MyGroup")).ToString(),
-		FString(TEXT("QuestActivationGroup.MyGroup")));
+		FString(TEXT("ActivationGroup.MyGroup")));
 	TestEqual(TEXT("Legacy outcome (no PluginPrefix) passes through"),
 		FQuestTagComposer::FormatTagForDisplay(TEXT("Quest.Outcome.Combat.BossDefeated")).ToString(),
 		FString(TEXT("Quest.Outcome.Combat.BossDefeated")));

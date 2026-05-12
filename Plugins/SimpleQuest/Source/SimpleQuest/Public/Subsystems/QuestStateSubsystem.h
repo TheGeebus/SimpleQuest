@@ -357,4 +357,30 @@ private:
 	 * subscribers receive the fact-mutation events on their bound alias channels.
 	 */
 	TMap<FGameplayTag, TArray<FGameplayTag>> AssetScopedAliasTagsByContextualTag;
+
+	/**
+	 * Calls Op once per perspective for CanonicalTag: the canonical itself, then each AssetScopedAliasTag the
+	 * alias index has registered for it. Iteration is silent when no aliases exist (top-level content). Used by
+	 * the multi-write mutators (RecordResolution / RecordEntry / UpdateQuestPrereqStatus / ClearQuestPrereqStatus)
+	 * so registry maps stay symmetric with the WorldState multi-perspective fact-write model and the bus's
+	 * multi-channel publish — query and iteration from any perspective surface the same data without alias-
+	 * walking at every read site.
+	 */
+	template<typename TFunc>
+	void ForEachPerspective(FGameplayTag CanonicalTag, TFunc&& Op) const
+	{
+		if (!CanonicalTag.IsValid()) return;
+		Op(CanonicalTag);
+
+		if (const TArray<FGameplayTag>* Aliases = AssetScopedAliasTagsByContextualTag.Find(CanonicalTag))
+		{
+			for (const FGameplayTag& AliasTag : *Aliases)
+			{
+				if (AliasTag.IsValid() && AliasTag != CanonicalTag)
+				{
+					Op(AliasTag);
+				}
+			}
+		}
+	}
 };

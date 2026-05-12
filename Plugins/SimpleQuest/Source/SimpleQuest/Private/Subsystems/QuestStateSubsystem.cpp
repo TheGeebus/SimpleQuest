@@ -273,33 +273,36 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 {
 	if (!QuestTag.IsValid()) return;
 
-	FQuestResolutionRecord& Record = QuestResolutions.FindOrAdd(QuestTag);
-	FQuestResolutionEntry& Entry = Record.History.Emplace_GetRef();
-	Entry.OutcomeTag = OutcomeTag;
-	Entry.ResolutionTime = ResolutionTime;
-	Entry.Source = Source;
-
-	// Index maintenance for HasResolvedWith. Skipped when OutcomeTag is invalid (the "resolve without specifying an
-	// outcome" case via the BP ResolveQuest helper). Those entries appear in History but don't contribute to outcome-
-	// keyed lookups. TSet handles deduplication so repeat resolutions with the same outcome don't bloat the set.
-	if (OutcomeTag.IsValid())
+	// Multi-perspective registry write: append the resolution entry at the canonical AND every AssetScopedAlias.
+	// Symmetric with WorldState's multi-perspective fact write and the bus's multi-channel publish — registry
+	// iterators (QSV, future telemetry) see the resolution at every perspective without per-row alias-walking.
+	// F.3's event-keyed dedup gate in the cascade ensures one logical RecordResolution call per logical event;
+	// the splay across perspectives is a single write fanned out, not multiple cascade-driven calls.
+	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
-		ResolvedOutcomesByQuest.FindOrAdd(QuestTag).Add(OutcomeTag);
-	}
+		FQuestResolutionRecord& Record = QuestResolutions.FindOrAdd(Perspective);
+		FQuestResolutionEntry& Entry = Record.History.Emplace_GetRef();
+		Entry.OutcomeTag = OutcomeTag;
+		Entry.ResolutionTime = ResolutionTime;
+		Entry.Source = Source;
+
+		// Index maintenance for HasResolvedWith. Skipped when OutcomeTag is invalid (the "resolve without
+		// specifying an outcome" case via the BP ResolveQuest helper). TSet handles deduplication so repeat
+		// resolutions with the same outcome don't bloat the set.
+		if (OutcomeTag.IsValid())
+		{
+			ResolvedOutcomesByQuest.FindOrAdd(Perspective).Add(OutcomeTag);
+		}
+	});
 
 	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
 		*OutcomeTag.ToString(),
 		Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"),
-		Record.History.Num(),
+		QuestResolutions.FindOrAdd(QuestTag).History.Num(),
 		ResolutionTime);
 
-	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag. PublishWithAliases wraps the bus's
-	// multi-channel publish primitive (F.2) — one event instance addressable under all aliases; subscribers bound
-	// to any perspective receive once with matched-channel attribution in the callback's first arg. Distinct from
-	// FQuestEndedEvent (manager-published in ChainToNextNodes for graph-driven completions); this event fires for
-	// every resolution path — graph chain, external ResolveQuest, future save rehydration — so Leaf_Resolution
-	// prereq leaves and any other subscribers reach a single canonical mechanism.
+	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag...
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
@@ -320,22 +323,23 @@ void UQuestStateSubsystem::RecordEntry(
 {
 	if (!QuestTag.IsValid()) return;
 
-	FQuestEntryRecord& Record = QuestEntries.FindOrAdd(QuestTag);
-	FQuestEntryArrival& Entry = Record.History.Emplace_GetRef();
-	Entry.SourceQuestTag = SourceQuestTag;
-	Entry.IncomingOutcomeTag = IncomingOutcomeTag;
-	Entry.EntryTime = EntryTime;
-	Entry.Provenance = Provenance;
-	Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
-	Entry.PathIdentity = PathIdentity;
-
-	// Index maintenance for HasEnteredWith. Skipped when IncomingOutcomeTag is invalid (defensive — the cascade
-	// path always carries a valid outcome tag in current code, but the registry stays robust against future paths
-	// that might call RecordEntry without one).
-	if (IncomingOutcomeTag.IsValid())
+	// Multi-perspective registry write — see RecordResolution for the symmetry rationale.
+	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
-		EnteredOutcomesByQuest.FindOrAdd(QuestTag).Add(IncomingOutcomeTag);
-	}
+		FQuestEntryRecord& Record = QuestEntries.FindOrAdd(Perspective);
+		FQuestEntryArrival& Entry = Record.History.Emplace_GetRef();
+		Entry.SourceQuestTag = SourceQuestTag;
+		Entry.IncomingOutcomeTag = IncomingOutcomeTag;
+		Entry.EntryTime = EntryTime;
+		Entry.Provenance = Provenance;
+		Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
+		Entry.PathIdentity = PathIdentity;
+
+		if (IncomingOutcomeTag.IsValid())
+		{
+			EnteredOutcomesByQuest.FindOrAdd(Perspective).Add(IncomingOutcomeTag);
+		}
+	});
 
 	const AActor* GiverActor = ActivationParamsSnapshot.ActivationSource;
 	UE_LOG(LogSimpleQuest, Log,
@@ -349,7 +353,7 @@ void UQuestStateSubsystem::RecordEntry(
 		ActivationParamsSnapshot.TargetActors.Num(),
 		ActivationParamsSnapshot.TargetClasses.Num(),
 		ActivationParamsSnapshot.NumElementsRequired,
-		Record.History.Num(),
+		QuestEntries.FindOrAdd(QuestTag).History.Num(),
 		EntryTime);
 
 	// Broadcast on the destination quest's tag channel + each AssetScopedAliasTag. PrereqLeafSubscription consumers
@@ -499,22 +503,28 @@ void UQuestStateSubsystem::RegisterQuestTag(FGameplayTag QuestTag)
 void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status)
 {
 	if (!QuestTag.IsValid()) return;
-	CachedPrereqStatus.Add(QuestTag, Status);
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::UpdateQuestPrereqStatus : '%s' bSatisfied=%d (leaves=%d)"),
-		*QuestTag.ToString(), Status.bSatisfied ? 1 : 0, Status.Leaves.Num());
 
+	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
+	{
+		CachedPrereqStatus.Add(Perspective, Status);
+	});
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::UpdateQuestPrereqStatus : '%s' bSatisfied=%d (leaves=%d)"),
+		*QuestTag.ToString(),
+		Status.bSatisfied ? 1 : 0,
+		Status.Leaves.Num());
 	OnAnyRegistryChanged.Broadcast();
 }
 
 void UQuestStateSubsystem::ClearQuestPrereqStatus(FGameplayTag QuestTag)
 {
-	if (CachedPrereqStatus.Remove(QuestTag) > 0)
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::ClearQuestPrereqStatus : '%s' cleared"),
-			*QuestTag.ToString());
+	if (!QuestTag.IsValid()) return;
 
-		OnAnyRegistryChanged.Broadcast();
-	}
+	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
+	{
+		CachedPrereqStatus.Remove(Perspective);
+	});
+
+	OnAnyRegistryChanged.Broadcast();
 }
 
 UWorldStateSubsystem* UQuestStateSubsystem::ResolveWorldState() const

@@ -33,6 +33,7 @@ struct FInstancedStruct;
 
 enum class EDeactivationSource : uint8;
 enum class EQuestActivationProvenance : uint8;
+enum class EQuestStateLeaf : uint8;
 
 class UQuestlineGraph;
 class UQuestNodeBase;
@@ -154,6 +155,25 @@ protected:
 	FGameplayTag ResolveToCanonicalTag(FGameplayTag InputTag) const;
 
 	/**
+	 * Adds (or removes) a state-leaf fact at the canonical perspective AND every AssetScopedAliasTag the
+	 * instance carries, so direct WorldState->HasFact queries from any perspective find the fact. Mirrors
+	 * the multi-channel publish model the bus uses for events — facts and events both ride every
+	 * perspective so consumers don't need to alias-walk at every read site.
+	 *
+	 * InputTag is canonicalized internally for safety; callers may pass any-perspective form. State-fact
+	 * tags for every alias perspective are pre-registered by FSimpleQuest::RegisterCompiledQuestTags (the
+	 * compile-time CompiledQuestTags list carries both contextual and alias FNames), so RequestGameplayTag
+	 * resolves cleanly at each perspective.
+	 *
+	 * Add/Remove must stay symmetric — each Add bumps the ref-count by N (1 + alias count); the paired
+	 * Remove decrements by N. The boolean idempotency guards in SetQuest* check canonical to prevent
+	 * double-bumps under cascade convergence — they don't need per-perspective awareness because canonical
+	 * is the source-of-truth for "is this state already set".
+	 */
+	void AddStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
+	void RemoveStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
+
+	/**
 	 * Folds a deduped (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
 	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
 	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance
@@ -243,6 +263,18 @@ private:
 	 * WorldState fact when the derivation result differs.
 	 */
 	void DeriveContainerLive(FGameplayTag ContainerTag);
+
+	/**
+	 * Walks Step's ancestor wrappers and re-derives each one's Live fact. Covers both the Step's own
+	 * compile-perspective ancestors (AncestorContainerTags) AND foreign-perspective ancestors derived
+	 * from each AssetScopedAliasTag's parent prefix chain. The second walk is required because
+	 * AuthoredGuid dedup keeps only the canonical's compile data; outer-asset wrappers unique to a
+	 * different compile (e.g. a LinkedQuestline wrapper in QL_Main that contextualizes QL_ActOne content
+	 * where ActOne registered first) are absent from AncestorContainerTags and would never derive
+	 * without alias-prefix fan-out. IsContainerTag bounds the walk to known wrappers — non-container
+	 * prefix segments (asset roots, namespace prefixes) are skipped.
+	 */
+	void DeriveAllAncestorContainersForStep(UQuestStep* Step);
 	
 	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
@@ -372,7 +404,7 @@ private:
 	 * Quest container publishes FQuestEndedEvent on its own tag when its inner chain reaches an Exit —
 	 * the asset-level equivalent uses the resolution registry's standard publish path.
 	 */
-	void PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;
+	void PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

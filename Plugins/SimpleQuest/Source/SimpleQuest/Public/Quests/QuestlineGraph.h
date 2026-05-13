@@ -10,6 +10,7 @@
 class FNativeGameplayTag;
 #endif
 
+struct FGameplayTag;
 class UQuestNodeBase;
 class UEdGraph;
 
@@ -97,15 +98,24 @@ private:
     TMap<FName, TObjectPtr<UQuestNodeBase>> CompiledNodes;
     
     /**
-     * True if any of the compiled node instances in CompiledNodes is a UActivationGroupListenerNode. Stamped by the compiler
-     * after registration. Surfaced via GetAssetRegistryTags as "HasActivationGroupListener" so the manager can scan the
-     * asset registry at startup and pre-register listener-bearing graphs — their listeners need to subscribe at game start
-     * regardless of whether the parent asset is in InitialQuestlines. Inherits via linked-questline inlining: a wrapper
-     * asset whose linked inner contains a listener carries the flag too (the inner's listener instance ends up in the
-     * wrapper's CompiledNodes).
+     * GroupTags this graph's UActivationGroupListenerNode instances subscribe to. Stamped by the compiler after
+     * registration. Surfaced via GetAssetRegistryTags so the manager can build an inverted GroupTag→graphs index at
+     * startup and async-load listener graphs reachable from any currently-loaded graph's setters. Inherits via
+     * LinkedQuestline inlining: a wrapper asset whose linked inner contains a listener carries the inner's listener
+     * tags too (the inner's listener instances end up in the wrapper's CompiledNodes with their original GroupTags
+     * preserved — ActivationGroup tags are authored, not contextualized).
      */
     UPROPERTY()
-    bool bHasActivationGroupListener = false;
+    TArray<FGameplayTag> ListenerGroupTags;
+
+    /**
+     * GroupTags this graph's UActivationGroupSetterNode instances publish on. Stamped by the compiler post-registration.
+     * Surfaced via GetAssetRegistryTags so the manager can match this graph's outward signal surface against the global
+     * listener-graph index when this graph registers — driving the reachability-walk that async-loads any listener graph
+     * reachable from one of these tags. Inherits via LinkedQuestline inlining for the same reason as ListenerGroupTags.
+     */
+    UPROPERTY()
+    TArray<FGameplayTag> OutwardSetterGroupTags;
     
     /**
      * Identifier used as the Gameplay Tag scope for all quests in this questline. Must be unique across the project. Defaults

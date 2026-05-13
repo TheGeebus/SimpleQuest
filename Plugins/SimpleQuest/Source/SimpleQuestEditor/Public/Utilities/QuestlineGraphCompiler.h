@@ -145,12 +145,15 @@ private:
 	FGameplayTag CurrentAssetIdentityTag;
 
 	/**
-	 * Count of UActivationGroupListenerNode instances created during this Compile() — accumulates across the
-	 * full recursive compile tree (so a wrapper asset whose linked inner contains a listener picks up the
-	 * count too via inlining). Reset to 0 at Compile() start; consumed at end of Compile() to stamp
-	 * UQuestlineGraph::bHasActivationGroupListener. Drives the manager's startup auto-load scan.
+	 * Per-compile accumulators for ActivationGroup signal-side dependencies. Populated during CompileNode-
+	 * Registration's setter / listener walks; stamped onto UQuestlineGraph::OutwardSetterGroupTags + Listener-
+	 * GroupTags at the end of Compile(). Drives the manager's reachability-walked async-load: when a graph
+	 * registers, the manager walks the graph's outward setter tags, finds any other graph with a listener on
+	 * the same tag, and async-loads it. Replaces the broader "auto-load all listener-bearing graphs at
+	 * startup" pattern with reachability-driven lazy loading.
 	 */
-	int32 CompiledListenerCount = 0;
+	TSet<FGameplayTag> CompiledSetterGroupTags;
+	TSet<FGameplayTag> CompiledListenerGroupTags;
 	
 	/**
 	 * Post-compile pass — populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and

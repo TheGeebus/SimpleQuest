@@ -293,7 +293,7 @@ protected:
 				}));
 	}
 
-private:	
+private:
 	/**
 	 * Assembles a fully populated FQuestEventContext from a node instance.
 	 * Stage 1: copies NodeInfo from the node.
@@ -372,18 +372,6 @@ private:
 	void RegisterGiversFromAssetRegistry();
 	
 	/**
-	 * Scans the asset registry for UQuestlineGraph assets flagged HasActivationGroupListener=true (stamped by the
-	 * compiler whenever a graph compiles to ≥1 UActivationGroupListenerNode instance), sync-loads each, and calls
-	 * RegisterQuestlineGraph on it. The asset's Start node is NOT fired — the goal is to bring the listener
-	 * instances online (CachedGameInstance set, OnRegisteredWithManager called, signal subscriptions live) without
-	 * activating the rest of the graph. Called once from Initialize (synchronously if AR is ready; via AR's
-	 * OnFilesLoaded delegate otherwise) so every project-wide listener is armed before any caller can publish a
-	 * setter event. Idempotent across re-entry: RegisterQuestlineGraph's per-node LoadedNodeInstances.Contains
-	 * dedup makes a second call on the same graph a no-op.
-	 */
-	void AutoLoadListenerBearingGraphs();
-
-	/**
 	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize
 	 * from the asset registry. A node whose tag is in this set waits for a give event rather than activating immediately.
 	 */
@@ -393,7 +381,41 @@ private:
 	FDelegateHandle ClassBridgeHandle;
 
 	void CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
+	
+	/**
+	 * Inverted index built at Initialize from each UQuestlineGraph asset's ListenerGroupTags AR metadata:
+	 * GroupTag → SoftObjectPaths of every graph whose listeners subscribe to that tag. Drives the reachability-walked
+	 * async-load: when RegisterQuestlineGraph runs for a graph, the graph's OutwardSetterGroupTags get matched against
+	 * this index, and any listed listener-graph not yet loaded is async-loaded + registered (which in turn cascades
+	 * through its own setters).
+	 */
+	TMap<FGameplayTag, TArray<FSoftObjectPath>> GraphsByListenerGroupTag;
 
+	/**
+	 * Cycle / dedup guard for the reachability cascade. Marked at WarmReachableGraphs entry (before async dispatch)
+	 * so recursive RegisterQuestlineGraph → WarmReachableGraphs chains can detect already-in-flight loads and skip.
+	 * Tracks SoftObjectPaths rather than UQuestlineGraph* pointers so a graph counts as loaded the moment its load is
+	 * scheduled, not just when it finishes — prevents N parallel async-loads for the same target during a fan-in.
+	 */
+	TSet<FSoftObjectPath> KnownLoadedGraphPaths;
+
+	/**
+	 * Scans the asset registry for UQuestlineGraph assets and builds GraphsByListenerGroupTag from each asset's
+	 * ListenerGroupTags AR metadata. Called once from Initialize (synchronously if AR is ready; via OnFilesLoaded
+	 * delegate otherwise). Loads no assets itself — the index just maps tag → SoftObjectPath, and async-loading
+	 * happens lazily during reachability walks triggered by RegisterQuestlineGraph. Replaces the previous
+	 * AutoLoadListenerBearingGraphs which sync-loaded every listener-bearing graph at startup.
+	 */
+	void BuildListenerGroupIndex();
+
+	/**
+	 * Walks a just-registered graph's OutwardSetterGroupTags, looks up matching listener-graphs in the global
+	 * GraphsByListenerGroupTag index, and async-loads + registers any that aren't already loaded. Cascades
+	 * recursively as each newly-loaded graph's own setters identify further reachable listener graphs.
+	 * KnownLoadedGraphPaths prevents cycles and parallel-fan-in over-loads.
+	 */
+	void WarmReachableGraphs(UQuestlineGraph* Graph);
+	
 
 	/*------------------------------------------------------------------------------------------------------------------
 	 * Deferred Completion

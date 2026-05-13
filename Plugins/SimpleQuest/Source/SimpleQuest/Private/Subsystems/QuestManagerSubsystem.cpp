@@ -87,18 +87,18 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     
     UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
 
-    // Bring all listener-bearing graphs online before any StartQuestline caller can publish a setter event. AR is
-    // typically loaded by the time game-instance subsystems initialize (editor PIE always; cooked starts almost
-    // always — cooked AR is serialized as a single early-loaded blob). The OnFilesLoaded fallback covers the
-    // narrow cooked-cold-start window where AR is still streaming when this fires.
+    // Build the GroupTag → listener-graphs inverted index from AR metadata. Async-loading itself is deferred to
+    // reachability walks during RegisterQuestlineGraph — no graph gets loaded at this point unless something else
+    // (e.g. BP_QuestPlayerExample::BeginPlay → StartQuestline) explicitly activates it, which then cascades through
+    // WarmReachableGraphs as its outward setters identify further reachable listener graphs.
     IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
     if (AR.IsLoadingAssets())
     {
-        AR.OnFilesLoaded().AddUObject(this, &UQuestManagerSubsystem::AutoLoadListenerBearingGraphs);
+        AR.OnFilesLoaded().AddUObject(this, &UQuestManagerSubsystem::BuildListenerGroupIndex);
     }
     else
     {
-        AutoLoadListenerBearingGraphs();
+        BuildListenerGroupIndex();
     }
 }
 
@@ -327,6 +327,11 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         NewlyRegistered,
         SkippedAlreadyRegistered,
         SkippedDuplicateAuthoredGuid);
+
+    // Reachability walk: identify listener-graphs reachable from this graph's outward setters and async-load them.
+    // Cascade-naturally: each newly-loaded graph's RegisterQuestlineGraph triggers its own WarmReachableGraphs, fan-
+    // ning out until the closure is reached. KnownLoadedGraphPaths gates cycles + parallel-fan-in.
+    WarmReachableGraphs(Graph);
 }
 
 FGameplayTag UQuestManagerSubsystem::ResolveToCanonicalTag(FGameplayTag InputTag) const
@@ -1687,7 +1692,7 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
 #endif
 }
 
-void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs()
+void UQuestManagerSubsystem::BuildListenerGroupIndex()
 {
     IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
 
@@ -1698,37 +1703,84 @@ void UQuestManagerSubsystem::AutoLoadListenerBearingGraphs()
     TArray<FAssetData> Assets;
     AR.GetAssets(Filter, Assets);
 
-    int32 PreRegisteredCount = 0;
+    int32 IndexedAssetCount = 0;
+    int32 IndexedTagCount = 0;
     for (const FAssetData& Asset : Assets)
     {
-        // The compiler stamps HasActivationGroupListener=true on assets whose CompiledNodes contains a
-        // UActivationGroupListenerNode instance (locally authored or inlined via LinkedQuestline). Assets that
-        // never compiled this flag (pre-Step-A content not yet recompiled) read missing/false and get skipped.
         FString TagValue;
-        if (!Asset.GetTagValue(TEXT("HasActivationGroupListener"), TagValue)) continue;
-        if (TagValue != TEXT("true")) continue;
+        if (!Asset.GetTagValue(TEXT("ListenerGroupTags"), TagValue) || TagValue.IsEmpty()) continue;
 
-        UQuestlineGraph* Graph = Cast<UQuestlineGraph>(Asset.GetAsset());
-        if (!Graph)
+        const FSoftObjectPath AssetPath(Asset.GetSoftObjectPath());
+
+        TArray<FString> TagStrings;
+        TagValue.ParseIntoArray(TagStrings, TEXT("|"), true);
+
+        for (const FString& TagStr : TagStrings)
         {
-            UE_LOG(LogSimpleQuest, Warning,
-                TEXT("AutoLoadListenerBearingGraphs: failed to load '%s' — skipping"),
-                *Asset.GetObjectPathString());
-            continue;
+            const FGameplayTag GroupTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
+            if (!GroupTag.IsValid()) continue;
+
+            GraphsByListenerGroupTag.FindOrAdd(GroupTag).AddUnique(AssetPath);
+            ++IndexedTagCount;
         }
-
-        RegisterQuestlineGraph(Graph);
-        ++PreRegisteredCount;
-
-        UE_LOG(LogSimpleQuest, Log,
-            TEXT("AutoLoadListenerBearingGraphs: pre-registered '%s' for cross-graph listener subscription"),
-            *Graph->GetName());
+        ++IndexedAssetCount;
     }
 
-    UE_LOG(LogSimpleQuest, Verbose,
-        TEXT("AutoLoadListenerBearingGraphs: scanned %d UQuestlineGraph asset(s); pre-registered %d listener-bearing graph(s)"),
+    UE_LOG(LogSimpleQuest, Log,
+        TEXT("BuildListenerGroupIndex: scanned %d UQuestlineGraph asset(s); indexed %d listener-bearing graph(s) under %d (GroupTag, graph) entries"),
         Assets.Num(),
-        PreRegisteredCount);
+        IndexedAssetCount,
+        IndexedTagCount);
+}
+
+void UQuestManagerSubsystem::WarmReachableGraphs(UQuestlineGraph* Graph)
+{
+    if (!Graph) return;
+
+    // Mark this graph as loaded BEFORE walking — guards against the (rare) case where a listener graph's own setters
+    // loop back to this graph, which would otherwise re-trigger an async-load for an already-resident asset.
+    KnownLoadedGraphPaths.Add(FSoftObjectPath(Graph));
+
+    for (const FGameplayTag& SetterTag : Graph->OutwardSetterGroupTags)
+    {
+        const TArray<FSoftObjectPath>* ListenerGraphs = GraphsByListenerGroupTag.Find(SetterTag);
+        if (!ListenerGraphs) continue;
+
+        for (const FSoftObjectPath& ListenerPath : *ListenerGraphs)
+        {
+            if (KnownLoadedGraphPaths.Contains(ListenerPath)) continue;
+
+            // Pre-mark to prevent a parallel fan-in (multiple WarmReachableGraphs invocations during the same cascade
+            // tick triggering N async-loads for the same target). The actual load + RegisterQuestlineGraph happens in
+            // the completion callback; subsequent WarmReachableGraphs walks see the path already in the set and skip.
+            KnownLoadedGraphPaths.Add(ListenerPath);
+
+            UE_LOG(LogSimpleQuest, Log,
+                TEXT("WarmReachableGraphs: '%s' setter on '%s' targets listener graph '%s' — async-loading"),
+                *Graph->GetName(),
+                *SetterTag.ToString(),
+                *ListenerPath.ToString());
+
+            const TSoftObjectPtr<UQuestlineGraph> SoftListener(ListenerPath);
+            AsyncLoadAndActivate<UQuestlineGraph>(this, SoftListener,
+                [this, ListenerPath](UQuestlineGraph* ListenerGraph)
+                {
+                    if (ListenerGraph)
+                    {
+                        UE_LOG(LogSimpleQuest, Log,
+                            TEXT("WarmReachableGraphs: load complete for '%s' — registering"),
+                            *ListenerGraph->GetName());
+                        RegisterQuestlineGraph(ListenerGraph);  // Recursively cascades via its own WarmReachableGraphs.
+                    }
+                    else
+                    {
+                        UE_LOG(LogSimpleQuest, Warning,
+                            TEXT("WarmReachableGraphs: load returned null for '%s'"),
+                            *ListenerPath.ToString());
+                    }
+                });
+        }
+    }
 }
 
 void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)

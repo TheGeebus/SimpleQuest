@@ -1,6 +1,8 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Quests/QuestlineGraph.h"
+
+#include "GameplayTagContainer.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
 #if !WITH_EDITOR
@@ -47,10 +49,31 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
 
-	// Drives the manager's startup auto-load scan: any asset flagged true here gets pre-registered (without firing
-	// its Start node) so its UActivationGroupListenerNode instances can subscribe to their group signal channels at
-	// game start, regardless of whether the asset is in InitialQuestlines. Stamped by the compiler post-registration.
-	Context.AddTag(FAssetRegistryTag(TEXT("HasActivationGroupListener"), bHasActivationGroupListener ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
+	// ListenerGroupTags + OutwardSetterGroupTags drive the manager's reachability-walked async-load. Manager builds
+	// an inverted GroupTag→graphs index from ListenerGroupTags at startup; when a graph registers, the manager walks
+	// the graph's OutwardSetterGroupTags and async-loads matching listener graphs. Pipe-separated tag-name lists,
+	// same shape as CompiledQuestTags.
+	if (!ListenerGroupTags.IsEmpty())
+	{
+		TArray<FString> TagStrings;
+		TagStrings.Reserve(ListenerGroupTags.Num());
+		for (const FGameplayTag& Tag : ListenerGroupTags)
+		{
+			TagStrings.Add(Tag.GetTagName().ToString());
+		}
+		Context.AddTag(FAssetRegistryTag(TEXT("ListenerGroupTags"), FString::Join(TagStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
+
+	if (!OutwardSetterGroupTags.IsEmpty())
+	{
+		TArray<FString> TagStrings;
+		TagStrings.Reserve(OutwardSetterGroupTags.Num());
+		for (const FGameplayTag& Tag : OutwardSetterGroupTags)
+		{
+			TagStrings.Add(Tag.GetTagName().ToString());
+		}
+		Context.AddTag(FAssetRegistryTag(TEXT("OutwardSetterGroupTags"), FString::Join(TagStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
 }
 
 FText UQuestlineGraph::GetDisplayName() const

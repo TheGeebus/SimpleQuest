@@ -121,8 +121,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	GetterEdNodeByGroupAndDest.Empty();
 	ImmediateContainerByTag.Empty();
 	CurrentInnerContainerTag = NAME_None;
-	CompiledListenerCount = 0;
-
+	CompiledSetterGroupTags.Reset();
+	CompiledListenerGroupTags.Reset();
+	
 	InGraph->Modify();
 	InGraph->CompiledNodes.Empty(); 
 	InGraph->EntryNodeTags.Empty();
@@ -176,8 +177,9 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 			InGraph->CompiledNodeAliases.Add(Pair);
 		}
 	}
-	InGraph->bHasActivationGroupListener = CompiledListenerCount > 0;
-
+	InGraph->OutwardSetterGroupTags = CompiledSetterGroupTags.Array();
+	InGraph->ListenerGroupTags = CompiledListenerGroupTags.Array();
+	
     // Detect renames via GUID bridge
     DetectAndRecordTagRenames(InGraph, OldTagsByGuid);
 
@@ -684,13 +686,15 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
         UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node);
         if (!Setter) continue;
 
-        if (!Setter->GroupTag.IsValid())
-        {
-            AddWarning(FString::Printf(TEXT("[%s] An Activation Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
-            continue;
-        }
+    	if (!Setter->GroupTag.IsValid())
+    	{
+    		AddWarning(FString::Printf(TEXT("[%s] An Activation Group Setter has no GroupTag set and will be skipped."), *TagPrefix), Setter);
+    		continue;
+    	}
 
-        UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
+    	CompiledSetterGroupTags.Add(Setter->GroupTag);
+
+    	UActivationGroupSetterNode* Inst = NewObject<UActivationGroupSetterNode>(RootGraph);
     	Inst->GroupTag = Setter->GroupTag;
     	Inst->AuthoredNodeGuid = Setter->QuestGuid;
 
@@ -717,15 +721,16 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
             continue;
         }
 
-        UActivationGroupListenerNode* Inst = NewObject<UActivationGroupListenerNode>(RootGraph);
+    	CompiledListenerGroupTags.Add(Getter->GroupTag);
+
+    	UActivationGroupListenerNode* Inst = NewObject<UActivationGroupListenerNode>(RootGraph);
     	Inst->GroupTag = Getter->GroupTag;
     	Inst->AuthoredNodeGuid = Getter->QuestGuid;
 
-        const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s__%s"), *Node->NodeGuid.ToString(), *TagPrefix));
-        UtilityNodeKeyMap.Add(Node, UtilKey);
-        AllCompiledNodes.Add(UtilKey, Inst);
-        AllCompiledEditorNodes.Add(UtilKey, Node);
-    	++CompiledListenerCount;
+    	const FName UtilKey = FName(*FString::Printf(TEXT("Util_%s__%s"), *Node->NodeGuid.ToString(), *TagPrefix));
+    	UtilityNodeKeyMap.Add(Node, UtilKey);
+    	AllCompiledNodes.Add(UtilKey, Inst);
+    	AllCompiledEditorNodes.Add(UtilKey, Node);
 
     	// Listeners are NOT registered as graph entry routes — subscription happens at instance lifetime via
     	// OnRegisteredWithManager (the always-armed semantic). The previous OutGetterEntryTags.Add line caused

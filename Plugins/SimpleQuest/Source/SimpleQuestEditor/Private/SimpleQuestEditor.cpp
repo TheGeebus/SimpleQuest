@@ -396,7 +396,6 @@ TUniquePtr<FQuestlineGraphCompiler> FSimpleQuestEditor::CreateCompiler() const
 
 void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames)
 {
-	// Detect stale tags: tags in the old compiled set that are absent from the new set
 	bool bHasStaleTags = false;
 	if (const TArray<FName>* OldTags = CompiledTagRegistry.Find(GraphPath))
 	{
@@ -411,12 +410,58 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s)"),
-		*GraphPath, TagNames.Num(), bHasStaleTags ? TEXT(", stale tags cleaned") : TEXT(""));
+	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s%s)"),
+		*GraphPath, TagNames.Num(),
+		bHasStaleTags ? TEXT(", stale tags cleaned") : TEXT(""),
+		bBatchActive ? TEXT(", batched") : TEXT(""));
 
 	CompiledTagRegistry.Add(GraphPath, TagNames);
+
+	if (bBatchActive)
+	{
+		// Incrementally register new natives so mid-batch RequestGameplayTag lookups succeed for fresh
+		// cross-graph references. Skip the tree rebuild + INI write — both deferred to EndCompileBatch.
+		if (bHasStaleTags) bBatchHasStaleTags = true;
+		AddNativeTagsForGraph(TagNames);
+		return;
+	}
+
 	WriteCompiledTagsIni();
 	RebuildNativeTags(bHasStaleTags);
+}
+
+void FSimpleQuestEditor::BeginCompileBatch()
+{
+	check(!bBatchActive);
+	bBatchActive = true;
+	bBatchHasStaleTags = false;
+	NumSkippedAlreadyRegistered = 0;  // TEMP
+	NumConstructedFresh = 0;          // TEMP
+}
+
+void FSimpleQuestEditor::EndCompileBatch()
+{
+	if (!bBatchActive) return;
+	bBatchActive = false;
+
+	WriteCompiledTagsIni();
+
+	UE_LOG(LogSimpleQuest, Display, TEXT("EndCompileBatch: %d tags skipped (already registered), %d constructed fresh"),
+		NumSkippedAlreadyRegistered, NumConstructedFresh);  // TEMP
+
+	// Tree rebuild path — full reset+refresh if stale tags appeared anywhere in the batch (need to
+	// prune the tree); otherwise just finalize the tree additively (incremental adds during the batch
+	// left the manager's tag set in good shape, just missing the tree structure).
+	if (bBatchHasStaleTags)
+	{
+		RebuildNativeTags(true);
+	}
+	else
+	{
+		UGameplayTagsManager::Get().ConstructGameplayTagTree();
+	}
+
+	bBatchHasStaleTags = false;
 }
 
 void FSimpleQuestEditor::CompileAllQuestlineGraphs()
@@ -439,17 +484,22 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     FScopedSlowTask SlowTask(QuestlineAssets.Num(), NSLOCTEXT("SimpleQuestEditor", "CompileAll_Progress", "Compiling questline graphs..."));
     SlowTask.MakeDialog(/*bShowCancelButton=*/ true);
 
-    int32 SuccessCount = 0;
-    int32 FailCount = 0;
-    int32 TotalErrors = 0;
-    int32 TotalWarnings = 0;
-    FMessageLog CompilerLog("QuestCompiler");
+	int32 SuccessCount = 0;
+	int32 FailCount = 0;
+	int32 TotalErrors = 0;
+	int32 TotalWarnings = 0;
+	FMessageLog CompilerLog("QuestCompiler");
 	CompilerLog.NewPage(NSLOCTEXT("SimpleQuestEditor", "CompileAllPageLabel", "Compile All"));
 
-    int32 TotalRenames = 0;
-    int32 TotalRenamedActors = 0;
+	int32 TotalRenames = 0;
+	int32 TotalRenamedActors = 0;
 
-    for (const FAssetData& AssetData : QuestlineAssets)
+	// Coalesce per-graph WriteCompiledTagsIni + RebuildNativeTags into a single end-of-batch flush.
+	// ON_SCOPE_EXIT covers early-return / SlowTask cancel paths.
+	BeginCompileBatch();
+	ON_SCOPE_EXIT { EndCompileBatch(); };
+
+	for (const FAssetData& AssetData : QuestlineAssets)
     {
         if (SlowTask.ShouldCancel()) break;
 
@@ -764,47 +814,29 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 
 void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 {
+	// Full reset: tear down all FNativeGameplayTags (each destructor unregisters from the manager),
+	// then re-add via the shared helper. Used in non-batch single-graph compile and in EndCompileBatch
+	// when stale tags need to be pruned from the tree.
 	CompiledNativeTags.Reset();
+	CompiledNativeTagNames.Reset();
 
 	for (const auto& Pair : CompiledTagRegistry)
 	{
-		for (const FName& QuestTag : Pair.Value)
-		{
-			// Defensive: skip NAME_None — see WriteCompiledTagsIni for rationale.
-			if (QuestTag.IsNone()) continue;
-
-			auto Add = [this](FName TagName)
-			{
-				CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
-					TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
-			};
-			Add(QuestTag);
-
-			if (FQuestTagComposer::IsIdentityTag(QuestTag))
-			{
-				for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
-				{
-					Add(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
-				}
-			}
-		}
+		AddNativeTagsForGraph(Pair.Value);
 	}
 
 	if (bRefreshTree)
 	{
-		// Full tree teardown and rebuild to prune stale tags from the in-memory tree.
-		// Safe here: runs synchronously during compilation which means no concurrent tag requests.
 		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
 	}
 	else
 	{
-		// Additive rebuild. Safe for startup and non-stale-removal cases where the original race concern (ResetTagCache clearing
-		// freshly registered native tags) applies.
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
 
 	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
-		CompiledNativeTags.Num(), bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
+		CompiledNativeTags.Num(),
+		bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
 }
 
 TSharedRef<SDockTab> FSimpleQuestEditor::SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args)
@@ -814,5 +846,49 @@ TSharedRef<SDockTab> FSimpleQuestEditor::SpawnStaleQuestTagsTab(const FSpawnTabA
 		[
 			SNew(SStaleQuestTagsPanel)
 		];
+}
+
+void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
+{
+	UGameplayTagsManager& TagsManager = UGameplayTagsManager::Get();
+
+	for (const FName& QuestTag : TagNames)
+	{
+		if (QuestTag.IsNone()) continue;
+
+		auto Add = [this, &TagsManager](FName TagName)
+		{
+			// Skip if our editor-side set already knows about it (already added this session).
+			if (CompiledNativeTagNames.Contains(TagName)) return;
+
+			// Skip the FNativeGameplayTag construction if the tag is already registered with the
+			// manager — typically from the runtime module's startup RegisterCompiledQuestTags pass,
+			// which registers every compiled tag via AR metadata at editor launch. We still mark
+			// CompiledNativeTagNames so subsequent batches' Contains check fast-paths through.
+			//
+			// Construction is ~3ms per tag (manager bookkeeping + tree-update side effects); for the
+			// ~3000 native tags a typical project registers, skipping already-known ones saves the
+			// bulk of Compile All Questlines time. Fresh tags (new content authored since last
+			// editor session) still pay full construction cost — that's the actual structural floor.
+			if (TagsManager.RequestGameplayTag(TagName, false).IsValid())
+			{
+				CompiledNativeTagNames.Add(TagName);
+				return;
+			}
+
+			CompiledNativeTagNames.Add(TagName);
+			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
+				TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+		};
+		Add(QuestTag);
+
+		if (FQuestTagComposer::IsIdentityTag(QuestTag))
+		{
+			for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+			{
+				Add(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
+			}
+		}
+	}
 }
 

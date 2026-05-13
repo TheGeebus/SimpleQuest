@@ -202,8 +202,10 @@ TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdG
 
 TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FSimpleQuestEditorUtilities_DiscoverObjectivePaths);
+	
 	if (!ObjectiveClass) return {};
-
+	
 	TArray<FObjectivePathDescriptor> AllPaths;
 
 	// ── Source 1: K2 node scan (Blueprint graphs) ──

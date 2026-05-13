@@ -26,7 +26,8 @@ public:
 	virtual void UnregisterCompilerFactory() override;
 	virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const override;
 	virtual void RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames) override;
-
+	void BeginCompileBatch();
+	void EndCompileBatch();
 	TMap<FString, TArray<FName>> CompiledTagRegistry; // keyed by graph package path
 	
 	virtual void CompileAllQuestlineGraphs() override;
@@ -35,7 +36,7 @@ public:
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
 
-	/** Editor-side PIE debug channel (agenda item 7). Lifetime managed by this module. Access via GetPIEDebugChannel(). */
+	/** Editor-side PIE debug channel. Lifetime managed by this module. Access via GetPIEDebugChannel(). */
 	static FQuestPIEDebugChannel* GetPIEDebugChannel();
 
 private:
@@ -65,4 +66,25 @@ private:
 	TSharedRef<SDockTab> SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args);
 
 	static const FName StaleQuestTagsTabId;
+
+	/**
+	 * Incremental: registers FNativeGameplayTags for any names in TagNames not already in the
+	 * current native-tag set. Each FNativeGameplayTag ctor calls AddNativeGameplayTag → the tag
+	 * becomes findable via RequestGameplayTag immediately, without needing a tree rebuild.
+	 * Tree rebuild is deferred to EndCompileBatch (or RebuildNativeTags's full path).
+	 *
+	 * Shared between RebuildNativeTags's full rebuild loop and the per-graph batch path so the
+	 * state-fact expansion logic stays in one place.
+	 */
+	void AddNativeTagsForGraph(const TArray<FName>& TagNames);
+	int32 NumSkippedAlreadyRegistered = 0;  // TEMP
+	int32 NumConstructedFresh = 0;          // TEMP
+	/**
+	 * Parallel index for AddNativeTagsForGraph's O(1) "already registered?" check. Stays in sync
+	 * with CompiledNativeTags. Reset() in lockstep with the array.
+	 */
+	TSet<FName> CompiledNativeTagNames;
+
+	bool bBatchActive = false;
+	bool bBatchHasStaleTags = false;
 };

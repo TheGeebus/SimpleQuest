@@ -1198,6 +1198,8 @@ void FQuestlineGraphCompiler::ResolvePinToTags(
 	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath,
 	TArray<FGameplayTag>* OutExitedGraphTags)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_ResolvePinToTags);
+	
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {
         UEdGraphNode* Node = LinkedPin->GetOwningNode();

@@ -670,7 +670,10 @@ int32 SGraphNode_QuestlineStep::OnPaint(
 
 const UClass* SGraphNode_QuestlineStep::GetObjectiveClass() const
 {
-	return StepNode ? StepNode->ObjectiveClass.Get() : nullptr;
+	// LoadSynchronous (not Get): ObjectiveClass is TSoftClassPtr and .Get() returns null until something else loads the
+	// class, so nodes display "None" until a Compile/Compile All forces the references resident. Synchronous load is
+	// acceptable here: editor-only, first-display cost is a few ms, and subsequent calls are O(1) once loaded.
+	return StepNode ? StepNode->ObjectiveClass.LoadSynchronous() : nullptr;
 }
 
 void SGraphNode_QuestlineStep::OnObjectiveClassChanged(const UClass* NewClass)

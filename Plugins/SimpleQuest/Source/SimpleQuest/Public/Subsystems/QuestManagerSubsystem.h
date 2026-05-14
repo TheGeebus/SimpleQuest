@@ -139,7 +139,7 @@ protected:
 	 * assets (standalone compile of an asset + inlined compile when the asset is a LinkedQuestline target inside
 	 * another asset). Both compiles produce separate UQuestNodeBase instances under different FName keys (different
 	 * ContextualTag perspectives). Without dedup, both instances register, both have their delegates bound, and
-	 * every event fires twice — manifests as watcher duplication, giver missed-add on loop, and other multi-tag
+	 * every event fires twice — manifests as observer duplication, giver missed-add on loop, and other multi-tag
 	 * delivery anomalies that look like broadcast bugs but root at duplicate registration.
 	 *
 	 * Excluded from this dedup: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
@@ -216,7 +216,7 @@ protected:
 
 	/**
 	 * Rich-record registry paired with WorldState's QuestState.<X>.Completed fact. Written atomically alongside
-	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestEventSubscription and UQuestWatcherComponent.
+	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestEventSubscription and UQuestObserverComponent.
 	 * Holds the current session's resolution record per quest: outcome, timestamp, running count.
 	 */
 	UPROPERTY()
@@ -365,7 +365,7 @@ private:
 
 	/**
 	 * Tears down an active or pending-giver node: cancels objectives, clears WorldState facts, writes Deactivated, then
-	 * publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, watchers, and this subsystem's own
+	 * publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, observers, and this subsystem's own
 	 * HandleNodeDeactivatedEvent) can react. No-op on Completed nodes.
 	 */
 	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source);

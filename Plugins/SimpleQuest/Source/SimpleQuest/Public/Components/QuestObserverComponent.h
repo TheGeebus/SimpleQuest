@@ -7,11 +7,11 @@
 #include "GameplayTagContainer.h"
 #include "QuestComponentBase.h"
 #include "Components/ActorComponent.h"
-#include "Interfaces/QuestWatcherInterface.h"
+#include "Interfaces/QuestObserverInterface.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
-#include "QuestWatcherComponent.generated.h"
+#include "QuestObserverComponent.generated.h"
 
 
 struct FQuestActivatedEvent;
@@ -27,66 +27,66 @@ struct FQuestUnblockedEvent;
 
 
 /**
- * Per-watched-quest flags controlling which lifecycle events this watcher subscribes to. Mirrors the
+ * Per-observed-quest flags controlling which lifecycle events this observer subscribes to. Mirrors the
  * BindToQuestEvent K2 node's per-event exposure mask but flagged per-quest-tag for finer authoring control.
- * Each flag gates its corresponding subscription in RegisterQuestWatcher; unticked flags incur zero
+ * Each flag gates its corresponding subscription in RegisterQuestObserver; unticked flags incur zero
  * subscription cost and skip catch-up for that event.
  *
- * Default values preserve the watcher's historical subscription set: Enabled / Started / Completed
+ * Default values preserve the observer's historical subscription set: Enabled / Started / Completed
  * default-on; everything else opts in explicitly.
  */
 USTRUCT(BlueprintType)
-struct FWatchedQuestEventSettings
+struct FObservedQuestEventSettings
 {
 	GENERATED_BODY()
 
 	/** Quest is offerable — execution reached a giver-gated quest. PrereqStatus carries the current prereq snapshot. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchActivated = false;
+	bool bObserveActivated = false;
 
 	/** Quest is offerable AND prereqs are satisfied (accept-ready). Most common opt-in for "show giver UI". */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchEnabled = true;
+	bool bObserveEnabled = true;
 
 	/** Quest was Enabled but a leaf change caused prereqs to no-longer-satisfy. Symmetric to Enabled; rare. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchDisabled = false;
+	bool bObserveDisabled = false;
 
 	/** A give attempt was refused. Carries the structured blocker array + the giver actor that initiated. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchGiveBlocked = false;
+	bool bObserveGiveBlocked = false;
 
 	/** Quest entered Live state. Fires per Activate-input pulse, not just on first transition. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchStarted = true;
+	bool bObserveStarted = true;
 
 	/** Per-step progress tick during Live phase. Transient; no catch-up. Opt-in (can be noisy). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchProgress = false;
+	bool bObserveProgress = false;
 
 	/** Quest resolved with an outcome. OutcomeFilter (below) further narrows broadcast to specific outcomes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchCompleted = true;
+	bool bObserveCompleted = true;
 
 	/** Quest was deactivated (lifecycle interrupted: external request, cascade, block-with-deactivation, etc.). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchDeactivated = false;
+	bool bObserveDeactivated = false;
 
 	/** Quest's Blocked state fact transitioned from absent to present (SetBlocked utility node or BP-driven
 	    SetQuestBlocked). Idempotent: already-blocked re-applications don't fire. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchBlocked = false;
+	bool bObserveBlocked = false;
 
 	/** Quest's Blocked state fact transitioned from present to absent (ClearBlocked utility node or BP-driven
-	    ClearQuestBlocked). Symmetric partner to bWatchBlocked. Transient; no catch-up. */
+	    ClearQuestBlocked). Symmetric partner to bObserveBlocked. Transient; no catch-up. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bWatchUnblocked = false;
+	bool bObserveUnblocked = false;
 
 	/**
 	 * If non-empty, OnQuestCompleted only fires when the completion outcome matches one of these tags. If empty,
-	 * fires for any outcome (default). Only relevant when bWatchCompleted is true.
+	 * fires for any outcome (default). Only relevant when bObserveCompleted is true.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.Outcome", EditCondition = "bWatchCompleted"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.Outcome", EditCondition = "bObserveCompleted"))
 	FGameplayTagContainer OutcomeFilter;
 };
 
@@ -94,19 +94,19 @@ struct FWatchedQuestEventSettings
 /**
  * Per-actor lifecycle observer for a curated set of quest tags. Drop on any actor that needs to react to
  * specific quest state changes — UI receptionists, level-bound gameplay objects, world services. Each watched
- * tag's FWatchedQuestEventSettings controls which of the 10 lifecycle events broadcast.
+ * tag's FObservedQuestEventSettings controls which of the 10 lifecycle events broadcast.
  *
  * Surface mirrors the BindToQuestEvent K2 node's per-event delegates: same events, same payload shapes,
- * same catch-up semantics. The watcher is the curated component-form alternative for designers who want
+ * same catch-up semantics. The observer is the curated component-form alternative for designers who want
  * config-authored per-quest observation rather than ad-hoc K2 subscription.
  */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestWatcherComponent : public UQuestComponentBase, public IQuestWatcherInterface
+class SIMPLEQUEST_API UQuestObserverComponent : public UQuestComponentBase, public IQuestObserverInterface
 {
 	GENERATED_BODY()
 
 public:
-	UQuestWatcherComponent();
+	UQuestObserverComponent();
 
 	// ── Offer phase ──────────────────────────────────────────────────────────────────────────────
 	//
@@ -121,29 +121,29 @@ public:
 	//  - It answers: what graph asset and node sent me this event?
 	//
 	// MatchedChannel is delivery metadata — the channel from this publish set most specific to this
-	// watcher's bound tag (longest descendant where the bound tag is a prefix). Guaranteed to be either
+	// observer's bound tag (longest descendant where the bound tag is a prefix). Guaranteed to be either
 	// the bound tag or a descendant of the bound tag.
 	//	- It answers: what's the address of this event in the context I cared about?
 	//
 	// In single-channel publishes the two are equal; in multi-channel publishes (e.g., a Step inlined
 	// under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
-	// watchers, MatchedChannel reflects each watcher's own perspective. Branch on QuestTag for "what quest
+	// observers, MatchedChannel reflects each observer's own perspective. Branch on QuestTag for "what quest
 	// instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
 	// Mirrors UQuestEventSubscription's K2-node delegate contract; same shape, same semantics.
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, FQuestPrereqStatus, PrereqStatus);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, FQuestPrereqStatus, PrereqStatus);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestGiveBlocked,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 	// ── Run phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, AActor*, GiverActor);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, AActor*, GiverActor);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 
 	// ── End phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 
 	/** Fires when execution reaches a giver-gated quest. PrereqStatus describes whether prereqs are currently satisfied. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
@@ -204,13 +204,13 @@ protected:
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
 	UFUNCTION(BlueprintCallable)
-	void RegisterQuestWatcher();
+	void RegisterQuestObserver();
 
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
-	TMap<FGameplayTag, FWatchedQuestEventSettings> WatchedTags;
+	TMap<FGameplayTag, FObservedQuestEventSettings> ObservedTags;
 
-	// DEPRECATED — add Tag/Settings pairs to UQuestWatcherComponent::WatchedTags TMap instead
+	/** DEPRECATED — add Tag/Settings pairs to UQuestObserverComponent::ObservedTags TMap instead */
 	FGameplayTagContainer WatchedStepTags;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
@@ -226,6 +226,7 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetRegisteredWatchedQuestKeys() const;
 
+	/** DEPRECATED — WatchedStepTags is deprecated and only preserved for backwards compatibility. Prefer UQuestObserverComponent::ObservedTags TMap, using GetObservedTags() */
 	const FGameplayTagContainer& GetWatchedStepTags() const { return WatchedStepTags; }
-	const TMap<FGameplayTag, FWatchedQuestEventSettings>& GetWatchedTags() const { return WatchedTags; }
+	const TMap<FGameplayTag, FObservedQuestEventSettings>& GetObservedTags() const { return ObservedTags; }
 };

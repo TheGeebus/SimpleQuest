@@ -5,11 +5,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
-#include "QuestWatcherInterface.generated.h"
+#include "QuestObserverInterface.generated.h"
 
 // This class does not need to be modified.
 UINTERFACE(MinimalAPI)
-class UQuestWatcherInterface : public UInterface
+class UQuestObserverInterface : public UInterface
 {
 	GENERATED_BODY()
 };
@@ -17,7 +17,7 @@ class UQuestWatcherInterface : public UInterface
 /**
  * 
  */
-class SIMPLEQUEST_API IQuestWatcherInterface
+class SIMPLEQUEST_API IQuestObserverInterface
 {
 	GENERATED_BODY()
 

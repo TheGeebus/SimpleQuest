@@ -47,7 +47,7 @@ enum class EQuestEventTypes : uint16
 ENUM_CLASS_FLAGS(EQuestEventTypes);
 
 /**
- * BP-facing delegate for quest lifecycle events other than completion. Matches the UQuestWatcherComponent pattern
+ * BP-facing delegate for quest lifecycle events other than completion. Matches the UQuestObserverComponent pattern
  * but carries the full FQuestEventPayload so designers reach TriggeredActor, Instigator, NodeInfo, CustomData
  * without a separate lookup.
  *
@@ -70,14 +70,14 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
  * under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
  * subscribers, MatchedChannel reflects each subscriber's own perspective. Branch on QuestTag for "what quest
  * instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
- * Mirrors UQuestWatcherComponent's delegate contract; same shape, same semantics.
+ * Mirrors UQuestObserverComponent's delegate contract; same shape, same semantics.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 
 /**
  * Completion variant — adds the OutcomeTag. Designers typically branch on OutcomeTag with a Switch or equality
- * check rather than filtering at subscription time, matching the watcher's post-Piece-C pattern. See the
+ * check rather than filtering at subscription time, matching the observer's post-Piece-C pattern. See the
  * lifecycle-delegate doc comment above for the QuestTag vs MatchedChannel contract.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionCompletedDelegate,
@@ -114,7 +114,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionGiveBlockedDeleg
  * Pins fire once per matching live event, not one-shot.
  *
  * Catch-up: on Activate(), any quest-state fact already asserted for QuestTag at subscription time fires the
- * corresponding pin immediately (mirrors UQuestWatcherComponent::RegisterQuestWatcher). Catch-up runs once;
+ * corresponding pin immediately (mirrors UQuestObserverComponent::RegisterQuestObserver). Catch-up runs once;
  * subsequent events flow through the live subscriptions. Catch-up is also gated by ExposedEventsMask — phases
  * the K2 node didn't expose are skipped.
  *

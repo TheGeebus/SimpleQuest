@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 
-#include "Components/QuestWatcherComponent.h"
+#include "Components/QuestObserverComponent.h"
 
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
@@ -24,18 +24,18 @@
 #include "WorldState/WorldStateSubsystem.h"
 
 
-UQuestWatcherComponent::UQuestWatcherComponent()
+UQuestObserverComponent::UQuestObserverComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestWatcherComponent::BeginPlay()
+void UQuestObserverComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	RegisterQuestWatcher();
+	RegisterQuestObserver();
 }
 
-void UQuestWatcherComponent::HandleQuestActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
+void UQuestObserverComponent::HandleQuestActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
 	if (OnQuestActivated.IsBound())
 	{
@@ -43,7 +43,7 @@ void UQuestWatcherComponent::HandleQuestActivated(FGameplayTag Channel, const FQ
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+void UQuestObserverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
 	ActiveQuestTags.AddTag(Event.GetQuestTag());
 	if (OnQuestEnabled.IsBound())
@@ -52,7 +52,7 @@ void UQuestWatcherComponent::HandleQuestEnabled(FGameplayTag Channel, const FQue
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
+void UQuestObserverComponent::HandleQuestDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
 {
 	if (OnQuestDisabled.IsBound())
 	{
@@ -60,7 +60,7 @@ void UQuestWatcherComponent::HandleQuestDisabled(FGameplayTag Channel, const FQu
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+void UQuestObserverComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
 {
 	if (OnQuestGiveBlocked.IsBound())
 	{
@@ -68,7 +68,7 @@ void UQuestWatcherComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const 
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
+void UQuestObserverComponent::HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
 	if (OnQuestStarted.IsBound())
 	{
@@ -76,7 +76,7 @@ void UQuestWatcherComponent::HandleQuestStarted(FGameplayTag Channel, const FQue
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
+void UQuestObserverComponent::HandleQuestProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
 	if (OnQuestProgress.IsBound())
 	{
@@ -84,21 +84,21 @@ void UQuestWatcherComponent::HandleQuestProgress(FGameplayTag Channel, const FQu
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
+void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	CompletedQuestTags.AddTag(Event.GetQuestTag());
 
 	// Find the most-specific watched entry whose key is an ancestor of (or equals) Channel — that's the
-	// authored binding this delivery corresponds to. Direct WatchedTags.Find(Channel) was the prior shape,
-	// which silently bypassed the outcome filter for parent-prefix subscriptions: a watcher authored at
+	// authored binding this delivery corresponds to. Direct ObservedTags.Find(Channel) was the prior shape,
+	// which silently bypassed the outcome filter for parent-prefix subscriptions: a observer authored at
 	// SimpleQuest.Questline.MyLine receiving an event published on SimpleQuest.Questline.MyLine.Step1 has Channel
-	// = the descendant, but WatchedTags is keyed by the authored ancestor — direct lookup returned null
+	// = the descendant, but ObservedTags is keyed by the authored ancestor — direct lookup returned null
 	// and the filter never applied. Walk the entries instead, picking the longest matching ancestor (most
 	// specific authored binding wins when multiple match — typical case is one authored binding per event).
-	const FWatchedQuestEventSettings* MatchingSettings = nullptr;
+	const FObservedQuestEventSettings* MatchingSettings = nullptr;
 	int32 BestKeyDepth = -1;
-	for (const TPair<FGameplayTag, FWatchedQuestEventSettings>& Pair : WatchedTags)
+	for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : ObservedTags)
 	{
 		if (!Channel.MatchesTag(Pair.Key)) continue;  // Pair.Key must be ancestor of (or equal) Channel
 
@@ -117,12 +117,12 @@ void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQ
 	}
 
 	// Apply outcome filter from the most-specific matching authored binding. If no entries match (defensive —
-	// shouldn't happen since this callback only fires for subscriptions made from WatchedTags), fall through
+	// shouldn't happen since this callback only fires for subscriptions made from ObservedTags), fall through
 	// to broadcast unfiltered.
 	if (MatchingSettings && !MatchingSettings->OutcomeFilter.IsEmpty()
 		&& !MatchingSettings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
 			*Event.GetQuestTag().ToString(),
 			*Event.OutcomeTag.ToString());
 		return;
@@ -134,7 +134,7 @@ void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQ
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
+void UQuestObserverComponent::HandleQuestDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	if (OnQuestDeactivated.IsBound())
@@ -143,7 +143,7 @@ void UQuestWatcherComponent::HandleQuestDeactivated(FGameplayTag Channel, const 
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
+void UQuestObserverComponent::HandleQuestBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
 {
 	if (OnQuestBlocked.IsBound())
 	{
@@ -151,7 +151,7 @@ void UQuestWatcherComponent::HandleQuestBlocked(FGameplayTag Channel, const FQue
 	}
 }
 
-void UQuestWatcherComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
+void UQuestObserverComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
 {
 	if (OnQuestUnblocked.IsBound())
 	{
@@ -159,7 +159,7 @@ void UQuestWatcherComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQ
 	}
 }
 
-int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
+int32 UQuestObserverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 {
 	int32 Count = 0;
 	for (const auto& [OldName, NewName] : Renames)
@@ -185,9 +185,9 @@ int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 			Count++;
 		}
 
-		// WatchedTags TMap keys — find old tag among keys
+		// ObservedTags TMap keys — find old tag among keys
 		FGameplayTag FoundMapKey;
-		for (const auto& [Key, Value] : WatchedTags)
+		for (const auto& [Key, Value] : ObservedTags)
 		{
 			if (Key.GetTagName() == OldName)
 			{
@@ -200,9 +200,9 @@ int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
 			if (NewTag.IsValid())
 			{
-				FWatchedQuestEventSettings Moved = MoveTemp(WatchedTags[FoundMapKey]);
-				WatchedTags.Remove(FoundMapKey);
-				WatchedTags.Add(NewTag, MoveTemp(Moved));
+				FObservedQuestEventSettings Moved = MoveTemp(ObservedTags[FoundMapKey]);
+				ObservedTags.Remove(FoundMapKey);
+				ObservedTags.Add(NewTag, MoveTemp(Moved));
 				Count++;
 			}
 		}
@@ -210,7 +210,7 @@ int32 UQuestWatcherComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 	return Count;
 }
 
-int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+int32 UQuestObserverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
 	int32 Count = 0;
 	for (const FGameplayTag& Tag : TagsToRemove)
@@ -221,7 +221,7 @@ int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
 			WatchedStepTags.RemoveTag(Tag);
 			++Count;
 		}
-		const int32 MapRemoved = WatchedTags.Remove(Tag);
+		const int32 MapRemoved = ObservedTags.Remove(Tag);
 		if (MapRemoved > 0)
 		{
 			if (Count == 0) Modify();
@@ -235,78 +235,78 @@ int32 UQuestWatcherComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
 	return Count;
 }
 
-void UQuestWatcherComponent::RegisterQuestWatcher()
+void UQuestObserverComponent::RegisterQuestObserver()
 {
 	if (!SignalSubsystem)
 	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : QuestSignalSubsystem is null, aborting."));
+		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestObserverComponent::RegisterQuestObserver : QuestSignalSubsystem is null, aborting."));
 		return;
 	}
-	if (WatchedTags.IsEmpty())
+	if (ObservedTags.IsEmpty())
 	{
 		if (GetOwner())
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : WatchedQuests is empty. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : ObservedTags is empty. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
 		}
 		return;
 	}
 
-	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestWatcherComponent_RegisterQuestWatcher);
+	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestObserverComponent_RegisterQuestObserver);
 
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
-	for (auto& QuestPair : WatchedTags)
+	for (auto& QuestPair : ObservedTags)
 	{
 		const FGameplayTag& QuestTag = QuestPair.Key;
-		const FWatchedQuestEventSettings& Settings = QuestPair.Value;
+		const FObservedQuestEventSettings& Settings = QuestPair.Value;
 
 		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
 			UE_LOG(LogSimpleQuest, Warning,
-				TEXT("UQuestWatcherComponent::RegisterQuestWatcher : '%s' holds stale tag '%s' — skipping subscribe. ")
+				TEXT("UQuestObserverComponent::RegisterQuestObserver : '%s' holds stale tag '%s' — skipping subscribe. ")
 				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
 			continue;
 		}
 
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestWatcherComponent::RegisterQuestWatcher : Registered watcher for tag: %s"), *QuestTag.ToString());
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s"), *QuestTag.ToString());
 
 		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
 		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
-		if (Settings.bWatchActivated)    SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestActivated);
-		if (Settings.bWatchEnabled)      SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestEnabled);
-		if (Settings.bWatchDisabled)     SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestDisabled);
-		if (Settings.bWatchGiveBlocked)  SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestGiveBlocked);
-		if (Settings.bWatchStarted)      SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestStarted);
-		if (Settings.bWatchProgress)     SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestProgress);
-		if (Settings.bWatchCompleted)    SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestCompleted);
-		if (Settings.bWatchDeactivated)  SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestDeactivated);
-		if (Settings.bWatchBlocked)      SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestBlocked);
-		if (Settings.bWatchUnblocked)    SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestWatcherComponent::HandleQuestUnblocked);
+		if (Settings.bObserveActivated)    SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated);
+		if (Settings.bObserveEnabled)      SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled);
+		if (Settings.bObserveDisabled)     SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled);
+		if (Settings.bObserveGiveBlocked)  SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked);
+		if (Settings.bObserveStarted)      SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted);
+		if (Settings.bObserveProgress)     SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress);
+		if (Settings.bObserveCompleted)    SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted);
+		if (Settings.bObserveDeactivated)  SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated);
+		if (Settings.bObserveBlocked)      SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked);
+		if (Settings.bObserveUnblocked)    SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked);
 
 		if (!WorldState) continue;
 
 		// Catch-up: fire delegates immediately for state already present at subscription time. For an exact-tag
-		// watcher this fires per-pin if a matching state fact is set for QuestTag itself; for a parent-prefix
-		// watcher (subscribed tag is an unknown namespace OR a known wrapper container) it fans out to every
+		// observer this fires per-pin if a matching state fact is set for QuestTag itself; for a parent-prefix
+		// observer (subscribed tag is an unknown namespace OR a known wrapper container) it fans out to every
 		// known descendant via FQuestCatchUpFanout and probes each one in turn, mirroring the signal bus's
 		// hierarchical broadcast on the live side. Synthetic Context carries each descendant's tag — full Context
 		// isn't recoverable from state alone (NodeInfo, CompletionContext, GameData come from the runtime publish-
 		// time AssembleEventContext call). Mirrors UQuestEventSubscription's catch-up pattern.
 		//
-		// No per-tag dedup against live events here (unlike UQuestEventSubscription): the watcher's catch-up runs
-		// synchronously inside RegisterQuestWatcher (called from BeginPlay), so there's no deferral window during
+		// No per-tag dedup against live events here (unlike UQuestEventSubscription): the observer's catch-up runs
+		// synchronously inside RegisterQuestObserver (called from BeginPlay), so there's no deferral window during
 		// which a live event could fire and need dedup. The K2 node defers to next tick to avoid racing the BP
-		// execution stack; the watcher has no such constraint.
+		// execution stack; the observer has no such constraint.
 		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem);
 
 		for (const FGameplayTag& EachTag : CatchUpTags)
 		{
 			// EachTag is the canonical for this catch-up entry (post-GetQuestTagsUnderPrefix's alias-resolution).
 			// Build the channel set [canonical, ...aliases] and pick the best match for this watched-key tag —
-			// same selection the live bus dispatcher uses, so watcher delegates see consistent MatchedChannel
+			// same selection the live bus dispatcher uses, so observer delegates see consistent MatchedChannel
 			// values across catch-up and live deliveries (no need to branch by delivery path).
 			TArray<FGameplayTag> ChannelSet;
 			ChannelSet.Add(EachTag);
@@ -332,19 +332,19 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
 			}
 
-			if (Settings.bWatchActivated && bIsPendingGiver)
+			if (Settings.bObserveActivated && bIsPendingGiver)
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
 			}
 
-			if (Settings.bWatchEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
+			if (Settings.bObserveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
 			}
 
-			if (Settings.bWatchStarted)
+			if (Settings.bObserveStarted)
 			{
 				const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
 				if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
@@ -358,7 +358,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 			// Disabled / GiveBlocked / Progress / Unblocked have no catch-up — transient or one-shot events without
 			// recoverable state.
 
-			if (Settings.bWatchCompleted)
+			if (Settings.bObserveCompleted)
 			{
 				const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
 				if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
@@ -380,19 +380,19 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 
 					if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
 					{
-						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestWatcher: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
+						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 					}
 					else
 					{
-						UE_LOG(LogSimpleQuest, Log, TEXT("QuestWatcher: catch-up for '%s' — recovered outcome '%s' from registry"),
+						UE_LOG(LogSimpleQuest, Log, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
 					}
 				}
 			}
 
-			if (Settings.bWatchDeactivated)
+			if (Settings.bObserveDeactivated)
 			{
 				const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
 				if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
@@ -402,7 +402,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				}
 			}
 
-			if (Settings.bWatchBlocked)
+			if (Settings.bObserveBlocked)
 			{
 				const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
 				if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
@@ -414,20 +414,20 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 	}
 }
 
-FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedStepTags() const
+FGameplayTagContainer UQuestObserverComponent::GetRegisteredWatchedStepTags() const
 {
 	return FQuestTagComposer::FilterToRegisteredTags(
 		WatchedStepTags,
-		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedStepTags ('%s')"),
+		FString::Printf(TEXT("UQuestObserverComponent::GetRegisteredWatchedStepTags ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
 
-FGameplayTagContainer UQuestWatcherComponent::GetRegisteredWatchedQuestKeys() const
+FGameplayTagContainer UQuestObserverComponent::GetRegisteredWatchedQuestKeys() const
 {
 	FGameplayTagContainer KeysContainer;
-	for (const auto& Pair : WatchedTags) KeysContainer.AddTag(Pair.Key);
+	for (const auto& Pair : ObservedTags) KeysContainer.AddTag(Pair.Key);
 	return FQuestTagComposer::FilterToRegisteredTags(
 		KeysContainer,
-		FString::Printf(TEXT("UQuestWatcherComponent::GetRegisteredWatchedQuestKeys ('%s')"),
+		FString::Printf(TEXT("UQuestObserverComponent::GetRegisteredWatchedQuestKeys ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }

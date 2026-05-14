@@ -114,7 +114,7 @@ public:
 
 	/**
 	 * Paired entry produced by the contextual-query helpers: an actor name + the display name of the outer questline
-	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, watchers, or any future
+	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, observers, or any future
 	 * actor-per-tag contextual surface.
 	 */
 	struct FQuestContextualActor
@@ -227,11 +227,11 @@ public:
 	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
 	
 	/**
-	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent watchers per contextual tag instead of
+	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent observers per contextual tag instead of
 	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
 	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
 	 */
-	static TArray<FQuestContextualActor> FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode);
+	static TArray<FQuestContextualActor> FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
 	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
@@ -322,7 +322,7 @@ public:
 
 	/**
 	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
-	 * UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent that fails IsTagRegisteredInRuntime.
+	 * UQuestGiverComponent / UQuestTargetComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
 	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
@@ -369,7 +369,7 @@ private:
 	/**
 	 * Shared contextual-query body. Walks the Asset Registry for non-home questline packages, suffix-matches on the node's
 	 * relative path, and invokes TagToActorNames() per contextual tag to resolve the actor list. Both
-	 * FindContextualGiversForNode and FindContextualWatchersForNode are thin wrappers around this. LogLabel is emitted in
+	 * FindContextualGiversForNode and FindContextualObserversForNode are thin wrappers around this. LogLabel is emitted in
 	 * the Verbose diagnostic line for trace clarity.
 	 */
 	static TArray<FQuestContextualActor> CollectContextualActorEntries(const UQuestlineNode_ContentBase* ContentNode,

@@ -20,7 +20,7 @@ class UQuestStateSubsystem;
  * recovery for descendants already in some state at bind time.
  *
  * This namespace centralizes the "what tags should the catch-up loop iterate?" decision so UQuestEventSubscription
- * (the BindToQuestEvent K2 node's runtime) and UQuestWatcherComponent share the logic and stay parity-aligned.
+ * (the BindToQuestEvent K2 node's runtime) and UQuestObserverComponent share the logic and stay parity-aligned.
  * Both subscribers call EnumerateTagsForCatchUp and iterate the result, firing per-tag synthetic-context broadcasts.
  *
  * Lives next to FQuestTagComposer (Public/Utilities/) — same module, same architectural tier (consumer-side

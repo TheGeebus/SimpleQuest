@@ -26,7 +26,7 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
-#include "Components/QuestWatcherComponent.h"
+#include "Components/QuestObserverComponent.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Engine/SCS_Node.h"
 #include "Nodes/QuestlineNode_Knot.h"
@@ -95,7 +95,7 @@ namespace
     	// the home asset can't have a LinkedQuestline node pointing at it, so its tags can't legitimately be
     	// contextualized inlinings of this node. They're at most coincidental leaf-name collisions. Without
     	// this filter, two unrelated graphs with same-named leaf nodes (e.g. both have a "Step") cross-attribute
-    	// each other's actor watchers via the suffix-match logic below, producing false "(via OtherAsset)"
+    	// each other's actor observers via the suffix-match logic below, producing false "(via OtherAsset)"
     	// entries on the expanded node panel.
     	TArray<FName> ReferencerPackageNames;
     	AR.GetReferencers(HomePackageName, ReferencerPackageNames);
@@ -115,7 +115,7 @@ namespace
             // Compute the outer asset's expected prefix. Each outer asset's CompiledQuestTags carries both
             // ContextualTag-form entries (rooted at the outer's own QuestlineID) AND asset-scoped alias entries
             // that root at descendant home assets. Without the prefix filter below, suffix-matching would catch
-            // the aliases too — producing false-positive "(via OuterAsset)" attributions for watchers / givers
+            // the aliases too — producing false-positive "(via OuterAsset)" attributions for observers / givers
             // that subscribe through the home asset's own compile only.
             const FString OuterAssetID = AssetData.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
             const FString EffectiveOuterID = OuterAssetID.IsEmpty() ? AssetData.AssetName.ToString() : OuterAssetID;
@@ -442,9 +442,9 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::CollectContextualNodeTagsForEd
 	return Result;
 }
 
-TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode)
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode)
 {
-	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualWatchersForNode"));
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualObserversForNode"));
 }
 
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
@@ -1425,7 +1425,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 namespace
 {
 	/**
-	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Watcher),
+	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Observer),
 	 * emits one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are stamped on
 	 * every entry; Component pointer is the specific component carrying the stale tag.
 	 *
@@ -1469,12 +1469,12 @@ namespace
 				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch())
 					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
 			}
-			else if (UQuestWatcherComponent* Watcher = Cast<UQuestWatcherComponent>(Comp))
+			else if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags())
-					EmitIfStale(Watcher, TEXT("WatchedStepTags"), Tag);
-				for (const auto& Pair : Watcher->GetWatchedTags())
-					EmitIfStale(Watcher, TEXT("WatchedTags"), Pair.Key);
+				for (const FGameplayTag& Tag : Observer->GetWatchedStepTags())
+					EmitIfStale(Observer, TEXT("WatchedStepTags"), Tag);
+				for (const auto& Pair : Observer->GetObservedTags())
+					EmitIfStale(Observer, TEXT("ObservedTags"), Pair.Key);
 			}
 		}
 	}
@@ -1490,7 +1490,7 @@ namespace
 	 *
 	 * Walking all three is necessary because Actor->GetComponents on a CDO is unreliable for SCS / ICH-sourced
 	 * components in the general case (depends on whether the BP has been compiled and the CDO recreated). The
-	 * explicit walk catches all three of UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent
+	 * explicit walk catches all three of UQuestGiverComponent / UQuestTargetComponent / UQuestObserverComponent
 	 * regardless of how the designer added them.
 	 *
 	 * Pre-filters via AR-cached NativeParentClass tag so we don't sync-load non-actor BPs (UMG widget BPs, anim

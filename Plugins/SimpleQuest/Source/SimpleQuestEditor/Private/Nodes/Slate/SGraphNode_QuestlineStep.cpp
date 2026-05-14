@@ -75,10 +75,10 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
 		}
 
-		// Contextual watchers (QuestTargetComponent actors watching via OUTER-asset inlinings of this Step) append the
+		// Contextual observers (QuestTargetComponent actors watching via OUTER-asset inlinings of this Step) append the
 		// same "(via OuterAssetName)" annotation to the targets list.
 		for (const FSimpleQuestEditorUtilities::FQuestContextualActor& Entry
-			: FSimpleQuestEditorUtilities::FindContextualWatchersForNode(StepNode))
+			: FSimpleQuestEditorUtilities::FindContextualObserversForNode(StepNode))
 		{
 			WatchingTargetNames.Add(FString::Printf(TEXT("%s (via %s)"),
 				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));

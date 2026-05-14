@@ -8,7 +8,7 @@
 #include "StaleQuestTagsScanCommandlet.generated.h"
 
 /**
- * Headless project-wide scan for stale quest-tag references on giver / target / watcher components.
+ * Headless project-wide scan for stale quest-tag references on giver / target / observer components.
  * Mirrors the Stale Quest Tags panel's "Full Project Scan" button — calls the same backend
  * (FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries) with all scope bits enabled and
  * comprehensive WP coverage.

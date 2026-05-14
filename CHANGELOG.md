@@ -471,7 +471,7 @@ not just the cascade source identity captured pre-bundle.
 - **`FQuestCatchUpFanout::EnumerateTagsForCatchUp(SubscribedTag,
   StateSubsystem)`** — shared helper consumed by both `UQuestEventSubscript-
   ion::RunCatchUp` (the BindToQuestEvent K2 node's runtime) and
-  `UQuestWatcherComponent::RegisterQuestWatcher`. Returns `[SubscribedTag]`
+  `UQuestObserverComponent::RegisterQuestObserver`. Returns `[SubscribedTag]`
   for an exact-tag known leaf or wrapper; returns descendants for a parent-
   prefix subscription; empty for unregistered tags. Single source of truth
   for the "what tags should catch-up iterate?" decision so the two
@@ -483,7 +483,7 @@ not just the cascade source identity captured pre-bundle.
   live during the deferral window so catch-up doesn't double-broadcast.
   `OnStarted` catch-up now recovers the giver actor from
   `StateSubsystem->GetLastGiverActor` instead of broadcasting `nullptr`.
-- **`UQuestWatcherComponent::RegisterQuestWatcher` fanout rewrite** — same
+- **`UQuestObserverComponent::RegisterQuestObserver` fanout rewrite** — same
   shape as the K2 node's. No per-tag TSet dedup needed (catch-up runs
   synchronously inside `BeginPlay` rather than deferred to next-tick, no
   live-event-during-deferral window). `OnQuestStarted` catch-up recovers
@@ -845,7 +845,7 @@ instead of jumping to 100% before the work begins.
 #### `FSimpleQuestEditorUtilities::ScanActorForStaleTags` (new public utility)
 - Promoted from anonymous-namespace helper to public static method
   on `FSimpleQuestEditorUtilities`. Walks an actor's components,
-  dispatches by component type (Giver / Target / Watcher), emits
+  dispatches by component type (Giver / Target / Observer), emits
   one `FStaleQuestTagEntry` per stale tag found. Useful for any
   targeted recovery / scan flow that wants to re-derive entries
   for a specific actor without re-walking the entire project
@@ -1082,7 +1082,7 @@ Modified (N)** button so the designer can review and save in bulk.
 ## [0.3.3] — 2026-04-25 — Catch-Up Outcome Recovery + Two-Layer State Foundations
 
 A targeted release that closes the catch-up outcome recovery gap left by
-0.3.2's BindToQuestEvent work. Subscriptions and watchers that bind to an
+0.3.2's BindToQuestEvent work. Subscriptions and observers that bind to an
 already-resolved quest now recover the actual `OutcomeTag` — not the
 previous `EmptyTag` placeholder — by reading from a new
 `UQuestResolutionSubsystem` rich-record store keyed by quest tag. This
@@ -1130,7 +1130,7 @@ node type, content size, or which pin connects.
   recovered `OutcomeTag` instead of broadcasting `FGameplayTag::EmptyTag`
   on the no-filter path. Listeners that bind to an already-resolved
   quest now receive the actual outcome on `OnCompleted`
-- `UQuestWatcherComponent::RegisterQuestWatcher`'s `bWatchEnd` catch-up
+- `UQuestObserverComponent::RegisterQuestObserver`'s `bWatchEnd` catch-up
   block replaces its dual-path WorldState probing (per-filter-tag
   probes when filter set / EmptyTag fallback when not) with a single
   registry lookup followed by post-hoc `OutcomeFilter` matching.
@@ -1266,7 +1266,7 @@ investigating comment-node undo specifically).
   based; never auto-runs
 - Scans loaded editor worlds, walks every
   `UQuestGiverComponent` / `UQuestTargetComponent` /
-  `UQuestWatcherComponent` across `GEditor->GetWorldContexts`. One row
+  `UQuestObserverComponent` across `GEditor->GetWorldContexts`. One row
   per stale tag reference
 - Per-row surfaces: Find (magnifying-glass icon, selects + frames the
   actor in its level viewport) and Clear (removes the stale tag from
@@ -1289,7 +1289,7 @@ investigating comment-node undo specifically).
   facing sanitized getters
 - `UQuestComponentBase::RemoveTags(TagsToRemove)` — new virtual,
   parallels `ApplyTagRenames`. Concrete overrides on giver / target /
-  watcher remove matching tags from authored containers and mark the
+  observer remove matching tags from authored containers and mark the
   owning actor dirty. Powers the Stale Quest Tags panel's Clear action
 
 #### BP-Safe Sanitized Getters
@@ -1298,10 +1298,10 @@ investigating comment-node undo specifically).
   `Filter` / `HasAny` / `MatchesAny` calls that assert on stale entries
 - `UQuestTargetComponent::GetRegisteredStepTagsToWatch()` — same pattern
   for `StepTagsToWatch`
-- `UQuestWatcherComponent::GetRegisteredWatchedStepTags()` and
+- `UQuestObserverComponent::GetRegisteredWatchedStepTags()` and
   `GetRegisteredWatchedQuestKeys()` — for `WatchedStepTags` and the keys
   of the `WatchedTags` TMap
-- Raw accessors on `UQuestWatcherComponent` (`GetWatchedStepTags` /
+- Raw accessors on `UQuestObserverComponent` (`GetWatchedStepTags` /
   `GetWatchedTags`) — const-ref views of the authored containers, for
   the editor-side stale-tag scan
 
@@ -1340,7 +1340,7 @@ investigating comment-node undo specifically).
   (e.g. `Quest.MyLine`) receives events for every descendant quest
 - Catch-up on activation: any already-asserted quest-state fact fires
   the corresponding pin immediately, mirroring
-  `UQuestWatcherComponent::RegisterQuestWatcher`
+  `UQuestObserverComponent::RegisterQuestObserver`
 - BP factory `UQuestEventSubscription::BindToQuestEvent(WorldContext, QuestTag)`
   — DisplayName "Bind To Quest Event", `BlueprintInternalUseOnly` +
   `HidePin`/`DefaultToSelf` on `WorldContextObject` so the pin is
@@ -1382,7 +1382,7 @@ investigating comment-node undo specifically).
   guards upgraded from `IsValid` to `IsTagRegisteredInRuntime` — stale
   tags skipped with a Warning log naming the stale tag and the actor
 - `UQuestTargetComponent::BeginPlay` subscribe loop — same upgrade
-- `UQuestWatcherComponent::RegisterQuestWatcher` subscribe loop — same
+- `UQuestObserverComponent::RegisterQuestObserver` subscribe loop — same
   upgrade
 
 #### Soft class references across authoring + runtime
@@ -1608,7 +1608,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
   on any inner node. `FQuestPIEDebugChannel::ResolveRuntimeTag`
   and `QueryLeafState` now fall back to contextual tags via a new
   `CollectContextualNodeTagsForEditorNode` Asset Registry walk
-  (extracted from the existing contextual-giver/watcher machinery)
+  (extracted from the existing contextual-giver/observer machinery)
 - Diagnostic-log volume under `LogSimpleQuest VeryVerbose` —
   `FindCompiledTagForNode` was printing a per-slot iteration dump
   on every call from editor paints, reaching ~260 lines per tick.

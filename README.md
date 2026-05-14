@@ -45,8 +45,8 @@ Quest and narrative system. Runtime + editor modules, with an optional Electroni
 
 - Tag-addressed, instance-based runtime. Every compiled quest node is a `UObject` addressed by gameplay tag. The manager subsystem, components, and signal bus all route by tag.
 - Pull-based prerequisite activation. Deferred nodes subscribe to WorldState changes per leaf tag. When all conditions are met the node activates — no polling, no ticking.
-- Hierarchical catch-up with comprehensive historical context. Givers, watchers, and `BindToQuestEvent` subscribers that register after quest events have already fired receive the current state immediately. Parent-prefix subscriptions (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind — mirroring the live signal bus's hierarchical broadcast on the catch-up side. Recovered context includes the original `OutcomeTag`, prereq snapshot, activation-blocker structure, the giver actor that initiated the start, the activation provenance (giver-gate / cascade / external API / initial entry), and the merged-final activation params snapshot — sufficient to reconstitute live questline state, with save/load consuming the same data. All exposed via `UQuestStateSubsystem`, the rich-record half of the two-layer state architecture (WorldState answers "did it happen?"; the state subsystem answers "what's the structured detail?"). The manager subsystem orchestrates writes; the state subsystem owns the public read API. Future suite plugins will follow the same convention (`...StateSubsystem` = externally accessible fact registry with potentially limited write access).
-- Outcome-filtered watchers. A watcher component can filter which outcomes it responds to; empty filter = all outcomes.
+- Hierarchical catch-up with comprehensive historical context. Givers, observers, and `BindToQuestEvent` subscribers that register after quest events have already fired receive the current state immediately. Parent-prefix subscriptions (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind — mirroring the live signal bus's hierarchical broadcast on the catch-up side. Recovered context includes the original `OutcomeTag`, prereq snapshot, activation-blocker structure, the giver actor that initiated the start, the activation provenance (giver-gate / cascade / external API / initial entry), and the merged-final activation params snapshot — sufficient to reconstitute live questline state, with save/load consuming the same data. All exposed via `UQuestStateSubsystem`, the rich-record half of the two-layer state architecture (WorldState answers "did it happen?"; the state subsystem answers "what's the structured detail?"). The manager subsystem orchestrates writes; the state subsystem owns the public read API. Future suite plugins will follow the same convention (`...StateSubsystem` = externally accessible fact registry with potentially limited write access).
+- Outcome-filtered observers. An observer component can filter which outcomes it responds to; empty filter = all outcomes.
 
 ---
 
@@ -110,7 +110,7 @@ If you need custom orchestration logic (analytics, save integration, bespoke act
 | `UQuestPlayerComponent` | Player Pawn or PlayerState | Tracks the local player's quest state |
 | `UQuestGiverComponent` | NPC Actor | Offers and activates quests on interaction |
 | `UQuestTargetComponent` | Enemy, item, or location Actor | Responds to trigger, kill, and interact events |
-| `UQuestWatcherComponent` | Any Actor | Receives lifecycle events for one or more quests |
+| `UQuestObserverComponent` | Any Actor | Receives lifecycle events for one or more quests |
 
 ### 6. Inspect during PIE
 
@@ -145,7 +145,7 @@ UQuestNodeBase instances (Quest, Step, portals) — keyed by compiled tag
   │  (USignalSubsystem — tag-hierarchy publish)
   │  (UWorldStateSubsystem — persistent fact store)
   ▼
-Subscribers: watchers, givers, targets, UI
+Subscribers: observers, givers, targets, UI
 ```
 
 ### Compiler

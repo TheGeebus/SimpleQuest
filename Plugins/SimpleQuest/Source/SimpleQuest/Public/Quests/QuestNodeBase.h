@@ -260,7 +260,7 @@ protected:
      * contains this node, the array is [X-perspective, Y-perspective, Z-perspective]. ContextualTag carries the
      * Project (top-level) perspective; the array carries every other perspective.
      *
-     * Use case: a watcher placed in a level binds to "SimpleQuest.Questline.Y.LinkZ.S" — Y's natural perspective on
+     * Use case: a observer placed in a level binds to "SimpleQuest.Questline.Y.LinkZ.S" — Y's natural perspective on
      * Step S — and receives events from EVERY placement of Y across the project, regardless of how deeply Y is
      * nested in the parent compile chain. The bus's hierarchical walk handles parent-prefix subscription within
      * each tag's chain; multi-publish covers cross-chain subscribers.

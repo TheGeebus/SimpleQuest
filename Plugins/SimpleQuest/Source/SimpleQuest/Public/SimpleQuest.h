@@ -1,4 +1,5 @@
-// Copyright Greg Bussell, 2026, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 

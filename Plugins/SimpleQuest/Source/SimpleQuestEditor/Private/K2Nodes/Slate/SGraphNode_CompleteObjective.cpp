@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "K2Nodes/Slate/SGraphNode_CompleteObjective.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"

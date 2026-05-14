@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"

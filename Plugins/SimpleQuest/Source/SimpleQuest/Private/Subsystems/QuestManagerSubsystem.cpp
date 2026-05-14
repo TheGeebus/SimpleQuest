@@ -1,4 +1,5 @@
-// Copyright 2026, Greg Bussell, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "Quests/QuestlineGraph.h"

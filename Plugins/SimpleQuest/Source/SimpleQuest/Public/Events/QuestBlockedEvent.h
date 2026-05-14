@@ -33,7 +33,7 @@ struct SIMPLEQUEST_API FQuestBlockedEvent : public FQuestEventBase
 	FQuestBlockedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource)
 		: FQuestEventBase(InQuestTag), Source(InSource) {}
 
-	FQuestBlockedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventContext& InContext)
+	FQuestBlockedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext), Source(InSource) {}
 
 	UPROPERTY(BlueprintReadWrite)

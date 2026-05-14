@@ -13,7 +13,7 @@ UKillClassQuestObjective::UKillClassQuestObjective()
 	TargetKilledOutcomeTag = Tag_Outcome_KillClass_Killed;
 }
 
-void UKillClassQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
+void UKillClassQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
 {
 	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("KillClassQuestObjective::TryCompleteObjective checked: %s"),
 		InContext.TriggeredActor ? *InContext.TriggeredActor->GetName() : TEXT("null"));

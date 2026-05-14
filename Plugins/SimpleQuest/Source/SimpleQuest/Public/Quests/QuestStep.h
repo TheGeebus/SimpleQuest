@@ -4,8 +4,8 @@
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
-#include "Types/QuestObjectiveActivationParams.h"
-#include "Types/QuestObjectiveContext.h"
+#include "Types/QuestObjectiveActivationContext.h"
+#include "Types/QuestObjectiveTriggerContext.h"
 #include "Types/QuestStepEnums.h"
 #include "QuestStep.generated.h"
 
@@ -23,7 +23,7 @@ class SIMPLEQUEST_API UQuestStep : public UQuestNodeBase
 	friend class FQuestlineGraphCompiler; 
 
 public:
-	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveContext, ProgressData);
+	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveTriggerContext, ProgressData);
 	FOnNodeProgress OnNodeProgress;
 	
 	virtual void Activate(FGameplayTag InContextualTag) override;
@@ -67,27 +67,27 @@ public:
 	 * in ActivateInternal; cleared in DeactivateInternal.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationParams ReceivedActivationParams;
+	FQuestObjectiveActivationContext ReceivedActivationContext;
 
 	/**
 	 * Populated from the objective's forward-params at completion. Read by ChainToNextNodes to pre-stamp
-	 * downstream PendingActivationParams before activation. Transient across step activations.
+	 * downstream PendingActivationContext before activation. Transient across step activations.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationParams CompletionForwardParams;
+	FQuestObjectiveActivationContext CompletionForwardParams;
 	
 private:
 	UPROPERTY()
 	TObjectPtr<UQuestObjective> LiveObjective;
 
 	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
-	FQuestObjectiveContext CompletionContext;
+	FQuestObjectiveTriggerContext CompletionContext;
 
 	UFUNCTION(BlueprintCallable)
 	void OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity);
 
 	UFUNCTION()
-	void OnObjectiveProgress(FQuestObjectiveContext ProgressContext);
+	void OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
@@ -96,8 +96,8 @@ public:
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
 	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
-	FORCEINLINE const FQuestObjectiveContext& GetCompletionContext() const { return CompletionContext; }
-	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }
-	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }
+	FORCEINLINE const FQuestObjectiveTriggerContext& GetCompletionContext() const { return CompletionContext; }
+	FORCEINLINE const FQuestObjectiveActivationContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
+	FORCEINLINE const FQuestObjectiveActivationContext& GetCompletionForwardParams() const { return CompletionForwardParams; }
 	FORCEINLINE const TArray<FGameplayTag>& GetAncestorContainerTags() const { return AncestorContainerTags; }
 };

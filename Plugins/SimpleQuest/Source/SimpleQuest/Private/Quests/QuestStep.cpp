@@ -1,10 +1,10 @@
 ﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
 
 #include "Quests/QuestStep.h"
-#include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 void UQuestStep::Activate(FGameplayTag InContextualTag)
@@ -25,36 +25,34 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	// Compose activation params FIRST, before Super::ActivateInternal fires OnNodeStarted. The base-class Activate-
 	// Internal's OnNodeStarted broadcast routes to UQuestManagerSubsystem::HandleOnNodeStarted, whose Step-side
 	// RecordEntry call reads GetReceivedActivationParams() for the registry snapshot. Populating ReceivedActivation-
-	// Params before Super means the snapshot captures the merged final params (ActivationSource, Provenance, the full
-	// FQuestObjectiveActivationParams shape) rather than the default-constructed empty struct.
+	// Params before Super means the snapshot captures the merged final params (Instigator, Provenance, the full
+	// FQuestObjectiveActivationContext shape) rather than the default-constructed empty struct.
 	//
-	// Composition rules: additive for compound fields (sets union, counts sum); ActivationSource + CustomData come
+	// Composition rules: additive for compound fields (sets union, counts sum); Instigator + CustomData come
 	// straight from external since Step has no equivalents. Position data (if any) goes through CustomData. Provenance
 	// + IncomingOutcomeTag propagate so the registry's per-start record knows how this start was initiated and which
 	// outcome (if any) drove it.
-	FQuestObjectiveActivationParams Params;
+	FQuestObjectiveActivationContext Context;
 
-	Params.TargetActors = TargetActors;
-	Params.TargetActors.Append(PendingActivationParams.TargetActors);
+	// Designer-authored from this Step's UPROPERTYs (TargetActors here is the Step's authored set;
+	// PendingActivationParams.Dynamic.TargetActors is the runtime-supplied appendage):
+	Context.Authored.TargetClasses = TargetClasses;
+	Context.Authored.NumElementsRequired = NumberOfElements + PendingActivationContext.Authored.NumElementsRequired;
 
-	Params.TargetClasses = TargetClasses;
-	Params.TargetClasses.Append(PendingActivationParams.TargetClasses);
-
-	Params.NumElementsRequired = NumberOfElements + PendingActivationParams.NumElementsRequired;
-
-	Params.ActivationSource = PendingActivationParams.ActivationSource;
-	Params.CustomData = PendingActivationParams.CustomData;
-
-	Params.OriginTag = PendingActivationParams.OriginTag;
-	Params.OriginChain = PendingActivationParams.OriginChain;
-
-	Params.Provenance = PendingActivationParams.Provenance;
-	Params.IncomingOutcomeTag = PendingActivationParams.IncomingOutcomeTag;
+	// Runtime-dynamic merge — append incoming runtime contributions onto this Step's runtime set:
+	Context.Dynamic.TargetActors = TargetActors;
+	Context.Dynamic.TargetActors.Append(PendingActivationContext.Dynamic.TargetActors);
+	Context.Dynamic.Instigator = PendingActivationContext.Dynamic.Instigator;
+	Context.Dynamic.CustomData = PendingActivationContext.Dynamic.CustomData;
+	Context.Dynamic.OriginTag = PendingActivationContext.Dynamic.OriginTag;
+	Context.Dynamic.OriginChain = PendingActivationContext.Dynamic.OriginChain;
+	Context.Dynamic.Provenance = PendingActivationContext.Dynamic.Provenance;
+	Context.Dynamic.IncomingOutcomeTag = PendingActivationContext.Dynamic.IncomingOutcomeTag;
 
 	// Snapshot the composed params before Super so OnNodeStarted's handler reads a populated struct. Also serves
 	// Piece D chain propagation — ChainToNextNodes reads OriginChain to extend the forwarded chain when the chain
 	// reaches a downstream step.
-	ReceivedActivationParams = Params;
+	ReceivedActivationContext = Context;
 
 	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
 	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above.
@@ -68,9 +66,9 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 
 	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
-	PendingActivationParams = FQuestObjectiveActivationParams{};
+	PendingActivationContext = FQuestObjectiveActivationContext{};
 
-	LiveObjective->DispatchOnObjectiveActivated(Params);
+	LiveObjective->DispatchOnObjectiveActivated(Context);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
@@ -85,8 +83,8 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective = nullptr;
 	}
-	ReceivedActivationParams = FQuestObjectiveActivationParams{};
-	CompletionForwardParams = FQuestObjectiveActivationParams{};
+	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	CompletionForwardParams = FQuestObjectiveActivationContext{};
 	Super::DeactivateInternal(InContextualTag);
 }
 
@@ -96,9 +94,9 @@ void UQuestStep::ResetTransientState()
 	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
 	// drop the reference. CompletionContext + Piece D params are pure value types; reset to empty.
 	LiveObjective = nullptr;
-	CompletionContext = FQuestObjectiveContext{};
-	ReceivedActivationParams = FQuestObjectiveActivationParams{};
-	CompletionForwardParams = FQuestObjectiveActivationParams{};
+	CompletionContext = FQuestObjectiveTriggerContext{};
+	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	CompletionForwardParams = FQuestObjectiveActivationContext{};
 }
 
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity)
@@ -119,7 +117,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
 }
 
-void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressContext)
+void UQuestStep::OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext)
 {
 	OnNodeProgress.ExecuteIfBound(this, ProgressContext);
 }

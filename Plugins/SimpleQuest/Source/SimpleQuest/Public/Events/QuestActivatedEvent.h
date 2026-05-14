@@ -29,7 +29,7 @@ struct FQuestActivatedEvent : public FQuestEventBase
 	explicit FQuestActivatedEvent(const FGameplayTag InQuestTag)
 		: FQuestEventBase(InQuestTag) {}
 
-	FQuestActivatedEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext, const FQuestPrereqStatus& InPrereqStatus)
+	FQuestActivatedEvent(const FGameplayTag InQuestTag, const FQuestEventPayload& InContext, const FQuestPrereqStatus& InPrereqStatus)
 		: FQuestEventBase(InQuestTag, InContext)
 		, PrereqStatus(InPrereqStatus) {}
 

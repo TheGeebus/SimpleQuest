@@ -38,7 +38,7 @@ void UQuestWatcherComponent::HandleQuestActivated(FGameplayTag Channel, const FQ
 {
 	if (OnQuestActivated.IsBound())
 	{
-		OnQuestActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.PrereqStatus);
+		OnQuestActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.PrereqStatus);
 	}
 }
 
@@ -47,7 +47,7 @@ void UQuestWatcherComponent::HandleQuestEnabled(FGameplayTag Channel, const FQue
 	ActiveQuestTags.AddTag(Event.GetQuestTag());
 	if (OnQuestEnabled.IsBound())
 	{
-		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -55,7 +55,7 @@ void UQuestWatcherComponent::HandleQuestDisabled(FGameplayTag Channel, const FQu
 {
 	if (OnQuestDisabled.IsBound())
 	{
-		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -71,7 +71,7 @@ void UQuestWatcherComponent::HandleQuestStarted(FGameplayTag Channel, const FQue
 {
 	if (OnQuestStarted.IsBound())
 	{
-		OnQuestStarted.Broadcast(Event.GetQuestTag(), Channel, Event.Context, Event.GiverActor.Get());
+		OnQuestStarted.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.GiverActor.Get());
 	}
 }
 
@@ -79,7 +79,7 @@ void UQuestWatcherComponent::HandleQuestProgress(FGameplayTag Channel, const FQu
 {
 	if (OnQuestProgress.IsBound())
 	{
-		OnQuestProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -129,7 +129,7 @@ void UQuestWatcherComponent::HandleQuestCompleted(FGameplayTag Channel, const FQ
 
 	if (OnQuestCompleted.IsBound())
 	{
-		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Context);
+		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Payload);
 	}
 }
 
@@ -138,7 +138,7 @@ void UQuestWatcherComponent::HandleQuestDeactivated(FGameplayTag Channel, const 
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	if (OnQuestDeactivated.IsBound())
 	{
-		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -146,7 +146,7 @@ void UQuestWatcherComponent::HandleQuestBlocked(FGameplayTag Channel, const FQue
 {
 	if (OnQuestBlocked.IsBound())
 	{
-		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -154,7 +154,7 @@ void UQuestWatcherComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQ
 {
 	if (OnQuestUnblocked.IsBound())
 	{
-		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Context);
+		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
 }
 
@@ -318,8 +318,8 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 			}
 			const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, QuestTag);
 
-			FQuestEventContext SyntheticContext;
-			SyntheticContext.NodeInfo.QuestTag = EachTag;
+			FQuestEventPayload Payload;
+			Payload.NodeInfo.QuestTag = EachTag;
 
 			// PendingGiver fact gates both Activated and Enabled catch-up.
 			const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
@@ -334,13 +334,13 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 			if (Settings.bWatchActivated && bIsPendingGiver)
 			{
 				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, SyntheticContext, CachedPrereqStatus);
+				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
 			}
 
 			if (Settings.bWatchEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
 			{
 				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, SyntheticContext);
+				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
 			}
 
 			if (Settings.bWatchStarted)
@@ -350,7 +350,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				{
 					ActiveQuestTags.AddTag(EachTag);
 					AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, SyntheticContext, RecoveredGiver);
+					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
 				}
 			}
 
@@ -386,7 +386,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 					{
 						UE_LOG(LogSimpleQuest, Log, TEXT("QuestWatcher: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
-						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, SyntheticContext);
+						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
 					}
 				}
 			}
@@ -397,7 +397,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
 				{
 					ActiveQuestTags.RemoveTag(EachTag);
-					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, SyntheticContext);
+					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, Payload);
 				}
 			}
 
@@ -406,7 +406,7 @@ void UQuestWatcherComponent::RegisterQuestWatcher()
 				const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
 				if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
 				{
-					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, SyntheticContext);
+					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, Payload);
 				}
 			}
 		}

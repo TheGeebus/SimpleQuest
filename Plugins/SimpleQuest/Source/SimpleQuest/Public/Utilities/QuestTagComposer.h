@@ -74,7 +74,7 @@ public:
 	// Pre-0.4.0 outcome tag prefix retained for defensive runtime support — assets compiled
 	// before the namespace consolidation may still carry "Quest.Outcome.*" tags. Removal is
 	// a 0.4.1 polish item, gated on every authored asset being recompiled at least once
-	// (verifiable via Stale Quest Tags scanner). NOT part of item 2b cleanup.
+	// (verifiable via Stale Quest Tags scanner). NOT part of main tag namespace cleanup.
 	inline static const FString LegacyOutcomeSubPrefix		= TEXT("Quest.Outcome.");
 
 	inline static const FString AllPrefixes[] = { PluginPrefix, QuestSubPrefix, StateSubPrefix, OutcomeSubPrefix,
@@ -184,20 +184,21 @@ public:
 	 *  display, QuestlineNodeBase::GetOutcomeLabel, and the Prereq Examiner tree all render identically. */
 	static FText FormatOutcomeForDisplay(FName OutcomeTagName);
 
-	/** Strips the PluginPrefix from a tag and returns the remainder for rendering surfaces (panel headers,
-	 *  K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim — preserves the namespace
-	 *  context that distinguishes `Quest.X` (identity) from `QuestState.X.Live` (state fact) without forcing
-	 *  designers to mentally re-prepend the plugin name on every read. The data layer keeps the full tag;
-	 *  only rendering surfaces use this shortened form. Copy-tag affordances and serialization continue to
-	 *  use the raw tag.
+	/** Strips the PluginPrefix ("SimpleQuest.") from a tag and returns the remainder for rendering surfaces
+	 *  (panel headers, K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim —
+	 *  preserves the namespace context that distinguishes `Questline.X` (identity) from `State.X.Live`
+	 *  (state fact) without forcing designers to mentally re-prepend the plugin name on every read. The
+	 *  data layer keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances
+	 *  and serialization continue to use the raw tag.
 	 *
 	 *  Examples:
-	 *    "SimpleQuest.Questline.MyAsset.Step1"               → "Quest.MyAsset.Step1"
-	 *    "SimpleQuest.State.MyAsset.Step1.Live"     → "QuestState.MyAsset.Step1.Live"
-	 *    "SimpleQuest.Outcome.Combat.BossDefeated"  → "QuestOutcome.Combat.BossDefeated"
-	 *    "SimpleQuest.PrereqRule.MyRule"            → "QuestPrereqRule.MyRule"
-	 *    "Game.Foo.Bar" (foreign — no PluginPrefix)      → "Game.Foo.Bar"
-	 *    NAME_None                                       → ""              (empty FText) */
+	 *    "SimpleQuest.Questline.MyAsset.Step1"            → "Questline.MyAsset.Step1"
+	 *    "SimpleQuest.State.MyAsset.Step1.Live"           → "State.MyAsset.Step1.Live"
+	 *    "SimpleQuest.Outcome.Combat.BossDefeated"        → "Outcome.Combat.BossDefeated"
+	 *    "SimpleQuest.PrereqRule.MyRule"                  → "PrereqRule.MyRule"
+	 *    "Quest.Outcome.Combat.BossDefeated" (legacy)     → "Quest.Outcome.Combat.BossDefeated"
+	 *    "Game.Foo.Bar" (foreign — no PluginPrefix)       → "Game.Foo.Bar"
+	 *    NAME_None                                        → ""             (empty FText) */
 	static FText FormatTagForDisplay(FName TagName);
 
 	// ------------------------------------------------------------------------------------------------

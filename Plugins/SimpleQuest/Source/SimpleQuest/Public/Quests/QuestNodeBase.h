@@ -7,7 +7,7 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestNodeInfo.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "QuestNodeBase.generated.h"
 
 
@@ -280,7 +280,7 @@ protected:
      * republishes the activation event rather than persisting this stash.
      */
     UPROPERTY(Transient)
-    FQuestObjectiveActivationParams PendingActivationParams;
+    FQuestObjectiveActivationContext PendingActivationContext;
 
     /**
      * Routing table keyed by completion path identity. For static K2 placements PathIdentity equals the outcome
@@ -358,7 +358,7 @@ protected:
 
     /**
      * Compiled display metadata. DisplayName baked by the compiler from the unsanitized editor node title; ContextualTag resolved at
-     * runtime alongside the standalone ContextualTag field. Read by the manager when assembling outbound FQuestEventContext.
+     * runtime alongside the standalone ContextualTag field. Read by the manager when assembling outbound FQuestEventPayload.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FQuestNodeInfo NodeInfo;

@@ -9,7 +9,7 @@
 #include "Interfaces/QuestWatcherInterface.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
-#include "Quests/Types/QuestEventContext.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "QuestWatcherComponent.generated.h"
 
 
@@ -129,20 +129,20 @@ public:
 	// watchers, MatchedChannel reflects each watcher's own perspective. Branch on QuestTag for "what quest
 	// instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
 	// Mirrors UQuestEventSubscription's K2-node delegate contract; same shape, same semantics.
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, FQuestPrereqStatus, PrereqStatus);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, FQuestPrereqStatus, PrereqStatus);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestGiveBlocked,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 	// ── Run phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, AActor*, GiverActor);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, AActor*, GiverActor);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 
 	// ── End phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventContext, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 
 	/** Fires when execution reaches a giver-gated quest. PrereqStatus describes whether prereqs are currently satisfied. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)

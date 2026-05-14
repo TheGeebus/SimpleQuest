@@ -57,14 +57,14 @@ protected:
 	
 	/**
 	 * Per-cascade activation snapshots. Each call to UQuestManagerSubsystem::ActivateNodeByTag for this Quest
-	 * appends one snapshot of PendingActivationParams to this queue. HandleOnNodeStarted drains the queue when
+	 * appends one snapshot of PendingActivationContext to this queue. HandleOnNodeStarted drains the queue when
 	 * ActivateInternal fires (immediately or via TryActivateDeferred) and fires entry routes for each queued
 	 * cascade. Necessary for fan-in convergence patterns where multiple upstream outcomes feed into the same
 	 * Quest while its prereq is unmet: without this queue, only the most-recent cascade's IncomingOutcomeTag
 	 * survives when the prereq satisfies and earlier cascades' entry routes are silently dropped.
 	 */
 	UPROPERTY(Transient)
-	TArray<FQuestObjectiveActivationParams> PendingEntryActivations;
+	TArray<FQuestObjectiveActivationContext> PendingEntryActivations;
 	
 	/**
 	 * Set of cascade event IDs that have already resolved this wrapper in the current tick. Populated by
@@ -80,7 +80,7 @@ protected:
 
 	/**
 	 * Clears the per-cascade queue and the per-Live-phase resolved-events set between PIE sessions. Base
-	 * ResetTransientState handles PendingActivationParams.
+	 * ResetTransientState handles PendingActivationContext.
 	 */
 	virtual void ResetTransientState() override;
 

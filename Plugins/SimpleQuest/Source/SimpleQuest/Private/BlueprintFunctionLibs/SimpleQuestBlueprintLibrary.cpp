@@ -113,7 +113,7 @@ void USimpleQuestBlueprintLibrary::ActivateQuest(const UObject* WorldContext, FG
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {
-        SS->PublishMessage(Tag_Channel_QuestActivationRequest, FQuestActivationRequestEvent(QuestTag, FQuestObjectiveActivationParams()));
+        SS->PublishMessage(Tag_Channel_QuestActivationRequest, FQuestActivationRequestEvent(QuestTag, FQuestObjectiveActivationContext()));
     }
 }
 

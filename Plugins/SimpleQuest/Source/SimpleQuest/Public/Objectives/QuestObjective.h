@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
-#include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "QuestObjective.generated.h"
 
 class UQuestTargetInterface;
 class IQuestTargetInterface;
-struct FQuestObjectiveActivationParams;
+struct FQuestObjectiveActivationContext;
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
@@ -31,7 +31,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, FGameplayTag, OutcomeTag, FName, PathIdentity);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
 	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressContext);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveTriggerContext, ProgressContext);
 	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
 	
 	/**
@@ -88,13 +88,13 @@ public:
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
 	 * BlueprintNativeEvent TryCompleteObjective. Same thunk-routing behavior as DispatchSetObjectiveTarget.
 	 */
-	void DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext);
+	void DispatchTryCompleteObjective(const FQuestObjectiveTriggerContext& InContext);
 
 	/**
 	 * Step-facing entry point for tearing down the objective. Thin C++ forwarder to the protected
@@ -122,7 +122,7 @@ protected:
 	 * @param Params a set of specific target actors in the scene
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void OnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
+	void OnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
 
 	/**
 	 * Symmetric partner to OnObjectiveActivated. Fires whenever the owning step is releasing the
@@ -155,7 +155,7 @@ protected:
 	 *					optional designer-defined instanced struct that may contain additional fields as needed.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
+	void TryCompleteObjective(const FQuestObjectiveTriggerContext& InContext);
 	
 	/**
 	 * Completes the objective with a runtime outcome tag and optional explicit path identity. PathIdentity routes
@@ -167,14 +167,14 @@ protected:
 	 * auto-derive fallback via the default argument.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionContext,InForwardParams"), Category = "Quest|Objectives")
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveContext& InCompletionContext = FQuestObjectiveContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationContext& InForwardParams = FQuestObjectiveActivationContext());
 	
 	/**
 	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
 	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-	void ReportProgress(const FQuestObjectiveContext& ProgressContext);
+	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);
 	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
@@ -188,7 +188,7 @@ protected:
 private:
 	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionContext. */
 	UPROPERTY()
-	FQuestObjectiveContext CompletionContext;
+	FQuestObjectiveTriggerContext CompletionContext;
 	
 	/**
 	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step
@@ -196,7 +196,7 @@ private:
 	 * fields get forwarded on handoff.
 	 */
 	UPROPERTY()
-	FQuestObjectiveActivationParams ForwardActivationParams;
+	FQuestObjectiveActivationContext ForwardActivationParams;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
@@ -206,6 +206,6 @@ private:
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
-	FQuestObjectiveContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
-	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
+	FQuestObjectiveTriggerContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
+	FQuestObjectiveActivationContext TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 };

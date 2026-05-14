@@ -17,7 +17,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestStartedEvent.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
@@ -215,7 +215,7 @@ void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Contex
 	}
 }
 
-void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params)
+void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Params)
 {
 	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
@@ -236,26 +236,26 @@ void UQuestGiverComponent::GiveQuestByTag(const FGameplayTag& QuestTag, const FQ
 
 		// Start from the designer-authored baseline, then additively merge the caller-supplied Params on top. Matches
 		// the step-side merge rule so composition semantics are uniform across the activation pipeline.
-		FQuestObjectiveActivationParams OutgoingParams = ActivationParams;
-		OutgoingParams.TargetActors.Append(Params.TargetActors);
-		OutgoingParams.TargetClasses.Append(Params.TargetClasses);
-		OutgoingParams.NumElementsRequired += Params.NumElementsRequired;
+		FQuestObjectiveActivationContext OutgoingParams = ActivationParams;
+		OutgoingParams.Dynamic.TargetActors.Append(Params.Dynamic.TargetActors);
+		OutgoingParams.Authored.TargetClasses.Append(Params.Authored.TargetClasses);
+		OutgoingParams.Authored.NumElementsRequired += Params.Authored.NumElementsRequired;
 
 		// Single-valued fields: caller wins if set, else keep the authored baseline.
-		if (Params.ActivationSource) OutgoingParams.ActivationSource = Params.ActivationSource;
-		if (Params.CustomData.IsValid()) OutgoingParams.CustomData = Params.CustomData;
-		if (Params.OriginTag.IsValid()) OutgoingParams.OriginTag = Params.OriginTag;
-		if (Params.OriginChain.Num() > 0) OutgoingParams.OriginChain = Params.OriginChain;
+		if (Params.Dynamic.Instigator.IsValid()) OutgoingParams.Dynamic.Instigator = Params.Dynamic.Instigator;
+		if (Params.Dynamic.CustomData.IsValid()) OutgoingParams.Dynamic.CustomData = Params.Dynamic.CustomData;
+		if (Params.Dynamic.OriginTag.IsValid()) OutgoingParams.Dynamic.OriginTag = Params.Dynamic.OriginTag;
+		if (Params.Dynamic.OriginChain.Num() > 0) OutgoingParams.Dynamic.OriginChain = Params.Dynamic.OriginChain;
 
-		// Default ActivationSource to the giver's owner when neither authored nor caller set it.
-		if (!OutgoingParams.ActivationSource)
+		// Default Instigator to the giver's owner when neither authored nor caller set it.
+		if (!OutgoingParams.Dynamic.Instigator.IsValid())
 		{
-			OutgoingParams.ActivationSource = GetOwner();
+			OutgoingParams.Dynamic.Instigator = GetOwner();
 		}
 		// Seed OriginChain from OriginTag if the designer authored a tag but the chain is still empty.
-		if (OutgoingParams.OriginTag.IsValid() && OutgoingParams.OriginChain.Num() == 0)
+		if (OutgoingParams.Dynamic.OriginTag.IsValid() && OutgoingParams.Dynamic.OriginChain.Num() == 0)
 		{
-			OutgoingParams.OriginChain.Add(OutgoingParams.OriginTag);
+			OutgoingParams.Dynamic.OriginChain.Add(OutgoingParams.Dynamic.OriginTag);
 		}
 
 		SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingParams));

@@ -32,6 +32,6 @@ struct FQuestDisabledEvent : public FQuestEventBase
 	explicit FQuestDisabledEvent(const FGameplayTag InQuestTag)
 		: FQuestEventBase(InQuestTag) {}
 
-	FQuestDisabledEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+	FQuestDisabledEvent(const FGameplayTag InQuestTag, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext) {}
 };

@@ -29,7 +29,7 @@ struct SIMPLEQUEST_API FQuestDeactivatedEvent : public FQuestEventBase
 		, Source(InSource)
 	{}
 
-	FQuestDeactivatedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventContext& InContext)
+	FQuestDeactivatedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext)
 		, Source(InSource)
 	{}

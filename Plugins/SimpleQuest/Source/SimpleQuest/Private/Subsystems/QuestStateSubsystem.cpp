@@ -318,7 +318,7 @@ void UQuestStateSubsystem::RecordEntry(
 	FGameplayTag IncomingOutcomeTag,
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
-	const FQuestObjectiveActivationParams& ActivationParamsSnapshot,
+	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
 	FName PathIdentity)
 {
 	if (!QuestTag.IsValid()) return;
@@ -332,7 +332,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.IncomingOutcomeTag = IncomingOutcomeTag;
 		Entry.EntryTime = EntryTime;
 		Entry.Provenance = Provenance;
-		Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
+		Entry.ActivationContextSnapshot = ActivationParamsSnapshot;
 		Entry.PathIdentity = PathIdentity;
 
 		if (IncomingOutcomeTag.IsValid())
@@ -341,7 +341,7 @@ void UQuestStateSubsystem::RecordEntry(
 		}
 	});
 
-	const AActor* GiverActor = ActivationParamsSnapshot.ActivationSource;
+	const AActor* GiverActor = ActivationParamsSnapshot.Dynamic.Instigator.Get();
 	UE_LOG(LogSimpleQuest, Log,
 		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
@@ -350,9 +350,9 @@ void UQuestStateSubsystem::RecordEntry(
 		*UEnum::GetValueAsString(Provenance),
 		GiverActor ? *GiverActor->GetName() : TEXT("null"),
 		*PathIdentity.ToString(),
-		ActivationParamsSnapshot.TargetActors.Num(),
-		ActivationParamsSnapshot.TargetClasses.Num(),
-		ActivationParamsSnapshot.NumElementsRequired,
+		ActivationParamsSnapshot.Dynamic.TargetActors.Num(),
+		ActivationParamsSnapshot.Authored.TargetClasses.Num(),
+		ActivationParamsSnapshot.Authored.NumElementsRequired,
 		QuestEntries.FindOrAdd(QuestTag).History.Num(),
 		EntryTime);
 
@@ -432,7 +432,7 @@ AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationParamsSnapshot.ActivationSource;
+			return Latest->ActivationContextSnapshot.Dynamic.Instigator.Get();
 		}
 	}
 	return nullptr;
@@ -450,16 +450,16 @@ EQuestActivationProvenance UQuestStateSubsystem::GetLastActivationProvenance(FGa
 	return EQuestActivationProvenance::Unknown;
 }
 
-FQuestObjectiveActivationParams UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
+FQuestObjectiveActivationContext UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
 {
 	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationParamsSnapshot;
+			return Latest->ActivationContextSnapshot;
 		}
 	}
-	return FQuestObjectiveActivationParams();
+	return FQuestObjectiveActivationContext();
 }
 
 FName UQuestStateSubsystem::GetLastPathIdentity(FGameplayTag QuestTag) const

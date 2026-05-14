@@ -55,7 +55,7 @@ void UQuestNodeBase::ResetTransientState()
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
     bWasGiverGated = false;
-    PendingActivationParams = FQuestObjectiveActivationParams{};
+    PendingActivationContext = FQuestObjectiveActivationContext{};
 }
 
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)

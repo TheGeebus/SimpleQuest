@@ -62,8 +62,8 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
     //       otherwise stalls when a target is bound through an alias only.
     // Falls back to Channel if Context isn't populated (defensive — preserves behavior for any publish path that
     // hasn't been routed through FQuestPublish::OnAllNodeTags yet).
-    const FGameplayTag CanonicalTag = Event.Context.NodeInfo.QuestTag.IsValid()
-        ? Event.Context.NodeInfo.QuestTag
+    const FGameplayTag CanonicalTag = Event.Payload.NodeInfo.QuestTag.IsValid()
+        ? Event.Payload.NodeInfo.QuestTag
         : Channel;
 
     // Guard against duplicate activation for the same step

@@ -421,7 +421,7 @@ leaving parent-prefix subscribers with no historical context for descendants
 already in some state at bind time). Simultaneously expands the registry's
 per-quest historical surface so save/load (0.5.0) can reconstitute live
 questline state from the registry alone — the snapshot includes the full
-`FQuestObjectiveActivationParams` delivered to the objective at activation,
+`FQuestObjectiveActivationContext` delivered to the objective at activation,
 not just the cascade source identity captured pre-bundle.
 
 - **`UQuestStateSubsystem::KnownQuests`** — `TMap<FGameplayTag,
@@ -451,7 +451,7 @@ not just the cascade source identity captured pre-bundle.
   cascade loop); Step starts were invisible to the registry. The Step-side
   write captures `Step->GetReceivedActivationParams()` post-merge, so the
   snapshot reflects the actual final params delivered to the objective.
-- **`FQuestObjectiveActivationParams::Provenance`** — new field stamped by
+- **`FQuestObjectiveActivationContext::Provenance`** — new field stamped by
   `ActivateNodeByTag` onto the destination's `PendingActivationParams`. Rides
   through `UQuestStep::ActivateInternal`'s merge into `ReceivedActivation-
   Params` so the start-time registry capture has it. `ActivateNodeByTag`
@@ -1391,7 +1391,7 @@ investigating comment-node undo specifically).
   `TSet<TSoftClassPtr<>>`. The runtime counterparts
   (`UQuestStep::QuestObjective`, `UQuestNodeBase::Reward`) were already
   `TSoftClassPtr`; runtime `UQuestStep::TargetClasses`,
-  `FQuestObjectiveActivationParams::TargetClasses`, and
+  `FQuestObjectiveActivationContext::TargetClasses`, and
   `UQuestObjective::TargetClasses` all flipped to match
 - Questline asset packages no longer record hard dependencies on
   designer-authored Objective / Reward / target Actor BP classes.
@@ -1416,9 +1416,9 @@ investigating comment-node undo specifically).
 ## [0.3.1] — 2026-04-23 — Objective Activation Lifecycle + Structured Payloads
 
 Dominant feature: a restructuring of the objective activation surface.
-Activation now delivers a typed `FQuestObjectiveActivationParams`
+Activation now delivers a typed `FQuestObjectiveActivationContext`
 struct to objectives, with named fields + `FInstancedStruct CustomData`
-extension — symmetric with the existing `FQuestObjectiveContext` on
+extension — symmetric with the existing `FQuestObjectiveTriggerContext` on
 the completion side. Four entry points feed the struct (authored step
 defaults, external event bus, quest giver components, step-to-step
 handoff), all merging additively. New `OriginTag` + `OriginChain` give
@@ -1434,11 +1434,11 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
 ### Added
 
 #### Activation Params Struct (dominant feature)
-- `FQuestObjectiveActivationParams` — named activation-time fields
+- `FQuestObjectiveActivationContext` — named activation-time fields
   (`TargetActors`, `TargetClasses`, `NumElementsRequired`,
   `ActivationSource`, `OriginTag`, `OriginChain`) plus
   `FInstancedStruct CustomData` for game-specific runtime extension.
-  Symmetric with `FQuestObjectiveContext` on the completion side
+  Symmetric with `FQuestObjectiveTriggerContext` on the completion side
 - `UQuestObjective::OnObjectiveActivated` replaces `SetObjectiveTarget`
   — `BlueprintNativeEvent` taking the full params struct, accessed
   via `BlueprintProtected` + public `DispatchOnObjectiveActivated`
@@ -1454,7 +1454,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
 
 #### Giver-Authored Params 
 - `UQuestGiverComponent::ActivationParams` — designer-authored
-  `FQuestObjectiveActivationParams` carried with every give. Placed
+  `FQuestObjectiveActivationContext` carried with every give. Placed
   world singletons (shrines, dungeon-entrance actors) author their
   specific `TargetActors`, counts, `CustomData`, `OriginTag` directly
   in the Details panel
@@ -1470,7 +1470,7 @@ conveniences, plus a batch of rename- and compile-refresh fixes.
 #### Step-to-Step Forward Params 
 - `UQuestObjective::CompleteObjectiveWithOutcome` gains optional
   `InForwardParams` arg (`AutoCreateRefTerm`) — completing objective
-  specifies an `FQuestObjectiveActivationParams` to carry forward
+  specifies an `FQuestObjectiveActivationContext` to carry forward
   into the next step's activation. Merges additively with the
   downstream step's authored defaults. Both `InCompletionContext` and
   `InForwardParams` are BP-optional via `AutoCreateRefTerm`
@@ -1695,15 +1695,15 @@ inspector.
   refresh
 
 #### Quest Event Context Model
-- `FQuestObjectiveContext` struct carrying `TriggeredActor`,
+- `FQuestObjectiveTriggerContext` struct carrying `TriggeredActor`,
   `Instigator`, counter state, and `FInstancedStruct CustomData` for
   game-specific extension
 - `FQuestNodeInfo` struct carrying compiled display metadata
   (`QuestTag`, `DisplayName` `FText`) baked by the compiler
-- `FQuestEventContext` wrapping `FQuestNodeInfo` + optional
-  `FQuestObjectiveContext` for outbound events
+- `FQuestEventPayload` wrapping `FQuestNodeInfo` + optional
+  `FQuestObjectiveTriggerContext` for outbound events
 - All outbound events (Started, Ended, Enabled, Deactivated,
-  Progress) carry `FQuestEventContext`
+  Progress) carry `FQuestEventPayload`
 - `UQuestTargetComponent::Send*` methods accept optional `CustomData`
   via `AutoCreateRefTerm` (BP pin optional, C++ default-constructs)
 - `FQuestObjectiveTriggered` / `Killed` / `Interacted` gain

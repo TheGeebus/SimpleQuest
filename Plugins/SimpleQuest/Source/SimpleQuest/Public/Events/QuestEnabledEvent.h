@@ -14,6 +14,6 @@ struct FQuestEnabledEvent : public FQuestEventBase
 	FQuestEnabledEvent(const FGameplayTag InQuestTag)
 		: FQuestEventBase(InQuestTag) {}
 
-	FQuestEnabledEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+	FQuestEnabledEvent(const FGameplayTag InQuestTag, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext) {}
 };

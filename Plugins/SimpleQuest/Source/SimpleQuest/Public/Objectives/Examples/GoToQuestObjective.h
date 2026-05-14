@@ -21,8 +21,8 @@ public:
 	UGoToQuestObjective();
 	
 protected:
-	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
-	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override;
+	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext) override;
+	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override;
 
 private:
 	UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))

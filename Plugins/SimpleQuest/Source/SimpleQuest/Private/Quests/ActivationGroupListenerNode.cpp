@@ -42,7 +42,7 @@ void UActivationGroupListenerNode::OnRegisteredWithManager()
 
 void UActivationGroupListenerNode::OnGroupSignalReceived(FGameplayTag Channel, const FQuestActivationGroupTriggeredEvent& Event)
 {
-	// Stamp the signal payload onto own PendingActivationParams. The manager's HandleOnNodeForwardActivated
+	// Stamp the signal payload onto own PendingActivationContext. The manager's HandleOnNodeForwardActivated
 	// threads this onto each NextNodesOnForward destination, mirroring ChainToNextNodes::StampAndActivate.
 	// OriginChain is preserved verbatim — group is transparent to chain bookkeeping, so the Listener does NOT
 	// append its own tag. OriginatingEventID is similarly transparent: the cascade event ID identifies the
@@ -51,9 +51,9 @@ void UActivationGroupListenerNode::OnGroupSignalReceived(FGameplayTag Channel, c
 	// ForwardParams assignment already carries both fields; the explicit re-stamps mirror the documented
 	// ForwardParams-vs-event-field duplication pattern (event field takes precedence). SourceTag from the
 	// event is informational only.
-	PendingActivationParams = Event.ForwardParams;
-	PendingActivationParams.OriginChain = Event.OriginChain;
-	PendingActivationParams.OriginatingEventID = Event.OriginatingEventID;
+	PendingActivationContext = Event.ForwardParams;
+	PendingActivationContext.Dynamic.OriginChain = Event.OriginChain;
+	PendingActivationContext.Dynamic.OriginatingEventID = Event.OriginatingEventID;
 
 	UE_LOG(LogSimpleQuest, Verbose,
 		TEXT("ActivationGroupListener '%s' received signal — source='%s' chain-depth=%d eventGuid=%s"),

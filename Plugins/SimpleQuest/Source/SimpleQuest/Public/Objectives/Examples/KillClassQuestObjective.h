@@ -19,7 +19,7 @@ class SIMPLEQUEST_API UKillClassQuestObjective : public UCountingQuestObjective
 
 public:
 	UKillClassQuestObjective();
-	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext) override;
+	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext) override;
 	
 private:
 	UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))

@@ -12,7 +12,7 @@ struct FQuestActivationGroupTriggeredEvent;
  * Runtime instance for the editor "Activation Group: Exit" node — the LISTENER half of a group portal pair.
  * Subscribes at instance lifetime (via OnRegisteredWithManager) to the GroupTag signal channel, listening for
  * FQuestActivationGroupTriggeredEvent published by every UActivationGroupSetterNode sharing the same group tag.
- * On signal received, stamps the payload's ForwardParams + OriginChain onto own PendingActivationParams and
+ * On signal received, stamps the payload's ForwardParams + OriginChain onto own PendingActivationContext and
  * calls ForwardActivation() to fire BoundaryCompletionsOnForward + activate NextNodesOnForward downstream.
  *
  * Subscription persists for the full instance lifetime regardless of containing wrapper's Live state — the

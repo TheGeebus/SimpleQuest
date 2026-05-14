@@ -6,16 +6,16 @@
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Interfaces/QuestTargetInterface.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 
 
-void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveContext& InContext)
+void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
 {
 	/*-------------------------------------------------------------------------------------------------------------------*
-	 * Set fields on an FQuestObjectiveContext and pass it to CompleteObjectiveWithOutcome.
+	 * Set fields on an FQuestObjectiveTriggerContext and pass it to CompleteObjectiveWithOutcome.
 	 * Common fields:
 	 *   InContext can be forwarded directly for pass-through, or build a new one:
-	 *   FQuestObjectiveContext OutContext;
+	 *   FQuestObjectiveTriggerContext OutContext;
 	 *   OutContext.TriggeredActor = InContext.TriggeredActor;
 	 *   OutContext.Instigator = InContext.Instigator;
 	 * Game-specific extension - any desired struct type, such as example user-defined struct FMyKillData:
@@ -25,19 +25,19 @@ void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveC
 	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params)
+void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::OnObjectiveActivated_Implementation — storing base target fields from activation params."));
-	TargetActors = Params.TargetActors;
-	TargetClasses = Params.TargetClasses;
+	TargetActors = Params.Dynamic.TargetActors;
+	TargetClasses = Params.Authored.TargetClasses;
 }
 
-void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationParams& Params)
+void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params)
 {
 	OnObjectiveActivated(Params);
 }
 
-void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext)
+void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveTriggerContext& InContext)
 {
 	TryCompleteObjective(InContext);
 }
@@ -58,7 +58,7 @@ TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 	return {};
 }
 
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveContext& InCompletionContext, const FQuestObjectiveActivationParams& InForwardParams)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveTriggerContext& InCompletionContext, const FQuestObjectiveActivationContext& InForwardParams)
 {
 	CompletionContext = InCompletionContext;
 	ForwardActivationParams = InForwardParams;
@@ -70,7 +70,7 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 	ConditionalBeginDestroy();
 }
 
-void UQuestObjective::ReportProgress(const FQuestObjectiveContext& ProgressContext)
+void UQuestObjective::ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext)
 {
 	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), ProgressContext.CurrentCount, ProgressContext.RequiredCount, *GetFullName());
 	OnQuestObjectiveProgress.Broadcast(ProgressContext);

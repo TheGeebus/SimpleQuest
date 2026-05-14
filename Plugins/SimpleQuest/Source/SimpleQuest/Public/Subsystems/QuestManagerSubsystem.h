@@ -9,7 +9,7 @@
 #include "Engine/AssetManager.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
-#include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "QuestManagerSubsystem.generated.h"
@@ -22,7 +22,7 @@ struct FQuestClearBlockRequestEvent;
 struct FQuestDeactivateRequestEvent;
 struct FQuestDeactivatedEvent;
 struct FQuestEntryRecordedEvent;
-struct FQuestEventContext;
+struct FQuestEventPayload;
 struct FQuestGiverRegisteredEvent;
 struct FQuestGivenEvent;
 struct FQuestlineStartRequestEvent;
@@ -89,7 +89,7 @@ protected:
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
-	 * destination's PendingActivationParams so it rides through ActivateInternal's merge into ReceivedActivationParams;
+	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
 	 * catch-up subscribers and save/load reconstitution access to "how was this activation initiated?"
 	 *
@@ -105,7 +105,7 @@ protected:
 	 *                            outcome / forward / deactivation routing from another node; ExternalAPI for
 	 *                            FQuestActivationRequestEvent and programmatic / procedural / save-rehydration paths.
 	 * @param IncomingOutcomeTag  Outcome from the parent node for per-path entry routing in UQuest container nodes.
-	 *                            Stamped onto PendingActivationParams.IncomingOutcomeTag and consumed by the wrapper's
+	 *                            Stamped onto PendingActivationContext.Dynamic.IncomingOutcomeTag and consumed by the wrapper's
 	 *                            inner-entry routing. Invalid (default) for non-cascade activations.
 	 * @param IncomingSourceTag   FName of the specific parent source whose outcome fired. UQuest entry routing filters
 	 *                            source-qualified entries against this tag so only the matching spec's entry step
@@ -119,7 +119,7 @@ protected:
 	 *
 	 * @see UQuestStateSubsystem::RecordEntry
 	 * @see UQuestManagerSubsystem::HandleOnNodeStarted
-	 * @see FQuestObjectiveActivationParams::Provenance
+	 * @see FQuestObjectiveActivationContext::Provenance
 	 */
 	virtual void ActivateNodeByTag(
 		FName NodeTagName,
@@ -295,17 +295,17 @@ protected:
 
 private:
 	/**
-	 * Assembles a fully populated FQuestEventContext from a node instance.
+	 * Assembles a fully populated FQuestEventPayload from a node instance.
 	 * Stage 1: copies NodeInfo from the node.
 	 * Stage 2: copies InObjectiveData (non-empty only for completion events).
 	 * Stage 3: broadcasts OnAssembleEventContext for game code to fill GameData.
 	 */
-	FQuestEventContext AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveContext& InCompletionContext) const;
+	FQuestEventPayload AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveTriggerContext& InCompletionTrigger) const;
 	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity);
 	UFUNCTION()
-	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveContext ProgressData);
+	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveTriggerContext ProgressData);
 	UFUNCTION()
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()

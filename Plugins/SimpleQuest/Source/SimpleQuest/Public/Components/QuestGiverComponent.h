@@ -8,7 +8,7 @@
 #include "Components/ActorComponent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Quests/Types/PrerequisiteExpression.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "QuestGiverComponent.generated.h"
 
 
@@ -101,12 +101,12 @@ public:
 	 *   1. This component's authored ActivationParams (baseline per placed instance).
 	 *   2. The caller-supplied Params argument (per-call runtime data).
 	 * Merge rules match UQuestStep::ActivateInternal: TargetActors / TargetClasses union, NumElementsRequired sums,
-	 * and the single-valued fields (ActivationSource, CustomData, OriginTag, OriginChain) take the caller's value when
-	 * set, otherwise the authored baseline. If neither source sets ActivationSource, it defaults to GetOwner() so
+	 * and the single-valued fields (Instigator, CustomData, OriginTag, OriginChain) take the caller's value when
+	 * set, otherwise the authored baseline. If neither source sets Instigator, it defaults to GetOwner() so
 	 * objectives always have a "who activated me" reference.
 	 *
 	 * Blueprint: the Params pin is optional thanks to AutoCreateRefTerm — leave it unconnected and the authored
-	 * ActivationParams (if any) carries alone. Wire a Make FQuestObjectiveActivationParams node to supply runtime data
+	 * ActivationParams (if any) carries alone. Wire a Make FQuestObjectiveActivationContext node to supply runtime data
 	 * (dialogue choices, procedural targets, typed CustomData). 
 	 *
 	 * C++: pass an empty struct literal (or omit the argument) for the authored-only path; fill fields to add on top.
@@ -115,7 +115,7 @@ public:
 	 * @param Params    Optional per-call activation payload. Merged additively with the component's ActivationParams.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Params"))
-	void GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
+	void GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 	
 	/**
 	 * BP-friendly wrapper for UQuestStateSubsystem::QueryQuestActivationBlockers. Returns empty array if the
@@ -135,13 +135,13 @@ protected:
 	FGameplayTagContainer QuestTagsToGive;
 
 	/**
-	 * Designer-authored activation payload published with every give. Full FQuestObjectiveActivationParams struct —
+	 * Designer-authored activation payload published with every give. Full FQuestObjectiveActivationContext struct —
 	 * placed-actor givers can pre-wire TargetActors (the specific enemies / items this giver's quest is about), counts,
 	 * typed CustomData, etc. Merged additively with the step's authored defaults in UQuestStep::ActivateInternal. Empty
 	 * (default-constructed) is the common case and incurs no behavior change vs. pre-Piece-C.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest")
-	FQuestObjectiveActivationParams ActivationParams;
+	FQuestObjectiveActivationContext ActivationParams;
 	
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer EnabledQuestTags;

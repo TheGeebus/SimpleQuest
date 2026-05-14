@@ -51,7 +51,7 @@ struct FQuestStateEntryRow
     EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
     /**
-     * Display string for the giver actor (FQuestEntryArrival::ActivationParamsSnapshot.ActivationSource->GetName()).
+     * Display string for the giver actor (FQuestEntryArrival::ActivationContextSnapshot.Dynamic.Instigator->GetName()).
      * Stored as string at refresh time rather than as a TWeakObjectPtr — the snapshot may outlive the actor itself,
      * and we only need the name for display. Empty when the start had no giver (cascade / external / initial-entry).
      */

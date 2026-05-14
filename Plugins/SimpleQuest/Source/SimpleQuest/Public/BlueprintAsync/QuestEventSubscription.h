@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
-#include "Quests/Types/QuestEventContext.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "QuestEventSubscription.generated.h"
 
@@ -47,7 +47,7 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
 
 /**
  * BP-facing delegate for quest lifecycle events other than completion. Matches the UQuestWatcherComponent pattern
- * but carries the full FQuestEventContext so designers reach TriggeredActor, Instigator, NodeInfo, CustomData
+ * but carries the full FQuestEventPayload so designers reach TriggeredActor, Instigator, NodeInfo, CustomData
  * without a separate lookup.
  *
  * Linking Questline graphs means that a single node may broadcast events on several tagged channels
@@ -72,7 +72,7 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
  * Mirrors UQuestWatcherComponent's delegate contract; same shape, same semantics.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelegate,
-    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context);
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 
 /**
  * Completion variant — adds the OutcomeTag. Designers typically branch on OutcomeTag with a Switch or equality
@@ -80,12 +80,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelega
  * lifecycle-delegate doc comment above for the QuestTag vs MatchedChannel contract.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionCompletedDelegate,
-    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventContext, Context);
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Context);
 
 /** Activated variant — adds the PrereqStatus payload so designers don't need to query separately. See the
  *  lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionActivatedDelegate,
-    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, FQuestPrereqStatus, PrereqStatus);
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, FQuestPrereqStatus, PrereqStatus);
 
 /**
  * Started variant — adds the GiverActor payload. Populated when the quest was given via a giver; null when
@@ -93,7 +93,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionActivatedDelegat
  * vs MatchedChannel contract.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionStartedDelegate,
-    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventContext, Context, AActor*, GiverActor);
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, AActor*, GiverActor);
 
 /**
  * Give-blocked variant — carries the structured blocker array and the giver actor that initiated the refused

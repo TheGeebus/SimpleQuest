@@ -15,11 +15,11 @@ struct FQuestStartedEvent : public FQuestEventBase
 		: FQuestEventBase(InQuestTag)
 	{}
 
-	FQuestStartedEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+	FQuestStartedEvent(const FGameplayTag InQuestTag, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext)
 	{}
 
-	FQuestStartedEvent(const FGameplayTag InQuestTag, const FQuestEventContext& InContext, AActor* InGiverActor)
+	FQuestStartedEvent(const FGameplayTag InQuestTag, const FQuestEventPayload& InContext, AActor* InGiverActor)
 		: FQuestEventBase(InQuestTag, InContext), GiverActor(InGiverActor)
 	{}
 

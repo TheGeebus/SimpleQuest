@@ -17,7 +17,7 @@
  * Primary subscribers: prereq enablement-watch and deferred-completion subscriptions for outcome-typed leaves.
  * Each subscription filters on OutcomeTag in the payload to decide whether to re-evaluate. Plain "I want to
  * know when any quest resolves" consumers should keep using FQuestEndedEvent - same ContextualTag channel, but
- * with full FQuestEventContext attached.
+ * with full FQuestEventPayload attached.
  */
 USTRUCT(BlueprintType)
 struct FQuestResolutionRecordedEvent : public FQuestEventBase

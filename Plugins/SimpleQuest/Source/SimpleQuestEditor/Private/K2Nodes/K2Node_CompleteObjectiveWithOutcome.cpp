@@ -39,7 +39,7 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 
 	FEdGraphPinType CompletionContextPinType;
 	CompletionContextPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-	CompletionContextPinType.PinSubCategoryObject = FQuestObjectiveContext::StaticStruct();
+	CompletionContextPinType.PinSubCategoryObject = FQuestObjectiveTriggerContext::StaticStruct();
 	UEdGraphPin* DataPin = CreatePin(EGPD_Input, CompletionContextPinType, TEXT("CompletionContext"));
 	DataPin->PinFriendlyName = LOCTEXT("ContextPin", "Completion Context");
 	DataPin->PinToolTip = LOCTEXT("ContextPinTooltip",
@@ -51,18 +51,18 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 
 	FEdGraphPinType ForwardParamsPinType;
 	ForwardParamsPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-	ForwardParamsPinType.PinSubCategoryObject = FQuestObjectiveActivationParams::StaticStruct();
+	ForwardParamsPinType.PinSubCategoryObject = FQuestObjectiveActivationContext::StaticStruct();
 	UEdGraphPin* ForwardPin = CreatePin(EGPD_Input, ForwardParamsPinType, TEXT("ForwardParams"));
 	ForwardPin->PinFriendlyName = LOCTEXT("ForwardPin", "Forward Params");
 	ForwardPin->PinToolTip = LOCTEXT("ForwardPinTooltip",
 		"Forward Params\n"
 		"Quest Objective Activation Params Structure\n\n"
 		"Optional activation payload passed forward into any step(s) this completion activates next. Merges additively with\n"
-		"the downstream step's authored defaults (TargetActors union, NumElementsRequired sums, CustomData / ActivationSource\n"
+		"the downstream step's authored defaults (TargetActors union, NumElementsRequired sums, CustomData / Instigator\n"
 		"take caller-if-set). OriginChain is extended system-side regardless of whether this pin is connected — this payload\n"
 		"is for the rest of the activation data you want propagated.\n\n"
 		"Common uses: seeding a downstream kill-counter with actors the current step's objective discovered dynamically,\n"
-		"carrying a dialogue-choice struct forward as CustomData, or stamping an ActivationSource the next objective needs.\n"
+		"carrying a dialogue-choice struct forward as CustomData, or stamping an Instigator the next objective needs.\n"
 		"Leave unconnected to forward only the chain — the common case.").ToString();
 }
 

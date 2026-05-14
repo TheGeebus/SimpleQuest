@@ -5,7 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "NativeGameplayTags.h"
 #include "QuestEventBase.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "QuestActivationRequestEvent.generated.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestActivationRequest)
@@ -25,10 +25,10 @@ struct SIMPLEQUEST_API FQuestActivationRequestEvent : public FQuestEventBase
 	GENERATED_BODY()
 
 	FQuestActivationRequestEvent() = default;
-	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationParams& InParams)
+	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationContext& InParams)
 		: FQuestEventBase(InQuestTag), Params(InParams) {}
 
 	UPROPERTY(BlueprintReadWrite)
-	FQuestObjectiveActivationParams Params;
+	FQuestObjectiveActivationContext Params;
 };
 

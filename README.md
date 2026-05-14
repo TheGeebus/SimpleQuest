@@ -17,7 +17,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Visual graph editor** — author questlines as a composable node graph. Custom Slate widgets for combinator, group, utility, and step nodes; inline tag pickers; dynamic pin management; in-editor compile with clickable diagnostics that navigate to the offending node.
 - **Nested prerequisite expressions** — AND / OR / NOT combinators plus reusable Prerequisite Rule portals. Any content node can gate activation, progression, or completion on an arbitrarily deep boolean expression authored inline.
 - **Named outcomes** — nodes resolve with designer-authored outcome tags. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently. No binary success/failure constraint.
-- **Structured objective activation** — activation delivers a typed `FQuestObjectiveActivationParams` struct (target actors, classes, element counts, typed CustomData, ActivationSource). Designer-authored step defaults, giver components, event-bus publishers, and step-to-step handoff all merge additively. An OriginTag and OriginChain track the cascade path across Quest and LinkedQuestline boundaries so objectives can branch on "who activated me" without glue code.
+- **Structured objective activation** — activation delivers a typed `FQuestObjectiveActivationContext` struct (target actors, classes, element counts, typed CustomData, ActivationSource). Designer-authored step defaults, giver components, event-bus publishers, and step-to-step handoff all merge additively. An OriginTag and OriginChain track the cascade path across Quest and LinkedQuestline boundaries so objectives can branch on "who activated me" without glue code.
 - **Linked questlines** — reference external questline graph assets inline. The compiler inlines the linked graph with bidirectional tag resolution and dual-tag (contextual + standalone) subscription support.
 - **Live PIE inspection** — per-state colored halos on graph nodes, live leaf satisfaction tinting in the Prereq Examiner, and a searchable WorldState Facts panel showing every asserted fact. No log-diving required to understand the running state.
 - **Authoring diagnostics** — project-wide **Prereq Tag Validator** toolbar action flags broken cross-graph references (orphaned leaves, Rule Exits pointing at missing Rule Entries, unused Rule Entries); **Stale Quest Tags** nomad tab + headless commandlet cover the full project (loaded levels, Actor Blueprint defaults, unloaded levels including World Partition) with per-row Clear and a CI-friendly exit code for ship-pipeline gating. Together they catch authoring drift the compiler can't see.
@@ -189,13 +189,13 @@ class UMyObjective : public UQuestObjective
     GENERATED_BODY()
 
 protected:
-    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override
     {
         // Read Params.TargetActors, Params.NumElementsRequired, Params.CustomData (FInstancedStruct), Params.OriginTag, etc.
         // Wire up listeners, store local tracking state, spawn UI, and so on.
     }
 
-    virtual void TryCompleteObjective_Implementation(const FQuestObjectiveContext& Context) override
+    virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& Context) override
     {
         if (/* your completion condition */)
         {
@@ -213,7 +213,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 ### Reacting to Quest Events
 
-**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventContext` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
+**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
 
 **C++** — use the library template for direct handle-based subscriptions:
 

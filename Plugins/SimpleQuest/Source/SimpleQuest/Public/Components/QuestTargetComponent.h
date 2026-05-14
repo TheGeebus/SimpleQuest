@@ -35,7 +35,7 @@ public:
 
 	/**
 	 * Publish an objective-triggered event on every watched step channel. CustomData, if supplied, flows through to the
-	 * objective's FQuestObjectiveContext::CustomData — designer-visible game-specific payload. BP pin is optional via
+	 * objective's FQuestObjectiveTriggerContext::CustomData — designer-visible game-specific payload. BP pin is optional via
 	 * AutoCreateRefTerm; C++ callers can omit to publish an empty CustomData.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))

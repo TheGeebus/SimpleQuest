@@ -841,8 +841,8 @@ bool SQuestStateView::RefreshEntriesFromChannel()
             // snapshot may outlive the actor, and the underlying TObjectPtr<AActor> in the snapshot may be a
             // dangling pointer to a destroyed actor — IsValid() guards. Designers see "(none)" rendered with the
             // subdued color when no giver was attributed to the start.
-            if (const AActor* Giver = Entry.ActivationParamsSnapshot.ActivationSource)
-            {
+			if (const AActor* Giver = Entry.ActivationContextSnapshot.Dynamic.Instigator.Get())
+			{
                 if (IsValid(Giver))
                 {
                     Row->GiverActorName = Giver->GetName();

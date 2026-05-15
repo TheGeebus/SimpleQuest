@@ -5,9 +5,8 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestComponentBase.h"
+#include "QuestTriggerComponent.h"
 #include "Components/ActorComponent.h"
-#include "Events/QuestStartedEvent.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "QuestGiverComponent.generated.h"
@@ -20,6 +19,7 @@ struct FQuestEnabledEvent;
 struct FQuestActivatedEvent;
 struct FQuestDisabledEvent;
 struct FQuestGiveBlockedEvent;
+struct FQuestStartedEvent;
 struct FQuestActivationBlocker;
 
 class UQuestManagerSubsystem;
@@ -27,189 +27,262 @@ class UQuestStateSubsystem;
 
 
 /**
- * Fires when execution reaches this giver-gated quest. PrereqStatus describes whether prereqs are currently
- * satisfied — designers branch on PrereqStatus.bSatisfied to decide whether to show a "ready" or "locked" UI
- * affordance immediately.
+ * Categorization of what caused an availability change on a Giver. Designer-side logic branches
+ * on Reason for differentiated UI treatment — e.g., "newly available" pulse vs. "lost availability"
+ * fade.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestActivatedAtGiverDelegate, FGameplayTag, QuestTag, FQuestPrereqStatus, PrereqStatus);
+UENUM(BlueprintType)
+enum class EGiveAvailabilityChangeReason : uint8
+{
+	/** Default / unset. Treat as "unspecified change." */
+	Unknown,
 
-/** Fires when a quest at this giver becomes accept-ready (Activated AND prereqs satisfy). */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestEnabledAtGiverDelegate, FGameplayTag, QuestTag);
+	/**
+	 * A quest reached this giver (entered Activated state). Tag appears in NewlyActivated;
+	 * usually also NewlyEnabled if prereqs are already satisfied.
+	 */
+	Activated,
+
+	/**
+	 * A quest's prereqs transitioned from unsatisfied to satisfied while the quest was already
+	 * Activated. Tag appears in NewlyEnabled only (not NewlyActivated).
+	 */
+	Enabled,
+
+	/**
+	 * A quest's prereqs transitioned from satisfied to unsatisfied while still Activated.
+	 * Tag appears in NewlyUnavailable only (not NewlyDeactivated).
+	 */
+	Disabled,
+
+	/** A quest was successfully given by this giver. Tag appears in NewlyUnavailable and NewlyDeactivated. */
+	Started,
+
+	/**
+	 * A quest left this giver's surface without being given (cascade interrupt, force-deactivate,
+	 * resolved elsewhere). Tag appears in NewlyUnavailable and NewlyDeactivated.
+	 */
+	Deactivated,
+
+	/**
+	 * Initial state populated at BeginPlay from any quests already pending-giver when this
+	 * component came online. Currently* containers reflect the captured snapshot; Newly*
+	 * containers may be non-empty if pre-existing quests were caught up.
+	 */
+	InitialCatchUp,
+};
+
 
 /**
- * Fires when an accept-ready quest at this giver becomes no-longer-accept-ready (sat → unsat transition, typically
- * NOT-prereq edge cases). Symmetric partner to OnQuestEnabled.
+ * Rich payload for OnGiveAvailabilityChanged. Describes the delta between the prior state and
+ * the current state, plus the post-change snapshots of both Activated and Enabled sets for
+ * convenience — designer doesn't need a follow-up GetActivatedQuests() / GetEnabledQuests()
+ * call to refresh UI. Reason discriminates the cause for branched designer logic.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestDisabledAtGiverDelegate, FGameplayTag, QuestTag);
+USTRUCT(BlueprintType)
+struct SIMPLEQUEST_API FGiveAvailabilityChange
+{
+	GENERATED_BODY()
+
+	/** Quests that just entered the enabled set (newly available to give). */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer NewlyEnabled;
+
+	/** Quests that just left the enabled set (newly unavailable to give). */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer NewlyUnavailable;
+
+	/**
+	 * Quests that just entered Activated (reached this giver) but aren't yet enabled. Useful for
+	 * "this quest exists in scope but can't be given yet" UI states.
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer NewlyActivated;
+
+	/** Quests that just left Activated (deactivated, completed elsewhere, etc.). */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer NewlyDeactivated;
+
+	/** Current full enabled set. Convenience snapshot so consumers don't need a follow-up GetEnabledQuests() call. */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer CurrentEnabled;
+
+	/** Current full activated set. Convenience snapshot. */
+	UPROPERTY(BlueprintReadOnly)
+	FGameplayTagContainer CurrentActivated;
+
+	/** Categorization of the change for branched designer logic. */
+	UPROPERTY(BlueprintReadOnly)
+	EGiveAvailabilityChangeReason Reason = EGiveAvailabilityChangeReason::Unknown;
+};
+
 
 /**
- * Fires when an attempted give from this giver was refused by the manager. Carries the structured blocker array,
- * designer branches on Reason for contextual refusal dialogue.
+ * Fires when the giveable set changes. Designer refreshes UI from the rich payload describing
+ * which quests entered or left the Activated / Enabled sets.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestGiveBlockedAtGiverDelegate, FGameplayTag, QuestTag, const TArray<FQuestActivationBlocker>&, Blockers);
-	
-/**
- * Fires when a quest at this giver enters the Live state — typically right after a successful give. The
- * giver's state containers (ActivatedQuestTags / EnabledQuestTags) have been cleaned up by this point.
- */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestStartedAtGiverDelegate,	FGameplayTag, QuestTag);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGiveAvailabilityChanged, FGiveAvailabilityChange, Change);
+
 
 /**
- * Fires when a quest at this giver was deactivated before completing (abandon, cascade interrupt, SetBlocked).
- * Symmetric partner to OnQuestStarted for "this quest is no longer in the giver's purview" signalling.
+ * Component for actors that offer quests to the player. Configure QuestTagsToGive with the
+ * quest tags this giver should offer; the component automatically tracks Activated / Enabled /
+ * Given state for those quests via the lifecycle event bus. Designer refreshes UI from
+ * OnGiveAvailabilityChanged plus the state queries (GetEnabledQuests / CanGiveAnyQuests / etc.)
+ * and triggers gives via GiveQuest / GiveAllQuests.
+ *
+ * Per-give success and refusal notifications come from the inherited UQuestObserverComponent
+ * delegates OnQuestStarted (Live transition with GiverActor populated) and OnQuestGiveBlocked
+ * (refusal with Blockers and GiverActor). QuestTagsToGive entries are implicitly observed —
+ * adopters can bind those delegates without authoring a parallel ObservedTags entry. Filter by
+ * GiverActor == GetOwner() to scope to this giver's attempts.
+ *
+ * Inherits the full observation surface from UQuestObserverComponent and the trigger /
+ * Send-event surface from UQuestTriggerComponent. A single Giver component can offer quests
+ * AND act as a trigger target for other quests' step objectives — populate both
+ * QuestTagsToGive and StepTagsToTrigger on the same component.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestDeactivatedAtGiverDelegate,	FGameplayTag, QuestTag);
-
-
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestGiverComponent : public UQuestComponentBase
+class SIMPLEQUEST_API UQuestGiverComponent : public UQuestTriggerComponent
 {
 	GENERATED_BODY()
 
 public:	
 	UQuestGiverComponent();
-	
-	/** Fires when execution reaches a quest at this giver, regardless of prereq state. */
-	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestActivatedAtGiverDelegate OnQuestActivated;
 
-	/** Fires when a quest becomes accept-ready at this giver. */
-	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestEnabledAtGiverDelegate OnQuestEnabled;
+	// ── Event surface ────────────────────────────────────────────
 
-	/** Fires when an accept-ready quest at this giver becomes no-longer-ready. Rare; primarily NOT-prereq cases. */
+	/** Fires when the giveable set changes. Rich payload describes the delta + current snapshot. */
 	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestDisabledAtGiverDelegate OnQuestDisabled;
+	FOnGiveAvailabilityChanged OnGiveAvailabilityChanged;
 
-	/** Fires when a give attempt from this giver was refused. Designer reads Blockers for contextual UI. */
-	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestGiveBlockedAtGiverDelegate OnQuestGiveBlocked;
 
-	/** Fires when a quest at this giver starts (post-acceptance, quest now Live). */
-	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestStartedAtGiverDelegate OnQuestStarted;
+	// ── Action API ───────────────────────────────────────────────
 
-	/** Fires when a quest at this giver is deactivated before completion. */
-	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
-	FOnQuestDeactivatedAtGiverDelegate OnQuestDeactivated;
-	
 	/**
-	 * Give the quest identified by ContextualTag to this component's owner. Publishes FQuestGivenEvent on Tag_Channel_QuestGiven;
-	 * UQuestManagerSubsystem picks it up, clears any PendingGiver state, stamps the merged params onto the target step, and
-	 * routes into the normal activation pipeline (prereq / gate checks unchanged).
+	 * Give a specific quest. Publishes a request to the manager, which clears any PendingGiver
+	 * state, stamps Context onto the target step, and routes into the normal activation pipeline.
+	 * The outcome surfaces asynchronously via OnQuestGiven (success) or OnGiveAttemptBlocked
+	 * (refusal). If Context.Dynamic.Instigator is unset, it defaults to this giver's owning actor.
 	 *
-	 * The outgoing params are built by additively merging two sources, in this order:
-	 *   1. This component's authored ActivationParams (baseline per placed instance).
-	 *   2. The caller-supplied Params argument (per-call runtime data).
-	 * Merge rules match UQuestStep::ActivateInternal: TargetActors / TargetClasses union, NumElementsRequired sums,
-	 * and the single-valued fields (Instigator, CustomData, OriginTag, OriginChain) take the caller's value when
-	 * set, otherwise the authored baseline. If neither source sets Instigator, it defaults to GetOwner() so
-	 * objectives always have a "who activated me" reference.
-	 *
-	 * Blueprint: the Params pin is optional thanks to AutoCreateRefTerm — leave it unconnected and the authored
-	 * ActivationParams (if any) carries alone. Wire a Make FQuestObjectiveActivationContext node to supply runtime data
-	 * (dialogue choices, procedural targets, typed CustomData). 
-	 *
-	 * C++: pass an empty struct literal (or omit the argument) for the authored-only path; fill fields to add on top.
-	 *
-	 * @param QuestTag  Compiled quest tag identifying which step to activate. Must be a registered tag; no-op otherwise.
-	 * @param Params    Optional per-call activation payload. Merged additively with the component's ActivationParams.
+	 * @param QuestTag   The quest to give. Must be registered in the runtime tag manager.
+	 * @param Context    Per-call activation context. Empty default carries no extra data.
 	 */
-	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Params"))
-	void GiveQuestByTag(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
-	
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
+	void GiveQuest(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Context = FQuestObjectiveActivationContext());
+
 	/**
-	 * BP-friendly wrapper for UQuestStateSubsystem::QueryQuestActivationBlockers. Returns empty array if the
-	 * state subsystem can't be resolved (rare; world / GameInstance teardown).
+	 * Give every currently-enabled quest in QuestTagsToGive. Iterates in authored order and
+	 * calls GiveQuest on each. The same Context applies to all. Useful for "interact with NPC,
+	 * give everything available" interaction patterns where designer doesn't want to pick
+	 * individually.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
+	void GiveAllQuests(const FQuestObjectiveActivationContext& Context = FQuestObjectiveActivationContext());
+
+	// ── State queries ────────────────────────────────────────────
+
+	/**
+	 * Activated set: every quest in QuestTagsToGive that has reached this giver, regardless of
+	 * whether prereqs are satisfied. Use for "this quest exists in this NPC's scope" UI.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	const FGameplayTagContainer& GetActivatedQuests() const { return ActivatedQuestTags; }
+
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	bool HasAnyActivatedQuests() const { return !ActivatedQuestTags.IsEmpty(); }
+
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	bool IsQuestActivated(FGameplayTag QuestTag) const { return ActivatedQuestTags.HasTag(QuestTag); }
+
+	/**
+	 * Enabled set: activated AND prereqs satisfied AND not blocked. The quests this giver can
+	 * actually offer right now.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	const FGameplayTagContainer& GetEnabledQuests() const { return EnabledQuestTags; }
+
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	bool IsQuestEnabled(FGameplayTag QuestTag) const { return EnabledQuestTags.HasTag(QuestTag); }
+
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	bool CanGiveAnyQuests() const { return !EnabledQuestTags.IsEmpty(); }
+
+	/** History of quests this giver has successfully given. Append-only within the session. */
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	const FGameplayTagContainer& GetGivenQuests() const { return GivenQuestTags; }
+
+	/** Returns the structured reasons (if any) why QuestTag can't currently be activated. */
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
 	TArray<FQuestActivationBlocker> QueryActivationBlockers(FGameplayTag QuestTag) const;
-	
+
+	// ── Authored config accessors ────────────────────────────────
+
+	UFUNCTION(BlueprintCallable)
+	const FGameplayTagContainer& GetQuestTagsToGive() const { return QuestTagsToGive; }
+
+	/**
+	 * Registration-filtered view of QuestTagsToGive. Stale (unregistered) entries are dropped
+	 * with a warning log; the authored container is unchanged. Safe to pass into
+	 * FGameplayTagContainer::Filter / HasAny / MatchesAny without tripping UE's stale-tag ensure.
+	 */
+	UFUNCTION(BlueprintCallable)
+	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
+
 protected:
 	virtual void BeginPlay() override;
-	
-	/**
-	 * New authoritative property — read by the manifest builder and eventually the sole registration mechanism once the
-	 * full tag-based rework is complete.
-	 */
+
+	/** Quest tags this giver offers. Designer-authored on the placed component instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline"))
 	FGameplayTagContainer QuestTagsToGive;
 
-	/**
-	 * Designer-authored activation payload published with every give. Full FQuestObjectiveActivationContext struct —
-	 * placed-actor givers can pre-wire TargetActors (the specific enemies / items this giver's quest is about), counts,
-	 * typed CustomData, etc. Merged additively with the step's authored defaults in UQuestStep::ActivateInternal. Empty
-	 * (default-constructed) is the common case and incurs no behavior change vs. pre-Piece-C.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest")
-	FQuestObjectiveActivationContext ActivationParams;
-	
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category="QuestGiver", meta=(AllowPrivateAccess=true))
 	FGameplayTagContainer EnabledQuestTags;
 
 	/**
-	 * Quests that have reached this giver via the activation wire, regardless of prereq satisfaction. Compared to
-	 * EnabledQuestTags — which only contains accept-ready quests — this is the broader "any quest in the giver's
-	 * scope" set. Designers showing always-on indicators bind to this; designers showing only-when-actionable
-	 * indicators bind to EnabledQuestTags or CanGiveAnyQuests.
+	 * Quests in QuestTagsToGive that have reached this giver via the activation wire, regardless
+	 * of prereq satisfaction. Broader than EnabledQuestTags.
 	 */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer ActivatedQuestTags;
 
-	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
+	/** Quests this giver has successfully given. Appended in OnQuestStartedEventReceived. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
+	FGameplayTagContainer GivenQuestTags;
 
+	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
-	
+
+	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override { return QuestTagsToGive; }
+
 private:
-	void OnQuestActivatedEventReceived(FGameplayTag Channel, const FQuestActivatedEvent& Event);
-	void OnQuestDisabledEventReceived(FGameplayTag Channel, const FQuestDisabledEvent& Event);
-	void OnQuestGiveBlockedEventReceived(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
+	void OnQuestActivatedEventReceived   (FGameplayTag Channel, const FQuestActivatedEvent& Event);
+	void OnQuestEnabledEventReceived     (FGameplayTag Channel, const FQuestEnabledEvent& Event);
+	void OnQuestDisabledEventReceived    (FGameplayTag Channel, const FQuestDisabledEvent& Event);
+	void OnQuestStartedEventReceived     (FGameplayTag Channel, const FQuestStartedEvent& Event);
+	void OnQuestEndedEventReceived       (FGameplayTag Channel, const FQuestEndedEvent& Event);
+	void OnQuestDeactivatedEventReceived (FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+	void OnQuestGiveBlockedEventReceived (FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
+
+	void RegisterQuestGiver();
+
+	/** Shared cleanup body for the deactivation and end-event paths. */
+	void HandleQuestLeftGiverSurface(FGameplayTag Channel);
+
+	/** Computes the delta between prior and current state and fires OnGiveAvailabilityChanged. */
+	void BroadcastAvailabilityChange(const FGameplayTagContainer& PriorActivated, const FGameplayTagContainer& PriorEnabled, EGiveAvailabilityChangeReason Reason);
 
 	/**
-	 * One-shot blocker-event subscription handles, keyed by quest tag. Populated by GiveQuestByTag before the
-	 * give event publishes; cleared on receipt of either FQuestGiveBlockedEvent or FQuestStartedEvent.
+	 * Per-attempt blocker-event handles, keyed by quest tag. Populated by GiveQuest before the
+	 * give request publishes; cleared when the cycle closes (Started or Blocked response).
+	 * Presence of an entry signals "this giver has an in-flight give for this tag" — read by
+	 * OnQuestStartedEventReceived to attribute the give to this giver.
 	 */
 	TMap<FGameplayTag, FDelegateHandle> PendingGiveBlockedHandles;
 
 	void UnsubscribePendingGiveBlocked(FGameplayTag QuestTag);
 
 	UQuestStateSubsystem* ResolveQuestStateSubsystem() const;
-	
-	void RegisterQuestGiver();
-	void OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event);
-	void OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event);
-	void OnQuestEndedEventReceived(FGameplayTag Channel, const FQuestEndedEvent& Event);
-	void OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 
-	/**
-	 * Shared body for OnQuestDeactivatedEventReceived and OnQuestEndedEventReceived. Clears internal tracking
-	 * for Channel, unsubscribes any pending give-blocked subscription, and broadcasts OnQuestDeactivated as
-	 * the unified "quest left the giver's offering surface" signal.
-	 */
-	void HandleQuestLeftGiverSurface(FGameplayTag Channel);
-	
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
-
-public:
-	/**
-	 * Returns the authored QuestTagsToGive container verbatim. May contain stale (unregistered) tags if the designer hasn't
-	 * recompiled after removing a referenced node. Feed into tag-library Filter / HasAny / MatchesAny calls via
-	 * GetRegisteredQuestTagsToGive() instead — raw stale entries assert inside UE's FGameplayTag::MatchesAny.
-	 */
-	UFUNCTION(BlueprintCallable)
-	FGameplayTagContainer GetQuestTagsToGive() const { return QuestTagsToGive; }
-
-	/**
-	 * Registration-filtered view of QuestTagsToGive. Every returned tag is guaranteed registered in the runtime tag
-	 * manager, making this safe to pass into FGameplayTagContainer::Filter / HasAny / MatchesAny. Stale entries are
-	 * dropped (with a Warning log naming each one) but preserved on the underlying authored container.
-	 */
-	UFUNCTION(BlueprintCallable)
-	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
-	
-	UFUNCTION(BlueprintCallable)
-	bool CanGiveAnyQuests() const;
-	UFUNCTION(BlueprintCallable)
-	bool IsQuestEnabled(FGameplayTag QuestTag);
-
 };

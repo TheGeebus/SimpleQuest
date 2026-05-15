@@ -242,11 +242,28 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestObserverComponent::RegisterQuestObserver : QuestSignalSubsystem is null, aborting."));
 		return;
 	}
-	if (ObservedTags.IsEmpty())
+
+	// Build the effective observed set: designer-authored ObservedTags plus implicit entries supplied by
+	// derived components via GetImplicitlyObservedTags(). For tags in the implicit set, the give-flow
+	// success/refusal pair (bObserveStarted + bObserveGiveBlocked) is forced on regardless of designer
+	// overrides — those two delegates are the canonical give-outcome notifications for a Giver-managed
+	// tag, and silencing either creates an asymmetric / partially-observable surface that confuses
+	// adopters binding the inherited delegates. Other flags fall through to designer's authored values
+	// (when an ObservedTags entry exists) or FObservedQuestEventSettings defaults (when not).
+	TMap<FGameplayTag, FObservedQuestEventSettings> EffectiveObserved = ObservedTags;
+	for (const FGameplayTag& ImplicitTag : GetImplicitlyObservedTags())
+	{
+		if (!ImplicitTag.IsValid()) continue;
+		FObservedQuestEventSettings& Settings = EffectiveObserved.FindOrAdd(ImplicitTag);
+		Settings.bObserveStarted = true;
+		Settings.bObserveGiveBlocked = true;
+	}
+
+	if (EffectiveObserved.IsEmpty())
 	{
 		if (GetOwner())
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : ObservedTags is empty. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : no observed tags resolved. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
 		}
 		return;
 	}
@@ -257,7 +274,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
-	for (auto& QuestPair : ObservedTags)
+	for (auto& QuestPair : EffectiveObserved)
 	{
 		const FGameplayTag& QuestTag = QuestPair.Key;
 		const FObservedQuestEventSettings& Settings = QuestPair.Value;

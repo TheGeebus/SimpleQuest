@@ -5,10 +5,8 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestComponentBase.h"
+#include "QuestObserverComponent.h"
 #include "Components/ActorComponent.h"
-#include "Events/QuestEndedEvent.h"
-#include "Events/QuestStartedEvent.h"
 #include "QuestTriggerComponent.generated.h"
 
 
@@ -18,7 +16,7 @@ struct FQuestEndedEvent;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestTriggerComponent : public UQuestComponentBase
+class SIMPLEQUEST_API UQuestTriggerComponent : public UQuestObserverComponent
 {
 	GENERATED_BODY()
 

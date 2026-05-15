@@ -188,6 +188,17 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
+	/**
+	 * Derived components may expose a set of tags to be implicitly observed alongside the
+	 * designer-authored ObservedTags container. Returned tags receive default FObservedQuestEventSettings
+	 * (every observe-flag on, no outcome filter) only when not already present in ObservedTags —
+	 * designer-authored settings always win on overlap.
+	 *
+	 * Use to bridge tags managed by a derived component (e.g., Giver's QuestTagsToGive) onto the
+	 * Observer's broadcast surface without requiring designers to maintain a parallel ObservedTags entry.
+	 */
+	virtual FGameplayTagContainer GetImplicitlyObservedTags() const { return FGameplayTagContainer(); }
+
 	virtual void HandleQuestActivated   (FGameplayTag Channel, const FQuestActivatedEvent& Event);
 	virtual void HandleQuestEnabled     (FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	virtual void HandleQuestDisabled    (FGameplayTag Channel, const FQuestDisabledEvent& Event);

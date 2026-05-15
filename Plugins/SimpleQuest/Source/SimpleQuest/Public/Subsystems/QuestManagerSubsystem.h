@@ -10,6 +10,7 @@
 #include "Engine/AssetManager.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
@@ -86,7 +87,7 @@ protected:
 	virtual void RegisterQuestlineGraph(UQuestlineGraph* Graph);
 	
 	/** Registers all compiled node instances from the graph into LoadedNodeInstances and activates its entry nodes. */
-	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph);
+	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
@@ -205,7 +206,7 @@ protected:
 		FName PathIdentity,
 		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
 
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload()) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -368,7 +369,7 @@ private:
 	 * publishes FQuestDeactivatedEvent on the node tag channel so subscribers (givers, observers, and this subsystem's own
 	 * HandleNodeDeactivatedEvent) can react. No-op on Completed nodes.
 	 */
-	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source);
+	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context = FQuestEventPayload());
 
 	void RegisterGiversFromAssetRegistry();
 	

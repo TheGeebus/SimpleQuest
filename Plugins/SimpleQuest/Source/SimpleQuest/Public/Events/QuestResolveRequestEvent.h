@@ -5,6 +5,7 @@
 
 #include "NativeGameplayTags.h"
 #include "QuestEventBase.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "QuestResolveRequestEvent.generated.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestResolveRequest)
@@ -19,6 +20,9 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestResolveRequest)
  * terminal state (Completed or Deactivated), the manager skips with a warn-log. With true, the manager proceeds
  * additively: appends a new resolution entry to the quest's history; never RemoveFact's prior facts; never
  * overwrites prior records. OutcomeTag may be empty or invalid for "resolve without specifying an outcome."
+ *
+ * Context carries optional attribution (Instigator, CustomData, OriginTag, OriginChain) propagated into
+ * FQuestEndedEvent.Payload when the resolution is applied.
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestResolveRequestEvent : public FQuestEventBase
@@ -28,10 +32,16 @@ struct SIMPLEQUEST_API FQuestResolveRequestEvent : public FQuestEventBase
 	FQuestResolveRequestEvent() = default;
 	FQuestResolveRequestEvent(FGameplayTag InQuestTag, FGameplayTag InOutcomeTag, bool bInOverrideExisting)
 		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag), bOverrideExisting(bInOverrideExisting) {}
+	FQuestResolveRequestEvent(FGameplayTag InQuestTag, FGameplayTag InOutcomeTag, bool bInOverrideExisting, const FQuestEventPayload& InContext)
+		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag), bOverrideExisting(bInOverrideExisting), Context(InContext) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	FGameplayTag OutcomeTag;
 
 	UPROPERTY(BlueprintReadWrite)
 	bool bOverrideExisting = false;
+
+	/** Optional attribution payload. Empty default; manager propagates non-empty Context into FQuestEndedEvent.Payload. */
+	UPROPERTY(BlueprintReadWrite)
+	FQuestEventPayload Context;
 };

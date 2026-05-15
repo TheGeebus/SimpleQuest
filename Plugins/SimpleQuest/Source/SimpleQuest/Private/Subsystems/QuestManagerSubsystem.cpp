@@ -53,6 +53,26 @@
 #include "Components/QuestGiverComponent.h"
 #endif
 
+namespace
+{
+    /**
+     * Overlay a caller-supplied attribution payload onto a framework-assembled context. Returns Base with
+     * Overlay's populated FQuestContextBase fields layered on top — NodeInfo (graph identity) stays from
+     * Base; Instigator / CustomData / OriginTag / OriginChain from Overlay win where populated. Used at
+     * request-handler boundaries to let BP callers' attribution data carry through into lifecycle event
+     * payloads without losing the framework's node-perspective metadata.
+     */
+    FQuestEventPayload OverlayCallerContext(const FQuestEventPayload& Base, const FQuestEventPayload& Overlay)
+    {
+        FQuestEventPayload Result = Base;
+        if (Overlay.Instigator.IsValid())   Result.Instigator = Overlay.Instigator;
+        if (Overlay.CustomData.IsValid())   Result.CustomData = Overlay.CustomData;
+        if (Overlay.OriginTag.IsValid())    Result.OriginTag = Overlay.OriginTag;
+        if (!Overlay.OriginChain.IsEmpty()) Result.OriginChain = Overlay.OriginChain;
+        return Result;
+    }
+}
+
 void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
@@ -506,17 +526,32 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
         Existing->ExitedGraphTagsOnAnyOutcome.Num());
 }
 
-void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph)
+void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params)
 {
     if (!Graph) return;
 
     RegisterQuestlineGraph(Graph);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s)"),
-        *Graph->GetName(), Graph->GetEntryNodeTags().Num());
+    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s) (CustomData %s, Instigator %s)"),
+        *Graph->GetName(), Graph->GetEntryNodeTags().Num(),
+        Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
+        Params.Dynamic.Instigator.IsValid() ? *Params.Dynamic.Instigator->GetName() : TEXT("null"));
 
     for (const FName& EntryTagName : Graph->GetEntryNodeTags())
     {
+        // Mirror of HandleActivationRequest / HandleGiveQuestEvent: stash Params on each entry Step's
+        // PendingActivationContext before activation, so ActivateInternal merges them with the Step's authored
+        // defaults. Empty Params stamps cleanly; ActivateInternal's additive merge preserves authored defaults
+        // in that case. Container entry nodes don't carry an activation context themselves — Params propagates
+        // to the first Step reached on the inward cascade.
+        if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(EntryTagName))
+        {
+            if (UQuestStep* Step = Cast<UQuestStep>(Instance))
+            {
+                Step->PendingActivationContext = Params;
+            }
+        }
+
         ActivateNodeByTag(EntryTagName, EQuestActivationProvenance::InitialEntry);
     }
 }
@@ -1202,7 +1237,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     }
 }
 
-void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source)
+void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context)
 {
     if (!QuestTag.IsValid() || !WorldState) return;
 
@@ -1305,19 +1340,21 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     {
         AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Deactivated);
 
-        // Publish with context
+        // Publish with context. Caller-supplied Context (from BP request) overlays onto the framework-assembled
+        // context when a Node is loaded — Instigator / CustomData / lineage from the request layer in; NodeInfo
+        // stays from assembly. No-Node fallback path uses the request Context directly (nothing else to merge).
         if (QuestSignalSubsystem)
         {
-            FQuestDeactivatedEvent Event(QuestTag, Source);
             if (Node)
             {
-                Event = FQuestDeactivatedEvent(QuestTag, Source, AssembleEventContext(Node, FQuestObjectiveTriggerContext()));
+                FQuestEventPayload EffectiveContext = OverlayCallerContext(AssembleEventContext(Node, FQuestObjectiveTriggerContext()), Context);
+                FQuestDeactivatedEvent Event(QuestTag, Source, EffectiveContext);
                 FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, Event);
             }
             else
             {
                 // Fallback — no instance loaded under this tag. Single publish preserves observability.
-                QuestSignalSubsystem->PublishMessage(QuestTag, Event);
+                QuestSignalSubsystem->PublishMessage(QuestTag, FQuestDeactivatedEvent(QuestTag, Source, Context));
             }
         }
     }
@@ -1355,7 +1392,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     }
 }
 
-void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source) const
+void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext) const
 {
     if (!QuestSignalSubsystem || !Node->GetContextualTag().IsValid()) return;
 
@@ -1365,7 +1402,7 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
         CompletionCtx = Step->GetCompletionContext();
     }
 
-    FQuestEventPayload Context = AssembleEventContext(Node, CompletionCtx);
+    FQuestEventPayload Context = OverlayCallerContext(AssembleEventContext(Node, CompletionCtx), ExternalContext);
     FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestEndedEvent(Node->GetContextualTag(), OutcomeTag, Source, Context));
 }
 
@@ -1519,7 +1556,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // Block does NOT auto-deactivate. Block is the orthogonal re-entry gate; deactivation is the lifecycle/world
     // disabler. Callers who want both must publish FQuestDeactivateRequestEvent themselves (or use SetBlocked's
     // bAlsoDeactivateTargets toggle on the node-driven path).
-    FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source));
+    FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source, Event.Context));
 
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
         *QuestTag.ToString(),
@@ -1545,7 +1582,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
     if (QuestSignalSubsystem)
     {
-        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestUnblockedEvent(QuestTag, Event.Source));
+        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
     }
 
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=%s)"),
@@ -1589,17 +1626,19 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
     }
     ClearEnablementWatch(QuestTag);
 
-    // Publish FQuestEndedEvent — branch on whether a node instance is loaded for context assembly.
+    // Publish FQuestEndedEvent — branch on whether a node instance is loaded for context assembly. Either
+    // path threads the request's Context into the published event: Node-loaded overlays caller's attribution
+    // onto the assembled context; no-Node uses the caller's Context directly.
     if (QuestSignalSubsystem)
     {
         if (UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
         {
-            PublishQuestEndedEvent(Node, Event.OutcomeTag, EQuestResolutionSource::External);
+            PublishQuestEndedEvent(Node, Event.OutcomeTag, EQuestResolutionSource::External, Event.Context);
         }
         else
         {
             // Fully-dynamic flow — no node instance. Publish a minimal event without assembled Context.
-            QuestSignalSubsystem->PublishMessage(QuestTag, FQuestEndedEvent(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External));
+            QuestSignalSubsystem->PublishMessage(QuestTag, FQuestEndedEvent(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External, Event.Context));
         }
     }
 
@@ -1618,12 +1657,12 @@ void UQuestManagerSubsystem::HandleQuestlineStartRequest(FGameplayTag Channel, c
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and activate"), *Event.Graph.ToString());
 
     AsyncLoadAndActivate<UQuestlineGraph>(this, Event.Graph,
-        [this](UQuestlineGraph* Graph)
+        [this, Params = Event.Params](UQuestlineGraph* Graph)
         {
             if (Graph)
             {
                 UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
-                ActivateQuestlineGraph(Graph);
+                ActivateQuestlineGraph(Graph, Params);
             }
             else
             {
@@ -1904,7 +1943,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel,
     // perspective state facts were actually written under. BP callers (DeactivateQuest helper) may pass any
     // perspective form; state lives at the canonical ContextualTag of the underlying instance.
     const FGameplayTag CanonicalTag = ResolveToCanonicalTag(Event.GetQuestTag());
-    if (CanonicalTag.IsValid()) SetQuestDeactivated(CanonicalTag, Event.Source);
+    if (CanonicalTag.IsValid()) SetQuestDeactivated(CanonicalTag, Event.Source, Event.Context);
 }
 
 int32 UQuestManagerSubsystem::GetQuestCompletionCount(FGameplayTag QuestTag) const

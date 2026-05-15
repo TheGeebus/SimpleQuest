@@ -13,6 +13,7 @@
 struct FQuestDeactivatedEvent;
 struct FQuestStartedEvent;
 struct FQuestEndedEvent;
+struct FQuestObjectiveTriggerContext;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -38,18 +39,19 @@ public:
 	void SetActivated(bool bIsActivated);
 
 	/**
-	 * Publish an objective-triggered event on every watched step channel. CustomData, if supplied, flows through to the
-	 * objective's FQuestObjectiveTriggerContext::CustomData — designer-visible game-specific payload. BP pin is optional via
-	 * AutoCreateRefTerm; C++ callers can omit to publish an empty CustomData.
+	 * Publish a trigger event on every watched step channel. The structural facts of any trigger fire are
+	 * "what was triggered" (TriggeredActor — typically this component's owning actor; component fills this
+	 * in if the caller left it null) and "what initiated the trigger" (Instigator — the killer, interactor,
+	 * or whatever external causer fired the trigger; equal to TriggeredActor for self-fired triggers).
+	 * CustomData on the context carries game-specific payload. All other variants — kill / interact / any
+	 * domain-specific firing — collapse into this one signal; the semantic differentiation lives in the
+	 * Instigator role and any CustomData the designer adds.
+	 *
+	 * BP pin is optional via AutoCreateRefTerm; callers can omit Context to publish with TriggeredActor =
+	 * this component's owning actor and everything else empty.
 	 */
-	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
-	virtual void SendTriggeredEvent(const FInstancedStruct& CustomData = FInstancedStruct());
-
-	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
-	virtual void SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData = FInstancedStruct());
-
-	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "CustomData"))
-	virtual void SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData = FInstancedStruct());
+	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
+	virtual void SendTriggerEvent(const FQuestObjectiveTriggerContext& Context = FQuestObjectiveTriggerContext());
 
 protected:
 	virtual void BeginPlay() override;

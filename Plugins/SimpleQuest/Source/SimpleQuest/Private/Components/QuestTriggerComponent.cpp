@@ -4,11 +4,10 @@
 #include "Components/QuestTriggerComponent.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestDeactivatedEvent.h"
-#include "Events/QuestObjectiveInteracted.h"
-#include "Events/QuestObjectiveKilled.h"
-#include "Events/QuestObjectiveTriggered.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEndedEvent.h"
+#include "Events/QuestObjectiveTriggered.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 
@@ -56,8 +55,8 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     // Step's canonical identity, set by AssembleEventContext to ContextualTag). This serves two ends:
     //   (1) Dedup when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step —
     //       multi-publish would otherwise hit both subscriptions and double-activate.
-    //   (2) Route trigger publishes (SendTriggeredEvent etc.) on ContextualTag, which is what the manager's per-
-    //       step FQuestObjectiveTriggered subscription is bound to — closing the cross-asset trigger flow that
+    //   (2) Route trigger publishes (SendTriggerEvent) on ContextualTag, which is what the manager's per-step
+    //       FQuestObjectiveTriggered subscription is bound to — closing the cross-asset trigger flow that
     //       otherwise stalls when a target is bound through an alias only.
     // Falls back to Channel if Context isn't populated (defensive — preserves behavior for any publish path that
     // hasn't been routed through FQuestPublish::OnAllNodeTags yet).
@@ -174,54 +173,27 @@ void UQuestTriggerComponent::SetActivated_Implementation(bool bIsActivated)
     OnQuestTriggerActivated.Broadcast(bIsActivated);
 }
 
-void UQuestTriggerComponent::SendTriggeredEvent(const FInstancedStruct& CustomData)
+void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContext& Context)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendTriggeredEvent);
-    
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendTriggeredEvent : '%s' fanning out to %d watched step(s); CustomData %s"),
-        *GetOwner()->GetActorNameOrLabel(), ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendTriggerEvent);
+
+    // Default TriggeredActor to the owning actor when the caller didn't supply one. "What was triggered"
+    // is almost always this trigger's owner — most external callers won't bother to set it explicitly.
+    UObject* TriggeredActor = Context.TriggeredActor ? Context.TriggeredActor.Get() : GetOwner();
+    UObject* Instigator = Context.Instigator.IsValid() ? Context.Instigator.Get() : nullptr;
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendTriggerEvent : '%s' fired by '%s' fanning out to %d watched step(s); CustomData %s"),
+        TriggeredActor ? *TriggeredActor->GetName() : TEXT("(none)"),
+        Instigator ? *Instigator->GetName() : TEXT("(none)"),
+        ActiveStepEndHandles.Num(), Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     TMap<FGameplayTag, FDelegateHandle> HandlesCopy = ActiveStepEndHandles;
     for (const auto& Pair : HandlesCopy)
     {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveTriggered(GetOwner(), nullptr, CustomData));
-    }
-}
-
-void UQuestTriggerComponent::SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData)
-{
-    if (!SignalSubsystem) return;
-    if (ActiveStepEndHandles.IsEmpty()) return;
-
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendKilledEvent);
-
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendKilledEvent : '%s' killed by '%s', fanning out to %d watched step(s); CustomData %s"),
-        *GetOwner()->GetActorNameOrLabel(), KillerActor ? *KillerActor->GetActorNameOrLabel() : TEXT("(none)"),
-        ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
-
-    for (const auto& Pair : ActiveStepEndHandles)
-    {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveKilled(GetOwner(), KillerActor, CustomData));
-    }
-}
-
-void UQuestTriggerComponent::SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData)
-{
-    if (!SignalSubsystem) return;
-    if (ActiveStepEndHandles.IsEmpty()) return;
-
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendInteractedEvent);
-
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendInteractedEvent : '%s' interacted by '%s', fanning out to %d watched step(s); CustomData %s"),
-        *GetOwner()->GetActorNameOrLabel(), InteractingActor ? *InteractingActor->GetActorNameOrLabel() : TEXT("(none)"),
-        ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
-
-    for (const auto& Pair : ActiveStepEndHandles)
-    {
-        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveInteracted(GetOwner(), InteractingActor, CustomData));
+        SignalSubsystem->PublishMessage(Pair.Key, FQuestObjectiveTriggered(TriggeredActor, Instigator, Context.CustomData));
     }
 }
 

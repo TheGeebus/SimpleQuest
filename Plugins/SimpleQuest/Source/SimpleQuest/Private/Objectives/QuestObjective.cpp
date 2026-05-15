@@ -62,9 +62,15 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 {
 	CompletionContext = InCompletionContext;
 	ForwardActivationParams = InForwardParams;
+
+	// Emit a final progress tick before completing so consumers driving a progress bar see the "full"
+	// state before the completion delegate takes over. The CompletionContext typically already has
+	// CurrentCount == RequiredCount at this point.
+	OnQuestObjectiveProgress.Broadcast(InCompletionContext);
+	
 	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
-	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements (Bundle Y)
-	// supply an explicit PathIdentity from the node's authored PathName.
+	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements supply an
+	// explicit PathIdentity from the node's authored PathName.
 	const FName ResolvedPath = PathIdentity.IsNone() ? OutcomeTag.GetTagName() : PathIdentity;
 	OnQuestObjectiveComplete.Broadcast(OutcomeTag, ResolvedPath);
 	ConditionalBeginDestroy();

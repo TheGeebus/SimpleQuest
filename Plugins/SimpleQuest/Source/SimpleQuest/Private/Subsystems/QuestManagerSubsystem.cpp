@@ -575,10 +575,44 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
     Context.NodeInfo = Node->GetNodeInfo();
     Context.CompletionTrigger = InCompletionTrigger;
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s"),
+    // Forward the FQuestContextBase fields from the Step's merged activation context — without this, the
+    // outbound payload arrives with empty Instigator / CustomData / OriginTag / OriginChain even when
+    // ActivateQuest / GiveQuest / etc. passed populated Params. UQuestStep::ActivateInternal stamps the
+    // merged context into ReceivedActivationContext before Super fires OnNodeStarted, so by the time this
+    // helper runs on the publish path the data is ready to forward. Closes the read-from half of the
+    // bidirectional adopter pipeline for attribution data.
+    if (const UQuestStep* Step = Cast<UQuestStep>(Node))
+    {
+        // Pre-Live events (Activated, Enabled while PendingGiver) fire before ActivateInternal merges
+        // Pending → Received, so ReceivedActivationContext is still empty in that phase. Read from
+        // PendingActivationContext when it carries data; fall back to ReceivedActivationContext for
+        // post-Live events (Started, Progress, Completed, etc.) when Pending has been consumed and
+        // cleared by ActivateInternal. PendingActivationContext is protected on UQuestNodeBase but the
+        // manager has friend access (declared at QuestNodeBase.h:131) so direct read works without a
+        // public getter.
+        const FQuestObjectiveActivationContext& Pending = Step->PendingActivationContext;
+        const bool bPendingHasData = Pending.Dynamic.Instigator.IsValid()
+            || Pending.Dynamic.CustomData.IsValid()
+            || Pending.Dynamic.OriginTag.IsValid()
+            || !Pending.Dynamic.OriginChain.IsEmpty();
+
+        const FQuestObjectiveActivationContext& Source = bPendingHasData
+            ? Pending
+            : Step->GetReceivedActivationParams();
+
+        Context.Instigator = Source.Dynamic.Instigator;
+        Context.CustomData = Source.Dynamic.CustomData;
+        Context.OriginTag = Source.Dynamic.OriginTag;
+        Context.OriginChain = Source.Dynamic.OriginChain;
+        Context.OriginatingEventID = Source.Dynamic.OriginatingEventID;
+    }
+
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
         *Context.NodeInfo.QuestTag.ToString(),
         *Context.NodeInfo.DisplayName.ToString(),
-        Context.CompletionTrigger.TriggeredActor ? TEXT("set") : TEXT("empty"));
+        Context.CompletionTrigger.TriggeredActor ? TEXT("set") : TEXT("empty"),
+        Context.Instigator.IsValid() ? *Context.Instigator->GetName() : TEXT("none"),
+        Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     return Context;
 }
@@ -1490,10 +1524,26 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
 
         if (Event.Params.Dynamic.Instigator.IsValid())
         {
-            // Stored under each placement's ContextualTag so HandleOnNodeStarted's per-instance lookup
-            // (RecentGiverActors.Find(Node->GetContextualTag())) recovers the giver actor for FQuestStartedEvent
-            // attribution on every placement that activates from this give.
+            // Multi-perspective attribution: a give issued against one perspective tag must attribute the
+            // GiverActor regardless of which perspective HandleOnNodeStarted later sees as Node->GetContextual-
+            // Tag(). The same logical Step can have a ContextualTag from one graph perspective and aliases from
+            // others; ResolveCanonicalTags returns the perspective the give was authored against, which isn't
+            // necessarily the Instance's own ContextualTag. Write the giver to every tag the Instance is known
+            // by so the lookup hits regardless of which perspective surfaces at the FQuestStartedEvent publish.
             RecentGiverActors.Add(CanonicalTag, Event.Params.Dynamic.Instigator);
+
+            const FGameplayTag InstanceContextualTag = Instance->GetContextualTag();
+            if (InstanceContextualTag.IsValid() && InstanceContextualTag != CanonicalTag)
+            {
+                RecentGiverActors.Add(InstanceContextualTag, Event.Params.Dynamic.Instigator);
+            }
+            for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+            {
+                if (AliasTag.IsValid() && AliasTag != CanonicalTag && AliasTag != InstanceContextualTag)
+                {
+                    RecentGiverActors.Add(AliasTag, Event.Params.Dynamic.Instigator);
+                }
+            }
         }
 
         ClearQuestPendingGiver(CanonicalTag);
@@ -1533,10 +1583,8 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
         if (!CanonicalTag.IsValid()) continue;
 
         UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName());
-        if (!Instance) continue;  // Skip canonicals with no loaded instance — avoids ActivateNodeByTag's noisy warning.
+        if (!Instance) continue;
 
-        // Stash params on the target step (if it IS a step) before activation, so ActivateInternal merges them
-        // with the Step's authored defaults.
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {
             Step->PendingActivationContext = Event.Params;
@@ -1593,10 +1641,11 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     RemoveStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Blocked);
     // Deactivated intentionally not cleared: the target's Activate input clears it on re-entry.
 
-    if (QuestSignalSubsystem)
-    {
-        QuestSignalSubsystem->PublishMessage(QuestTag, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
-    }
+    // Multi-channel publish — mirrors HandleBlockRequest's OnAllTagsForRequest path so subscribers on any
+    // perspective of this Step (ContextualTag or any AssetScopedAliasTag) receive one callback via the
+    // bus's per-subscriber dedup. Without this, an observer subscribed via one perspective misses unblock
+    // events published on a sibling perspective's canonical.
+    FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
 
     UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=%s)"),
         *QuestTag.ToString(),

@@ -246,21 +246,37 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer ActivatedQuestTags;
 
-	/** Quests this giver has successfully given. Appended in OnQuestStartedEventReceived. */
+	/** Quests this giver has successfully given. Appended in HandleQuestStarted. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer GivenQuestTags;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override { return QuestTagsToGive; }
+	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;
+	
+	/**
+	 * The three overrides below all interleave Giver-specific state tracking with the inherited Observer
+	 * broadcast. Pattern: filter to QuestTagsToGive → state update → Super::HandleQuest*(broadcast) →
+	 * BroadcastAvailabilityChange. State runs BEFORE Super so BP listeners bound to the inherited
+	 * delegates see fully-updated GivenQuestTags / ActivatedQuestTags / EnabledQuestTags when they query
+	 * inside the callback. Each override replaces a previous separate Giver subscription whose dispatch
+	 * order ran AFTER Observer's broadcast (Observer subscriptions register in Super::BeginPlay; Giver's
+	 * separate ones registered later in RegisterQuestGiver, putting them downstream in dispatch order).
+	 *
+	 * Activated / Disabled / Deactivated keep their separate Giver subscriptions because Observer doesn't
+	 * subscribe to those events by default — moving them into overrides would silently lose state-tracking
+	 * for tags only in QuestTagsToGive (not in ObservedTags). The subscriber-order issue only manifests
+	 * for those events when a designer explicitly opts in via ObservedTags with the respective flag true,
+	 * which is the narrow case we accept as a known limitation.
+	 */
+	virtual void HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event) override;
+	virtual void HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event) override;
+	virtual void HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event) override;
 
 private:
 	void OnQuestActivatedEventReceived   (FGameplayTag Channel, const FQuestActivatedEvent& Event);
-	void OnQuestEnabledEventReceived     (FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	void OnQuestDisabledEventReceived    (FGameplayTag Channel, const FQuestDisabledEvent& Event);
-	void OnQuestStartedEventReceived     (FGameplayTag Channel, const FQuestStartedEvent& Event);
-	void OnQuestEndedEventReceived       (FGameplayTag Channel, const FQuestEndedEvent& Event);
 	void OnQuestDeactivatedEventReceived (FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	void OnQuestGiveBlockedEventReceived (FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
 
@@ -276,7 +292,7 @@ private:
 	 * Per-attempt blocker-event handles, keyed by quest tag. Populated by GiveQuest before the
 	 * give request publishes; cleared when the cycle closes (Started or Blocked response).
 	 * Presence of an entry signals "this giver has an in-flight give for this tag" — read by
-	 * OnQuestStartedEventReceived to attribute the give to this giver.
+	 * HandleQuestStarted to attribute the give to this giver.
 	 */
 	TMap<FGameplayTag, FDelegateHandle> PendingGiveBlockedHandles;
 

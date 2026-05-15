@@ -79,6 +79,15 @@ protected:
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
 	/**
+	 * Bridges StepTagsToTrigger onto the inherited Observer broadcast surface — adopters binding the
+	 * inherited Observer delegates (OnQuestStarted, OnQuestProgress, OnQuestCompleted, etc.) receive
+	 * fires for the Trigger's managed step tags without authoring a parallel ObservedTags entry.
+	 * Chains via Super so a derived class that also bridges its own container (Giver's QuestTagsToGive)
+	 * sees both contributions in EffectiveObserved at register time.
+	 */
+	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;
+
+	/**
 	 * Shared cleanup body for both completion and deactivation routes. Unsubscribes the step end handle for
 	 * Channel; if no other watched steps remain active, calls SetActivated(false).
 	 */

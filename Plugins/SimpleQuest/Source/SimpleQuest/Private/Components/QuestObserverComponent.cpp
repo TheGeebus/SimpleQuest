@@ -243,18 +243,35 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		return;
 	}
 
-	// Build the effective observed set: designer-authored ObservedTags plus implicit entries supplied by
-	// derived components via GetImplicitlyObservedTags(). For tags in the implicit set, the give-flow
-	// success/refusal pair (bObserveStarted + bObserveGiveBlocked) is forced on regardless of designer
-	// overrides — those two delegates are the canonical give-outcome notifications for a Giver-managed
-	// tag, and silencing either creates an asymmetric / partially-observable surface that confuses
-	// adopters binding the inherited delegates. Other flags fall through to designer's authored values
-	// (when an ObservedTags entry exists) or FObservedQuestEventSettings defaults (when not).
+	// Build the effective observed set:
+	//   - Start with the designer-authored ObservedTags.
+	//   - For each implicit-observed tag (Trigger's StepTagsToTrigger, Giver's QuestTagsToGive, etc.),
+	//     either use the existing designer-authored entry OR create a fresh entry with implicit-default
+	//     flag overlay.
+	//   - Force-on the give-flow pair (bObserveStarted + bObserveGiveBlocked) on EVERY implicit-observed
+	//     tag regardless of source — these protect success/refusal symmetry and override designer config
+	//     silencing.
+	//   - Apply implicit defaults (bObserveProgress / bObserveBlocked / bObserveUnblocked) ONLY on fresh
+	//     entries — Progress for run-phase UI auto-binding, Blocked/Unblocked as a symmetric pair for
+	//     block-state UI. Designer-authored entries keep their authored flag values for these.
 	TMap<FGameplayTag, FObservedQuestEventSettings> EffectiveObserved = ObservedTags;
 	for (const FGameplayTag& ImplicitTag : GetImplicitlyObservedTags())
 	{
 		if (!ImplicitTag.IsValid()) continue;
+
+		const bool bDesignerAuthored = EffectiveObserved.Contains(ImplicitTag);
 		FObservedQuestEventSettings& Settings = EffectiveObserved.FindOrAdd(ImplicitTag);
+
+		if (!bDesignerAuthored)
+		{
+			// Implicit-only defaults — ergonomic flags that auto-bind for derived-component managed tags.
+			Settings.bObserveProgress = true;
+			Settings.bObserveBlocked = true;
+			Settings.bObserveUnblocked = true;
+		}
+
+		// Force-on the give-flow invariant pair regardless of source — silencing either half breaks the
+		// success/refusal observability symmetry.
 		Settings.bObserveStarted = true;
 		Settings.bObserveGiveBlocked = true;
 	}
@@ -288,8 +305,14 @@ void UQuestObserverComponent::RegisterQuestObserver()
 			continue;
 		}
 
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s"), *QuestTag.ToString());
-
+		// Source annotation helps debugging the implicit-observed bridge — adopters who see a tag firing
+		// delegates without an explicit ObservedTags entry can confirm it came from a derived component's
+		// GetImplicitlyObservedTags() override.
+		const bool bFromImplicitBridge = !ObservedTags.Contains(QuestTag);
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s (%s)"),
+			*QuestTag.ToString(),
+			bFromImplicitBridge ? TEXT("implicit") : TEXT("authored"));
+		
 		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
 		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
 		if (Settings.bObserveActivated)    SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated);
@@ -394,7 +417,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 							}
 						}
 					}
-
+					
 					if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
 					{
 						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
@@ -402,7 +425,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 					}
 					else
 					{
-						UE_LOG(LogSimpleQuest, Log, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
+						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
 					}

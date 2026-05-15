@@ -168,6 +168,13 @@ int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
     return Count;
 }
 
+FGameplayTagContainer UQuestTriggerComponent::GetImplicitlyObservedTags() const
+{
+    FGameplayTagContainer Implicit = Super::GetImplicitlyObservedTags();
+    Implicit.AppendTags(StepTagsToTrigger);
+    return Implicit;
+}
+
 void UQuestTriggerComponent::SetActivated_Implementation(bool bIsActivated)
 {
     OnQuestTriggerActivated.Broadcast(bIsActivated);

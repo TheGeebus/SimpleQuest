@@ -15,7 +15,7 @@
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
-#include "Components/QuestTargetComponent.h"
+#include "Components/QuestTriggerComponent.h"
 #include "Components/QuestGiverComponent.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
@@ -346,9 +346,9 @@ TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGa
 
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			if (const UQuestTargetComponent* Comp = It->FindComponentByClass<UQuestTargetComponent>())
+			if (const UQuestTriggerComponent* Comp = It->FindComponentByClass<UQuestTriggerComponent>())
 			{
-				if (Comp->GetStepTagsToWatch().HasTagExact(StepTag))
+				if (Comp->GetStepTagsToTrigger().HasTagExact(StepTag))
 				{
 					Names.Add(It->GetActorLabel());
 				}
@@ -1464,9 +1464,9 @@ namespace
 				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive())
 					EmitIfStale(Giver, TEXT("QuestTagsToGive"), Tag);
 			}
-			else if (UQuestTargetComponent* Target = Cast<UQuestTargetComponent>(Comp))
+			else if (UQuestTriggerComponent* Target = Cast<UQuestTriggerComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch())
+				for (const FGameplayTag& Tag : Target->GetStepTagsToTrigger())
 					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
 			}
 			else if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
@@ -1490,7 +1490,7 @@ namespace
 	 *
 	 * Walking all three is necessary because Actor->GetComponents on a CDO is unreliable for SCS / ICH-sourced
 	 * components in the general case (depends on whether the BP has been compiled and the CDO recreated). The
-	 * explicit walk catches all three of UQuestGiverComponent / UQuestTargetComponent / UQuestObserverComponent
+	 * explicit walk catches all three of UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent
 	 * regardless of how the designer added them.
 	 *
 	 * Pre-filters via AR-cached NativeParentClass tag so we don't sync-load non-actor BPs (UMG widget BPs, anim

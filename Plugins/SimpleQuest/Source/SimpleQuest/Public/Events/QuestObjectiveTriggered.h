@@ -5,7 +5,7 @@
 #include "QuestObjectiveTriggered.generated.h"
 
 // Routing channel for all objective trigger events. Pass as the Channel argument to PublishMessage.
-UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestTarget)
+UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestTrigger)
 
 USTRUCT(BlueprintType)
 struct FQuestObjectiveTriggered

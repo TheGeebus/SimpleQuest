@@ -9,8 +9,7 @@
 #include "Components/ActorComponent.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestStartedEvent.h"
-#include "Interfaces/QuestTargetInterface.h"
-#include "QuestTargetComponent.generated.h"
+#include "QuestTriggerComponent.generated.h"
 
 
 struct FQuestDeactivatedEvent;
@@ -19,20 +18,26 @@ struct FQuestEndedEvent;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestTargetComponent : public UQuestComponentBase, public IQuestTargetInterface
+class SIMPLEQUEST_API UQuestTriggerComponent : public UQuestComponentBase
 {
 	GENERATED_BODY()
 
 public:	
-	UQuestTargetComponent();
+	UQuestTriggerComponent();
 
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FActivateQuestTargetDelegate, bool, bIsActivated);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FActivateQuestTriggerDelegate, bool, bIsActivated);
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
-	FActivateQuestTargetDelegate OnQuestTargetActivated;
-			
-	UFUNCTION(BlueprintCallable)
-	virtual void SetActivated_Implementation(bool bIsActivated) override;
+	FActivateQuestTriggerDelegate OnQuestTriggerActivated;
+
+	/**
+	 * Framework calls this on the lifecycle transitions of the trigger's watched steps — true on step Started,
+	 * false on step Completed/Deactivated. BlueprintNativeEvent: adopters override SetActivated in BP to drive
+	 * owner visuals / collision / AI behavior on top of (or instead of) the OnQuestTriggerActivated delegate
+	 * broadcast. Default impl forwards to OnQuestTriggerActivated.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
+	void SetActivated(bool bIsActivated);
 
 	/**
 	 * Publish an objective-triggered event on every watched step channel. CustomData, if supplied, flows through to the
@@ -51,38 +56,35 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	virtual void OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	virtual void OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
 
-	/** Step-completion handler. Routes to OnTargetStepEnded so completion + deactivation share the same
+	/** Step-completion handler. Routes to OnTriggerStepEnded so completion + deactivation share the same
 	 *  "step no longer active" cleanup path. */
-	virtual void OnTargetStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event);
+	virtual void OnTriggerStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event);
 
-	/** Step-deactivation handler. Routes to OnTargetStepEnded for shared cleanup. Subscribed alongside
+	/** Step-deactivation handler. Routes to OnTriggerStepEnded for shared cleanup. Subscribed alongside
 	 *  the completion handler because targets disable on either kind of end — completion AND mid-flight
 	 *  interruption both indicate "this step is no longer active and this target shouldn't respond." */
-	virtual void OnTargetStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
-
-protected:
+	virtual void OnTriggerStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	
 	/**
 	 * Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
 	 * The subsystem publishes step events on the step tag; any target configured with that tag activates.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "SimpleQuest.Questline"))
-	FGameplayTagContainer StepTagsToWatch;
+	FGameplayTagContainer StepTagsToTrigger;
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
-	
-private:
 
 	/**
 	 * Shared cleanup body for both completion and deactivation routes. Unsubscribes the step end handle for
 	 * Channel; if no other watched steps remain active, calls SetActivated(false).
 	 */
-	void OnTargetStepEnded(FGameplayTag Channel);
-	
+	void OnTriggerStepEnded(FGameplayTag Channel);
+
+private:	
 	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
 	
 	/** Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously */
@@ -93,21 +95,20 @@ private:
 	 * to FQuestDeactivatedEvent on the same Channel.
 	 */
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepDeactivatedHandles;
-	
 
-public:
+public:	
 	/**
-	 * Raw authored StepTagsToWatch. May contain stale tags — feed into tag-library calls via GetRegisteredStepTagsToWatch()
+	 * Raw authored StepTagsToTrigger. May contain stale tags — feed into tag-library calls via GetRegisteredStepTagsToTrigger()
 	 * instead to avoid UE's stale-tag ensure.
 	 */
-	const FGameplayTagContainer& GetStepTagsToWatch() const { return StepTagsToWatch; }
+	const FGameplayTagContainer& GetStepTagsToTrigger() const { return StepTagsToTrigger; }
 
 	/**
-	 * Registration-filtered view of StepTagsToWatch — safe to pass into FGameplayTagContainer::Filter / HasAny /
+	 * Registration-filtered view of StepTagsToTrigger — safe to pass into FGameplayTagContainer::Filter / HasAny /
 	 * MatchesAny. Stale entries are dropped with a Warning log; authored container is unchanged.
 	 */
 	UFUNCTION(BlueprintCallable)
-	FGameplayTagContainer GetRegisteredStepTagsToWatch() const;
+	FGameplayTagContainer GetRegisteredStepTagsToTrigger() const;
 
 };
 

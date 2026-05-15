@@ -109,7 +109,7 @@ If you need custom orchestration logic (analytics, save integration, bespoke act
 |---|---|---|
 | `UQuestPlayerComponent` | Player Pawn or PlayerState | Tracks the local player's quest state |
 | `UQuestGiverComponent` | NPC Actor | Offers and activates quests on interaction |
-| `UQuestTargetComponent` | Enemy, item, or location Actor | Responds to trigger, kill, and interact events |
+| `UQuestTriggerComponent` | Enemy, item, or location Actor | Responds to trigger, kill, and interact events |
 | `UQuestObserverComponent` | Any Actor | Receives lifecycle events for one or more quests |
 
 ### 6. Inspect during PIE

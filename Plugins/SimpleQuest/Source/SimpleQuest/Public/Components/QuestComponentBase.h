@@ -5,7 +5,6 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Interfaces/QuestEventListenerInterface.h"
 #include "QuestComponentBase.generated.h"
 
 
@@ -14,7 +13,7 @@ class USignalSubsystem;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent, public IQuestEventListenerInterface
+class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent
 {
 	GENERATED_BODY()
 

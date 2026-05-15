@@ -7,7 +7,6 @@
 #include "GameplayTagContainer.h"
 #include "QuestComponentBase.h"
 #include "Components/ActorComponent.h"
-#include "Interfaces/QuestObserverInterface.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
@@ -101,7 +100,7 @@ struct FObservedQuestEventSettings
  * config-authored per-quest observation rather than ad-hoc K2 subscription.
  */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestObserverComponent : public UQuestComponentBase, public IQuestObserverInterface
+class SIMPLEQUEST_API UQuestObserverComponent : public UQuestComponentBase
 {
 	GENERATED_BODY()
 

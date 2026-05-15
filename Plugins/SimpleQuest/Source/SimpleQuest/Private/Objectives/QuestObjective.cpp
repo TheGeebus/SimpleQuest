@@ -6,7 +6,6 @@
 
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
-#include "Interfaces/QuestTargetInterface.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 
 

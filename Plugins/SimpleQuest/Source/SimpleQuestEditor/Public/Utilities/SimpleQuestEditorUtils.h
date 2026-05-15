@@ -95,7 +95,7 @@ public:
 	static FGameplayTag ReconstructStepTag(const UQuestlineNode_Step* StepNode);
 
 	/**
-	 * Finds actors in loaded editor worlds whose QuestTargetComponent watches the given step tag. Returns actor editor labels,
+	 * Finds actors in loaded editor worlds whose QuestTriggerComponent watches the given step tag. Returns actor editor labels,
 	 * sorted alphabetically.
 	 */
 	static TArray<FString> FindActorNamesWatchingTag(const FGameplayTag& StepTag);
@@ -227,8 +227,8 @@ public:
 	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
 	
 	/**
-	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent observers per contextual tag instead of
-	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
+	 * Same walk as FindContextualGiversForNode, but resolves QuestTriggerComponent observers per contextual tag instead of
+	 * givers. Surfaces target actors whose StepTagsToTrigger include one of the node's contextual inlined tags — the
 	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
 	 */
 	static TArray<FQuestContextualActor> FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode);
@@ -322,7 +322,7 @@ public:
 
 	/**
 	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
-	 * UQuestGiverComponent / UQuestTargetComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
+	 * UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
 	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());

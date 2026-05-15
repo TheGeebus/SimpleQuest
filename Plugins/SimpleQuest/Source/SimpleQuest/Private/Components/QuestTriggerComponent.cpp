@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-#include "Components/QuestTargetComponent.h"
+#include "Components/QuestTriggerComponent.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestEndedEvent.h"
@@ -14,41 +14,41 @@
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 
-UQuestTargetComponent::UQuestTargetComponent()
+UQuestTriggerComponent::UQuestTriggerComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestTargetComponent::BeginPlay()
+void UQuestTriggerComponent::BeginPlay()
 {
     Super::BeginPlay();
     if (!SignalSubsystem) return;
 
-    for (const FGameplayTag& StepTag : StepTagsToWatch)
+    for (const FGameplayTag& StepTag : StepTagsToTrigger)
     {
         if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
         {
             UE_LOG(LogSimpleQuest, Warning,
-                TEXT("UQuestTargetComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
+                TEXT("UQuestTriggerComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
                 TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
                 *GetOwner()->GetActorNameOrLabel(), *StepTag.ToString());
             continue;
         }
-        FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTargetComponent::OnTargetActivated);
+        FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated);
         StepStartedHandles.Add(StepTag, Handle);
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
 }
 
-void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)
+void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (!SignalSubsystem) return;
     
-    // Guard: ensure the channel matches some entry in StepTagsToWatch, including ancestor-matching semantics.
-    if (!StepTagsToWatch.HasTag(Channel))
+    // Guard: ensure the channel matches some entry in StepTagsToTrigger, including ancestor-matching semantics.
+    if (!StepTagsToTrigger.HasTag(Channel))
     {
         UE_LOG(LogSimpleQuest, Warning,
-            TEXT("UQuestTargetComponent::OnTargetActivated : '%s' on '%s' — channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToWatch configuration."),
+            TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' — channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToTrigger configuration."),
             *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
         return;
     }
@@ -56,7 +56,7 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
     // Track active subscription by the canonical ContextualTag from Event.Context — invariant across multi-publish
     // channels (Channel varies by which publish chain the bus dispatched through; Context.NodeInfo.QuestTag is the
     // Step's canonical identity, set by AssembleEventContext to ContextualTag). This serves two ends:
-    //   (1) Dedup when StepTagsToWatch contains both ContextualTag and alias forms for the same logical Step —
+    //   (1) Dedup when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step —
     //       multi-publish would otherwise hit both subscriptions and double-activate.
     //   (2) Route trigger publishes (SendTriggeredEvent etc.) on ContextualTag, which is what the manager's per-
     //       step FQuestObjectiveTriggered subscription is bound to — closing the cross-asset trigger flow that
@@ -74,28 +74,28 @@ void UQuestTargetComponent::OnTargetActivated(FGameplayTag Channel, const FQuest
     // should end the target's active state. ActiveStepEndHandles tracks the completion-side handle (one slot
     // per Channel); the deactivation-side handle is tracked separately so each can be unsubscribed cleanly
     // when its corresponding event fires.
-    FDelegateHandle EndedHandle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetStepCompleted);
-    FDelegateHandle DeactivatedHandle = SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(CanonicalTag, this, &UQuestTargetComponent::OnTargetStepDeactivated);
+    FDelegateHandle EndedHandle = SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(CanonicalTag, this, &UQuestTriggerComponent::OnTriggerStepCompleted);
+    FDelegateHandle DeactivatedHandle = SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(CanonicalTag, this, &UQuestTriggerComponent::OnTriggerStepDeactivated);
     ActiveStepEndHandles.Add(CanonicalTag, EndedHandle);
     ActiveStepDeactivatedHandles.Add(CanonicalTag, DeactivatedHandle);
 
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetActivated : Channel: %s, Canonical: %s : Owner: %s"),
+    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerActivated : Channel: %s, Canonical: %s : Owner: %s"),
         *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-    Execute_SetActivated(this, true);
+    SetActivated(true);
 }
 
-void UQuestTargetComponent::OnTargetStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
+void UQuestTriggerComponent::OnTriggerStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
-    OnTargetStepEnded(Channel);
+    OnTriggerStepEnded(Channel);
 }
 
-void UQuestTargetComponent::OnTargetStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
+void UQuestTriggerComponent::OnTriggerStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
-    OnTargetStepEnded(Channel);
+    OnTriggerStepEnded(Channel);
 }
 
-void UQuestTargetComponent::OnTargetStepEnded(FGameplayTag Channel)
+void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
 {
     if (SignalSubsystem)
     {
@@ -111,7 +111,7 @@ void UQuestTargetComponent::OnTargetStepEnded(FGameplayTag Channel)
         ActiveStepDeactivatedHandles.Remove(Channel);
     }
 
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTargetComponent::OnTargetStepEnded : Channel: %s : Owner: %s"),
+    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerStepEnded : Channel: %s : Owner: %s"),
         *Channel.ToString(),
         *GetOwner()->GetClass()->GetFName().ToString());
 
@@ -120,17 +120,17 @@ void UQuestTargetComponent::OnTargetStepEnded(FGameplayTag Channel)
     // sufficient check — but using ActiveStepEndHandles keeps a single canonical source of truth.
     if (ActiveStepEndHandles.IsEmpty())
     {
-        Execute_SetActivated(this, false);
+        SetActivated(false);
     }
 }
 
-int32 UQuestTargetComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
+int32 UQuestTriggerComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 {
     int32 Count = 0;
     for (const auto& [OldName, NewName] : Renames)
     {
         FGameplayTag FoundOld;
-        for (const FGameplayTag& Tag : StepTagsToWatch.GetGameplayTagArray())
+        for (const FGameplayTag& Tag : StepTagsToTrigger.GetGameplayTagArray())
         {
             if (Tag.GetTagName() == OldName)
             {
@@ -140,11 +140,11 @@ int32 UQuestTargetComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
         }
         if (FoundOld.IsValid())
         {
-            StepTagsToWatch.RemoveTag(FoundOld);
+            StepTagsToTrigger.RemoveTag(FoundOld);
             FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
             if (NewTag.IsValid())
             {
-                StepTagsToWatch.AddTag(NewTag);
+                StepTagsToTrigger.AddTag(NewTag);
             }
             Count++;
         }
@@ -152,15 +152,15 @@ int32 UQuestTargetComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
     return Count;
 }
 
-int32 UQuestTargetComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
+int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
     int32 Count = 0;
     for (const FGameplayTag& Tag : TagsToRemove)
     {
-        if (StepTagsToWatch.HasTagExact(Tag))
+        if (StepTagsToTrigger.HasTagExact(Tag))
         {
             if (Count == 0) Modify();
-            StepTagsToWatch.RemoveTag(Tag);
+            StepTagsToTrigger.RemoveTag(Tag);
             ++Count;
         }
     }
@@ -171,20 +171,19 @@ int32 UQuestTargetComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove
     return Count;
 }
 
-void UQuestTargetComponent::SetActivated_Implementation(bool bIsActivated)
+void UQuestTriggerComponent::SetActivated_Implementation(bool bIsActivated)
 {
-    IQuestTargetInterface::SetActivated_Implementation(bIsActivated);
-    OnQuestTargetActivated.Broadcast(bIsActivated);
+    OnQuestTriggerActivated.Broadcast(bIsActivated);
 }
 
-void UQuestTargetComponent::SendTriggeredEvent(const FInstancedStruct& CustomData)
+void UQuestTriggerComponent::SendTriggeredEvent(const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendTriggeredEvent);
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendTriggeredEvent);
     
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendTriggeredEvent : '%s' fanning out to %d watched step(s); CustomData %s"),
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendTriggeredEvent : '%s' fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     TMap<FGameplayTag, FDelegateHandle> HandlesCopy = ActiveStepEndHandles;
@@ -194,14 +193,14 @@ void UQuestTargetComponent::SendTriggeredEvent(const FInstancedStruct& CustomDat
     }
 }
 
-void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData)
+void UQuestTriggerComponent::SendKilledEvent(AActor* KillerActor, const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendKilledEvent);
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendKilledEvent);
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendKilledEvent : '%s' killed by '%s', fanning out to %d watched step(s); CustomData %s"),
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendKilledEvent : '%s' killed by '%s', fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), KillerActor ? *KillerActor->GetActorNameOrLabel() : TEXT("(none)"),
         ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
@@ -211,14 +210,14 @@ void UQuestTargetComponent::SendKilledEvent(AActor* KillerActor, const FInstance
     }
 }
 
-void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData)
+void UQuestTriggerComponent::SendInteractedEvent(AActor* InteractingActor, const FInstancedStruct& CustomData)
 {
     if (!SignalSubsystem) return;
     if (ActiveStepEndHandles.IsEmpty()) return;
 
-    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTargetComponent_SendInteractedEvent);
+    TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendInteractedEvent);
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTargetComponent::SendInteractedEvent : '%s' interacted by '%s', fanning out to %d watched step(s); CustomData %s"),
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendInteractedEvent : '%s' interacted by '%s', fanning out to %d watched step(s); CustomData %s"),
         *GetOwner()->GetActorNameOrLabel(), InteractingActor ? *InteractingActor->GetActorNameOrLabel() : TEXT("(none)"),
         ActiveStepEndHandles.Num(), CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
@@ -228,11 +227,11 @@ void UQuestTargetComponent::SendInteractedEvent(AActor* InteractingActor, const 
     }
 }
 
-FGameplayTagContainer UQuestTargetComponent::GetRegisteredStepTagsToWatch() const
+FGameplayTagContainer UQuestTriggerComponent::GetRegisteredStepTagsToTrigger() const
 {
     return FQuestTagComposer::FilterToRegisteredTags(
-        StepTagsToWatch,
-        FString::Printf(TEXT("UQuestTargetComponent::GetRegisteredStepTagsToWatch ('%s')"),
+        StepTagsToTrigger,
+        FString::Printf(TEXT("UQuestTriggerComponent::GetRegisteredStepTagsToTrigger ('%s')"),
             GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
 

@@ -9,9 +9,9 @@
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "QuestObjective.generated.h"
 
-class UQuestTargetInterface;
-class IQuestTargetInterface;
+
 struct FQuestObjectiveActivationContext;
+
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
@@ -141,7 +141,7 @@ protected:
 	void OnObjectiveDeactivated();
 
 	/**
-	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
+	 * Count a relevant quest trigger and determine if the step should end in success or failure. This event is intended
 	 * to be overridden by child classes to provide the logic for quest step completion.
 	 *
 	 * This function should be used to count elements or perform additional logic and call CompleteObjectiveWithOutcome

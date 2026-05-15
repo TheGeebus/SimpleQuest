@@ -1265,7 +1265,7 @@ investigating comment-node undo specifically).
   whose target isn't registered in the runtime tag manager. Pull-
   based; never auto-runs
 - Scans loaded editor worlds, walks every
-  `UQuestGiverComponent` / `UQuestTargetComponent` /
+  `UQuestGiverComponent` / `UQuestTriggerComponent` /
   `UQuestObserverComponent` across `GEditor->GetWorldContexts`. One row
   per stale tag reference
 - Per-row surfaces: Find (magnifying-glass icon, selects + frames the
@@ -1296,7 +1296,7 @@ investigating comment-node undo specifically).
 - `UQuestGiverComponent::GetRegisteredQuestTagsToGive()` — registration-
   filtered view of `QuestTagsToGive`. Safe to pass to tag-library
   `Filter` / `HasAny` / `MatchesAny` calls that assert on stale entries
-- `UQuestTargetComponent::GetRegisteredStepTagsToWatch()` — same pattern
+- `UQuestTriggerComponent::GetRegisteredStepTagsToWatch()` — same pattern
   for `StepTagsToWatch`
 - `UQuestObserverComponent::GetRegisteredWatchedStepTags()` and
   `GetRegisteredWatchedQuestKeys()` — for `WatchedStepTags` and the keys
@@ -1381,7 +1381,7 @@ investigating comment-node undo specifically).
 - `UQuestGiverComponent::GiveQuestByTag` and `RegisterQuestGiver` loop
   guards upgraded from `IsValid` to `IsTagRegisteredInRuntime` — stale
   tags skipped with a Warning log naming the stale tag and the actor
-- `UQuestTargetComponent::BeginPlay` subscribe loop — same upgrade
+- `UQuestTriggerComponent::BeginPlay` subscribe loop — same upgrade
 - `UQuestObserverComponent::RegisterQuestObserver` subscribe loop — same
   upgrade
 
@@ -1704,7 +1704,7 @@ inspector.
   `FQuestObjectiveTriggerContext` for outbound events
 - All outbound events (Started, Ended, Enabled, Deactivated,
   Progress) carry `FQuestEventPayload`
-- `UQuestTargetComponent::Send*` methods accept optional `CustomData`
+- `UQuestTriggerComponent::Send*` methods accept optional `CustomData`
   via `AutoCreateRefTerm` (BP pin optional, C++ default-constructs)
 - `FQuestObjectiveTriggered` / `Killed` / `Interacted` gain
   `CustomData` fields plumbed through to subsystem handlers

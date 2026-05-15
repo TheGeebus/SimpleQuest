@@ -33,10 +33,10 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationContext
 	GENERATED_BODY()
 
 	/** Design-time configuration set on the destination Step. Immutable per activation. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FQuestObjectiveAuthoredConfig Authored;
 
 	/** Runtime-accumulated context from upstream contributions. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FQuestObjectiveRuntimeContext Dynamic;
 };

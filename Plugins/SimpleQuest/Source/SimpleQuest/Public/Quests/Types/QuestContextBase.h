@@ -22,11 +22,11 @@ struct SIMPLEQUEST_API FQuestContextBase
 	GENERATED_BODY()
 
 	/** Actor that caused this event/activation. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TWeakObjectPtr<AActor> Instigator;
 
 	/** Untyped extension point for game-specific data. Read via CustomData.Get<FYourType>(). */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FInstancedStruct CustomData;
 
 	/**
@@ -34,7 +34,7 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * supplied tag on external API. Designer escape hatch for "who activated me?" branching in BP. Equivalent
 	 * to OriginChain.Last() when the chain is non-empty. Invalid when there's no meaningful source.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FGameplayTag OriginTag;
 
 	/**
@@ -43,7 +43,7 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * ("did this chain pass through step X?") read this instead of OriginTag. Empty when no origin information
 	 * exists. Ordered list (not a tag container) — order is semantically meaningful.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FGameplayTag> OriginChain;
 
 	/**
@@ -52,6 +52,6 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * Read by FireWrapperBoundaryCompletion's event-keyed deduplication gate. Default-constructed (invalid) for
 	 * contexts that don't originate from a Step resolution (top-level entries, direct external API requests).
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FOriginatingEventID OriginatingEventID;
 };

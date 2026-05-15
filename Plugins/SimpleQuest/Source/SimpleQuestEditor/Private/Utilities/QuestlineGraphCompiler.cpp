@@ -14,6 +14,7 @@
 #include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"
+#include "Quests/StartQuestlineNode.h"
 #include "Quests/ActivationGroupListenerNode.h"
 #include "Quests/ActivationGroupSetterNode.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
@@ -30,6 +31,7 @@
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
@@ -37,12 +39,57 @@
 #include "EdGraph/EdGraphPin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Objectives/QuestObjective.h"
-#include "Rewards/QuestReward.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Utilities/QuestTagComposer.h"
+
+
+namespace
+{
+	/**
+	 * Walks upstream from Pin through any chain of UQuestlineNode_Knot reroute nodes. Returns true if any
+	 * upstream path eventually lands on a UQuestlineNode_Entry by passing only through Knot nodes; false
+	 * otherwise. VisitedKnots guards against pathological knot-cycle authoring (shouldn't happen but cheap).
+	 */
+	bool DoesPinReachEntryThroughKnots(const UEdGraphPin* Pin, TSet<const UEdGraphNode*>& VisitedKnots)
+	{
+		if (!Pin) return false;
+
+		for (const UEdGraphPin* UpstreamPin : Pin->LinkedTo)
+		{
+			if (!UpstreamPin) continue;
+			const UEdGraphNode* UpstreamNode = UpstreamPin->GetOwningNode();
+			if (!UpstreamNode) continue;
+
+			if (Cast<UQuestlineNode_Entry>(UpstreamNode))
+			{
+				return true;
+			}
+
+			if (const UQuestlineNode_Knot* KnotNode = Cast<UQuestlineNode_Knot>(UpstreamNode))
+			{
+				if (VisitedKnots.Contains(KnotNode)) continue;
+				VisitedKnots.Add(KnotNode);
+
+				for (const UEdGraphPin* KnotInputPin : KnotNode->Pins)
+				{
+					if (KnotInputPin && KnotInputPin->Direction == EGPD_Input)
+					{
+						if (DoesPinReachEntryThroughKnots(KnotInputPin, VisitedKnots))
+						{
+							return true;
+						}
+					}
+				}
+			}
+			// Any non-Entry, non-Knot upstream node halts this path — the cycle would be broken by
+			// whatever lifecycle guard that node enforces on the second activation pass.
+		}
+		return false;
+	}
+}
 
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
@@ -769,6 +816,51 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
     		UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
     		Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
     		Inst->AuthoredNodeGuid = ClearBlockNode->QuestGuid;
+    		Instance = Inst;
+    	}
+    	else if (UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilEdNode))
+    	{
+    		// "Direct from Entry" traversal — Knot reroute nodes are transparent. The cascade flows through
+    		// knots without gating, so Entry → Knot → Knot → ... → Start Questline is the same cycle as
+    		// Entry → Start Questline. Any non-knot upstream node would supply its own lifecycle guard on
+    		// the recursion attempt.
+    		bool bDirectFromEntry = false;
+    		TSet<const UEdGraphNode*> VisitedKnots;
+    		for (const UEdGraphPin* InputPin : UtilEdNode->Pins)
+    		{
+    			if (!InputPin || InputPin->Direction != EGPD_Input) continue;
+    			if (DoesPinReachEntryThroughKnots(InputPin, VisitedKnots))
+    			{
+    				bDirectFromEntry = true;
+    				break;
+    			}
+    		}
+
+    		if (bDirectFromEntry && !StartNode->Graph.IsNull() && RootGraph)
+    		{
+    			const FTopLevelAssetPath StartTargetPath = StartNode->Graph.ToSoftObjectPath().GetAssetPath();
+    			const FTopLevelAssetPath RootGraphPath = FSoftObjectPath(RootGraph).GetAssetPath();
+    			if (StartTargetPath == RootGraphPath)
+    			{
+    				TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Error);
+    				Msg->AddToken(FTextToken::Create(FText::FromString(FString::Printf(
+    					TEXT("[%s] Start Questline node is wired directly from Entry and targets the same questline — activation would cycle indefinitely. Insert a Step between Entry and this node, or point this Start Questline at a different questline."),
+    					*TagPrefix))));
+    				AddNodeNavigationToken(Msg, UtilEdNode);
+    				Messages.Add(Msg);
+    				bHasErrors = true;
+    				NumErrors++;
+    				UE_LOG(LogSimpleQuest, Error,
+    					TEXT("QuestlineGraphCompiler: '%s' has a Start Questline node directly downstream of Entry targeting its own graph — would cycle at runtime."),
+    					*RootGraph->GetName());
+    				continue;  // Skip runtime instance creation — asset is in error state.
+    			}
+    		}
+
+    		UStartQuestlineNode* Inst = NewObject<UStartQuestlineNode>(RootGraph);
+    		Inst->Graph = StartNode->Graph;
+    		Inst->Params = StartNode->Params;
+    		Inst->AuthoredNodeGuid = StartNode->QuestGuid;
     		Instance = Inst;
     	}
 

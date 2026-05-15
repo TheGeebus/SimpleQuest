@@ -20,6 +20,7 @@
 #include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
@@ -1247,13 +1248,25 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	}
 	// Unblock
 	{
-	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
-	        NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddClearBlocked", "Clear Blocked"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddClearBlockedTooltip", "Remove the blocked state from one or more quests"),
-	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_ClearBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
-	    ContextMenuBuilder.AddAction(Action);
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearBlocked", "Clear Blocked"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearBlockedTooltip", "Remove the blocked state from one or more quests"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ClearBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Start Questline
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddStartQuestline", "Start Questline"),
+			NSLOCTEXT("SimpleQuestEditor", "AddStartQuestlineTooltip",
+				"Activate a questline graph asset at runtime. Mirrors the BP-callable StartQuestline; the manager async-loads "
+				"the graph and applies the configured Params to the entry Step's activation."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_StartQuestline>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
 	}
 
 	// ---- Activation Group ----

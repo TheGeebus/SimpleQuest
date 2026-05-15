@@ -4,6 +4,9 @@
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "PropertyCustomizationHelpers.h"
+#include "Quests/QuestlineGraph.h"
 #include "SGraphPin.h"
 #include "SGameplayTagContainerCombo.h"
 #include "ScopedTransaction.h"
@@ -146,12 +149,14 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 			CreatePinContentArea()
 		]
 
-		// Tag picker
+		// Authoring row — varies by utility node type:
+		//   - Asset picker for StartQuestline (selects the questline graph asset to activate).
+		//   - Tag picker for SetBlocked / ClearBlocked (selects the target quest tags).
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
-			CreateTagPickerWidget()
+			UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget()
 		]
 
 		// Optional toggles row — currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
@@ -413,4 +418,57 @@ void SGraphNode_UtilityNode::OnAlsoDeactivateChanged(ECheckBoxState NewState)
 	}
 }
 
+bool SGraphNode_UtilityNode::UsesGraphAssetPicker() const
+{
+	return Cast<UQuestlineNode_StartQuestline>(UtilityNode) != nullptr;
+}
+
+TSharedRef<SWidget> SGraphNode_UtilityNode::CreateGraphAssetPickerWidget()
+{
+	UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilityNode);
+	if (!StartNode) return SNullWidget::NullWidget;
+
+	return SNew(SWrapBox).PreferredSize(220.f).Orientation(Orient_Horizontal)
+		+ SWrapBox::Slot().Padding(8.f, 0.f, 2.f, 0.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("QuestlineGraphLabel", "Questline:"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+		]
+		+ SWrapBox::Slot().Padding(4.f, 2.f, 0.f, 2.f)
+		[
+			SNew(SObjectPropertyEntryBox)
+			.AllowedClass(UQuestlineGraph::StaticClass())
+			.AllowClear(true)
+			.DisplayBrowse(true)
+			.DisplayUseSelected(true)
+			.ObjectPath_Lambda([this]() -> FString
+			{
+				if (UQuestlineNode_StartQuestline* Start = Cast<UQuestlineNode_StartQuestline>(UtilityNode))
+				{
+					return Start->Graph.ToSoftObjectPath().ToString();
+				}
+				return FString();
+			})
+			.OnObjectChanged(this, &SGraphNode_UtilityNode::OnGraphAssetChanged)
+		];
+}
+
+void SGraphNode_UtilityNode::OnGraphAssetChanged(const FAssetData& AssetData)
+{
+	UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilityNode);
+	if (!StartNode || !GraphNode) return;
+
+	const FScopedTransaction Transaction(LOCTEXT("ChangeStartQuestlineGraph", "Change Questline Graph"));
+	GraphNode->Modify();
+
+	StartNode->Graph = TSoftObjectPtr<UQuestlineGraph>(AssetData.GetSoftObjectPath());
+
+	if (UEdGraph* Graph = GraphNode->GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
 #undef LOCTEXT_NAMESPACE
+

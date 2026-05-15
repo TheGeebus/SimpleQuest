@@ -22,14 +22,14 @@ struct SIMPLEQUEST_API FQuestObjectiveTriggerContext : public FQuestContextBase
 	GENERATED_BODY()
 
 	/** The actor that was acted upon (killed enemy, reached waypoint, interacted NPC). */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TObjectPtr<AActor> TriggeredActor;
 
 	/** Number of elements completed at the time of this trigger. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 CurrentCount = 0;
 
 	/** Number of elements required by the objective. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 RequiredCount = 0;
 };

@@ -32,7 +32,7 @@ struct SIMPLEQUEST_API FQuestObjectiveRuntimeContext : public FQuestContextBase
 	 * upstream-step Forward Parameters). Distinct from FQuestObjectiveAuthoredConfig::TargetClasses, which is
 	 * designer-pinned class-level intent.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
 
 	/**
@@ -41,7 +41,7 @@ struct SIMPLEQUEST_API FQuestObjectiveRuntimeContext : public FQuestContextBase
 	 * without specific outcome). Read by HandleOnNodeStarted's UQuest branch to drive inner-entry routing.
 	 * Consumed and cleared after use.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FGameplayTag IncomingOutcomeTag;
 
 	/**
@@ -49,6 +49,6 @@ struct SIMPLEQUEST_API FQuestObjectiveRuntimeContext : public FQuestContextBase
 	 * through the merge into ReceivedActivationContext so the live objective and the registry's start record
 	 * both see consistent provenance. Read by FQuestEntryArrival::Provenance via the snapshot.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 };

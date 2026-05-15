@@ -7,8 +7,6 @@
 #include "Signals/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
-#include "Engine/AssetManager.h"
-#include "Engine/StreamableManager.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestObjectiveTriggered.h"
 #include "Events/QuestProgressEvent.h"
@@ -44,11 +42,10 @@
 #include "Utilities/QuestTagComposer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
-#include "Kismet/KismetMathLibrary.h"
 #include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
-#include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestPublish.h"
+#include "Misc/ScopeExit.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -529,6 +526,22 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params)
 {
     if (!Graph) return;
+
+    // Cycle break — if this graph is already inside an in-flight activation cascade, skip to prevent the loop.
+    // Catches both direct self-reference (Start Questline node in graph X targeting X) and indirect cycles
+    // (A → B → A or longer). The set is keyed by soft path so it stays valid across async-load boundaries.
+    const FSoftObjectPath GraphPath(Graph);
+    if (ActivatingGraphPaths.Contains(GraphPath))
+    {
+        UE_LOG(LogSimpleQuest, Warning,
+            TEXT("ActivateQuestlineGraph: cycle detected — graph '%s' is already inside an activation cascade. ")
+            TEXT("Skipping to break the loop. Likely a self-referencing Start Questline node or a multi-graph cycle (e.g., A→B→A)."),
+            *Graph->GetName());
+        return;
+    }
+
+    ActivatingGraphPaths.Add(GraphPath);
+    ON_SCOPE_EXIT { ActivatingGraphPaths.Remove(GraphPath); };
 
     RegisterQuestlineGraph(Graph);
 

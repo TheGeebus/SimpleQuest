@@ -26,11 +26,23 @@ private:
 	TSharedRef<SWidget> CreatePinContentArea();
 	void OnTargetTagsChanged(const FGameplayTagContainer& NewTags);
 
-	/** Returns a SetBlocked-specific "Also Deactivate Targets" checkbox row, or SNullWidget for any other utility
-	 *  node type. The checkbox edits UQuestlineNode_SetBlocked::bAlsoDeactivateTargets in place; only that one
-	 *  utility subclass surfaces the toggle. */
+	/**
+	 * Returns a SetBlocked-specific "Also Deactivate Targets" checkbox row, or SNullWidget for any other utility
+	 * node type. The checkbox edits UQuestlineNode_SetBlocked::bAlsoDeactivateTargets in place; only that one
+	 * utility subclass surfaces the toggle.
+	 */
 	TSharedRef<SWidget> CreateAlsoDeactivateToggleWidget();
 	void OnAlsoDeactivateChanged(ECheckBoxState NewState);
 
+	/**
+	 * Returns an asset picker for the StartQuestline graph reference, or SNullWidget for any other utility
+	 * node type. Replaces the tag picker on the authoring row when the node is UQuestlineNode_StartQuestline.
+	 */
+	TSharedRef<SWidget> CreateGraphAssetPickerWidget();
+	void OnGraphAssetChanged(const FAssetData& AssetData);
+
+	/** Returns true when the underlying utility node uses the graph asset picker instead of the tag picker. */
+	bool UsesGraphAssetPicker() const;
+	
 	UQuestlineNode_UtilityBase* UtilityNode = nullptr;
 };

@@ -20,11 +20,11 @@ struct SIMPLEQUEST_API FQuestObjectiveAuthoredConfig
 	GENERATED_BODY()
 
 	/** Actor classes the objective targets (for kill/pickup-class objectives). Designer-set on the Step. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSoftClassPtr<AActor>> TargetClasses;
 
 	/** Element count required to complete (for counting objectives). Designer-set on the Step. */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 NumElementsRequired = 0;
 
 	/**
@@ -33,6 +33,6 @@ struct SIMPLEQUEST_API FQuestObjectiveAuthoredConfig
 	 * The Step node's picker filters to UQuestObjectiveConfig and its descendants; the objective casts to the
 	 * expected subclass at consumption time.
 	 */
-	UPROPERTY(BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSoftObjectPtr<UQuestObjectiveConfig> ConfigAsset;
 };

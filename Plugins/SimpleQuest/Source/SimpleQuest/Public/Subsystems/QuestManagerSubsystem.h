@@ -340,6 +340,16 @@ private:
 	void SetQuestLive(FGameplayTag QuestTag);
 
 	/**
+	 * Soft paths of questline graphs currently inside an ActivateQuestlineGraph cascade. Guards against
+	 * cycles where a graph's activation reaches a Start Questline node targeting the same graph (direct
+	 * self-reference) or a chain that returns to a graph already activating (A → B → A indirect). Set
+	 * membership added on entry, removed on exit — non-cyclic nested activations (A's cascade activating
+	 * a different graph B) push/pop cleanly. Re-entry while a graph's path is in the set means a cycle;
+	 * the second activation logs and returns without re-running entry-tag firing.
+	 */
+	TSet<FSoftObjectPath> ActivatingGraphPaths;
+	
+	/**
 	 * Recomputes a container's Live fact from its inner Step state. Called by SetQuestLive (and in upcoming
 	 * phases by SetQuestResolved / SetQuestDeactivated) once a Step's Live state has changed — walks the Step's
 	 * ancestor chain and re-derives each ancestor in turn. A container is Live whenever any inner Step (at any

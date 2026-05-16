@@ -30,6 +30,13 @@ enum class EQuestActivationBlocker : uint8
 
 	/** ContextualTag isn't registered in the runtime tag manager. Stale or never-compiled tag. */
 	UnknownQuest,
+
+	/**
+	 * Quest IS already in PendingGiver state and a re-activation cascade tried to re-fire the gate. Surfaced as
+	 * an FQuestActivationFailedEvent reason; not used by give-time blocker queries (the give-flow checks
+	 * NotPendingGiver as its symmetric partner — that's "no gate to consume", this is "gate still pending").
+	 */
+	AlreadyPendingGiver,
 };
 
 /**

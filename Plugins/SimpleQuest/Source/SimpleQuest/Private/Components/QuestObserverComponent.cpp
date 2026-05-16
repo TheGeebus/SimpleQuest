@@ -7,6 +7,7 @@
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestActivatedEvent.h"
+#include "Events/QuestActivationFailedEvent.h"
 #include "Events/QuestBlockedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestDisabledEvent.h"
@@ -40,6 +41,14 @@ void UQuestObserverComponent::HandleQuestActivated(FGameplayTag Channel, const F
 	if (OnQuestActivated.IsBound())
 	{
 		OnQuestActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.PrereqStatus);
+	}
+}
+
+void UQuestObserverComponent::HandleQuestActivationFailed(FGameplayTag Channel, const FQuestActivationFailedEvent& Event)
+{
+	if (OnQuestActivationFailed.IsBound())
+	{
+		OnQuestActivationFailed.Broadcast(Event.GetQuestTag(), Event.AttemptedTagName, Channel, Event.Reason, Event.Payload);
 	}
 }
 
@@ -315,16 +324,17 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		
 		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
 		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
-		if (Settings.bObserveActivated)    SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated);
-		if (Settings.bObserveEnabled)      SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled);
-		if (Settings.bObserveDisabled)     SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled);
-		if (Settings.bObserveGiveBlocked)  SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked);
-		if (Settings.bObserveStarted)      SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted);
-		if (Settings.bObserveProgress)     SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress);
-		if (Settings.bObserveCompleted)    SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted);
-		if (Settings.bObserveDeactivated)  SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated);
-		if (Settings.bObserveBlocked)      SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked);
-		if (Settings.bObserveUnblocked)    SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked);
+		if (Settings.bObserveActivated)			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated);
+		if (Settings.bObserveActivationFailed)	SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed);
+		if (Settings.bObserveEnabled)			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled);
+		if (Settings.bObserveDisabled)			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled);
+		if (Settings.bObserveGiveBlocked)		SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked);
+		if (Settings.bObserveStarted)			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted);
+		if (Settings.bObserveProgress)			SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress);
+		if (Settings.bObserveCompleted)			SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted);
+		if (Settings.bObserveDeactivated)		SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated);
+		if (Settings.bObserveBlocked)			SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked);
+		if (Settings.bObserveUnblocked)			SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked);
 
 		if (!WorldState) continue;
 
@@ -332,13 +342,15 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		// observer this fires per-pin if a matching state fact is set for QuestTag itself; for a parent-prefix
 		// observer (subscribed tag is an unknown namespace OR a known wrapper container) it fans out to every
 		// known descendant via FQuestCatchUpFanout and probes each one in turn, mirroring the signal bus's
-		// hierarchical broadcast on the live side. Synthetic Context carries each descendant's tag — full Context
-		// isn't recoverable from state alone (NodeInfo, CompletionContext, GameData come from the runtime publish-
-		// time AssembleEventContext call). Mirrors UQuestEventSubscription's catch-up pattern.
+		// hierarchical broadcast on the live side. Synthetic Payload carries each descendant's tag only — full
+		// Payload isn't recoverable from state alone (NodeInfo display fields, CompletionTrigger, and the
+		// inherited FQuestContextBase attribution come from runtime publish-time AssembleEventContext calls;
+		// Started catch-up additionally recovers the last giver actor via StateSubsystem). Mirrors UQuestEvent-
+		// Subscription's catch-up pattern.
 		//
-		// No per-tag dedup against live events here (unlike UQuestEventSubscription): the observer's catch-up runs
+		// No per-tag deduplication against live events here (unlike UQuestEventSubscription): the observer's catch-up runs
 		// synchronously inside RegisterQuestObserver (called from BeginPlay), so there's no deferral window during
-		// which a live event could fire and need dedup. The K2 node defers to next tick to avoid racing the BP
+		// which a live event could fire and need deduplication. The K2 node defers to next tick to avoid racing the BP
 		// execution stack; the observer has no such constraint.
 		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem);
 

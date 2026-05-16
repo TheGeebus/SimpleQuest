@@ -14,6 +14,7 @@
 
 
 struct FQuestActivatedEvent;
+struct FQuestActivationFailedEvent;
 struct FQuestEnabledEvent;
 struct FQuestDisabledEvent;
 struct FQuestGiveBlockedEvent;
@@ -43,6 +44,14 @@ struct FObservedQuestEventSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveActivated = false;
 
+	/**
+	 * An activation attempt against this quest was refused. Carries the EQuestActivationBlocker reason
+	 * (UnknownQuest, AlreadyLive, AlreadyPendingGiver, or Blocked). Debug-leaning by default; useful for
+	 * lock-feedback / refusal-fanfare gameplay. No catch-up — transient like GiveBlocked / Progress.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bObserveActivationFailed = false;
+	
 	/** Quest is offerable AND prereqs are satisfied (accept-ready). Most common opt-in for "show giver UI". */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveEnabled = true;
@@ -107,7 +116,7 @@ class SIMPLEQUEST_API UQuestObserverComponent : public UQuestComponentBase
 public:
 	UQuestObserverComponent();
 
-	// ── Offer phase ──────────────────────────────────────────────────────────────────────────────
+	// ─── Observer Events ─────────────────────────────────────────────────────────────────────────
 	//
 	// Linking Questline graphs means that a single node may broadcast events on several tagged channels
 	// that each refer to its address in a different graph hierarchy. Subscribers can listen for any
@@ -129,24 +138,34 @@ public:
 	// observers, MatchedChannel reflects each observer's own perspective. Branch on QuestTag for "what quest
 	// instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
 	// Mirrors UQuestEventSubscription's K2-node delegate contract; same shape, same semantics.
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, FQuestPrereqStatus, PrereqStatus);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestGiveBlocked,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
+	//
+	// ── Offer phase ──────────────────────────────────────────────────────────────────────────────
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, FQuestPrereqStatus, PrereqStatus);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams (FOnQuestActivationFailed, FGameplayTag, QuestTag, FName, AttemptedTagName, FGameplayTag, MatchedChannel, EQuestActivationBlocker, Reason, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestEnabled, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDisabled, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestGiveBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 	// ── Run phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, AActor*, GiverActor);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress,     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestStarted, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, AActor*, GiverActor);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestProgress, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 
 	// ── End phase ────────────────────────────────────────────────────────────────────────────────
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Payload);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated,  FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked,      FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked,    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestCompleted, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 
 	/** Fires when execution reaches a giver-gated quest. PrereqStatus describes whether prereqs are currently satisfied. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
+	
+	/**
+	 * Fires when an activation attempt was refused. Reason discriminates UnknownQuest / AlreadyLive /
+	 * AlreadyPendingGiver / Blocked. Debug-leaning by default; useful for lock-feedback gameplay too.
+	 */
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestActivationFailed OnQuestActivationFailed;
 
 	/** Fires when a giver-gated quest becomes accept-ready (Activated AND prereqs satisfy). */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
@@ -199,16 +218,17 @@ protected:
 	 */
 	virtual FGameplayTagContainer GetImplicitlyObservedTags() const { return FGameplayTagContainer(); }
 
-	virtual void HandleQuestActivated   (FGameplayTag Channel, const FQuestActivatedEvent& Event);
-	virtual void HandleQuestEnabled     (FGameplayTag Channel, const FQuestEnabledEvent& Event);
-	virtual void HandleQuestDisabled    (FGameplayTag Channel, const FQuestDisabledEvent& Event);
-	virtual void HandleQuestGiveBlocked (FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
-	virtual void HandleQuestStarted     (FGameplayTag Channel, const FQuestStartedEvent& Event);
-	virtual void HandleQuestProgress    (FGameplayTag Channel, const FQuestProgressEvent& Event);
-	virtual void HandleQuestCompleted   (FGameplayTag Channel, const FQuestEndedEvent& Event);
-	virtual void HandleQuestDeactivated (FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
-	virtual void HandleQuestBlocked     (FGameplayTag Channel, const FQuestBlockedEvent& Event);
-	virtual void HandleQuestUnblocked   (FGameplayTag Channel, const FQuestUnblockedEvent& Event);
+	virtual void HandleQuestActivated			(FGameplayTag Channel, const FQuestActivatedEvent& Event);
+	virtual void HandleQuestActivationFailed	(FGameplayTag Channel, const FQuestActivationFailedEvent& Event);
+	virtual void HandleQuestEnabled				(FGameplayTag Channel, const FQuestEnabledEvent& Event);
+	virtual void HandleQuestDisabled			(FGameplayTag Channel, const FQuestDisabledEvent& Event);
+	virtual void HandleQuestGiveBlocked			(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
+	virtual void HandleQuestStarted				(FGameplayTag Channel, const FQuestStartedEvent& Event);
+	virtual void HandleQuestProgress			(FGameplayTag Channel, const FQuestProgressEvent& Event);
+	virtual void HandleQuestCompleted			(FGameplayTag Channel, const FQuestEndedEvent& Event);
+	virtual void HandleQuestDeactivated			(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+	virtual void HandleQuestBlocked				(FGameplayTag Channel, const FQuestBlockedEvent& Event);
+	virtual void HandleQuestUnblocked			(FGameplayTag Channel, const FQuestUnblockedEvent& Event);
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;

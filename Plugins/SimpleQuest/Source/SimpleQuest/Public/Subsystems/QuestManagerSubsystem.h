@@ -139,19 +139,19 @@ protected:
 	 * authored node" invariant at registration time. The same authored node can be compiled into multiple questline
 	 * assets (standalone compile of an asset + inlined compile when the asset is a LinkedQuestline target inside
 	 * another asset). Both compiles produce separate UQuestNodeBase instances under different FName keys (different
-	 * ContextualTag perspectives). Without dedup, both instances register, both have their delegates bound, and
+	 * ContextualTag perspectives). Without deduplication, both instances register, both have their delegates bound, and
 	 * every event fires twice — manifests as observer duplication, giver missed-add on loop, and other multi-tag
 	 * delivery anomalies that look like broadcast bugs but root at duplicate registration.
 	 *
-	 * Excluded from this dedup: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
-	 * different cascade behavior per perspective) and prereq rule monitors (already deduped via shared FName key
-	 * in LoadedNodeInstances; see the comment on the FName-key dedup loop in RegisterQuestlineGraph).
+	 * Excluded from this deduplication: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
+	 * different cascade behavior per perspective) and prereq rule monitors (already deduplicated via shared FName key
+	 * in LoadedNodeInstances; see the comment on the FName-key deduplication loop in RegisterQuestlineGraph).
 	 */
 	TMap<FGuid, FName> LoadedInstancesByAuthoredNodeGuid;
 
 	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
-	 * for state facts and registry entries. Layer 2 dedup populates LoadedNodeInstances under the canonical key
+	 * for state facts and registry entries. Layer 2 deduplication populates LoadedNodeInstances under the canonical key
 	 * AND every alias key (all pointing at the same instance), so any-perspective input here resolves the same
 	 * instance, and the instance's ContextualTag is always the canonical regardless of which key was used to
 	 * look it up.
@@ -162,14 +162,14 @@ protected:
 	 * writes leak to alias-perspective fact tags that no query will ever read.
 	 *
 	 * Pass-through behavior: returns InputTag unchanged if not in LoadedNodeInstances (legacy, external,
-	 * pre-registration, or unregistered tag). Callers must still handle invalid-tag fallthroughs.
+	 * pre-registration, or unregistered tag). Callers must still handle any invalid-tag fallthrough.
 	 */
 	FGameplayTag ResolveToCanonicalTag(FGameplayTag InputTag) const;
 
 	/**
 	 * Adds (or removes) a state-leaf fact at the canonical perspective AND every AssetScopedAliasTag the
 	 * instance carries, so direct WorldState->HasFact queries from any perspective find the fact. Mirrors
-	 * the multi-channel publish model the bus uses for events — facts and events both ride every
+	 * the multichannel publish model the bus uses for events — facts and events both ride every
 	 * perspective so consumers don't need to alias-walk at every read site.
 	 *
 	 * InputTag is canonicalized internally for safety; callers may pass any-perspective form. State-fact
@@ -186,10 +186,10 @@ protected:
 	void RemoveStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
 
 	/**
-	 * Folds a deduped (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
+	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
 	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
 	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance
-	 * carries every perspective the deduped instance would have had — events publish on all forms, alias-walks
+	 * carries every perspective the deduplicated instance would have had — events publish on all forms, alias-walks
 	 * find the canonical from any form, state subsystem queries resolve through cross-asset perspectives.
 	 *
 	 * Also populates LoadedNodeInstances under each merged alias key (same pointer, additional keys) so every
@@ -230,7 +230,7 @@ protected:
 	 * SoftPtr fires OnComplete synchronously with nullptr so the contract is uniform regardless of input.
 	 *
 	 * WeakBindContext is the UObject the callback is weakly bound to — if it tears down mid-load,
-	 * OnComplete becomes a no-op rather than a use-after-free. Typically `this` when called from a
+	 * OnComplete becomes a no-op rather than a use-after-free — typically `this` when called from a
 	 * UObject method.
 	 *
 	 * Post-load nullptr is tolerated (load failure, deleted-but-still-referenced asset); OnComplete
@@ -297,10 +297,19 @@ protected:
 
 private:
 	/**
-	 * Assembles a fully populated FQuestEventPayload from a node instance.
-	 * Stage 1: copies NodeInfo from the node.
-	 * Stage 2: copies InObjectiveData (non-empty only for completion events).
-	 * Stage 3: broadcasts OnAssembleEventContext for game code to fill GameData.
+	 * Assembles an outbound FQuestEventPayload from a node instance for publish sites that emit an
+	 * FQuestEventBase-derived event. Sources:
+	 *  - NodeInfo: copied from the node (compile-time identity + display metadata).
+	 *  - CompletionTrigger: from the InCompletionTrigger argument. Default-constructed for non-completion
+	 *     publishes (activation, progress, lifecycle); populated by callers emitting completion-flavored events.
+	 *  - FQuestContextBase fields (Instigator / CustomData / OriginTag / OriginChain / OriginatingEventID):
+	 *     forwarded from the Step's PendingActivationContext (pre-Live and Started phases) or Received-
+	 *     ActivationContext (post-Started phases, after Pending is cleared at the tail of ActivateInternal).
+	 *     See the buffer-selection comment in the cpp for details.
+	 *
+	 * No broadcast / no external hook — the function is a pure read from node state. CustomData / typed config
+	 * extension flows in via the WRITE-INTO surfaces (BP-callable Params, request-event payloads); this helper
+	 * reads it back out on the publisher side.
 	 */
 	FQuestEventPayload AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveTriggerContext& InCompletionTrigger) const;
 	
@@ -362,7 +371,7 @@ private:
 	 * Walks Step's ancestor wrappers and re-derives each one's Live fact. Covers both the Step's own
 	 * compile-perspective ancestors (AncestorContainerTags) AND foreign-perspective ancestors derived
 	 * from each AssetScopedAliasTag's parent prefix chain. The second walk is required because
-	 * AuthoredGuid dedup keeps only the canonical's compile data; outer-asset wrappers unique to a
+	 * AuthoredGuid deduplication keeps only the canonical's compile data; outer-asset wrappers unique to a
 	 * different compile (e.g. a LinkedQuestline wrapper in QL_Main that contextualizes QL_ActOne content
 	 * where ActOne registered first) are absent from AncestorContainerTags and would never derive
 	 * without alias-prefix fan-out. IsContainerTag bounds the walk to known wrappers — non-container
@@ -404,7 +413,7 @@ private:
 	TMap<FGameplayTag, TArray<FSoftObjectPath>> GraphsByListenerGroupTag;
 
 	/**
-	 * Cycle / dedup guard for the reachability cascade. Marked at WarmReachableGraphs entry (before async dispatch)
+	 * Cycle / deduplication guard for the reachability cascade. Marked at WarmReachableGraphs entry (before async dispatch)
 	 * so recursive RegisterQuestlineGraph → WarmReachableGraphs chains can detect already-in-flight loads and skip.
 	 * Tracks SoftObjectPaths rather than UQuestlineGraph* pointers so a graph counts as loaded the moment its load is
 	 * scheduled, not just when it finishes — prevents N parallel async-loads for the same target during a fan-in.

@@ -15,6 +15,7 @@
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestActivationRequestEvent.h"
+#include "Events/QuestActivationFailedEvent.h"
 #include "Events/QuestBlockRequestEvent.h"
 #include "Events/QuestClearBlockRequestEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
@@ -67,6 +68,74 @@ namespace
         if (Overlay.OriginTag.IsValid())    Result.OriginTag = Overlay.OriginTag;
         if (!Overlay.OriginChain.IsEmpty()) Result.OriginChain = Overlay.OriginChain;
         return Result;
+    }
+
+    /**
+     * Resolve the publish anchor for a Reason=UnknownQuest activation failure. Returns the input tag itself when
+     * registered (state-vs-cache desync — tag known, no loaded instance). Otherwise walks up the input FName by
+     * string parsing to find the first registered ancestor (covers stale tags whose FName is preserved across BP
+     * serialization but whose registry entry has been removed). Returns invalid if no registered ancestor exists
+     * in the input's name lineage.
+     *
+     * Without the walk-up, publishes on loose tags fire the bus trace but reach no subscribers — RequestDirect-
+     * Parent returns invalid for unregistered tags, so the bus's per-publish parent walk exits before climbing
+     * to any registered ancestor.
+     */
+    FGameplayTag ResolveActivationFailurePublishAnchor(FName InputName)
+    {
+        UGameplayTagsManager& TagManager = UGameplayTagsManager::Get();
+        FGameplayTag Anchor = TagManager.RequestGameplayTag(InputName, false);
+        if (Anchor.IsValid()) return Anchor;
+
+        FString NameStr = InputName.ToString();
+        while (true)
+        {
+            int32 LastDot;
+            if (!NameStr.FindLastChar(TEXT('.'), LastDot)) break;
+            NameStr.LeftInline(LastDot);
+            FGameplayTag Candidate = TagManager.RequestGameplayTag(FName(*NameStr), false);
+            if (Candidate.IsValid()) return Candidate;
+        }
+        return FGameplayTag();
+    }
+
+    /**
+     * Publish a Reason=UnknownQuest FQuestActivationFailedEvent on the resolved publish anchor for the given
+     * input FName. When the anchor is a loaded UQuestNodeBase, fans out across its alias perspectives so
+     * subscribers bound to any perspective receive. When the anchor is a non-node tag (e.g. a Questline category),
+     * single-publish on that tag — the bus's parent walk handles ancestor subscribers.
+     *
+     * Event.QuestTag is set to the input tag when registered (state-vs-cache desync) and strict-invalid when the
+     * input is unregistered (stale-tag activation — the FName lives only in the caller's Warning log per the
+     * one-state UnknownQuest contract).
+     */
+    void PublishUnknownQuestFailure(USignalSubsystem* Signals,
+        const TMap<FName, TObjectPtr<UQuestNodeBase>>& LoadedNodeInstances,
+        FName InputName, const FQuestEventPayload& Payload)
+    {
+        if (!Signals) return;
+
+        const FGameplayTag PublishAnchor = ResolveActivationFailurePublishAnchor(InputName);
+        if (!PublishAnchor.IsValid()) return;  // No registered ancestor; warning log alone surfaces the failure.
+
+        // InputTag is strict-invalid for unregistered inputs (RequestGameplayTag returns EmptyTag), valid for the
+        // state-vs-cache desync case. Either way it's the right value for Event.QuestTag's one-state contract.
+        const FGameplayTag InputTag = UGameplayTagsManager::Get().RequestGameplayTag(InputName, false);
+
+        TArray<FGameplayTag> Channels;
+        Channels.Add(PublishAnchor);
+        if (const TObjectPtr<UQuestNodeBase>* AnchorPtr = LoadedNodeInstances.Find(PublishAnchor.GetTagName()))
+        {
+            if (UQuestNodeBase* AnchorInstance = *AnchorPtr)
+            {
+                for (const FGameplayTag& Alias : AnchorInstance->GetAssetScopedAliasTags())
+                {
+                    if (Alias.IsValid()) Channels.Add(Alias);
+                }
+            }
+        }
+
+        Signals->PublishMessageOnChannels(MoveTemp(Channels), FQuestActivationFailedEvent(InputTag, InputName, EQuestActivationBlocker::UnknownQuest, Payload));
     }
 }
 
@@ -583,13 +652,14 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
     // bidirectional adopter pipeline for attribution data.
     if (const UQuestStep* Step = Cast<UQuestStep>(Node))
     {
-        // Pre-Live events (Activated, Enabled while PendingGiver) fire before ActivateInternal merges
-        // Pending → Received, so ReceivedActivationContext is still empty in that phase. Read from
-        // PendingActivationContext when it carries data; fall back to ReceivedActivationContext for
-        // post-Live events (Started, Progress, Completed, etc.) when Pending has been consumed and
-        // cleared by ActivateInternal. PendingActivationContext is protected on UQuestNodeBase but the
-        // manager has friend access (declared at QuestNodeBase.h:131) so direct read works without a
-        // public getter.
+        // Read from Pending when it carries data, Received otherwise. Pending is stamped by upstream callers
+        // (ChainToNextNodes, HandleGiveQuestEvent, HandleActivationRequest) before Activate runs and is the only
+        // populated buffer at giver-gate time (Activated / Enabled fire from ActivateNodeByTag's GiverGateFire
+        // branch without invoking ActivateInternal). Received is populated by UQuestStep::ActivateInternal's
+        // merge before Super fires OnNodeStarted; Started reads either (both hold the same data at that point
+        // — Pending isn't cleared until the tail of ActivateInternal, after Super returns). Post-Started events
+        // (Progress / Completed / Deactivated) fire after Pending has been cleared, so Received is the surviving
+        // source. PendingActivationContext is protected; the manager has friend access.
         const FQuestObjectiveActivationContext& Pending = Step->PendingActivationContext;
         const bool bPendingHasData = Pending.Dynamic.Instigator.IsValid()
             || Pending.Dynamic.CustomData.IsValid()
@@ -942,6 +1012,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     if (!InstancePtr || !*InstancePtr)
     {
         UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
+        PublishUnknownQuestFailure(QuestSignalSubsystem, LoadedNodeInstances, NodeTagName, FQuestEventPayload());
         return;
     }
 
@@ -1002,12 +1073,24 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already live)"),
             *NodeTagName.ToString());
+        
+        if (QuestSignalSubsystem)
+        {
+            FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyLive, Context));
+        }
         return;
     }
     if (Decision == EQuestActivationGuardDecision::RefuseStepAlreadyPendingGiver)
     {
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already pending giver)"),
             *NodeTagName.ToString());
+
+        if (QuestSignalSubsystem)
+        {
+            FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyPendingGiver, Context));
+        }
         return;
     }
 
@@ -1031,6 +1114,12 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         // pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
         UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
             *NodeTagName.ToString());
+
+        if (QuestSignalSubsystem)
+        {
+            FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::Blocked, Context));
+        }
         return;
 
     case EQuestActivationGuardDecision::GiverGateFire:
@@ -1573,11 +1662,12 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     TArray<FGameplayTag> CanonicalTags = StateSubsystem ? StateSubsystem->ResolveCanonicalTags(QuestTag) : TArray<FGameplayTag>{ QuestTag };
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — activating %d placement(s) with external params (CustomData %s)"),
+    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — resolved to %d canonical(s) to try (CustomData %s)"),
         *QuestTag.ToString(),
         CanonicalTags.Num(),
         Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
+    int32 SuccessfulDispatches = 0;
     for (const FGameplayTag& CanonicalTag : CanonicalTags)
     {
         if (!CanonicalTag.IsValid()) continue;
@@ -1591,6 +1681,23 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
         }
 
         ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::ExternalAPI);
+        ++SuccessfulDispatches;
+    }
+    
+    if (SuccessfulDispatches == 0 && QuestSignalSubsystem)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("HandleActivationRequest: '%s' — no placements reached an activation (zero loaded instances among %d canonical(s))"),
+            *QuestTag.ToString(), CanonicalTags.Num());
+
+        FQuestEventPayload Payload;
+        Payload.Instigator = Event.Params.Dynamic.Instigator;
+        Payload.CustomData = Event.Params.Dynamic.CustomData;
+        Payload.OriginTag = Event.Params.Dynamic.OriginTag;
+        Payload.OriginChain = Event.Params.Dynamic.OriginChain;
+        Payload.OriginatingEventID = Event.Params.Dynamic.OriginatingEventID;
+        // Payload.NodeInfo stays default (no node identity to forward for UnknownQuest).
+
+        PublishUnknownQuestFailure(QuestSignalSubsystem, LoadedNodeInstances, QuestTag.GetTagName(), Payload);
     }
 }
 

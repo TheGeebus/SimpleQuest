@@ -198,7 +198,24 @@ protected:
 	 * concern.
 	 */
 	void MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming);
-	
+
+	/**
+	 * Idempotent registration of an Instance pointer in LoadedNodeInstances. Centralizes the alias-aware Add so
+	 * the invariant "all alias keys for a given Instance map to the same pointer" lives in one place. Handle-
+	 * ActivationRequest / HandleGiveQuestEvent rely on this invariant for their dedup-by-Instance-pointer loops;
+	 * any future caller comparing FindRef results across alias forms gets the same guarantee.
+	 *
+	 * Behavior:
+	 *   - Key unmapped: stores Instance under Key.
+	 *   - Key already mapped to the SAME Instance: no-op (idempotent re-registration is benign — happens during
+	 *     MergePerspectiveTagsInto's union pass and on cross-session registration for instances that persist on
+	 *     the asset across PIE).
+	 *   - Key already mapped to a DIFFERENT Instance: logs Warning and SKIPS the write. A collision here
+	 *     indicates a broken design invariant — alias keys are constructed at compile-time to be unique per
+	 *     Instance via the multi-tag stack; surfacing the violation is preferable to silent overwrite.
+	 */
+	void RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance);
+
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(
 		UQuestNodeBase* CompletedNode,
@@ -539,7 +556,9 @@ private:
 	void ReevaluateEnablementWatch(FGameplayTag QuestTag);
 	void ClearEnablementWatch(FGameplayTag QuestTag);
 
-	/** Shared body for all OnEnablementLeaf*** handlers: re-evaluate every active enablement watch.
-	Per-channel filtering isn't worth the inverse-lookup cost; expression re-eval is cheap. */
+	/**
+	 * Shared body for all OnEnablementLeaf*** handlers: re-evaluate every active enablement watch.
+	 * Per-channel filtering isn't worth the inverse-lookup cost; expression re-eval is cheap.
+	 */
 	void ReevaluateAllEnablementWatches();
 };

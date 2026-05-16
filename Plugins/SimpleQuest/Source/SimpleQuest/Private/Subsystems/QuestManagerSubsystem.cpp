@@ -328,7 +328,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             {
                 Instance->ResolveContextualTag(Pair.Key);
             }
-            LoadedNodeInstances.Add(Pair.Key, Instance);
+            RegisterLoadedNodeInstance(Pair.Key, Instance);
             if (!bIsUtilityKey && InstanceAuthoredGuid.IsValid())
             {
                 LoadedInstancesByAuthoredNodeGuid.Add(InstanceAuthoredGuid, Pair.Key);
@@ -339,9 +339,9 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             // FireWrapperBoundaryCompletion, etc.) work transparently with this — no alias-walk helper needed.
             for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
             {
-                if (AliasTag.IsValid() && !LoadedNodeInstances.Contains(AliasTag.GetTagName()))
+                if (AliasTag.IsValid())
                 {
-                    LoadedNodeInstances.Add(AliasTag.GetTagName(), Instance);
+                    RegisterLoadedNodeInstance(AliasTag.GetTagName(), Instance);
                 }
             }
             Instance->RegisterWithGameInstance(GetGameInstance());
@@ -516,10 +516,7 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
     // the existing canonical instance.
     for (const FName& AliasName : MergedAliasSet)
     {
-        if (!LoadedNodeInstances.Contains(AliasName))
-        {
-            LoadedNodeInstances.Add(AliasName, Existing);
-        }
+        RegisterLoadedNodeInstance(AliasName, Existing);
     }
 
     // Register the new aliases with the state subsystem so cross-asset query paths (HasResolvedWith,
@@ -590,6 +587,26 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
         Existing->NextNodesByPath.Num(),
         Existing->BoundaryCompletionsOnAnyOutcome.Num(),
         Existing->ExitedGraphTagsOnAnyOutcome.Num());
+}
+
+void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance)
+{
+    if (Key.IsNone() || !Instance) return;
+
+    if (TObjectPtr<UQuestNodeBase>* ExistingPtr = LoadedNodeInstances.Find(Key))
+    {
+        if (*ExistingPtr != Instance)
+        {
+            UE_LOG(LogSimpleQuest, Warning,
+                TEXT("RegisterLoadedNodeInstance: key '%s' already maps to a different Instance ('%s' vs incoming '%s') — ")
+                TEXT("alias keys must be unique per Instance for dedup-by-pointer to work correctly. Preserving existing mapping."),
+                *Key.ToString(),
+                ExistingPtr->Get() ? *ExistingPtr->Get()->GetName() : TEXT("<null>"),
+                *Instance->GetName());
+        }
+        return;
+    }
+    LoadedNodeInstances.Add(Key, Instance);
 }
 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params)
@@ -1604,12 +1621,21 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
         Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
         Event.Params.Dynamic.Instigator.IsValid() ? *Event.Params.Dynamic.Instigator->GetName() : TEXT("null"));
 
+    // Deduplication by Instance pointer — same rationale as HandleActivationRequest's loop. ResolveCanonicalTags returns
+    // multiple entries when input is an alias; for multi-alias-of-single-Instance scenarios all entries resolve
+    // to the same pointer and the per-canonical work would be redundantly applied to the same Instance. State
+    // writes (ClearQuestPendingGiver) already fan out across perspectives via RemoveStateFactAcrossPerspectives;
+    // the attribution block already iterates Instance.GetAssetScopedAliasTags so all perspectives are covered in
+    // one iteration. Deduplication keeps multi-PLACEMENT iterations distinct since their pointers genuinely differ.
+    TSet<UQuestNodeBase*> SeenInstances;
     for (const FGameplayTag& CanonicalTag : CanonicalTags)
     {
         if (!CanonicalTag.IsValid()) continue;
 
         UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName());
         if (!Instance) continue;  // Skip canonicals with no loaded instance — avoids ActivateNodeByTag's noisy warning.
+        if (SeenInstances.Contains(Instance)) continue;
+        SeenInstances.Add(Instance);
 
         if (Event.Params.Dynamic.Instigator.IsValid())
         {
@@ -1667,6 +1693,14 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
         CanonicalTags.Num(),
         Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
+    // Deduplication by Instance pointer. ResolveCanonicalTags returns multiple entries when the input tag is registered
+    // as an alias (input + every canonical the alias represents). For multi-PLACEMENT scenarios (standalone +
+    // LinkedQuestline inlined contextual placements) these resolve to distinct Instances and each iteration
+    // dispatches a real, distinct activation. For multi-alias-of-single-Instance scenarios the entries all
+    // resolve to the same pointer; without deduplication, ActivateNodeByTag is called once per redundant alias, hitting
+    // the diamond / Block guards on subsequent iterations and producing duplicate FQuestActivationFailedEvent
+    // publishes — one per over-iteration. Deduplication by pointer collapses those into a single dispatch.
+    TSet<UQuestNodeBase*> SeenInstances;
     int32 SuccessfulDispatches = 0;
     for (const FGameplayTag& CanonicalTag : CanonicalTags)
     {
@@ -1674,6 +1708,8 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
 
         UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName());
         if (!Instance) continue;
+        if (SeenInstances.Contains(Instance)) continue;
+        SeenInstances.Add(Instance);
 
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {

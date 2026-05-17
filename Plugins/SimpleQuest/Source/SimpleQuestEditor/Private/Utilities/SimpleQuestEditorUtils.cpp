@@ -11,7 +11,9 @@
 #include "EditorWorldUtils.h"
 #include "EngineUtils.h"
 #include "GameplayTagsManager.h"
+#include "GameplayTagsSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/FileHelper.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
@@ -23,7 +25,6 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Utilities/GroupExaminerTypes.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
-#include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
 #include "Components/QuestObserverComponent.h"
@@ -487,6 +488,353 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 	}
 
 	return ModifiedActors;
+}
+
+int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	const FString ConfigFile = FPaths::ProjectConfigDir() / TEXT("DefaultGameplayTags.ini");
+	static const FString SectionHeader = TEXT("[/Script/GameplayTags.GameplayTagsSettings]");
+	static const FString RedirectLinePrefix = TEXT("+GameplayTagRedirects=");
+	static const FString OldNameMarker = TEXT("OldTagName=\"");
+	static const FString NewNameMarker = TEXT("NewTagName=\"");
+
+	auto ExtractQuotedAfter = [](const FString& Text, const FString& Marker) -> FName
+	{
+		const int32 Pos = Text.Find(Marker);
+		if (Pos == INDEX_NONE) return NAME_None;
+		const int32 Start = Pos + Marker.Len();
+		const int32 End = Text.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+		if (End == INDEX_NONE) return NAME_None;
+		return FName(*Text.Mid(Start, End - Start));
+	};
+
+	FString FileContents;
+	FFileHelper::LoadFileToString(FileContents, *ConfigFile);
+
+	// Locate the section bounds. Section spans from its header to the next section header (or EOF).
+	const int32 SectionStart = FileContents.Find(SectionHeader);
+	int32 SectionEnd = INDEX_NONE;
+	FString SectionContent;
+	if (SectionStart != INDEX_NONE)
+	{
+		const int32 AfterHeader = SectionStart + SectionHeader.Len();
+		const int32 NextSectionPos = FileContents.Find(TEXT("\n["), ESearchCase::CaseSensitive, ESearchDir::FromStart, AfterHeader);
+		SectionEnd = (NextSectionPos != INDEX_NONE) ? NextSectionPos + 1 : FileContents.Len();
+		SectionContent = FileContents.Mid(AfterHeader, SectionEnd - AfterHeader);
+	}
+
+	// Parse existing redirect lines into a map for dedup + cycle detection. Non-redirect lines (comments, blank
+	// lines, other keys in the section) are ignored here and preserved verbatim by the rebuild loop below.
+	TMap<FName, FName> ExistingRedirects;
+	if (!SectionContent.IsEmpty())
+	{
+		TArray<FString> Lines;
+		SectionContent.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
+		for (const FString& Line : Lines)
+		{
+			const FString Trimmed = Line.TrimStartAndEnd();
+			if (!Trimmed.StartsWith(RedirectLinePrefix)) continue;
+			const FName OldName = ExtractQuotedAfter(Trimmed, OldNameMarker);
+			const FName NewName = ExtractQuotedAfter(Trimmed, NewNameMarker);
+			if (OldName.IsNone() || NewName.IsNone()) continue;
+			ExistingRedirects.Add(OldName, NewName);
+		}
+	}
+
+	// Classify each incoming rename. Skip if OldName already maps to something — UE's resolver walks the map
+	// transitively at lookup time, so a stale reference is already covered by the existing entry.
+	//
+	// Three collision shapes need surgery to avoid breaking adopter resolution:
+	//
+	// 1. Cycle closure: walking the existing redirect map from NewName eventually reaches OldName. Adding the new
+	//    entry would close the chain back into a non-terminating loop.
+	// 2. Cross-chain collision against existing redirects: NewName currently has an outgoing redirect that belongs
+	//    to a different node's rename history. Adding the new entry would extend that other chain — adopters of the
+	//    new rename's node would end up at the other chain's terminal.
+	// 3. In-batch collision: OldName of this rename is also the NewName of another rename in this same compile.
+	//    Neither redirect is in the existing map yet, so case 2's check against ExistingRedirects misses it. If both
+	//    redirects land, adopters of the second rename's node walk transitively past the colliding name to wherever
+	//    the first rename points.
+	//
+	// Surgery:
+	//   - Cases 1 + 2: remove the existing redirect originating at NewName, knit predecessors past it, add the new
+	//     entry.
+	//   - Case 3: drop this rename entirely so the OTHER rename's canonical claim wins. Adopters of THIS rename's
+	//     node at OldName orphan to whoever now owns the colliding name — the unavoidable cost of two nodes claiming
+	//     the same name in one compile.
+	//
+	// Adopter references at NewName itself become ambiguous after any of these surgeries when the original chain had
+	// adopters using that name — they previously walked through NewName to reach some other terminal and now resolve
+	// to the new canonical instead.
+
+	// Pre-build the set of new-names in this batch so the case-3 check is O(1) per rename.
+	TSet<FName> InBatchNewNames;
+	InBatchNewNames.Reserve(Renames.Num());
+	for (const TPair<FName, FName>& Pair : Renames)
+	{
+		InBatchNewNames.Add(Pair.Value);
+	}
+
+	TSet<FName> RedirectsToRemove;
+	TMap<FName, FName> RedirectsToAdd;
+	for (const TPair<FName, FName>& NewPair : Renames)
+	{
+		const FName NewOld = NewPair.Key;
+		const FName NewNew = NewPair.Value;
+
+		if (NewOld == NewNew) continue;  // identity rename — should be pruned upstream, guard defensively
+		if (ExistingRedirects.Contains(NewOld)) continue;
+
+		// Case 3: in-batch collision. OldName is also the new canonical of another rename in this compile.
+		// Drop this rename so the other rename's canonical claim isn't overridden by this rename's redirect.
+		if (InBatchNewNames.Contains(NewOld))
+		{
+			UE_LOG(LogSimpleQuest, Warning,
+				TEXT("WriteGameplayTagRedirects: %s to %s — in-batch collision (%s is the new canonical of another rename in this compile); this shouldn't fire with up-front validation — please report"),
+				*NewOld.ToString(), *NewNew.ToString(), *NewOld.ToString());
+			continue;
+		}
+
+		// If NewName isn't currently a redirect source, this is a clean forward rename.
+		const FName* NewNewSuccessorPtr = ExistingRedirects.Find(NewNew);
+		if (!NewNewSuccessorPtr)
+		{
+			RedirectsToAdd.Add(NewOld, NewNew);
+			continue;
+		}
+		const FName NewNewSuccessor = *NewNewSuccessorPtr;
+
+		// NewName has an outgoing redirect. Characterize the chain (cycle vs cross-chain collision) for logging.
+		FName Current = NewNew;
+		int32 ChainDepth = 0;
+		TSet<FName> Visited;
+		bool bCycleDetected = false;
+		while (true)
+		{
+			if (Visited.Contains(Current)) break;
+			Visited.Add(Current);
+			const FName* Next = ExistingRedirects.Find(Current);
+			if (!Next) break;
+			++ChainDepth;
+			if (*Next == NewOld) { bCycleDetected = true; break; }
+			Current = *Next;
+		}
+
+		// Find every existing entry pointing TO NewName — these are the predecessors we need to knit past it.
+		TArray<FName> Predecessors;
+		for (const TPair<FName, FName>& Entry : ExistingRedirects)
+		{
+			if (Entry.Value == NewNew)
+			{
+				Predecessors.Add(Entry.Key);
+			}
+		}
+
+		// Apply the surgery.
+		RedirectsToRemove.Add(NewNew);
+		for (const FName& Pred : Predecessors)
+		{
+			RedirectsToRemove.Add(Pred);            // re-added with the new target below; net effect is a value rewrite
+			RedirectsToAdd.Add(Pred, NewNewSuccessor);
+		}
+		RedirectsToAdd.Add(NewOld, NewNew);
+
+		UE_LOG(LogSimpleQuest, Log,
+			TEXT("WriteGameplayTagRedirects: %s to %s — %s (chain depth %d); removed %s to %s, knit %d predecessor(s) past the removed link"),
+			*NewOld.ToString(),
+			*NewNew.ToString(),
+			bCycleDetected ? TEXT("cycle closure") : TEXT("cross-chain collision"),
+			ChainDepth,
+			*NewNew.ToString(),
+			*NewNewSuccessor.ToString(),
+			Predecessors.Num());
+	}
+
+	if (RedirectsToRemove.IsEmpty() && RedirectsToAdd.IsEmpty()) return 0;
+
+	// Rebuild the section line-by-line. Drop redirect lines whose OldName is in the removal set; preserve every
+	// other line (comments, blanks, non-redirect keys) byte-for-byte so authored documentation survives.
+	FString NewSectionContent;
+	if (!SectionContent.IsEmpty())
+	{
+		TArray<FString> Lines;
+		SectionContent.ParseIntoArrayLines(Lines, false);
+		for (const FString& Line : Lines)
+		{
+			if (!RedirectsToRemove.IsEmpty())
+			{
+				const FString Trimmed = Line.TrimStartAndEnd();
+				if (Trimmed.StartsWith(RedirectLinePrefix))
+				{
+					const FName OldName = ExtractQuotedAfter(Trimmed, OldNameMarker);
+					if (RedirectsToRemove.Contains(OldName))
+					{
+						UE_LOG(LogSimpleQuest, Verbose, TEXT("WriteGameplayTagRedirects: removing %s (per surgery above)"), *OldName.ToString());
+						continue;
+					}
+				}
+			}
+			NewSectionContent += Line;
+			NewSectionContent += LINE_TERMINATOR;
+		}
+	}
+
+	// Trim trailing whitespace before appending so the new entries don't pile up after a growing tail of blanks.
+	NewSectionContent = NewSectionContent.TrimEnd();
+
+	int32 Added = 0;
+	for (const TPair<FName, FName>& Pair : RedirectsToAdd)
+	{
+		NewSectionContent += LINE_TERMINATOR;
+		NewSectionContent += FString::Printf(TEXT("+GameplayTagRedirects=(OldTagName=\"%s\",NewTagName=\"%s\")"),
+			*Pair.Key.ToString(), *Pair.Value.ToString());
+		++Added;
+		UE_LOG(LogSimpleQuest, Verbose, TEXT("WriteGameplayTagRedirects: %s to %s"), *Pair.Key.ToString(), *Pair.Value.ToString());
+	}
+	NewSectionContent += LINE_TERMINATOR;
+
+	// Reassemble the file. If the section didn't exist before (uncommon — UE projects ship with this section),
+	// append a fresh one at the end.
+	if (SectionStart == INDEX_NONE)
+	{
+		if (!FileContents.IsEmpty() && !FileContents.EndsWith(LINE_TERMINATOR))
+		{
+			FileContents += LINE_TERMINATOR;
+		}
+		if (!FileContents.IsEmpty()) FileContents += LINE_TERMINATOR;
+		FileContents += SectionHeader + NewSectionContent;
+	}
+	else
+	{
+		const int32 AfterHeader = SectionStart + SectionHeader.Len();
+		const FString HeaderAndBefore = FileContents.Left(AfterHeader);
+		const FString TailAfterSection = FileContents.Mid(SectionEnd);
+		FileContents = HeaderAndBefore + NewSectionContent;
+		if (!TailAfterSection.IsEmpty())
+		{
+			FileContents += LINE_TERMINATOR;
+			FileContents += TailAfterSection;
+		}
+	}
+
+	if (!FFileHelper::SaveStringToFile(FileContents, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuest, Warning, TEXT("WriteGameplayTagRedirects: failed to write '%s'"), *ConfigFile);
+		return 0;
+	}
+
+	// Mirror the file write into the in-memory CDO array directly. UE's LoadConfig path appends to TArray-typed
+	// config properties on the `+` INI syntax rather than replacing, so a reload would duplicate every existing
+	// entry. Direct CDO manipulation keeps memory aligned with disk and avoids dirty-marking the CDO (which
+	// could trigger UE's settings auto-save over our comment-preserving file write).
+	if (UGameplayTagsSettings* Settings = GetMutableDefault<UGameplayTagsSettings>())
+	{
+		if (!RedirectsToRemove.IsEmpty())
+		{
+			Settings->GameplayTagRedirects.RemoveAll([&RedirectsToRemove](const FGameplayTagRedirect& R) {
+				return RedirectsToRemove.Contains(R.OldTagName);
+			});
+		}
+		for (const TPair<FName, FName>& Pair : RedirectsToAdd)
+		{
+			FGameplayTagRedirect NewRedirect;
+			NewRedirect.OldTagName = Pair.Key;
+			NewRedirect.NewTagName = Pair.Value;
+			Settings->GameplayTagRedirects.Add(NewRedirect);
+		}
+	}
+
+	if (Added > 0 || !RedirectsToRemove.IsEmpty())
+	{
+		// Push the redirect-map update into UGameplayTagsManager immediately so subsequent FGameplayTag operations
+		// (RequestGameplayTag, deserialization, the swap helpers downstream of this call) see the new state. Critical
+		// when this compilation cycle changes a tag's redirect-chain membership: compilation's own RebuildNativeTags ran
+		// BEFORE this write, registering native tags under the prior redirect map. Without this refresh, the new
+		// canonical name can stay unregistered (or registered under its previous redirect target) until the next
+		// compile reaches it again — and any in-session swap that queries it would get an invalid FGameplayTag back
+		// and silently clear adopter data.
+		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+
+		UE_LOG(LogSimpleQuest, Log, TEXT("WriteGameplayTagRedirects: +%d added, -%d removed in %s; tag tree refreshed"),
+			Added,
+			RedirectsToRemove.Num(),
+			*ConfigFile);
+	}
+
+	return Added;
+}
+
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	int32 ModifiedBPs = 0;
+
+	for (TObjectIterator<UBlueprint> BPIt; BPIt; ++BPIt)
+	{
+		UBlueprint* BP = *BPIt;
+		if (!BP || !BP->GeneratedClass) continue;
+
+		UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
+		if (!CDO) continue;
+
+		int32 SwapsInBP = 0;
+
+		for (TFieldIterator<FStructProperty> PropIt(BP->GeneratedClass); PropIt; ++PropIt)
+		{
+			FStructProperty* StructProp = *PropIt;
+
+			if (StructProp->Struct == FGameplayTag::StaticStruct())
+			{
+				FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(CDO);
+				if (!TagPtr) continue;
+
+				if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
+				{
+					*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
+					++SwapsInBP;
+				}
+			}
+			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+			{
+				FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(CDO);
+				if (!ContainerPtr) continue;
+
+				FGameplayTagContainer Rebuilt;
+				bool bAnyChanges = false;
+				for (const FGameplayTag& Tag : *ContainerPtr)
+				{
+					if (const FName* NewName = Renames.Find(Tag.GetTagName()))
+					{
+						Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
+						bAnyChanges = true;
+					}
+					else
+					{
+						Rebuilt.AddTag(Tag);
+					}
+				}
+				if (bAnyChanges)
+				{
+					*ContainerPtr = Rebuilt;
+					++SwapsInBP;
+				}
+			}
+		}
+
+		if (SwapsInBP > 0)
+		{
+			BP->Modify();
+			BP->MarkPackageDirty();
+			++ModifiedBPs;
+			UE_LOG(LogSimpleQuest, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' — %d field(s) updated on CDO"),
+				*BP->GetName(), SwapsInBP);
+		}
+	}
+
+	return ModifiedBPs;
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)

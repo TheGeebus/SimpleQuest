@@ -58,6 +58,18 @@ public:
      * Creates a compiler instance using the registered factory if one exists, otherwise returns the default FQuestlineGraphCompiler.
      */
     virtual TUniquePtr<FQuestlineGraphCompiler> CreateCompiler() const = 0;
+    
+    /**
+     * Begin / End a compile batch. Inside a batch, RegisterCompiledTags defers WriteCompiledTagsIni and the native-tag tree
+     * rebuild to EndCompileBatch — incremental AddNativeTagsForGraph calls keep mid-batch RequestGameplayTag lookups working,
+     * then a single coalesced rebuild + refresh fires when the batch closes. Callers that need a redirect-map update to land
+     * between the per-graph compiles and the final native-tag rebuild (so rebuilt tags register under the new redirect map)
+     * should call WriteGameplayTagRedirects inside the batch scope, just before it closes.
+     *
+     * BeginCompileBatch must be paired with EndCompileBatch. Use ON_SCOPE_EXIT for cancel safety.
+     */
+    virtual void BeginCompileBatch() = 0;
+    virtual void EndCompileBatch() = 0;
 
     /**
      * Register native Gameplay Tags produced at graph compilation time. For each quest tag registered, the corresponding WorldState

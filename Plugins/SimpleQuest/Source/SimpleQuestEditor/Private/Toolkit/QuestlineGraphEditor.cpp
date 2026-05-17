@@ -30,6 +30,7 @@
 #include "Widgets/SPrereqExaminerPanel.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "EdGraphNode_Comment.h"
+#include "GameplayTagsManager.h"
 #include "GraphEditorActions.h"
 #include "ScopedTransaction.h"
 
@@ -616,10 +617,10 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     // Aggregate state across primary + linked neighborhood.
     int32 TotalErrors = 0;
     int32 TotalWarnings = 0;
-    int32 TotalRenames = 0;
     int32 TotalRenamedActors = 0;
     int32 NeighborSuccessCount = 0;
     int32 NeighborFailCount = 0;
+    TMap<FName, FName> AllRenames;
 
     FMessageLog CompilerLog("QuestCompiler");
     bool bLogPageOpen = false;
@@ -631,8 +632,9 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         bLogPageOpen = true;
     };
 
-    // Per-asset compile body — runs for primary and each neighbor. Broadcasts OnQuestlineCompiled per asset so
-    // every open editor (this one + any others) refreshes via the existing OnExternalCompile path.
+    // Per-asset compile body — runs for primary and each neighbor. Broadcasts OnQuestlineCompiled per asset so every open
+    // editor (this one + any others) refreshes via the existing OnExternalCompile path. Renames accumulate into AllRenames
+    // for a single coalesced redirect write at end-of-batch.
     auto CompileAsset = [&](UQuestlineGraph* Graph, bool bIsPrimary)
     {
         if (!Graph) return;
@@ -643,18 +645,13 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         if (bSuccess)
         {
             if (!bIsPrimary) ++NeighborSuccessCount;
-            const TMap<FName, FName>& Renames = Compiler->GetDetectedRenames();
-            if (Renames.Num() > 0)
-            {
-                TotalRenames       += Renames.Num();
-                TotalRenamedActors += FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(Renames);
-            }
+            AllRenames.Append(Compiler->GetDetectedRenames());
         }
         else if (!bIsPrimary)
         {
             ++NeighborFailCount;
         }
-        TotalErrors   += Compiler->GetNumErrors();
+        TotalErrors += Compiler->GetNumErrors();
         TotalWarnings += Compiler->GetNumWarnings();
 
         if (Compiler->GetMessages().Num() > 0)
@@ -663,26 +660,48 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
             CompilerLog.AddMessages(Compiler->GetMessages());
         }
 
-        ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(
-            Graph->GetOutermost()->GetName(), bSuccess);
+        ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(Graph->GetOutermost()->GetName(), bSuccess);
     };
 
-    // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
-    CompileAsset(QuestlineGraph, /*bIsPrimary=*/ true);
-
-    // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references. See
-    // ISimpleQuestEditorModule::CollectLinkedNeighborhood.
-    TArray<UQuestlineGraph*> Neighborhood;
-    ISimpleQuestEditorModule::Get().CollectLinkedNeighborhood(QuestlineGraph, Neighborhood);
-
-    if (Neighborhood.Num() > 0)
+    // Single batch covers primary + every linked neighbor + the coalesced WriteGameplayTagRedirects call. RegisterCompiledTags
+    // inside Compile() takes the batched path (no per-graph WriteCompiledTagsIni / RebuildNativeTags), so the final rebuild fires
+    // ONCE in EndCompileBatch — under the new redirect map written below — and registers each new canonical name as itself.
     {
-        UE_LOG(LogSimpleQuest, Log, TEXT("Compile: auto-compiling %d linked neighbor(s) of '%s'"), Neighborhood.Num(), *QuestlineGraph->GetName());
+        ISimpleQuestEditorModule::Get().BeginCompileBatch();
+        ON_SCOPE_EXIT { ISimpleQuestEditorModule::Get().EndCompileBatch(); };
+
+        // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
+        CompileAsset(QuestlineGraph, /*bIsPrimary=*/ true);
+
+        // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references.
+        TArray<UQuestlineGraph*> Neighborhood;
+        ISimpleQuestEditorModule::Get().CollectLinkedNeighborhood(QuestlineGraph, Neighborhood);
+
+        if (Neighborhood.Num() > 0)
+        {
+            UE_LOG(LogSimpleQuest, Log, TEXT("Compile: auto-compiling %d linked neighbor(s) of '%s'"), Neighborhood.Num(), *QuestlineGraph->GetName());
+        }
+
+        for (UQuestlineGraph* Neighbor : Neighborhood)
+        {
+            CompileAsset(Neighbor, /*bIsPrimary=*/ false);
+        }
+
+        // Coalesced redirect write inside the batch scope so EndCompileBatch's RebuildNativeTags fires AFTER the CDO + manager
+        // redirect-map are current.
+        if (AllRenames.Num() > 0)
+        {
+            FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(AllRenames);
+        }
     }
 
-    for (UQuestlineGraph* Neighbor : Neighborhood)
+    // Swap helpers run AFTER the batch closes — the tag tree reflects the new redirects and the new canonical names are
+    // registered as themselves, so RequestGameplayTag inside the helpers returns valid tags rather than silently clearing
+    // adopter data on cycle-closing renames.
+    if (AllRenames.Num() > 0)
     {
-        CompileAsset(Neighbor, /*bIsPrimary=*/ false);
+        TotalRenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(AllRenames);
+        FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(AllRenames);
     }
 
     // Notifications — MessageLog already shows pages if anything wrote to them. Emit a notify summary for
@@ -712,12 +731,12 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
-    if (TotalRenames > 0)
+    if (AllRenames.Num() > 0)
     {
         FNotificationInfo RenameInfo(FText::Format(
             NSLOCTEXT("SimpleQuestEditor", "TagRenames",
                 "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
-            TotalRenames, TotalRenamedActors));
+            AllRenames.Num(), TotalRenamedActors));
         RenameInfo.ExpireDuration = 5.f;
         RenameInfo.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
@@ -942,6 +961,23 @@ void FQuestlineGraphEditor::OnNodeTitleCommitted(const FText& NewText, ETextComm
 {
     if (CommitType == ETextCommit::OnCleared) return;
     if (!NodeBeingChanged || !NodeBeingChanged->GetCanRenameNode()) return;
+
+    // Reject collisions with sibling live labels or compiled identities BEFORE applying the rename. The compile-time
+    // redirect machinery can't gracefully resolve two nodes claiming the same name in one compile cycle — the cleanest
+    // outcome there is to drop one of the renames, which orphans that node's subscribers. Catching the collision here
+    // surfaces the situation to the designer with a clear path forward (recompile, then rename).
+    if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(NodeBeingChanged))
+    {
+        FText ErrorText;
+        if (!ContentNode->IsLabelAvailable(NewText.ToString(), ErrorText))
+        {
+            FNotificationInfo Info(ErrorText);
+            Info.ExpireDuration = 6.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+            return;
+        }
+    }
 
     const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "RenameNode", "Rename Node"));
     NodeBeingChanged->Modify();

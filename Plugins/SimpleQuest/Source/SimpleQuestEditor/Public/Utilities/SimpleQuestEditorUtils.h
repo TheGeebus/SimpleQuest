@@ -240,6 +240,36 @@ public:
 	static int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 
 	/**
+	 * Writes tag rename pairs as +GameplayTagRedirects entries on UGameplayTagsSettings and persists the section to the project's
+	 * Config/DefaultGameplayTags.ini. Returns the count of NEW redirect entries added (entries whose OldTagName already maps to
+	 * something in the CDO are skipped; UE's redirect resolver walks the map transitively at lookup time, so a stale chain like
+	 * A->B already resolves to the eventual canonical without a second A->C entry).
+	 *
+	 * UE's deserialization-time redirect mechanism heals FGameplayTag UPROPERTY fields automatically once a redirect is registered —
+	 * component fields, TMap keys, TArray entries, FGameplayTagContainer contents, FInstancedStruct interiors. The K2-node pin
+	 * DefaultValue case is NOT covered here (pin defaults are stored as strings, not FGameplayTag structs); that gap is handled by
+	 * ApplyTagRenamesToBlueprintGraphs.
+	 *
+	 * Callers are responsible for triggering UGameplayTagsManager::EditorRefreshGameplayTagTree once per compile action after all
+	 * renames are written to rebuild the redirect map for subsequent FGameplayTag deserialization.
+	 */
+	static int32 WriteGameplayTagRedirects(const TMap<FName, FName>& Renames);
+	
+	/**
+	 * Walks every loaded UBlueprint's generated-class CDO and rewrites any FGameplayTag or FGameplayTagContainer field whose stored
+	 * tag name appears as an OldTagName in Renames. Required because UE's GameplayTagRedirects heals values at deserialization time —
+	 * an already-loaded CDO retains its old value in memory until the class is reloaded. Variables that aren't Instance Editable are
+	 * read directly from the CDO at runtime, so they wouldn't pick up the rename otherwise without an editor restart.
+	 *
+	 * Covers top-level FGameplayTag UPROPERTYs and FGameplayTagContainer UPROPERTYs on the CDO. Does not currently descend into nested
+	 * USTRUCTs, FInstancedStruct interiors, or TMap / TArray element types other than FGameplayTag — those fields heal naturally on
+	 * next BP load via UE's deserialization redirect.
+	 *
+	 * Returns the number of UBlueprint assets modified (and marked dirty).
+	 */
+	static int32 ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames);
+	
+	/**
 	 * Walks the node's Outer chain (through any Quest container graphs) to the owning UQuestlineGraph asset, then
 	 * matches the node's QuestGuid against CompiledNodes to resolve its compiled runtime tag. Works for any
 	 * UQuestlineNode_ContentBase descendant (Quest, Step, LinkedQuestline). Returns an invalid tag when the node

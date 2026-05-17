@@ -1,6 +1,11 @@
 ﻿#include "Nodes/QuestlineNode_ContentBase.h"
 
+#include "Framework/Notifications/NotificationManager.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Widgets/Notifications/SNotificationList.h"
 
 UQuestlineNode_ContentBase::UQuestlineNode_ContentBase()
 {
@@ -110,6 +115,15 @@ void UQuestlineNode_ContentBase::EnsureUniqueLabel()
 	NodeLabel = FText::FromString(Candidate);
 }
 
+void UQuestlineNode_ContentBase::PreEditChange(FProperty* PropertyAboutToChange)
+{
+	Super::PreEditChange(PropertyAboutToChange);
+	if (PropertyAboutToChange && PropertyAboutToChange->GetFName() == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, NodeLabel))
+	{
+		PreEditNodeLabelSnapshot = NodeLabel;
+	}
+}
+
 void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -118,9 +132,23 @@ void UQuestlineNode_ContentBase::PostEditChangeProperty(FPropertyChangedEvent& P
 
 	if (PropName == GET_MEMBER_NAME_CHECKED(UQuestlineNode_ContentBase, NodeLabel))
 	{
-		// Details-panel rename goes through UPROPERTY change, not OnRenameNode. Route through the shared
-		// notify path so the stale-tag warning appears on this widget AND on descendant widgets whose paths
-		// include this label.
+		// Validate the new label against live + compiled state on the same graph. Reject + revert if it collides
+		// with another node — the alternative is letting the compile-time redirect machinery silently drop one of
+		// the two renames, which can lose subscriber linkage on the orphaned node.
+		FText ErrorText;
+		if (!IsLabelAvailable(NodeLabel.ToString(), ErrorText))
+		{
+			NodeLabel = PreEditNodeLabelSnapshot;
+
+			FNotificationInfo Info(ErrorText);
+			Info.ExpireDuration = 6.f;
+			Info.bUseSuccessFailIcons = true;
+			FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+			return;
+		}
+
+		// Details-panel rename goes through UPROPERTY change, not OnRenameNode. Route through the shared notify path
+		// so the stale-tag warning appears on this widget AND on descendant widgets whose paths include this label.
 		NotifyRenameSideEffects();
 		return;
 	}
@@ -237,3 +265,66 @@ void UQuestlineNode_ContentBase::GetNodeContextMenuActions(UToolMenu* Menu, UGra
 
 	FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section, const_cast<UQuestlineNode_ContentBase*>(this));
 }
+
+bool UQuestlineNode_ContentBase::IsLabelAvailable(const FString& ProposedLabel, FText& OutError) const
+{
+	UEdGraph* MyGraph = GetGraph();
+	if (!MyGraph) return true;  // can't validate without a graph context — let it through
+
+	// Walk Outer chain to the owning UQuestlineGraph asset (skipping any intermediate Quest container graphs).
+	UObject* Outer = MyGraph->GetOuter();
+	while (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Outer))
+	{
+		UEdGraph* QuestGraph = QuestNode->GetGraph();
+		if (!QuestGraph) break;
+		Outer = QuestGraph->GetOuter();
+	}
+	const UQuestlineGraph* OwningAsset = Cast<UQuestlineGraph>(Outer);
+
+	for (UEdGraphNode* OtherEdNode : MyGraph->Nodes)
+	{
+		const UQuestlineNode_ContentBase* OtherContent = Cast<UQuestlineNode_ContentBase>(OtherEdNode);
+		if (!OtherContent || OtherContent == this) continue;
+
+		// Live label collision — another node on this graph currently displays the proposed label.
+		if (OtherContent->NodeLabel.ToString().Equals(ProposedLabel))
+		{
+			OutError = FText::Format(NSLOCTEXT("SimpleQuestEditor", "RenameCollision_LiveLabel",
+				"Cannot rename to '{0}' — another node on this graph is currently named '{0}'."),
+				FText::FromString(ProposedLabel));
+			return false;
+		}
+
+		// Compiled-identity collision — another node on this graph still holds the proposed label as its last-compiled
+		// identity. The other node has been renamed in the editor but not yet recompiled, so its previous canonical
+		// name is still pinned in the compiled tag registry. Allowing this rename would create the in-batch collision
+		// at the next compile.
+		if (OwningAsset)
+		{
+			for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : OwningAsset->GetCompiledNodes())
+			{
+				const UQuestNodeBase* CompiledInstance = Compiled.Value;
+				if (!CompiledInstance) continue;
+				if (CompiledInstance->GetQuestGuid() != OtherContent->QuestGuid) continue;
+
+				// Found the compiled record for OtherContent. Extract the leaf segment of its compiled tag and compare.
+				const FString TagStr = Compiled.Key.ToString();
+				int32 LastDot = INDEX_NONE;
+				const bool bHasDot = TagStr.FindLastChar(TEXT('.'), LastDot);
+				const FString CompiledLeaf = bHasDot ? TagStr.Mid(LastDot + 1) : TagStr;
+
+				if (CompiledLeaf.Equals(ProposedLabel))
+				{
+					OutError = FText::Format(NSLOCTEXT("SimpleQuestEditor", "RenameCollision_CompiledIdentity",
+						"Cannot rename to '{0}' — another node on this graph still holds '{0}' as its compiled identity. Recompile the questline to lock in pending renames and free the name."),
+						FText::FromString(ProposedLabel));
+					return false;
+				}
+				break;  // found the matching compiled record; no need to keep scanning for this OtherContent
+			}
+		}
+	}
+
+	return true;
+}
+

@@ -6,7 +6,9 @@
 #include "AssetToolsModule.h"
 #include "Modules/ModuleManager.h"
 #include "EdGraphUtilities.h"
+#include "GameplayTagRedirectors.h"
 #include "GameplayTagsManager.h"
+#include "GameplayTagsSettings.h"
 #include "MessageLogModule.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "SGraphNodeKnot.h"
@@ -176,6 +178,11 @@ void FSimpleQuestEditor::StartupModule()
 		RegisterTagsFromAssetRegistry();
 	}
 
+	// On UBlueprint load, marks the asset dirty if any FGameplayTag UPROPERTY's value matches a redirect target — a heuristic for
+	// "PostSerialize transparently healed this field during load." Save All then writes the healed name to disk, so the asset stops
+	// depending on the redirect entry to resolve correctly on future loads.
+	OnAssetLoadedHandle = FCoreUObjectDelegates::OnAssetLoaded.AddRaw(this, &FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad);
+	
 	// Blueprint compile check requires a fully initialized editor — keep in delegate.
 	FEditorDelegates::OnEditorInitialized.AddLambda([this](double)
 	{
@@ -330,7 +337,9 @@ void FSimpleQuestEditor::ShutdownModule()
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnFilesLoaded().RemoveAll(this);
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnAssetRemoved().RemoveAll(this);
 	}
-
+	
+	FCoreUObjectDelegates::OnAssetLoaded.Remove(OnAssetLoadedHandle);
+	
 	if (FSlateApplication::IsInitialized())
 	{
 		FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(StaleQuestTagsTabId);
@@ -492,57 +501,70 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	FMessageLog CompilerLog("QuestCompiler");
 	CompilerLog.NewPage(NSLOCTEXT("SimpleQuestEditor", "CompileAllPageLabel", "Compile All"));
 
-	int32 TotalRenames = 0;
 	int32 TotalRenamedActors = 0;
+	TMap<FName, FName> AllRenames;
 
-	// Coalesce per-graph WriteCompiledTagsIni + RebuildNativeTags into a single end-of-batch flush.
-	// ON_SCOPE_EXIT covers early-return / SlowTask cancel paths.
-	BeginCompileBatch();
-	ON_SCOPE_EXIT { EndCompileBatch(); };
+	// Single batch covers all per-graph compiles + the one coalesced WriteGameplayTagRedirects call. Native-tag registrations
+	// queued by RegisterCompiledTags during each Compile() flush in EndCompileBatch's RebuildNativeTags — fired AFTER the
+	// redirect write below — so rebuilt tags register under the new redirect map, not the pre-rename one. ON_SCOPE_EXIT covers
+	// early-return / SlowTask cancel paths.
+	{
+		BeginCompileBatch();
+		ON_SCOPE_EXIT { EndCompileBatch(); };
 
-	for (const FAssetData& AssetData : QuestlineAssets)
-    {
-        if (SlowTask.ShouldCancel()) break;
+		for (const FAssetData& AssetData : QuestlineAssets)
+		{
+			if (SlowTask.ShouldCancel()) break;
 
-        SlowTask.EnterProgressFrame(1.f, FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Item", "Compiling {0}..."), FText::FromName(AssetData.AssetName)));
+			SlowTask.EnterProgressFrame(1.f, FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Item", "Compiling {0}..."), FText::FromName(AssetData.AssetName)));
 
-        UQuestlineGraph* Graph = Cast<UQuestlineGraph>(AssetData.GetAsset());
-        if (!Graph) { ++FailCount; continue; }
-    	
-        TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
-        if (Compiler->Compile(Graph))
-        {
-            ++SuccessCount;
+			UQuestlineGraph* Graph = Cast<UQuestlineGraph>(AssetData.GetAsset());
+			if (!Graph) { ++FailCount; continue; }
 
-            // Propagate renames BEFORE broadcast — OnExternalCompile triggers RefreshAllNodeWidgets, which queries actors by compiled tag.
-            // Actors must already hold the new tags for those queries to succeed.
-            const TMap<FName, FName>& DetectedRenames = Compiler->GetDetectedRenames();
-            if (DetectedRenames.Num() > 0)
-            {
-                TotalRenamedActors += FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(DetectedRenames);
-                TotalRenames += DetectedRenames.Num();
-            }
+			TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
+			if (Compiler->Compile(Graph))
+			{
+				++SuccessCount;
 
-            UPackage* Package = Graph->GetOutermost();
-            Package->MarkPackageDirty();
-            FSavePackageArgs Args;
-            UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
-            QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
-        }
-        else
-        {
-            ++FailCount;
-            QuestlineCompiledDelegate.Broadcast(Graph->GetOutermost()->GetName(), false);
-        }
+				// Accumulate this graph's renames. Different graphs producing the same (OldName -> NewName) pair (shared
+				// LinkedQuestline targets) merge cleanly; TMap::Append's second-wins behavior is a no-op for identical values.
+				AllRenames.Append(Compiler->GetDetectedRenames());
 
-    	// Add messages directly — no per-graph NewPage
-    	if (Compiler->GetMessages().Num() > 0)
-    	{
-    		CompilerLog.AddMessages(Compiler->GetMessages());
-    		TotalErrors += Compiler->GetNumErrors();
-    		TotalWarnings += Compiler->GetNumWarnings();
-    	}
-    }
+				UPackage* Package = Graph->GetOutermost();
+				Package->MarkPackageDirty();
+				FSavePackageArgs Args;
+				UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
+				QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
+			}
+			else
+			{
+				++FailCount;
+				QuestlineCompiledDelegate.Broadcast(Graph->GetOutermost()->GetName(), false);
+			}
+
+			if (Compiler->GetMessages().Num() > 0)
+			{
+				CompilerLog.AddMessages(Compiler->GetMessages());
+				TotalErrors += Compiler->GetNumErrors();
+				TotalWarnings += Compiler->GetNumWarnings();
+			}
+		}
+
+		// One coalesced redirect write for the entire batch, inside the scope so EndCompileBatch's RebuildNativeTags fires AFTER
+		// the CDO + manager-redirect-map are current. Native tags then re-register under the new redirects in a single rebuild.
+		if (AllRenames.Num() > 0)
+		{
+			FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(AllRenames);
+		}
+	}
+
+	// Swap helpers run AFTER the batch closes — the tag tree reflects the new redirects and the new canonical names are registered
+	// as themselves, so RequestGameplayTag lookups inside the helpers return valid tags rather than silently clearing adopter data.
+	if (AllRenames.Num() > 0)
+	{
+		TotalRenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(AllRenames);
+		FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(AllRenames);
+	}
 
     // Summary notification
     if (TotalErrors > 0 || TotalWarnings > 0)
@@ -564,9 +586,9 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     }
 
 	// Tag rename toast
-	if (TotalRenames > 0)
+	if (AllRenames.Num() > 0)
 	{
-		FNotificationInfo RenameInfo(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_TagRenames", "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."), TotalRenames, TotalRenamedActors));
+		FNotificationInfo RenameInfo(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_TagRenames", "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."), AllRenames.Num(), TotalRenamedActors));
 		RenameInfo.ExpireDuration = 5.f;
 		RenameInfo.bUseSuccessFailIcons = true;
 		FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
@@ -838,6 +860,78 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
 		CompiledNativeTags.Num(),
 		bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
+}
+
+void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
+{
+	UBlueprint* BP = Cast<UBlueprint>(LoadedAsset);
+	if (!BP || !BP->GeneratedClass) return;
+
+	UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
+	if (!CDO) return;
+
+	UGameplayTagsSettings* Settings = GetMutableDefault<UGameplayTagsSettings>();
+	if (!Settings || Settings->GameplayTagRedirects.Num() == 0) return;
+
+	// Build a set of every NewTagName in the active redirect map. A CDO field that holds one of these names AFTER deserialization
+	// MAY have been transparently rewritten by FGameplayTag::PostSerialize from a corresponding OldTagName on disk. We can't
+	// distinguish "redirected on load" from "always had this name" without comparing to the on-disk bytes — the heuristic accepts
+	// occasional no-op saves in exchange for catching the real cases.
+	TSet<FName> RedirectTargets;
+	RedirectTargets.Reserve(Settings->GameplayTagRedirects.Num());
+	for (const FGameplayTagRedirect& Entry : Settings->GameplayTagRedirects)
+	{
+		RedirectTargets.Add(Entry.NewTagName);
+	}
+
+	bool bMatched = false;
+	for (TFieldIterator<FStructProperty> It(BP->GeneratedClass); It && !bMatched; ++It)
+	{
+		FStructProperty* StructProp = *It;
+
+		if (StructProp->Struct == FGameplayTag::StaticStruct())
+		{
+			const FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(CDO);
+			if (TagPtr && RedirectTargets.Contains(TagPtr->GetTagName()))
+			{
+				bMatched = true;
+			}
+		}
+		else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+		{
+			const FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(CDO);
+			if (ContainerPtr)
+			{
+				for (const FGameplayTag& Tag : *ContainerPtr)
+				{
+					if (RedirectTargets.Contains(Tag.GetTagName()))
+					{
+						bMatched = true;
+						break;
+					}
+				}
+			}
+		}
+	}
+
+	if (bMatched)
+	{
+		// UPackage::MarkPackageDirty silently no-ops while UE is routing PostLoad calls — OnAssetLoaded fires from inside that phase,
+		// so a direct mark here is suppressed by design (UE doesn't want load-time changes to flag assets as user-modified). Defer to
+		// the next tick to escape the routing context.
+		TWeakObjectPtr<UBlueprint> WeakBP(BP);
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakBP](float)
+		{
+			if (UBlueprint* DeferredBP = WeakBP.Get())
+			{
+				DeferredBP->MarkPackageDirty();
+				UE_LOG(LogSimpleQuest, Verbose,
+					TEXT("MarkDirtyOnRedirectedTagLoad: deferred dirty mark fired for '%s' — Save All will now catch the healed FGameplayTag value(s)"),
+					*DeferredBP->GetName());
+			}
+			return false; // one-shot — unregister after firing
+		}), 0.0f);
+	}
 }
 
 TSharedRef<SDockTab> FSimpleQuestEditor::SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args)

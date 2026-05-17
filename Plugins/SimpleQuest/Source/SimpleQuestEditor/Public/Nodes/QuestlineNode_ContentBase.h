@@ -22,6 +22,7 @@ public:
 	virtual void PostPlacedNewNode() override;
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostPasteNode() override;
+	virtual void PreEditChange(FProperty* PropertyAboutToChange) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void OnRenameNode(const FString& NewName) override;
 	virtual void EnsureDeactivationPinsForAutowire() override;
@@ -30,6 +31,16 @@ public:
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	FText NodeLabel;
+	
+	/**
+	 * Returns true if ProposedLabel is available for this node — i.e., no other content node on the same direct graph
+	 * currently displays it as a live label AND no other content node on the same graph still holds it as its last-
+	 * compiled identity. The second check is what blocks the in-batch collision case: a designer renames Node 1 from
+	 * X to Y, then before recompiling tries to rename Node 2 to X. Live state says X is free (Node 1 displays Y now),
+	 * but Node 1's compiled identity is still X until the next compile rewrites the redirect map, so X is effectively
+	 * pinned. OutError carries a human-readable explanation when the function returns false.
+	 */
+	bool IsLabelAvailable(const FString& ProposedLabel, FText& OutError) const;
 
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
@@ -73,6 +84,9 @@ protected:
 	/** Shared side-effect for both inline rename (OnRenameNode) and Details-panel NodeLabel edit
 	(PostEditChangeProperty). Fires NotifyGraphChanged on this node's graph plus any owned inner graphs. */
 	void NotifyRenameSideEffects();
-	
 
+private:
+	/** Snapshot of NodeLabel taken in PreEditChange so PostEditChangeProperty can revert if the new value fails validation. */
+	UPROPERTY(Transient)
+	FText PreEditNodeLabelSnapshot;
 };

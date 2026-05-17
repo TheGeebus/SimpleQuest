@@ -121,34 +121,6 @@ void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
     }
 }
 
-int32 UQuestTriggerComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
-{
-    int32 Count = 0;
-    for (const auto& [OldName, NewName] : Renames)
-    {
-        FGameplayTag FoundOld;
-        for (const FGameplayTag& Tag : StepTagsToTrigger.GetGameplayTagArray())
-        {
-            if (Tag.GetTagName() == OldName)
-            {
-                FoundOld = Tag;
-                break;
-            }
-        }
-        if (FoundOld.IsValid())
-        {
-            StepTagsToTrigger.RemoveTag(FoundOld);
-            FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
-            if (NewTag.IsValid())
-            {
-                StepTagsToTrigger.AddTag(NewTag);
-            }
-            Count++;
-        }
-    }
-    return Count;
-}
-
 int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
     int32 Count = 0;

@@ -170,31 +170,13 @@ void UQuestObserverComponent::HandleQuestUnblocked(FGameplayTag Channel, const F
 
 int32 UQuestObserverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 {
+	// Specialty handling for ObservedTags only. This TMap has FGameplayTag KEYS, which the editor-side reflection
+	// sweep can't address — TMap doesn't permit in-place key mutation, so the rewrite is remove-then-readd. The
+	// generic FGameplayTagContainer field (WatchedStepTags) is handled by the reflection sweep in the loader; this
+	// override adds only what reflection can't reach.
 	int32 Count = 0;
 	for (const auto& [OldName, NewName] : Renames)
 	{
-		// WatchedStepTags
-		FGameplayTag FoundOld;
-		for (const FGameplayTag& Tag : WatchedStepTags.GetGameplayTagArray())
-		{
-			if (Tag.GetTagName() == OldName)
-			{
-				FoundOld = Tag;
-				break;
-			}
-		}
-		if (FoundOld.IsValid())
-		{
-			WatchedStepTags.RemoveTag(FoundOld);
-			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
-			if (NewTag.IsValid())
-			{
-				WatchedStepTags.AddTag(NewTag);
-			}
-			Count++;
-		}
-
-		// ObservedTags TMap keys — find old tag among keys
 		FGameplayTag FoundMapKey;
 		for (const auto& [Key, Value] : ObservedTags)
 		{

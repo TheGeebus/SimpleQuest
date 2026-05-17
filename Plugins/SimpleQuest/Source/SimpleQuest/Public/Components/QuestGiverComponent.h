@@ -252,7 +252,6 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer GivenQuestTags;
 
-	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
 	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;

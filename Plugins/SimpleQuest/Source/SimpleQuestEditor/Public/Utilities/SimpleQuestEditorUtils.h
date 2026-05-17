@@ -234,8 +234,26 @@ public:
 	static TArray<FQuestContextualActor> FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
-	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
-	 * Returns the number of actors modified.
+	 * Walks any UObject's top-level UPROPERTYs and rewrites FGameplayTag or FGameplayTagContainer field values whose
+	 * stored tag name appears as an OldTagName in Renames. Returns the number of individual field swaps performed.
+	 *
+	 * Generic reflection sweep — covers FGameplayTag and FGameplayTagContainer UPROPERTYs on any UObject regardless of
+	 * class. Used as the shared implementation behind ApplyTagRenamesToLoadedBlueprintCDOs (CDO healing) and
+	 * ApplyTagRenamesToLoadedWorlds (actor + component healing), and available to adopter custom code that needs the
+	 * same generic sweep on bespoke UObjects.
+	 *
+	 * Does NOT descend into nested USTRUCTs, TMap with FGameplayTag keys / values, TArray of FGameplayTag elements,
+	 * or FInstancedStruct interiors. Specialty cases (e.g., TMap with FGameplayTag keys) need per-class handling via
+	 * UQuestComponentBase::ApplyTagRenames overrides that call Super and add the specialty work.
+	 */
+	static int32 ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames);
+
+	/**
+	 * Walks loaded editor worlds and applies tag renames to actors and their components. For each loaded actor:
+	 * (1) reflection sweep over the actor's own FGameplayTag / FGameplayTagContainer UPROPERTYs, then (2) reflection
+	 * sweep over each component, then (3) for UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any
+	 * specialty handling (Observer's TMap-with-FGameplayTag-keys is the canonical specialty case). Returns the number
+	 * of actors modified.
 	 */
 	static int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 

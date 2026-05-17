@@ -410,34 +410,6 @@ FGameplayTagContainer UQuestGiverComponent::GetRegisteredQuestTagsToGive() const
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
 
-int32 UQuestGiverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
-{
-	int32 Count = 0;
-	for (const auto& [OldName, NewName] : Renames)
-	{
-		FGameplayTag FoundOld;
-		for (const FGameplayTag& Tag : QuestTagsToGive.GetGameplayTagArray())
-		{
-			if (Tag.GetTagName() == OldName)
-			{
-				FoundOld = Tag;
-				break;
-			}
-		}
-		if (FoundOld.IsValid())
-		{
-			QuestTagsToGive.RemoveTag(FoundOld);
-			FGameplayTag NewTag = FGameplayTag::RequestGameplayTag(NewName, false);
-			if (NewTag.IsValid())
-			{
-				QuestTagsToGive.AddTag(NewTag);
-			}
-			Count++;
-		}
-	}
-	return Count;
-}
-
 int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
 	int32 Count = 0;

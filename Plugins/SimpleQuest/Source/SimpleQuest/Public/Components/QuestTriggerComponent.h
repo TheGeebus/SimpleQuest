@@ -74,8 +74,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "SimpleQuest.Questline"))
 	FGameplayTagContainer StepTagsToTrigger;
 
-	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
-
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
 	/**

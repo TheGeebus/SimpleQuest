@@ -448,6 +448,57 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualObserversForNode"));
 }
 
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames)
+{
+	if (!Object || Renames.Num() == 0) return 0;
+
+	int32 Swaps = 0;
+
+	for (TFieldIterator<FStructProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
+	{
+		FStructProperty* StructProp = *PropIt;
+
+		if (StructProp->Struct == FGameplayTag::StaticStruct())
+		{
+			FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(Object);
+			if (!TagPtr) continue;
+
+			if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
+			{
+				*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
+				++Swaps;
+			}
+		}
+		else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+		{
+			FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(Object);
+			if (!ContainerPtr) continue;
+
+			FGameplayTagContainer Rebuilt;
+			bool bAnyChanges = false;
+			for (const FGameplayTag& Tag : *ContainerPtr)
+			{
+				if (const FName* NewName = Renames.Find(Tag.GetTagName()))
+				{
+					Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
+					bAnyChanges = true;
+				}
+				else
+				{
+					Rebuilt.AddTag(Tag);
+				}
+			}
+			if (bAnyChanges)
+			{
+				*ContainerPtr = Rebuilt;
+				++Swaps;
+			}
+		}
+	}
+
+	return Swaps;
+}
+
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
 {
 	if (Renames.Num() == 0 || !GEditor) return 0;
@@ -462,27 +513,50 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			AActor* Actor = *It;
-			bool bActorModified = false;
+			int32 ActorSwapCount = 0;
 
-			TInlineComponentArray<UQuestComponentBase*> QuestComps;
-			Actor->GetComponents(QuestComps);
-
-			for (UQuestComponentBase* Comp : QuestComps)
+			// Actor-level FGameplayTag UPROPERTYs (adopter use case where the tag field lives directly on the actor
+			// rather than on a component). Reflection sweep covers the generic case.
+			const int32 ActorLevelSwaps = ApplyTagRenamesToObject(Actor, Renames);
+			if (ActorLevelSwaps > 0)
 			{
-				const int32 SwapCount = Comp->ApplyTagRenames(Renames);
-				if (SwapCount > 0)
+				Actor->Modify();
+				ActorSwapCount += ActorLevelSwaps;
+				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated (actor-level field)"),
+					*Actor->GetClass()->GetName(), *Actor->GetActorLabel(), ActorLevelSwaps);
+			}
+
+			// Walk every component (not just UQuestComponentBase subclasses). The reflection sweep handles adopter
+			// custom components that hold FGameplayTag UPROPERTYs without needing to derive from our base class. For
+			// UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
+			// cover (Observer's TMap<FGameplayTag, ...>::Keys is the canonical specialty case).
+			TInlineComponentArray<UActorComponent*> AllComponents;
+			Actor->GetComponents(AllComponents);
+
+			for (UActorComponent* Comp : AllComponents)
+			{
+				if (!Comp) continue;
+
+				int32 CompSwaps = ApplyTagRenamesToObject(Comp, Renames);
+
+				if (UQuestComponentBase* QuestComp = Cast<UQuestComponentBase>(Comp))
+				{
+					CompSwaps += QuestComp->ApplyTagRenames(Renames);
+				}
+
+				if (CompSwaps > 0)
 				{
 					Comp->Modify();
-					bActorModified = true;
+					ActorSwapCount += CompSwaps;
 					UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
-						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), SwapCount);
+						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), CompSwaps);
 				}
 			}
 
-			if (bActorModified)
+			if (ActorSwapCount > 0)
 			{
 				Actor->MarkPackageDirty();
-				ModifiedActors++;
+				++ModifiedActors;
 			}
 		}
 	}
@@ -780,50 +854,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TM
 		UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
 		if (!CDO) continue;
 
-		int32 SwapsInBP = 0;
-
-		for (TFieldIterator<FStructProperty> PropIt(BP->GeneratedClass); PropIt; ++PropIt)
-		{
-			FStructProperty* StructProp = *PropIt;
-
-			if (StructProp->Struct == FGameplayTag::StaticStruct())
-			{
-				FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(CDO);
-				if (!TagPtr) continue;
-
-				if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
-				{
-					*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
-					++SwapsInBP;
-				}
-			}
-			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
-			{
-				FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(CDO);
-				if (!ContainerPtr) continue;
-
-				FGameplayTagContainer Rebuilt;
-				bool bAnyChanges = false;
-				for (const FGameplayTag& Tag : *ContainerPtr)
-				{
-					if (const FName* NewName = Renames.Find(Tag.GetTagName()))
-					{
-						Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
-						bAnyChanges = true;
-					}
-					else
-					{
-						Rebuilt.AddTag(Tag);
-					}
-				}
-				if (bAnyChanges)
-				{
-					*ContainerPtr = Rebuilt;
-					++SwapsInBP;
-				}
-			}
-		}
-
+		const int32 SwapsInBP = ApplyTagRenamesToObject(CDO, Renames);
 		if (SwapsInBP > 0)
 		{
 			BP->Modify();

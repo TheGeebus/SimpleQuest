@@ -162,8 +162,10 @@ public:
 	/**
 	 * Give a specific quest. Publishes a request to the manager, which clears any PendingGiver
 	 * state, stamps Context onto the target step, and routes into the normal activation pipeline.
-	 * The outcome surfaces asynchronously via OnQuestGiven (success) or OnGiveAttemptBlocked
-	 * (refusal). If Context.Dynamic.Instigator is unset, it defaults to this giver's owning actor.
+	 * The outcome surfaces asynchronously via the inherited OnQuestStarted (success) or
+	 * OnQuestGiveBlocked (refusal) delegates; filter by GiverActor == GetOwner() to scope to this
+	 * giver's attempts. If Context.Dynamic.Instigator is unset, it defaults to this giver's
+	 * owning actor.
 	 *
 	 * @param QuestTag   The quest to give. Must be registered in the runtime tag manager.
 	 * @param Context    Per-call activation context. Empty default carries no extra data.

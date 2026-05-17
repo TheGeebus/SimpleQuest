@@ -289,7 +289,8 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 	// Blocked or Started — closes the cycle and clears the subscription. Replace any prior pending
 	// subscription on this quest tag (most-recent attempt wins). PendingGiveBlockedHandles' presence
 	// also marks "this giver has an in-flight give attempt for this tag" — read by
-	// HandleQuestStarted to decide whether to fire OnQuestGiven.
+	// HandleQuestStarted to attribute the give to this giver (sets GiverActor = GetOwner() on the
+	// inherited OnQuestStarted broadcast payload).
 	UnsubscribePendingGiveBlocked(QuestTag);
 	FDelegateHandle BlockedHandle = SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(
 		QuestTag, this, &UQuestGiverComponent::OnQuestGiveBlockedEventReceived);

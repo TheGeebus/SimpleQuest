@@ -109,7 +109,7 @@ void UQuestlineGraph::PostLoad()
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestlineGraph::PostLoad [%s] — registered %d native tag(s) "
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("UQuestlineGraph::PostLoad [%s] — registered %d native tag(s) "
 		"(incl. state facts)"), *GetName(), RegisteredNativeTags.Num());
 #endif
 }

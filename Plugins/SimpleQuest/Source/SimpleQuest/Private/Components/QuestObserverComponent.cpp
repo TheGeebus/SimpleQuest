@@ -131,7 +131,7 @@ void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const F
 	if (MatchingSettings && !MatchingSettings->OutcomeFilter.IsEmpty()
 		&& !MatchingSettings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
 			*Event.GetQuestTag().ToString(),
 			*Event.OutcomeTag.ToString());
 		return;
@@ -248,7 +248,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 {
 	if (!SignalSubsystem)
 	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("UQuestObserverComponent::RegisterQuestObserver : QuestSignalSubsystem is null, aborting."));
+		UE_LOG(LogSimpleQuestSubscription, Error, TEXT("UQuestObserverComponent::RegisterQuestObserver : QuestSignalSubsystem is null, aborting."));
 		return;
 	}
 
@@ -289,7 +289,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	{
 		if (GetOwner())
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : no observed tags resolved. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+			UE_LOG(LogSimpleQuestSubscription, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : no observed tags resolved. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
 		}
 		return;
 	}
@@ -307,7 +307,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 
 		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
-			UE_LOG(LogSimpleQuest, Warning,
+			UE_LOG(LogSimpleQuestSubscription, Warning,
 				TEXT("UQuestObserverComponent::RegisterQuestObserver : '%s' holds stale tag '%s' — skipping subscribe. ")
 				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
@@ -318,7 +318,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		// delegates without an explicit ObservedTags entry can confirm it came from a derived component's
 		// GetImplicitlyObservedTags() override.
 		const bool bFromImplicitBridge = !ObservedTags.Contains(QuestTag);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s (%s)"),
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s (%s)"),
 			*QuestTag.ToString(),
 			bFromImplicitBridge ? TEXT("implicit") : TEXT("authored"));
 		
@@ -432,12 +432,12 @@ void UQuestObserverComponent::RegisterQuestObserver()
 					
 					if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
 					{
-						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
+						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 					}
 					else
 					{
-						UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
+						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
 					}

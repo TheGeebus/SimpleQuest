@@ -35,7 +35,7 @@ void UActivationGroupSetterNode::ActivateInternal(FGameplayTag InContextualTag)
             PendingActivationContext.Dynamic.OriginChain, PendingActivationContext.Dynamic.OriginatingEventID);
         Signals->PublishMessage(GroupTag, Event);
 
-        UE_LOG(LogSimpleQuest, Verbose,
+        UE_LOG(LogSimpleQuestActivation, Verbose,
             TEXT("ActivationGroupSetter '%s' published transient signal — source='%s' chain-depth=%d eventGuid=%s"),
             *GroupTag.ToString(),
             *ProvenanceSource.ToString(),

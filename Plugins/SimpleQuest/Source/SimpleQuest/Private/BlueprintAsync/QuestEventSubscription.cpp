@@ -29,7 +29,7 @@ void UQuestEventSubscription::Activate()
 {
     if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestSubscription, Warning,
             TEXT("UQuestEventSubscription: stale or invalid QuestTag '%s' — aborting subscription."),
             *QuestTag.ToString());
         SetReadyToDestroy();
@@ -38,7 +38,7 @@ void UQuestEventSubscription::Activate()
 
     if (ExposedEventsMask == 0)
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestSubscription, Warning,
             TEXT("UQuestEventSubscription: '%s' has no exposed events — subscription is a no-op. ")
             TEXT("Enable at least one event under Pins | <phase> in the BindToQuestEvent node's Details panel."),
             *QuestTag.ToString());
@@ -50,7 +50,7 @@ void UQuestEventSubscription::Activate()
     UWorldStateSubsystem* WorldState = ResolveWorldStateSubsystem();
     if (!Signals || !WorldState)
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestSubscription, Warning,
             TEXT("UQuestEventSubscription: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting. ")
             TEXT("Common causes: BindToQuestEvent fired before the world finished initializing, or the WorldContextObject pin is wired to an actor whose UWorld isn't valid."));
         SetReadyToDestroy();
@@ -116,7 +116,7 @@ void UQuestEventSubscription::Activate()
     UWorld* World = WorldContextObjectWeak.IsValid() ? WorldContextObjectWeak->GetWorld() : nullptr;
     if (!World)
     {
-        UE_LOG(LogSimpleQuest, Verbose,
+        UE_LOG(LogSimpleQuestSubscription, Verbose,
             TEXT("UQuestEventSubscription: no world available for deferred catch-up — running inline (acceptable: no BP execution stack to race with)."));
         RunCatchUp(Signals, WorldState);
         return;

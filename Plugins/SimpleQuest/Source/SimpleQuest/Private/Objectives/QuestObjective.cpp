@@ -22,12 +22,12 @@ void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveT
 	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType, ...);
 	 *-------------------------------------------------------------------------------------------------------------------*/
 
-	UE_LOG(LogSimpleQuest, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
+	UE_LOG(LogSimpleQuestActivation, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
 void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::OnObjectiveActivated_Implementation — storing base target fields from activation params."));
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::OnObjectiveActivated_Implementation — storing base target fields from activation params."));
 	TargetActors = Params.Dynamic.TargetActors;
 	TargetClasses = Params.Authored.TargetClasses;
 }
@@ -49,7 +49,7 @@ void UQuestObjective::DispatchOnObjectiveDeactivated()
 
 void UQuestObjective::OnObjectiveDeactivated_Implementation()
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::OnObjectiveDeactivated_Implementation — base no-op. Override in "
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::OnObjectiveDeactivated_Implementation — base no-op. Override in "
 		"subclass to unsubscribe from external event sources, tear down UI handles, release timers, etc. (%s)"), *GetFullName());
 }
 
@@ -78,7 +78,7 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 
 void UQuestObjective::ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext)
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("ReportProgress: %d/%d — %s"), ProgressContext.CurrentCount, ProgressContext.RequiredCount, *GetFullName());
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ReportProgress: %d/%d — %s"), ProgressContext.CurrentCount, ProgressContext.RequiredCount, *GetFullName());
 	OnQuestObjectiveProgress.Broadcast(ProgressContext);
 }
 
@@ -93,7 +93,7 @@ void UQuestObjective::EnableQuestTargetActors(bool bIsTargetEnabled)
 	{
 		if (AActor* TargetActor = Target.LoadSynchronous())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestObjective::EnableQuestTargetActor : enabling target actor: %s"), *TargetActor->GetFName().ToString());
+			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::EnableQuestTargetActor : enabling target actor: %s"), *TargetActor->GetFName().ToString());
 			EnableTargetObject(TargetActor, bIsTargetEnabled);
 		}
 	}

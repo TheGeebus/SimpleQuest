@@ -17,7 +17,7 @@ namespace FQuestCatchUpFanout
 
 		TArray<FGameplayTag> CatchUpTags = StateSubsystem->GetQuestTagsUnderPrefix(SubscribedTag);
 
-		UE_LOG(LogSimpleQuest, Verbose,
+		UE_LOG(LogSimpleQuestSubscription, Verbose,
 			TEXT("FQuestCatchUpFanout::EnumerateTagsForCatchUp : '%s' fanned out to %d known quest tag(s)"),
 			*SubscribedTag.ToString(), CatchUpTags.Num());
 

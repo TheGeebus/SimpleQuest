@@ -296,7 +296,7 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		}
 	});
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
+	UE_LOG(LogSimpleQuestState, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
 		*OutcomeTag.ToString(),
 		Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"),
@@ -343,7 +343,7 @@ void UQuestStateSubsystem::RecordEntry(
 	});
 
 	const AActor* GiverActor = ActivationParamsSnapshot.Dynamic.Instigator.Get();
-	UE_LOG(LogSimpleQuest, Log,
+	UE_LOG(LogSimpleQuestState, Log,
 		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
 		*SourceQuestTag.ToString(),
@@ -494,7 +494,7 @@ void UQuestStateSubsystem::RegisterQuestTag(FGameplayTag QuestTag)
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose,
+	UE_LOG(LogSimpleQuestState, Verbose,
 		TEXT("UQuestStateSubsystem::RegisterQuestTag : '%s' registered (KnownQuests count=%d, RegisteredTime=%.2fs)"),
 		*QuestTag.ToString(), KnownQuests.Num(), Record.RegisteredTime);
 
@@ -509,7 +509,7 @@ void UQuestStateSubsystem::UpdateQuestPrereqStatus(FGameplayTag QuestTag, const 
 	{
 		CachedPrereqStatus.Add(Perspective, Status);
 	});
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestStateSubsystem::UpdateQuestPrereqStatus : '%s' bSatisfied=%d (leaves=%d)"),
+	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::UpdateQuestPrereqStatus : '%s' bSatisfied=%d (leaves=%d)"),
 		*QuestTag.ToString(),
 		Status.bSatisfied ? 1 : 0,
 		Status.Leaves.Num());
@@ -572,7 +572,7 @@ void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayT
 	ContextualTagsByAssetScopedTag.FindOrAdd(AssetScopedTag).AddUnique(ContextualTag);
 	AssetScopedAliasTagsByContextualTag.FindOrAdd(ContextualTag).AddUnique(AssetScopedTag);
 
-	UE_LOG(LogSimpleQuest, Verbose,
+	UE_LOG(LogSimpleQuestState, Verbose,
 		TEXT("UQuestStateSubsystem::RegisterAlias : '%s' → '%s' (forward index %d alias(es), reverse index %d contextual(s))"),
 		*AssetScopedTag.ToString(), *ContextualTag.ToString(),
 		ContextualTagsByAssetScopedTag.Num(), AssetScopedAliasTagsByContextualTag.Num());

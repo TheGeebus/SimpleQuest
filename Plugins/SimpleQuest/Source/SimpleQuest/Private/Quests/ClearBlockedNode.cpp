@@ -26,7 +26,7 @@ void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 					Signals->PublishMessage(Tag_Channel_QuestClearBlockRequest,
 						FQuestClearBlockRequestEvent(Tag, EDeactivationSource::Internal));
 
-					UE_LOG(LogSimpleQuest, Verbose, TEXT("UClearBlockedNode: '%s' — published ClearBlockRequest (source=Internal)"),
+					UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UClearBlockedNode: '%s' — published ClearBlockRequest (source=Internal)"),
 						*Tag.ToString());
 				}
 			}

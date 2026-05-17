@@ -21,7 +21,7 @@ void UStartQuestlineNode::ActivateInternal(FGameplayTag InContextualTag)
 			{
 				Signals->PublishMessage(Tag_Channel_QuestlineStartRequest, FQuestlineStartRequestEvent(Graph, Params));
 
-				UE_LOG(LogSimpleQuest, Verbose, TEXT("UStartQuestlineNode: published QuestlineStartRequest for '%s' (CustomData %s)"),
+				UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UStartQuestlineNode: published QuestlineStartRequest for '%s' (CustomData %s)"),
 					*Graph.ToString(),
 					Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 			}
@@ -29,7 +29,7 @@ void UStartQuestlineNode::ActivateInternal(FGameplayTag InContextualTag)
 	}
 	else
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("UStartQuestlineNode: null Graph reference, skipping publish"));
+		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("UStartQuestlineNode: null Graph reference, skipping publish"));
 	}
 
 	ForwardActivation();

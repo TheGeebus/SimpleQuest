@@ -172,7 +172,7 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
     RegisterGiversFromAssetRegistry();
     
-    UE_LOG(LogSimpleQuest, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
 
     // Build the GroupTag → listener-graphs inverted index from AR metadata. Async-loading itself is deferred to
     // reachability walks during RegisterQuestlineGraph — no graph gets loaded at this point unless something else
@@ -308,7 +308,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                 {
                     if (UQuestNodeBase* Existing = LoadedNodeInstances.FindRef(*ExistingKey))
                     {
-                        UE_LOG(LogSimpleQuest, Verbose,
+                        UE_LOG(LogSimpleQuestActivation, Verbose,
                             TEXT("RegisterQuestlineGraph: '%s' — merging perspectives from '%s' into '%s' (AuthoredNodeGuid %s)"),
                             *Graph->GetName(), *Pair.Key.ToString(), *ExistingKey->ToString(),
                             *InstanceAuthoredGuid.ToString(EGuidFormats::Short));
@@ -409,7 +409,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             ++NewlyRegistered;
         }
     }
-    UE_LOG(LogSimpleQuest, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName), %d duplicate authored-guid"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName), %d duplicate authored-guid"),
         *Graph->GetName(),
         NewlyRegistered,
         SkippedAlreadyRegistered,
@@ -580,7 +580,7 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
         if (GraphTag.IsValid()) Existing->ExitedGraphTagsOnAnyOutcome.AddUnique(GraphTag);
     }
 
-    UE_LOG(LogSimpleQuest, Verbose,
+    UE_LOG(LogSimpleQuestActivation, Verbose,
         TEXT("MergePerspectiveTagsInto: '%s' — merged structural cascade data from '%s' (paths=%d, AnyOutcome BCs=%d, AnyOutcome ExitedGraphs=%d)"),
         *ExistingCanonicalName.ToString(),
         *Incoming->GetContextualTag().ToString(),
@@ -597,7 +597,7 @@ void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBas
     {
         if (*ExistingPtr != Instance)
         {
-            UE_LOG(LogSimpleQuest, Warning,
+            UE_LOG(LogSimpleQuestActivation, Warning,
                 TEXT("RegisterLoadedNodeInstance: key '%s' already maps to a different Instance ('%s' vs incoming '%s') — ")
                 TEXT("alias keys must be unique per Instance for dedup-by-pointer to work correctly. Preserving existing mapping."),
                 *Key.ToString(),
@@ -619,7 +619,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
     const FSoftObjectPath GraphPath(Graph);
     if (ActivatingGraphPaths.Contains(GraphPath))
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("ActivateQuestlineGraph: cycle detected — graph '%s' is already inside an activation cascade. ")
             TEXT("Skipping to break the loop. Likely a self-referencing Start Questline node or a multi-graph cycle (e.g., A→B→A)."),
             *Graph->GetName());
@@ -631,7 +631,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 
     RegisterQuestlineGraph(Graph);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s) (CustomData %s, Instigator %s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s) (CustomData %s, Instigator %s)"),
         *Graph->GetName(), Graph->GetEntryNodeTags().Num(),
         Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
         Params.Dynamic.Instigator.IsValid() ? *Params.Dynamic.Instigator->GetName() : TEXT("null"));
@@ -694,7 +694,7 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
         Context.OriginatingEventID = Source.Dynamic.OriginatingEventID;
     }
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
         *Context.NodeInfo.QuestTag.ToString(),
         *Context.NodeInfo.DisplayName.ToString(),
         Context.CompletionTrigger.TriggeredActor ? TEXT("set") : TEXT("empty"),
@@ -706,7 +706,7 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
 
 void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
 {
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s' path='%s'"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s' path='%s'"),
         *Node->GetContextualTag().ToString(), *OutcomeTag.ToString(), *PathIdentity.ToString());
 
     UQuestStep* Step = Cast<UQuestStep>(Node);
@@ -716,7 +716,7 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         && !Step->PrerequisiteExpression.IsAlways()
         && !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetContextualTag().ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeCompleted: '%s' — prereqs unmet, deferring chain"), *Node->GetContextualTag().ToString());
         DeferChainToNextNodes(Step, OutcomeTag, PathIdentity);
         return;
     }
@@ -728,7 +728,7 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
     FOriginatingEventID OriginatingEventID;
     OriginatingEventID.AuthoredNodeGuid = Node->GetAuthoredNodeGuid();
     OriginatingEventID.ResolutionTimestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-    UE_LOG(LogSimpleQuest, Verbose,
+    UE_LOG(LogSimpleQuestActivation, Verbose,
         TEXT("HandleOnNodeCompleted: '%s' minted cascade event ID — guid=%s ts=%.3f"),
         *Node->GetContextualTag().ToString(),
         *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short),
@@ -741,7 +741,7 @@ void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObject
 {
     if (!Step || !QuestSignalSubsystem) return;
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeProgress: '%s' — %d/%d"),
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeProgress: '%s' — %d/%d"),
         *Step->GetContextualTag().ToString(),
         ProgressData.CurrentCount,
         ProgressData.RequiredCount);
@@ -790,7 +790,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         }
         else
         {
-            UE_LOG(LogSimpleQuest, Verbose,
+            UE_LOG(LogSimpleQuestActivation, Verbose,
                 TEXT("HandleOnNodeStarted: '%s' re-entering while already Live — suppressing QuestStartedEvent (no-op re-activation)"),
                 *Node->GetContextualTag().ToString());
         }
@@ -811,7 +811,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     UClass* Loaded = SoftClass.Get();
                     if (!Loaded)
                     {
-                        UE_LOG(LogSimpleQuest, Verbose,
+                        UE_LOG(LogSimpleQuestActivation, Verbose,
                             TEXT("HandleOnNodeStarted: '%s' target class '%s' not pre-warmed; falling back to LoadSynchronous"),
                             *Node->GetContextualTag().ToString(),
                             *SoftClass.ToSoftObjectPath().ToString());
@@ -848,7 +848,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     Snapshot.Dynamic.Provenance,
                     Snapshot,
                     NAME_None);
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
+                UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
                     *Node->GetContextualTag().ToString(),
                     *UEnum::GetValueAsString(Snapshot.Dynamic.Provenance),
                     Snapshot.Dynamic.Instigator.IsValid() ? *Snapshot.Dynamic.Instigator->GetName() : TEXT("null"));
@@ -928,7 +928,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     CascadeContext.Dynamic.Provenance,
                     CascadeContext,
                     IncomingSourceTag);
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
+                UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
                     *QuestNode->GetContextualTag().ToString(),
                     *CascadeContext.Dynamic.OriginTag.ToString(),
                     *IncomingOutcomeTag.ToString(),
@@ -997,7 +997,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // (the common mid-graph utility chaining case).
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnForward())
     {
-        UE_LOG(LogSimpleQuest, Verbose,
+        UE_LOG(LogSimpleQuestActivation, Verbose,
             TEXT("HandleOnNodeForwardActivated: firing boundary completion '%s' outcome='%s' (from utility '%s')"),
             *BC.WrapperTagName.ToString(),
             *BC.OutcomeTag.ToString(),
@@ -1028,7 +1028,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     TObjectPtr<UQuestNodeBase>* InstancePtr = LoadedNodeInstances.Find(NodeTagName);
     if (!InstancePtr || !*InstancePtr)
     {
-        UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
+        UE_LOG(LogSimpleQuestActivation, Warning, TEXT("UQuestManagerSubsystem::ActivateNodeByTag : no instance found for tag name '%s'"), *NodeTagName.ToString());
         PublishUnknownQuestFailure(QuestSignalSubsystem, LoadedNodeInstances, NodeTagName, FQuestEventPayload());
         return;
     }
@@ -1088,7 +1088,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // and double-publish FQuestStartedEvent.
     if (Decision == EQuestActivationGuardDecision::RefuseStepAlreadyLive)
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already live)"),
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already live)"),
             *NodeTagName.ToString());
         
         if (QuestSignalSubsystem)
@@ -1100,7 +1100,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     }
     if (Decision == EQuestActivationGuardDecision::RefuseStepAlreadyPendingGiver)
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already pending giver)"),
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ActivateNodeByTag: '%s' skipped (already pending giver)"),
             *NodeTagName.ToString());
 
         if (QuestSignalSubsystem)
@@ -1129,7 +1129,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         // HandleGiveQuestEvent's blocker check at the give step: gives on Blocked quests are refused with FQuestGive-
         // BlockedEvent, and direct/cascade activations on Blocked quests are refused here. Together these make Block a
         // pure re-initiation gate that doesn't disable targets/givers (those are SetQuestDeactivated's job).
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ActivateNodeByTag: '%s' skipped — Blocked (re-initiation refused, giver/targets untouched)"),
             *NodeTagName.ToString());
 
         if (QuestSignalSubsystem)
@@ -1184,7 +1184,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
                 RegisterEnablementWatch(CanonicalTag, CanonicalTagName, Instance->PrerequisiteExpression, PrereqStatus.bSatisfied);
             }
 
-            UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' (canonical '%s') gated by giver — Activated published, prereqs %s"),
+            UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateNodeByTag: '%s' (canonical '%s') gated by giver — Activated published, prereqs %s"),
                 *NodeTagName.ToString(),
                 *CanonicalTagName.ToString(),
                 PrereqStatus.bSatisfied ? TEXT("satisfied (Enabled fired)") : TEXT("unmet (watching for satisfy)"));
@@ -1198,7 +1198,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         // container branch processes Any-Outcome and per-path entries, records entry to UQuestStateSubsystem, and re-
         // publishes FQuestStartedEvent. Loop-back wires (own outer outcome → own Activate) and external fan-in both
         // route through here equivalently. Inner Step diamond guards handle idempotency for already-Live Steps.
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' re-activating container while %s"),
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ActivateNodeByTag: '%s' re-activating container while %s"),
             *NodeTagName.ToString(),
             FQuestLifecycleQuery::IsLive(WorldState, NodeTag) ? TEXT("live") : TEXT("pending giver"));
         break;
@@ -1209,7 +1209,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         // no work for the giver to enable, so skip the gate and fall through to normal activation. Covers loop-back
         // wires, fan-in re-entry, and any case where the entered path's targets are already running — preventing the
         // giver from spuriously re-firing each iteration.
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ActivateNodeByTag: '%s' giver-gate skipped — all reachable Steps from pin '%s' already Live"),
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ActivateNodeByTag: '%s' giver-gate skipped — all reachable Steps from pin '%s' already Live"),
             *NodeTagName.ToString(),
             IncomingOutcomeTag.IsValid() ? *IncomingOutcomeTag.GetTagName().ToString() : TEXT("AnyOutcome"));
         break;
@@ -1260,7 +1260,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
 
     Instance->Activate(NodeTag);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateNodeByTag: '%s' activated (source '%s', outcome '%s')"),
         *NodeTagName.ToString(),
         *IncomingSourceTag.ToString(),
         *IncomingOutcomeTag.ToString());
@@ -1282,7 +1282,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     const FName NodeTagName = Node->GetContextualTag().GetTagName();
     if (ChainRecursionTags.Contains(NodeTagName))
     {
-        UE_LOG(LogSimpleQuest, Error,
+        UE_LOG(LogSimpleQuestActivation, Error,
             TEXT("ChainToNextNodes: synchronous cycle detected on '%s' outcome='%s' — aborting recursive re-entry. ")
             TEXT("This means a single chain iteration completed without yielding to an external trigger and looped ")
             TEXT("back to the same node. Common causes: (a) ActivationGroup wired entry→exit with no gating step ")
@@ -1303,7 +1303,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     const FName ResolvedPath = PathIdentity.IsNone() ? OutcomeTag.GetTagName() : PathIdentity;
     const TArray<FName>* PathNodes = Node->GetNextNodesForPath(ResolvedPath);
     const int32 PathCount = PathNodes ? PathNodes->Num() : 0;
-    UE_LOG(LogSimpleQuest, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' - %d path + %d any-outcome downstream node(s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("ChainToNextNodes: '%s' outcome='%s' path='%s' - %d path + %d any-outcome downstream node(s)"),
         *Node->GetContextualTag().ToString(),
         *OutcomeTag.ToString(),
         *ResolvedPath.ToString(),
@@ -1401,7 +1401,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     // produces false negatives on multi-resolution quests.
     if (!FQuestLifecycleQuery::HasActiveLifecycle(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - no Live or PendingGiver lifecycle to interrupt"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - no Live or PendingGiver lifecycle to interrupt"), *QuestTag.ToString());
         return;
     }
 
@@ -1415,7 +1415,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     const bool bWasAlreadyDeactivated = FQuestLifecycleQuery::IsDeactivated(WorldState, QuestTag);
     if (bWasAlreadyDeactivated)
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("SetQuestDeactivated: '%s' had Live or PendingGiver AND Deactivated asserted simultaneously — inconsistent state; clearing active facts, skipping Deactivated fact-write + event re-publish"),
             *QuestTag.ToString());
     }
@@ -1424,7 +1424,7 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
     
 	const FName TagName = QuestTag.GetTagName();
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestDeactivated: '%s' source=%s"),
+	UE_LOG(LogSimpleQuestActivation, Log, TEXT("SetQuestDeactivated: '%s' source=%s"),
 		*QuestTag.ToString(),
 		Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 
@@ -1521,7 +1521,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
 
     UQuestNodeBase* Node = *NodePtr;
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleNodeDeactivatedEvent: '%s' — activating %d, cascading deactivation to %d"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleNodeDeactivatedEvent: '%s' — activating %d, cascading deactivation to %d"),
         *Channel.ToString(),
         Node->GetNextNodesOnDeactivation().Num(),
         Node->GetNextNodesToDeactivateOnDeactivation().Num());
@@ -1602,7 +1602,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
             }
         }
         // Log it.
-        UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *Message);
+        UE_LOG(LogSimpleQuestActivation, Warning, TEXT("%s"), *Message);
         return;
     }
 
@@ -1615,7 +1615,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     // for the next loop iteration / external re-activation.
     TArray<FGameplayTag> CanonicalTags = StateSubsystem ? StateSubsystem->ResolveCanonicalTags(QuestTag) : TArray<FGameplayTag>{ QuestTag };
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating %d placement(s) (CustomData %s, Instigator %s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating %d placement(s) (CustomData %s, Instigator %s)"),
         *QuestTag.ToString(),
         CanonicalTags.Num(),
         Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
@@ -1688,7 +1688,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     TArray<FGameplayTag> CanonicalTags = StateSubsystem ? StateSubsystem->ResolveCanonicalTags(QuestTag) : TArray<FGameplayTag>{ QuestTag };
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleActivationRequest: '%s' — resolved to %d canonical(s) to try (CustomData %s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleActivationRequest: '%s' — resolved to %d canonical(s) to try (CustomData %s)"),
         *QuestTag.ToString(),
         CanonicalTags.Num(),
         Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
@@ -1722,7 +1722,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     
     if (SuccessfulDispatches == 0 && QuestSignalSubsystem)
     {
-        UE_LOG(LogSimpleQuest, Warning, TEXT("HandleActivationRequest: '%s' — no placements reached an activation (zero loaded instances among %d canonical(s))"),
+        UE_LOG(LogSimpleQuestActivation, Warning, TEXT("HandleActivationRequest: '%s' — no placements reached an activation (zero loaded instances among %d canonical(s))"),
             *QuestTag.ToString(), CanonicalTags.Num());
 
         FQuestEventPayload Payload;
@@ -1751,7 +1751,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // broadcast so already-blocked re-applications stay silent at the event layer.
     if (FQuestLifecycleQuery::IsBlocked(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
         return;
     }
 
@@ -1762,7 +1762,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // bAlsoDeactivateTargets toggle on the node-driven path).
     FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source, Event.Context));
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
         *QuestTag.ToString(),
         Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 }
@@ -1777,7 +1777,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     // so clear-on-already-unblocked stays silent at the event layer.
     if (!FQuestLifecycleQuery::IsBlocked(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("HandleClearBlockRequest: '%s' skipped — not currently blocked"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleClearBlockRequest: '%s' skipped — not currently blocked"), *QuestTag.ToString());
         return;
     }
 
@@ -1790,7 +1790,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
     // events published on a sibling perspective's canonical.
     FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=%s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleClearBlockRequest: '%s' — Blocked fact cleared, FQuestUnblockedEvent published (source=%s)"),
         *QuestTag.ToString(),
         Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
 }
@@ -1805,7 +1805,7 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
     // protects against accidental double-broadcast; opt-in true appends additively (never removes prior facts).
     if (!Event.bOverrideExisting && FQuestLifecycleQuery::IsTerminal(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("HandleResolveRequest: '%s' skipped — already in terminal state. Pass bOverrideExisting=true to append a new resolution entry additively."),
             *QuestTag.ToString());
         return;
@@ -1847,7 +1847,7 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
         }
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleResolveRequest: '%s' resolved with outcome='%s' (override=%d)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleResolveRequest: '%s' resolved with outcome='%s' (override=%d)"),
         *QuestTag.ToString(), *Event.OutcomeTag.ToString(), Event.bOverrideExisting ? 1 : 0);
 }
 
@@ -1855,23 +1855,23 @@ void UQuestManagerSubsystem::HandleQuestlineStartRequest(FGameplayTag Channel, c
 {
     if (Event.Graph.IsNull())
     {
-        UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: null graph reference, skipping"));
+        UE_LOG(LogSimpleQuestActivation, Warning, TEXT("HandleQuestlineStartRequest: null graph reference, skipping"));
         return;
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and activate"), *Event.Graph.ToString());
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and activate"), *Event.Graph.ToString());
 
     AsyncLoadAndActivate<UQuestlineGraph>(this, Event.Graph,
         [this, Params = Event.Params](UQuestlineGraph* Graph)
         {
             if (Graph)
             {
-                UE_LOG(LogSimpleQuest, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
+                UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
                 ActivateQuestlineGraph(Graph, Params);
             }
             else
             {
-                UE_LOG(LogSimpleQuest, Warning, TEXT("HandleQuestlineStartRequest: load completed but graph still null"));
+                UE_LOG(LogSimpleQuestActivation, Warning, TEXT("HandleQuestlineStartRequest: load completed but graph still null"));
             }
         });
 }
@@ -1894,7 +1894,7 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
         {
             if (!Tag.IsValid()) continue;
             RegisteredGiverQuestTags.Add(Tag);
-            UE_LOG(LogSimpleQuest, Verbose,
+            UE_LOG(LogSimpleQuestActivation, Verbose,
                 TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (in-memory)"),
                 *Tag.ToString(), *Blueprint->GetName());
         }
@@ -1923,13 +1923,13 @@ void UQuestManagerSubsystem::RegisterGiversFromAssetRegistry()
             const FGameplayTag ContextualTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagStr), false);
             if (!ContextualTag.IsValid())
             {
-                UE_LOG(LogSimpleQuest, Warning,
+                UE_LOG(LogSimpleQuestActivation, Warning,
                     TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : tag '%s' is not registered — has the questline been compiled?"),
                     *TagStr);
                 continue;
             }
             RegisteredGiverQuestTags.Add(ContextualTag);
-            UE_LOG(LogSimpleQuest, Verbose,
+            UE_LOG(LogSimpleQuestActivation, Verbose,
                 TEXT("UQuestManagerSubsystem::RegisterGiversFromAssetRegistry : registered giver for '%s' from '%s' (asset registry)"),
                 *ContextualTag.ToString(), *Asset.AssetName.ToString());
         }
@@ -1971,7 +1971,7 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
         ++IndexedAssetCount;
     }
 
-    UE_LOG(LogSimpleQuest, Log,
+    UE_LOG(LogSimpleQuestActivation, Log,
         TEXT("BuildListenerGroupIndex: scanned %d UQuestlineGraph asset(s); indexed %d listener-bearing graph(s) under %d (GroupTag, graph) entries"),
         Assets.Num(),
         IndexedAssetCount,
@@ -2000,7 +2000,7 @@ void UQuestManagerSubsystem::WarmReachableGraphs(UQuestlineGraph* Graph)
             // the completion callback; subsequent WarmReachableGraphs walks see the path already in the set and skip.
             KnownLoadedGraphPaths.Add(ListenerPath);
 
-            UE_LOG(LogSimpleQuest, Log,
+            UE_LOG(LogSimpleQuestActivation, Log,
                 TEXT("WarmReachableGraphs: '%s' setter on '%s' targets listener graph '%s' — async-loading"),
                 *Graph->GetName(),
                 *SetterTag.ToString(),
@@ -2012,14 +2012,14 @@ void UQuestManagerSubsystem::WarmReachableGraphs(UQuestlineGraph* Graph)
                 {
                     if (ListenerGraph)
                     {
-                        UE_LOG(LogSimpleQuest, Log,
+                        UE_LOG(LogSimpleQuestActivation, Log,
                             TEXT("WarmReachableGraphs: load complete for '%s' — registering"),
                             *ListenerGraph->GetName());
                         RegisterQuestlineGraph(ListenerGraph);  // Recursively cascades via its own WarmReachableGraphs.
                     }
                     else
                     {
-                        UE_LOG(LogSimpleQuest, Warning,
+                        UE_LOG(LogSimpleQuestActivation, Warning,
                             TEXT("WarmReachableGraphs: load returned null for '%s'"),
                             *ListenerPath.ToString());
                     }
@@ -2037,7 +2037,7 @@ void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FI
     {
         if (Event->TriggeredActor->IsA(Pair.Value))
         {
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("CheckClassObjectives: actor '%s' (%s) matches class filter — forwarding to step '%s'"),
+            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("CheckClassObjectives: actor '%s' (%s) matches class filter — forwarding to step '%s'"),
                 *Event->TriggeredActor->GetName(),
                 *Pair.Value->GetName(),
                 *Pair.Key.ToString());
@@ -2062,7 +2062,7 @@ void UQuestManagerSubsystem::DeferChainToNextNodes(UQuestStep* Step, FGameplayTa
         &UQuestManagerSubsystem::OnDeferredCompletionPrereqEntryRecorded,
         Handles);
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq channel(s)"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("DeferChainToNextNodes: '%s' outcome='%s' path='%s' — subscribed to %d prereq channel(s)"),
         *StepTag.ToString(),
         *OutcomeTag.ToString(),
         *PathIdentity.ToString(),
@@ -2104,7 +2104,7 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
     UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
     if (!Step || !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem)) return;
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("TryFireDeferredCompletion: '%s' — prereqs satisfied, resuming chain"), *StepTag.ToString());
 
     // Clean up subscriptions
     if (TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles>* Handles = DeferredCompletionPrereqHandles.Find(StepTag))
@@ -2132,11 +2132,11 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
     if (!QuestTag.IsValid()) return;
 
     RegisteredGiverQuestTags.Add(QuestTag);
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver registered for '%s'"), *QuestTag.ToString());
 
     if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
             *QuestTag.ToString());
     }
@@ -2174,11 +2174,11 @@ void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
     // multi-perspective Add/Remove helpers.
     if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s' already live, skipping (convergence)"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestLive: '%s' already live, skipping (convergence)"), *QuestTag.ToString());
         return;
     }
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
     AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Live);
 
     // Ancestor walk for Steps. Containers' Live state is derived from inner Step state, so a Step
@@ -2232,7 +2232,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     if (bAnyInnerLive && !bCurrentlyLive)
     {
         WorldState->AddFact(ContainerLiveFact);
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("DeriveContainerLive: '%s' → Live (inner Step now active)"), *ContainerTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("DeriveContainerLive: '%s' → Live (inner Step now active)"), *ContainerTag.ToString());
     }
     else if (!bAnyInnerLive && bCurrentlyLive)
     {
@@ -2243,7 +2243,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
         // arrives at the wrapper, defeating the gate. The set is kept bounded by the prune-on-add logic in
         // FireWrapperBoundaryCompletion's gate (entries with strictly earlier timestamps are pruned when a
         // new event lands), so growth is naturally limited to events from the current tick.
-        UE_LOG(LogSimpleQuest, Verbose,
+        UE_LOG(LogSimpleQuestActivation, Verbose,
             TEXT("DeriveContainerLive: '%s' → not Live (no inner Steps active)"),
             *ContainerTag.ToString());
     }
@@ -2340,7 +2340,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
         }
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("SetQuestResolved: '%s' outcome='%s' source=%s"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("SetQuestResolved: '%s' outcome='%s' source=%s"),
         *QuestTag.ToString(),
         *OutcomeTag.ToString(),
         Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"));
@@ -2357,12 +2357,12 @@ void UQuestManagerSubsystem::SetQuestPendingGiver(FGameplayTag QuestTag)
     // semantically a boolean.
     if (FQuestLifecycleQuery::IsPendingGiver(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s' already pending, skipping"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestPendingGiver: '%s' already pending, skipping"), *QuestTag.ToString());
         return;
     }
 
     AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::PendingGiver);
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestPendingGiver: '%s'"), *QuestTag.ToString());
 
     // Ancestor walk for Steps. Container Live derives off any-inner-step-active (Live or PendingGiver), so a Step
     // entering PendingGiver propagates upward: each ancestor container re-derives its Live fact based on whether
@@ -2383,7 +2383,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     if (WorldState && QuestTag.IsValid())
     {
         RemoveStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::PendingGiver);
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ClearQuestPendingGiver: '%s'"), *QuestTag.ToString());
     }
 }
 
@@ -2409,7 +2409,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
         {
             if (WrapperContainer->ResolvedByEvents.Contains(OriginatingEventID))
             {
-                UE_LOG(LogSimpleQuest, Verbose,
+                UE_LOG(LogSimpleQuestActivation, Verbose,
                     TEXT("FireWrapperBoundaryCompletion: skipping '%s' outcome='%s' — already resolved by event guid=%s ts=%.3f"),
                     *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
                     *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short),
@@ -2433,7 +2433,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
             WrapperContainer->ResolvedByEvents.Add(OriginatingEventID);
         }
 
-        UE_LOG(LogSimpleQuest, Verbose,
+        UE_LOG(LogSimpleQuestActivation, Verbose,
             TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes (eventGuid=%s)"),
             *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
             *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
@@ -2441,7 +2441,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
     }
     else
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("FireWrapperBoundaryCompletion: wrapper '%s' instance not loaded — falling back to direct SetQuestResolved + publish"),
             *WrapperTag.ToString());
         SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
@@ -2460,7 +2460,7 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FGameplayTag>&
     {
         if (GraphTag.IsValid())
         {
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("PublishGraphResolutions: '%s' outcome='%s'"),
+            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("PublishGraphResolutions: '%s' outcome='%s'"),
                 *GraphTag.ToString(),
                 *OutcomeTag.ToString());
 
@@ -2497,7 +2497,7 @@ void UQuestManagerSubsystem::RegisterEnablementWatch(FGameplayTag QuestTag, FNam
         &UQuestManagerSubsystem::OnEnablementLeafEntryRecorded,
         Handles);
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d channel(s), initial satisfied=%d"),
+    UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("RegisterEnablementWatch: '%s' subscribed to %d channel(s), initial satisfied=%d"),
         *QuestTag.ToString(),
         Handles.Num(),
         bInitialSatisfied ? 1 : 0);
@@ -2565,13 +2565,13 @@ void UQuestManagerSubsystem::ReevaluateEnablementWatch(FGameplayTag QuestTag)
 
     if (NewStatus.bSatisfied)
     {
-        UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs satisfied, publishing Enabled"),
+        UE_LOG(LogSimpleQuestSubscription, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs satisfied, publishing Enabled"),
             *QuestTag.ToString());
         FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestEnabledEvent(QuestTag, Context));
     }
     else
     {
-        UE_LOG(LogSimpleQuest, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs no longer satisfied, publishing Disabled"),
+        UE_LOG(LogSimpleQuestSubscription, Log, TEXT("ReevaluateEnablementWatch: '%s' — prereqs no longer satisfied, publishing Disabled"),
             *QuestTag.ToString());
         FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestDisabledEvent(QuestTag, Context));
     }

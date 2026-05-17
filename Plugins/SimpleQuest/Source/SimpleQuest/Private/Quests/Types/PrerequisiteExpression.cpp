@@ -89,7 +89,7 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 	case EPrerequisiteExpressionType::Leaf:
 		{
 			const bool bHas = WorldState && WorldState->HasFact(Node.LeafTag);
-			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Fact]: '%s' (valid=%d) → HasFact=%d"),
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Fact]: '%s' (valid=%d) → HasFact=%d"),
 				*Node.LeafTag.ToString(), Node.LeafTag.IsValid(), bHas);
 			return bHas;
 		}
@@ -100,7 +100,7 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 				&& Node.LeafQuestTag.IsValid()
 				&& Node.LeafOutcomeTag.IsValid()
 				&& StateSubsystem->HasResolvedWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
-			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Resolution]: quest='%s' outcome='%s' → HasResolvedWith=%d"),
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Resolution]: quest='%s' outcome='%s' → HasResolvedWith=%d"),
 				*Node.LeafQuestTag.ToString(), *Node.LeafOutcomeTag.ToString(), bResolved);
 			return bResolved;
 		}
@@ -111,7 +111,7 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 				&& Node.LeafQuestTag.IsValid()
 				&& Node.LeafOutcomeTag.IsValid()
 				&& StateSubsystem->HasEnteredWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
-			UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("Prereq leaf [Entry]: quest='%s' outcome='%s' → HasEnteredWith=%d"),
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Entry]: quest='%s' outcome='%s' → HasEnteredWith=%d"),
 				*Node.LeafQuestTag.ToString(), *Node.LeafOutcomeTag.ToString(), bEntered);
 			return bEntered;
 		}

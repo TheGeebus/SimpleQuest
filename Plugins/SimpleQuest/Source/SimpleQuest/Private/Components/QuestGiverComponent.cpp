@@ -39,7 +39,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 {
 	if (QuestTagsToGive.IsEmpty())
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("UQuestGiverComponent::RegisterQuestGiver : QuestTagsToGive is empty. Actor: %s"),
+		UE_LOG(LogSimpleQuestSubscription, Warning, TEXT("UQuestGiverComponent::RegisterQuestGiver : QuestTagsToGive is empty. Actor: %s"),
 			*GetOwner()->GetActorNameOrLabel());
 		return;
 	}
@@ -56,14 +56,14 @@ void UQuestGiverComponent::RegisterQuestGiver()
 	{
 		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 		{
-			UE_LOG(LogSimpleQuest, Warning,
+			UE_LOG(LogSimpleQuestSubscription, Warning,
 				TEXT("UQuestGiverComponent::RegisterQuestGiver : '%s' holds stale tag '%s' — skipping subscribe. ")
 				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
 			continue;
 		}
 
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"),
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"),
 			*QuestTag.ToString(), *GetOwner()->GetName());
 
 		if (SignalSubsystem)
@@ -90,7 +90,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
 			if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
 			{
-				UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"),
+				UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"),
 					*QuestTag.ToString());
 
 				ActivatedQuestTags.AddTag(QuestTag);
@@ -118,7 +118,7 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 void UQuestGiverComponent::OnQuestActivatedEventReceived(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestActivatedEventReceived : '%s' (prereqs satisfied=%d)"),
+	UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestActivatedEventReceived : '%s' (prereqs satisfied=%d)"),
 		*Channel.ToString(), Event.PrereqStatus.bSatisfied ? 1 : 0);
 
 	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
@@ -141,7 +141,7 @@ void UQuestGiverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuest
 
 	if (bGiverOwned)
 	{
-		UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::HandleQuestEnabled : '%s' is now accept-ready"), *Channel.ToString());
+		UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestGiverComponent::HandleQuestEnabled : '%s' is now accept-ready"), *Channel.ToString());
 
 		PriorActivated = ActivatedQuestTags;
 		PriorEnabled = EnabledQuestTags;
@@ -162,7 +162,7 @@ void UQuestGiverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuest
 
 void UQuestGiverComponent::OnQuestDisabledEventReceived(FGameplayTag Channel, const FQuestDisabledEvent& Event)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestDisabledEventReceived : '%s' no longer accept-ready"), *Channel.ToString());
+	UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestDisabledEventReceived : '%s' no longer accept-ready"), *Channel.ToString());
 
 	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
 	const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
@@ -265,7 +265,7 @@ void UQuestGiverComponent::OnQuestGiveBlockedEventReceived(FGameplayTag Channel,
 	// subscribe to the same quest tag channel; GiverActor identifies the initiator.
 	if (Event.GiverActor.Get() != GetOwner()) return;
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("UQuestGiverComponent::OnQuestGiveBlockedEventReceived : '%s' refused — %d blocker(s)"),
+	UE_LOG(LogSimpleQuestSubscription, Log, TEXT("UQuestGiverComponent::OnQuestGiveBlockedEventReceived : '%s' refused — %d blocker(s)"),
 		*Channel.ToString(), Event.Blockers.Num());
 
 	// Clear the one-shot subscription. Cycle closes on either this event or FQuestStartedEvent.
@@ -276,7 +276,7 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 {
 	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
-		UE_LOG(LogSimpleQuest, Warning,
+		UE_LOG(LogSimpleQuestSubscription, Warning,
 			TEXT("UQuestGiverComponent::GiveQuest : '%s' on '%s' tried to give stale tag '%s' — skipping publish. ")
 			TEXT("Use Stale Quest Tags (Tools → Debug → Stale Tags) to sweep this reference."),
 			*GetClass()->GetName(), *GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
@@ -315,7 +315,7 @@ void UQuestGiverComponent::GiveAllQuests(const FQuestObjectiveActivationContext&
 {
 	if (EnabledQuestTags.IsEmpty())
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestGiverComponent::GiveAllQuests : '%s' has no enabled quests; no-op."),
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestGiverComponent::GiveAllQuests : '%s' has no enabled quests; no-op."),
 			*GetOwner()->GetActorNameOrLabel());
 		return;
 	}

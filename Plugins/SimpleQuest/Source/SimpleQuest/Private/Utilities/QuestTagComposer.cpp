@@ -217,7 +217,7 @@ FGameplayTagContainer FQuestTagComposer::FilterToRegisteredTags(const FGameplayT
 	for (const FGameplayTag& Tag : Container)
 	{
 		if (IsTagRegisteredInRuntime(Tag)) { Result.AddTag(Tag); continue; }
-		UE_LOG(LogSimpleQuest, Warning,
+		UE_LOG(LogSimpleQuestCompiler, Warning,
 			TEXT("%s : filtering stale tag '%s' — no longer registered. ")
 			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 			*ContextLabel, *Tag.ToString());

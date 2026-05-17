@@ -37,7 +37,7 @@ void UActivationGroupListenerNode::OnRegisteredWithManager()
 	SignalSubscriptionHandle = Signals->SubscribeMessage<FQuestActivationGroupTriggeredEvent>(
 		GroupTag, this, &UActivationGroupListenerNode::OnGroupSignalReceived);
 
-	UE_LOG(LogSimpleQuest, Verbose,
+	UE_LOG(LogSimpleQuestActivation, Verbose,
 		TEXT("ActivationGroupListener subscribed to '%s'"), *GroupTag.ToString());
 }
 
@@ -56,7 +56,7 @@ void UActivationGroupListenerNode::OnGroupSignalReceived(FGameplayTag Channel, c
 	PendingActivationContext.Dynamic.OriginChain = Event.OriginChain;
 	PendingActivationContext.Dynamic.OriginatingEventID = Event.OriginatingEventID;
 
-	UE_LOG(LogSimpleQuest, Verbose,
+	UE_LOG(LogSimpleQuestActivation, Verbose,
 		TEXT("ActivationGroupListener '%s' received signal — source='%s' chain-depth=%d eventGuid=%s"),
 		*Event.GroupTag.ToString(),
 		*Event.SourceTag.ToString(),

@@ -25,7 +25,7 @@ void UQuestTriggerComponent::BeginPlay()
     {
         if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
         {
-            UE_LOG(LogSimpleQuest, Warning,
+            UE_LOG(LogSimpleQuestSubscription, Warning,
                 TEXT("UQuestTriggerComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
                 TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
                 *GetOwner()->GetActorNameOrLabel(), *StepTag.ToString());
@@ -33,7 +33,7 @@ void UQuestTriggerComponent::BeginPlay()
         }
         FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated);
         StepStartedHandles.Add(StepTag, Handle);
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
+        UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
 }
 
@@ -44,7 +44,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     // Guard: ensure the channel matches some entry in StepTagsToTrigger, including ancestor-matching semantics.
     if (!StepTagsToTrigger.HasTag(Channel))
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestSubscription, Warning,
             TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' — channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToTrigger configuration."),
             *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
         return;
@@ -76,7 +76,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     ActiveStepEndHandles.Add(CanonicalTag, EndedHandle);
     ActiveStepDeactivatedHandles.Add(CanonicalTag, DeactivatedHandle);
 
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerActivated : Channel: %s, Canonical: %s : Owner: %s"),
+    UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerActivated : Channel: %s, Canonical: %s : Owner: %s"),
         *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
     SetActivated(true);
@@ -108,7 +108,7 @@ void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
         ActiveStepDeactivatedHandles.Remove(Channel);
     }
 
-    UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerStepEnded : Channel: %s : Owner: %s"),
+    UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerStepEnded : Channel: %s : Owner: %s"),
         *Channel.ToString(),
         *GetOwner()->GetClass()->GetFName().ToString());
 
@@ -192,7 +192,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
     UObject* TriggeredActor = Context.TriggeredActor ? Context.TriggeredActor.Get() : GetOwner();
     UObject* Instigator = Context.Instigator.IsValid() ? Context.Instigator.Get() : nullptr;
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("UQuestTriggerComponent::SendTriggerEvent : '%s' fired by '%s' fanning out to %d watched step(s); CustomData %s"),
+    UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::SendTriggerEvent : '%s' fired by '%s' fanning out to %d watched step(s); CustomData %s"),
         TriggeredActor ? *TriggeredActor->GetName() : TEXT("(none)"),
         Instigator ? *Instigator->GetName() : TEXT("(none)"),
         ActiveStepEndHandles.Num(), Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));

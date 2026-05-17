@@ -41,24 +41,58 @@ public:
 	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(UQuestManagerSubsystem::StaticClass());
 
 	/**
-	 * Verbosity for LogSimpleQuest. Live-applied — changing this in Project Settings updates the log filter
-	 * immediately without restart. Persists via UDeveloperSettings's Config save. Equivalent to setting
-	 * `LogSimpleQuest=<verbosity>` in DefaultEngine.ini's [Core.Log] section, but designer-facing.
+	 * Verbosity for LogSimpleQuest. The umbrella channel — module startup, settings, debug overlay, and anything that
+	 * doesn't fit one of the specialized channels (Activation / Compiler / Subscription / State). Live-applied: changing
+	 * this in Project Settings updates the log filter immediately without restart. Persists via UDeveloperSettings's
+	 * Config save. Equivalent to setting `LogSimpleQuest=<verbosity>` in DefaultEngine.ini's [Core.Log] section, but
+	 * designer-facing.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging")
 	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Verbosity for LogSimpleCore. Same live-apply behavior as LogSimpleQuestVerbosity. SimpleCore covers the
-	 * underlying signal bus and world-state subsystems; raise to Verbose or VeryVerbose for diagnostic runs.
+	 * Verbosity for LogSimpleQuestActivation. Manager activation flow — ActivateNodeByTag, ChainToNextNodes,
+	 * SetQuestLive / SetQuestDeactivated / SetQuestPendingGiver writers, DeriveContainerLive, and the surrounding
+	 * cascade. Raise to Verbose when debugging "why isn't my quest going Live" or chain-advancement issues.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleQuestActivationVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Verbosity for LogSimpleQuestCompiler. Compile-time output — graph compile, native tag registration, tag-rename
+	 * redirect machinery, stale-tag warnings. The bulk of the historical Verbose noise lives here; keep at Log during
+	 * gameplay debugging and raise selectively when investigating compile or rename behavior.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Verbosity for LogSimpleQuestSubscription. Subscriber wiring — Observer / Trigger / Giver registration, K2 node
+	 * subscriptions, catch-up fanout, prereq-leaf enablement watches. Raise to Verbose when debugging "my K2 node bound
+	 * but never fires" or catch-up replay behavior.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleQuestSubscriptionVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Verbosity for LogSimpleQuestState. UQuestStateSubsystem registry mutations — RecordResolution, RecordEntry,
+	 * RegisterQuestTag, RegisterAlias. The durable record of what happened (becomes load-bearing once save/load lands
+	 * in 0.5.0). Raise to Verbose when debugging "what's persisted vs ephemeral."
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	EQuestLogVerbosity LogSimpleQuestStateVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Verbosity for LogSimpleCore. Same live-apply behavior as LogSimpleQuestVerbosity. SimpleCore covers the underlying
+	 * signal bus and world-state subsystems; raise to Verbose or VeryVerbose for diagnostic runs.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging")
 	EQuestLogVerbosity LogSimpleCoreVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Pushes both verbosity values to their log categories. Called from PostEditChangeProperty for live-apply
-	 * during editor sessions, and from FSimpleQuest::StartupModule on engine startup so settings take effect
-	 * before any UE_LOG fires.
+	 * Pushes every verbosity value to its log category — all five SimpleQuest channels plus LogSimpleCore. Called from
+	 * PostEditChangeProperty for live-apply during editor sessions, and from FSimpleQuest::StartupModule on engine
+	 * startup so settings take effect before any UE_LOG fires.
 	 */
 	void ApplyLogVerbosity() const;
 	

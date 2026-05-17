@@ -109,13 +109,13 @@ void UQuestNodeBase::ResolveContextualTag(FName TagName)
     NodeInfo.QuestTag = ContextualTag;
     if (!ContextualTag.IsValid())
     {
-        UE_LOG(LogSimpleQuest, Warning,
+        UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("ResolveContextualTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
             TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
             *TagName.ToString());
         return;
     }
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveContextualTag: %s → DisplayName='%s'"), *ContextualTag.ToString(), *NodeInfo.DisplayName.ToString());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveContextualTag: %s → DisplayName='%s'"), *ContextualTag.ToString(), *NodeInfo.DisplayName.ToString());
 }
 
 void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
@@ -129,7 +129,7 @@ void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
         const FGameplayTag Resolved = Manager.RequestGameplayTag(TagName, false);
         if (!Resolved.IsValid())
         {
-            UE_LOG(LogSimpleQuest, Warning,
+            UE_LOG(LogSimpleQuestActivation, Warning,
                 TEXT("ResolveAssetScopedAliasTags: '%s' is not registered in the runtime tag manager — stale compiled alias, skipping. ")
                 TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
                 *TagName.ToString());
@@ -138,7 +138,7 @@ void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
         AssetScopedAliasTags.Add(Resolved);
     }
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveAssetScopedAliasTags: %d alias(es) resolved for '%s'"),
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAssetScopedAliasTags: %d alias(es) resolved for '%s'"),
         AssetScopedAliasTags.Num(),
         *ContextualTag.ToString());
 }

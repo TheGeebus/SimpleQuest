@@ -145,7 +145,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
         }
     }
     
-    UE_LOG(LogSimpleQuest, Log, TEXT("Compile: starting '%s' (prefix='%s')"),
+    UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: starting '%s' (prefix='%s')"),
         *InGraph->GetName(),
         *TagPrefix);
 
@@ -238,7 +238,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// structural containment rather than re-deriving it at runtime.
 	ComputeContainerReachability(InGraph);
 	
-    UE_LOG(LogSimpleQuest, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
+    UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
         *InGraph->GetName(),
         InGraph->CompiledNodes.Num(),
         InGraph->CompiledQuestTags.Num(),
@@ -278,7 +278,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
     TArray<UQuestlineNode_UtilityBase*> UtilityEdNodes;
     CompileUtilityNodes(Graph, TagPrefix, UtilityEdNodes);
 
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGraph: [%s] %d content, %d utility node(s)"),
+    UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CompileGraph: [%s] %d content, %d utility node(s)"),
         *TagPrefix,
         ContentNodes.Num(),
         UtilityEdNodes.Num());
@@ -634,7 +634,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     				}
     				else
     				{
-    					UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileNodeRegistration[%s]: skipping bare PathIdentity '%s' "
+    					UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CompileNodeRegistration[%s]: skipping bare PathIdentity '%s' "
 							"(dynamic — not registering at tag manager root)"), *TagName.ToString(), *Desc.Identity.ToString());
     				}
     				// The path-fact tag is always properly namespaced (SimpleQuest.State.<Quest>.Path.<PathID>),
@@ -689,7 +689,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 			Messages.Add(Msg);
 			bHasErrors = true;
 			NumErrors++;
-			UE_LOG(LogSimpleQuest, Error,
+			UE_LOG(LogSimpleQuestCompiler, Error,
 				TEXT("QuestlineGraphCompiler: Prerequisite Rule tag '%s' has %d Entries — rule names must be unique."),
 				*RuleTag.GetTagName().ToString(), Entries.Num());
 
@@ -703,7 +703,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 	    UQuestlineNode_PrerequisiteRuleEntry* PrimaryEntry = Entries[0];
 	    if (Entries.Num() > 1)
 	    {
-	        UE_LOG(LogSimpleQuest, Verbose,
+	        UE_LOG(LogSimpleQuestCompiler, Verbose,
 	            TEXT("CompileGroupSetters: [%s] rule tag '%s' has %d Entries — using first; duplicate detection pass will error in 4.c."),
 	            *TagPrefix, *RuleTag.GetTagName().ToString(), Entries.Num());
 	    }
@@ -724,7 +724,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
 		
 	    TArray<FGameplayTag> LeafTags;
 	    Monitor->Expression.CollectLeafTags(LeafTags);
-	    UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] prereq rule '%s' — expression with %d leaf(s)"),
+	    UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CompileGroupSetters: [%s] prereq rule '%s' — expression with %d leaf(s)"),
 	        *TagPrefix, *RuleTagName.ToString(), LeafTags.Num());
 	}
 
@@ -751,7 +751,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
         AllCompiledNodes.Add(UtilKey, Inst);
         AllCompiledEditorNodes.Add(UtilKey, Node);
 
-    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation setter '%s' — key='%s'"),
+    	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CompileGroupSetters: [%s] activation setter '%s' — key='%s'"),
 			*TagPrefix,
 			*Setter->GroupTag.GetTagName().ToString(),
 			*UtilKey.ToString());
@@ -785,7 +785,7 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
     	// wrapper-Listener loop bugs by re-firing ActivateInternal each wrapper iteration; the signal path
     	// handles activation cleanly without that registration.
 
-    	UE_LOG(LogSimpleQuest, Verbose, TEXT("CompileGroupSetters: [%s] activation listener '%s' — key='%s'"),
+    	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CompileGroupSetters: [%s] activation listener '%s' — key='%s'"),
 			*TagPrefix,
 			*Getter->GroupTag.GetTagName().ToString(),
 			*UtilKey.ToString());
@@ -850,7 +850,7 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
     				Messages.Add(Msg);
     				bHasErrors = true;
     				NumErrors++;
-    				UE_LOG(LogSimpleQuest, Error,
+    				UE_LOG(LogSimpleQuestCompiler, Error,
     					TEXT("QuestlineGraphCompiler: '%s' has a Start Questline node directly downstream of Entry targeting its own graph — would cycle at runtime."),
     					*RootGraph->GetName());
     				continue;  // Skip runtime instance creation — asset is in error state.
@@ -1247,7 +1247,7 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
     {
         return E.OldTag == E.NewTag;
     });
-	UE_LOG(LogSimpleQuest, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
 		DetectedTagRenames.Num(), InGraph->PendingTagRenames.Num());
 
 	/**
@@ -1267,7 +1267,7 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
 				OffendingDisplayName = Node->GetNodeInfo().DisplayName;
 			}
 		}
-		UE_LOG(LogSimpleQuest, Display, TEXT("  rename: '%s' -> '%s' (node '%s', GUID %s)"),
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  rename: '%s' -> '%s' (node '%s', GUID %s)"),
 			*OldTag.ToString(),
 			*NewTag.ToString(),
 			*OffendingDisplayName.ToString(),
@@ -1410,7 +1410,7 @@ void FQuestlineGraphCompiler::AddError(const FString& Message, const UEdGraphNod
     TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Error, FText::FromString(Message));
     if (Node) AddNodeNavigationToken(Msg, Node);
     Messages.Add(Msg);
-    UE_LOG(LogSimpleQuest, Error, TEXT("QuestlineGraphCompiler: %s"), *Message);
+    UE_LOG(LogSimpleQuestCompiler, Error, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
 void FQuestlineGraphCompiler::AddWarning(const FString& Message, const UEdGraphNode* Node)
@@ -1419,7 +1419,7 @@ void FQuestlineGraphCompiler::AddWarning(const FString& Message, const UEdGraphN
     TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning, FText::FromString(Message));
     if (Node) AddNodeNavigationToken(Msg, Node);
     Messages.Add(Msg);
-    UE_LOG(LogSimpleQuest, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
+    UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
 void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
@@ -1952,7 +1952,7 @@ bool FQuestlineGraphCompiler::ParallelPathKeysCollide(const FSourcePathKey& A, c
 
 void FQuestlineGraphCompiler::EmitParallelPathWarnings()
 {
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("Surface D: %d setter group(s), %d getter group(s), %d direct-reach destination(s)"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Surface D: %d setter group(s), %d getter group(s), %d direct-reach destination(s)"),
 		GroupSetterSourcesByTag.Num(), GroupGetterDestsByTag.Num(), DirectReachesByDest.Num());
 
 	/**
@@ -2011,7 +2011,7 @@ void FQuestlineGraphCompiler::EmitDuplicateOutcomeRoutingWarning(const UEdGraphN
 	Messages.Add(Msg);
 	NumWarnings++;
 
-	UE_LOG(LogSimpleQuest, Warning, TEXT("Duplicate path routing: pin '%s' on '%s' reaches %d terminals on path '%s'"),
+	UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("Duplicate path routing: pin '%s' on '%s' reaches %d terminals on path '%s'"),
 		*PinDisplay,
 		SourceNode ? *SourceNode->GetNodeTitle(ENodeTitleType::ListView).ToString() : TEXT("<unknown>"),
 		DuplicateExits.Num(),
@@ -2068,7 +2068,7 @@ void FQuestlineGraphCompiler::EmitParallelPathCollisionWarning(const FGameplayTa
 	Messages.Add(Msg);
 	NumWarnings++;
 
-	UE_LOG(LogSimpleQuest, Warning,
+	UE_LOG(LogSimpleQuestCompiler, Warning,
 		TEXT("Surface D parallel path: path '%s' on '%s' reaches '%s' both directly and via group '%s'"),
 		*PathStr, *SetterSource.SourceTag.ToString(), *DestTag.ToString(), *GroupTag.ToString());
 }
@@ -2321,27 +2321,27 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
     }
 
     // ---- Step 4: Verbose log dump for verification ----
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ComputeContainerReachability: graph '%s' — %d compiled node(s)"),
+    UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ComputeContainerReachability: graph '%s' — %d compiled node(s)"),
         *InGraph->GetName(), InGraph->CompiledNodes.Num());
 
     for (const auto& Pair : InGraph->CompiledNodes)
     {
         if (UQuest* Container = Cast<UQuest>(Pair.Value))
         {
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("  Container '%s' — %d inner Step(s), %d Activate-pin entry(s)"),
+            UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("  Container '%s' — %d inner Step(s), %d Activate-pin entry(s)"),
                 *Pair.Key.ToString(), Container->InnerStepTags.Num(), Container->ReachableStepsByActivatePin.Num());
             for (const FGameplayTag& T : Container->InnerStepTags)
             {
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("    InnerStep: %s"), *T.GetTagName().ToString());
+                UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("    InnerStep: %s"), *T.GetTagName().ToString());
             }
             for (const auto& PinPair : Container->ReachableStepsByActivatePin)
             {
                 const FString PinLabel = (PinPair.Key == NAME_None) ? TEXT("AnyOutcome") : PinPair.Key.ToString();
-                UE_LOG(LogSimpleQuest, Verbose, TEXT("    ActivatePin '%s' → %d Step(s)"),
+                UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("    ActivatePin '%s' → %d Step(s)"),
                     *PinLabel, PinPair.Value.StepTags.Num());
                 for (const FGameplayTag& T : PinPair.Value.StepTags)
                 {
-                    UE_LOG(LogSimpleQuest, Verbose, TEXT("      reachable Step: %s"), *T.GetTagName().ToString());
+                    UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("      reachable Step: %s"), *T.GetTagName().ToString());
                 }
             }
         }
@@ -2354,7 +2354,7 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
                 AncestorList += T.GetTagName().ToString();
             }
             if (AncestorList.IsEmpty()) AncestorList = TEXT("(root)");
-            UE_LOG(LogSimpleQuest, Verbose, TEXT("  Step '%s' — Ancestors=[%s]"),
+            UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("  Step '%s' — Ancestors=[%s]"),
                 *Pair.Key.ToString(), *AncestorList);
         }
     }

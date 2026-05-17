@@ -26,6 +26,10 @@ namespace
 void USimpleQuestSettings::ApplyLogVerbosity() const
 {
 	LogSimpleQuest.SetVerbosity(ToELogVerbosity(LogSimpleQuestVerbosity));
+	LogSimpleQuestActivation.SetVerbosity(ToELogVerbosity(LogSimpleQuestActivationVerbosity));
+	LogSimpleQuestCompiler.SetVerbosity(ToELogVerbosity(LogSimpleQuestCompilerVerbosity));
+	LogSimpleQuestSubscription.SetVerbosity(ToELogVerbosity(LogSimpleQuestSubscriptionVerbosity));
+	LogSimpleQuestState.SetVerbosity(ToELogVerbosity(LogSimpleQuestStateVerbosity));
 	LogSimpleCore.SetVerbosity(ToELogVerbosity(LogSimpleCoreVerbosity));
 }
 

@@ -270,14 +270,14 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 	TArray<FAssetData> QuestlineAssets;
 	AR.GetAssets(Filter, QuestlineAssets);
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("SimpleQuestEditor: RegisterTagsFromAssetRegistry — found %d questline asset(s)"), QuestlineAssets.Num());
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: RegisterTagsFromAssetRegistry — found %d questline asset(s)"), QuestlineAssets.Num());
 
 	for (const FAssetData& AssetData : QuestlineAssets)
 	{
 		FAssetTagValueRef TagValue = AssetData.TagsAndValues.FindTag(TEXT("CompiledQuestTags"));
 		if (!TagValue.IsSet() || TagValue.GetValue().IsEmpty())
 		{
-			UE_LOG(LogSimpleQuest, Display, TEXT("  %s — no CompiledQuestTags metadata (not yet compiled+saved)"), *AssetData.AssetName.ToString());
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s — no CompiledQuestTags metadata (not yet compiled+saved)"), *AssetData.AssetName.ToString());
 			continue;
 		}
 
@@ -292,7 +292,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 		}
 
 		CompiledTagRegistry.Add(AssetData.PackageName.ToString(), MoveTemp(TagNames));
-		UE_LOG(LogSimpleQuest, Display, TEXT("  %s — loaded %d tag(s)"), *AssetData.AssetName.ToString(), TagStrings.Num());
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s — loaded %d tag(s)"), *AssetData.AssetName.ToString(), TagStrings.Num());
 	}
 	
 	// The INI is the authoritative compiled state. Only generate it from AR metadata when it doesn't already exist (first
@@ -304,7 +304,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 		WriteCompiledTagsIni();
 	}
 	RebuildNativeTags();
-	UE_LOG(LogSimpleQuest, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
 }
 
 void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
@@ -314,7 +314,7 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 	const FString RemovedPath = AssetData.PackageName.ToString();
 	if (CompiledTagRegistry.Remove(RemovedPath) > 0)
 	{
-		UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved — removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved — removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
 		WriteCompiledTagsIni();
 		RebuildNativeTags(true);
 	}
@@ -415,12 +415,12 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 			if (!NewTagSet.Contains(OldTag))
 			{
 				bHasStaleTags = true;
-				UE_LOG(LogSimpleQuest, Display, TEXT("  Stale tag removed: %s"), *OldTag.ToString());
+				UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  Stale tag removed: %s"), *OldTag.ToString());
 			}
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s%s)"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s%s)"),
 		*GraphPath, TagNames.Num(),
 		bHasStaleTags ? TEXT(", stale tags cleaned") : TEXT(""),
 		bBatchActive ? TEXT(", batched") : TEXT(""));
@@ -456,7 +456,7 @@ void FSimpleQuestEditor::EndCompileBatch()
 
 	WriteCompiledTagsIni();
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("EndCompileBatch: %d tags skipped (already registered), %d constructed fresh"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("EndCompileBatch: %d tags skipped (already registered), %d constructed fresh"),
 		NumSkippedAlreadyRegistered, NumConstructedFresh);  // TEMP
 
 	// Tree rebuild path — full reset+refresh if stale tags appeared anywhere in the batch (need to
@@ -695,7 +695,7 @@ void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TAr
         }
     }
 
-    if (UE_LOG_ACTIVE(LogSimpleQuest, Verbose))
+    if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
     {
         TStringBuilder<256> NeighborList;
         for (int32 i = 0; i < OutNeighborhood.Num(); ++i)
@@ -703,7 +703,7 @@ void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TAr
             if (i > 0) NeighborList << TEXT(", ");
             NeighborList << OutNeighborhood[i]->GetName();
         }
-        UE_LOG(LogSimpleQuest, Verbose, TEXT("CollectLinkedNeighborhood: Primary '%s' → %d linked asset(s) [%s]"),
+        UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CollectLinkedNeighborhood: Primary '%s' → %d linked asset(s) [%s]"),
             *Primary->GetName(), OutNeighborhood.Num(), *FString(NeighborList));
     }
 }
@@ -714,7 +714,7 @@ void FSimpleQuestEditor::LoadCompiledTagsFromIni()
 	FString Content;
 	if (!FFileHelper::LoadFileToString(Content, *IniPath))
 	{
-		UE_LOG(LogSimpleQuest, Display, TEXT("LoadCompiledTagsFromIni — no INI found (first run or not yet compiled)"));
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("LoadCompiledTagsFromIni — no INI found (first run or not yet compiled)"));
 		return;
 	}
 
@@ -739,7 +739,7 @@ void FSimpleQuestEditor::LoadCompiledTagsFromIni()
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("LoadCompiledTagsFromIni — registered %d native tag(s)"), CompiledNativeTags.Num());
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("LoadCompiledTagsFromIni — registered %d native tag(s)"), CompiledNativeTags.Num());
 }
 
 void FSimpleQuestEditor::MigrateLegacyTagsIni()
@@ -757,7 +757,7 @@ void FSimpleQuestEditor::MigrateLegacyTagsIni()
 		if (FPaths::FileExists(LegacyPath))
 		{
 			IFileManager::Get().Delete(*LegacyPath);
-			UE_LOG(LogSimpleQuest, Display,
+			UE_LOG(LogSimpleQuestCompiler, Display,
 				TEXT("MigrateLegacyTagsIni — deleted legacy INI at '%s'. Tags now managed via plugin Config/Tags/."),
 				*LegacyPath);
 		}
@@ -827,11 +827,11 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 
     if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
-        UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
+        UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
     }
     else
     {
-        UE_LOG(LogSimpleQuest, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write FAILED for: %s"), *IniPath);
+        UE_LOG(LogSimpleQuestCompiler, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write FAILED for: %s"), *IniPath);
     }
 }
 
@@ -857,7 +857,7 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
 		CompiledNativeTags.Num(),
 		bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
 }
@@ -925,7 +925,7 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 			if (UBlueprint* DeferredBP = WeakBP.Get())
 			{
 				DeferredBP->MarkPackageDirty();
-				UE_LOG(LogSimpleQuest, Verbose,
+				UE_LOG(LogSimpleQuestCompiler, Verbose,
 					TEXT("MarkDirtyOnRedirectedTagLoad: deferred dirty mark fired for '%s' — Save All will now catch the healed FGameplayTag value(s)"),
 					*DeferredBP->GetName());
 			}

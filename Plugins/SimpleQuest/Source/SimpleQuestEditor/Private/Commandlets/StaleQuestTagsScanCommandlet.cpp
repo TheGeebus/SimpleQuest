@@ -53,12 +53,12 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 	// scan helpers returns zero, and the scan reports 0 stale references regardless of project state.
 	// SearchAllAssets is idempotent and cheap on an already-populated AR (editor mode no-op).
 	{
-		UE_LOG(LogSimpleQuest, Display, TEXT("StaleQuestTagsScan: priming Asset Registry (synchronous full scan)..."));
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("StaleQuestTagsScan: priming Asset Registry (synchronous full scan)..."));
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		const double ScanStartTime = FPlatformTime::Seconds();
 		ARM.Get().SearchAllAssets(/*bSynchronousSearch*/ true);
 		const double ScanElapsed = FPlatformTime::Seconds() - ScanStartTime;
-		UE_LOG(LogSimpleQuest, Display, TEXT("StaleQuestTagsScan: Asset Registry priming completed in %.2fs"), ScanElapsed);
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("StaleQuestTagsScan: Asset Registry priming completed in %.2fs"), ScanElapsed);
 	}
 
 	// Resolve relative JSON paths against the project dir.
@@ -74,7 +74,7 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 	Scope.bUnloadedLevels      = true;
 	Scope.bComprehensiveWPScan = !bFastWP;
 
-	UE_LOG(LogSimpleQuest, Display,
+	UE_LOG(LogSimpleQuestCompiler, Display,
 		TEXT("StaleQuestTagsScan: starting (WP mode=%s, JSON output=%s)"),
 		bFastWP ? TEXT("class-filtered") : TEXT("comprehensive"),
 		OutputJsonPath.IsEmpty() ? TEXT("(none)") : *OutputJsonPath);
@@ -97,10 +97,10 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 	}
 
 	// Per-entry log (Warning so it surfaces in default verbosity).
-	UE_LOG(LogSimpleQuest, Display, TEXT("StaleQuestTagsScan: ---- %d stale reference(s) ----"), Entries.Num());
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("StaleQuestTagsScan: ---- %d stale reference(s) ----"), Entries.Num());
 	for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
 	{
-		UE_LOG(LogSimpleQuest, Warning,
+		UE_LOG(LogSimpleQuestCompiler, Warning,
 			TEXT("StaleQuestTagsScan: [%s] actor=%s component=%s field=%s tag=%s package=%s"),
 			SourceText(E.Source),
 			E.Actor.IsValid()     ? *E.Actor->GetName()                  : TEXT("(null)"),
@@ -110,7 +110,7 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 			*E.PackagePath);
 	}
 
-	UE_LOG(LogSimpleQuest, Display,
+	UE_LOG(LogSimpleQuestCompiler, Display,
 		TEXT("StaleQuestTagsScan: summary — Open=%d, BPCDOs=%d, Unloaded=%d, Total=%d"),
 		OpenCount, BPCDOCount, UnloadedCount, Entries.Num());
 
@@ -142,11 +142,11 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 
 		if (FFileHelper::SaveStringToFile(JsonString, *OutputJsonPath))
 		{
-			UE_LOG(LogSimpleQuest, Display, TEXT("StaleQuestTagsScan: wrote JSON results to %s"), *OutputJsonPath);
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("StaleQuestTagsScan: wrote JSON results to %s"), *OutputJsonPath);
 		}
 		else
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("StaleQuestTagsScan: failed to write JSON results to %s"), *OutputJsonPath);
+			UE_LOG(LogSimpleQuestCompiler, Error, TEXT("StaleQuestTagsScan: failed to write JSON results to %s"), *OutputJsonPath);
 			return -1;
 		}
 	}

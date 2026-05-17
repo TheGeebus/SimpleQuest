@@ -16,7 +16,7 @@ UKillClassQuestObjective::UKillClassQuestObjective()
 
 void UKillClassQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
 {
-	UE_LOG(LogSimpleQuest, VeryVerbose, TEXT("KillClassQuestObjective::TryCompleteObjective checked: %s"),
+	UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("KillClassQuestObjective::TryCompleteObjective checked: %s"),
 		InContext.TriggeredActor ? *InContext.TriggeredActor->GetName() : TEXT("null"));
 
 	if (AddProgress(InContext, Tag_Outcome_KillClass_Killed))

@@ -476,7 +476,7 @@ FReply SStaleQuestTagsPanel::HandleSaveAllModifiedClicked()
 		/*bCheckDirty*/ false,
 		/*bPromptToSave*/ false);
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("SStaleQuestTagsPanel: SaveAllModified saved %d package(s), result=%d"),
+	UE_LOG(LogSimpleQuestCompiler, Log, TEXT("SStaleQuestTagsPanel: SaveAllModified saved %d package(s), result=%d"),
 		ToSave.Num(), static_cast<int32>(Result));
 
 	// Drop saved entries from the tracking set; leave any still-dirty (save was cancelled / failed) for retry.
@@ -533,7 +533,7 @@ FReply SStaleQuestTagsPanel::HandleClearClicked(FEntryPtr Entry)
 		ModifiedPackages.Add(DirtiedPackage);
 	}
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("SStaleQuestTagsPanel: cleared stale tag '%s' from %s on '%s' (%d removal(s), source=%s, dirtied=%s)"),
+	UE_LOG(LogSimpleQuestCompiler, Log, TEXT("SStaleQuestTagsPanel: cleared stale tag '%s' from %s on '%s' (%d removal(s), source=%s, dirtied=%s)"),
 		*Entry->StaleTag.ToString(),
 		*Entry->Component->GetClass()->GetName(),
 		Entry->Actor.IsValid() ? *Entry->Actor->GetActorNameOrLabel() : TEXT("<gc>"),
@@ -719,7 +719,7 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 		ModifiedPackages.Add(Pkg);
 	}
 
-	UE_LOG(LogSimpleQuest, Log,
+	UE_LOG(LogSimpleQuestCompiler, Log,
 		TEXT("SStaleQuestTagsPanel: bulk-cleared %d entr%s (%d tag removal(s), %d unique package(s) dirtied, %d skipped as gc'd; loaded=%d bpcdo=%d unloaded=%d)"),
 		Selected.Num() - SkippedStale,
 		(Selected.Num() - SkippedStale) == 1 ? TEXT("y") : TEXT("ies"),
@@ -816,7 +816,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 				FString MapFilename;
 				if (!FPackageName::TryConvertLongPackageNameToFilename(PackagePath, MapFilename, FPackageName::GetMapPackageExtension()))
 				{
-					UE_LOG(LogSimpleQuest, Warning, TEXT("HandleFocusClicked: could not resolve filename for unloaded level package '%s'"),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("HandleFocusClicked: could not resolve filename for unloaded level package '%s'"),
 						*PackagePath);
 					return FReply::Handled();
 				}
@@ -851,7 +851,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 						}
 					}
 				}
-				UE_LOG(LogSimpleQuest, Log, TEXT("SStaleQuestTagsPanel: actor '%s' not found in newly-loaded world '%s' — level loaded but selection skipped (actor may have been renamed or removed since the scan)"),
+				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("SStaleQuestTagsPanel: actor '%s' not found in newly-loaded world '%s' — level loaded but selection skipped (actor may have been renamed or removed since the scan)"),
 					*ActorName.ToString(), *PackagePath);
 			}
 			return FReply::Handled();

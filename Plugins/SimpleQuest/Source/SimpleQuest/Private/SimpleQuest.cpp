@@ -15,6 +15,10 @@
 #define LOCTEXT_NAMESPACE "FSimpleQuestModule"
 
 DEFINE_LOG_CATEGORY(LogSimpleQuest);
+DEFINE_LOG_CATEGORY(LogSimpleQuestActivation);
+DEFINE_LOG_CATEGORY(LogSimpleQuestCompiler);
+DEFINE_LOG_CATEGORY(LogSimpleQuestSubscription);
+DEFINE_LOG_CATEGORY(LogSimpleQuestState);
 
 void FSimpleQuest::StartupModule()
 {

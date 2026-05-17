@@ -72,13 +72,13 @@ void UQuestPrereqRuleNode::TryPublishRule()
 	if (bEval && !bCurrentlyPublished)
 	{
 		WorldState->AddFact(GroupTag);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestPrereqRule '%s' published (expression %s)"),
+		UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("QuestPrereqRule '%s' published (expression %s)"),
 			*GroupTag.ToString(), bIsAlways ? TEXT("Always") : TEXT("satisfied"));
 	}
 	else if (!bEval && bCurrentlyPublished)
 	{
 		WorldState->RemoveFact(GroupTag);
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestPrereqRule '%s' retracted (expression no longer satisfied)"),
+		UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("QuestPrereqRule '%s' retracted (expression no longer satisfied)"),
 			*GroupTag.ToString());
 	}
 

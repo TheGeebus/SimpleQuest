@@ -207,7 +207,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
     if (!AsyncTaskTemp)
     {
-        UE_LOG(LogSimpleQuest, Warning, TEXT("[BindToQuestEvent::ExpandNode] AsyncTask temp variable not found — base didn't generate one"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[BindToQuestEvent::ExpandNode] AsyncTask temp variable not found — base didn't generate one"));
         return;
     }
 
@@ -270,7 +270,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
     else
     {
-        UE_LOG(LogSimpleQuest, Warning, TEXT("[BindToQuestEvent::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[BindToQuestEvent::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
     }
 
     if (Mask == 0)
@@ -280,7 +280,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
             TEXT("Enable at least one event under Pins | <phase> in the Details panel.")), this);
     }
 
-    UE_LOG(LogSimpleQuest, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
+    UE_LOG(LogSimpleQuestCompiler, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
 
     // Cleanup: remove the temp pins so the K2 node's saved pin set matches the bExpose* configuration. Without
     // this, the temp pins persist across save/load and surface as ghost pins in the graph editor on next open.

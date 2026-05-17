@@ -34,7 +34,7 @@ void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 							FQuestDeactivateRequestEvent(Tag, EDeactivationSource::Internal));
 					}
 
-					UE_LOG(LogSimpleQuest, Verbose, TEXT("USetBlockedNode: '%s' — published BlockRequest%s (source=Internal)"),
+					UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("USetBlockedNode: '%s' — published BlockRequest%s (source=Internal)"),
 						*Tag.ToString(),
 						bAlsoDeactivateTargets ? TEXT(" + DeactivateRequest") : TEXT(""));
 				}

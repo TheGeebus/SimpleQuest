@@ -275,7 +275,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 			return A.Identity.LexicalLess(B.Identity);
 		});
 
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("DiscoverObjectivePaths: Found %d path(s) for %s"), AllPaths.Num(), *ObjectiveClass->GetName());
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("DiscoverObjectivePaths: Found %d path(s) for %s"), AllPaths.Num(), *ObjectiveClass->GetName());
 	}
 
 	return AllPaths;
@@ -422,7 +422,7 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
 		LogLabel, *ContentNode->NodeLabel.ToString(), Result.Num());
 
 	return Result;
@@ -474,7 +474,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 				{
 					Comp->Modify();
 					bActorModified = true;
-					UE_LOG(LogSimpleQuest, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
+					UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
 						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), SwapCount);
 				}
 			}
@@ -591,7 +591,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		// Drop this rename so the other rename's canonical claim isn't overridden by this rename's redirect.
 		if (InBatchNewNames.Contains(NewOld))
 		{
-			UE_LOG(LogSimpleQuest, Warning,
+			UE_LOG(LogSimpleQuestCompiler, Warning,
 				TEXT("WriteGameplayTagRedirects: %s to %s — in-batch collision (%s is the new canonical of another rename in this compile); this shouldn't fire with up-front validation — please report"),
 				*NewOld.ToString(), *NewNew.ToString(), *NewOld.ToString());
 			continue;
@@ -641,7 +641,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		}
 		RedirectsToAdd.Add(NewOld, NewNew);
 
-		UE_LOG(LogSimpleQuest, Log,
+		UE_LOG(LogSimpleQuestCompiler, Log,
 			TEXT("WriteGameplayTagRedirects: %s to %s — %s (chain depth %d); removed %s to %s, knit %d predecessor(s) past the removed link"),
 			*NewOld.ToString(),
 			*NewNew.ToString(),
@@ -671,7 +671,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 					const FName OldName = ExtractQuotedAfter(Trimmed, OldNameMarker);
 					if (RedirectsToRemove.Contains(OldName))
 					{
-						UE_LOG(LogSimpleQuest, Verbose, TEXT("WriteGameplayTagRedirects: removing %s (per surgery above)"), *OldName.ToString());
+						UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("WriteGameplayTagRedirects: removing %s (per surgery above)"), *OldName.ToString());
 						continue;
 					}
 				}
@@ -691,7 +691,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		NewSectionContent += FString::Printf(TEXT("+GameplayTagRedirects=(OldTagName=\"%s\",NewTagName=\"%s\")"),
 			*Pair.Key.ToString(), *Pair.Value.ToString());
 		++Added;
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("WriteGameplayTagRedirects: %s to %s"), *Pair.Key.ToString(), *Pair.Value.ToString());
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("WriteGameplayTagRedirects: %s to %s"), *Pair.Key.ToString(), *Pair.Value.ToString());
 	}
 	NewSectionContent += LINE_TERMINATOR;
 
@@ -721,7 +721,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 
 	if (!FFileHelper::SaveStringToFile(FileContents, *ConfigFile))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("WriteGameplayTagRedirects: failed to write '%s'"), *ConfigFile);
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("WriteGameplayTagRedirects: failed to write '%s'"), *ConfigFile);
 		return 0;
 	}
 
@@ -757,7 +757,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		// and silently clear adopter data.
 		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
 
-		UE_LOG(LogSimpleQuest, Log, TEXT("WriteGameplayTagRedirects: +%d added, -%d removed in %s; tag tree refreshed"),
+		UE_LOG(LogSimpleQuestCompiler, Log, TEXT("WriteGameplayTagRedirects: +%d added, -%d removed in %s; tag tree refreshed"),
 			Added,
 			RedirectsToRemove.Num(),
 			*ConfigFile);
@@ -829,7 +829,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TM
 			BP->Modify();
 			BP->MarkPackageDirty();
 			++ModifiedBPs;
-			UE_LOG(LogSimpleQuest, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' — %d field(s) updated on CDO"),
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' — %d field(s) updated on CDO"),
 				*BP->GetName(), SwapsInBP);
 		}
 	}
@@ -864,7 +864,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
 	if (!QuestlineAsset)
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
 			*ContentNode->NodeLabel.ToString(), Outer ? *Outer->GetClass()->GetName() : TEXT("null"));
 		return FGameplayTag();
 	}
@@ -882,7 +882,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
 		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString());
 	return FGameplayTag();
 }
@@ -939,7 +939,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
 	if (!CompiledTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
 			ContentNode ? *ContentNode->NodeLabel.ToString() : TEXT("(null)"));
 		return false;
 	}
@@ -947,7 +947,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag ReconstructedTag = ReconstructNodeTagInternal(ContentNode);
 	if (!ReconstructedTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
 			*ContentNode->NodeLabel.ToString());
 		return false;
 	}
@@ -1153,7 +1153,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 				if (!ActivatePin)
 				{
-					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
 						*Setter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -1195,7 +1195,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
 				if (!ForwardPin)
 				{
-					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
 						*Getter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -1764,7 +1764,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 	    ++Result.WarningCount;
 	}
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
+	UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
 		QuestlineAssets.Num(), Result.ErrorCount, Result.WarningCount);
 
 	return Result;
@@ -1851,7 +1851,7 @@ namespace
 		IAssetRegistry& AR = ARM.Get();
 		if (AR.IsLoadingAssets())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanActorBlueprintCDOs: AssetRegistry still loading; waiting for completion before scan"));
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ScanActorBlueprintCDOs: AssetRegistry still loading; waiting for completion before scan"));
 			AR.WaitForCompletion();
 		}
 
@@ -1928,7 +1928,7 @@ namespace
 				PackagePath, OutEntries);
 		}
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanActorBlueprintCDOs: scanned %d actor-derived blueprint(s) of %d total blueprint(s) found in AR"),
 			ActorBlueprints.Num(), BlueprintAssets.Num());
 	}
@@ -2055,7 +2055,7 @@ namespace
 			}
 		}
 
-		UE_LOG(LogSimpleQuest, Verbose,
+		UE_LOG(LogSimpleQuestCompiler, Verbose,
 			TEXT("BuildQuestComponentClassSet: %d quest-component-bearing classes (native + BP combined)"),
 			Result.Num());
 		return Result;
@@ -2123,7 +2123,7 @@ namespace
 				return true;
 			});
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanWorldPartitionActors: %s — %d descriptors, %d scanned, %d filtered by class (filter=%s)"),
 			*PackagePath, NumDescriptors, NumScanned, NumFilteredByClass,
 			ClassFilter ? TEXT("on") : TEXT("off"));
@@ -2163,7 +2163,7 @@ namespace
 		IAssetRegistry& AR = ARM.Get();
 		if (AR.IsLoadingAssets())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanUnloadedLevels: AssetRegistry still loading; waiting for completion before scan"));
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ScanUnloadedLevels: AssetRegistry still loading; waiting for completion before scan"));
 			AR.WaitForCompletion();
 		}
 
@@ -2273,7 +2273,7 @@ namespace
 					// Already-initialized (resident from a prior run still pending GC, or some external owner
 					// holds it). Scan directly without taking ownership of the lifecycle — FScopedEditorWorld
 					// asserts on already-initialized worlds and would interfere with the real owner anyway.
-					UE_LOG(LogSimpleQuest, Verbose,
+					UE_LOG(LogSimpleQuestCompiler, Verbose,
 						TEXT("ScanUnloadedLevels: '%s' already initialized; scanning without lifecycle wrapper"),
 						*PackagePath);
 					ScanWorldPartitionActors(World, PackagePath, EnsureClassFilter(), OutEntries);
@@ -2289,14 +2289,14 @@ namespace
 					FSimpleQuestEditorUtilities::ScanActorForStaleTags(Actor, FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,	PackagePath, OutEntries);
 					++NumActorsInLevel;
 				}
-				UE_LOG(LogSimpleQuest, Display,
+				UE_LOG(LogSimpleQuestCompiler, Display,
 					TEXT("ScanUnloadedLevels: non-WP world '%s' — %d actors walked"),
 					*PackagePath, NumActorsInLevel);
 				++NumNonWPScanned;
 			}
 		}
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanUnloadedLevels: %d total worlds in AR; %d already loaded (Tier 1), %d non-WP scanned, %d WP scanned (mode=%s), %d load failures"),
 			WorldAssets.Num(), NumAlreadyLoaded, NumNonWPScanned, NumWPScanned,
 			Scope.bComprehensiveWPScan ? TEXT("comprehensive") : TEXT("class-filtered"),
@@ -2345,7 +2345,7 @@ TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtili
 		ScanUnloadedLevels(Scope, Result);
 	}
 	
-	UE_LOG(LogSimpleQuest, Display,
+	UE_LOG(LogSimpleQuestCompiler, Display,
 		TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found (scope flags: loaded=%s, bpCDOs=%s, unloaded=%s)"),
 		Result.Num(),
 		Scope.bLoadedLevels ? TEXT("on") : TEXT("off"),

@@ -564,6 +564,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	{
 		TotalRenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(AllRenames);
 		FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(AllRenames);
+		FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(AllRenames);
 	}
 
     // Summary notification
@@ -862,18 +863,64 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 		bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
 }
 
+namespace
+{
+	// Recursive detection walk — returns true on first field whose value is in RedirectTargets. Recurses into nested
+	// USTRUCT fields. Cycle-free (no by-value struct self-references in UE). Mirrors ApplyTagRenamesToStructLayout in
+	// shape — the apply path and the detect path walk the same structural territory.
+	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets)
+	{
+		if (!Struct || !ContainerPtr) return false;
+
+		for (TFieldIterator<FStructProperty> PropIt(Struct); PropIt; ++PropIt)
+		{
+			FStructProperty* StructProp = *PropIt;
+
+			if (StructProp->Struct == FGameplayTag::StaticStruct())
+			{
+				const FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(ContainerPtr);
+				if (TagPtr && RedirectTargets.Contains(TagPtr->GetTagName())) return true;
+			}
+			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+			{
+				const FGameplayTagContainer* ContainerProp = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(ContainerPtr);
+				if (ContainerProp)
+				{
+					for (const FGameplayTag& Tag : *ContainerProp)
+					{
+						if (RedirectTargets.Contains(Tag.GetTagName())) return true;
+					}
+				}
+			}
+			else
+			{
+				const void* NestedPtr = StructProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+				if (HasFieldMatchingRedirectTarget(StructProp->Struct, NestedPtr, RedirectTargets)) return true;
+			}
+		}
+		return false;
+	}
+}
+
 void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 {
-	UBlueprint* BP = Cast<UBlueprint>(LoadedAsset);
-	if (!BP || !BP->GeneratedClass) return;
-
-	UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
-	if (!CDO) return;
+	if (!LoadedAsset) return;
 
 	UGameplayTagsSettings* Settings = GetMutableDefault<UGameplayTagsSettings>();
 	if (!Settings || Settings->GameplayTagRedirects.Num() == 0) return;
 
-	// Build a set of every NewTagName in the active redirect map. A CDO field that holds one of these names AFTER deserialization
+	// Decide where the FGameplayTag fields live. UBlueprint loads expose them on the generated-class CDO; other asset types
+	// (UDataAsset / UDataTable / adopter custom asset classes) hold them on the asset object itself.
+	UObject* InspectionTarget = LoadedAsset;
+	if (UBlueprint* BP = Cast<UBlueprint>(LoadedAsset))
+	{
+		if (!BP->GeneratedClass) return;
+		UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
+		if (!CDO) return;
+		InspectionTarget = CDO;
+	}
+
+	// Build a set of every NewTagName in the active redirect map. A field that holds one of these names AFTER deserialization
 	// MAY have been transparently rewritten by FGameplayTag::PostSerialize from a corresponding OldTagName on disk. We can't
 	// distinguish "redirected on load" from "always had this name" without comparing to the on-disk bytes — the heuristic accepts
 	// occasional no-op saves in exchange for catching the real cases.
@@ -884,27 +931,20 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 		RedirectTargets.Add(Entry.NewTagName);
 	}
 
-	bool bMatched = false;
-	for (TFieldIterator<FStructProperty> It(BP->GeneratedClass); It && !bMatched; ++It)
-	{
-		FStructProperty* StructProp = *It;
+	bool bMatched = HasFieldMatchingRedirectTarget(InspectionTarget->GetClass(), InspectionTarget, RedirectTargets);
 
-		if (StructProp->Struct == FGameplayTag::StaticStruct())
+	// UDataTable special case: rows live in TMap<FName, uint8*> RowMap with layout described by RowStruct. The walk above
+	// only sees UDataTable's own UPROPERTYs, not the row data behind the map.
+	if (!bMatched)
+	{
+		if (UDataTable* DataTable = Cast<UDataTable>(InspectionTarget))
 		{
-			const FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(CDO);
-			if (TagPtr && RedirectTargets.Contains(TagPtr->GetTagName()))
+			if (const UScriptStruct* RowStruct = DataTable->RowStruct)
 			{
-				bMatched = true;
-			}
-		}
-		else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
-		{
-			const FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(CDO);
-			if (ContainerPtr)
-			{
-				for (const FGameplayTag& Tag : *ContainerPtr)
+				for (const TPair<FName, uint8*>& RowPair : DataTable->GetRowMap())
 				{
-					if (RedirectTargets.Contains(Tag.GetTagName()))
+					if (!RowPair.Value) continue;
+					if (HasFieldMatchingRedirectTarget(RowStruct, RowPair.Value, RedirectTargets))
 					{
 						bMatched = true;
 						break;
@@ -918,16 +958,17 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 	{
 		// UPackage::MarkPackageDirty silently no-ops while UE is routing PostLoad calls — OnAssetLoaded fires from inside that phase,
 		// so a direct mark here is suppressed by design (UE doesn't want load-time changes to flag assets as user-modified). Defer to
-		// the next tick to escape the routing context.
-		TWeakObjectPtr<UBlueprint> WeakBP(BP);
-		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakBP](float)
+		// the next tick to escape the routing context. The mark goes on the loaded asset (what UE will serialize), regardless of
+		// whether the matching field lived on the asset directly or on its generated-class CDO.
+		TWeakObjectPtr<UObject> WeakAsset(LoadedAsset);
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAsset](float)
 		{
-			if (UBlueprint* DeferredBP = WeakBP.Get())
+			if (UObject* DeferredAsset = WeakAsset.Get())
 			{
-				DeferredBP->MarkPackageDirty();
+				DeferredAsset->MarkPackageDirty();
 				UE_LOG(LogSimpleQuestCompiler, Verbose,
-					TEXT("MarkDirtyOnRedirectedTagLoad: deferred dirty mark fired for '%s' — Save All will now catch the healed FGameplayTag value(s)"),
-					*DeferredBP->GetName());
+					TEXT("MarkDirtyOnRedirectedTagLoad: deferred dirty mark fired for '%s' (%s) — Save All will now catch the healed FGameplayTag value(s)"),
+					*DeferredAsset->GetName(), *DeferredAsset->GetClass()->GetName());
 			}
 			return false; // one-shot — unregister after firing
 		}), 0.0f);

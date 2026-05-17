@@ -76,7 +76,7 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
                 UQuestlineGraph* AssetGraph = Cast<UQuestlineGraph>(Asset);
                 if (!AssetGraph) continue;
 
-                IAssetEditorInstance* Instance = EditorSubsystem->FindEditorForAsset(AssetGraph, /*bFocusIfOpen=*/ false);
+                IAssetEditorInstance* Instance = EditorSubsystem->FindEditorForAsset(AssetGraph, false);
                 if (!Instance) continue;
 
                 FQuestlineGraphEditor* OtherEditor = static_cast<FQuestlineGraphEditor*>(Instance);
@@ -671,7 +671,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         ON_SCOPE_EXIT { ISimpleQuestEditorModule::Get().EndCompileBatch(); };
 
         // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
-        CompileAsset(QuestlineGraph, /*bIsPrimary=*/ true);
+        CompileAsset(QuestlineGraph, true);
 
         // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references.
         TArray<UQuestlineGraph*> Neighborhood;
@@ -684,7 +684,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
 
         for (UQuestlineGraph* Neighbor : Neighborhood)
         {
-            CompileAsset(Neighbor, /*bIsPrimary=*/ false);
+            CompileAsset(Neighbor, false);
         }
 
         // Coalesced redirect write inside the batch scope so EndCompileBatch's RebuildNativeTags fires AFTER the CDO + manager
@@ -702,6 +702,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     {
         TotalRenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(AllRenames);
         FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(AllRenames);
+        FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(AllRenames);
     }
 
     // Notifications — MessageLog already shows pages if anything wrote to them. Emit a notify summary for
@@ -813,7 +814,7 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
         TAttribute<FText>(),
         NSLOCTEXT("SimpleQuestEditor", "CompileOptions_Tooltip", "Compile options"),
         TAttribute<FSlateIcon>(),
-        /*bInSimpleComboBox=*/ true);
+        true);
 
     // Compile All — dedicated button
     ToolbarBuilder.AddToolBarButton(
@@ -852,7 +853,7 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
 
 TSharedRef<SWidget> FQuestlineGraphEditor::GenerateCompileOptionsMenu()
 {
-    FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/ true, GraphEditorCommands);
+    FMenuBuilder MenuBuilder(true, GraphEditorCommands);
 
     // Placeholder for future options:
     // MenuBuilder.BeginSection("CompileSettings", LOCTEXT("CompileSettings", "Settings"));

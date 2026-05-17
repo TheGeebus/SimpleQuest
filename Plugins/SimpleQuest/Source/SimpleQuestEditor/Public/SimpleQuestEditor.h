@@ -63,13 +63,19 @@ private:
 	void RebuildNativeTags(bool bRefreshTree = false);
 	
 	/**
-	 * Bound to FCoreUObjectDelegates::OnAssetLoaded in StartupModule. When a UBlueprint asset loads, scans its CDO for top-level
-	 * FGameplayTag / FGameplayTagContainer UPROPERTYs whose stored FName matches a NewTagName on the active redirect map. A match
-	 * indicates the field MAY have been transparently rewritten by FGameplayTag::PostSerialize during deserialization — the asset's
-	 * disk bytes still reference the OldTagName, and UE doesn't mark the asset dirty for that hidden rewrite. Marking dirty here
-	 * surfaces the asset in the Content Browser so Save All persists the healed value and the redirect can later be cleaned up
-	 * without orphaning unloaded-at-rename-time assets. Heuristic accepts false positives — an asset whose FGameplayTag was already
-	 * at the redirect's NewTagName on disk gets a no-op save, which UE handles cleanly.
+	 * Bound to FCoreUObjectDelegates::OnAssetLoaded in StartupModule. When any asset loads, scans it for top-level FGameplayTag /
+	 * FGameplayTagContainer UPROPERTYs whose stored FName matches a NewTagName on the active redirect map. A match indicates the
+	 * field MAY have been transparently rewritten by FGameplayTag::PostSerialize during deserialization — the asset's disk bytes
+	 * still reference the OldTagName, and UE doesn't mark the asset dirty for that hidden rewrite. Marking dirty here surfaces the
+	 * asset in the Content Browser so Save All persists the healed value and the redirect can later be cleaned up without orphaning
+	 * unloaded-at-rename-time assets.
+	 *
+	 * Inspection target depends on asset class: UBlueprint loads expose their FGameplayTag fields on the generated-class CDO; other
+	 * asset types (UDataAsset, UDataTable, adopter custom asset classes) hold their fields on the asset object itself. The dirty
+	 * mark always goes on the loaded asset (the thing UE will serialize), regardless of where the matching field lived.
+	 *
+	 * Heuristic accepts false positives — an asset whose FGameplayTag was already at the redirect's NewTagName on disk gets a no-op
+	 * save, which UE handles cleanly.
 	 */
 	void MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset);
 	FDelegateHandle OnAssetLoadedHandle;

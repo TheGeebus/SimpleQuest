@@ -3,6 +3,7 @@
 
 #include "Utilities/SimpleQuestEditorUtils.h"
 
+#include "DataTableEditorUtils.h"
 #include "SimpleQuestLog.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Exit.h"
@@ -448,51 +449,101 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualObserversForNode"));
 }
 
+namespace
+{
+	// Recursive struct-layout walk. Handles FGameplayTag and FGameplayTagContainer at any depth — recurses into
+	// nested USTRUCT fields so adopter types with embedded structs get covered without per-class hooks. Cycle-free
+	// because UE forbids by-value struct self-references (a struct can't contain itself; pointers go through
+	// FObjectProperty, not FStructProperty, and we don't iterate those).
+	int32 ApplyTagRenamesToStructLayout(const UStruct* Struct, void* ContainerPtr, const TMap<FName, FName>& Renames)
+	{
+		if (!Struct || !ContainerPtr) return 0;
+
+		int32 Swaps = 0;
+		for (TFieldIterator<FStructProperty> PropIt(Struct); PropIt; ++PropIt)
+		{
+			FStructProperty* StructProp = *PropIt;
+
+			if (StructProp->Struct == FGameplayTag::StaticStruct())
+			{
+				FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(ContainerPtr);
+				if (!TagPtr) continue;
+
+				if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
+				{
+					*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
+					++Swaps;
+				}
+			}
+			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+			{
+				FGameplayTagContainer* ContainerProp = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(ContainerPtr);
+				if (!ContainerProp) continue;
+
+				FGameplayTagContainer Rebuilt;
+				bool bAnyChanges = false;
+				for (const FGameplayTag& Tag : *ContainerProp)
+				{
+					if (const FName* NewName = Renames.Find(Tag.GetTagName()))
+					{
+						Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
+						bAnyChanges = true;
+					}
+					else
+					{
+						Rebuilt.AddTag(Tag);
+					}
+				}
+				if (bAnyChanges)
+				{
+					*ContainerProp = Rebuilt;
+					++Swaps;
+				}
+			}
+			else
+			{
+				// Recurse into nested USTRUCTs. Adopter assets with FGameplayTag fields inside their own struct types
+				// get covered without per-class wiring.
+				void* NestedPtr = StructProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+				Swaps += ApplyTagRenamesToStructLayout(StructProp->Struct, NestedPtr, Renames);
+			}
+		}
+		return Swaps;
+	}
+}
+
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames)
 {
 	if (!Object || Renames.Num() == 0) return 0;
 
-	int32 Swaps = 0;
+	int32 Swaps = ApplyTagRenamesToStructLayout(Object->GetClass(), Object, Renames);
 
-	for (TFieldIterator<FStructProperty> PropIt(Object->GetClass()); PropIt; ++PropIt)
+	// UDataTable special case: rows live in TMap<FName, uint8*> RowMap with layout described by RowStruct. The
+	// struct-layout walk above only sees UDataTable's own UPROPERTYs, not the row data behind the map. Walk each
+	// row's struct interior explicitly.
+	if (UDataTable* DataTable = Cast<UDataTable>(Object))
 	{
-		FStructProperty* StructProp = *PropIt;
-
-		if (StructProp->Struct == FGameplayTag::StaticStruct())
+		if (const UScriptStruct* RowStruct = DataTable->RowStruct)
 		{
-			FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(Object);
-			if (!TagPtr) continue;
-
-			if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
+			int32 RowSwaps = 0;
+			for (const TPair<FName, uint8*>& RowPair : DataTable->GetRowMap())
 			{
-				*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
-				++Swaps;
-			}
-		}
-		else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
-		{
-			FGameplayTagContainer* ContainerPtr = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(Object);
-			if (!ContainerPtr) continue;
-
-			FGameplayTagContainer Rebuilt;
-			bool bAnyChanges = false;
-			for (const FGameplayTag& Tag : *ContainerPtr)
-			{
-				if (const FName* NewName = Renames.Find(Tag.GetTagName()))
+				if (RowPair.Value)
 				{
-					Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
-					bAnyChanges = true;
-				}
-				else
-				{
-					Rebuilt.AddTag(Tag);
+					RowSwaps += ApplyTagRenamesToStructLayout(RowStruct, RowPair.Value, Renames);
 				}
 			}
-			if (bAnyChanges)
+			if (RowSwaps > 0)
 			{
-				*ContainerPtr = Rebuilt;
-				++Swaps;
+				// Two-stage notification. UDataTable::HandleDataTableChanged broadcasts the table's own OnDataTableChanged
+				// delegate (consumers that watch the asset directly); FDataTableEditorUtils::BroadcastPostChange fires the
+				// editor-side OnPostDataTableChange that the FDataTableEditor widget subscribes to for its row-list view
+				// refresh. Without the second one, the row detail editor refreshes but the row grid stays stale until
+				// close + reopen.
+				DataTable->HandleDataTableChanged(NAME_None);
+				FDataTableEditorUtils::BroadcastPostChange(DataTable, FDataTableEditorUtils::EDataTableChangeInfo::RowList);
 			}
+			Swaps += RowSwaps;
 		}
 	}
 
@@ -866,6 +917,33 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TM
 	}
 
 	return ModifiedBPs;
+}
+
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	int32 ModifiedAssets = 0;
+
+	for (TObjectIterator<UObject> It; It; ++It)
+	{
+		UObject* Asset = *It;
+		if (!Asset || !Asset->IsAsset()) continue;
+		if (Cast<UBlueprint>(Asset)) continue;  // covered by ApplyTagRenamesToLoadedBlueprintCDOs (CDO indirection)
+		if (Cast<UWorld>(Asset)) continue;       // contents covered by ApplyTagRenamesToLoadedWorlds (per-actor walk)
+
+		const int32 Swaps = ApplyTagRenamesToObject(Asset, Renames);
+		if (Swaps > 0)
+		{
+			Asset->Modify();
+			Asset->MarkPackageDirty();
+			++ModifiedAssets;
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedAssets: '%s' (%s) — %d field(s) updated"),
+				*Asset->GetName(), *Asset->GetClass()->GetName(), Swaps);
+		}
+	}
+
+	return ModifiedAssets;
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)

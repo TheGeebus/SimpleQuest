@@ -34,7 +34,8 @@ public class SimpleQuestEditor: ModuleRules
 			"ApplicationCore", 
 			"WorkspaceMenuStructure",
 			"WorldPartitionEditor",
-			"SimpleCoreEditor"
+			"SimpleCoreEditor",
+			"DataTableEditor"
 		});
 
 		if (Target.bBuildEditor)

@@ -288,6 +288,15 @@ public:
 	static int32 ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames);
 	
 	/**
+	 * Walks every loaded asset (excluding UBlueprint and UWorld, which are handled by sibling helpers) and applies the
+	 * rename map to any matching FGameplayTag / FGameplayTagContainer UPROPERTYs on the asset object itself. Covers
+	 * UDataAsset, UDataTable, and adopter custom asset types — anything loaded in memory that holds tag UPROPERTYs and
+	 * isn't already covered by the actor + BP CDO sweeps. Marks each modified asset dirty so Save All persists the
+	 * healed values to disk. Returns the number of assets modified.
+	 */
+	static int32 ApplyTagRenamesToLoadedAssets(const TMap<FName, FName>& Renames);
+	
+	/**
 	 * Walks the node's Outer chain (through any Quest container graphs) to the owning UQuestlineGraph asset, then
 	 * matches the node's QuestGuid against CompiledNodes to resolve its compiled runtime tag. Works for any
 	 * UQuestlineNode_ContentBase descendant (Quest, Step, LinkedQuestline). Returns an invalid tag when the node

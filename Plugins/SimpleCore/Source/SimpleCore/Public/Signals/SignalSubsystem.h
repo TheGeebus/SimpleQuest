@@ -90,6 +90,19 @@ public:
     /** Remove a subscription by the handle returned from SubscribeMessage. */
     void UnsubscribeMessage(FGameplayTag Channel, FDelegateHandle Handle);
 
+    /**
+     * Remove every subscription on every channel whose Listener is the given object. Single-call cleanup intended for
+     * EndPlay / BeginDestroy on subscriber objects with many subscriptions across many channels — avoids the
+     * per-(Channel, Handle) bookkeeping that UnsubscribeMessage requires. Compares raw UObject pointers
+     * (TWeakObjectPtr::Get() == Listener), so subclasses and unrelated objects are not affected. No-op if Listener is
+     * nullptr (refuses the call rather than incidentally purging stale records). Safe to call from inside a publish
+     * walk — the walker snapshots the per-channel array before iterating, so removals only affect subsequent publishes.
+     *
+     * Preserves subscriber insertion order in each affected channel — the broadcast-ordering contract that
+     * state-before-broadcast subscribers depend on continues to hold for surviving subscribers.
+     */
+    void UnsubscribeListener(UObject* Listener);
+
 private:
     /**
      * Internal dispatcher for multi-channel publishes. Channels assumed valid and deduplicated upstream, which

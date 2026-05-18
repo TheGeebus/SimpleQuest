@@ -70,13 +70,40 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
     }
 }
 
+void USignalSubsystem::UnsubscribeListener(UObject* Listener)
+{
+    if (!Listener || bIsShuttingDown) return;
+
+    int32 RemovedCount = 0;
+    int32 CompactedChannels = 0;
+
+    // Map-iterator-with-RemoveCurrent is the safe idiom for "iterate and conditionally drop entries"; we can't collect
+    // channels-to-remove and apply post-loop because the inner per-channel mutation is what creates the empty arrays.
+    for (auto It = ChannelSubscribers.CreateIterator(); It; ++It)
+    {
+        TArray<FSignalSubscriberRecord>& Records = It.Value();
+        RemovedCount += Records.RemoveAll([Listener](const FSignalSubscriberRecord& R) { return R.Listener.Get() == Listener; });
+        if (Records.IsEmpty())
+        {
+            It.RemoveCurrent();
+            ++CompactedChannels;
+        }
+    }
+
+    if (RemovedCount > 0)
+    {
+        UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::UnsubscribeListener: listener='%s' removed=%d compacted=%d"),
+            *Listener->GetName(), RemovedCount, CompactedChannels);
+    }
+}
+
 void USignalSubsystem::PublishMessageOnChannelsRaw(TArray<FGameplayTag> Channels, const FInstancedStruct& Payload, bool bAllChannels)
 {
     if (bIsShuttingDown) return;
 
     TRACE_CPUPROFILER_EVENT_SCOPE(USignalSubsystem_PublishMessageOnChannelsRaw);
 
-    // Drop invalid tags and de-duplicate the channel set up front. Subscriber dedup downstream depends on each channel
+    // Drop invalid tags and de-duplicate the channel set up front. Subscriber deduplication downstream depends on each channel
     // being walked at most once; trusting caller-side cleanliness would couple bus correctness to consumer discipline.
     TArray<FGameplayTag> CleanChannels;
     CleanChannels.Reserve(Channels.Num());
@@ -130,8 +157,8 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
     }
     else
     {
-        // Default dedup-on. Walk every channel's hierarchy; deduplicate subscribers across channels by FDelegateHandle. Each
-        // subscriber fires once with the best-match channel from the publish set as the callback's first arg.
+        // Default deduplication on. Walk every channel's hierarchy; deduplicate subscribers across channels by FDelegateHandle.
+        // Each subscriber fires once with the best-match channel from the publishing set as the callback's first arg.
         TSet<FDelegateHandle> Delivered;
 
         for (const FGameplayTag& Channel : Channels)

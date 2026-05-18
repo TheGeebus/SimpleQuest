@@ -28,6 +28,14 @@ void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContext
     }
 }
 
+void USimpleCoreBlueprintLibrary::UnsubscribeListener(UObject* WorldContextObject, UObject* Listener)
+{
+    if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+    {
+        Signals->UnsubscribeListener(Listener);
+    }
+}
+
 // ── World State ────────────────────────────────────────────────────────────────────────────────────
 
 void USimpleCoreBlueprintLibrary::AddFact(UObject* WorldContextObject, FGameplayTag Tag,

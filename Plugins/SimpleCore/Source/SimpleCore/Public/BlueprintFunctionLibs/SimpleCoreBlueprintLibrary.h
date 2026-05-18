@@ -69,6 +69,18 @@ public:
     static void PublishMessageOnChannels(UObject* WorldContextObject, const TArray<FGameplayTag>& Channels,
         const FInstancedStruct& Payload, bool bAllChannels = false);
 
+    /**
+     * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /
+     * components with many subscriptions across many channels — call from EndPlay or BeginDestroy. Compares raw UObject
+     * pointers, so subclasses and unrelated objects are not affected. No-op if Listener is null. Most adopter usage
+     * passes self as Listener.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
+                DefaultToSelf = "WorldContextObject"))
+    static void UnsubscribeListener(UObject* WorldContextObject, UObject* Listener);
+    
+
     // ── World State ────────────────────────────────────────────────────────────────────────────────
 
     /**

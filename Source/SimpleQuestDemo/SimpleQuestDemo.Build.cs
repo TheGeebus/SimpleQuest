@@ -10,7 +10,7 @@ public class SimpleQuestDemo : ModuleRules
 	
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "GameplayTags" });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "SimpleCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "SimpleCore", "SimpleQuest" });
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

@@ -32,7 +32,6 @@ void UQuestTriggerComponent::BeginPlay()
             continue;
         }
         FDelegateHandle Handle = SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated);
-        StepStartedHandles.Add(StepTag, Handle);
         UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
 }

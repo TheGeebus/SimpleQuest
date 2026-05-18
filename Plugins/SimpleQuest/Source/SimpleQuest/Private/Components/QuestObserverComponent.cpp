@@ -36,6 +36,16 @@ void UQuestObserverComponent::BeginPlay()
 	RegisterQuestObserver();
 }
 
+void UQuestObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Bulk-clear every channel subscription this component (and any derived subclass — Trigger, Giver) registered with the bus.
+	if (SignalSubsystem)
+	{
+		SignalSubsystem->UnsubscribeListener(this);
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
 void UQuestObserverComponent::HandleQuestActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
 	if (OnQuestActivated.IsBound())

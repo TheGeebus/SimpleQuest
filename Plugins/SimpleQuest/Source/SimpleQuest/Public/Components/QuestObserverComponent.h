@@ -206,6 +206,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/**
 	 * Derived components may expose a set of tags to be implicitly observed alongside the

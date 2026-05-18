@@ -44,8 +44,7 @@ public:
      * me." See the SimpleCore architecture notes (MULTI-CHANNEL PUBLISH CONTRACT) for the full contract.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void PublishMessage(UObject* WorldContextObject, FGameplayTag Channel, const FInstancedStruct& Payload);
 
     /**
@@ -64,8 +63,7 @@ public:
      * channel must reach its own subscribers.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void PublishMessageOnChannels(UObject* WorldContextObject, const TArray<FGameplayTag>& Channels,
         const FInstancedStruct& Payload, bool bAllChannels = false);
 
@@ -76,8 +74,7 @@ public:
      * passes self as Listener.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void UnsubscribeListener(UObject* WorldContextObject, UObject* Listener);
     
 
@@ -91,8 +88,7 @@ public:
      *   Suppress — never fire, even at the boundary.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void AddFact(UObject* WorldContextObject, FGameplayTag Tag,
         EFactBroadcastMode BroadcastMode = EFactBroadcastMode::BoundaryOnly);
 
@@ -102,8 +98,7 @@ public:
      * opt into different semantics; see AddFact's doc.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void RemoveFact(UObject* WorldContextObject, FGameplayTag Tag,
         EFactBroadcastMode BroadcastMode = EFactBroadcastMode::BoundaryOnly);
 
@@ -113,14 +108,12 @@ public:
      * add/remove patterns where reference-count semantics matter.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void ClearFact(UObject* WorldContextObject, FGameplayTag Tag, bool bSuppressBroadcast = false);
 
     /** Returns true if the fact's count is greater than zero. */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleCore|World State",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static bool HasFact(UObject* WorldContextObject, FGameplayTag Tag);
 
     /**
@@ -128,8 +121,7 @@ public:
      * removed. Suitable for querying how many times a repeatable fact has been asserted.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleCore|World State",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject",
-                DefaultToSelf = "WorldContextObject"))
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static int32 GetFactValue(UObject* WorldContextObject, FGameplayTag Tag);
 
 private:

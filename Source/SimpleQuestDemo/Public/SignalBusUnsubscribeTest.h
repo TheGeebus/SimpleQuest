@@ -18,11 +18,7 @@ struct FBusTestPayload
 
 
 /**
- * Self-testing actor for USignalSubsystem::UnsubscribeListener. BeginPlay subscribes to three channels, publishes a
- * payload on each (round 1 — three toasts expected), calls UnsubscribeListener(this), then publishes on each channel
- * again (round 2 — zero toasts expected). Drop in any test level; press Play; observe the screen toasts and the
- * Output Log line "Signal::UnsubscribeListener: listener='...' removed=3 compacted=3". Delete the actor + this class
- * after verifying.
+ * Self-testing actor for various SimpleCore and SimpleQuest features. Reconfigured regularly.
  */
 UCLASS()
 class SIMPLEQUESTDEMO_API ASignalBusUnsubscribeTest : public AActor
@@ -31,6 +27,7 @@ class SIMPLEQUESTDEMO_API ASignalBusUnsubscribeTest : public AActor
 
 public:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	void HandleFoo(FGameplayTag Channel, const FBusTestPayload& Payload);

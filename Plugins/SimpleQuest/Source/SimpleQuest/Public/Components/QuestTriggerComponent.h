@@ -92,8 +92,6 @@ protected:
 	void OnTriggerStepEnded(FGameplayTag Channel);
 
 private:	
-	TMap<FGameplayTag, FDelegateHandle> StepStartedHandles;
-	
 	/** Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously */
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
 	

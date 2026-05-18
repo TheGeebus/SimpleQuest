@@ -12,7 +12,7 @@
  * 
  */
 UCLASS()
-class SIMPLEQUEST_API UTestRenameDataBase : public UDataAsset
+class SIMPLEQUESTDEMO_API UTestRenameDataBase : public UDataAsset
 {
 	GENERATED_BODY()
 

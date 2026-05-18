@@ -32,141 +32,61 @@ class SIMPLEQUEST_API USimpleQuestSettings : public UDeveloperSettings
 
 public:
 	virtual FName GetCategoryName() const override { return FName("Plugins"); }
-	
+
 	/**
-	 * Quest manager to load when the game starts. Defaults to the native UQuestManagerSubsystem class; set to a
-	 * Blueprint or C++ subclass derived from UQuestManagerSubsystem if you need to customize manager behavior.
+	 * Quest manager class loaded when the game starts. Set to a Blueprint or C++ subclass of UQuestManagerSubsystem
+	 * to customize manager behavior; defaults to the native UQuestManagerSubsystem.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category="Initialization")
+	UPROPERTY(Config, EditAnywhere, Category="Initialization", meta=(DisplayName="Quest Manager"))
 	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(UQuestManagerSubsystem::StaticClass());
 
 	/**
-	 * Verbosity for LogSimpleQuest. The umbrella channel — module startup, settings, debug overlay, and anything that
-	 * doesn't fit one of the specialized channels (Activation / Compiler / Subscription / State). Live-applied: changing
-	 * this in Project Settings updates the log filter immediately without restart. Persists via UDeveloperSettings's
-	 * Config save. Equivalent to setting `LogSimpleQuest=<verbosity>` in DefaultEngine.ini's [Core.Log] section, but
-	 * designer-facing.
+	 * Manager activation flow — cascade entry, chain advancement, live-state writers, container Live derivation.
+	 * Raise to Verbose when debugging "why isn't my quest going Live" or chain-advancement issues.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
-	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
-
-	/**
-	 * Verbosity for LogSimpleQuestActivation. Manager activation flow — ActivateNodeByTag, ChainToNextNodes,
-	 * SetQuestLive / SetQuestDeactivated / SetQuestPendingGiver writers, DeriveContainerLive, and the surrounding
-	 * cascade. Raise to Verbose when debugging "why isn't my quest going Live" or chain-advancement issues.
-	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Activation"))
 	EQuestLogVerbosity LogSimpleQuestActivationVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Verbosity for LogSimpleQuestCompiler. Compile-time output — graph compile, native tag registration, tag-rename
-	 * redirect machinery, stale-tag warnings. The bulk of the historical Verbose noise lives here; keep at Log during
-	 * gameplay debugging and raise selectively when investigating compile or rename behavior.
+	 * Subscriber wiring — Observer/Trigger/Giver registration, K2 node subscriptions, catch-up fanout, prereq-leaf
+	 * enablement watches. Raise to Verbose when debugging "bound but never fires" or catch-up replay behavior.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
-	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
-
-	/**
-	 * Verbosity for LogSimpleQuestSubscription. Subscriber wiring — Observer / Trigger / Giver registration, K2 node
-	 * subscriptions, catch-up fanout, prereq-leaf enablement watches. Raise to Verbose when debugging "my K2 node bound
-	 * but never fires" or catch-up replay behavior.
-	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Subscription"))
 	EQuestLogVerbosity LogSimpleQuestSubscriptionVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Verbosity for LogSimpleQuestState. UQuestStateSubsystem registry mutations — RecordResolution, RecordEntry,
-	 * RegisterQuestTag, RegisterAlias. The durable record of what happened (becomes load-bearing once save/load lands
-	 * in 0.5.0). Raise to Verbose when debugging "what's persisted vs ephemeral."
+	 * Compile-time output — graph compile, native tag registration, rename-redirect machinery, stale-tag warnings.
+	 * Bulk of the historical Verbose noise; raise selectively when investigating compile or rename behavior.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Compiler"))
+	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * UQuestStateSubsystem registry mutations — resolutions, entries, tag/alias registrations. The durable record of
+	 * what happened (becomes load-bearing once save/load lands in 0.5.0). Raise to Verbose when debugging "what's
+	 * persisted vs ephemeral."
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="State"))
 	EQuestLogVerbosity LogSimpleQuestStateVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Verbosity for LogSimpleCore. Same live-apply behavior as LogSimpleQuestVerbosity. SimpleCore covers the underlying
-	 * signal bus and world-state subsystems; raise to Verbose or VeryVerbose for diagnostic runs.
+	 * Umbrella channel — module startup, settings, debug overlay, and anything not covered by the specialized channels
+	 * above. Live-applied: changes take effect immediately without restart.
 	 */
-	UPROPERTY(Config, EditAnywhere, Category="Logging")
-	EQuestLogVerbosity LogSimpleCoreVerbosity = EQuestLogVerbosity::Log;
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Module"))
+	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Pushes every verbosity value to its log category — all five SimpleQuest channels plus LogSimpleCore. Called from
-	 * PostEditChangeProperty for live-apply during editor sessions, and from FSimpleQuest::StartupModule on engine
-	 * startup so settings take effect before any UE_LOG fires.
+	 * Pushes every verbosity value to its log category. Called from PostEditChangeProperty for live-apply during editor
+	 * sessions, and from FSimpleQuest::StartupModule on engine startup so settings take effect before any UE_LOG fires.
 	 */
 	void ApplyLogVerbosity() const;
-	
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
-
-#if WITH_EDITORONLY_DATA
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Wires")
-	FLinearColor ActivationWireColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Wires")
-	FLinearColor PrerequisiteWireColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Wires")
-	FLinearColor OutcomeWireColor = FLinearColor::White;
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Wires")
-	FLinearColor DeactivationWireColor = FLinearColor(0.9f, 0.4f, 0.3f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Wires")
-	FLinearColor StaleWireColor = FLinearColor(1.f, 0.f, 0.f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Pins")
-	FLinearColor DefaultPinColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor EntryNodeColor = FLinearColor(0.7f, 0.15f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor ExitNodeActiveColor = FLinearColor(0.9f, 0.7f, 0.1f); 
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor ExitNodeInactiveColor = FLinearColor(0.6f, 0.6f, 0.6f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor QuestNodeColor = FLinearColor(0.2f, 0.4f, 0.7f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor StepNodeColor = FLinearColor(0.1f, 0.2f, 0.35f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor LinkedQuestlineGraphNodeColor = FLinearColor(0.2f, 0.6f, 0.9f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor ActivateGroupNodeColor = FLinearColor(0.9f, 0.7f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor PrerequisiteGroupNodeColor = FLinearColor(0.65f, 0.05f, 0.65f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor UtilityNodeColor = FLinearColor(0.2f, 0.2f, 0.8f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Nodes")
-	FLinearColor GraphOutcomeNodeColor = FLinearColor(0.3f, 0.7f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Debug|Examiners|ActivationGroup")
-	FLinearColor ExaminerGroupSetterColor = FLinearColor(0.85f, 0.65f, 0.15f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Colors|Debug|Examiners|ActivationGroup")
-	FLinearColor ExaminerGroupGetterColor = FLinearColor(0.25f, 0.60f, 0.90f);
-
-	/**
-	 * Color used by the Group Examiner (and future examiners) to draw a hover-highlight border around a graph node when
-	 * the designer hovers a corresponding row in the panel. Cross-editor — if the target node lives in another open editor,
-	 * the highlight draws there too. Bright, distinctive colors read best since they need to contrast with arbitrary node
-	 * backgrounds.
-	 */
-	UPROPERTY(EditAnywhere, Config, Category = "Colors|Debug|Examiners")
-	FLinearColor HoverHighlightColor = FLinearColor(0.3f, 0.95f, 0.95f);
-	
-#endif
 };
+
 
 UCLASS()
 class SIMPLEQUEST_API UGameInstanceSubsystemInitializer : public UGameInstanceSubsystem

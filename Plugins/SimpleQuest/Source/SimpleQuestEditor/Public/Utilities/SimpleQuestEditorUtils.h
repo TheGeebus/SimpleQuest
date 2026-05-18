@@ -5,35 +5,35 @@
 
 #include "GameplayTagContainer.h"
 #include "Components/QuestComponentBase.h"
-#include "Settings/SimpleQuestSettings.h"
+#include "Settings/SimpleQuestEditorVisualSettings.h"
 
 // ---- Wire colors ----
-#define SQ_ED_WIRE_ACTIVATION		(GetDefault<USimpleQuestSettings>()->ActivationWireColor)
-#define SQ_ED_WIRE_PREREQUISITE		(GetDefault<USimpleQuestSettings>()->PrerequisiteWireColor)
-#define SQ_ED_WIRE_OUTCOME			(GetDefault<USimpleQuestSettings>()->OutcomeWireColor)
-#define SQ_ED_WIRE_DEACTIVATION		(GetDefault<USimpleQuestSettings>()->DeactivationWireColor)
-#define SQ_ED_WIRE_STALE			(GetDefault<USimpleQuestSettings>()->StaleWireColor)
+#define SQ_ED_WIRE_ACTIVATION		(GetDefault<USimpleQuestEditorVisualSettings>()->ActivationWireColor)
+#define SQ_ED_WIRE_PREREQUISITE		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteWireColor)
+#define SQ_ED_WIRE_OUTCOME			(GetDefault<USimpleQuestEditorVisualSettings>()->OutcomeWireColor)
+#define SQ_ED_WIRE_DEACTIVATION		(GetDefault<USimpleQuestEditorVisualSettings>()->DeactivationWireColor)
+#define SQ_ED_WIRE_STALE			(GetDefault<USimpleQuestEditorVisualSettings>()->StaleWireColor)
 
 // ---- Pin colors ----
-#define SQ_ED_PIN_DEFAULT			(GetDefault<USimpleQuestSettings>()->DefaultPinColor)
+#define SQ_ED_PIN_DEFAULT			(GetDefault<USimpleQuestEditorVisualSettings>()->DefaultPinColor)
 
 // ---- Node title colors ----
-#define SQ_ED_NODE_ENTRY			(GetDefault<USimpleQuestSettings>()->EntryNodeColor)
-#define SQ_ED_NODE_EXIT_ACTIVE		(GetDefault<USimpleQuestSettings>()->ExitNodeActiveColor)
-#define SQ_ED_NODE_EXIT_INACTIVE	(GetDefault<USimpleQuestSettings>()->ExitNodeInactiveColor)
-#define SQ_ED_NODE_QUEST			(GetDefault<USimpleQuestSettings>()->QuestNodeColor)
-#define SQ_ED_NODE_STEP				(GetDefault<USimpleQuestSettings>()->StepNodeColor)
-#define SQ_ED_NODE_LINKED			(GetDefault<USimpleQuestSettings>()->LinkedQuestlineGraphNodeColor)
-#define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestSettings>()->ActivateGroupNodeColor)
-#define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestSettings>()->PrerequisiteGroupNodeColor)
-#define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestSettings>()->UtilityNodeColor)
-#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestSettings>()->GraphOutcomeNodeColor)
+#define SQ_ED_NODE_ENTRY			(GetDefault<USimpleQuestEditorVisualSettings>()->EntryNodeColor)
+#define SQ_ED_NODE_EXIT_ACTIVE		(GetDefault<USimpleQuestEditorVisualSettings>()->ExitNodeActiveColor)
+#define SQ_ED_NODE_EXIT_INACTIVE	(GetDefault<USimpleQuestEditorVisualSettings>()->ExitNodeInactiveColor)
+#define SQ_ED_NODE_QUEST			(GetDefault<USimpleQuestEditorVisualSettings>()->QuestNodeColor)
+#define SQ_ED_NODE_STEP				(GetDefault<USimpleQuestEditorVisualSettings>()->StepNodeColor)
+#define SQ_ED_NODE_LINKED			(GetDefault<USimpleQuestEditorVisualSettings>()->LinkedQuestlineGraphNodeColor)
+#define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestEditorVisualSettings>()->ActivateGroupNodeColor)
+#define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteGroupNodeColor)
+#define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestEditorVisualSettings>()->UtilityNodeColor)
+#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestEditorVisualSettings>()->GraphOutcomeNodeColor)
 
 // ---- Group Examiner ----
-#define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupSetterColor)
-#define SQ_ED_EXAMINER_GROUP_GETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupGetterColor)
+#define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupSetterColor)
+#define SQ_ED_EXAMINER_GROUP_GETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupGetterColor)
 
-#define SQ_ED_HOVER_HIGHLIGHT       (GetDefault<USimpleQuestSettings>()->HoverHighlightColor)
+#define SQ_ED_HOVER_HIGHLIGHT       (GetDefault<USimpleQuestEditorVisualSettings>()->HoverHighlightColor)
 
 
 class UQuestObjective;

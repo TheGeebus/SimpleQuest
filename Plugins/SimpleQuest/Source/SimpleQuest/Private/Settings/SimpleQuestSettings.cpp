@@ -2,7 +2,6 @@
 
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
-#include "Utilities/SimpleCoreLog.h"
 
 namespace
 {
@@ -30,7 +29,6 @@ void USimpleQuestSettings::ApplyLogVerbosity() const
 	LogSimpleQuestCompiler.SetVerbosity(ToELogVerbosity(LogSimpleQuestCompilerVerbosity));
 	LogSimpleQuestSubscription.SetVerbosity(ToELogVerbosity(LogSimpleQuestSubscriptionVerbosity));
 	LogSimpleQuestState.SetVerbosity(ToELogVerbosity(LogSimpleQuestStateVerbosity));
-	LogSimpleCore.SetVerbosity(ToELogVerbosity(LogSimpleCoreVerbosity));
 }
 
 #if WITH_EDITOR

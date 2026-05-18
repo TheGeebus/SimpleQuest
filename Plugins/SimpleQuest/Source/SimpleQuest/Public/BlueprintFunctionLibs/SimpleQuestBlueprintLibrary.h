@@ -137,7 +137,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void SetQuestBlocked(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestEventPayload& Payload = FQuestEventPayload());
+        const FQuestEventPayload& Payload = FQuestEventPayload(),
+        bool bAlsoDeactivate = false);
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void ClearQuestBlocked(const UObject* WorldContext,

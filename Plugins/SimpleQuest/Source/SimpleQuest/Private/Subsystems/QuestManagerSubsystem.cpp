@@ -1745,26 +1745,35 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    // Idempotency guard at canonical perspective: symmetric with the already-deactivated guard in
+    // Block-side: idempotency guard at canonical perspective. Symmetric with the already-deactivated guard in
     // SetQuestDeactivated. Spamming a block request on an already-blocked quest would otherwise bump the
     // WorldState ref-count without reflecting a genuine state transition. Also gates FQuestBlockedEvent
     // broadcast so already-blocked re-applications stay silent at the event layer.
     if (FQuestLifecycleQuery::IsBlocked(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleBlockRequest: '%s' skipped — already blocked"), *QuestTag.ToString());
-        return;
+    }
+    else
+    {
+        AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Blocked);
+        FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source, Event.Context));
+
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
+            *QuestTag.ToString(),
+            Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
     }
 
-    AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Blocked);
-
-    // Block does NOT auto-deactivate. Block is the orthogonal re-entry gate; deactivation is the lifecycle/world
-    // disabler. Callers who want both must publish FQuestDeactivateRequestEvent themselves (or use SetBlocked's
-    // bAlsoDeactivateTargets toggle on the node-driven path).
-    FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestBlockedEvent(QuestTag, Event.Source, Event.Context));
-
-    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleBlockRequest: '%s' — Blocked fact added, FQuestBlockedEvent published (source=%s)"),
-        *QuestTag.ToString(),
-        Event.Source == EDeactivationSource::External ? TEXT("External") : TEXT("Internal"));
+    // Deactivate-side: independent of block-idempotency outcome. Matches USetBlockedNode's "publish both events;
+    // each handler's own idempotency decides" pattern, giving graph-driven and event-driven paths parity.
+    // HandleDeactivateRequest applies its own already-deactivated guard, so a no-op block + no-op deactivate
+    // combination stays silent at both event layers.
+    if (Event.bAlsoDeactivate && QuestSignalSubsystem)
+    {
+        QuestSignalSubsystem->PublishMessage(Tag_Channel_QuestDeactivateRequest,
+            FQuestDeactivateRequestEvent(QuestTag, Event.Source, Event.Context));
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleBlockRequest: '%s' — bAlsoDeactivate=true → published DeactivateRequest"),
+            *QuestTag.ToString());
+    }
 }
 
 void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)

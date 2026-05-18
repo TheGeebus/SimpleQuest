@@ -18,6 +18,10 @@ UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestBlockRequest)
  * External = BP/external publish). Idempotent: already-blocked requests are skipped without firing the event.
  * Context carries optional attribution (Instigator, CustomData, OriginTag, OriginChain) propagated into
  * FQuestBlockedEvent.Payload when the block is applied.
+ *
+ * Set bAlsoDeactivate=true to publish FQuestDeactivateRequestEvent alongside the block. Default false preserves
+ * the Block / Deactivate orthogonality — Block is the re-entry gate, Deactivate is the lifecycle interrupt.
+ * Mirrors the graph-driven SetBlocked node's bAlsoDeactivateTargets toggle.
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestBlockRequestEvent : public FQuestEventBase
@@ -30,6 +34,8 @@ struct SIMPLEQUEST_API FQuestBlockRequestEvent : public FQuestEventBase
 		: FQuestEventBase(InQuestTag), Source(InSource) {}
 	FQuestBlockRequestEvent(FGameplayTag InQuestTag, EDeactivationSource InSource, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag), Source(InSource), Context(InContext) {}
+	FQuestBlockRequestEvent(FGameplayTag InQuestTag, EDeactivationSource InSource, const FQuestEventPayload& InContext, bool InAlsoDeactivate)
+	: FQuestEventBase(InQuestTag), Source(InSource), Context(InContext), bAlsoDeactivate(InAlsoDeactivate) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	EDeactivationSource Source = EDeactivationSource::External;
@@ -37,4 +43,12 @@ struct SIMPLEQUEST_API FQuestBlockRequestEvent : public FQuestEventBase
 	/** Optional attribution payload. Empty default; manager propagates non-empty Context into FQuestBlockedEvent.Payload. */
 	UPROPERTY(BlueprintReadWrite)
 	FQuestEventPayload Context;
+
+	/**
+	 * When true, the manager publishes FQuestDeactivateRequestEvent for the same quest alongside the block.
+	 * Independent of block-side idempotency — if the quest is already blocked but not yet deactivated, the
+	 * deactivation event still publishes. Default false preserves Block / Deactivate orthogonality.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	bool bAlsoDeactivate = false;
 };

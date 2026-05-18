@@ -79,6 +79,218 @@ pin exposure via right-click context menu and mask-gated proxy
 subscriptions; six discrete BP delegates on `UQuestGiverComponent`
 matching the new lifecycle granularity.
 
+### Late 0.4.0 sprint (2026-05-13 → 2026-05-18)
+
+A two-week sprint at the tail of the 0.4.0 development cycle that
+landed component-model unification, tag-rename resilience across
+every `FGameplayTag` reference shape, per-channel log verbosity, a
+settings split that separates adopter-facing knobs from
+developer-facing visuals, and a handful of convenience APIs +
+cleanups. Each theme is independently shippable and they compose to
+close out the 0.4.0 architectural agenda.
+
+#### Component model — linear inheritance chain
+
+`UQuestObserverComponent` → `UQuestTriggerComponent` →
+`UQuestGiverComponent`. Trigger and Giver inherit Observer's full
+observation surface; an actor that gives quests and also reacts to
+trigger events drops a single `UQuestGiverComponent` instead of
+maintaining parallel components.
+
+- Designer-authored tag containers on a derived component (Giver's
+  `QuestTagsToGive`, Trigger's `StepTagsToTrigger`) flow onto
+  Observer's broadcast surface via the new
+  `GetImplicitlyObservedTags` virtual — Observer unions the hook
+  with its own `ObservedTags` map at register time, dedupes by
+  TMap-key uniqueness, force-ons specific required-flag pairs
+  (e.g. `bObserveStarted` + `bObserveGiveBlocked` on Giver so the
+  give success / refusal pair stays symmetric regardless of
+  designer-override choices).
+- Giver's per-event delegate surface collapses to a single rich-
+  payload `OnGiveAvailabilityChanged` that carries a delta payload
+  (`NewlyActivated` / `NewlyEnabled` / `NewlyDeactivated` /
+  `NewlyUnavailable` containers plus an `EGiveAvailabilityChangeReason`
+  field). Per-give success / refusal notifications come from the
+  inherited Observer delegates (`OnQuestStarted` / `OnQuestGiveBlocked`)
+  filtered by `GiverActor == GetOwner()`.
+- Read-from and write-into adopter pipelines widened symmetrically.
+  Seven BP-callable write surfaces (`StartQuestline`, `GiveQuest`,
+  `ActivateQuest`, `ResolveQuest`, `SetQuestBlocked`,
+  `ClearQuestBlocked`, plus the trigger send) accept rich payload
+  / context inputs that propagate through the manager into outbound
+  event payloads. Five request events widened symmetrically.
+
+#### Symmetric activation observability
+
+`FQuestActivationFailedEvent` makes previously-invisible failure
+paths observable. Fires on every `ActivateNodeByTag` refusal:
+`UnknownQuest` (stale tag), `AlreadyLive` (re-fire on live Step),
+`AlreadyPendingGiver` (re-fire on giver-gated Step), `Blocked`
+(re-entry refused by Blocked fact).
+
+- `bObserveActivationFailed` flag on `FObservedQuestEventSettings`
+  (default false; debug-leaning opt-in).
+- `OnQuestActivationFailed` delegate on `UQuestObserverComponent`
+  carrying `QuestTag`, `AttemptedTagName` (raw `FName` preserved
+  for diagnostic identity when the structural `FGameplayTag` is
+  invalid), `MatchedChannel`, `EQuestActivationBlocker Reason`,
+  and `FQuestEventPayload`.
+- Stale-tag publishes walk up to the first registered ancestor
+  before publishing so adopter subscriptions at any registered
+  ancestor receive the event, even when the failed `FName` isn't
+  in the gameplay tag manager.
+
+#### Tag rename propagation through Blueprint graphs and assets
+
+Renames in the questline graph editor now flow through every
+`FGameplayTag` reference shape across loaded and unloaded
+content — closing the "I renamed a node and my BP subscriptions
+silently broke" friction class.
+
+- `GameplayTagRedirects` written automatically per compile to the
+  project's `Config/DefaultGameplayTags.ini`. UE's
+  `FGameplayTag::PostSerialize` heals every `FGameplayTag` /
+  `FGameplayTagContainer` `UPROPERTY` on deserialization — component
+  fields, TMap keys, TArray entries, `FInstancedStruct` interiors.
+- Reflection-based sweep in
+  `FSimpleQuestEditorUtilities::ApplyTagRenamesToObject` covers
+  adopter custom components, custom asset types, and actor-level
+  `FGameplayTag` fields without requiring inheritance from
+  `UQuestComponentBase`. Loaded-worlds + loaded-BP-CDOs +
+  loaded-assets all swept at compile time; nested USTRUCT fields
+  recursed; UDataTable rows walked through the row layout.
+- DataTable editor live-refresh: row changes broadcast through
+  `FDataTableEditorUtils::BroadcastPostChange` so any open
+  DataTable editor reflects the healed values immediately.
+- Load-time dirty hook (`MarkDirtyOnRedirectedTagLoad`) marks
+  unloaded packages dirty when `PostSerialize` rewrites a value on
+  first deserialization — Save All catches the healed value so the
+  asset stops depending on the redirect entry on future loads.
+  Deferred via `FTSTicker` to escape UE's PostLoad routing context
+  (`UPackage::MarkPackageDirty` silently no-ops during PostLoad).
+- Upfront authoring-time validation in
+  `UQuestlineNode_ContentBase::IsLabelAvailable` refuses renames
+  that would collide with another node's current `NodeLabel` OR
+  last-compiled `FName` leaf. Wired through both inline-rename and
+  Details-panel paths. Subscribers never migrate to the wrong node
+  via in-batch collisions because the rename is structurally
+  refused at authoring time.
+- Batch-coalesced redirect-write pipeline. `WriteGameplayTagRedirects`
+  uses one unified algorithm for cycle closure (rename target's
+  chain reaches `OldName`), cross-chain collision (rename target
+  is inside another node's chain), and predecessor knit-back
+  (rewriting chain predecessors past a removed link). Inside the
+  `BeginCompileBatch` / `EndCompileBatch` scope so the redirect
+  write lands BEFORE the final `RebuildNativeTags`, ensuring native
+  tags re-register under the new redirect map. Comment-preserving
+  file IO retains authored section dividers in
+  `DefaultGameplayTags.ini`.
+- Per-graph Compile button auto-compiles the linked neighborhood
+  and shares the same batching machinery — felt slowness vs Compile
+  All disappears.
+
+#### Per-channel log verbosity
+
+`LogSimpleQuest` splits into five categories so adopters can dial
+each concern independently without the all-or-nothing-Verbose
+firehose.
+
+- `LogSimpleQuest` — umbrella (module startup, settings, debug
+  overlay, anything not covered by the specialized channels).
+- `LogSimpleQuestActivation` — manager activation flow (cascade
+  entry, chain advancement, live-state writers, container Live
+  derivation).
+- `LogSimpleQuestSubscription` — Observer / Trigger / Giver
+  registration, K2 node subscriptions, catch-up fanout, prereq
+  enablement watches.
+- `LogSimpleQuestCompiler` — graph compile, native tag registration,
+  rename-redirect machinery, stale-tag warnings.
+- `LogSimpleQuestState` — `UQuestStateSubsystem` registry mutations
+  (resolutions, entries, tag / alias registrations).
+- Independent verbosity dials per channel exposed under **Project
+  Settings → Plugins → Simple Quest → Logging**. Live-applied on
+  edit via `PostEditChangeProperty`; persisted to the project's
+  `Config/DefaultSimpleQuest.ini`; pushed to the log categories at
+  module startup so settings take effect before any `UE_LOG` fires.
+
+#### Settings reorganization
+
+Three `UDeveloperSettings` classes replace the prior single
+`USimpleQuestSettings`. Adopter-facing knobs stay on the Project
+Settings page; developer-facing visuals move to Editor Preferences;
+SimpleCore's own dial moves to its own page in the Plugins section.
+
+- **`USimpleCoreSettings`** in the SimpleCore runtime module —
+  hosts `LogSimpleCoreVerbosity`. Lives at **Project Settings →
+  Plugins → Simple Core**.
+- **`USimpleQuestSettings`** in the SimpleQuest runtime module —
+  hosts `QuestManagerClass` + five SimpleQuest log channel
+  verbosities. Lives at **Project Settings → Plugins → Simple
+  Quest** with reordered, short-named dropdowns (Activation /
+  Subscription / Compiler / State / Module).
+- **`USimpleQuestEditorVisualSettings`** in the SimpleQuestEditor
+  module — hosts 19 `FLinearColor` `UPROPERTY`s (wires, pins, node
+  titles, debug highlights) across four categories. Lives at
+  **Editor Preferences → Plugins → Simple Quest Visuals**. Per-
+  developer; not committed to source control.
+
+#### Signal bus convenience
+
+- `USignalSubsystem::UnsubscribeListener(UObject* Listener)` —
+  bulk-clear every subscription on every channel matching the
+  listener. Avoids per-(Channel, Handle) bookkeeping for components
+  with many subscriptions. Snapshot-safe re-entrancy (publish walks
+  copy per-channel arrays before iterating), preserves subscriber
+  insertion order, null-guards the input rather than incidentally
+  purging stale records.
+- `USimpleCoreBlueprintLibrary::UnsubscribeListener` BP wrapper —
+  `DefaultToSelf` on the WorldContext pin; pass `self` as the
+  Listener.
+- `UQuestObserverComponent::EndPlay` calls `UnsubscribeListener(this)`;
+  Trigger and Giver inherit the cleanup via the linear chain. Closes
+  a slow-leak problem where stale `TWeakObjectPtr` records previously
+  accumulated in `ChannelSubscribers` until the subsystem itself
+  died. Fine-grained per-handle unsubscribe sites in Trigger /
+  Giver (per-step end-event paths, per-give blocked-event paths)
+  remain — they handle gameplay-time finer-grained unsubscribe at
+  smaller granularity than the at-teardown bulk sweep.
+
+#### Block + deactivate convenience
+
+`FQuestBlockRequestEvent` gains an optional `bAlsoDeactivate` field
+(default false preserves the Block / Deactivate orthogonality). When
+true, the manager publishes `FQuestDeactivateRequestEvent` alongside
+the block — matches the graph-driven `USetBlockedNode`'s
+`bAlsoDeactivateTargets` toggle that's existed for a while.
+
+- The deactivate publish is independent of block-side idempotency:
+  if the quest is already blocked but not yet deactivated, the
+  deactivate publish still fires. Mirrors `USetBlockedNode`'s
+  "publish both events; each handler's own idempotency decides"
+  pattern.
+- `USimpleQuestBlueprintLibrary::SetQuestBlocked` extended with the
+  new flag (default false). Constructed inline via a new 4-arg
+  `FQuestBlockRequestEvent` constructor.
+
+#### Cleanups
+
+- Legacy `Quest.Outcome.*` defensive guard removed
+  (`LegacyOutcomeSubPrefix` + `EQuestTagKind::LegacyOutcome` +
+  branches in `ClassifyTag` / `IsOutcomeTag` / `TryStripOutcomePrefix`).
+  Bundled the intermediate `SimpleQuest.QuestOutcome.*` sibling
+  guard at the same retirement gate (every authored asset
+  recompiled at least once, satisfied by the rename-propagation
+  work above). `GameplayTagRedirects` in `DefaultGameplayTags.ini`
+  still cover transparent migration for any pre-0.4.0 content
+  loaded after the cleanup.
+- `FQuestTagComposer::MakeEntryPathFact` deleted (orphan — zero
+  production callers post-2c). The `EntryPathSubSuffix` constant
+  stays in active duty via `QuestPIEDebugChannel` (named-outcome
+  resolution detection in the prereq debug overlay) and the
+  `AllSuffixes[]` / `AllNamespaces[]` reserved-segment validation
+  chain.
+
+
 ### Tag namespace migration table
 
 Six namespace roots migrated. The 0.4.0 pass landed in two stages — an
@@ -1717,7 +1929,7 @@ inspector.
 - `FQuestProgressEvent` fires per trigger (not just on completion) for
   UI reactivity (e.g. kill-counter updates from 3/5 to 4/5)
 - Quest state facts in the `QuestState.<Tag>.*` namespace:
-  `.Active`, `.Completed`, `.PendingGiver`, `.Deactivated`, `.Blocked`
+  `.Live`, `.Completed`, `.PendingGiver`, `.Deactivated`, `.Blocked`
 - Autowire: rule-aware priority walker with Deactivation pin
   auto-expansion (dragging from a `Deactivated` output auto-expands
   the target node's deactivation pins before routing the wire)

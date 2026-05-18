@@ -19,6 +19,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Named outcomes** — nodes resolve with designer-authored outcome tags. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream wiring routes each outcome independently. No binary success/failure constraint.
 - **Structured objective activation** — activation delivers a typed `FQuestObjectiveActivationContext` struct (target actors, classes, element counts, typed CustomData, ActivationSource). Designer-authored step defaults, giver components, event-bus publishers, and step-to-step handoff all merge additively. An OriginTag and OriginChain track the cascade path across Quest and LinkedQuestline boundaries so objectives can branch on "who activated me" without glue code.
 - **Linked questlines** — reference external questline graph assets inline. The compiler inlines the linked graph with bidirectional tag resolution and dual-tag (contextual + standalone) subscription support.
+- **Tag rename resilience** — renaming a node or asset flows through every `FGameplayTag` reference on recompile: component fields, BP CDO defaults, K2 pin defaults via UE's `PostSerialize` redirect, UDataAsset / UDataTable / nested USTRUCT fields via reflection sweep. Unloaded packages get dirty-marked on next load so Save All catches the healed value. Upfront authoring-time validation refuses name collisions so subscribers never migrate to the wrong node.
 - **Live PIE inspection** — per-state colored halos on graph nodes, live leaf satisfaction tinting in the Prereq Examiner, and a searchable WorldState Facts panel showing every asserted fact. No log-diving required to understand the running state.
 - **Authoring diagnostics** — project-wide **Prereq Tag Validator** toolbar action flags broken cross-graph references (orphaned leaves, Rule Exits pointing at missing Rule Entries, unused Rule Entries); **Stale Quest Tags** nomad tab + headless commandlet cover the full project (loaded levels, Actor Blueprint defaults, unloaded levels including World Partition) with per-row Clear and a CI-friendly exit code for ship-pipeline gating. Together they catch authoring drift the compiler can't see.
 - **Two-plugin architecture** — SimpleQuest sits on top of **SimpleCore**, a standalone coordination layer any system can use independently.
@@ -234,15 +235,23 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 
 ## Configuration
 
-**Project Settings > Plugins > Simple Quest** — configure the runtime quest manager class, wire/pin/node color schemes, and hover highlight color.
+**Project Settings > Plugins > Simple Quest** — runtime quest manager class plus per-channel log verbosity dials.
 
-**Log verbosity** — SimpleQuest logs under the `LogSimpleQuest` category and SimpleCore under `LogSimpleCore`. Set verbosity in `DefaultEngine.ini`:
+**Project Settings > Plugins > Simple Core** — `LogSimpleCore` verbosity dial.
 
-```ini
-[Core.Log]
-LogSimpleQuest=Verbose
-LogSimpleCore=Verbose
-```
+**Editor Preferences > Plugins > Simple Quest Visuals** — wire, pin, node title, and debug-highlight colors used by the questline graph editor. Per-developer; not committed to source control.
+
+**Log verbosity** — SimpleQuest's logging is split into five channels for independent dial control:
+
+| Channel | Coverage |
+|---|---|
+| `LogSimpleQuest` | Umbrella — module startup, settings, debug overlay |
+| `LogSimpleQuestActivation` | Manager activation flow — cascade entry, chain advancement, live-state writers |
+| `LogSimpleQuestSubscription` | Observer / Trigger / Giver wiring, K2 subscriptions, catch-up fanout |
+| `LogSimpleQuestCompiler` | Graph compile, native tag registration, rename-redirect machinery |
+| `LogSimpleQuestState` | `UQuestStateSubsystem` registry mutations (resolutions, entries, tag / alias registrations) |
+
+SimpleCore logs under `LogSimpleCore`. Set verbosity per channel via the Project Settings pages above — changes apply live without editor restart. The `[Core.Log]` section in `DefaultEngine.ini` still works as a fallback for non-editor builds.
 
 Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 

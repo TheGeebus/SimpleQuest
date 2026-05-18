@@ -35,7 +35,6 @@ EQuestTagKind FQuestTagComposer::ClassifyTag(FName TagName)
 	const FString TagStr = TagName.ToString();
 	if (TagStr.StartsWith(StateNamespace))           return EQuestTagKind::State;
 	if (TagStr.StartsWith(OutcomeNamespace))         return EQuestTagKind::Outcome;
-	if (TagStr.StartsWith(LegacyOutcomeSubPrefix))			return EQuestTagKind::LegacyOutcome;
 	if (TagStr.StartsWith(PrereqRuleNamespace))      return EQuestTagKind::PrereqRule;
 	if (TagStr.StartsWith(ActivationGroupNamespace)) return EQuestTagKind::ActivationGroup;
 	if (TagStr.StartsWith(IdentityNamespace))        return EQuestTagKind::Identity;
@@ -44,11 +43,7 @@ EQuestTagKind FQuestTagComposer::ClassifyTag(FName TagName)
 
 bool FQuestTagComposer::IsIdentityTag(FName TagName)        { return ClassifyTag(TagName) == EQuestTagKind::Identity; }
 bool FQuestTagComposer::IsStateTag(FName TagName)           { return ClassifyTag(TagName) == EQuestTagKind::State; }
-bool FQuestTagComposer::IsOutcomeTag(FName TagName)
-{
-	const EQuestTagKind Kind = ClassifyTag(TagName);
-	return Kind == EQuestTagKind::Outcome || Kind == EQuestTagKind::LegacyOutcome;
-}
+bool FQuestTagComposer::IsOutcomeTag(FName TagName)         { return ClassifyTag(TagName) == EQuestTagKind::Outcome; }
 bool FQuestTagComposer::IsPrereqRuleTag(FName TagName)      { return ClassifyTag(TagName) == EQuestTagKind::PrereqRule; }
 bool FQuestTagComposer::IsActivationGroupTag(FName TagName) { return ClassifyTag(TagName) == EQuestTagKind::ActivationGroup; }
 
@@ -143,22 +138,6 @@ bool FQuestTagComposer::TryStripOutcomePrefix(FString& InOutPathString)
 	if (InOutPathString.StartsWith(OutcomeNamespace))
 	{
 		InOutPathString.RightChopInline(OutcomeNamespace.Len());
-		return true;
-	}
-	// 0.4.0-era prefix (post-namespace-consolidation, pre-Phase-D). BP-authored
-	// objectives may still carry K2 pin default values under this intermediate form
-	// because pin-default strings aren't auto-rewritten by GameplayTagRedirects. Removal
-	// slot after every authored asset has been recompiled under post-Phase-D code (§4.2-
-	// adjacent — same "transitional safeguard" pattern as LegacyOutcomeSubPrefix).
-	static const FString IntermediateOutcomePrefix = TEXT("SimpleQuest.QuestOutcome.");
-	if (InOutPathString.StartsWith(IntermediateOutcomePrefix))
-	{
-		InOutPathString.RightChopInline(IntermediateOutcomePrefix.Len());
-		return true;
-	}
-	if (InOutPathString.StartsWith(LegacyOutcomeSubPrefix))
-	{
-		InOutPathString.RightChopInline(LegacyOutcomeSubPrefix.Len());
 		return true;
 	}
 	return false;

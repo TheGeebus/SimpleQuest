@@ -32,8 +32,6 @@ bool FQuestTagComposer_Classify::RunTest(const FString& Parameters)
 		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.PrereqRule.MyRule")), EQuestTagKind::PrereqRule);
 	TestEqual(TEXT("ActivationGroup tag"),
 		FQuestTagComposer::ClassifyTag(TEXT("SimpleQuest.ActivationGroup.MyGroup")), EQuestTagKind::ActivationGroup);
-	TestEqual(TEXT("Legacy outcome tag"),
-		FQuestTagComposer::ClassifyTag(TEXT("Quest.Outcome.Victory")), EQuestTagKind::LegacyOutcome);
 	TestEqual(TEXT("Foreign tag"),
 		FQuestTagComposer::ClassifyTag(TEXT("Game.Combat.Damage")), EQuestTagKind::Unknown);
 	TestEqual(TEXT("None tag"),
@@ -45,7 +43,6 @@ bool FQuestTagComposer_Classify::RunTest(const FString& Parameters)
 
 	// IsOutcomeTag covers BOTH modern and legacy: closes the asymmetry bug.
 	TestTrue(TEXT("IsOutcomeTag modern"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.Outcome.X")));
-	TestTrue(TEXT("IsOutcomeTag legacy"), FQuestTagComposer::IsOutcomeTag(TEXT("Quest.Outcome.X")));
 	TestFalse(TEXT("IsOutcomeTag identity"), FQuestTagComposer::IsOutcomeTag(TEXT("SimpleQuest.Questline.X")));
 
 	return true;
@@ -205,7 +202,7 @@ bool FQuestTagComposer_EnumerateAncestors::RunTest(const FString& Parameters)
 }
 
 // -------------------------------------------------------------------------------------------------
-// TryStripOutcomePrefix: handles modern and legacy outcome namespaces; no-ops on non-outcome input.
+// TryStripOutcomePrefix: strips the modern outcome namespace; no-ops on non-outcome input.
 // -------------------------------------------------------------------------------------------------
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_StripOutcomePrefix, "SimpleQuest.TagComposer.StripOutcomePrefix", TestFlags)
@@ -215,11 +212,6 @@ bool FQuestTagComposer_StripOutcomePrefix::RunTest(const FString& Parameters)
 		FString Modern = TEXT("SimpleQuest.Outcome.Combat.Victory");
 		TestTrue(TEXT("Modern strip reports true"), FQuestTagComposer::TryStripOutcomePrefix(Modern));
 		TestEqual(TEXT("Modern stripped"), Modern, FString(TEXT("Combat.Victory")));
-	}
-	{
-		FString Legacy = TEXT("Quest.Outcome.Combat.Victory");
-		TestTrue(TEXT("Legacy strip reports true"), FQuestTagComposer::TryStripOutcomePrefix(Legacy));
-		TestEqual(TEXT("Legacy stripped"), Legacy, FString(TEXT("Combat.Victory")));
 	}
 	{
 		FString Foreign = TEXT("Game.Foo.Bar");
@@ -243,9 +235,6 @@ bool FQuestTagComposer_FormatOutcomeForDisplay::RunTest(const FString& Parameter
 	TestEqual(TEXT("Modern single-segment"),
 		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("SimpleQuest.Outcome.Victory")).ToString(),
 		FString(TEXT("Victory")));
-	TestEqual(TEXT("Legacy multi-segment"),
-		FQuestTagComposer::FormatOutcomeForDisplay(TEXT("Quest.Outcome.Combat.BossDefeated")).ToString(),
-		FString(TEXT("Combat: Boss Defeated")));
 	return true;
 }
 

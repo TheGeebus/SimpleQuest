@@ -15,11 +15,10 @@ enum class EQuestTagKind : uint8
 {
 	Unknown,
 	Identity,           // SimpleQuest.Questline.*           — designer-authored or compiler-emitted node identity
-	State,              // SimpleQuest.State.*      — runtime-managed state facts
-	Outcome,            // SimpleQuest.Outcome.*    — designer-authored outcome identifiers
-	PrereqRule,         // SimpleQuest.PrereqRule.* — designer-authored prereq rule group identity
-	ActivationGroup,    // SimpleQuest.ActivationGroup.*
-	LegacyOutcome,      // Quest.Outcome.*               — pre-0.4.0 outcome (transitional)
+	State,              // SimpleQuest.State.*				 — runtime-managed state facts
+	Outcome,            // SimpleQuest.Outcome.*			 — designer-authored outcome identifiers
+	PrereqRule,         // SimpleQuest.PrereqRule.*			 — designer-authored prereq rule group identity
+	ActivationGroup,    // SimpleQuest.ActivationGroup.* 	 — designer-authored activation group identity
 };
 
 /**
@@ -72,14 +71,9 @@ public:
 	inline static const FString OutcomeSubPrefix			= TEXT("Outcome");
 	inline static const FString PrereqRuleSubPrefix			= TEXT("PrereqRule");
 	inline static const FString ActivationGroupSubPrefix	= TEXT("ActivationGroup");
-	// Pre-0.4.0 outcome tag prefix retained for defensive runtime support — assets compiled
-	// before the namespace consolidation may still carry "Quest.Outcome.*" tags. Removal is
-	// a 0.4.1 polish item, gated on every authored asset being recompiled at least once
-	// (verifiable via Stale Quest Tags scanner). NOT part of main tag namespace cleanup.
-	inline static const FString LegacyOutcomeSubPrefix		= TEXT("Quest.Outcome.");
 
 	inline static const FString AllPrefixes[] = { PluginPrefix, QuestSubPrefix, StateSubPrefix, OutcomeSubPrefix,
-		PrereqRuleSubPrefix, ActivationGroupSubPrefix, LegacyOutcomeSubPrefix };
+		PrereqRuleSubPrefix, ActivationGroupSubPrefix };
 
 	// ------------------------------------------------------------------------------------------------
 	// Fully defined namespaces
@@ -107,13 +101,13 @@ public:
 	};
 
 	/**
-	 * Comprehensive union of every tag token FQuestTagComposer manages: plugin prefix, sub-prefixes
-	 * (including LegacyOutcomeSubPrefix), fully composed namespaces, suffixes (Path / EntryPath), and
-	 * the wire-format leaf names (Live, Completed, …) sourced via LeafToString. Heterogeneous by design
-	 * — single-segment entries mixed with dot-bearing prefix strings — so NOT suitable for tag-validity
-	 * checks (would produce false positives). Primary use: reserved-segment validation in the compiler
-	 * to block designer node labels from colliding with any internal-use token. Also suitable as a
-	 * complete inventory for any future audit / inspection surface.
+	 * Comprehensive union of every tag token FQuestTagComposer manages: plugin prefix, sub-prefixes,
+	 * fully composed namespaces, suffixes (Path / EntryPath), and the wire-format leaf names (Live,
+	 * Completed, …) sourced via LeafToString. Heterogeneous by design — single-segment entries mixed
+	 * with dot-bearing prefix strings — so NOT suitable for tag-validity checks (would produce false
+	 * positives). Primary use: reserved-segment validation in the compiler to block designer node
+	 * labels from colliding with any internal-use token. Also suitable as a complete inventory for any
+	 * future audit / inspection surface.
 	 */
 	inline static const TArray<FString> AllNamespaces = []
 	{

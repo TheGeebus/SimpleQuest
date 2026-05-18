@@ -301,10 +301,6 @@ bool FQuestTagComposer_PathFacts::RunTest(const FString& Parameters)
 		FQuestTagComposer::MakeNodePathFact(Node, Outcome),
 		FName(TEXT("SimpleQuest.State.MyAsset.Step1.Path.Victory")));
 
-	TestEqual(TEXT("MakeEntryPathFact strips outcome prefix"),
-		FQuestTagComposer::MakeEntryPathFact(Node, Outcome),
-		FName(TEXT("SimpleQuest.State.MyAsset.Step1.EntryPath.Victory")));
-
 	// Bare path identity (dynamic placement): no prefix to strip.
 	const FName BarePath = TEXT("DynamicVictory");
 	TestEqual(TEXT("MakeNodePathFact passes bare identity"),

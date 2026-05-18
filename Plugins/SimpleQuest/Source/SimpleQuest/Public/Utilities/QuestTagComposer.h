@@ -152,9 +152,6 @@ public:
 	/** Per-node path resolution fact: SimpleQuest.State.<NodePath>.Path.<Outcome>. */
 	static FName MakeNodePathFact(FName IdentityTagName, FName PathIdentity);
 
-	/** Per-quest entry path fact: SimpleQuest.State.<NodePath>.EntryPath.<Outcome>. */
-	static FName MakeEntryPathFact(FName IdentityTagName, FName PathIdentity);
-
 	/** Resolves a state-fact name to a registered FGameplayTag. Returns invalid tag if not registered. */
 	static FGameplayTag ResolveStateFactTag(FGameplayTag IdentityTag, EQuestStateLeaf Leaf);
 

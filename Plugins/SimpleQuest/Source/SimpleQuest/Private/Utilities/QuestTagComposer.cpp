@@ -92,19 +92,6 @@ FName FQuestTagComposer::MakeNodePathFact(FName IdentityTagName, FName PathIdent
 	return FName(*(NodeStr + TEXT(".") + PathSubSuffix + TEXT(".") + PathStr));
 }
 
-FName FQuestTagComposer::MakeEntryPathFact(FName IdentityTagName, FName PathIdentity)
-{
-	if (PathIdentity.IsNone()) return NAME_None;
-	FString NodeStr = IdentityTagName.ToString();
-	if (NodeStr.StartsWith(IdentityNamespace))
-	{
-		NodeStr = StateNamespace + NodeStr.RightChop(IdentityNamespace.Len());
-	}
-	FString PathStr = PathIdentity.ToString();
-	TryStripOutcomePrefix(PathStr);
-	return FName(*(NodeStr + TEXT(".") + EntryPathSubSuffix + TEXT(".") + PathStr));
-}
-
 FGameplayTag FQuestTagComposer::ResolveStateFactTag(FGameplayTag IdentityTag, EQuestStateLeaf Leaf)
 {
 	const FName FactName = MakeStateFact(IdentityTag, Leaf);

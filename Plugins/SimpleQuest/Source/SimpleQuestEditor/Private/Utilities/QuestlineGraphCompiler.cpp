@@ -1720,35 +1720,41 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 				return OutExpression.AddFactLeaf(CompletedFactTag);
 			}
 
-			// Build OR over all named outcome facts
+			// Build OR over all named output paths. AnyOutcomeOut is satisfied when ANY of the source node's
+			// declared paths fires — each path becomes its own Leaf_Path child.
 			const int32 OrIndex = OutExpression.AddCombinator(EPrerequisiteExpressionType::Or);
 
 			for (UEdGraphPin* OutcomePin : OutcomePins)
 			{
-				const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutcomePin->PinName, false);
-				if (!OutcomeTag.IsValid()) continue;
+				if (OutcomePin->PinName.IsNone()) continue;
 
-				// AddResolutionLeaf may reallocate Nodes; AddCombinatorChild's parent index is reused after the leaf
+				// PinName is the path identity directly. Static K2 placements have PinName equal to the
+				// outcome tag's name; dynamic placements supply a designer-authored sanitized PathName.
+				// Either shape feeds the leaf as-is — no gameplay-tag parsing required, no silent drop
+				// when PinName isn't a registered tag.
+				//
+				// AddPathLeaf may reallocate Nodes; AddCombinatorChild's parent index is reused after the leaf
 				// add so the index stays valid (TArray Add returns by value, no dangling reference into the array).
-				const int32 LeafIdx = OutExpression.AddResolutionLeaf(NodeTagName, OutcomeTag);
+				const int32 LeafIdx = OutExpression.AddPathLeaf(NodeTagName, OutcomePin->PinName);
 				OutExpression.AddCombinatorChild(OrIndex, LeafIdx);
 			}
 
 			return OrIndex;
         }
 
-    	// Specific outcome pin (a single named outcome wired into a prereq input). PinName IS the outcome tag's
-    	// FName for static placements; for dynamic placements it's the sanitized PathName. Routes through the same
-    	// Leaf_Resolution shape as the AnyOutcomeOut OR-loop above via FPrerequisiteExpression::AddResolutionLeaf.
+    	// Specific path pin (a single named path wired into a prereq input). PinName is the path identity
+    	// directly — equal to the outcome tag's name for static K2 placements, or the designer-authored
+    	// sanitized PathName for dynamic placements. Either shape feeds Leaf_Path as-is; no gameplay-tag
+    	// parsing, no silent drop when PinName isn't a registered tag string. The leaf is satisfied only
+    	// when the named quest resolves through THIS specific authored path.
     	const UQuestlineNode_ContentBase* ContentNode = Cast<const UQuestlineNode_ContentBase>(OutputPin->GetOwningNode());
     	if (!ContentNode) return INDEX_NONE;
     	const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
     	if (Label.IsEmpty()) return INDEX_NONE;
     	const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
-    	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
-    	if (!OutcomeTag.IsValid()) return INDEX_NONE;
+    	if (OutputPin->PinName.IsNone()) return INDEX_NONE;
 
-    	return OutExpression.AddResolutionLeaf(NodeTagName, OutcomeTag);
+    	return OutExpression.AddPathLeaf(NodeTagName, OutputPin->PinName);
     }
 
     return INDEX_NONE;

@@ -18,12 +18,23 @@ enum class EPrerequisiteExpressionType : uint8
 	And,			 // all children must be satisfied
 	Or,				 // any child must be satisfied
 	Not,			 // child must NOT be satisfied
-	Leaf_Resolution, // quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith on
-					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing assets
-					 // stamped with int values 0–4 continue to deserialize correctly.
-	Leaf_Entry		 // Quest-entry check (queries UQuestStateSubsystem::HasEnteredWith on
+	Leaf_Resolution, // outcome-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith on
+					 // LeafQuestTag and LeafOutcomeTag). Satisfies whenever the named quest resolved with the
+					 // named outcome, regardless of which path produced that outcome. Authored by the
+					 // declarative PrerequisiteOutcome node; the pin-wire authoring path emits Leaf_Path
+					 // instead (see below). Appended at the end so existing assets stamped with int values
+					 // 0–4 continue to deserialize correctly.
+	Leaf_Entry,		 // Quest-entry check (queries UQuestStateSubsystem::HasEnteredWith on
 					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing
 					 // serialized assets continue to deserialize correctly.
+	Leaf_Path		 // path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
+					 // LeafQuestTag and LeafPathIdentity). Satisfies only when the named quest resolved
+					 // through the specific authored path. This is what pin-wire prereq authoring emits —
+					 // the designer wired a specific output pin into a Prereq input, so only that pin's
+					 // resolution satisfies. Distinct from Leaf_Resolution: a quest with two paths sharing
+					 // an outcome tag will satisfy Leaf_Resolution on either path's resolution, but
+					 // Leaf_Path only on the named path's. Appended at the end so existing assets stamped
+					 // with int values 0–6 continue to deserialize correctly.
 };
 
 USTRUCT(Blueprintable)
@@ -33,18 +44,26 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 
 	UPROPERTY() EPrerequisiteExpressionType Type = EPrerequisiteExpressionType::Always;
 
-	/** Meaningful for Type=Leaf (the WorldState fact tag). Also populated for Type=Leaf_Resolution as a bridge
-		path-fact tag matching the runtime's MakeNodePathFact output for Prereq Examiner display compatibility:
-		runtime evaluation reads via UQuestStateSubsystem rather than WorldState; the bridge tag is editor-side
-		only. NOT populated for Type=Leaf_Entry. Entry leaves render via LeafQuestTag / LeafOutcomeTag directly. */
+	/** Meaningful for Type=Leaf (the WorldState fact tag). Also populated for Type=Leaf_Resolution and Type=Leaf_Path
+		as a bridge path-fact tag matching the runtime's MakeNodePathFact output for Prereq Examiner display
+		compatibility: runtime evaluation reads via UQuestStateSubsystem rather than WorldState; the bridge tag is
+		editor-side only. NOT populated for Type=Leaf_Entry. Entry leaves render via LeafQuestTag / LeafOutcomeTag
+		directly. */
 	UPROPERTY() FGameplayTag LeafTag;
 
-	/** Shared (ContextualTag, OutcomeTag) payload for both Type=Leaf_Resolution and Type=Leaf_Entry. The runtime
-		evaluator dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith
-		for resolution leaves, HasEnteredWith for entry leaves. Stamped by the compiler	from the outcome-pin
-		context. */
+	/** Source quest tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Path. The runtime evaluator
+		dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith for resolution
+		leaves (outcome-keyed), HasEnteredWith for entry leaves, HasResolvedAtPath for path leaves (path-keyed).
+		Stamped by the compiler from the source content node's compiled tag. */
 	UPROPERTY() FGameplayTag LeafQuestTag;
+
+	/** Outcome tag for Type=Leaf_Resolution and Type=Leaf_Entry. NOT populated for Type=Leaf_Path — path leaves
+		are path-keyed via LeafPathIdentity, not outcome-keyed. */
 	UPROPERTY() FGameplayTag LeafOutcomeTag;
+
+	/** Path identity for Type=Leaf_Path. Matches the source content node's output pin name (the pin's PathIdentity).
+		Stamped by the compiler from the wired pin. NOT populated for any other leaf type. */
+	UPROPERTY() FName LeafPathIdentity;
 
 	UPROPERTY() TArray<int32> ChildIndices;
 };
@@ -102,11 +121,14 @@ struct SIMPLEQUEST_API FQuestPrereqStatus
  *  - Type=Leaf				—   FactTag is the WorldState fact to subscribe via FWorldStateFactAddedEvent /
  *								FWorldStateFactRemovedEvent on its tag channel.
  *  - Type=Leaf_Resolution	—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent. LeafOutcomeTag
- *								is informational: handler unconditionally re-evaluates the expression, which uses the
- *								outcome internally via UQuestStateSubsystem::HasResolvedWith.
- *  - Type=Leaf_Entry		—	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag
- *								is informational: handler unconditionally re-evaluates the expression, which uses the
- *								outcome internally via UQuestStateSubsystem::HasEnteredWith.
+ *								is the match criterion: handler re-evaluates whether the quest has resolved with
+ *								that outcome on any path.
+ *  - Type=Leaf_Entry		—	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag is the
+ *								match criterion: handler re-evaluates whether the quest has been entered with that
+ *								incoming outcome.
+ *  - Type=Leaf_Path		—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent (same channel as
+ *								Leaf_Resolution). LeafPathIdentity is the match criterion: handler re-evaluates
+ *								whether the quest has resolved through that specific authored path.
  */
 struct FPrereqLeafDescriptor
 {
@@ -114,6 +136,7 @@ struct FPrereqLeafDescriptor
 	FGameplayTag FactTag;
 	FGameplayTag LeafQuestTag;
 	FGameplayTag LeafOutcomeTag;
+	FName LeafPathIdentity;
 };
 
 USTRUCT(Blueprintable)
@@ -145,6 +168,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 	int32 AddAlways();
 	int32 AddFactLeaf(const FGameplayTag& FactTag);
 	int32 AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
+	int32 AddPathLeaf(FName NodeTagName, FName PathIdentity);
 	int32 AddEntryLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
 	int32 AddCombinator(EPrerequisiteExpressionType Type);  // expects And or Or; child indices wired by caller
 	int32 AddNot();                                         // child index wired by caller via AddCombinatorChild

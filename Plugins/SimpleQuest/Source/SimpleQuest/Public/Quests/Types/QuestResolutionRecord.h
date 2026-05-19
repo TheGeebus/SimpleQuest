@@ -37,6 +37,14 @@ struct SIMPLEQUEST_API FQuestResolutionEntry
 	UPROPERTY(BlueprintReadOnly)
 	FGameplayTag OutcomeTag;
 
+	/**
+	 * The specific authored path the resolution fired through. Matches the source content node's output pin name
+	 * (the pin's PathIdentity). Used for path-keyed prereq queries via UQuestStateSubsystem::HasResolvedAtPath.
+	 * NAME_None for "resolve without specifying a path" calls (typically external API rehydration).
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	FName PathIdentity = NAME_None;
+
 	/** World time at this specific resolution (GetTimeSeconds on the manager's world). */
 	UPROPERTY(BlueprintReadOnly)
 	double ResolutionTime = 0.0;

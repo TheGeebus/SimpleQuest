@@ -10,8 +10,7 @@
 #include "Utilities/QuestTagComposer.h"
 
 
-bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState,
-                                       const UQuestStateSubsystem* StateSubsystem) const
+bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const
 {
 	if (Nodes.IsEmpty()) return true;
 	return EvaluateNode(RootIndex, WorldState, StateSubsystem);
@@ -68,6 +67,16 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 				&& StateSubsystem->HasEnteredWith(Node.LeafQuestTag, Node.LeafOutcomeTag);
 			Status.Leaves.Add(LeafStatus);
 		}
+		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Path)
+		{
+			FQuestPrereqLeafStatus LeafStatus;
+			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag: preserves blocker-display API shape
+			LeafStatus.bSatisfied = StateSubsystem
+				&& Node.LeafQuestTag.IsValid()
+				&& !Node.LeafPathIdentity.IsNone()
+				&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity);
+			Status.Leaves.Add(LeafStatus);
+		}
 	}
 
 	Status.bSatisfied = EvaluateNode(RootIndex, WorldState, StateSubsystem);
@@ -116,6 +125,17 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 			return bEntered;
 		}
 
+	case EPrerequisiteExpressionType::Leaf_Path:
+		{
+			const bool bResolvedAtPath = StateSubsystem
+				&& Node.LeafQuestTag.IsValid()
+				&& !Node.LeafPathIdentity.IsNone()
+				&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity);
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Path]: quest='%s' path='%s' → HasResolvedAtPath=%d"),
+				*Node.LeafQuestTag.ToString(), *Node.LeafPathIdentity.ToString(), bResolvedAtPath);
+			return bResolvedAtPath;
+		}
+
 	case EPrerequisiteExpressionType::And:
 		for (int32 ChildIdx : Node.ChildIndices)
 		{
@@ -147,9 +167,12 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	if (!Nodes.IsValidIndex(NodeIndex)) return;
 	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
 
-	// Both leaf kinds emit their LeafTag. Subscription wiring on the call sites continues to subscribe via the
-	// FWorldStateFactAddedEvent channel.
-	if (Node.Type == EPrerequisiteExpressionType::Leaf || Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+	// Leaf kinds that emit a bridge LeafTag get counted here. Subscription wiring on the call sites continues
+	// to subscribe via the type-appropriate channel — this helper is used by leaf-count logging, not by the
+	// subscription path (which uses CollectLeaves with the typed descriptor).
+	if (Node.Type == EPrerequisiteExpressionType::Leaf
+	 || Node.Type == EPrerequisiteExpressionType::Leaf_Resolution
+	 || Node.Type == EPrerequisiteExpressionType::Leaf_Path)
 	{
 		OutTags.AddUnique(Node.LeafTag);
 		return;
@@ -197,6 +220,15 @@ void FPrerequisiteExpression::CollectLeavesFromNode(int32 NodeIndex, TArray<FPre
 		OutLeaves.Add(Desc);
 		return;
 	}
+	if (Node.Type == EPrerequisiteExpressionType::Leaf_Path)
+	{
+		FPrereqLeafDescriptor Desc;
+		Desc.Type = EPrerequisiteExpressionType::Leaf_Path;
+		Desc.LeafQuestTag = Node.LeafQuestTag;
+		Desc.LeafPathIdentity = Node.LeafPathIdentity;
+		OutLeaves.Add(Desc);
+		return;
+	}
 	for (int32 ChildIdx : Node.ChildIndices)
 	{
 		CollectLeavesFromNode(ChildIdx, OutLeaves);
@@ -217,6 +249,14 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 	{
 	case EPrerequisiteExpressionType::Always: OutLines.Add(Indent + TEXT("Always")); break;
 	case EPrerequisiteExpressionType::Leaf:   OutLines.Add(FString::Printf(TEXT("%sLeaf [Fact] '%s' (valid=%d)"), *Indent, *Node.LeafTag.ToString(), Node.LeafTag.IsValid())); break;
+	case EPrerequisiteExpressionType::Leaf_Resolution:
+		{
+			OutLines.Add(FString::Printf(TEXT("%sLeaf [Resolution] quest='%s' outcome='%s'"),
+				*Indent,
+				*Node.LeafQuestTag.ToString(),
+				*Node.LeafOutcomeTag.ToString()));
+			break;
+		}
 	case EPrerequisiteExpressionType::Leaf_Entry:
 		{
 			OutLines.Add(FString::Printf(TEXT("%sLeaf [Entry] quest='%s' outcome='%s'"),
@@ -225,13 +265,17 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 				*Node.LeafOutcomeTag.ToString()));
 			break;
 		}
+	case EPrerequisiteExpressionType::Leaf_Path:
+		{
+			OutLines.Add(FString::Printf(TEXT("%sLeaf [Path] quest='%s' path='%s'"),
+				*Indent,
+				*Node.LeafQuestTag.ToString(),
+				*Node.LeafPathIdentity.ToString()));
+			break;
+		}
 	case EPrerequisiteExpressionType::And:    OutLines.Add(Indent + FString::Printf(TEXT("AND (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Or:     OutLines.Add(Indent + FString::Printf(TEXT("OR (%d children)"), Node.ChildIndices.Num())); break;
 	case EPrerequisiteExpressionType::Not:    OutLines.Add(Indent + TEXT("NOT")); break;
-	}
-	for (int32 ChildIdx : Node.ChildIndices)
-	{
-		DebugDumpTo(OutLines, ChildIdx, Depth + 1);
 	}
 }
 
@@ -259,6 +303,22 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 		FQuestTagComposer::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafOutcomeTag = OutcomeTag;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddPathLeaf(FName NodeTagName, FName PathIdentity)
+{
+	// Bridge LeafTag preserved for Prereq Examiner display compat — same MakeNodePathFact mechanism as
+	// AddResolutionLeaf, keyed on the path identity directly rather than the outcome tag's name. Runtime
+	// evaluation reads LeafQuestTag / LeafPathIdentity via UQuestStateSubsystem::HasResolvedAtPath; the
+	// bridge tag is editor-side only. Path leaves are satisfied only when the named quest resolved through
+	// this specific authored path — distinct from Leaf_Resolution which is outcome-keyed and satisfies on
+	// any path producing the named outcome.
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Leaf_Path;
+	Node.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeNodePathFact(NodeTagName, PathIdentity), false);
+	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+	Node.LeafPathIdentity = PathIdentity;
 	return Nodes.Add(Node);
 }
 

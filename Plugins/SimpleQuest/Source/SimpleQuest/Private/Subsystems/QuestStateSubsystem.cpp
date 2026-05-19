@@ -75,6 +75,19 @@ bool UQuestStateSubsystem::HasResolvedWith(FGameplayTag QuestTag, FGameplayTag O
 	return false;
 }
 
+bool UQuestStateSubsystem::HasResolvedAtPath(FGameplayTag QuestTag, FName PathIdentity) const
+{
+	if (!QuestTag.IsValid() || PathIdentity.IsNone()) return false;
+	for (const FGameplayTag& Tag : ResolveCanonicalTags(QuestTag))
+	{
+		if (const TSet<FName>* PathSet = ResolvedPathsByQuest.Find(Tag))
+		{
+			if (PathSet->Contains(PathIdentity)) return true;
+		}
+	}
+	return false;
+}
+
 int32 UQuestStateSubsystem::GetResolutionCount(FGameplayTag QuestTag) const
 {
 	int32 Total = 0;
@@ -270,7 +283,7 @@ FQuestPrereqStatus UQuestStateSubsystem::GetQuestPrereqStatus(FGameplayTag Quest
 	return FQuestPrereqStatus();
 }
 
-void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime, EQuestResolutionSource Source)
+void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -284,21 +297,31 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		FQuestResolutionRecord& Record = QuestResolutions.FindOrAdd(Perspective);
 		FQuestResolutionEntry& Entry = Record.History.Emplace_GetRef();
 		Entry.OutcomeTag = OutcomeTag;
+		Entry.PathIdentity = PathIdentity;
 		Entry.ResolutionTime = ResolutionTime;
 		Entry.Source = Source;
 
-		// Index maintenance for HasResolvedWith. Skipped when OutcomeTag is invalid (the "resolve without
-		// specifying an outcome" case via the BP ResolveQuest helper). TSet handles deduplication so repeat
+		// Index maintenance for HasResolvedWith (outcome-keyed). Skipped when OutcomeTag is invalid (the "resolve
+		// without specifying an outcome" case via the BP ResolveQuest helper). TSet handles deduplication so repeat
 		// resolutions with the same outcome don't bloat the set.
 		if (OutcomeTag.IsValid())
 		{
 			ResolvedOutcomesByQuest.FindOrAdd(Perspective).Add(OutcomeTag);
 		}
+
+		// Index maintenance for HasResolvedAtPath (path-keyed). Skipped when PathIdentity is NAME_None (external
+		// API resolves and graph-level wrapper completions don't carry a path). TSet handles deduplication for
+		// repeat resolutions through the same path.
+		if (!PathIdentity.IsNone())
+		{
+			ResolvedPathsByQuest.FindOrAdd(Perspective).Add(PathIdentity);
+		}
 	});
 
-	UE_LOG(LogSimpleQuestState, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' source=%s (resolution #%d at t=%.2fs)"),
+	UE_LOG(LogSimpleQuestState, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' path='%s' source=%s (resolution #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
 		*OutcomeTag.ToString(),
+		*PathIdentity.ToString(),
 		Source == EQuestResolutionSource::External ? TEXT("External") : TEXT("Graph"),
 		QuestResolutions.FindOrAdd(QuestTag).History.Num(),
 		ResolutionTime);
@@ -308,7 +331,7 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		ResolveSignalSubsystem(),
 		QuestTag,
 		AssetScopedAliasTagsByContextualTag,
-		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, ResolutionTime, Source));
+		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source));
 
 	OnAnyRegistryChanged.Broadcast();
 }

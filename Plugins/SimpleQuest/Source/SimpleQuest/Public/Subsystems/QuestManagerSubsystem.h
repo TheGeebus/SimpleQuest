@@ -396,7 +396,7 @@ private:
 	 */
 	void DeriveAllAncestorContainersForStep(UQuestStep* Step);
 	
-	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
+	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source);
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
 

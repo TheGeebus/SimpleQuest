@@ -105,8 +105,14 @@ namespace FPrereqLeafSubscription
 					StoreHandles(Channel, Slot);
 					SubscribedFactChannels.Add(Channel);
 				}
-				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution)
+				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution
+					  || Leaf.Type == EPrerequisiteExpressionType::Leaf_Path)
 				{
+					// Both leaf kinds subscribe to FQuestResolutionRecordedEvent on the source quest's tag. The
+					// handler re-evaluates the whole expression on event fire, which checks each leaf via its
+					// type-appropriate Has* query (HasResolvedWith for Leaf_Resolution, HasResolvedAtPath for
+					// Leaf_Path). One subscription per channel suffices; the SubscribedResolutionChannels set
+					// dedupes across both leaf types.
 					const FGameplayTag& Channel = Leaf.LeafQuestTag;
 					if (!Channel.IsValid() || SubscribedResolutionChannels.Contains(Channel)) continue;
 

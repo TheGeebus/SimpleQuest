@@ -73,6 +73,17 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
     bool HasResolvedWith(FGameplayTag QuestTag, FGameplayTag OutcomeTag) const;
 
+	/**
+	 * Whether this quest has resolved through the specified PathIdentity at any point this session. O(1) lookup
+	 * against a parallel index maintained alongside QuestResolutions; populated on every RecordResolution call.
+	 * Distinct from HasResolvedWith: that one is outcome-keyed (satisfies on any path producing the named
+	 * outcome); this one is path-keyed (satisfies only when the named quest resolved through this specific
+	 * authored path). Drives the runtime evaluation of Leaf_Path prereqs emitted from pin-wired prereq
+	 * authoring — a designer wiring from a specific output pin gets a leaf that only this exact path satisfies.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|State")
+	bool HasResolvedAtPath(FGameplayTag QuestTag, FName PathIdentity) const;
+
     /** Convenience accessor: how many times this quest has resolved this session. */
     int32 GetResolutionCount(FGameplayTag QuestTag) const;
 
@@ -276,6 +287,15 @@ private:
      */
     TMap<FGameplayTag, TSet<FGameplayTag>> ResolvedOutcomesByQuest;
 
+	/**
+	 * Parallel O(1) index for HasResolvedAtPath. Maintained alongside QuestResolutions: every RecordResolution
+	 * call adds the (ContextualTag, PathIdentity) pair to this map. Separate from ResolvedOutcomesByQuest because
+	 * Path and Outcome are independently queryable concerns — a quest with two paths sharing an outcome will
+	 * appear once in ResolvedOutcomesByQuest (under the shared outcome) but twice in ResolvedPathsByQuest (one
+	 * entry per path). TSet handles deduplication for repeat resolutions through the same path.
+	 */
+	TMap<FGameplayTag, TSet<FName>> ResolvedPathsByQuest;
+
     UPROPERTY()
     TMap<FGameplayTag, FQuestEntryRecord> QuestEntries;
 
@@ -291,7 +311,7 @@ private:
     TMap<FGameplayTag, FQuestPrereqStatus> CachedPrereqStatus;
 
     /** Manager calls these via friend access. */
-    void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, double ResolutionTime, EQuestResolutionSource Source);
+    void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source);
     void UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status);
     void ClearQuestPrereqStatus(FGameplayTag QuestTag);
     void RecordEntry(

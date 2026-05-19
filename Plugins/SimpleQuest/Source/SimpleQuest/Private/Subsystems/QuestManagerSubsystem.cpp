@@ -1312,7 +1312,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     if (Node->GetContextualTag().IsValid())
     {
-        SetQuestResolved(Node->GetContextualTag(), OutcomeTag, EQuestResolutionSource::Graph);
+        SetQuestResolved(Node->GetContextualTag(), OutcomeTag, ResolvedPath, EQuestResolutionSource::Graph);
         if (QuestSignalSubsystem)
         {
             if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetContextualTag()))
@@ -1819,9 +1819,8 @@ void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQ
             *QuestTag.ToString());
         return;
     }
-
-
-    SetQuestResolved(QuestTag, Event.OutcomeTag, EQuestResolutionSource::External);
+    
+    SetQuestResolved(QuestTag, Event.OutcomeTag, NAME_None, EQuestResolutionSource::External);
 
     // Live-step bookkeeping cleanup mirroring ChainToNextNodes — defensive against the non-Live cases (Find returns null).
     if (QuestSignalSubsystem)
@@ -2289,7 +2288,7 @@ void UQuestManagerSubsystem::DeriveAllAncestorContainersForStep(UQuestStep* Step
     }
 }
 
-void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, EQuestResolutionSource Source)
+void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
@@ -2345,7 +2344,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
         if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
         {
             const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-            Registry->RecordResolution(QuestTag, OutcomeTag, Now, Source);
+            Registry->RecordResolution(QuestTag, OutcomeTag, PathIdentity, Now, Source);
         }
     }
 
@@ -2453,7 +2452,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
         UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("FireWrapperBoundaryCompletion: wrapper '%s' instance not loaded — falling back to direct SetQuestResolved + publish"),
             *WrapperTag.ToString());
-        SetQuestResolved(WrapperTag, BC.OutcomeTag, EQuestResolutionSource::Graph);
+        SetQuestResolved(WrapperTag, BC.OutcomeTag, NAME_None, EQuestResolutionSource::Graph);
     }
 }
 
@@ -2476,7 +2475,7 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FGameplayTag>&
             // QSV layer: rich-record registry entry. RecordResolution multi-writes across the asset identity's
             // alias chain (typically empty for asset identities — they aren't aliased in the current compile
             // model — but the helper handles it uniformly for forward compat).
-            StateSubsystem->RecordResolution(GraphTag, OutcomeTag, ResolutionTime, Source);
+            StateSubsystem->RecordResolution(GraphTag, OutcomeTag, NAME_None, ResolutionTime, Source);
 
             // WSV layer: WorldState Completed fact write at the asset identity. Symmetric with content-node
             // SetQuestResolved's Completed fact bump — assets reach a terminal state too, and the WSV panel

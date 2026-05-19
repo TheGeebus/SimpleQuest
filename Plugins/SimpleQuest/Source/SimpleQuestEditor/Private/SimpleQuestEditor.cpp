@@ -56,7 +56,6 @@
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "FactsPanel/FactsPanelRegistry.h"
-#include "K2Nodes/K2Node_BindToQuestEvent.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
 

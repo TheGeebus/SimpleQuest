@@ -70,6 +70,77 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
     }
 }
 
+FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate)
+{
+    check(IsInGameThread());
+
+    UObject* Listener = Delegate.GetUObject();
+    if (!Listener)
+    {
+        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeDynamic: channel='%s' rejected — delegate has no bound UObject"),
+            *Channel.ToString());
+        return FDelegateHandle();
+    }
+
+    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::SubscribeDynamic: channel='%s' listener='%s'"),
+        *Channel.ToString(), *Listener->GetName());
+
+    FSignalSubscriberRecord Record;
+    Record.Listener = TWeakObjectPtr<UObject>(Listener);
+    Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), Delegate]
+        (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
+    {
+        if (!WeakListener.IsValid()) return;
+        if (Delegate.IsBound())
+        {
+            Delegate.Execute(ActualChannel, Struct);
+        }
+    };
+
+    const FDelegateHandle Handle = Record.Handle;
+    ChannelSubscribers.FindOrAdd(Channel).Add(MoveTemp(Record));
+    return Handle;
+}
+
+FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate)
+{
+    check(IsInGameThread());
+
+    UObject* Listener = Delegate.GetUObject();
+    if (!Listener)
+    {
+        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeOfType: channel='%s' rejected — delegate has no bound UObject"),
+            *Channel.ToString());
+        return FDelegateHandle();
+    }
+
+    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::SubscribeOfType: channel='%s' type='%s' listener='%s'"),
+        *Channel.ToString(),
+        PayloadType ? *PayloadType->GetName() : TEXT("<null>"),
+        *Listener->GetName());
+
+    FSignalSubscriberRecord Record;
+    Record.Listener = TWeakObjectPtr<UObject>(Listener);
+    Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), PayloadType, Delegate]
+        (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
+    {
+        if (!WeakListener.IsValid()) return;
+        if (!PayloadType) return;
+        const UScriptStruct* ActualType = Struct.GetScriptStruct();
+        if (!ActualType || !ActualType->IsChildOf(PayloadType)) return;
+        if (Delegate.IsBound())
+        {
+            Delegate.Execute(ActualChannel, Struct);
+        }
+    };
+
+    const FDelegateHandle Handle = Record.Handle;
+    ChannelSubscribers.FindOrAdd(Channel).Add(MoveTemp(Record));
+    return Handle;
+}
+
 void USignalSubsystem::UnsubscribeListener(UObject* Listener)
 {
     if (!Listener || bIsShuttingDown) return;

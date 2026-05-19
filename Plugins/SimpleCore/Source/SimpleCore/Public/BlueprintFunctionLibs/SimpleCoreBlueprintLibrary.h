@@ -7,10 +7,11 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "StructUtils/InstancedStruct.h"
-#include "WorldState/WorldStateSubsystem.h"  // for EFactBroadcastMode (UENUM in default arg)
+#include "WorldState/WorldStateSubsystem.h"
+#include "Signals/SignalSubsystem.h"
 #include "SimpleCoreBlueprintLibrary.generated.h"
 
-class USignalSubsystem;
+class FOnSignalReceived;
 
 
 /**
@@ -66,6 +67,40 @@ public:
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static void PublishMessageOnChannels(UObject* WorldContextObject, const TArray<FGameplayTag>& Channels,
         const FInstancedStruct& Payload, bool bAllChannels = false);
+
+    /**
+     * Subscribe to messages published on Channel or any of its descendant tags. The bound handler receives the
+     * original published tag plus the payload as an FInstancedStruct — use UE's "Get FInstancedStruct Value"
+     * or typed-extraction nodes inside the handler to read the concrete payload type.
+     *
+     * Listener identity comes from the bound delegate's UObject (typically the calling Blueprint actor or
+     * component). For cleanup, call UnsubscribeListener(self) from your EndPlay or BeginDestroy — it clears
+     * every subscription this listener owns across all channels in one call. Per-handle tracking is unnecessary
+     * for the typical BP use case.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
+    static void SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived);
+
+    /**
+     * Typed-filter variant of SubscribeMessage. Same delivery shape — handler receives the matched channel
+     * plus the payload as an FInstancedStruct — but only events whose payload is PayloadType (or a USTRUCT
+     * derived from it) actually fire the handler. Removes the per-handler "is this the event I care about?"
+     * branch adopters otherwise need with the untyped subscribe.
+     *
+     * The Payload Type picker is filtered to FSignalEventBase descendants — the SimpleCore-wide marker
+     * base for events flowing through the signal bus. SimpleQuest's FQuestEventBase and its lifecycle
+     * subclasses (FQuestStartedEvent, FQuestEndedEvent, FQuestResolutionRecordedEvent, …) all qualify,
+     * as does any adopter-authored event struct that derives from FSignalEventBase. Listener identity,
+     * cleanup semantics, and channel-hierarchy delivery match the untyped SubscribeMessage variant.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
+    static void SubscribeMessageOfType(
+        UObject* WorldContextObject,
+        FGameplayTag Channel,
+        UPARAM(meta = (MetaStruct = "/Script/SimpleCore.SignalEventBase")) UScriptStruct* PayloadType,
+        const FOnSignalReceived& OnSignalReceived);
 
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /

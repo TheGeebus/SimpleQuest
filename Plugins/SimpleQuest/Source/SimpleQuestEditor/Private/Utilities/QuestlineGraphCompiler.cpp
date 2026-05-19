@@ -38,6 +38,8 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Objectives/QuestObjective.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
@@ -1624,6 +1626,31 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 			}
 		}
 		return NodeIndex;
+	}
+	
+	// Fact Tag leaf: standalone prereq authoring against an arbitrary World State fact tag. Decoupled from
+	// graph topology — designer picks any registered gameplay tag and the leaf gates on its presence.
+	if (UQuestlineNode_PrerequisiteFactTag* FactTagNode = Cast<UQuestlineNode_PrerequisiteFactTag>(Node))
+	{
+		if (!FactTagNode->FactTag.IsValid())
+		{
+			AddWarning(FString::Printf(TEXT("[%s] A Fact Tag prereq node has no FactTag set and will be skipped."), *TagPrefix), FactTagNode);
+			return INDEX_NONE;
+		}
+		return OutExpression.AddFactLeaf(FactTagNode->FactTag);
+	}
+	
+	// Outcome leaf: context-free prereq authoring against an outcome tag. Decoupled from graph topology AND from
+	// any specific quest — satisfies when any quest in the session has resolved with the picked outcome (or any
+	// descendant). Backed by Phase 6a outcome-channel publishing + HasAnyQuestResolvedWith hierarchy walk.
+	if (UQuestlineNode_PrerequisiteOutcome* OutcomeNode = Cast<UQuestlineNode_PrerequisiteOutcome>(Node))
+	{
+		if (!OutcomeNode->OutcomeTag.IsValid())
+		{
+			AddWarning(FString::Printf(TEXT("[%s] An Outcome prereq node has no OutcomeTag set and will be skipped."), *TagPrefix), OutcomeNode);
+			return INDEX_NONE;
+		}
+		return OutExpression.AddOutcomeLeaf(OutcomeNode->OutcomeTag);
 	}
 
 	// Getter: resolves to a Leaf on the group's Satisfied tag

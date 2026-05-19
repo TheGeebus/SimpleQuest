@@ -88,6 +88,7 @@ namespace FPrereqLeafSubscription
 			TSet<FGameplayTag> SubscribedFactChannels;
 			TSet<FGameplayTag> SubscribedResolutionChannels;
 			TSet<FGameplayTag> SubscribedEntryChannels;
+			TSet<FGameplayTag> SubscribedOutcomeChannels;
 
 			for (const FPrereqLeafDescriptor& Leaf : Leaves)
 			{
@@ -120,6 +121,20 @@ namespace FPrereqLeafSubscription
 					Slot.Resolution = Signals->template SubscribeMessage<FQuestResolutionRecordedEvent>(Channel, Subscriber, ResolutionHandler);
 					StoreHandles(Channel, Slot);
 					SubscribedResolutionChannels.Add(Channel);
+				}
+				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Outcome)
+				{
+					// Context-free outcome leaf — channel IS the outcome tag (Phase 6a outcome-channel publish
+					// target). Subscribe to FQuestResolutionRecordedEvent on that channel; bus's hierarchical
+					// delivery covers descendant outcomes. Handler re-evaluates the whole expression, which checks
+					// each leaf via HasAnyQuestResolvedWith (also hierarchy-aware via MatchesTag).
+					const FGameplayTag& Channel = Leaf.LeafOutcomeTag;
+					if (!Channel.IsValid() || SubscribedOutcomeChannels.Contains(Channel)) continue;
+
+					FPrereqLeafHandles Slot;
+					Slot.Resolution = Signals->template SubscribeMessage<FQuestResolutionRecordedEvent>(Channel, Subscriber, ResolutionHandler);
+					StoreHandles(Channel, Slot);
+					SubscribedOutcomeChannels.Add(Channel);
 				}
 				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Entry)
 				{

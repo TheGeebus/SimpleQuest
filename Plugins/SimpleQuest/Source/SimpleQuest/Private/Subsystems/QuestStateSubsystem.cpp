@@ -30,7 +30,8 @@ namespace
 	 * than per-node alias arrays — the state subsystem's events don't carry a node reference at this layer.
 	 */
 	template <typename EventType>
-	void PublishWithAliases(USignalSubsystem* Signals, FGameplayTag CanonicalTag, const TMap<FGameplayTag, TArray<FGameplayTag>>& AliasReverseMap, EventType Event)
+	void PublishWithAliases(USignalSubsystem* Signals, FGameplayTag CanonicalTag, const TMap<FGameplayTag, TArray<FGameplayTag>>& AliasReverseMap,
+		EventType Event, TArrayView<const FGameplayTag> AdditionalChannels = {})
 	{
 		if (!Signals || !CanonicalTag.IsValid()) return;
 
@@ -42,6 +43,15 @@ namespace
 			{
 				if (AliasTag.IsValid()) Channels.Add(AliasTag);
 			}
+		}
+		
+		// Cross-cutting channels — for resolution / entry events these include the outcome tag (and incoming
+		// outcome tag, respectively) so subscribers can bind by outcome semantically without filtering payloads
+		// on a quest-tag-keyed subscription. Bus dedup-on-by-default collapses delivery to one callback per
+		// subscriber when they bind on multiple matched channels.
+		for (const FGameplayTag& Extra : AdditionalChannels)
+		{
+			if (Extra.IsValid()) Channels.Add(Extra);
 		}
 
 		Signals->PublishMessageOnChannels(MoveTemp(Channels), Event);
@@ -84,6 +94,16 @@ bool UQuestStateSubsystem::HasResolvedAtPath(FGameplayTag QuestTag, FName PathId
 		{
 			if (PathSet->Contains(PathIdentity)) return true;
 		}
+	}
+	return false;
+}
+
+bool UQuestStateSubsystem::HasAnyQuestResolvedWith(FGameplayTag OutcomeTag) const
+{
+	if (!OutcomeTag.IsValid()) return false;
+	for (const FGameplayTag& Recorded : ResolvedOutcomes)
+	{
+		if (Recorded.MatchesTag(OutcomeTag)) return true;
 	}
 	return false;
 }
@@ -317,6 +337,12 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 			ResolvedPathsByQuest.FindOrAdd(Perspective).Add(PathIdentity);
 		}
 	});
+	
+	// Session-wide flat outcome index (new) — one insert; perspectives don't affect the outcome itself
+	if (OutcomeTag.IsValid())
+	{
+		ResolvedOutcomes.Add(OutcomeTag);
+	}
 
 	UE_LOG(LogSimpleQuestState, Log, TEXT("QuestResolutions: appended '%s' outcome='%s' path='%s' source=%s (resolution #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
@@ -326,12 +352,18 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		QuestResolutions.FindOrAdd(QuestTag).History.Num(),
 		ResolutionTime);
 
-	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag...
+	// Broadcast on the resolved quest's tag channel + each AssetScopedAliasTag + the outcome tag itself.
+	// Outcome-channel publish lets subscribers bind on a specific outcome tag (or a parent outcome tag for
+	// hierarchical fan-in) without needing to subscribe per-quest and filter payloads. Reputation systems,
+	// achievement trackers, telemetry, and audio cue layers benefit from binding by outcome directly.
+	// Bus dedup means subscribers on both the quest channel and the outcome channel receive one callback.
+	const TArray<FGameplayTag> OutcomeChannels = { OutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
 		AssetScopedAliasTagsByContextualTag,
-		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source));
+		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source),
+		OutcomeChannels);
 
 	OnAnyRegistryChanged.Broadcast();
 }
@@ -380,17 +412,20 @@ void UQuestStateSubsystem::RecordEntry(
 		QuestEntries.FindOrAdd(QuestTag).History.Num(),
 		EntryTime);
 
-	// Broadcast on the destination quest's tag channel + each AssetScopedAliasTag. PrereqLeafSubscription consumers
-	// routed by Leaf_Entry listen here and trigger expression re-evaluation; designers can also subscribe directly
-	// for cascade-attribution audit / logging. The event's payload preserves the legacy (QuestTag, SourceQuestTag,
-	// IncomingOutcomeTag, EntryTime) shape — subscribers wanting the new provenance / snapshot fields read the
-	// latest entry from the registry on receipt. PublishWithAliases wraps the bus's multi-channel publish primitive
-	// (F.2) — cross-asset subscribers bound through alias tags receive the event once on their natural channel.
+	// Broadcast on the destination quest's tag channel + each AssetScopedAliasTag + the incoming outcome tag.
+	// PrereqLeafSubscription consumers routed by Leaf_Entry listen here and trigger expression re-evaluation;
+	// designers can also subscribe directly for cascade-attribution audit / logging or to react when ANY quest
+	// is entered via a specific outcome route (matched at the outcome-tag channel). The event's payload
+	// preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime) shape — subscribers
+	// wanting the new provenance / snapshot fields read the latest entry from the registry on receipt.
+	// Bus dedup collapses delivery to one callback per subscriber across the channel set.
+	const TArray<FGameplayTag> IncomingOutcomeChannels = { IncomingOutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
 		AssetScopedAliasTagsByContextualTag,
-		FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime));
+		FQuestEntryRecordedEvent(QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime),
+		IncomingOutcomeChannels);
 
 	OnAnyRegistryChanged.Broadcast();
 }

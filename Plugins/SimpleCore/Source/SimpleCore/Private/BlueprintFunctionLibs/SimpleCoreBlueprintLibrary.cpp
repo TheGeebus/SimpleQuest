@@ -28,6 +28,22 @@ void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContext
     }
 }
 
+void USimpleCoreBlueprintLibrary::SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived)
+{
+    if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+    {
+        Signals->SubscribeMessageDynamic(Channel, OnSignalReceived);
+    }
+}
+
+void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextObject, FGameplayTag Channel, UScriptStruct* PayloadType, const FOnSignalReceived& OnSignalReceived)
+{
+    if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+    {
+        Signals->SubscribeMessageOfType(Channel, PayloadType, OnSignalReceived);
+    }
+}
+
 void USimpleCoreBlueprintLibrary::UnsubscribeListener(UObject* WorldContextObject, UObject* Listener)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))

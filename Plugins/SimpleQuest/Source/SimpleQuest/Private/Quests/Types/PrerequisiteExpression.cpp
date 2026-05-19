@@ -77,7 +77,16 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 				&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity);
 			Status.Leaves.Add(LeafStatus);
 		}
-	}
+		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Outcome)
+		{
+			FQuestPrereqLeafStatus LeafStatus;
+			LeafStatus.LeafTag = Node.LeafOutcomeTag;  // bridge: outcome tag IS the identifier for context-free leaves
+			LeafStatus.bSatisfied = StateSubsystem
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasAnyQuestResolvedWith(Node.LeafOutcomeTag);
+			Status.Leaves.Add(LeafStatus);
+		}
+	}	
 
 	Status.bSatisfied = EvaluateNode(RootIndex, WorldState, StateSubsystem);
 
@@ -135,6 +144,16 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 				*Node.LeafQuestTag.ToString(), *Node.LeafPathIdentity.ToString(), bResolvedAtPath);
 			return bResolvedAtPath;
 		}
+		
+	case EPrerequisiteExpressionType::Leaf_Outcome:
+		{
+			const bool bResolved = StateSubsystem
+				&& Node.LeafOutcomeTag.IsValid()
+				&& StateSubsystem->HasAnyQuestResolvedWith(Node.LeafOutcomeTag);
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Outcome]: outcome='%s' → HasAnyQuestResolvedWith=%d"),
+				*Node.LeafOutcomeTag.ToString(), bResolved);
+			return bResolved;
+		}
 
 	case EPrerequisiteExpressionType::And:
 		for (int32 ChildIdx : Node.ChildIndices)
@@ -175,6 +194,13 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	 || Node.Type == EPrerequisiteExpressionType::Leaf_Path)
 	{
 		OutTags.AddUnique(Node.LeafTag);
+		return;
+	}
+	if (Node.Type == EPrerequisiteExpressionType::Leaf_Outcome)
+	{
+		// Outcome leaves have no node-context bridge — the outcome tag itself is the identifier. LeafTag is
+		// populated by AddOutcomeLeaf directly to the outcome tag for examiner display compatibility.
+		OutTags.AddUnique(Node.LeafOutcomeTag);
 		return;
 	}
 	for (int32 ChildIdx : Node.ChildIndices)
@@ -229,6 +255,14 @@ void FPrerequisiteExpression::CollectLeavesFromNode(int32 NodeIndex, TArray<FPre
 		OutLeaves.Add(Desc);
 		return;
 	}
+	if (Node.Type == EPrerequisiteExpressionType::Leaf_Outcome)
+	{
+		FPrereqLeafDescriptor Desc;
+		Desc.Type = EPrerequisiteExpressionType::Leaf_Outcome;
+		Desc.LeafOutcomeTag = Node.LeafOutcomeTag;
+		OutLeaves.Add(Desc);
+		return;
+	}
 	for (int32 ChildIdx : Node.ChildIndices)
 	{
 		CollectLeavesFromNode(ChildIdx, OutLeaves);
@@ -271,6 +305,13 @@ void FPrerequisiteExpression::DebugDumpTo(TArray<FString>& OutLines, int32 NodeI
 				*Indent,
 				*Node.LeafQuestTag.ToString(),
 				*Node.LeafPathIdentity.ToString()));
+			break;
+		}
+	case EPrerequisiteExpressionType::Leaf_Outcome:
+		{
+			OutLines.Add(FString::Printf(TEXT("%sLeaf [Outcome] outcome='%s'"),
+				*Indent,
+				*Node.LeafOutcomeTag.ToString()));
 			break;
 		}
 	case EPrerequisiteExpressionType::And:    OutLines.Add(Indent + FString::Printf(TEXT("AND (%d children)"), Node.ChildIndices.Num())); break;
@@ -329,6 +370,19 @@ int32 FPrerequisiteExpression::AddEntryLeaf(FName NodeTagName, const FGameplayTa
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf_Entry;
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
+	Node.LeafOutcomeTag = OutcomeTag;
+	return Nodes.Add(Node);
+}
+
+int32 FPrerequisiteExpression::AddOutcomeLeaf(const FGameplayTag& OutcomeTag)
+{
+	// Context-free outcome leaf — no quest-tag scoping. LeafOutcomeTag is BOTH the match criterion (passed to
+	// HasAnyQuestResolvedWith at evaluation time) AND the subscribe channel (Phase 6a's outcome-channel publish
+	// target). LeafTag mirrors the outcome tag so CollectLeafTags + examiner display can render the leaf identity
+	// without a synthesized bridge fact (the outcome tag IS the identifier here, no node context to encode).
+	FPrerequisiteExpressionNode Node;
+	Node.Type = EPrerequisiteExpressionType::Leaf_Outcome;
+	Node.LeafTag = OutcomeTag;
 	Node.LeafOutcomeTag = OutcomeTag;
 	return Nodes.Add(Node);
 }

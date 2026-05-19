@@ -18,16 +18,15 @@ enum class EPrerequisiteExpressionType : uint8
 	And,			 // all children must be satisfied
 	Or,				 // any child must be satisfied
 	Not,			 // child must NOT be satisfied
-	Leaf_Resolution, // outcome-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith on
-					 // LeafQuestTag and LeafOutcomeTag). Satisfies whenever the named quest resolved with the
-					 // named outcome, regardless of which path produced that outcome. Authored by the
-					 // declarative PrerequisiteOutcome node; the pin-wire authoring path emits Leaf_Path
-					 // instead (see below). Appended at the end so existing assets stamped with int values
-					 // 0–4 continue to deserialize correctly.
+	Leaf_Resolution, // Legacy outcome-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedWith
+					 // on LeafQuestTag and LeafOutcomeTag). Superseded by Leaf_Path (for pin-wired authoring) and
+					 // Leaf_Outcome (for context-free outcome authoring); no current authoring path emits it.
+					 // Retained for back-compat deserialization of assets compiled before the Path/Outcome split.
+					 // Appended at the end so existing assets stamped with int values 0–4 continue to deserialize.
 	Leaf_Entry,		 // Quest-entry check (queries UQuestStateSubsystem::HasEnteredWith on
 					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing
 					 // serialized assets continue to deserialize correctly.
-	Leaf_Path		 // path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
+	Leaf_Path,		 // path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
 					 // LeafQuestTag and LeafPathIdentity). Satisfies only when the named quest resolved
 					 // through the specific authored path. This is what pin-wire prereq authoring emits —
 					 // the designer wired a specific output pin into a Prereq input, so only that pin's
@@ -35,6 +34,12 @@ enum class EPrerequisiteExpressionType : uint8
 					 // an outcome tag will satisfy Leaf_Resolution on either path's resolution, but
 					 // Leaf_Path only on the named path's. Appended at the end so existing assets stamped
 					 // with int values 0–6 continue to deserialize correctly.
+	Leaf_Outcome	 // context-free outcome leaf — satisfies when ANY quest has resolved with LeafOutcomeTag
+					 // (or any descendant via gameplay-tag hierarchy). Queries UQuestStateSubsystem::
+					 // HasAnyQuestResolvedWith and subscribes directly on the outcome tag channel (Phase 6a
+					 // outcome-channel publish target). Authored by the declarative PrerequisiteOutcome node;
+					 // no quest-tag context required. Distinct from Leaf_Resolution which is quest-keyed.
+					 // Appended at the end so existing assets stamped with int values 0–7 continue to deserialize.
 };
 
 USTRUCT(Blueprintable)
@@ -57,8 +62,9 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 		Stamped by the compiler from the source content node's compiled tag. */
 	UPROPERTY() FGameplayTag LeafQuestTag;
 
-	/** Outcome tag for Type=Leaf_Resolution and Type=Leaf_Entry. NOT populated for Type=Leaf_Path — path leaves
-		are path-keyed via LeafPathIdentity, not outcome-keyed. */
+	/** Outcome tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Outcome. NOT populated for
+		Type=Leaf_Path — path leaves are path-keyed via LeafPathIdentity, not outcome-keyed. For Leaf_Outcome
+		this is both the match criterion AND the subscribe channel (Phase 6a outcome-channel publish target). */
 	UPROPERTY() FGameplayTag LeafOutcomeTag;
 
 	/** Path identity for Type=Leaf_Path. Matches the source content node's output pin name (the pin's PathIdentity).
@@ -122,13 +128,17 @@ struct SIMPLEQUEST_API FQuestPrereqStatus
  *								FWorldStateFactRemovedEvent on its tag channel.
  *  - Type=Leaf_Resolution	—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent. LeafOutcomeTag
  *								is the match criterion: handler re-evaluates whether the quest has resolved with
- *								that outcome on any path.
+ *								that outcome on any path. Legacy — no current authoring path emits this.
  *  - Type=Leaf_Entry		—	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag is the
  *								match criterion: handler re-evaluates whether the quest has been entered with that
  *								incoming outcome.
  *  - Type=Leaf_Path		—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent (same channel as
  *								Leaf_Resolution). LeafPathIdentity is the match criterion: handler re-evaluates
  *								whether the quest has resolved through that specific authored path.
+ *  - Type=Leaf_Outcome	—	LeafOutcomeTag is BOTH the channel (Phase 6a outcome-channel publish target for
+ *								FQuestResolutionRecordedEvent) AND the match criterion. Context-free — no
+ *								LeafQuestTag scoping; handler re-evaluates whether any quest has resolved with
+ *								that outcome (or any descendant via gameplay-tag hierarchy).
  */
 struct FPrereqLeafDescriptor
 {
@@ -170,6 +180,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 	int32 AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
 	int32 AddPathLeaf(FName NodeTagName, FName PathIdentity);
 	int32 AddEntryLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
+	int32 AddOutcomeLeaf(const FGameplayTag& OutcomeTag);
 	int32 AddCombinator(EPrerequisiteExpressionType Type);  // expects And or Or; child indices wired by caller
 	int32 AddNot();                                         // child index wired by caller via AddCombinatorChild
 	void  AddCombinatorChild(int32 ParentIndex, int32 ChildIndex);

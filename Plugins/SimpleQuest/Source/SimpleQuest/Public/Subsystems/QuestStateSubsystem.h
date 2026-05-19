@@ -84,6 +84,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Quest|State")
 	bool HasResolvedAtPath(FGameplayTag QuestTag, FName PathIdentity) const;
 
+	/**
+	 * Whether ANY quest has resolved with the specified OutcomeTag (or any descendant via gameplay-tag hierarchy)
+	 * at any point this session. Context-free — no quest-tag scoping. Backs the runtime evaluation of Leaf_Outcome
+	 * prereqs emitted from the declarative PrerequisiteOutcome authoring node. Hierarchy walk via FGameplayTag::
+	 * MatchesTag mirrors the bus's hierarchical delivery semantics for outcome-channel publishes: a leaf subscribed
+	 * at SimpleQuest.Outcome.Victory satisfies on both Outcome.Victory and any descendant like Outcome.Victory.Flawless.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|State")
+	bool HasAnyQuestResolvedWith(FGameplayTag OutcomeTag) const;
+
     /** Convenience accessor: how many times this quest has resolved this session. */
     int32 GetResolutionCount(FGameplayTag QuestTag) const;
 
@@ -295,6 +305,16 @@ private:
 	 * entry per path). TSet handles deduplication for repeat resolutions through the same path.
 	 */
 	TMap<FGameplayTag, TSet<FName>> ResolvedPathsByQuest;
+
+	/**
+	 * Flat session-wide set of every outcome tag any quest has resolved with. Maintained alongside the per-quest
+	 * ResolvedOutcomesByQuest map: RecordResolution inserts here too. Backs HasAnyQuestResolvedWith — the
+	 * context-free outcome query that catch-up logic for Leaf_Outcome prereqs queries on subscribe.
+	 *
+	 * Hierarchy walk happens at query time (HasAnyQuestResolvedWith iterates and calls MatchesTag) rather than
+	 * at storage time, so the set stays compact regardless of tag hierarchy depth.
+	 */
+	TSet<FGameplayTag> ResolvedOutcomes;
 
     UPROPERTY()
     TMap<FGameplayTag, FQuestEntryRecord> QuestEntries;

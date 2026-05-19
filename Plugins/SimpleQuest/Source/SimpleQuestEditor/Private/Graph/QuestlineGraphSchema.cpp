@@ -25,6 +25,8 @@
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Types/QuestPinRole.h"
 
 
@@ -1211,6 +1213,28 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	        0));
 	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteNot>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 	    ContextMenuBuilder.AddAction(Action);
+	}
+	
+	// Prereq Fact Tag
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqFactTag", "Add Prerequisite Fact Tag"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqFactTagTooltip", "Gate on the presence of an arbitrary World State fact tag. Decoupled from graph topology."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteFactTag>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	
+	// Prereq Outcome Tag
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqOutcomeTag", "Add Prerequisite Outcome Tag"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqOutcomeTagTooltip", "Context-free outcome leaf. Satisfied when any quest has resolved with the picked outcome (or any descendant)."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteOutcome>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
 	}
 
 	// Prereq Group Setter

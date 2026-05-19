@@ -5,11 +5,12 @@
 
 #include <concepts>
 
+#include "Events/SignalEventBase.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "QuestEventBase.generated.h"
 
 USTRUCT(BlueprintType)
-struct FQuestEventBase
+struct FQuestEventBase : public FSignalEventBase
 {
 	GENERATED_BODY()
 

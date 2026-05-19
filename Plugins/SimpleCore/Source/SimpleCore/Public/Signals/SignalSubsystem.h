@@ -22,6 +22,14 @@ struct FSignalSubscriberRecord
     TFunction<void(FGameplayTag, const FInstancedStruct&)> Dispatcher;
 };
 
+/**
+ * Dynamic delegate type for Blueprint-callable subscriptions. Matches the bus's typed-payload dispatch shape
+ * but receives FInstancedStruct on the BP side so the handler can branch on payload type via UE's
+ * GetInstancedStructValue / typed-extraction nodes. C++ subscribers should keep using the templated
+ * SubscribeMessage<T> for compile-time payload typing; this surface is for BP.
+ */
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSignalReceived, FGameplayTag, MatchedChannel, FInstancedStruct, Payload);
+
 UCLASS()
 class SIMPLECORE_API USignalSubsystem : public UGameInstanceSubsystem
 {
@@ -50,7 +58,7 @@ public:
     /**
      * Publish Event on a set of channels treating the call as one logical event instance. The bus walks each channel's
      * hierarchy independently; subscribers reached via any channel in the set fire exactly once (default dedup-on, by
-     * FDelegateHandle), with the callback's first arg set to the channel from the publish set most specific to that
+     * FDelegateHandle), with the callback's first arg set to the channel from the publishing set most specific to that
      * subscriber's bound tag (longest channel where the subscriber's tag is an ancestor or equal; tie-break by input
      * array order).
      *
@@ -68,7 +76,7 @@ public:
     void PublishMessageOnChannels(TArray<FGameplayTag> Channels, const T& Event, bool bAllChannels = false);
 
     /**
-     * Raw FInstancedStruct multi-channel publish. Same semantics as the templated form; use when forwarding a payload
+     * Raw FInstancedStruct multichannel publish. Same semantics as the templated form; use when forwarding a payload
      * received from another subscription without re-packing (avoids type-slicing).
      */
     void PublishMessageOnChannelsRaw(TArray<FGameplayTag> Channels, const FInstancedStruct& Payload, bool bAllChannels = false);
@@ -91,11 +99,34 @@ public:
     void UnsubscribeMessage(FGameplayTag Channel, FDelegateHandle Handle);
 
     /**
+     * Blueprint-friendly subscribe path. Listener is taken from the delegate's bound UObject (FScriptDelegate's
+     * GetUObject), so the bus's stale-listener guard works correctly without an explicit Listener parameter.
+     * Returns the handle for the rare adopter case that wants per-(channel, handle) cleanup; most BP callers
+     * should rely on UnsubscribeListener(this) at teardown rather than tracking handles.
+     *
+     * BP adopters consume this via USimpleCoreBlueprintLibrary::SubscribeMessage. Direct C++ use is supported
+     * but the templated SubscribeMessage<T> / SubscribeRawMessage<T> path is preferred for compile-time payload
+     * typing.
+     */
+    FDelegateHandle SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate);
+
+    /**
+     * Typed-filter variant of SubscribeMessageDynamic. The bound handler only fires when the incoming
+     * payload's UScriptStruct matches PayloadType or derives from it — same semantic as the C++ template
+     * SubscribeMessage<T>. Use when the BP handler only wants events carrying a specific payload type
+     * without per-handler FInstancedStruct-extraction branches in every callback body.
+     *
+     * PayloadType must be non-null; null is treated as "no filter passes" and the subscription silently
+     * delivers nothing (defensive — prevents a spuriously-null type from acting as a wildcard).
+     */
+    FDelegateHandle SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate);
+
+    /**
      * Remove every subscription on every channel whose Listener is the given object. Single-call cleanup intended for
      * EndPlay / BeginDestroy on subscriber objects with many subscriptions across many channels — avoids the
      * per-(Channel, Handle) bookkeeping that UnsubscribeMessage requires. Compares raw UObject pointers
      * (TWeakObjectPtr::Get() == Listener), so subclasses and unrelated objects are not affected. No-op if Listener is
-     * nullptr (refuses the call rather than incidentally purging stale records). Safe to call from inside a publish
+     * nullptr (refuses the call rather than incidentally purging stale records). Safe to call from inside a publishing
      * walk — the walker snapshots the per-channel array before iterating, so removals only affect subsequent publishes.
      *
      * Preserves subscriber insertion order in each affected channel — the broadcast-ordering contract that
@@ -105,7 +136,7 @@ public:
 
 private:
     /**
-     * Internal dispatcher for multi-channel publishes. Channels assumed valid and deduplicated upstream, which
+     * Internal dispatcher for multichannel publishes. Channels assumed valid and deduplicated upstream, which
      * PublishMessageOnChannelsRaw enforces. Implements the deduplication-on / sibling-publish split based on bAllChannels.
      */
     void DispatchOnChannels(const TArray<FGameplayTag>& Channels, const FInstancedStruct& Payload, bool bAllChannels);

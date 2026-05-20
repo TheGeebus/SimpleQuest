@@ -14,7 +14,7 @@ public class SimpleQuestDemoEditorTarget : TargetRules
 		// engine considers current — keeps the editor target's build environment compatible with the
 		// parent UnrealEditor settings regardless of which engine version is in use.
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
-		IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_6;
+		IncludeOrderVersion = EngineIncludeOrderVersion.Latest;
 		ExtraModuleNames.Add("SimpleQuestDemo");
 	}
 }

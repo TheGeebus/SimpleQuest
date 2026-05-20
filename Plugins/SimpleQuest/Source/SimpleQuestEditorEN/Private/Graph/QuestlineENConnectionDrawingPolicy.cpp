@@ -5,8 +5,10 @@
 void FQuestlineENConnectionDrawingPolicy::DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End,
                                                          const FConnectionParams& Params)
 {
-    bIsPrereqWire = (Params.AssociatedPin2 != nullptr
-                  && Params.AssociatedPin2->PinName == TEXT("Prerequisites"));
+    // Prereq-wire detection now reads Params.bUserFlag1, set by the Mixin's DetermineWiringStyle. Inherits
+    // the Mixin's knot-traversal logic (LeadsOnlyToPrereqInputs) so wires passing through knot chains into
+    // prereq inputs dash correctly without a second topology walk here.
+    bIsPrereqWire = Params.bUserFlag1;
 
     DashAccumulated = 0.f;
     bDashDrawing = true;
@@ -14,42 +16,80 @@ void FQuestlineENConnectionDrawingPolicy::DrawConnection(int32 LayerId, const FV
 
     FENBase::DrawConnection(LayerId, Start, End, Params);
 
+    // Trailing flush — any partial dash still open in CurrentDash after the connection's final MakeDrawSpline
+    // call gets emitted here. Uses Params.WireColor / WireThickness as the trailing-render attributes;
+    // EN's internal MakeDrawSpline calls within this connection share the same color and thickness so the
+    // approximation matches the actual last-rendered spline.
     if (bIsPrereqWire && bDashDrawing && CurrentDash.Num() >= 2)
-        FSlateDrawElement::MakeLines(DrawElementsList, LayerId,
-            FPaintGeometry(), CurrentDash, ESlateDrawEffect::None,
-            Params.WireColor, true, Params.WireThickness);
+    {
+        FSlateDrawElement::MakeLines(DrawElementsList, LayerId, FPaintGeometry(), CurrentDash,
+            ESlateDrawEffect::None, Params.WireColor, true, Params.WireThickness);
+    }
 }
 
-void FQuestlineENConnectionDrawingPolicy::DrawWireSegment(const FVector2f& Start, const FVector2f& End, int32 LayerId,
-    const FLinearColor& Color, float Thickness)
+void FQuestlineENConnectionDrawingPolicy::MakeDrawSpline(FSlateWindowElementList& ElementList, uint32 InLayer,
+    const FVector2D InStart, const FVector2D InStartDir, const FVector2D InEnd, const FVector2D InEndDir,
+    float InThickness, ESlateDrawEffect InDrawEffects, const FLinearColor& InTint)
 {
     if (!bIsPrereqWire)
     {
-        FENBase::DrawWireSegment(Start, End, LayerId, Color, Thickness);
+        FENBase::MakeDrawSpline(ElementList, InLayer, InStart, InStartDir, InEnd, InEndDir, InThickness, InDrawEffects, InTint);
         return;
     }
 
-    // Dash this segment, continuing state from previous segments on this connection
+    // Subdivide the cubic Hermite spline into straight line segments and feed each through the dash state
+    // machine. Dash state (DashAccumulated, bDashDrawing, CurrentDash) is INSTANCE state that persists
+    // across this entire connection — Manhattan and Subway wire styles emit multiple MakeDrawSpline calls
+    // per connection, and the state machine maintains a continuous dash pattern across all of them.
+    const FVector2f Start2f(InStart);
+    const FVector2f StartTan(InStartDir);
+    const FVector2f End2f(InEnd);
+    const FVector2f EndTan(InEndDir);
+
+    FVector2f Prev = Start2f;
+    for (int32 i = 1; i <= SplineSubdivisions; ++i)
+    {
+        const float T = static_cast<float>(i) / static_cast<float>(SplineSubdivisions);
+        const FVector2f Point = FMath::CubicInterp(Start2f, StartTan, End2f, EndTan, T);
+        AccumulateDashSegment(Prev, Point, static_cast<int32>(InLayer), InTint, InThickness);
+        Prev = Point;
+    }
+}
+
+void FQuestlineENConnectionDrawingPolicy::AccumulateDashSegment(const FVector2f& Start, const FVector2f& End,
+    int32 LayerId, const FLinearColor& Color, float Thickness)
+{
     const float SegLen = FVector2f::Distance(Start, End);
     if (SegLen < KINDA_SMALL_NUMBER) return;
-    
-    // If a DrawRadius arc was drawn since the last DrawWireSegment call, CurrentDash ends at the pre-arc position while
-    // this segment starts at the post-arc position. Flush the partial dash now to prevent a diagonal jump across the
-    // arc in MakeLines.
-    if (CurrentDash.Num() > 0 && FVector2f::Distance(CurrentDash.Last(), Start) > 0.5f)
+
+    // EN's tuples in DrawList have two categories of position discrepancy at boundaries:
+    //   • small numerical noise (a few units) — tangent-computation differences between EN helpers leave
+    //     adjacent tuple endpoints not quite matching, but the wire is visually continuous.
+    //   • large genuine jumps (tens of units) — real routing discontinuities in Manhattan/Subway paths
+    //     where the rendered wire takes a discrete step.
+    //
+    // The dash polyline should flow through the first category (line caps stay aligned, no visible artifact)
+    // and break cleanly across the second (otherwise MakeLines draws a diagonal across the gap). DashFlush-
+    // Threshold sits high enough that small noise stays under it, but well below the magnitude of genuine
+    // jumps EN produces. DashAccumulated and bDashDrawing are preserved across the flush so the dash phase
+    // continues correctly past the break.
+    static constexpr float DashFlushThreshold = 8.0f;
+    if (CurrentDash.Num() > 0 && FVector2f::Distance(CurrentDash.Last(), Start) > DashFlushThreshold)
     {
         if (CurrentDash.Num() >= 2)
         {
-            FSlateDrawElement::MakeLines(DrawElementsList, LayerId, FPaintGeometry(), CurrentDash, ESlateDrawEffect::None,
-                Color, true, Thickness);
+            FSlateDrawElement::MakeLines(DrawElementsList, LayerId, FPaintGeometry(), CurrentDash,
+                ESlateDrawEffect::None, Color, true, Thickness);
         }
         CurrentDash.Reset();
-        // DashAccumulated and bDashDrawing are preserved — the dash pattern continues across the arc without accounting
-        // for its length (arc is solid).
     }
-    
-    if (CurrentDash.Num() == 0) CurrentDash.Add(Start);
 
+    // Only seed CurrentDash with Start when we're actively drawing a dash. In gap mode, CurrentDash must
+    // stay empty until the next gap→dash transition seeds it with the proper dash-start point. Adding
+    // Start unconditionally pollutes CurrentDash during gap mode and produces a phantom line across the
+    // gap when the next dash eventually renders via MakeLines.
+    if (CurrentDash.Num() == 0 && bDashDrawing) CurrentDash.Add(Start);
+    
     const FVector2f Dir = (End - Start) / SegLen;
     float Consumed = 0.f;
 
@@ -72,45 +112,17 @@ void FQuestlineENConnectionDrawingPolicy::DrawWireSegment(const FVector2f& Start
             CurrentDash.Add(Transition);
             if (CurrentDash.Num() >= 2)
             {
-                FSlateDrawElement::MakeLines(DrawElementsList, LayerId, FPaintGeometry(), CurrentDash, ESlateDrawEffect::None,
-                    Color, true, Thickness);
+                FSlateDrawElement::MakeLines(DrawElementsList, LayerId, FPaintGeometry(), CurrentDash,
+                    ESlateDrawEffect::None, Color, true, Thickness);
             }
             CurrentDash.Reset();
         }
 
         Consumed += ToThreshold;
-        DashAccumulated  = 0.f;
+        DashAccumulated = 0.f;
         bDashDrawing = !bDashDrawing;
         if (bDashDrawing) CurrentDash.Add(Start + Dir * Consumed);
     }
-}
-
-void FQuestlineENConnectionDrawingPolicy::DrawArcSegment(const FVector2f& Start, const FVector2f& StartTangent,const FVector2f& End,
-    const FVector2f& EndTangent, int32 LayerId, const FLinearColor& Color, float Thickness)
-{
-    if (!bIsPrereqWire)
-    {
-        FENBase::DrawArcSegment(Start, StartTangent, End, EndTangent, LayerId, Color, Thickness);
-        return;
-    }
-
-    // Subdivide the cubic Bezier arc into straight segments so the dash state machine runs continuously through corners
-    // without a seam or jump.
-    static constexpr int32 NumSubdivisions = 32;
-    FVector2f Prev = Start;
-    for (int32 i = 1; i <= NumSubdivisions; ++i)
-    {
-        const float T = static_cast<float>(i) / static_cast<float>(NumSubdivisions);
-        const FVector2f Point = FMath::CubicInterp(Start, StartTangent, End, EndTangent, T);
-        DrawWireSegment(Prev, Point, LayerId, Color, Thickness);
-        Prev = Point;
-    }
-}
-
-bool FQuestlineENConnectionDrawingPolicy::IsIdenticalRibbonSegment(float RibbonMin, float RibbonMax, float CurrentMin, float CurrentMax)
-{
-    return  (FMath::IsNearlyEqual(RibbonMin, CurrentMin, KINDA_SMALL_NUMBER) && FMath::IsNearlyEqual(RibbonMax, CurrentMax, KINDA_SMALL_NUMBER)) ||
-            (FMath::IsNearlyEqual(RibbonMin, CurrentMax, KINDA_SMALL_NUMBER) && FMath::IsNearlyEqual(RibbonMax, CurrentMin, KINDA_SMALL_NUMBER));
 }
 
 #endif

@@ -28,6 +28,11 @@
 			"AdditionalDependencies": [
 				"Settings"
 			]
+		},
+		{
+			"Name": "SimpleQuestEditorEN",
+			"Type": "UncookedOnly",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
@@ -38,6 +43,11 @@
 		{
 			"Name": "GameplayTagsEditor",
 			"Enabled": true
+		},
+		{
+			"Name": "ElectronicNodes",
+			"Enabled": true,
+			"Optional": true
 		}
 	],
 	"AdditionalPluginConfig": [

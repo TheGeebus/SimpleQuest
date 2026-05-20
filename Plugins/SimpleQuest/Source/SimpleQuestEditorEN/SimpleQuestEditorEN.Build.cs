@@ -7,20 +7,36 @@ public class SimpleQuestEditorEN : ModuleRules
     public SimpleQuestEditorEN(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
+    
         PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
         PrivateIncludePaths.Add(Path.Combine(ModuleDirectory, "Private"));
-
+    
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Core", "CoreUObject", "Slate", "SlateCore",
-            "UnrealEd", "GraphEditor", "BlueprintGraph",
+            "Core", 
+            "CoreUObject", 
+            "Slate",
+            "Engine",
+            "SlateCore",
+            "UnrealEd",
+            "GraphEditor", 
+            "BlueprintGraph",
             "SimpleQuestEditor"
         });
-
+    
+        // EN integration requires UE 5.7+ — the MakeDrawSpline virtual hook needed for the prereq-wire dash effect
+        // was introduced in the Electronic Nodes release for UE 5.7. Stock 5.6 EN doesn't expose hooks at the 
+        // abstraction layer the integration needs, so on pre-5.7 engines we skip the integration entirely
+        // (the module still compiles; the #if-guarded source files just compile to empty translation units). The
+        // rest of the SimpleQuest plugin works fine on 5.6 — only the optional EN visual layer is gated.
+        bool bEngineSupportsENIntegration =
+            Target.Version.MajorVersion > 5 ||
+            (Target.Version.MajorVersion == 5 && Target.Version.MinorVersion >= 7);
+    
         string EngineDir = Path.GetFullPath(Target.RelativeEnginePath);
-
-        if (FindElectronicNodes(EngineDir, ModuleDirectory, Target, out string ENSourceDir))
+    
+        if (bEngineSupportsENIntegration &&
+            FindElectronicNodes(EngineDir, ModuleDirectory, Target, out string ENSourceDir))
         {
             PrivateDependencyModuleNames.Add("ElectronicNodes");
             PrivateIncludePaths.Add(Path.Combine(ENSourceDir, "Private"));

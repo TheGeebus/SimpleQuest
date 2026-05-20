@@ -18,71 +18,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   that landed in 0.4.0 will extend to step-level resolutions,
   giving adopters per-step "what happened" detail in addition to
   per-quest. Direct groundwork for save/load.
-
-### Active Development
-
-- **Event-driven LinkedQuestline reference cache.** Incremental
-  cross-asset dependency tracking, replacing the current Asset
-  Registry scans on compile. Faster authoring iteration on
-  projects with many linked questlines.
+- **Quest rewards.** Runtime and editor framework for creating 
+  and delivering rewards. A standalone questline graph node allows 
+  rewards to be issued under any circumstance. By following the
+  same adapater pattern as the `UQuestObjective`, they maintain
+  maximum flexibility to serve any game.
+    
 
 ---
 
-## [0.4.0] — TBD — Quest Lifecycle Architecture + Tag Namespace Consolidation
+## [0.4.0] — 2026-05-20 — Architectural Cohesion + Adopter Ergonomics
 
-A multi-theme architectural pass that lays the foundations for the
-0.5.0 save/load work by locking down tag identity, splitting
-orchestration from fact-registry read access, and rebuilding the
-quest event lifecycle around an Activated / Enabled / Started /
-GiveBlocked vocabulary that lets designer-side UI choose between
-"I might offer this soon" affordance and "I can actually offer this
-right now" affordance without writing state-query boilerplate inside
-every event handler.
+Where v0.3 began to reveal the shape of the framework, v0.4 fully describes it.
 
-Three intertwined themes:
-
-1. **Tag namespace consolidation under `SimpleQuest.*`** — every
-   plugin-introduced gameplay tag now lives under a single parent.
-   Designers opening the Gameplay Tag Manager see a clean separation
-   between plugin tags and game-authored tags. Locks tag string
-   identity before the save format freezes in 0.5.0.
-
-2. **Quest event lifecycle redesign** — `Activated` (execution reached
-   this giver-gated quest, with prereq snapshot) and `Enabled`
-   (genuinely accept-ready) are now distinct events; `GiveBlocked`
-   is the structured "no" partner to `Started`'s "yes"; a
-   `QueryQuestActivationBlockers` BP-callable query API surfaces
-   the same blocker structure synchronously for greyed-out / locked-
-   icon UI.
-
-3. **Manager-orchestrator + state-registry split** — the manager
-   subsystem is now a black-box orchestrator with no public read API.
-   All public read access lives on `UQuestStateSubsystem` (renamed
-   from `UQuestResolutionSubsystem` per the new "...StateSubsystem"
-   convention — externally accessible fact registry with potentially
-   limited write access; mirrors `UWorldStateSubsystem` across the
-   suite).
-
-Plus the supporting renames and surface refreshes that fall out of
-those themes: **Active → Live** state rename across runtime + editor
-(frees activation vocabulary for the new lifecycle event without
-forcing past-tense "Started" as a state name); **BindToQuestEvent**
-K2 node expansion to expose all 9 lifecycle events with per-instance
-pin exposure via right-click context menu and mask-gated proxy
-subscriptions; six discrete BP delegates on `UQuestGiverComponent`
-matching the new lifecycle granularity.
-
-### Late 0.4.0 sprint (2026-05-13 → 2026-05-18)
-
-A two-week sprint at the tail of the 0.4.0 cycle landed component-
-model unification, tag-rename resilience across every place an
-`FGameplayTag` can hide, per-channel log verbosity, a settings
-reorganization that separates adopter knobs from developer visuals,
-and a handful of convenience APIs and cleanups. Each theme is
-independently useful; together they close out 0.4.0's architectural
-agenda.
-
-#### Component model — Observer / Trigger / Giver linear inheritance
+### Component model — Observer / Trigger / Giver linear inheritance
 
 `UQuestObserverComponent` is now the base of a linear inheritance
 chain. `UQuestTriggerComponent` inherits Observer's full lifecycle
@@ -111,30 +60,55 @@ component instead of stacking a Giver plus a separate Observer.
   `FInstancedStruct` payload at any write site; downstream
   subscribers receive them as part of the standard `FQuestEventPayload`.
 
-#### Activation failure observability
+### Path / Outcome architectural separation
 
-Quest activation refusals are now observable. When an `ActivateQuest`
-call refuses — because the tag isn't registered, the quest is
-already live, the quest is already waiting on a giver, or the quest
-is blocked — `OnQuestActivationFailed` fires on any
-`UQuestObserverComponent` subscribed to the quest's tag.
+Pin-wired prereqs now distinguish *which authored output path* fired
+the upstream resolution, not just *which outcome*. Closes a real
+prereq-wiring gap where two parallel paths on a content node sharing
+the same outcome tag would both satisfy a downstream prereq wired to
+just one of them — silently dropping the designer's authored intent.
+After this change, wiring a prereq into a specific output pin means
+only that pin's path satisfies it.
 
-- Per-quest opt-in via the **Observe Activation Failed** checkbox
-  on the observer's tag entry (off by default; debug-leaning
-  feature most adopters won't need outside diagnostic flows).
-- The delegate carries the attempted tag both as a registered
-  `FGameplayTag` (when valid) and a raw `FName` (so designers can
-  read what was attempted even when the tag isn't registered at
-  all), the refusal reason as an `EQuestActivationBlocker` enum,
-  and the standard `FQuestEventPayload`.
-- Subscriptions bound on a parent tag receive failures from any
-  descendant — even when the failed tag isn't in the gameplay tag
-  manager. Combined with the raw `FName`, this means a single
-  observer bound on `SimpleQuest.Questline.MyArc` can catch
-  failures across the whole arc, including typo'd tags that never
-  registered to begin with.
+Underneath, the prereq expression schema gained two new leaf types
+and two new authoring nodes built on top of them:
 
-#### Tag rename propagation through Blueprints and assets
+- `Leaf_Path` — emitted by the compiler whenever a prereq is wired
+  from a specific output pin on a content node. Satisfies only when
+  the source quest resolved through that exact authored path
+  (matches the pin's `PathIdentity`, an `FName`). Queries
+  `UQuestStateSubsystem::HasResolvedAtPath`.
+- `Leaf_Outcome` — context-free outcome leaf. Satisfies when ANY
+  quest resolves with the named outcome tag (or any descendant via
+  gameplay-tag hierarchy). Queries
+  `UQuestStateSubsystem::HasAnyQuestResolvedWith`. Subscribes
+  directly on the outcome tag channel (see "Outcome-channel
+  publishing" below).
+
+New authoring nodes:
+
+- **Prerequisite Fact Tag** — gates on the presence of any World
+  State fact tag. Decoupled from graph topology entirely; lets you
+  gate quests on systemic state from anywhere in the project (faction
+  reputation, inventory facts, system-level flags) without routing
+  it through the quest graph.
+- **Prerequisite Outcome** — gates on a context-free outcome tag.
+  Satisfied when any quest resolves with the picked outcome, no
+  matter which quest produced it. Picker filtered to
+  `SimpleQuest.Outcome.*` for ergonomic narrowing.
+
+Both new nodes render with the same visual shape as Prerequisite
+Rule Exit — title bar above, inline tag picker on the same row as
+the output pin. Tag-picker prereq leaves are now visually consistent
+across the three variants.
+
+Quest resolution records (`FQuestResolutionEntry`) and the broadcast
+event (`FQuestResolutionRecordedEvent`) both gained a `PathIdentity`
+field carrying the source pin's `FName`. The event keeps a 4-arg
+constructor for back-compat; new construction sites prefer the 5-arg
+form to preserve graph-authored path identity.
+
+### Tag rename propagation through Blueprints and assets
 
 Renaming a quest node or asset in the questline editor now flows
 through every `FGameplayTag` reference shape on next compile,
@@ -162,7 +136,9 @@ Coverage:
 Assets that weren't loaded at compile time heal transparently on
 next load via Unreal's standard `GameplayTagRedirects` machinery,
 and the framework flags them dirty so Save All catches the healed
-value to disk.
+value to disk. Avoids the usual need to restart the editor to apply
+`GameplayTagRedirects`. They are registered and take effect immediately 
+on graph compilation.
 
 Authoring-time guardrail: the editor refuses renames that would
 collide with another node's current name OR last-compiled identity.
@@ -171,53 +147,98 @@ error message — so subscribers never silently migrate to the wrong
 node because two nodes briefly shared a name across a compile
 boundary.
 
+Compile-time guardrail: any new rename operation that would create a
+collision with some prior name in an existing chain of redirects is 
+detected at compile time. The prior chain is broken at the point of 
+collision and the downstream tag is then connected directly to all
+immediate upstream tags, preserving the transitive nature of the 
+pre-existing redirect chain, ensuring all tags are accurately redirected.
+
 The compile pipeline batches all rename-redirect writes into a
 single end-of-compile pass, so the per-graph **Compile** toolbar
 button now runs at parity with the project-wide **Compile All
 Questlines** action. No felt-slowness regression on iterative
 authoring cycles.
 
-#### Per-channel log verbosity
+### Activation failure observability
 
-`LogSimpleQuest` splits into five categories so you can dial each
-concern independently. The previous all-or-nothing pattern (compile
-firehose drowning the gameplay trace, or gameplay trace burying
-the compile diagnostics) goes away.
+Quest activation refusals are now observable. When an `ActivateQuest`
+call refuses — because the tag isn't registered, the quest is
+already live, the quest is already waiting on a giver, or the quest
+is blocked — `OnQuestActivationFailed` fires on any
+`UQuestObserverComponent` subscribed to the quest's tag.
 
-| Channel | Coverage |
-|---|---|
-| `LogSimpleQuest` | Module startup, settings, debug overlay, anything not covered below |
-| `LogSimpleQuestActivation` | Quest activation flow — starts, chain advancement, deactivation |
-| `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery |
-| `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation |
-| `LogSimpleQuestState` | Quest history recording — resolutions, entries, tag registrations |
+- Per-quest opt-in via the **Observe Activation Failed** checkbox
+  on the observer's tag entry (off by default; debug-leaning
+  feature most adopters won't need outside diagnostic flows).
+- The delegate carries the attempted tag both as a registered
+  `FGameplayTag` (when valid) and a raw `FName` (so designers can
+  read what was attempted even when the tag isn't registered at
+  all), the refusal reason as an `EQuestActivationBlocker` enum,
+  and the standard `FQuestEventPayload`.
+- Subscriptions bound on a parent tag receive failures from any
+  descendant — even when the failed tag isn't in the gameplay tag
+  manager. Combined with the raw `FName`, this means a single
+  observer bound on `SimpleQuest.Questline.MyArc` can catch
+  failures across the whole arc, including typo'd tags that never
+  registered to begin with.
 
-Set verbosity per channel under **Project Settings → Plugins →
-Simple Quest → Logging** (or **Simple Core** for `LogSimpleCore`).
-Changes apply live — no editor restart, no `DefaultEngine.ini`
-edit. Values persist across sessions automatically.
+### Outcome-channel event publishing
 
-#### Settings page reorganization
+Quest resolutions and entries now publish on the outcome tag channel
+in addition to the canonical quest channel. Subscribers can bind
+directly to an outcome tag (e.g., `SimpleQuest.Outcome.Victory`) and
+receive every resolution that matches — across all quests, with the
+gameplay-tag hierarchy walk handled by the signal bus.
 
-Project Settings is split into three pages, sorted by audience.
+Useful for systems that key off outcomes rather than quests:
+achievement trackers, reputation systems, telemetry, audio cue
+layers. Replaces the per-quest subscribe-and-filter pattern with a
+direct subscribe on the outcome itself.
 
-- **Project Settings → Plugins → Simple Quest** — quest manager
-  class designation and the five log verbosity dials. The adopter
-  surface.
-- **Project Settings → Plugins → Simple Core** — verbosity dial
-  for `LogSimpleCore`. Separate page so SimpleCore stays usable
-  standalone for projects that don't pull in SimpleQuest.
-- **Editor Preferences → Plugins → Simple Quest Visuals** —
-  wire, pin, node title, and debug-highlight colors used by the
-  questline graph editor. Per-developer (saved to local Editor
-  Preferences, not source-controlled).
+Signal bus deduplication means subscribers bound on both the quest channel
+AND the outcome channel still get exactly one callback per logical
+resolution event.
 
-The previous single Project Settings page bundled colors alongside
-the adopter knobs; colors are out of that surface entirely now so
-first-impression scanning stays focused on what adopters actually
-configure.
+### `FSignalEventBase` marker struct
 
-#### Signal bus convenience
+A bare marker base in SimpleCore that all signal-bus event structs
+inherit from. Doesn't add fields or behavior — the bus's runtime
+contract still admits any USTRUCT — but provides:
+
+- A canonical compile-time concept (`CSignalEvent`) for template
+  constraints on event-handling APIs.
+- A meta-struct filter target for Blueprint picker UX (used by the
+  Subscribe Message Of Type node, below).
+
+SimpleQuest's `FQuestEventBase` now derives from `FSignalEventBase`,
+so all quest lifecycle events flow through the picker filter
+naturally. Adopters can derive their own event structs from
+`FSignalEventBase` to get the same picker integration.
+
+### Blueprint Subscribe nodes
+
+The signal bus's `SubscribeMessage` is now Blueprint-callable via
+two nodes on `USimpleCoreBlueprintLibrary`:
+
+- **Subscribe Message** — untyped variant. Receives every event
+  published on the channel as an `FInstancedStruct` payload.
+  Branch on the payload's identity inside the handler.
+- **Subscribe Message Of Type** — typed-filter variant. Pass a
+  `UScriptStruct*` for the payload type; only events matching that
+  type (or a derived type) fire the handler. Removes the "is this
+  the event I care about?" branch when you only care about one
+  event shape on a busy channel.
+
+The **Payload Type** picker on Subscribe Message Of Type is filtered
+to descendants of `FSignalEventBase`, narrowing the dropdown to
+event-shaped structs only rather than every USTRUCT in the project.
+
+Pairs with **Unsubscribe Listener** (also new this release) for
+single-call teardown — call from `EndPlay` and the bus clears every
+subscription this listener registered.
+
+### Signal bus convenience
 
 `USignalSubsystem` (the gameplay-tag-routed event bus underlying
 all framework event routing) gains an
@@ -237,7 +258,47 @@ required for clean teardown.
   without the bus accumulating stale subscriber records from
   departed actors over a long session.
 
-#### Block + deactivate convenience
+### Per-channel log verbosity
+
+`LogSimpleQuest` splits into five categories so you can dial each
+concern independently. The previous all-or-nothing pattern (compile
+firehose drowning the gameplay trace, or gameplay trace burying
+the compile diagnostics) goes away.
+
+| Channel | Coverage |
+|---|---|
+| `LogSimpleQuest` | Module startup, settings, debug overlay, anything not covered below |
+| `LogSimpleQuestActivation` | Quest activation flow — starts, chain advancement, deactivation |
+| `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery |
+| `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation |
+| `LogSimpleQuestState` | Quest history recording — resolutions, entries, tag registrations |
+
+Set verbosity per channel under **Project Settings → Plugins →
+Simple Quest → Logging** (or **Simple Core** for `LogSimpleCore`).
+Changes apply live — no editor restart, no `DefaultEngine.ini`
+edit. Values persist across sessions automatically.
+
+### Settings page reorganization
+
+Project Settings is split into three pages, sorted by audience.
+
+- **Project Settings → Plugins → Simple Quest** — quest manager
+  class designation and the five log verbosity dials. The adopter
+  surface.
+- **Project Settings → Plugins → Simple Core** — verbosity dial
+  for `LogSimpleCore`. Separate page so SimpleCore stays usable
+  standalone for projects that don't pull in SimpleQuest.
+- **Editor Preferences → Plugins → Simple Quest Visuals** —
+  wire, pin, node title, and debug-highlight colors used by the
+  questline graph editor. Per-developer (saved to local Editor
+  Preferences, not source-controlled).
+
+The previous single Project Settings page bundled colors alongside
+the adopter knobs; colors are out of that surface entirely now so
+first-impression scanning stays focused on what adopters actually
+configure.
+
+### Block + deactivate convenience
 
 The graph-driven `SetBlocked` node has had an **Also Deactivate
 Targets** toggle for a while — when checked, blocking a quest also
@@ -252,7 +313,35 @@ the block — even if the quest was already blocked. So a quest
 that's blocked but still live can be deactivated by the same call
 that would have been a no-op on the block side alone.
 
-#### Cleanups
+### Electronic Nodes integration — stock 5.7+ marketplace plugin
+
+The Electronic Nodes (EN) visual integration that styles questline
+graph wires now uses the stock marketplace EN plugin on UE 5.7+. The
+previously-required EN fork is no longer needed; adopters install
+EN from the marketplace and the visual layer activates automatically
+when the plugin is enabled in their project.
+
+Behavior matrix:
+
+- **UE 5.7+ with EN installed and enabled** → integration loads and
+  renders dashed prerequisite wires across all EN wire styles
+  (Default, Manhattan, Subway), through knot chains, with stable
+  visual behavior under node drag.
+- **UE 5.7+ without EN** → integration inert, framework otherwise
+  unaffected.
+- **UE 5.6 (any EN state)** → integration is gated off entirely.
+  EN's 5.6 release predates the spline-rendering hook needed for
+  the dash effect, so the framework runs cleanly without the EN
+  visual layer on 5.6. All other framework functionality works
+  identically on 5.6 and 5.7+.
+
+The integration hooks `FENConnectionDrawingPolicy::MakeDrawSpline`
+(introduced in EN's 5.7 release) and overlays a dashed-rendering
+pass for wires entering a Prerequisites input. Knot-traversed prereq
+chains are detected via the existing schema mixin's topology walk —
+prereqs routed through one or more knots still dash correctly.
+
+### Cleanups
 
 - Older transitional outcome tag prefixes (`Quest.Outcome.*` from
   pre-0.4.0 and a short-lived `SimpleQuest.QuestOutcome.*` from

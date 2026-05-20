@@ -4,7 +4,7 @@
 MIT licensed, source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data.
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
-This version targets Unreal Engine 5.6 and is verified compatible with 5.7 (no source changes required).
+This version targets Unreal Engine 5.6 and is verified compatible with 5.7; the Electronic Nodes visual integration activates automatically on 5.7+ when EN is installed.
 
 Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
 
@@ -88,6 +88,8 @@ Open the asset to launch the graph editor. From Entry, drag off a wire and place
 Useful constructs as your graph grows:
 - **AND / OR / NOT combinators** — wire into any node's `Prerequisites` pin to gate activation on a boolean expression.
 - **Prerequisite Rule Entry / Exit** — define a named rule once; reference it from multiple content nodes without duplication.
+- **Prerequisite Fact Tag** — gate on any World State fact tag. Decoupled from graph topology, so you can compose with any UE gameplay system that tracks tag-keyed state (faction reputation, inventory, system flags).
+- **Prerequisite Outcome** — gate on a context-free outcome tag. Satisfied when any quest resolves with the picked outcome, regardless of which quest produced it.
 - **Activation Group Entry / Exit** — many-to-many node activation topology without per-wire bookkeeping.
 - **LinkedQuestline** — reference another questline asset inline; the compiler expands it with full outcome pin synchronization.
 
@@ -214,7 +216,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 ### Reacting to Quest Events
 
-**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
+**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
 
 **C++** — use the library template for direct handle-based subscriptions:
 
@@ -268,15 +270,16 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
 | Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
 | Q2 2026 | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references) | **Shipped** (v0.3.2) |
-| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestResolutionSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
+| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestStateSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
 | Q2 2026 | Stale Quest Tags Tier 2 — project-wide stale-tag scanning (Actor Blueprint defaults + unloaded levels including World Partition; editor panel Full Project Scan + headless commandlet with CI-friendly exit codes) | **Shipped** (v0.3.4) |
 | Q2 2026 | Stale Quest Tags polish + design captures (multi-row mass-clear with confirmation + atomic undo, sortable Level column, sub-millisecond per-actor PostUndo rescan, designer-facing log clarity pass; rewards-design + scope-tag system docs) | **Shipped** (v0.3.5) |
-| Q2 2026 | Quest lifecycle architecture pass + tag namespace consolidation — distinct lifecycle events for offer-availability, accept-readiness, give-refusal, and activation failure; rich payload propagation across all activation entry points; `SimpleQuest.*` namespace finalization with transparent migration redirects; tag rename resilience across Blueprints, components, and data assets; per-channel log verbosity; component model unification (single Giver component replaces stacked components); UE 5.7 compatibility verified | In development (v0.4.0) |
-| Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling. Primary deliverable for 0.5.0. | Planned (v0.5.0) |
-| Q3 2026 | Multiplayer replication — server-authoritative quest state with join-in-progress | Planned |
-| Q4 2026 | GAS integration module — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Planned |
-| Q1 2027 | Expanded objective library — timed, escort, collection, and conversation objectives | Planned |
-| Q1 2027 | Example project and full API documentation | Planned |
+| Q2 2026 | Architectural cohesion + adopter ergonomics — distinct lifecycle events for offer-availability, accept-readiness, give-refusal, and activation failure; rich payload propagation across all activation entry points; `SimpleQuest.*` namespace finalization with transparent migration redirects; tag rename resilience across Blueprints, components, and data assets; pin-wired prereq Path/Outcome separation with new Prerequisite Fact Tag and Prerequisite Outcome authoring nodes; outcome-channel event publishing for cross-quest subscribers; Blueprint-callable signal bus subscriptions plus `FSignalEventBase` marker for picker filtering; component model unification (single Giver component replaces stacked components); per-channel log verbosity; Electronic Nodes integration rewritten against the stock marketplace plugin on 5.7+ (no fork dependency); UE 5.7 compatibility verified | **Shipped** (v0.4.0) |
+| Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned (v0.5.0) |
+| Q4 2026 | Rewards system — designer-authored reward bundles wired to outcome resolution | Planned (v0.6.0) |
+| Q1 2027 | Expanded objective library — timed, escort, collection, and conversation objectives | Planned (v0.7.0) |
+| Q2 2027 | Pre-release polish + API documentation + sample project | Planned (v0.9.0 → v1.0.0) |
+| Post-1.0 | Multiplayer replication — server-authoritative quest state with join-in-progress | Pro Module |
+| Post-1.0 | GAS integration — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Pro Module |
 
 ---
 

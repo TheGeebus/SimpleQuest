@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "1.0",
+	"VersionName": "0.4.0",
 	"FriendlyName": "Simple Quest",
-	"Description": "Easily create and manage a branching series of gameplay events - or quests.",
+	"Description": "Easily create and manage any series of linear or non-linear gameplay events - or quests.",
 	"Category": "Gameplay",
 	"CreatedBy": "Greg Bussell",
 	"CreatedByURL": "",
@@ -46,7 +46,7 @@
 		},
 		{
 			"Name": "ElectronicNodes",
-			"Enabled": true,
+			"Enabled": false,
 			"Optional": true
 		}
 	],

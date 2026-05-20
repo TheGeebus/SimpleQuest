@@ -12,7 +12,7 @@ struct FGameplayTag;
 class USignalSubsystem;
 class UQuestManagerSubsystem;
 
-UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
+UCLASS(Abstract, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
 class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent
 {
 	GENERATED_BODY()

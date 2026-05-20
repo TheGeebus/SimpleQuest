@@ -30,11 +30,8 @@ public:
 
     virtual void DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End, const FConnectionParams& Params) override;
 
-    virtual void MakeDrawSpline(FSlateWindowElementList& ElementList, uint32 InLayer,
-        const FVector2D InStart, const FVector2D InStartDir,
-        const FVector2D InEnd, const FVector2D InEndDir,
-        float InThickness, ESlateDrawEffect InDrawEffects,
-        const FLinearColor& InTint) override;
+    virtual void MakeDrawSpline(FSlateWindowElementList& ElementList, uint32 InLayer, const FVector2D InStart, const FVector2D InStartDir,
+        const FVector2D InEnd, const FVector2D InEndDir, float InThickness, ESlateDrawEffect InDrawEffects, const FLinearColor& InTint) override;
 
 private:
     /**

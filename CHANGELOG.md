@@ -183,6 +183,84 @@ is blocked — `OnQuestActivationFailed` fires on any
   failures across the whole arc, including typo'd tags that never
   registered to begin with.
 
+### Trigger response surface — per-fire and per-lifecycle feedback
+
+The Trigger Component's outbound surface (`SendTriggerEvent`) now
+has a matching inbound feedback surface. Designers wiring trigger
+volumes to objectives get response, block, and lifecycle-wrap signals
+back without authoring a parallel subscription pipeline.
+
+Three new events with matching delegates on `UQuestTriggerComponent`:
+
+- **`OnQuestTriggerResponded`** — per-fire response from the
+  objective. `EQuestTriggerResolution` discriminates `Progress`
+  (counter advanced), `Completed` (objective resolved with an
+  outcome), and `Refused` (objective received the fire but declined
+  to act on it, with a designer-supplied refusal reason tag). Echoes
+  the originating fire's `FQuestObjectiveTriggerContext` for own-fire
+  scoping.
+- **`OnQuestTriggerBlocked`** — per-fire structural block. Fires
+  when a trigger reaches a step that's been activated but can't make
+  forward progress because of structural blockers (Blocked fact set,
+  or unmet prerequisites in `GatesProgression` mode). Carries the
+  same `FQuestActivationBlocker[]` payload adopters already handle
+  for `OnQuestGiveBlocked` — one translator covers both surfaces.
+- **`OnQuestTriggerDeactivated`** — per-lifecycle wrap. Fires once
+  per watched step's lifecycle end. `EQuestTriggerEndReason`
+  discriminates `Completed` (step completed normally), `Interrupted`
+  (step deactivated before completion), and `Manual` (objective
+  signaled trigger-side wrap explicitly via the BP-callable below).
+
+Auto-publishes wire Response and Deactivated into the existing
+lifecycle flow — adopters using the default flow get
+Progress / Completed Responses and Completed / Interrupted
+Deactivations for free. Refusal and Manual deactivation are explicit
+objective-side operations:
+
+- **`RefuseTrigger(RefusalReason, TriggerContext)`** — new
+  Blueprint-callable on `UQuestObjective`. Call from inside
+  `TryCompleteObjective` when a trigger fire doesn't satisfy game-
+  logic conditions (wrong actor, missing item, wrong phase).
+  Publishes a Response event with `Resolution = Refused` and the
+  designer-supplied reason tag.
+- **`PublishTriggerDeactivation(OutcomeTag, FinalContext)`** —
+  new Blueprint-callable on `UQuestObjective`. Call when an
+  objective wants to release trigger-side audiences early without
+  ending the step — for example, a multi-phase objective that's
+  done with one trigger volume's input but isn't yet ready to
+  complete.
+
+**Originating-component identity stays framework-stamped.** Each
+fire carries a framework-managed pointer to the publishing Trigger
+Component that survives any adopter mutation of the payload
+(legitimate retargeting of `TriggeredActor` for game logic, etc.).
+Response and Blocked deliveries filter via pointer-equality against
+this stamp so the publishing component always receives feedback for
+its own fires, no matter what the objective does to the payload in
+between.
+
+**Attribution auto-forwarding** — `ReportProgress`,
+`CompleteObjectiveWithOutcome`, `RefuseTrigger`, and
+`PublishTriggerDeactivation` auto-fill `TriggeredActor`, `Instigator`,
+and `CustomData` from the originating fire when the adopter omits
+them. Adopters can pass explicit context to override per-field; the
+framework fills the rest. Eliminates the silent-failure mode where a
+missing `TriggeredActor` in an adopter's
+`CompleteObjectiveWithOutcome` call would cause downstream subscriber
+filters to silently reject the Response event.
+
+**Coverage of the `GatesProgression` silent-ignore.** Steps with
+`EPrerequisiteGateMode::GatesProgression` previously dropped trigger
+fires silently when prerequisites were unmet. The framework now
+publishes `FQuestTriggerBlockedEvent` with the unsatisfied leaf tags
+in that case, so trigger-side UI can react to "you need to satisfy
+X first" without authoring its own prereq monitoring.
+
+`FQuestObjectiveTriggered` renamed to `FQuestTriggerFiredEvent` for
+naming consistency with the rest of the Quest Trigger event family.
+Existing assets and Blueprint references heal via `StructRedirects`
+on next load; no manual migration required.
+
 ### Outcome-channel event publishing
 
 Quest resolutions and entries now publish on the outcome tag channel

@@ -7,6 +7,9 @@
 #include "GameplayTagContainer.h"
 #include "QuestObserverComponent.h"
 #include "Components/ActorComponent.h"
+#include "Events/QuestTriggerBlockedEvent.h"
+#include "Events/QuestTriggerDeactivatedEvent.h"
+#include "Events/QuestTriggerResponseEvent.h"
 #include "QuestTriggerComponent.generated.h"
 
 
@@ -28,6 +31,35 @@ public:
 
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
 	FActivateQuestTriggerDelegate OnQuestTriggerActivated;
+	
+	/**
+	 * Fires when an objective produces a per-fire response to one of this trigger's SendTriggerEvent fires. Resolution
+	 * discriminates Progress / Completed / Refused. Subscriber-side filter on Event.TriggerContext.TriggeredActor ==
+	 * GetOwner() is applied internally before broadcast — adopters bound to this delegate only receive responses for
+	 * their own trigger's fires.
+	 */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerResponded, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerResponseEvent, Event);
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
+	FOnQuestTriggerResponded OnQuestTriggerResponded;
+
+	/**
+	 * Fires when SendTriggerEvent reached a watched step that's been activated (PendingGiver-or-similar) but cannot
+	 * currently progress because of structural blockers (Blocked fact set, or unmet prereqs). Mirrors the Giver's
+	 * OnQuestGiveBlocked shape — same FQuestActivationBlocker[] payload. Own-fire filter applied internally.
+	 */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerBlockedEvent, Event);
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
+	FOnQuestTriggerBlocked OnQuestTriggerBlocked;
+
+	/**
+	 * Fires when the trigger-side of a watched step's lifecycle wraps — Completed / Interrupted (manager-published
+	 * alongside FQuestEndedEvent / FQuestDeactivatedEvent) or Manual (from inside an objective via
+	 * PublishTriggerDeactivation). Per-lifecycle signal — fires once per step end. No own-fire filter; all trigger
+	 * actors watching the step are relevant audiences for lifecycle wrap.
+	 */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerDeactivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerDeactivatedEvent, Event);
+	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
+	FOnQuestTriggerDeactivated OnQuestTriggerDeactivated;
 
 	/**
 	 * Framework calls this on the lifecycle transitions of the trigger's watched steps — true on step Started,
@@ -58,14 +90,35 @@ protected:
 
 	virtual void OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
 
-	/** Step-completion handler. Routes to OnTriggerStepEnded so completion + deactivation share the same
-	 *  "step no longer active" cleanup path. */
+	/**
+	 * Step-completion handler. Routes to OnTriggerStepEnded so completion + deactivation share the same
+	 * "step no longer active" cleanup path.
+	 */
 	virtual void OnTriggerStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event);
 
-	/** Step-deactivation handler. Routes to OnTriggerStepEnded for shared cleanup. Subscribed alongside
-	 *  the completion handler because targets disable on either kind of end — completion AND mid-flight
-	 *  interruption both indicate "this step is no longer active and this target shouldn't respond." */
+	/**
+	 * Step-deactivation handler. Routes to OnTriggerStepEnded for shared cleanup. Subscribed alongside
+	 * the completion handler because targets disable on either kind of end — completion AND mid-flight
+	 * interruption both indicate "this step is no longer active and this target shouldn't respond." */
 	virtual void OnTriggerStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
+	
+	/**
+	 * Receives the objective's per-fire Response (Progress / Completed / Refused). Applies own-fire filter
+	 * (TriggerContext.TriggeredActor == GetOwner()) then broadcasts OnQuestTriggerResponded.
+	 */
+	virtual void HandleQuestTriggerResponse(FGameplayTag Channel, const FQuestTriggerResponseEvent& Event);
+
+	/**
+	 * Receives Blocked publishes from any Trigger Component's SendTriggerEvent (including this one's own publishes
+	 * bouncing back). Own-fire filter scopes the broadcast to this component's owning actor.
+	 */
+	virtual void HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestTriggerBlockedEvent& Event);
+
+	/**
+	 * Receives the trigger-side wrap signal — Completed / Interrupted / Manual. No own-fire filter; all watching
+	 * components on the channel are relevant.
+	 */
+	virtual void HandleQuestTriggerDeactivated(FGameplayTag Channel, const FQuestTriggerDeactivatedEvent& Event);
 	
 	/**
 	 * Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.

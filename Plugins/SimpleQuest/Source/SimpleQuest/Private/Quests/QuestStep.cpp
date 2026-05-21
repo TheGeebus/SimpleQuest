@@ -65,6 +65,8 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
+	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);
+	LiveObjective->OnQuestObjectiveTriggerDeactivation.AddDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
 
 	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationContext = FQuestObjectiveActivationContext{};
@@ -82,6 +84,8 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		LiveObjective->DispatchOnObjectiveDeactivated();
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
+		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
 		LiveObjective = nullptr;
 	}
 	ReceivedActivationContext = FQuestObjectiveActivationContext{};
@@ -113,6 +117,8 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
+		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
 		LiveObjective = nullptr;
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
@@ -121,4 +127,14 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 void UQuestStep::OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext)
 {
 	OnNodeProgress.ExecuteIfBound(this, ProgressContext);
+}
+
+void UQuestStep::OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext)
+{
+	OnNodeRefused.ExecuteIfBound(this, RefusalReason, TriggerContext);
+}
+
+void UQuestStep::OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext)
+{
+	OnNodeTriggerDeactivation.ExecuteIfBound(this, OutcomeTag, FinalContext);
 }

@@ -26,6 +26,23 @@ class SIMPLEQUEST_API UQuestStep : public UQuestNodeBase
 public:
 	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveTriggerContext, ProgressData);
 	FOnNodeProgress OnNodeProgress;
+
+	DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeRefused, UQuestStep*, Step, FGameplayTag, RefusalReason, FQuestObjectiveTriggerContext, TriggerContext);
+		
+	/**
+	 * Fired by OnObjectiveRefused (forwarded from the live objective's OnQuestObjectiveRefused broadcast). Manager binds
+	 * and publishes FQuestTriggerResponseEvent(Refused) on the step's tag channel.
+	 */
+	FOnNodeRefused OnNodeRefused;
+
+	DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeTriggerDeactivation, UQuestStep*, Step, FGameplayTag, OutcomeTag, FQuestObjectiveTriggerContext, FinalContext);
+	
+	/**
+	 * Fired by OnObjectiveTriggerDeactivation (forwarded from the live objective's OnQuestObjectiveTriggerDeactivation
+	 * broadcast — manual fires only; the Completed / Interrupted auto-publishes happen manager-side adjacent to
+	 * FQuestEndedEvent / FQuestDeactivatedEvent). Manager binds and publishes FQuestTriggerDeactivatedEvent(Manual).
+	 */
+	FOnNodeTriggerDeactivation OnNodeTriggerDeactivation;
 	
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
@@ -84,11 +101,17 @@ private:
 	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
 	FQuestObjectiveTriggerContext CompletionContext;
 
-	UFUNCTION(BlueprintCallable)
+	UFUNCTION()
 	void OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity);
 
 	UFUNCTION()
 	void OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext);
+	
+	UFUNCTION()
+	void OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext);
+
+	UFUNCTION()
+	void OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }

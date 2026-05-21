@@ -34,6 +34,26 @@ public:
 	
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveTriggerContext, ProgressContext);
 	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestObjectiveRefused, FGameplayTag, RefusalReason, FQuestObjectiveTriggerContext, TriggerContext);
+		
+	/**
+	 * Fired by RefuseTrigger when the objective sees a SendTriggerEvent fire but declines to act on it. Step subscribes
+	 * and forwards to the manager, which publishes FQuestTriggerResponseEvent(Refused) on the step's tag channel so
+	 * adopters bound to UQuestTriggerComponent::OnQuestTriggerResponded receive the refusal with the originating
+	 * TriggerContext echoed back for own-fire filtering.
+	 */
+	FOnQuestObjectiveRefused OnQuestObjectiveRefused;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestObjectiveTriggerDeactivation, FGameplayTag, OutcomeTag, FQuestObjectiveTriggerContext, FinalContext);
+	
+	/**
+	 * Fired by PublishTriggerDeactivation when the objective explicitly signals "I'm done consuming fires on this trigger"
+	 * without ending the step. Step subscribes and forwards to the manager, which publishes FQuestTriggerDeactivatedEvent
+	 * with EndReason = Manual. Distinct from the auto-publish path (Completed / Interrupted) that fires alongside the
+	 * step's lifecycle transitions.
+	 */
+	FOnQuestObjectiveTriggerDeactivation OnQuestObjectiveTriggerDeactivation;
 	
 	/**
 	 * Outcome Tag Discovery																						<br>
@@ -177,6 +197,35 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);
 	
+	/**
+	 * Declines a trigger fire that reached this objective. Step forwards to manager, which publishes
+	 * FQuestTriggerResponseEvent(Refused) on the step's tag channel. Use from within TryCompleteObjective when an
+	 * incoming fire doesn't satisfy game-logic conditions (wrong actor, missing item, wrong phase) and should be
+	 * surfaced to the trigger actor's UI rather than silently dropped.
+	 *
+	 * RefusalReason is designer-defined and consumed by the trigger actor's response handler — typically a
+	 * SimpleQuest.Refusal.* descendant or any tag whose subscribers know how to translate to UI / audio.
+	 *
+	 * Echoes the originating TriggerContext through to the published event so UQuestTriggerComponent's filter
+	 * (TriggeredActor == GetOwner()) resolves correctly. Adopters should typically pass the InContext their
+	 * TryCompleteObjective override received, not construct a fresh empty one.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "TriggerContext"), Category = "Quest|Objectives")
+	void RefuseTrigger(FGameplayTag RefusalReason, const FQuestObjectiveTriggerContext& TriggerContext);
+
+	/**
+	 * Manually signals "the trigger side of this step's lifecycle is wrapping" without affecting the step's own
+	 * lifecycle. Step forwards to manager, which publishes FQuestTriggerDeactivatedEvent with EndReason = Manual.
+	 * Distinct from the auto-publish path fired by the manager adjacent to FQuestEndedEvent / FQuestDeactivatedEvent
+	 * (EndReason = Completed / Interrupted) — Manual fires don't change the step's state, only notify trigger-side
+	 * subscribers.
+	 *
+	 * Use when an objective wants to release trigger-side audiences early — e.g., a multiphase objective that's
+	 * done with one trigger volume's input but isn't yet ready to complete the step.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "FinalContext"), Category = "Quest|Objectives")
+	void PublishTriggerDeactivation(FGameplayTag OutcomeTag, const FQuestObjectiveTriggerContext& FinalContext);
+	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
 
@@ -190,6 +239,25 @@ private:
 	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionContext. */
 	UPROPERTY()
 	FQuestObjectiveTriggerContext CompletionContext;
+	
+	/**
+	 * Cached InContext from the most-recent DispatchTryCompleteObjective call. Used by ResolveTriggerContext to
+	 * auto-forward TriggeredActor / Instigator / CustomData when adopters call ReportProgress / Complete /
+	 * RefuseTrigger / PublishTriggerDeactivation without passing context — AND to force the framework-stamped
+	 * OriginatingTriggerComponent through immune to adopter mutation, guaranteeing the publishing trigger
+	 * component receives its own feedback.
+	 */
+	UPROPERTY()
+	FQuestObjectiveTriggerContext LastTriggerContext;
+
+	/**
+	 * Field-level overlay: returns AdopterContext with TriggeredActor / Instigator / CustomData fallback-populated
+	 * from LastTriggerContext where the adopter left them unset, AND OriginatingTriggerComponent force-overridden
+	 * from LastTriggerContext unconditionally. Adopters who pass explicit attribution win on the first three fields;
+	 * the originating-component identity stays framework-owned so own-fire filtering can't be broken by adopter
+	 * re-targeting of TriggeredActor for game-logic reasons.
+	 */
+	FQuestObjectiveTriggerContext ResolveTriggerContext(const FQuestObjectiveTriggerContext& AdopterContext) const;
 	
 	/**
 	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step

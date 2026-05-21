@@ -8,7 +8,7 @@
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Events/QuestEndedEvent.h"
-#include "Events/QuestObjectiveTriggered.h"
+#include "Events/QuestTriggerFiredEvent.h"
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestEnabledEvent.h"
@@ -29,6 +29,9 @@
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestBlockedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
+#include "Events/QuestTriggerBlockedEvent.h"
+#include "Events/QuestTriggerDeactivatedEvent.h"
+#include "Events/QuestTriggerResponseEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -244,7 +247,7 @@ void UQuestManagerSubsystem::Deinitialize()
 
 void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)
 {
-    const FQuestObjectiveTriggered* Event = RawEvent.GetPtr<FQuestObjectiveTriggered>();
+    const FQuestTriggerFiredEvent* Event = RawEvent.GetPtr<FQuestTriggerFiredEvent>();
     if (!Event) return;
 
     TObjectPtr<UQuestNodeBase>* NodePtr = LoadedNodeInstances.Find(Channel.GetTagName());
@@ -257,13 +260,36 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
         && !Step->IsGiverGated()
         && !Step->PrerequisiteExpression.IsAlways())
     {
-        if (!Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem)) return;
+        const FQuestPrereqStatus PrereqStatus = Step->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
+        if (!PrereqStatus.bSatisfied)
+        {
+            // Trigger-side per-fire feedback for the GatesProgression silent-ignore case. Echo the trigger context
+            // (TriggeredActor / Instigator / CustomData) from the inbound fire so subscriber-side own-fire filter
+            // resolves. Multichannel publish via FQuestPublish::OnAllNodeTags so subscribers on any perspective
+            // (canonical or asset-scoped alias) receive the Blocked event.
+            FQuestObjectiveTriggerContext EchoContext;
+            EchoContext.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
+            EchoContext.Instigator = Cast<AActor>(Event->Instigator);
+            EchoContext.CustomData = Event->CustomData;
+            EchoContext.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
+
+            FQuestActivationBlocker Blocker;
+            Blocker.Reason = EQuestActivationBlocker::PrereqUnmet;
+            for (const FQuestPrereqLeafStatus& Leaf : PrereqStatus.Leaves)
+            {
+                if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
+            }
+
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerBlockedEvent(Step->GetContextualTag(), { Blocker }, EchoContext));
+            return;
+        }
     }
 
     FQuestObjectiveTriggerContext Context;
     Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
     Context.Instigator = Cast<AActor>(Event->Instigator);
     Context.CustomData = Event->CustomData;
+    Context.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
     Step->GetLiveObjective()->DispatchTryCompleteObjective(Context);
 }
 
@@ -358,6 +384,8 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             if (UQuestStep* Step = Cast<UQuestStep>(Instance))
             {
                 Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
+                Step->OnNodeRefused.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeRefused);
+                Step->OnNodeTriggerDeactivation.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeTriggerDeactivation);
                 
                 // Pre-warm target classes so HandleOnNodeStarted's hot-path .Get() skips the LoadSynchronous
                 // stall when the step activates. The engine's loaded-asset cache keeps async-loaded UClasses
@@ -748,6 +776,39 @@ void UQuestManagerSubsystem::HandleOnNodeProgress(UQuestStep* Step, FQuestObject
 
     FQuestEventPayload Context = AssembleEventContext(Step, ProgressData);
     FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressEvent(Step->GetContextualTag(), Context));
+
+    // Trigger-side per-fire Response. Echoes the originating trigger fire's TriggerContext so UQuestTriggerComponent's
+    // own-fire filter (TriggeredActor == GetOwner()) resolves. Empty ProgressData (objective called ReportProgress
+    // outside a fire context) still publishes — adopters who care filter; those who don't pay only the publishing cost.
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerResponseEvent(Step->GetContextualTag(), EQuestTriggerResolution::Progress, ProgressData));
+}
+
+void UQuestManagerSubsystem::HandleOnNodeRefused(UQuestStep* Step, FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeRefused: '%s' reason='%s' triggered='%s'"),
+        *Step->GetContextualTag().ToString(),
+        *RefusalReason.ToString(),
+        TriggerContext.TriggeredActor ? *TriggerContext.TriggeredActor->GetName() : TEXT("(none)"));
+
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerResponseEvent(
+        Step->GetContextualTag(), EQuestTriggerResolution::Refused, FGameplayTag(), RefusalReason, TriggerContext));
+}
+
+void UQuestManagerSubsystem::HandleOnNodeTriggerDeactivation(UQuestStep* Step, FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeTriggerDeactivation: '%s' outcome='%s'"),
+        *Step->GetContextualTag().ToString(),
+        *OutcomeTag.ToString());
+
+    // Manual is the only reason that can reach this handler — Completed and Interrupted publish at their own
+    // auto-publish sites in PublishQuestEndedEvent / SetQuestDeactivated. Hardcoded here rather than threaded
+    // through the chain so the BP-callable's surface stays honest ("the manual way to do this").
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerDeactivatedEvent(
+        Step->GetContextualTag(), EQuestTriggerEndReason::Manual, OutcomeTag, FinalContext));
 }
 
 void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag)
@@ -797,7 +858,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         
         if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
-            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Node->GetContextualTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
+            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Node->GetContextualTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
             LiveStepTriggerHandles.Add(Node->GetContextualTag(), Handle);
             if (!Step->GetTargetClasses().IsEmpty())
             {
@@ -826,7 +887,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                 // Subscribe once to global channel if this is the first class-filtered step.
                 if (!ClassBridgeHandle.IsValid())
                 {
-                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestObjectiveTriggered>(Tag_Channel_QuestTrigger, this, &UQuestManagerSubsystem::CheckClassObjectives);
+                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Tag_Channel_QuestTrigger, this, &UQuestManagerSubsystem::CheckClassObjectives);
                 }
             }
 
@@ -1503,6 +1564,14 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
                 FQuestEventPayload EffectiveContext = OverlayCallerContext(AssembleEventContext(Node, FQuestObjectiveTriggerContext()), Context);
                 FQuestDeactivatedEvent Event(QuestTag, Source, EffectiveContext);
                 FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, Event);
+
+                // Trigger-side wrap on interruption. Steps only — containers don't host trigger components. FinalContext
+                // empty because deactivation has no specific fire driving it; OutcomeTag invalid for the same reason.
+                if (Node->IsStepNode())
+                {
+                    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestTriggerDeactivatedEvent(
+                        QuestTag, EQuestTriggerEndReason::Interrupted, FGameplayTag(), FQuestObjectiveTriggerContext()));
+                }
             }
             else
             {
@@ -1557,6 +1626,15 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
 
     FQuestEventPayload Context = OverlayCallerContext(AssembleEventContext(Node, CompletionCtx), ExternalContext);
     FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestEndedEvent(Node->GetContextualTag(), OutcomeTag, Source, Context));
+
+    // Trigger-side completion: per-fire Response(Completed) + per-lifecycle Deactivated(Completed). Steps only — containers
+    // don't host trigger components. CompletionCtx echoes the fire context the objective drove completion with so trigger
+    // subscribers' own-fire filter (TriggeredActor == GetOwner()) resolves on the round trip.
+    if (Node->IsStepNode())
+    {
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestTriggerResponseEvent(Node->GetContextualTag(), EQuestTriggerResolution::Completed, OutcomeTag, FGameplayTag(), CompletionCtx));
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestTriggerDeactivatedEvent(Node->GetContextualTag(), EQuestTriggerEndReason::Completed, OutcomeTag, CompletionCtx));
+    }
 }
 
 void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event)
@@ -2038,7 +2116,7 @@ void UQuestManagerSubsystem::WarmReachableGraphs(UQuestlineGraph* Graph)
 
 void UQuestManagerSubsystem::CheckClassObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent)
 {
-    const FQuestObjectiveTriggered* Event = RawEvent.GetPtr<FQuestObjectiveTriggered>();
+    const FQuestTriggerFiredEvent* Event = RawEvent.GetPtr<FQuestTriggerFiredEvent>();
     if (!Event || !Event->TriggeredActor || !QuestSignalSubsystem) return;
 
     for (const auto& Pair : ClassFilteredSteps)

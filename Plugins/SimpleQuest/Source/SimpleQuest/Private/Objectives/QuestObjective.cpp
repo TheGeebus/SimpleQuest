@@ -11,7 +11,7 @@
 
 void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
 {
-	/*-------------------------------------------------------------------------------------------------------------------*
+	/*----------------------------------------------------------------------------------------------------------------*
 	 * Set fields on an FQuestObjectiveTriggerContext and pass it to CompleteObjectiveWithOutcome.
 	 * Common fields:
 	 *   InContext can be forwarded directly for pass-through, or build a new one:
@@ -20,7 +20,7 @@ void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveT
 	 *   OutContext.Instigator = InContext.Instigator;
 	 * Game-specific extension - any desired struct type, such as example user-defined struct FMyKillData:
 	 *   OutContext.CustomData = FInstancedStruct::Make<FMyKillData>(Target->GetFName(), DamageType, ...);
-	 *-------------------------------------------------------------------------------------------------------------------*/
+	 *----------------------------------------------------------------------------------------------------------------*/
 
 	UE_LOG(LogSimpleQuestActivation, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
@@ -39,7 +39,18 @@ void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivati
 
 void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveTriggerContext& InContext)
 {
+	LastTriggerContext = InContext;
 	TryCompleteObjective(InContext);
+}
+
+FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQuestObjectiveTriggerContext& AdopterContext) const
+{
+	FQuestObjectiveTriggerContext Out = AdopterContext;
+	if (!Out.TriggeredActor)         Out.TriggeredActor = LastTriggerContext.TriggeredActor;
+	if (!Out.Instigator.IsValid())   Out.Instigator    = LastTriggerContext.Instigator;
+	if (!Out.CustomData.IsValid())   Out.CustomData    = LastTriggerContext.CustomData;
+	Out.OriginatingTriggerComponent = LastTriggerContext.OriginatingTriggerComponent;
+	return Out;
 }
 
 void UQuestObjective::DispatchOnObjectiveDeactivated()
@@ -60,13 +71,14 @@ TArray<FGameplayTag> UQuestObjective::GetPossibleOutcomes() const
 
 void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveTriggerContext& InCompletionContext, const FQuestObjectiveActivationContext& InForwardParams)
 {
-	CompletionContext = InCompletionContext;
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(InCompletionContext);
+	CompletionContext = Effective;
 	ForwardActivationParams = InForwardParams;
 
 	// Emit a final progress tick before completing so consumers driving a progress bar see the "full"
 	// state before the completion delegate takes over. The CompletionContext typically already has
 	// CurrentCount == RequiredCount at this point.
-	OnQuestObjectiveProgress.Broadcast(InCompletionContext);
+	OnQuestObjectiveProgress.Broadcast(Effective);
 	
 	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
 	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements supply an
@@ -78,8 +90,28 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 
 void UQuestObjective::ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext)
 {
-	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ReportProgress: %d/%d — %s"), ProgressContext.CurrentCount, ProgressContext.RequiredCount, *GetFullName());
-	OnQuestObjectiveProgress.Broadcast(ProgressContext);
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(ProgressContext);
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ReportProgress: %d/%d — %s"), Effective.CurrentCount, Effective.RequiredCount, *GetFullName());
+	OnQuestObjectiveProgress.Broadcast(Effective);
+}
+
+void UQuestObjective::RefuseTrigger(FGameplayTag RefusalReason, const FQuestObjectiveTriggerContext& TriggerContext)
+{
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(TriggerContext);
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::RefuseTrigger : Reason=%s, TriggeredActor=%s — %s"),
+		*RefusalReason.ToString(),
+		Effective.TriggeredActor ? *Effective.TriggeredActor->GetName() : TEXT("(none)"),
+		*GetFullName());
+	OnQuestObjectiveRefused.Broadcast(RefusalReason, Effective);
+}
+
+void UQuestObjective::PublishTriggerDeactivation(FGameplayTag OutcomeTag, const FQuestObjectiveTriggerContext& FinalContext)
+{
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(FinalContext);
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::PublishTriggerDeactivation : Outcome=%s — %s"),
+		*OutcomeTag.ToString(),
+		*GetFullName());
+	OnQuestObjectiveTriggerDeactivation.Broadcast(OutcomeTag, Effective);
 }
 
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const

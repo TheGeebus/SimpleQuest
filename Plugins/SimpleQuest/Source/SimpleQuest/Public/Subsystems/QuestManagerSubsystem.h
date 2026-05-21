@@ -335,6 +335,10 @@ private:
 	UFUNCTION()
 	void HandleOnNodeProgress(UQuestStep* Step, FQuestObjectiveTriggerContext ProgressData);
 	UFUNCTION()
+	void HandleOnNodeRefused(UQuestStep* Step, FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext);
+	UFUNCTION()
+	void HandleOnNodeTriggerDeactivation(UQuestStep* Step, FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
+	UFUNCTION()
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);

@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,27 +37,30 @@ struct FPrereqExaminerNode
         a FriendlyName override once that field lands on the content-node display. */
     UPROPERTY() FText LeafSourceLabel;
 
-    /** Leaf-only: outcome's tag-picker category prefix (everything after "Quest.Outcome." up to and including the last dot,
-        e.g., "Combat." for Quest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome") and for outcomes
-        that are direct children of Quest.Outcome. Rendered deemphasized above LeafOutcomeLabel in the leaf widget. */
-    UPROPERTY() FText LeafOutcomeCategory;
+    /** Leaf-only: path's tag-picker category prefix for static-OutcomeTag-derived path identities (everything after
+        "SimpleQuest.Outcome." up to and including the last dot, e.g., "Combat." for
+        SimpleQuest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome"), for outcomes that are
+        direct children of SimpleQuest.Outcome, and for dynamic path identities (bare designer-authored or
+        "Dynamic N" auto-numbered names). Rendered de-emphasized above LeafPathLabel in the leaf widget. */
+    UPROPERTY() FText LeafPathCategory;
 
-    /** Leaf-only: outcome pin label — the leaf segment of a named outcome tag, the "Any Outcome" sentinel, or "Entered".
-        Row-2 primary value in the leaf's two-row display. */
-    UPROPERTY() FText LeafOutcomeLabel;
+    /** Leaf-only: path pin label, the leaf segment of a named outcome tag for static placements, the bare path
+        identity for dynamic placements, the "Any Outcome" sentinel, or "Entered". Row-2 primary value in the
+        leaf's two-row display. */
+    UPROPERTY() FText LeafPathLabel;
 
     /** WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
-        (MakeNodeOutcomeFact for named outcomes, MakeStateFact(Completed) for Any Outcome). For RuleRef: the rule's
+        (MakeNodePathFact for named paths, MakeStateFact(Completed) for Any Outcome). For RuleRef: the rule's
         group tag. Invalid on combinator nodes and on leaves whose source pin role isn't covered by
-        ResolveLeafFactForOutputPin (rare — Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
+        ResolveLeafFactForOutputPin (rare. Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
     UPROPERTY() FGameplayTag LeafTag;
 
-    /** Source content node's compiled runtime tag (e.g., "Quest.Demo.Step1"). Paired with LeafTag so the debug channel
+    /** Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
         can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
         Leaf-only; invalid on other node types. */
     UPROPERTY() FGameplayTag LeafSourceTag;
 
-    /** Navigation target on double-click — the editor node that sources this leaf or owns this rule reference. */
+    /** Navigation target on double-click - the editor node that sources this leaf or owns this rule reference. */
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> SourceNode;
 
     /** RuleRef only: the Prerequisite Rule Entry that defines the referenced rule. Enables drill-down into the rule's

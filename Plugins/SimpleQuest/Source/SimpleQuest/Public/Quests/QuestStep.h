@@ -1,11 +1,12 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
-#include "Types/QuestObjectiveActivationParams.h"
-#include "Types/QuestObjectiveContext.h"
+#include "Types/QuestObjectiveActivationContext.h"
+#include "Types/QuestObjectiveTriggerContext.h"
 #include "Types/QuestStepEnums.h"
 #include "QuestStep.generated.h"
 
@@ -23,10 +24,29 @@ class SIMPLEQUEST_API UQuestStep : public UQuestNodeBase
 	friend class FQuestlineGraphCompiler; 
 
 public:
-	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveContext, ProgressData);
+	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeProgress, UQuestStep*, Step, FQuestObjectiveTriggerContext, ProgressData);
 	FOnNodeProgress OnNodeProgress;
+
+	DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeRefused, UQuestStep*, Step, FGameplayTag, RefusalReason, FQuestObjectiveTriggerContext, TriggerContext);
+		
+	/**
+	 * Fired by OnObjectiveRefused (forwarded from the live objective's OnQuestObjectiveRefused broadcast). Manager binds
+	 * and publishes FQuestTriggerResponseEvent(Refused) on the step's tag channel.
+	 */
+	FOnNodeRefused OnNodeRefused;
+
+	DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeTriggerDeactivation, UQuestStep*, Step, FGameplayTag, OutcomeTag, FQuestObjectiveTriggerContext, FinalContext);
+	
+	/**
+	 * Fired by OnObjectiveTriggerDeactivation (forwarded from the live objective's OnQuestObjectiveTriggerDeactivation
+	 * broadcast — manual fires only; the Completed / Interrupted auto-publishes happen manager-side adjacent to
+	 * FQuestEndedEvent / FQuestDeactivatedEvent). Manager binds and publishes FQuestTriggerDeactivatedEvent(Manual).
+	 */
+	FOnNodeTriggerDeactivation OnNodeTriggerDeactivation;
 	
 	virtual void Activate(FGameplayTag InContextualTag) override;
+
+	virtual bool IsStepNode() const override { return true; }
 
 protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
@@ -49,6 +69,15 @@ protected:
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
 
+	/**
+	 * Container chain ordered innermost → outermost. Compile-time populated by FQuestlineGraphCompiler::
+	 * ComputeContainerReachability. Read by Step state-transition methods (SetQuestLive / SetQuestResolved /
+	 * SetQuestDeactivated) to walk up and re-derive each ancestor container's Live state.
+	 */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+	TArray<FGameplayTag> AncestorContainerTags;
+
+	
 public:
 	/**
 	 * Snapshot of the final composed params delivered to the objective at activation. Retained for Piece D chain
@@ -56,36 +85,43 @@ public:
 	 * in ActivateInternal; cleared in DeactivateInternal.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationParams ReceivedActivationParams;
+	FQuestObjectiveActivationContext ReceivedActivationContext;
 
 	/**
 	 * Populated from the objective's forward-params at completion. Read by ChainToNextNodes to pre-stamp
-	 * downstream PendingActivationParams before activation. Transient across step activations.
+	 * downstream PendingActivationContext before activation. Transient across step activations.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationParams CompletionForwardParams;
+	FQuestObjectiveActivationContext CompletionForwardParams;
 	
 private:
 	UPROPERTY()
-	TObjectPtr<UQuestObjective> ActiveObjective;
+	TObjectPtr<UQuestObjective> LiveObjective;
 
 	/** Completion payload captured from the objective before teardown. Read by the manager during context assembly. */
-	FQuestObjectiveContext CompletionData;
-
-	UFUNCTION(BlueprintCallable)
-	void OnObjectiveComplete(FGameplayTag OutcomeTag);
+	FQuestObjectiveTriggerContext CompletionContext;
 
 	UFUNCTION()
-	void OnObjectiveProgress(FQuestObjectiveContext ProgressData);
+	void OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity);
+
+	UFUNCTION()
+	void OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext);
+	
+	UFUNCTION()
+	void OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext);
+
+	UFUNCTION()
+	void OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
-	FORCEINLINE UQuestObjective* GetActiveObjective() const { return ActiveObjective; }
+	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
-	FORCEINLINE const FQuestObjectiveContext& GetCompletionData() const { return CompletionData; }
-	FORCEINLINE const FQuestObjectiveActivationParams& GetReceivedActivationParams() const { return ReceivedActivationParams; }
-	FORCEINLINE const FQuestObjectiveActivationParams& GetCompletionForwardParams() const { return CompletionForwardParams; }	
+	FORCEINLINE const FQuestObjectiveTriggerContext& GetCompletionContext() const { return CompletionContext; }
+	FORCEINLINE const FQuestObjectiveActivationContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
+	FORCEINLINE const FQuestObjectiveActivationContext& GetCompletionForwardParams() const { return CompletionForwardParams; }
+	FORCEINLINE const TArray<FGameplayTag>& GetAncestorContainerTags() const { return AncestorContainerTags; }
 };

@@ -3,6 +3,42 @@
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 
+namespace
+{
+	ELogVerbosity::Type ToELogVerbosity(EQuestLogVerbosity Verbosity)
+	{
+		switch (Verbosity)
+		{
+		case EQuestLogVerbosity::NoLogging:   return ELogVerbosity::NoLogging;
+		case EQuestLogVerbosity::Fatal:       return ELogVerbosity::Fatal;
+		case EQuestLogVerbosity::Error:       return ELogVerbosity::Error;
+		case EQuestLogVerbosity::Warning:     return ELogVerbosity::Warning;
+		case EQuestLogVerbosity::Display:     return ELogVerbosity::Display;
+		case EQuestLogVerbosity::Log:         return ELogVerbosity::Log;
+		case EQuestLogVerbosity::Verbose:     return ELogVerbosity::Verbose;
+		case EQuestLogVerbosity::VeryVerbose: return ELogVerbosity::VeryVerbose;
+		default:                              return ELogVerbosity::Log;
+		}
+	}
+}
+
+void USimpleQuestSettings::ApplyLogVerbosity() const
+{
+	LogSimpleQuest.SetVerbosity(ToELogVerbosity(LogSimpleQuestVerbosity));
+	LogSimpleQuestActivation.SetVerbosity(ToELogVerbosity(LogSimpleQuestActivationVerbosity));
+	LogSimpleQuestCompiler.SetVerbosity(ToELogVerbosity(LogSimpleQuestCompilerVerbosity));
+	LogSimpleQuestSubscription.SetVerbosity(ToELogVerbosity(LogSimpleQuestSubscriptionVerbosity));
+	LogSimpleQuestState.SetVerbosity(ToELogVerbosity(LogSimpleQuestStateVerbosity));
+}
+
+#if WITH_EDITOR
+void USimpleQuestSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+	ApplyLogVerbosity();
+}
+#endif
+
 void UGameInstanceSubsystemInitializer::Initialize(FSubsystemCollectionBase& Collection)
 {
 	const USimpleQuestSettings* SimpleQuestSettings = GetDefault<USimpleQuestSettings>();

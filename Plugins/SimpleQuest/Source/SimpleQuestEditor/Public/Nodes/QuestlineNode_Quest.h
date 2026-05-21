@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -23,7 +24,7 @@ public:
 	virtual void PostDuplicate(bool bDuplicateForPIE) override;
 	virtual void PostPasteNode() override;
 	virtual void PostLoad() override;
-	virtual FString GetDefaultNodeBaseName() const override { return TEXT("Quest"); }
+	virtual FString GetDefaultNodeBaseName() const override { return TEXT("NewQuest"); }
 	
 protected:
 	virtual void NotifyInnerGraphsOfRename() override;

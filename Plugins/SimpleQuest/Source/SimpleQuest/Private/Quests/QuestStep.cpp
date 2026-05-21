@@ -1,10 +1,11 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Quests/QuestStep.h"
-#include "Quests/Types/QuestObjectiveContext.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "WorldState/WorldStateSubsystem.h"
 
 void UQuestStep::Activate(FGameplayTag InContextualTag)
@@ -22,83 +23,118 @@ void UQuestStep::Activate(FGameplayTag InContextualTag)
 
 void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
+	// Compose activation params FIRST, before Super::ActivateInternal fires OnNodeStarted. The base-class Activate-
+	// Internal's OnNodeStarted broadcast routes to UQuestManagerSubsystem::HandleOnNodeStarted, whose Step-side
+	// RecordEntry call reads GetReceivedActivationParams() for the registry snapshot. Populating ReceivedActivation-
+	// Params before Super means the snapshot captures the merged final params (Instigator, Provenance, the full
+	// FQuestObjectiveActivationContext shape) rather than the default-constructed empty struct.
+	//
+	// Composition rules: additive for compound fields (sets union, counts sum); Instigator + CustomData come
+	// straight from external since Step has no equivalents. Position data (if any) goes through CustomData. Provenance
+	// + IncomingOutcomeTag propagate so the registry's per-start record knows how this start was initiated and which
+	// outcome (if any) drove it.
+	FQuestObjectiveActivationContext Context;
+
+	// Designer-authored from this Step's UPROPERTYs (TargetActors here is the Step's authored set;
+	// PendingActivationParams.Dynamic.TargetActors is the runtime-supplied appendage):
+	Context.Authored.TargetClasses = TargetClasses;
+	Context.Authored.NumElementsRequired = NumberOfElements + PendingActivationContext.Authored.NumElementsRequired;
+
+	// Runtime-dynamic merge — append incoming runtime contributions onto this Step's runtime set:
+	Context.Dynamic.TargetActors = TargetActors;
+	Context.Dynamic.TargetActors.Append(PendingActivationContext.Dynamic.TargetActors);
+	Context.Dynamic.Instigator = PendingActivationContext.Dynamic.Instigator;
+	Context.Dynamic.CustomData = PendingActivationContext.Dynamic.CustomData;
+	Context.Dynamic.OriginTag = PendingActivationContext.Dynamic.OriginTag;
+	Context.Dynamic.OriginChain = PendingActivationContext.Dynamic.OriginChain;
+	Context.Dynamic.Provenance = PendingActivationContext.Dynamic.Provenance;
+	Context.Dynamic.IncomingOutcomeTag = PendingActivationContext.Dynamic.IncomingOutcomeTag;
+
+	// Snapshot the composed params before Super so OnNodeStarted's handler reads a populated struct. Also serves
+	// Piece D chain propagation — ChainToNextNodes reads OriginChain to extend the forwarded chain when the chain
+	// reaches a downstream step.
+	ReceivedActivationContext = Context;
+
+	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
+	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above.
 	Super::ActivateInternal(InContextualTag);
 
 	UClass* ObjClass = QuestObjective.LoadSynchronous();
 	if (!ObjClass) return;
 
-	ActiveObjective = NewObject<UQuestObjective>(this, ObjClass);
-	ActiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
-	ActiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
+	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
+	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
+	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
+	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);
+	LiveObjective->OnQuestObjectiveTriggerDeactivation.AddDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
 
-	// Compose activation params — Step's authored defaults plus any external params from a
-	// Tag_Channel_QuestActivationRequest publisher. Additive for compound fields (sets union, count sums);
-	// ActivationSource + CustomData come straight from external since Step has no equivalents. Position
-	// data (if any) goes through CustomData — no first-class TargetVector field on the Step anymore.
-	FQuestObjectiveActivationParams Params;
+	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
+	PendingActivationContext = FQuestObjectiveActivationContext{};
 
-	Params.TargetActors = TargetActors;
-	Params.TargetActors.Append(PendingActivationParams.TargetActors);
-
-	Params.TargetClasses = TargetClasses;
-	Params.TargetClasses.Append(PendingActivationParams.TargetClasses);
-
-	Params.NumElementsRequired = NumberOfElements + PendingActivationParams.NumElementsRequired;
-
-	Params.ActivationSource = PendingActivationParams.ActivationSource;
-	Params.CustomData = PendingActivationParams.CustomData;
-
-	Params.OriginTag = PendingActivationParams.OriginTag;
-	Params.OriginChain = PendingActivationParams.OriginChain;
-
-	// Snapshot the composed params for Piece D chain propagation — ChainToNextNodes needs OriginChain to extend the
-	// forwarded chain with this step's tag when the chain reaches a downstream step.
-	ReceivedActivationParams = Params;
-
-	// Consume + clear so subsequent activations don't accidentally reuse stale external params.
-	PendingActivationParams = FQuestObjectiveActivationParams{};
-
-	ActiveObjective->DispatchOnObjectiveActivated(Params);
+	LiveObjective->DispatchOnObjectiveActivated(Context);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {
-	if (ActiveObjective)
+	if (LiveObjective)
 	{
-		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		ActiveObjective = nullptr;
+		// Symmetric to OnObjectiveActivated: fire the deactivation hook BEFORE delegate cleanup and null-out
+		// so subclass overrides (universal-adapter pattern: subscribed to game-system events in OnObjective-
+		// Activated) can still inspect targets / objective state and explicitly unsubscribe.
+		LiveObjective->DispatchOnObjectiveDeactivated();
+		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
+		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective = nullptr;
 	}
-	ReceivedActivationParams = FQuestObjectiveActivationParams{};
-	CompletionForwardParams = FQuestObjectiveActivationParams{};
+	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	CompletionForwardParams = FQuestObjectiveActivationContext{};
 	Super::DeactivateInternal(InContextualTag);
 }
 
 void UQuestStep::ResetTransientState()
 {
 	Super::ResetTransientState();
-	// ActiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
-	// drop the reference. CompletionData + Piece D params are pure value types; reset to empty.
-	ActiveObjective = nullptr;
-	CompletionData = FQuestObjectiveContext{};
-	ReceivedActivationParams = FQuestObjectiveActivationParams{};
-	CompletionForwardParams = FQuestObjectiveActivationParams{};
+	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
+	// drop the reference. CompletionContext + Piece D params are pure value types; reset to empty.
+	LiveObjective = nullptr;
+	CompletionContext = FQuestObjectiveTriggerContext{};
+	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	CompletionForwardParams = FQuestObjectiveActivationContext{};
 }
 
-void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag)
+void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity)
 {
-	if (ActiveObjective)
+	if (LiveObjective)
 	{
-		CompletionData = ActiveObjective->TakeCompletionData();
-		CompletionForwardParams = ActiveObjective->TakeForwardActivationParams();
-		ActiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		ActiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		ActiveObjective = nullptr;
+		// Fire the deactivation hook FIRST, before TakeCompletionContext / TakeForwardActivationParams move
+		// data out of the objective, so the subclass override can read CompletionContext / ForwardActivation-
+		// Params if it needs them. The objective is still live (we're inside its OnQuestObjectiveComplete
+		// broadcast); ConditionalBeginDestroy hasn't fired yet.
+		LiveObjective->DispatchOnObjectiveDeactivated();
+		CompletionContext = LiveObjective->TakeCompletionContext();
+		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
+		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
+		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective = nullptr;
 	}
-	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag);
+	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
 }
 
-void UQuestStep::OnObjectiveProgress(FQuestObjectiveContext ProgressData)
+void UQuestStep::OnObjectiveProgress(FQuestObjectiveTriggerContext ProgressContext)
 {
-	OnNodeProgress.ExecuteIfBound(this, ProgressData);
+	OnNodeProgress.ExecuteIfBound(this, ProgressContext);
+}
+
+void UQuestStep::OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveTriggerContext TriggerContext)
+{
+	OnNodeRefused.ExecuteIfBound(this, RefusalReason, TriggerContext);
+}
+
+void UQuestStep::OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext)
+{
+	OnNodeTriggerDeactivation.ExecuteIfBound(this, OutcomeTag, FinalContext);
 }

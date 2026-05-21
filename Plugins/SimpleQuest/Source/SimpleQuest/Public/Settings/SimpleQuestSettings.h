@@ -2,9 +2,28 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Subsystems/QuestManagerSubsystem.h"
 #include "SimpleQuestSettings.generated.h"
 
-class UQuestManagerSubsystem;
+
+/**
+ * BP-friendly mirror of ELogVerbosity::Type for the log-category settings on USimpleQuestSettings. Maps 1:1 to UE's
+ * underlying enum via ToELogVerbosity in SimpleQuestSettings.cpp; kept separate so the Project Settings dropdown
+ * shows clean designer-facing labels without exposing the engine enum.
+ */
+UENUM(BlueprintType)
+enum class EQuestLogVerbosity : uint8
+{
+	NoLogging   UMETA(DisplayName = "Off"),
+	Fatal       UMETA(DisplayName = "Fatal"),
+	Error       UMETA(DisplayName = "Error"),
+	Warning     UMETA(DisplayName = "Warning"),
+	Display     UMETA(DisplayName = "Display"),
+	Log         UMETA(DisplayName = "Log"),
+	Verbose     UMETA(DisplayName = "Verbose"),
+	VeryVerbose UMETA(DisplayName = "Very Verbose"),
+};
+
 
 UCLASS(config=SimpleQuest, DefaultConfig, meta=(DisplayName="Simple Quest"))
 class SIMPLEQUEST_API USimpleQuestSettings : public UDeveloperSettings
@@ -13,77 +32,61 @@ class SIMPLEQUEST_API USimpleQuestSettings : public UDeveloperSettings
 
 public:
 	virtual FName GetCategoryName() const override { return FName("Plugins"); }
-	
-	/** Quest manager to load when the game starts. Blueprints or C++ class derived from UQuestManagerSubsystem. */
-	UPROPERTY(Config, EditAnywhere, Category="Initialization")
-	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(FSoftObjectPath(TEXT("/SimpleQuest/BP_QuestManager.BP_QuestManager_C")));
-
-#if WITH_EDITORONLY_DATA
-	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
-	FLinearColor ActivationWireColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
-	FLinearColor PrerequisiteWireColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
-	FLinearColor OutcomeWireColor = FLinearColor::White;
-	
-	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
-	FLinearColor DeactivationWireColor = FLinearColor(0.9f, 0.4f, 0.3f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Wire Colors")
-	FLinearColor StaleWireColor = FLinearColor(1.f, 0.f, 0.f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Pin Colors")
-	FLinearColor DefaultPinColor = FLinearColor::White;
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor EntryNodeColor = FLinearColor(0.7f, 0.15f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor ExitNodeActiveColor = FLinearColor(0.9f, 0.7f, 0.1f); 
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor ExitNodeInactiveColor = FLinearColor(0.6f, 0.6f, 0.6f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor QuestNodeColor = FLinearColor(0.2f, 0.4f, 0.7f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor StepNodeColor = FLinearColor(0.1f, 0.2f, 0.35f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor LinkedQuestlineGraphNodeColor = FLinearColor(0.2f, 0.6f, 0.9f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor ActivateGroupNodeColor = FLinearColor(0.9f, 0.7f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor PrerequisiteGroupNodeColor = FLinearColor(0.65f, 0.05f, 0.65f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor UtilityNodeColor = FLinearColor(0.2f, 0.2f, 0.8f);
-	
-	UPROPERTY(Config, EditAnywhere, Category="Node Colors")
-	FLinearColor GraphOutcomeNodeColor = FLinearColor(0.3f, 0.7f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="ExaminerWidgets|ActivationGroup")
-	FLinearColor ExaminerGroupSetterColor = FLinearColor(0.85f, 0.65f, 0.15f);
-
-	UPROPERTY(Config, EditAnywhere, Category="ExaminerWidgets|ActivationGroup")
-	FLinearColor ExaminerGroupGetterColor = FLinearColor(0.25f, 0.60f, 0.90f);
 
 	/**
-	 * Color used by the Group Examiner (and future examiners) to draw a hover-highlight border around a graph node when
-	 * the designer hovers a corresponding row in the panel. Cross-editor — if the target node lives in another open editor,
-	 * the highlight draws there too. Bright, distinctive colors read best since they need to contrast with arbitrary node
-	 * backgrounds.
+	 * Quest manager class loaded when the game starts. Set to a Blueprint or C++ subclass of UQuestManagerSubsystem
+	 * to customize manager behavior; defaults to the native UQuestManagerSubsystem.
 	 */
-	UPROPERTY(EditAnywhere, Config, Category = "Simple Quest|Colors")
-	FLinearColor HoverHighlightColor = FLinearColor(0.3f, 0.95f, 0.95f);
-	
+	UPROPERTY(Config, EditAnywhere, Category="Initialization", meta=(DisplayName="Quest Manager"))
+	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(UQuestManagerSubsystem::StaticClass());
+
+	/**
+	 * Manager activation flow — cascade entry, chain advancement, live-state writers, container Live derivation.
+	 * Raise to Verbose when debugging "why isn't my quest going Live" or chain-advancement issues.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Activation"))
+	EQuestLogVerbosity LogSimpleQuestActivationVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Subscriber wiring — Observer/Trigger/Giver registration, K2 node subscriptions, catch-up fanout, prereq-leaf
+	 * enablement watches. Raise to Verbose when debugging "bound but never fires" or catch-up replay behavior.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Subscription"))
+	EQuestLogVerbosity LogSimpleQuestSubscriptionVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Compile-time output — graph compile, native tag registration, rename-redirect machinery, stale-tag warnings.
+	 * Bulk of the historical Verbose noise; raise selectively when investigating compile or rename behavior.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Compiler"))
+	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * UQuestStateSubsystem registry mutations — resolutions, entries, tag/alias registrations. The durable record of
+	 * what happened (becomes load-bearing once save/load lands in 0.5.0). Raise to Verbose when debugging "what's
+	 * persisted vs ephemeral."
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="State"))
+	EQuestLogVerbosity LogSimpleQuestStateVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Umbrella channel — module startup, settings, debug overlay, and anything not covered by the specialized channels
+	 * above. Live-applied: changes take effect immediately without restart.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Module"))
+	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
+
+	/**
+	 * Pushes every verbosity value to its log category. Called from PostEditChangeProperty for live-apply during editor
+	 * sessions, and from FSimpleQuest::StartupModule on engine startup so settings take effect before any UE_LOG fires.
+	 */
+	void ApplyLogVerbosity() const;
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 };
+
 
 UCLASS()
 class SIMPLEQUEST_API UGameInstanceSubsystemInitializer : public UGameInstanceSubsystem

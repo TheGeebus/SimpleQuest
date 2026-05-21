@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 
@@ -15,8 +16,8 @@ FText UQuestlineNode_LinkedQuestline::GetNodeTitle(ENodeTitleType::Type TitleTyp
 		return LOCTEXT("LinkedQuestlineMenuTitle", "Linked Questline");
 	}
 
-	// Placed / editable contexts show NodeLabel — the designer-authored identity that drives the compiled tag
-	// segment (Quest.<ParentID>.<NodeLabel>). Same convention as Step and Quest. The linked asset reference is
+	// Placed / editable contexts show NodeLabel — the designer-authored identity that drives the compiled tag segment
+	// (SimpleQuest.Questline.<ParentID>.<NodeLabel>). Same convention as Step and Quest. The linked asset reference is
 	// displayed prominently in the inline picker widget on the node body, so no redundant header decoration.
 	return NodeLabel;
 }

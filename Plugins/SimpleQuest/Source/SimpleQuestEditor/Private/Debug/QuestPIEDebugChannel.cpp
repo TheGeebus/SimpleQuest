@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Debug/QuestPIEDebugChannel.h"
 
@@ -13,7 +14,9 @@
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "WorldState/WorldStateSubsystem.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Subsystems/QuestStateSubsystem.h"
+#include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 
@@ -21,11 +24,9 @@ namespace
 {
 	bool HasAnyStateFact(const FGameplayTag& NodeTag, UWorldStateSubsystem* WorldState)
 	{
-		using FQ = FQuestStateTagUtils;
-		const FName TagName = NodeTag.GetTagName();
-		for (const FString& Leaf : { FQ::Leaf_Active, FQ::Leaf_Completed, FQ::Leaf_PendingGiver, FQ::Leaf_Blocked, FQ::Leaf_Deactivated })
+		for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
 		{
-			const FGameplayTag Fact = FGameplayTag::RequestGameplayTag(FQ::MakeStateFact(TagName, Leaf), false);
+			const FGameplayTag Fact = FQuestTagComposer::ResolveStateFactTag(NodeTag, Leaf);
 			if (Fact.IsValid() && WorldState->HasFact(Fact)) return true;
 		}
 		return false;
@@ -51,8 +52,19 @@ void FQuestPIEDebugChannel::Shutdown()
 		FEditorDelegates::EndPIE.Remove(EndPIEHandle);
 		EndPIEHandle.Reset();
 	}
+	if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		if (OnAnyRegistryChangedHandle.IsValid())
+		{
+			QS->OnAnyRegistryChanged.Remove(OnAnyRegistryChangedHandle);
+		}
+	}
+	OnAnyRegistryChangedHandle.Reset();
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
+	CachedQuestState.Reset();
+	SessionHistory.Reset();
+	NextSessionNumber = 1;
 	bIsActive = false;
 }
 
@@ -67,13 +79,38 @@ void FQuestPIEDebugChannel::HandlePostPIEStarted(bool bIsSimulating)
 	bIsActive = bResolved;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE started (simulating=%d, subsystems resolved=%d)"),
 		bIsSimulating ? 1 : 0, bResolved ? 1 : 0);
+
+	// Always begin a new session even if QuestState didn't resolve — the snapshot fields stay empty in that case
+	// (graceful degradation). This matches IsActive()'s policy: WorldState + QuestManager are load-bearing, QuestState
+	// is optional. Subscribe to OnAnyRegistryChanged only if the subsystem resolved.
+	if (bResolved)
+	{
+		BeginNewSession();
+		if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+		{
+			OnAnyRegistryChangedHandle = QS->OnAnyRegistryChanged.AddRaw(this, &FQuestPIEDebugChannel::HandleAnyRegistryChanged);
+		}
+	}
 	OnDebugActiveChanged.Broadcast();
 }
 
 void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 {
+	// Finalize before resetting CachedQuestState — finalize reads the live subsystem to capture registry maps.
+	FinalizeInFlightSession();
+
+	if (UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		if (OnAnyRegistryChangedHandle.IsValid())
+		{
+			QS->OnAnyRegistryChanged.Remove(OnAnyRegistryChangedHandle);
+		}
+	}
+	OnAnyRegistryChangedHandle.Reset();
+
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
+	CachedQuestState.Reset();
 	bIsActive = false;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE ended"));
 	OnDebugActiveChanged.Broadcast();
@@ -124,12 +161,17 @@ bool FQuestPIEDebugChannel::ResolvePIESubsystems()
 
 	CachedWorldState = GI->GetSubsystem<UWorldStateSubsystem>();
 	CachedQuestManager = GI->GetSubsystem<UQuestManagerSubsystem>();
+	CachedQuestState = GI->GetSubsystem<UQuestStateSubsystem>();
 
-	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel::ResolvePIESubsystems : world='%s' type=%d, WorldState=%s, QuestManager=%s"),
+	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel::ResolvePIESubsystems : world='%s' type=%d, WorldState=%s, QuestManager=%s, QuestState=%s"),
 		*PIEWorld->GetName(), static_cast<int32>(PIEWorld->WorldType),
 		CachedWorldState.IsValid() ? TEXT("resolved") : TEXT("NULL"),
-		CachedQuestManager.IsValid() ? TEXT("resolved") : TEXT("NULL"));
-
+		CachedQuestManager.IsValid() ? TEXT("resolved") : TEXT("NULL"),
+		CachedQuestState.IsValid() ? TEXT("resolved") : TEXT("NULL"));
+	
+	// IsActive() condition unchanged: WorldState + QuestManager are the load-bearing pair for existing queries
+	// (QueryNodeState, QueryLeafState, HasFact). QuestState is a separately-checked optional resource for the
+	// Quest State view; failures to resolve it don't disable the rest of the channel.
 	return CachedWorldState.IsValid() && CachedQuestManager.IsValid();
 }
 
@@ -145,23 +187,15 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	if (!WorldState) return EQuestNodeDebugState::Unknown;
 
-	// Priority order: Blocked > PendingGiver > Active > Completed > Deactivated. See agenda item 7 Session A discussion.
-	const FName TagName = RuntimeTag.GetTagName();
-	const FGameplayTag BlockedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Blocked), /*ErrorIfNotFound*/ false);
-	if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact)) return EQuestNodeDebugState::Blocked;
+	// Priority order: Blocked > Completed > PendingGiver > Live > Deactivated. Routes through FQuestLifecycle-
+	// Query so this debug surface answers the same "is this state asserted?" question every other site does —
+	// no separate fact-resolve+probe path that drifts from ground truth as the centralized helpers evolve.
+	if (FQuestLifecycleQuery::IsBlocked(WorldState, RuntimeTag))      return EQuestNodeDebugState::Blocked;
+	if (FQuestLifecycleQuery::IsCompleted(WorldState, RuntimeTag))    return EQuestNodeDebugState::Completed;
+	if (FQuestLifecycleQuery::IsPendingGiver(WorldState, RuntimeTag)) return EQuestNodeDebugState::PendingGiver;
+	if (FQuestLifecycleQuery::IsLive(WorldState, RuntimeTag))         return EQuestNodeDebugState::Live;
+	if (FQuestLifecycleQuery::IsDeactivated(WorldState, RuntimeTag))  return EQuestNodeDebugState::Deactivated;
 
-	const FGameplayTag PendingGiverFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_PendingGiver), false);
-	if (PendingGiverFact.IsValid() && WorldState->HasFact(PendingGiverFact)) return EQuestNodeDebugState::PendingGiver;
-
-	const FGameplayTag ActiveFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Active), false);
-	if (ActiveFact.IsValid() && WorldState->HasFact(ActiveFact)) return EQuestNodeDebugState::Active;
-
-	const FGameplayTag CompletedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Completed), false);
-	if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact)) return EQuestNodeDebugState::Completed;
-
-	const FGameplayTag DeactivatedFact = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(TagName, FQuestStateTagUtils::Leaf_Deactivated), false);
-	if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact)) return EQuestNodeDebugState::Deactivated;
-	
 	return EQuestNodeDebugState::Unknown;
 }
 
@@ -188,79 +222,132 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 		}
 	}
 
-	// Contextual resolution: if PIE is running and own-asset tag has no live state, the asset is probably opened
-	// while a parent LinkedQuestline nesting is active. Walk contextual parents; return the first with live state.
+	// Contextual resolution: if PIE is running and own-asset tag has no live state, the asset may be opened
+	// while a parent LinkedQuestline placement is the actively running instance. Consult the state subsystem's
+	// runtime alias index (ResolveCanonicalTags) instead of the editor-utility's asset-registry walk — the
+	// runtime index reflects post-game-start registrations (including listener auto-load), whereas the asset-
+	// registry walk only sees compile-time data and can disagree with what the manager has actually registered.
+	// Closes the "halo doesn't update post-listener" symptom.
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
-	if (WorldState && OwnAssetTag.IsValid() && !HasAnyStateFact(OwnAssetTag, WorldState))
+	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
+	if (WorldState && StateSubsystem && OwnAssetTag.IsValid() && !HasAnyStateFact(OwnAssetTag, WorldState))
 	{
-		for (const FGameplayTag& ContextualTag : FSimpleQuestEditorUtilities::CollectContextualNodeTagsForEditorNode(ContentNode))
+		for (const FGameplayTag& CanonicalTag : StateSubsystem->ResolveCanonicalTags(OwnAssetTag))
 		{
-			if (HasAnyStateFact(ContextualTag, WorldState)) return ContextualTag;
+			if (CanonicalTag != OwnAssetTag && HasAnyStateFact(CanonicalTag, WorldState))
+			{
+				return CanonicalTag;
+			}
 		}
 	}
 	return OwnAssetTag;
 }
 
-EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag, const UQuestlineNode_ContentBase* LeafSourceNode) const
+EPrereqDebugState FQuestPIEDebugChannel::QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag) const
 {
 	if (!IsActive() || !LeafFact.IsValid() || !SourceRuntimeTag.IsValid()) return EPrereqDebugState::Unknown;
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	if (!WorldState) return EPrereqDebugState::Unknown;
+	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
 
-	// Contextual rewrite: if the leaf fact isn't present under the own-asset tag but the leaf's source node has a
-	// live contextual nesting, rewrite both LeafFact and SourceRuntimeTag to use that nesting. Lets the examiner
-	// light up when viewing a linked asset's graph while a parent graph is actively running it.
-	FGameplayTag EffectiveLeaf = LeafFact;
-	FGameplayTag EffectiveSource = SourceRuntimeTag;
-	if (LeafSourceNode && !WorldState->HasFact(LeafFact) && !HasAnyStateFact(SourceRuntimeTag, WorldState))
+	// Detect leaf-fact shape and route through the canonical answer surface for that kind. Path facts and
+	// entry-path facts live in the state subsystem's QuestResolutions / QuestEntries registries (post the
+	// Outcome/Path data-layer migration) — WorldState->HasFact returns false on them. State-fact leaves
+	// (AnyOutcome → .Completed) stay readable via WorldState. The state subsystem's predicates alias-walk
+	// natively, so no debug-channel-side contextual rewrite is needed — the pre-Phase-G EffectiveLeaf
+	// string-transplant scaffolding is dropped entirely.
+	const FName SourceStateRoot = FQuestTagComposer::SwapNamespacePrefix(
+		SourceRuntimeTag.GetTagName(), FQuestTagComposer::IdentityNamespace, FQuestTagComposer::StateNamespace);
+	const FString PathPrefix = SourceStateRoot.ToString() + TEXT(".") + FQuestTagComposer::PathSubSuffix + TEXT(".");
+	const FString EntryPathPrefix = SourceStateRoot.ToString() + TEXT(".") + FQuestTagComposer::EntryPathSubSuffix + TEXT(".");
+	const FString LeafStr = LeafFact.GetTagName().ToString();
+
+	bool bSatisfied = false;
+	if (StateSubsystem && LeafStr.StartsWith(EntryPathPrefix))
 	{
-	    for (const FGameplayTag& ContextualSource : FSimpleQuestEditorUtilities::CollectContextualNodeTagsForEditorNode(LeafSourceNode))
-	    {
-	        if (!HasAnyStateFact(ContextualSource, WorldState)) continue;
-
-	        // Source nesting is live. Rewrite the leaf fact by transplanting the leaf-fact tail onto the contextual
-	        // source: strip "QuestState.<home>." prefix off the leaf, re-root under "QuestState.<contextual>.".
-	        const FString LeafStr = LeafFact.GetTagName().ToString();
-	        const FString HomeStr = SourceRuntimeTag.GetTagName().ToString();  // e.g. "Quest.SideQuestQL.Near.Left"
-	        const FString HomeStatePrefix = FQuestStateTagUtils::Namespace + HomeStr.Mid(6); // "QuestState." + everything after "Quest."
-	        if (LeafStr.StartsWith(HomeStatePrefix))
-	        {
-	            const FString Suffix = LeafStr.RightChop(HomeStatePrefix.Len()); // ".Outcome.Reached" etc.
-	            const FString ContextualStatePrefix = FQuestStateTagUtils::Namespace + ContextualSource.GetTagName().ToString().Mid(6);
-	            const FGameplayTag RewrittenLeaf = FGameplayTag::RequestGameplayTag(FName(*(ContextualStatePrefix + Suffix)), false);
-	            if (RewrittenLeaf.IsValid())
-	            {
-	                EffectiveLeaf = RewrittenLeaf;
-	                EffectiveSource = ContextualSource;
-	                break;
-	            }
-	        }
-	    }
+		// Named-outcome entry leaf — consult the entry registry, alias-walked.
+		const FString OutcomePart = LeafStr.RightChop(EntryPathPrefix.Len());
+		const FGameplayTag OutcomeTag = FGameplayTag::RequestGameplayTag(
+			FName(*(FQuestTagComposer::OutcomeNamespace + OutcomePart)), false);
+		bSatisfied = OutcomeTag.IsValid() && StateSubsystem->HasEnteredWith(SourceRuntimeTag, OutcomeTag);
 	}
-	
-	// Satisfied wins regardless of source state — the fact is present, the leaf evaluates true.
-	if (WorldState->HasFact(EffectiveLeaf)) return EPrereqDebugState::Satisfied;
-
-	// Classify based on the source content node's state facts. Resolve each QuestState.<SourceTag>.<Leaf> lazily; the
-	// ones we actually check short-circuit on first hit.
-	const FName SourceTagName = EffectiveSource.GetTagName();
-	auto LookupSourceFact = [&](const FString& Leaf) -> bool
+	else if (StateSubsystem && LeafStr.StartsWith(PathPrefix))
 	{
-		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(SourceTagName, Leaf), false);
-		return Tag.IsValid() && WorldState->HasFact(Tag);
+		// Named-outcome resolution leaf — consult the resolution registry, alias-walked.
+		const FString OutcomePart = LeafStr.RightChop(PathPrefix.Len());
+		const FGameplayTag OutcomeTag = FGameplayTag::RequestGameplayTag(
+			FName(*(FQuestTagComposer::OutcomeNamespace + OutcomePart)), false);
+		bSatisfied = OutcomeTag.IsValid() && StateSubsystem->HasResolvedWith(SourceRuntimeTag, OutcomeTag);
+	}
+	else
+	{
+		// State-fact leaf (AnyOutcome → .Completed, or future state-fact leaf shapes). Walk ResolveCanonicalTags
+		// and re-root the leaf's state-fact suffix on each canonical's state-namespace prefix. Mirrors the path /
+		// entry-path arms above, which alias-walk natively through the state subsystem's APIs — state-fact reads
+		// don't have an alias-walked predicate yet, so the walk happens inline here. Closes the "AnyOutcome shows
+		// always-false post-completion when viewing a standalone-asset graph while a parent compile is the active
+		// runtime instance" symptom.
+		const FString SourceStatePrefix = SourceStateRoot.ToString() + TEXT(".");
+		if (StateSubsystem && LeafStr.StartsWith(SourceStatePrefix))
+		{
+			const FString LeafSuffix = LeafStr.RightChop(SourceStatePrefix.Len()); // e.g., "Completed"
+			for (const FGameplayTag& CanonicalTag : StateSubsystem->ResolveCanonicalTags(SourceRuntimeTag))
+			{
+				const FName CanonicalStateRoot = FQuestTagComposer::SwapNamespacePrefix(
+					CanonicalTag.GetTagName(), FQuestTagComposer::IdentityNamespace, FQuestTagComposer::StateNamespace);
+				const FName CanonicalFactName = FName(*(CanonicalStateRoot.ToString() + TEXT(".") + LeafSuffix));
+				const FGameplayTag CanonicalFact = FGameplayTag::RequestGameplayTag(CanonicalFactName, false);
+				if (CanonicalFact.IsValid() && WorldState->HasFact(CanonicalFact))
+				{
+					bSatisfied = true;
+					break;
+				}
+			}
+		}
+		if (!bSatisfied)
+		{
+			// Fallback: state subsystem unavailable, or LeafFact doesn't match source's state-namespace shape
+			// (foreign / future leaf type). Direct exact-match read preserves pre-Phase-G behavior for those.
+			bSatisfied = WorldState->HasFact(LeafFact);
+		}
+	}
+
+	if (bSatisfied) return EPrereqDebugState::Satisfied;
+
+	// Classify based on the source's aggregate state across canonical placements. Walk ResolveCanonicalTags so a
+	// standalone-asset-view examiner panel sees the inlined placement's state when its parent is the actively
+	// running instance.
+	bool bSourceLive = false;
+	bool bSourcePendingGiver = false;
+	bool bSourceCompleted = false;
+	bool bSourceDeactivated = false;
+
+	auto ScanState = [&](const FGameplayTag& Tag)
+	{
+		if (FQuestLifecycleQuery::IsLive(WorldState, Tag))         bSourceLive         = true;
+		if (FQuestLifecycleQuery::IsPendingGiver(WorldState, Tag)) bSourcePendingGiver = true;
+		if (FQuestLifecycleQuery::IsCompleted(WorldState, Tag))    bSourceCompleted    = true;
+		if (FQuestLifecycleQuery::IsDeactivated(WorldState, Tag))  bSourceDeactivated  = true;
 	};
 
-	const bool bSourceActive       = LookupSourceFact(FQuestStateTagUtils::Leaf_Active);
-	const bool bSourcePendingGiver = LookupSourceFact(FQuestStateTagUtils::Leaf_PendingGiver);
-	const bool bSourceCompleted    = LookupSourceFact(FQuestStateTagUtils::Leaf_Completed);
-	const bool bSourceDeactivated  = LookupSourceFact(FQuestStateTagUtils::Leaf_Deactivated);
+	if (StateSubsystem)
+	{
+		for (const FGameplayTag& CanonicalTag : StateSubsystem->ResolveCanonicalTags(SourceRuntimeTag))
+		{
+			ScanState(CanonicalTag);
+		}
+	}
+	else
+	{
+		ScanState(SourceRuntimeTag);
+	}
 
 	if (bSourceCompleted || bSourceDeactivated)
 	{
-		// Source resolved but the leaf's specific fact isn't present — the leaf's required outcome won't happen.
+		// Source resolved but the leaf's required outcome isn't recorded — this branch won't satisfy.
 		return EPrereqDebugState::Unsatisfied;
 	}
-	if (bSourceActive || bSourcePendingGiver)
+	if (bSourceLive || bSourcePendingGiver)
 	{
 		// Source running, outcome not yet resolved — still in flight.
 		return EPrereqDebugState::InProgress;
@@ -274,4 +361,113 @@ bool FQuestPIEDebugChannel::HasFact(const FGameplayTag& FactTag) const
 	if (!IsActive() || !FactTag.IsValid()) return false;
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	return WorldState && WorldState->HasFact(FactTag);
+}
+
+UQuestStateSubsystem* FQuestPIEDebugChannel::GetQuestStateSubsystem() const
+{
+	return CachedQuestState.Get();
+}
+
+double FQuestPIEDebugChannel::GetCurrentGameTimeSeconds() const
+{
+	const UQuestManagerSubsystem* QM = CachedQuestManager.Get();
+	if (!QM) return 0.0;
+	const UWorld* World = QM->GetWorld();
+	return World ? World->GetTimeSeconds() : 0.0;
+}
+
+void FQuestPIEDebugChannel::BeginNewSession()
+{
+	FQuestStateSessionSnapshot NewSession;
+	NewSession.SessionNumber = NextSessionNumber++;
+	NewSession.SessionStartRealTime = FPlatformTime::Seconds();
+	NewSession.bInFlight = true;
+	SessionHistory.Add(MoveTemp(NewSession));
+
+	// FIFO trim — drop oldest until under the cap. RemoveAt(0) preserves chronological index order.
+	while (SessionHistory.Num() > MaxStoredSessions)
+	{
+		SessionHistory.RemoveAt(0);
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel::BeginNewSession : session #%d started, %d total in history"),
+		SessionHistory.Last().SessionNumber, SessionHistory.Num());
+
+	OnSessionHistoryChanged.Broadcast();
+}
+
+void FQuestPIEDebugChannel::FinalizeInFlightSession()
+{
+	if (SessionHistory.IsEmpty()) return;
+	FQuestStateSessionSnapshot& Latest = SessionHistory.Last();
+	if (!Latest.bInFlight) return;
+
+	if (const UQuestStateSubsystem* QS = CachedQuestState.Get())
+	{
+		Latest.Resolutions = QS->GetAllResolutions();
+		Latest.Entries = QS->GetAllEntries();
+		Latest.PrereqStatus = QS->GetAllCachedPrereqStatus();
+	}
+	if (const UQuestManagerSubsystem* QM = CachedQuestManager.Get())
+	{
+		if (const UWorld* World = QM->GetWorld())
+		{
+			Latest.EndedAtGameTime = World->GetTimeSeconds();
+		}
+	}
+	Latest.bInFlight = false;
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel::FinalizeInFlightSession : session #%d closed at t=%.2fs (resolutions=%d, entries=%d, prereqs=%d)"),
+		Latest.SessionNumber, Latest.EndedAtGameTime, Latest.Resolutions.Num(), Latest.Entries.Num(), Latest.PrereqStatus.Num());
+
+	OnSessionHistoryChanged.Broadcast();
+}
+
+void FQuestPIEDebugChannel::HandleAnyRegistryChanged()
+{
+	OnSessionHistoryChanged.Broadcast();
+}
+
+const FQuestStateSessionSnapshot* FQuestPIEDebugChannel::GetSessionByIndex(int32 Index) const
+{
+	return SessionHistory.IsValidIndex(Index) ? &SessionHistory[Index] : nullptr;
+}
+
+const TMap<FGameplayTag, FQuestResolutionRecord>& FQuestPIEDebugChannel::GetResolutionsForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestResolutionRecord> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllResolutions() : Empty;
+	}
+	return Session.Resolutions;
+}
+
+const TMap<FGameplayTag, FQuestEntryRecord>& FQuestPIEDebugChannel::GetEntriesForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestEntryRecord> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllEntries() : Empty;
+	}
+	return Session.Entries;
+}
+
+const TMap<FGameplayTag, FQuestPrereqStatus>& FQuestPIEDebugChannel::GetPrereqStatusForSession(int32 Index) const
+{
+	static const TMap<FGameplayTag, FQuestPrereqStatus> Empty;
+	if (!SessionHistory.IsValidIndex(Index)) return Empty;
+	const FQuestStateSessionSnapshot& Session = SessionHistory[Index];
+	if (Session.bInFlight)
+	{
+		const UQuestStateSubsystem* QS = CachedQuestState.Get();
+		return QS ? QS->GetAllCachedPrereqStatus() : Empty;
+	}
+	return Session.PrereqStatus;
 }

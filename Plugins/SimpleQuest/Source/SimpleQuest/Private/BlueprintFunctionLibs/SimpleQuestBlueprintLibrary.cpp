@@ -1,15 +1,24 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
-#include "Events/AbandonQuestEvent.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestTagComposer.h"
 #include "GameplayTagsManager.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"
+#include "Events/QuestActivationRequestEvent.h"
+#include "Events/QuestBlockRequestEvent.h"
+#include "Events/QuestClearBlockRequestEvent.h"
+#include "Events/QuestDeactivateRequestEvent.h"
+#include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestGivenEvent.h"
+#include "Events/QuestlineStartRequestEvent.h"
+#include "Events/QuestResolveRequestEvent.h"
 #include "Subsystems/QuestManagerSubsystem.h"
+
 
 // -------------------------------------------------------------------------
 // Private helpers
@@ -47,29 +56,32 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 // Quest state queries
 // -------------------------------------------------------------------------
 
-bool USimpleQuestBlueprintLibrary::IsQuestActive(const UObject* WorldContext, FGameplayTag QuestTag)
+bool USimpleQuestBlueprintLibrary::IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Active), false));
+    return FQuestLifecycleQuery::IsLive(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_Completed), false));
+    return FQuestLifecycleQuery::IsCompleted(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeStateFact(QuestTag, FQuestStateTagUtils::Leaf_PendingGiver), false));
+    return FQuestLifecycleQuery::IsPendingGiver(GetWorldState(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    if (!WS || !OutcomeTag.IsValid()) return false;
-    return WS->HasFact(UGameplayTagsManager::Get().RequestGameplayTag(FQuestStateTagUtils::MakeOutcomeFact(OutcomeTag), false));
+    if (!QuestTag.IsValid() || !OutcomeTag.IsValid()) return false;
+    // UQuestStateSubsystem::HasResolvedWith works for any OutcomeTag the quest has actually fired with,
+    // including dynamic outcomes set via the BP ResolveQuest helper that were never registered as
+    // compile-time identities.
+    if (!WorldContext) return false;
+    const UWorld* World = WorldContext->GetWorld();
+    const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+    const UQuestStateSubsystem* StateSubsystem = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    return StateSubsystem && StateSubsystem->HasResolvedWith(QuestTag, OutcomeTag);
 }
 
 int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)
@@ -82,40 +94,71 @@ int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* World
 // Quest actions
 // -------------------------------------------------------------------------
 
-void USimpleQuestBlueprintLibrary::AbandonQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+void USimpleQuestBlueprintLibrary::DeactivateQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestEventPayload& Payload)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(QuestTag, FAbandonQuestEvent(QuestTag));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestDeactivateRequest, FQuestDeactivateRequestEvent(QuestTag, EDeactivationSource::External, Payload));
+    }
 }
 
-void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag)
+void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationContext& Params)
 {
-    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext)) SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag));
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, Params));
+    }
 }
+
+void USimpleQuestBlueprintLibrary::ActivateQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationContext& Params)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestActivationRequest, FQuestActivationRequestEvent(QuestTag, Params));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::SetQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestEventPayload& Payload, bool bAlsoDeactivate)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestBlockRequest, FQuestBlockRequestEvent(QuestTag, EDeactivationSource::External, Payload, bAlsoDeactivate));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ClearQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestEventPayload& Payload)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestClearBlockRequest, FQuestClearBlockRequestEvent(QuestTag, EDeactivationSource::External, Payload));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ResolveQuest(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag, bool bOverrideExisting, const FQuestEventPayload& Payload)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestResolveRequest, FQuestResolveRequestEvent(QuestTag, OutcomeTag, bOverrideExisting, Payload));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph, const FQuestObjectiveActivationContext& Params)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestlineStartRequest, FQuestlineStartRequestEvent(QuestlineGraph, Params));
+    }
+}
+
 
 // -------------------------------------------------------------------------
-// World state
+// Bind to Quest Event
 // -------------------------------------------------------------------------
 
-void USimpleQuestBlueprintLibrary::AddWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->AddFact(FactTag);
-}
-
-void USimpleQuestBlueprintLibrary::RemoveWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    if (UWorldStateSubsystem* WS = GetWorldState(WorldContext)) WS->RemoveFact(FactTag);
-}
-
-bool USimpleQuestBlueprintLibrary::HasWorldStateFact(const UObject* WorldContext, FGameplayTag FactTag)
-{
-    UWorldStateSubsystem* WS = GetWorldState(WorldContext);
-    return WS && WS->HasFact(FactTag);
-}
-
-UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag)
+UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents)
 {
     UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
-    Sub->InitFromFactory(WorldContextObject, QuestTag);
+    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents);
     Sub->RegisterWithGameInstance(WorldContextObject);
     return Sub;
 }

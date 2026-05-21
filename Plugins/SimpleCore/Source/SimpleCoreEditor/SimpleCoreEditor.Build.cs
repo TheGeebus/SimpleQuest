@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -27,7 +28,8 @@ public class SimpleCoreEditor : ModuleRules
 			"ToolMenus",
 			"InputCore",
 			"WorkspaceMenuStructure",
-			"Projects"
+			"Projects",
+			"ApplicationCore"
 		});
 	}
 }

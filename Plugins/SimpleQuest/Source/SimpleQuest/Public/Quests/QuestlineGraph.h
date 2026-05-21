@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -10,6 +11,7 @@
 class FNativeGameplayTag;
 #endif
 
+struct FGameplayTag;
 class UQuestNodeBase;
 class UEdGraph;
 
@@ -23,6 +25,24 @@ struct FQuestTagRename
     
     UPROPERTY()
     FName NewTag;
+};
+
+/**
+ * Compiler-stamped contextual→alias pair. One entry per (ContextualTag, AssetScopedAliasTag) pair on a node — a node with N
+ * aliases (i.e., N enclosing LinkedQuestline depths) produces N entries here. Top-level nodes (no aliases) produce zero entries.
+ * Persisted alongside CompiledQuestTags and exposed via GetAssetRegistryTags so editor utilities can discriminate legitimate
+ * cross-asset inlinings from coincidental leaf-name collisions when walking the asset registry.
+ */
+USTRUCT()
+struct FQuestCompiledNodeAlias
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FName ContextualFName;
+
+    UPROPERTY()
+    FName AliasFName;
 };
 
 /**
@@ -46,6 +66,15 @@ private:
      */
     UPROPERTY()
     TArray<FName> CompiledQuestTags;
+    
+    /**
+     * Parallel to CompiledQuestTags: each entry pairs a node's ContextualTag with one AssetScopedAliasTag it carries. Empty
+     * for top-level nodes (no LinkedQuestline ancestors). Used by editor utilities to tell legitimate inlinings of this
+     * asset's nodes (which carry an alias matching another asset's standalone-perspective compiled tag) apart from
+     * coincidental leaf-name matches in unrelated graphs. Surfaced via GetAssetRegistryTags as "CompiledNodeAliases".
+     */
+    UPROPERTY()
+    TArray<FQuestCompiledNodeAlias> CompiledNodeAliases;
 
     /**
      * Tag renames detected during compilation, persisted for deferred propagation to unloaded actors. Chain-collapsed across compiles.
@@ -68,13 +97,33 @@ private:
      */
     UPROPERTY()
     TMap<FName, TObjectPtr<UQuestNodeBase>> CompiledNodes;
+    
+    /**
+     * GroupTags this graph's UActivationGroupListenerNode instances subscribe to. Stamped by the compiler after
+     * registration. Surfaced via GetAssetRegistryTags so the manager can build an inverted GroupTag→graphs index at
+     * startup and async-load listener graphs reachable from any currently-loaded graph's setters. Inherits via
+     * LinkedQuestline inlining: a wrapper asset whose linked inner contains a listener carries the inner's listener
+     * tags too (the inner's listener instances end up in the wrapper's CompiledNodes with their original GroupTags
+     * preserved — ActivationGroup tags are authored, not contextualized).
+     */
+    UPROPERTY()
+    TArray<FGameplayTag> ListenerGroupTags;
 
+    /**
+     * GroupTags this graph's UActivationGroupSetterNode instances publish on. Stamped by the compiler post-registration.
+     * Surfaced via GetAssetRegistryTags so the manager can match this graph's outward signal surface against the global
+     * listener-graph index when this graph registers — driving the reachability-walk that async-loads any listener graph
+     * reachable from one of these tags. Inherits via LinkedQuestline inlining for the same reason as ListenerGroupTags.
+     */
+    UPROPERTY()
+    TArray<FGameplayTag> OutwardSetterGroupTags;
+    
     /**
      * Identifier used as the Gameplay Tag scope for all quests in this questline. Must be unique across the project. Defaults
      * to the asset name if left empty. Override this when you need a stable tag namespace independent of the asset name,
      * or to disambiguate duplicate assets.
      *
-     * Format: Quest.<QuestlineID>.<QuestNodeLabel>
+     * Format: SimpleQuest.Questline.<QuestlineID>.<QuestNodeLabel>
      */
     UPROPERTY(EditAnywhere)
     FString QuestlineID;
@@ -98,6 +147,7 @@ public:
     const TArray<FName>& GetEntryNodeTags() const { return EntryNodeTags; }
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
+    const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
     const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
     void ClearPendingTagRenames() { PendingTagRenames.Empty(); }

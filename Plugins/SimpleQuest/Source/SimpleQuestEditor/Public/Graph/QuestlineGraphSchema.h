@@ -1,9 +1,9 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "InputCoreTypes.h"
 #include "EdGraph/EdGraphSchema.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "QuestlineGraphSchema.generated.h"
@@ -128,6 +128,7 @@ private:
 	 * return true when an intermediate knot already has its PinType.PinCategory inferred as QuestPrerequisite, since that label
 	 * implies it transitively reaches a prereq input. Only walks knot chains. Non-knot destinations are checked for prereq category
 	 * but not recursed into.
+	 * 
 	 * @param StartKnot the knot from which to begin checking the downstream connections.
 	 * @return TRUE if any of the knot's downstream connections lead to any Prerequisite-type input pin.
 	 */

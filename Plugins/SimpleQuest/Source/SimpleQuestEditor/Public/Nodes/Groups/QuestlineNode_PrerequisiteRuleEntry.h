@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -22,13 +23,13 @@ public:
 
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
-	virtual FString GetTagFilterString() const override { return TEXT("QuestPrereqRule"); }
+	virtual FString GetTagFilterString() const override { return TEXT("SimpleQuest.PrereqRule"); }
 
 	/** Single-input Rule Entry: no multi-condition UI. Compose with AND/OR/NOT combinators into the Enter pin. */
 	virtual bool CanAddInputPin() const override { return false; }
 
 	/** Identifies this rule. Referenced by Rule Exits and prerequisite expressions anywhere in the project. */
-	UPROPERTY(EditAnywhere, Category="Prerequisite Rule", meta=(Categories="QuestPrereqRule"))
+	UPROPERTY(EditAnywhere, Category="Prerequisite Rule", meta=(Categories="SimpleQuest.PrereqRule"))
 	FGameplayTag GroupTag;
 };
 

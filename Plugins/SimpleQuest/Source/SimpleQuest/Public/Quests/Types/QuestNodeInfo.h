@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -7,7 +8,7 @@
 #include "QuestNodeInfo.generated.h"
 
 /**
- * Compiled display metadata for a quest graph node. Populated by the compiler (DisplayName) and resolved at runtime (QuestTag).
+ * Compiled display metadata for a quest graph node. Populated by the compiler (DisplayName) and resolved at runtime (ContextualTag).
  * Self-contained so it can be embedded in event context structs without requiring a reference back to the originating node.
  */
 USTRUCT(BlueprintType)

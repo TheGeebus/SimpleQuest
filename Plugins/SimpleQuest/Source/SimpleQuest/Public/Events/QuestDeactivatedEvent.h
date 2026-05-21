@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -13,7 +14,7 @@ enum class EDeactivationSource : uint8
 	/** Triggered by a Deactivate input pin, SetBlocked node, or other graph-authored path. */
 	Internal    UMETA(DisplayName = "Internal"),
 
-	/** Triggered by an external call — AbandonQuest, editor tooling, or a game system  publishing FAbandonQuestEvent on Tag_Channel_QuestAbandoned. */
+	/** Triggered by an external call — DeactivateQuest, editor tooling, or a game system  publishing FQuestDeactivateRequestEvent on Tag_Channel_QuestDeactivateRequest. */
 	External    UMETA(DisplayName = "External"),
 };
 
@@ -29,7 +30,7 @@ struct SIMPLEQUEST_API FQuestDeactivatedEvent : public FQuestEventBase
 		, Source(InSource)
 	{}
 
-	FQuestDeactivatedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventContext& InContext)
+	FQuestDeactivatedEvent(const FGameplayTag InQuestTag, const EDeactivationSource InSource, const FQuestEventPayload& InContext)
 		: FQuestEventBase(InQuestTag, InContext)
 		, Source(InSource)
 	{}

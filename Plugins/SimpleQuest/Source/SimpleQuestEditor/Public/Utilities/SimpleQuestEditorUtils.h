@@ -1,38 +1,39 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "GameplayTagContainer.h"
 #include "Components/QuestComponentBase.h"
-#include "Settings/SimpleQuestSettings.h"
+#include "Settings/SimpleQuestEditorVisualSettings.h"
 
 // ---- Wire colors ----
-#define SQ_ED_WIRE_ACTIVATION		(GetDefault<USimpleQuestSettings>()->ActivationWireColor)
-#define SQ_ED_WIRE_PREREQUISITE		(GetDefault<USimpleQuestSettings>()->PrerequisiteWireColor)
-#define SQ_ED_WIRE_OUTCOME			(GetDefault<USimpleQuestSettings>()->OutcomeWireColor)
-#define SQ_ED_WIRE_DEACTIVATION		(GetDefault<USimpleQuestSettings>()->DeactivationWireColor)
-#define SQ_ED_WIRE_STALE			(GetDefault<USimpleQuestSettings>()->StaleWireColor)
+#define SQ_ED_WIRE_ACTIVATION		(GetDefault<USimpleQuestEditorVisualSettings>()->ActivationWireColor)
+#define SQ_ED_WIRE_PREREQUISITE		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteWireColor)
+#define SQ_ED_WIRE_OUTCOME			(GetDefault<USimpleQuestEditorVisualSettings>()->OutcomeWireColor)
+#define SQ_ED_WIRE_DEACTIVATION		(GetDefault<USimpleQuestEditorVisualSettings>()->DeactivationWireColor)
+#define SQ_ED_WIRE_STALE			(GetDefault<USimpleQuestEditorVisualSettings>()->StaleWireColor)
 
 // ---- Pin colors ----
-#define SQ_ED_PIN_DEFAULT			(GetDefault<USimpleQuestSettings>()->DefaultPinColor)
+#define SQ_ED_PIN_DEFAULT			(GetDefault<USimpleQuestEditorVisualSettings>()->DefaultPinColor)
 
 // ---- Node title colors ----
-#define SQ_ED_NODE_ENTRY			(GetDefault<USimpleQuestSettings>()->EntryNodeColor)
-#define SQ_ED_NODE_EXIT_ACTIVE		(GetDefault<USimpleQuestSettings>()->ExitNodeActiveColor)
-#define SQ_ED_NODE_EXIT_INACTIVE	(GetDefault<USimpleQuestSettings>()->ExitNodeInactiveColor)
-#define SQ_ED_NODE_QUEST			(GetDefault<USimpleQuestSettings>()->QuestNodeColor)
-#define SQ_ED_NODE_STEP				(GetDefault<USimpleQuestSettings>()->StepNodeColor)
-#define SQ_ED_NODE_LINKED			(GetDefault<USimpleQuestSettings>()->LinkedQuestlineGraphNodeColor)
-#define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestSettings>()->ActivateGroupNodeColor)
-#define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestSettings>()->PrerequisiteGroupNodeColor)
-#define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestSettings>()->UtilityNodeColor)
-#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestSettings>()->GraphOutcomeNodeColor)
+#define SQ_ED_NODE_ENTRY			(GetDefault<USimpleQuestEditorVisualSettings>()->EntryNodeColor)
+#define SQ_ED_NODE_EXIT_ACTIVE		(GetDefault<USimpleQuestEditorVisualSettings>()->ExitNodeActiveColor)
+#define SQ_ED_NODE_EXIT_INACTIVE	(GetDefault<USimpleQuestEditorVisualSettings>()->ExitNodeInactiveColor)
+#define SQ_ED_NODE_QUEST			(GetDefault<USimpleQuestEditorVisualSettings>()->QuestNodeColor)
+#define SQ_ED_NODE_STEP				(GetDefault<USimpleQuestEditorVisualSettings>()->StepNodeColor)
+#define SQ_ED_NODE_LINKED			(GetDefault<USimpleQuestEditorVisualSettings>()->LinkedQuestlineGraphNodeColor)
+#define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestEditorVisualSettings>()->ActivateGroupNodeColor)
+#define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteGroupNodeColor)
+#define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestEditorVisualSettings>()->UtilityNodeColor)
+#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestEditorVisualSettings>()->GraphOutcomeNodeColor)
 
 // ---- Group Examiner ----
-#define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupSetterColor)
-#define SQ_ED_EXAMINER_GROUP_GETTER (GetDefault<USimpleQuestSettings>()->ExaminerGroupGetterColor)
+#define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupSetterColor)
+#define SQ_ED_EXAMINER_GROUP_GETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupGetterColor)
 
-#define SQ_ED_HOVER_HIGHLIGHT       (GetDefault<USimpleQuestSettings>()->HoverHighlightColor)
+#define SQ_ED_HOVER_HIGHLIGHT       (GetDefault<USimpleQuestEditorVisualSettings>()->HoverHighlightColor)
 
 
 class UQuestObjective;
@@ -49,6 +50,22 @@ struct FGameplayTag;
 struct FGroupExaminerTopology;
 struct FPrereqExaminerTree;
 
+
+/**
+ * Output of DiscoverObjectivePaths: pairs the path identity FName with its provenance. bIsRegisteredTag
+ * is true when Identity came from a registered FGameplayTag source (the OutcomeTag pin DefaultValue parsed
+ * as a tag, an ObjectiveOutcome UPROPERTY meta scan, or GetPossibleOutcomes); false when Identity is a bare
+ * designer-authored or auto-numbered K2 placement string (PathName / "Dynamic N"). The compiler uses this
+ * to register only known-registered-tag identities at the gameplay tag manager root, capturing provenance
+ * at the source instead of inferring it later from string structure (which a dotted PathName could defeat).
+ */
+struct FObjectivePathDescriptor
+{
+	FName Identity;
+	bool bIsRegisteredTag = false;
+
+	bool operator==(const FObjectivePathDescriptor& Other) const { return Identity == Other.Identity; }
+};
 
 class FSimpleQuestEditorUtilities
 {
@@ -69,8 +86,8 @@ public:
 	 * Discovers possible outcome tags for an objective class. Scans the class's Blueprint graphs for UK2Node_CompleteObjectiveWithOutcome
 	 * instances; falls back to the CDO's GetPossibleOutcomes() virtual for classes where neither K2 nodes nor ObjectiveOutcome UPROPERTYs apply.
 	 */
-	static TArray<FGameplayTag> DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass);
-
+	static TArray<FObjectivePathDescriptor> DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass);
+	
 	/**
 	 * Reconstructs the compiled gameplay tag for a step node by walking the graph hierarchy (Step → Quest → QuestlineGraph).
 	 * Returns an invalid tag if the graph hasn't been compiled yet or the step label is empty.
@@ -78,7 +95,7 @@ public:
 	static FGameplayTag ReconstructStepTag(const UQuestlineNode_Step* StepNode);
 
 	/**
-	 * Finds actors in loaded editor worlds whose QuestTargetComponent watches the given step tag. Returns actor editor labels,
+	 * Finds actors in loaded editor worlds whose QuestTriggerComponent watches the given step tag. Returns actor editor labels,
 	 * sorted alphabetically.
 	 */
 	static TArray<FString> FindActorNamesWatchingTag(const FGameplayTag& StepTag);
@@ -97,7 +114,7 @@ public:
 
 	/**
 	 * Paired entry produced by the contextual-query helpers: an actor name + the display name of the outer questline
-	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, watchers, or any future
+	 * asset whose contextual inlining of this node the actor is linked to. Applies to givers, observers, or any future
 	 * actor-per-tag contextual surface.
 	 */
 	struct FQuestContextualActor
@@ -193,7 +210,7 @@ public:
 	 * Finds givers attached to this node's CONTEXTUAL inlined compiled tags, i.e., tags emitted by OUTER questline assets
 	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
 	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
-	 * (everything past "Quest.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
+	 * (everything past "SimpleQuest.Questline.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
 	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
 	 *
 	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.
@@ -210,18 +227,75 @@ public:
 	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
 	
 	/**
-	 * Same walk as FindContextualGiversForNode, but resolves QuestTargetComponent watchers per contextual tag instead of
-	 * givers. Surfaces target actors whose StepTagsToWatch include one of the node's contextual inlined tags — the
+	 * Same walk as FindContextualGiversForNode, but resolves QuestTriggerComponent observers per contextual tag instead of
+	 * givers. Surfaces target actors whose StepTagsToTrigger include one of the node's contextual inlined tags — the
 	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
 	 */
-	static TArray<FQuestContextualActor> FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode);
+	static TArray<FQuestContextualActor> FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
-	 * Applies tag renames to all quest components in loaded editor worlds via the virtual UQuestComponentBase::ApplyTagRenames.
-	 * Returns the number of actors modified.
+	 * Walks any UObject's top-level UPROPERTYs and rewrites FGameplayTag or FGameplayTagContainer field values whose
+	 * stored tag name appears as an OldTagName in Renames. Returns the number of individual field swaps performed.
+	 *
+	 * Generic reflection sweep — covers FGameplayTag and FGameplayTagContainer UPROPERTYs on any UObject regardless of
+	 * class. Used as the shared implementation behind ApplyTagRenamesToLoadedBlueprintCDOs (CDO healing) and
+	 * ApplyTagRenamesToLoadedWorlds (actor + component healing), and available to adopter custom code that needs the
+	 * same generic sweep on bespoke UObjects.
+	 *
+	 * Does NOT descend into nested USTRUCTs, TMap with FGameplayTag keys / values, TArray of FGameplayTag elements,
+	 * or FInstancedStruct interiors. Specialty cases (e.g., TMap with FGameplayTag keys) need per-class handling via
+	 * UQuestComponentBase::ApplyTagRenames overrides that call Super and add the specialty work.
+	 */
+	static int32 ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames);
+
+	/**
+	 * Walks loaded editor worlds and applies tag renames to actors and their components. For each loaded actor:
+	 * (1) reflection sweep over the actor's own FGameplayTag / FGameplayTagContainer UPROPERTYs, then (2) reflection
+	 * sweep over each component, then (3) for UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any
+	 * specialty handling (Observer's TMap-with-FGameplayTag-keys is the canonical specialty case). Returns the number
+	 * of actors modified.
 	 */
 	static int32 ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames);
 
+	/**
+	 * Writes tag rename pairs as +GameplayTagRedirects entries on UGameplayTagsSettings and persists the section to the project's
+	 * Config/DefaultGameplayTags.ini. Returns the count of NEW redirect entries added (entries whose OldTagName already maps to
+	 * something in the CDO are skipped; UE's redirect resolver walks the map transitively at lookup time, so a stale chain like
+	 * A->B already resolves to the eventual canonical without a second A->C entry).
+	 *
+	 * UE's deserialization-time redirect mechanism heals FGameplayTag UPROPERTY fields automatically once a redirect is registered —
+	 * component fields, TMap keys, TArray entries, FGameplayTagContainer contents, FInstancedStruct interiors. The K2-node pin
+	 * DefaultValue case is NOT covered here (pin defaults are stored as strings, not FGameplayTag structs); that gap is handled by
+	 * ApplyTagRenamesToBlueprintGraphs.
+	 *
+	 * Callers are responsible for triggering UGameplayTagsManager::EditorRefreshGameplayTagTree once per compile action after all
+	 * renames are written to rebuild the redirect map for subsequent FGameplayTag deserialization.
+	 */
+	static int32 WriteGameplayTagRedirects(const TMap<FName, FName>& Renames);
+	
+	/**
+	 * Walks every loaded UBlueprint's generated-class CDO and rewrites any FGameplayTag or FGameplayTagContainer field whose stored
+	 * tag name appears as an OldTagName in Renames. Required because UE's GameplayTagRedirects heals values at deserialization time —
+	 * an already-loaded CDO retains its old value in memory until the class is reloaded. Variables that aren't Instance Editable are
+	 * read directly from the CDO at runtime, so they wouldn't pick up the rename otherwise without an editor restart.
+	 *
+	 * Covers top-level FGameplayTag UPROPERTYs and FGameplayTagContainer UPROPERTYs on the CDO. Does not currently descend into nested
+	 * USTRUCTs, FInstancedStruct interiors, or TMap / TArray element types other than FGameplayTag — those fields heal naturally on
+	 * next BP load via UE's deserialization redirect.
+	 *
+	 * Returns the number of UBlueprint assets modified (and marked dirty).
+	 */
+	static int32 ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames);
+	
+	/**
+	 * Walks every loaded asset (excluding UBlueprint and UWorld, which are handled by sibling helpers) and applies the
+	 * rename map to any matching FGameplayTag / FGameplayTagContainer UPROPERTYs on the asset object itself. Covers
+	 * UDataAsset, UDataTable, and adopter custom asset types — anything loaded in memory that holds tag UPROPERTYs and
+	 * isn't already covered by the actor + BP CDO sweeps. Marks each modified asset dirty so Save All persists the
+	 * healed values to disk. Returns the number of assets modified.
+	 */
+	static int32 ApplyTagRenamesToLoadedAssets(const TMap<FName, FName>& Renames);
+	
 	/**
 	 * Walks the node's Outer chain (through any Quest container graphs) to the owning UQuestlineGraph asset, then
 	 * matches the node's QuestGuid against CompiledNodes to resolve its compiled runtime tag. Works for any
@@ -234,7 +308,7 @@ public:
 	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
 	 * at runtime, plus the source node's compiled runtime tag (OutSourceTag). Mirrors the content-node branches of
 	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
-	 * NamedOutcomeOut resolves to QuestState.<src>.Outcome.<leaf>. Returns invalid tags for pin roles the examiner treats
+	 * NamedOutcomeOut resolves to QuestState.<src>.Path.<leaf>. Returns invalid tags for pin roles the examiner treats
 	 * as drill-through (Rule Entry Forward) or RuleRef (Rule Exit); those code paths don't flatten to leaves in the
 	 * examiner tree. Used by the Prereq Examiner for PIE leaf coloring.
 	 */
@@ -305,7 +379,7 @@ public:
 
 	/**
 	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
-	 * UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent that fails IsTagRegisteredInRuntime.
+	 * UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
 	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
@@ -352,7 +426,7 @@ private:
 	/**
 	 * Shared contextual-query body. Walks the Asset Registry for non-home questline packages, suffix-matches on the node's
 	 * relative path, and invokes TagToActorNames() per contextual tag to resolve the actor list. Both
-	 * FindContextualGiversForNode and FindContextualWatchersForNode are thin wrappers around this. LogLabel is emitted in
+	 * FindContextualGiversForNode and FindContextualObserversForNode are thin wrappers around this. LogLabel is emitted in
 	 * the Verbose diagnostic line for trace clarity.
 	 */
 	static TArray<FQuestContextualActor> CollectContextualActorEntries(const UQuestlineNode_ContentBase* ContentNode,

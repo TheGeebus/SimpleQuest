@@ -1,5 +1,6 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Events/QuestGiverRegisteredEvent.h"
 
-UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestGiverRegistered, "Quest.Channel.GiverRegistered")
+UE_DEFINE_GAMEPLAY_TAG(Tag_Channel_QuestGiverRegistered, "SimpleQuest.Channel.GiverRegistered")

@@ -1,17 +1,17 @@
-// Copyright 2026, Greg Bussell, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Quests/Types/QuestObjectiveActivationParams.h"
-#include "Quests/Types/QuestObjectiveContext.h"
-#include "StructUtils/InstancedStruct.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "QuestObjective.generated.h"
 
-class UQuestTargetInterface;
-class IQuestTargetInterface;
-struct FQuestObjectiveActivationParams;
+
+struct FQuestObjectiveActivationContext;
+
 
 /**
  * Base class with functions intended to be overridden to provide logic for the completion of a given quest step.
@@ -29,11 +29,31 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEnableTarget, UObject*, InTargetObject, bool, bNewIsEnabled);
 	FOnEnableTarget OnEnableTarget;
 
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FQuestObjectiveComplete, FGameplayTag, OutcomeTag);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FQuestObjectiveComplete, FGameplayTag, OutcomeTag, FName, PathIdentity);
 	FQuestObjectiveComplete OnQuestObjectiveComplete;
 	
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveContext, ProgressData);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveProgress, FQuestObjectiveTriggerContext, ProgressContext);
 	FOnQuestObjectiveProgress OnQuestObjectiveProgress;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestObjectiveRefused, FGameplayTag, RefusalReason, FQuestObjectiveTriggerContext, TriggerContext);
+		
+	/**
+	 * Fired by RefuseTrigger when the objective sees a SendTriggerEvent fire but declines to act on it. Step subscribes
+	 * and forwards to the manager, which publishes FQuestTriggerResponseEvent(Refused) on the step's tag channel so
+	 * adopters bound to UQuestTriggerComponent::OnQuestTriggerResponded receive the refusal with the originating
+	 * TriggerContext echoed back for own-fire filtering.
+	 */
+	FOnQuestObjectiveRefused OnQuestObjectiveRefused;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestObjectiveTriggerDeactivation, FGameplayTag, OutcomeTag, FQuestObjectiveTriggerContext, FinalContext);
+	
+	/**
+	 * Fired by PublishTriggerDeactivation when the objective explicitly signals "I'm done consuming fires on this trigger"
+	 * without ending the step. Step subscribes and forwards to the manager, which publishes FQuestTriggerDeactivatedEvent
+	 * with EndReason = Manual. Distinct from the auto-publish path (Completed / Interrupted) that fires alongside the
+	 * step's lifecycle transitions.
+	 */
+	FOnQuestObjectiveTriggerDeactivation OnQuestObjectiveTriggerDeactivation;
 	
 	/**
 	 * Outcome Tag Discovery																						<br>
@@ -53,11 +73,11 @@ public:
 	 *    - The editor discovers tagged properties via TFieldIterator reflection scan.
 	 *																									
 	 *        - In the header:																						<br>
-	 *			   UPROPERTY(EditDefaultsOnly, meta = (Categories = "Quest.Outcome", ObjectiveOutcome))				<br>
+	 *			   UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))	<br>
 	 *			   FGameplayTag Outcome_Reached;	
 	 *																									
 	 *        - In the .cpp (file scope):																			<br>
-	 *			   UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "Quest.Outcome.Reached")
+	 *			   UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "SimpleQuest.Outcome.Reached")
 	 *
 	 *        - In the constructor:																					<br>
 	 *			   Outcome_Reached = Tag_Outcome_Reached;
@@ -77,9 +97,9 @@ public:
 	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
 	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes
 	 * computed at CDO construction time. Tags returned here are not constrained to the
-	 * Quest.Outcome namespace. Base implementation returns an empty array.
+	 * SimpleQuest.Outcome namespace. Base implementation returns an empty array.
 	 *
-	 * @see FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes
+	 * @see FSimpleQuestEditorUtilities::DiscoverObjectivePaths
 	 * @see UK2Node_CompleteObjectiveWithOutcome
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
@@ -89,29 +109,59 @@ public:
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
 	 * BlueprintNativeEvent TryCompleteObjective. Same thunk-routing behavior as DispatchSetObjectiveTarget.
 	 */
-	void DispatchTryCompleteObjective(const FQuestObjectiveContext& InContext);
+	void DispatchTryCompleteObjective(const FQuestObjectiveTriggerContext& InContext);
+
+	/**
+	 * Step-facing entry point for tearing down the objective. Thin C++ forwarder to the protected
+	 * BlueprintNativeEvent OnObjectiveDeactivated. Same thunk-routing behavior as DispatchOnObjectiveActivated.
+	 *
+	 * Called by UQuestStep BOTH on the interruption path (DeactivateInternal: abandon, blocked, cascade-
+	 * deactivated) AND on the completion path (OnObjectiveComplete) before the step releases its reference
+	 * to the objective. Gives subclasses a symmetric hook to OnObjectiveActivated for unsubscribing from
+	 * external event sources, releasing UI handles, stopping timers, etc.
+	 *
+	 * Does NOT fire on PIE-end / ResetTransientState, the objective is already GC'd at that point.
+	 * Subclasses subscribing to non-UE systems should defend against PIE end via TWeakObjectPtr or
+	 * equivalent standard UE patterns.
+	 */
+	void DispatchOnObjectiveDeactivated();
 	
 protected:
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
 	 * to bind additional delegates. (see: UGoToQuestObjective)
 	 *
-	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
+	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
 	 *
 	 * @param Params a set of specific target actors in the scene
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void OnObjectiveActivated(const FQuestObjectiveActivationParams& Params);
+	void OnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
 
 	/**
-	 * Count a relevant quest target and determine if the step should end in success or failure. This event is intended
+	 * Symmetric partner to OnObjectiveActivated. Fires whenever the owning step is releasing the
+	 * objective: both the interruption path (abandon, blocked, cascade-deactivated) AND the completion
+	 * path. Override to unsubscribe from external event sources, tear down UI handles, release timers, etc.
+	 *
+	 * The objective is still live when this fires; LiveObjective on the step is nulled AFTER this dispatch
+	 * returns. Inside the override you can still call EnableQuestTargetActors(false), inspect TargetActors,
+	 * read state stored during OnObjectiveActivated, etc.
+	 *
+	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the
+	 * public DispatchOnObjectiveDeactivated from C++; subclass BPs override normally.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
+	void OnObjectiveDeactivated();
+
+	/**
+	 * Count a relevant quest trigger and determine if the step should end in success or failure. This event is intended
 	 * to be overridden by child classes to provide the logic for quest step completion.
 	 *
 	 * This function should be used to count elements or perform additional logic and call CompleteObjectiveWithOutcome
@@ -126,17 +176,55 @@ protected:
 	 *					optional designer-defined instanced struct that may contain additional fields as needed.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void TryCompleteObjective(const FQuestObjectiveContext& InContext);
-
-	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionData,InForwardParams"), Category = "Quest|Objectives")
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, const FQuestObjectiveContext& InCompletionData = FQuestObjectiveContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
-
+	void TryCompleteObjective(const FQuestObjectiveTriggerContext& InContext);
+	
+	/**
+	 * Completes the objective with a runtime outcome tag and optional explicit path identity. PathIdentity routes
+	 * the completion through the Step's structurally-keyed pin map (NextNodesByPath); when NAME_None, the manager
+	 * auto-derives PathIdentity from OutcomeTag.GetTagName() so static K2 placements behave identically to pre-
+	 * Bundle-Y. Dynamic K2 placements supply an explicit PathIdentity authored on the K2 node's PathName field.
+	 *
+	 * Direct C++ callers can also supply PathIdentity explicitly; legacy callers passing only OutcomeTag get the
+	 * auto-derive fallback via the default argument.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionContext,InForwardParams"), Category = "Quest|Objectives")
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationContext& InForwardParams = FQuestObjectiveActivationContext());
+	
 	/**
 	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
 	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-	void ReportProgress(const FQuestObjectiveContext& InProgressData);
+	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);
+	
+	/**
+	 * Declines a trigger fire that reached this objective. Step forwards to manager, which publishes
+	 * FQuestTriggerResponseEvent(Refused) on the step's tag channel. Use from within TryCompleteObjective when an
+	 * incoming fire doesn't satisfy game-logic conditions (wrong actor, missing item, wrong phase) and should be
+	 * surfaced to the trigger actor's UI rather than silently dropped.
+	 *
+	 * RefusalReason is designer-defined and consumed by the trigger actor's response handler — typically a
+	 * SimpleQuest.Refusal.* descendant or any tag whose subscribers know how to translate to UI / audio.
+	 *
+	 * Echoes the originating TriggerContext through to the published event so UQuestTriggerComponent's filter
+	 * (TriggeredActor == GetOwner()) resolves correctly. Adopters should typically pass the InContext their
+	 * TryCompleteObjective override received, not construct a fresh empty one.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "TriggerContext"), Category = "Quest|Objectives")
+	void RefuseTrigger(FGameplayTag RefusalReason, const FQuestObjectiveTriggerContext& TriggerContext);
+
+	/**
+	 * Manually signals "the trigger side of this step's lifecycle is wrapping" without affecting the step's own
+	 * lifecycle. Step forwards to manager, which publishes FQuestTriggerDeactivatedEvent with EndReason = Manual.
+	 * Distinct from the auto-publish path fired by the manager adjacent to FQuestEndedEvent / FQuestDeactivatedEvent
+	 * (EndReason = Completed / Interrupted) — Manual fires don't change the step's state, only notify trigger-side
+	 * subscribers.
+	 *
+	 * Use when an objective wants to release trigger-side audiences early — e.g., a multiphase objective that's
+	 * done with one trigger volume's input but isn't yet ready to complete the step.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "FinalContext"), Category = "Quest|Objectives")
+	void PublishTriggerDeactivation(FGameplayTag OutcomeTag, const FQuestObjectiveTriggerContext& FinalContext);
 	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
@@ -148,9 +236,28 @@ protected:
 	void EnableQuestTargetClasses(bool bIsTargetEnabled) const;
 	
 private:
-	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionData. */
+	/** Set by CompleteObjectiveWithOutcome. Read by the step via TakeCompletionContext. */
 	UPROPERTY()
-	FQuestObjectiveContext CompletionData;
+	FQuestObjectiveTriggerContext CompletionContext;
+	
+	/**
+	 * Cached InContext from the most-recent DispatchTryCompleteObjective call. Used by ResolveTriggerContext to
+	 * auto-forward TriggeredActor / Instigator / CustomData when adopters call ReportProgress / Complete /
+	 * RefuseTrigger / PublishTriggerDeactivation without passing context — AND to force the framework-stamped
+	 * OriginatingTriggerComponent through immune to adopter mutation, guaranteeing the publishing trigger
+	 * component receives its own feedback.
+	 */
+	UPROPERTY()
+	FQuestObjectiveTriggerContext LastTriggerContext;
+
+	/**
+	 * Field-level overlay: returns AdopterContext with TriggeredActor / Instigator / CustomData fallback-populated
+	 * from LastTriggerContext where the adopter left them unset, AND OriginatingTriggerComponent force-overridden
+	 * from LastTriggerContext unconditionally. Adopters who pass explicit attribution win on the first three fields;
+	 * the originating-component identity stays framework-owned so own-fire filtering can't be broken by adopter
+	 * re-targeting of TriggeredActor for game-logic reasons.
+	 */
+	FQuestObjectiveTriggerContext ResolveTriggerContext(const FQuestObjectiveTriggerContext& AdopterContext) const;
 	
 	/**
 	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step
@@ -158,7 +265,7 @@ private:
 	 * fields get forwarded on handoff.
 	 */
 	UPROPERTY()
-	FQuestObjectiveActivationParams ForwardActivationParams;
+	FQuestObjectiveActivationContext ForwardActivationParams;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;
@@ -168,6 +275,6 @@ private:
 public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
-	FQuestObjectiveContext TakeCompletionData() { return MoveTemp(CompletionData); }
-	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
+	FQuestObjectiveTriggerContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
+	FQuestObjectiveActivationContext TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 };

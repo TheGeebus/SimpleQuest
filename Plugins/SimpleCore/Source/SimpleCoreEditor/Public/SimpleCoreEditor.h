@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -11,12 +12,14 @@ class SDockTab;
 
 /**
  * Editor module for the SimpleCore plugin. Owns the editor-side PIE debug channel scoped to SimpleCore's subsystems
- * (WorldState today; additional subsystem hooks may slot in later), and registers the WorldState Facts inspector as
- * a nomad tab accessible from the editor's Window menu under Developer Tools.
+ * (WorldState today; additional subsystem hooks may slot in later), registers the WorldState facts view with the
+ * generic facts-panel registry, and registers a multi-instance Facts Panel as a nomad tab under Window → Developer
+ * Tools.
  *
- * Independent of SimpleQuest — a project using SimpleCore without SimpleQuest still gets the WorldState inspector.
+ * Independent of SimpleQuest — a project using SimpleCore without SimpleQuest still gets the WorldState view and the
+ * panel shell.
  */
-class FSimpleCoreEditorModule : public IModuleInterface
+class SIMPLECOREEDITOR_API FSimpleCoreEditorModule : public IModuleInterface
 {
 public:
 	virtual void StartupModule() override;
@@ -26,9 +29,20 @@ public:
 	static FSimpleCorePIEDebugChannel* GetPIEDebugChannel();
 
 private:
-	TSharedRef<SDockTab> SpawnWorldStateFactsTab(const FSpawnTabArgs& Args);
+	TSharedRef<SDockTab> SpawnFactsPanelTab(const FSpawnTabArgs& Args);
 
 	TUniquePtr<FSimpleCorePIEDebugChannel> PIEDebugChannel;
 
-	static const FName WorldStateFactsTabId;
+	/** Counter appended to spawned tab labels for multi-instance disambiguation. */
+	int32 SpawnedPanelCount = 0;
+
+	/**
+	 * Handle for FCoreDelegates::OnExit subscription that flips GFactsPanelEditorShuttingDown. Released in
+	 * ShutdownModule so module unload during a still-running editor session (hot reload) doesn't leave a
+	 * dangling lambda firing into freed memory at editor exit.
+	 */
+	FDelegateHandle OnExitHandle;
+
+	static const FName FactsPanelTabId;
+	static const FName WorldStateViewId;
 };

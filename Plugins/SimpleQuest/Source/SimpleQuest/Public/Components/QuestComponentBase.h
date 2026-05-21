@@ -1,10 +1,10 @@
-// Copyright 2026, Greg Bussell, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Interfaces/QuestEventListenerInterface.h"
 #include "QuestComponentBase.generated.h"
 
 
@@ -12,8 +12,8 @@ struct FGameplayTag;
 class USignalSubsystem;
 class UQuestManagerSubsystem;
 
-UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent, public IQuestEventListenerInterface
+UCLASS(Abstract, ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
+class SIMPLEQUEST_API UQuestComponentBase : public UActorComponent
 {
 	GENERATED_BODY()
 
@@ -21,8 +21,12 @@ public:
 	UQuestComponentBase();
 
 	/**
-	 * Applies tag renames to designer-configured tag containers. Called by the editor rename propagation system. Returns the
-	 * number of individual tag swaps performed.
+	 * Applies tag renames to designer-configured tag containers that the editor-side reflection sweep can't address —
+	 * specifically, TMap or TArray fields whose elements use FGameplayTag in ways that need per-class semantics (TMap
+	 * with FGameplayTag keys requires remove-then-readd because TMap doesn't permit key mutation). For the common case
+	 * of plain FGameplayTag and FGameplayTagContainer UPROPERTYs, the reflection sweep in
+	 * FSimpleQuestEditorUtilities::ApplyTagRenamesToObject handles them generically and no override is needed. Returns
+	 * the number of individual tag swaps performed by the specialty handler.
 	 */
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames);
 

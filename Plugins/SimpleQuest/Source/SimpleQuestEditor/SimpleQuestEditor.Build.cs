@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 using UnrealBuildTool;
 
@@ -14,7 +15,8 @@ public class SimpleQuestEditor: ModuleRules
 			"CoreUObject", 
 			"Engine", 
 			"UnrealEd", 
-			"Settings", 
+			"Settings",
+			"DeveloperSettings",
 			"SimpleQuest",
 			"SimpleCore",
 			"AssetTools", 
@@ -32,7 +34,9 @@ public class SimpleQuestEditor: ModuleRules
 			"Projects",
 			"ApplicationCore", 
 			"WorkspaceMenuStructure",
-			"WorldPartitionEditor"
+			"WorldPartitionEditor",
+			"SimpleCoreEditor",
+			"DataTableEditor"
 		});
 
 		if (Target.bBuildEditor)

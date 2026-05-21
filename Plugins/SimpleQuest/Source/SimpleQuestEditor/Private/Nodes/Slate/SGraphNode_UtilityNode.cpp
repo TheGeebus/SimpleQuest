@@ -1,7 +1,12 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
+#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "PropertyCustomizationHelpers.h"
+#include "Quests/QuestlineGraph.h"
 #include "SGraphPin.h"
 #include "SGameplayTagContainerCombo.h"
 #include "ScopedTransaction.h"
@@ -10,6 +15,7 @@
 #include "SCommentBubble.h"
 #include "TutorialMetaData.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSpacer.h"
@@ -133,21 +139,34 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		]
 
-		// Tag picker
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
-		[
-			CreateTagPickerWidget()
-		]
+
 
 		// Pin content area — 2px bottom padding for input column breathing room
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.HAlign(HAlign_Fill)
-		.Padding(0.f, 0.f, 0.f, 2.f)
 		[
 			CreatePinContentArea()
+		]
+
+		// Authoring row — varies by utility node type:
+		//   - Asset picker for StartQuestline (selects the questline graph asset to activate).
+		//   - Tag picker for SetBlocked / ClearBlocked (selects the target quest tags).
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
+		[
+			UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget()
+		]
+
+		// Optional toggles row — currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
+		// CreateAlsoDeactivateToggleWidget returns SNullWidget for any other utility node type, so the slot
+		// collapses to zero size in those cases (padding lives inside the wrapper widget).
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(0.f, 0.f, 0.f, 4.f)
+		[
+			CreateAlsoDeactivateToggleWidget()
 		];
 
 	// Enabled state widget
@@ -299,6 +318,29 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 {
 	FString FilterString = UtilityNode ? UtilityNode->GetTargetQuestTagsFilterString() : FString(TEXT("Quest"));
 
+	return SNew(SWrapBox).PreferredSize(200.f).Orientation(Orient_Horizontal)
+		+ SWrapBox::Slot().Padding(8.f, 0.f, 2.f, 0.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("TagsToBlockLabel", "Tags to Block:"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+		]
+		+ SWrapBox::Slot().Padding(4.f, 2.f, 0.f, 2.f)
+		[
+			SNew(SGameplayTagContainerCombo)
+			.Filter(*FilterString)
+			.TagContainer_Lambda([this]()
+			{
+				if (UtilityNode) return UtilityNode->GetTargetQuestTags();
+				static const FGameplayTagContainer Empty;
+				return Empty;
+			})
+			.OnTagContainerChanged_Lambda([this](const FGameplayTagContainer& NewTags)
+			{
+				OnTargetTagsChanged(NewTags);
+			})
+		];
+	/*
 	return SNew(SGameplayTagContainerCombo)
 		.Filter(*FilterString)
 		.TagContainer_Lambda([this]()
@@ -311,6 +353,7 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 		{
 			OnTargetTagsChanged(NewTags);
 		});
+		*/
 }
 
 void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& NewTags)
@@ -328,4 +371,104 @@ void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& Ne
 	}
 }
 
+TSharedRef<SWidget> SGraphNode_UtilityNode::CreateAlsoDeactivateToggleWidget()
+{
+	UQuestlineNode_SetBlocked* SetBlockedNode = Cast<UQuestlineNode_SetBlocked>(UtilityNode);
+	if (!SetBlockedNode) return SNullWidget::NullWidget;
+
+	return SNew(SBox)
+	.Padding(FMargin(18.f, 4.f, 10.f, 8.f))
+	[
+		SNew(SHorizontalBox)
+			+ SHorizontalBox::Slot().AutoWidth()
+			[
+				SNew(SCheckBox)
+				.IsChecked_Lambda([SetBlockedNode]()
+				{
+					return SetBlockedNode->bAlsoDeactivateTargets ? ECheckBoxState::Checked : ECheckBoxState::Unchecked;
+				})
+				.OnCheckStateChanged(this, &SGraphNode_UtilityNode::OnAlsoDeactivateChanged)
+				.ToolTipText(LOCTEXT("AlsoDeactivateTooltip",
+					"When checked, also issues a deactivation request for each target quest in addition to setting the "
+					"Blocked re-entry gate. By default, blocking only sets the gate — any in-flight lifecycle on the targets "
+					"continues to its current resolution."))
+			]
+			+ SHorizontalBox::Slot().Padding(4.f, 0.f, 0.f, 0.f).FillWidth(1.f).HAlign(HAlign_Left).VAlign(VAlign_Center)
+			[			
+				SNew(STextBlock)
+				.Text(LOCTEXT("AlsoDeactivateLabel", "Also Deactivate"))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+			]
+	];
+}
+
+void SGraphNode_UtilityNode::OnAlsoDeactivateChanged(ECheckBoxState NewState)
+{
+	UQuestlineNode_SetBlocked* SetBlockedNode = Cast<UQuestlineNode_SetBlocked>(UtilityNode);
+	if (!SetBlockedNode || !GraphNode) return;
+
+	const FScopedTransaction Transaction(LOCTEXT("ChangeAlsoDeactivate", "Toggle Also Deactivate Targets"));
+	GraphNode->Modify();
+
+	SetBlockedNode->bAlsoDeactivateTargets = (NewState == ECheckBoxState::Checked);
+
+	if (UEdGraph* Graph = GraphNode->GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+bool SGraphNode_UtilityNode::UsesGraphAssetPicker() const
+{
+	return Cast<UQuestlineNode_StartQuestline>(UtilityNode) != nullptr;
+}
+
+TSharedRef<SWidget> SGraphNode_UtilityNode::CreateGraphAssetPickerWidget()
+{
+	UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilityNode);
+	if (!StartNode) return SNullWidget::NullWidget;
+
+	return SNew(SWrapBox).PreferredSize(220.f).Orientation(Orient_Horizontal)
+		+ SWrapBox::Slot().Padding(8.f, 0.f, 2.f, 0.f).VAlign(VAlign_Center)
+		[
+			SNew(STextBlock)
+			.Text(LOCTEXT("QuestlineGraphLabel", "Questline:"))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+		]
+		+ SWrapBox::Slot().Padding(4.f, 2.f, 0.f, 2.f)
+		[
+			SNew(SObjectPropertyEntryBox)
+			.AllowedClass(UQuestlineGraph::StaticClass())
+			.AllowClear(true)
+			.DisplayBrowse(true)
+			.DisplayUseSelected(true)
+			.ObjectPath_Lambda([this]() -> FString
+			{
+				if (UQuestlineNode_StartQuestline* Start = Cast<UQuestlineNode_StartQuestline>(UtilityNode))
+				{
+					return Start->Graph.ToSoftObjectPath().ToString();
+				}
+				return FString();
+			})
+			.OnObjectChanged(this, &SGraphNode_UtilityNode::OnGraphAssetChanged)
+		];
+}
+
+void SGraphNode_UtilityNode::OnGraphAssetChanged(const FAssetData& AssetData)
+{
+	UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilityNode);
+	if (!StartNode || !GraphNode) return;
+
+	const FScopedTransaction Transaction(LOCTEXT("ChangeStartQuestlineGraph", "Change Questline Graph"));
+	GraphNode->Modify();
+
+	StartNode->Graph = TSoftObjectPtr<UQuestlineGraph>(AssetData.GetSoftObjectPath());
+
+	if (UEdGraph* Graph = GraphNode->GetGraph())
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
 #undef LOCTEXT_NAMESPACE
+

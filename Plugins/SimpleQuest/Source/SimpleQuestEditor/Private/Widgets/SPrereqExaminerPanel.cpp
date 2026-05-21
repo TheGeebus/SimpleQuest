@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Widgets/SPrereqExaminerPanel.h"
 
@@ -14,6 +15,7 @@
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Toolkit/QuestlineGraphEditor.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
@@ -434,12 +436,9 @@ protected:
     {
         SCompoundWidget::OnMouseEnter(MyGeometry, MouseEvent);
         bDirectHover = true;
-        if (UEdGraphNode* Node = HighlightNode.Get())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->HighlightNodesInViewport({ Node });
-            }
+            Panel->SetGraphHighlight(HighlightNode.Get());
         }
     }
 
@@ -447,12 +446,9 @@ protected:
     {
         SCompoundWidget::OnMouseLeave(MouseEvent);
         bDirectHover = false;
-        if (UEdGraphNode* Node = HighlightNode.Get())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->ClearNodeHighlight();
-            }
+            Panel->ClearGraphHighlight();
         }
     }
 
@@ -626,38 +622,26 @@ protected:
     virtual void OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
     {
         SButton::OnMouseEnter(MyGeometry, MouseEvent);
-        if (OperatorGuid.IsValid())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
+            if (OperatorGuid.IsValid())
             {
                 Panel->SetHoveredOperator(OperatorGuid);
             }
-        }
-        if (UEdGraphNode* Node = HighlightNode.Get())
-        {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->HighlightNodesInViewport({ Node });
-            }
+            Panel->SetGraphHighlight(HighlightNode.Get());
         }
     }
 
     virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
     {
         SButton::OnMouseLeave(MouseEvent);
-        if (OperatorGuid.IsValid())
+        if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
         {
-            if (TSharedPtr<SPrereqExaminerPanel> Panel = PanelWeak.Pin())
+            if (OperatorGuid.IsValid())
             {
                 Panel->SetHoveredOperator(FGuid());
             }
-        }
-        if (UEdGraphNode* Node = HighlightNode.Get())
-        {
-            if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
-            {
-                Editor->ClearNodeHighlight();
-            }
+            Panel->ClearGraphHighlight();
         }
     }
 
@@ -752,10 +736,13 @@ void SPrereqExaminerPanel::Refresh()
 
 void SPrereqExaminerPanel::RebuildAll()
 {
-    // Old widgets are about to be discarded — any hovered-operator state they broadcast is stale. Clear it so freshly
+    // Old widgets are about to be discarded: any hovered-operator state they broadcast is stale. Clear it so freshly
     // built widgets don't re-emerge already emphasized (e.g., expanding a previously hovered operator should read as
-    // un-hovered until the cursor actually lands on a label again).
+    // un-hovered until the cursor actually lands on a label again). Same reasoning for the graph-node halo: a leaf
+    // or operator currently directing a halo via SetGraphHighlight is about to be destroyed, and its OnMouseLeave
+    // won't fire to clean up - clear panel-tracked state explicitly so the destination editor drops the halo.
     SetHoveredOperator(FGuid());
+    ClearGraphHighlight();
 
     if (HeaderSlot.IsValid())
     {
@@ -779,6 +766,32 @@ void SPrereqExaminerPanel::RebuildAll()
             ExpressionSlot->SetContent(BuildExpressionWidget(Tree.RootIndex, FGuid(), EPrereqBoxOutline::Default));
         }
     }
+}
+
+void SPrereqExaminerPanel::SetGraphHighlight(UEdGraphNode* Node)
+{
+    // Clear any prior highlight first — the new target may live in a different editor than the previous one, and
+    // we don't want to leave a stale halo on the prior editor's graph.
+    ClearGraphHighlight();
+
+    if (!Node) return;
+    if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Node))
+    {
+        Editor->HighlightNodesInViewport({ Node });
+        LastHighlightedNode = Node;
+    }
+}
+
+void SPrereqExaminerPanel::ClearGraphHighlight()
+{
+    if (UEdGraphNode* Prev = LastHighlightedNode.Get())
+    {
+        if (FQuestlineGraphEditor* Editor = FSimpleQuestEditorUtilities::GetEditorForNode(Prev))
+        {
+            Editor->ClearNodeHighlight();
+        }
+    }
+    LastHighlightedNode.Reset();
 }
 
 TSharedRef<SWidget> SPrereqExaminerPanel::BuildHeader()
@@ -839,7 +852,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildHeader()
     if (Tree.RuleTag.IsValid() || bIsRuleContext)
     {
         const FText RuleHeaderText = Tree.RuleTag.IsValid()
-            ? FText::Format(LOCTEXT("RuleHeaderFmt", "Rule: {0}"), FText::FromString(Tree.RuleTag.GetTagName().ToString()))
+            ? FText::Format(LOCTEXT("RuleHeaderFmt", "Rule: {0}"), FQuestTagComposer::FormatTagForDisplay(Tree.RuleTag.GetTagName()))
             : LOCTEXT("RuleHeaderNoTag", "Rule: (no tag set)");
 
         // "Go to Exit" when the pinned context is a Rule Exit whose tag didn't resolve to a defining Entry (no-tag case,
@@ -975,15 +988,15 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const
                         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                    .Text(Node.LeafOutcomeCategory)
+                                    .Text(Node.LeafPathCategory)
                                     .Font(ValueFont)
                                     .ColorAndOpacity(FSlateColor(PrereqExaminer_Style::LeafCategoryTint))
-                                    .Visibility(Node.LeafOutcomeCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+                                    .Visibility(Node.LeafPathCategory.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
                             ]
                         + SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                    .Text(Node.LeafOutcomeLabel)
+                                    .Text(Node.LeafPathLabel)
                                     .Font(ValueFont)
                                     .ColorAndOpacity(LeafColor)
                             ]
@@ -1663,7 +1676,9 @@ EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
     switch (Node.Type)
     {
     case EPrereqExaminerNodeType::Leaf:
-        return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag, Cast<UQuestlineNode_ContentBase>(Node.SourceNode.Get()));
+        {
+            return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag);
+        }
     case EPrereqExaminerNodeType::And:
     {
         // True iff every child Satisfied. Any Unknown propagates up (we can't confidently paint the combinator).

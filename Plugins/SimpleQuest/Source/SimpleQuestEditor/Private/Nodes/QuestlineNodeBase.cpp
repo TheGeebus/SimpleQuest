@@ -1,37 +1,23 @@
-// Copyright 2026, Greg Bussell, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/QuestlineNodeBase.h"
 
 #include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+#include "Utilities/QuestTagComposer.h"
+
 
 FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
 {
-	const FString Full = TagName.ToString();
-	int32 LastDot;
-	if (Full.FindLastChar(TEXT('.'), LastDot))
-	{
-		return FText::FromString(FName::NameToDisplayString(Full.Mid(LastDot + 1), false));
-	}
-	return FText::FromString(FName::NameToDisplayString(Full, false));
+	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
 }
 
 FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
 {
-	const FString Full = TagName.ToString();
-	int32 OutcomePos = Full.Find(TEXT("Outcome."));
-	if (OutcomePos != INDEX_NONE)
-	{
-		FString Remainder = Full.Mid(OutcomePos + 8);
-		TArray<FString> Segments;
-		Remainder.ParseIntoArray(Segments, TEXT("."));
-		for (FString& Seg : Segments)
-		{
-			Seg = FName::NameToDisplayString(Seg, false);
-		}
-		return FText::FromString(FString::Join(Segments, TEXT(": ")));
-	}
-	return GetTagLeafLabel(TagName);
+	return FQuestTagComposer::IsOutcomeTag(TagName)
+		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
+		: GetTagLeafLabel(TagName);
 }
 
 EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
@@ -200,6 +186,29 @@ void UQuestlineNodeBase::PostEditUndo()
 	{
 		Graph->NotifyGraphChanged();
 	}
+}
+
+void UQuestlineNodeBase::PostPlacedNewNode()
+{
+	Super::PostPlacedNewNode();
+	QuestGuid = FGuid::NewGuid();
+}
+
+void UQuestlineNodeBase::PostDuplicate(bool bDuplicateForPIE)
+{
+	Super::PostDuplicate(bDuplicateForPIE);
+	// StaticDuplicateObject path. Defense-in-depth alongside PostPasteNode (which handles the user-facing
+	// Ctrl-D / copy-paste route). Both regenerate to ensure a duplicated node never inherits its source's GUID.
+	QuestGuid = FGuid::NewGuid();
+}
+
+void UQuestlineNodeBase::PostPasteNode()
+{
+	Super::PostPasteNode();
+	// THE user-facing duplicate path. SGraphEditor's Ctrl-D and copy-paste both go through ExportText/ImportText
+	// which instantiates via NewObject and calls PostPasteNode (not PostDuplicate). Without this override, pasted
+	// nodes retain the source's QuestGuid, which the compiler rejects as duplicate identity.
+	QuestGuid = FGuid::NewGuid();
 }
 
 void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)

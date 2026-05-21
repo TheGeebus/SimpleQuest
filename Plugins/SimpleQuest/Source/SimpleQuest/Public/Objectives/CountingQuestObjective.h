@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -23,14 +24,14 @@ class SIMPLEQUEST_API UCountingQuestObjective : public UQuestObjective
     GENERATED_BODY()
 
 protected:
-    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationParams& Params) override;
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override;
 
     /**
      * Increments CurrentElements by Amount, then either completes (if threshold met) or reports progress. Fires exactly
      * one event — never both. Returns true if the objective completed.
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
-    bool AddProgress(const FQuestObjectiveContext& InContext, FGameplayTag OutcomeTag, int32 Amount = 1);
+    bool AddProgress(const FQuestObjectiveTriggerContext& InContext, FGameplayTag OutcomeTag, int32 Amount = 1);
 
 private:
     UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)

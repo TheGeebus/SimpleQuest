@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Graph/QuestlineGraphSchema.h"
 #include "Graph/QuestlineDrawingPolicyMixin.h"
@@ -19,10 +20,13 @@
 #include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Types/QuestPinRole.h"
 
 
@@ -1210,6 +1214,28 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	    Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteNot>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 	    ContextMenuBuilder.AddAction(Action);
 	}
+	
+	// Prereq Fact Tag
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqFactTag", "Add Prerequisite Fact Tag"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqFactTagTooltip", "Gate on the presence of an arbitrary World State fact tag. Decoupled from graph topology."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteFactTag>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	
+	// Prereq Outcome Tag
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "PrereqCategory", "Prerequisite"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqOutcomeTag", "Add Prerequisite Outcome Tag"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqOutcomeTagTooltip", "Context-free outcome leaf. Satisfied when any quest has resolved with the picked outcome (or any descendant)."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_PrerequisiteOutcome>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
 
 	// Prereq Group Setter
 	{
@@ -1246,13 +1272,25 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 	}
 	// Unblock
 	{
-	    TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
-	        NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddClearBlocked", "Clear Blocked"),
-	        NSLOCTEXT("SimpleQuestEditor", "AddClearBlockedTooltip", "Remove the blocked state from one or more quests"),
-	        0));
-	    Action->NodeTemplate = NewObject<UQuestlineNode_ClearBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
-	    ContextMenuBuilder.AddAction(Action);
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearBlocked", "Clear Blocked"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearBlockedTooltip", "Remove the blocked state from one or more quests"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ClearBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Start Questline
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddStartQuestline", "Start Questline"),
+			NSLOCTEXT("SimpleQuestEditor", "AddStartQuestlineTooltip",
+				"Activate a questline graph asset at runtime. Mirrors the BP-callable StartQuestline; the manager async-loads "
+				"the graph and applies the configured Params to the entry Step's activation."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_StartQuestline>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
 	}
 
 	// ---- Activation Group ----

@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -22,6 +23,6 @@ public
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 
 	/** The outcome this exit represents. Left unset while the graph is being sketched — compiler warns, not errors. */
-	UPROPERTY(EditAnywhere, Category = "Outcome", meta = (Categories = "Quest.Outcome"))
+	UPROPERTY(EditAnywhere, Category = "Outcome", meta = (Categories = "SimpleQuest.Outcome"))
 	FGameplayTag OutcomeTag;
 };

@@ -1,9 +1,11 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "QuestNodeBase.h"
+#include "Quests/Types/OriginatingEventID.h"
 #include "Quest.generated.h"
 
 /**
@@ -17,21 +19,75 @@ class SIMPLEQUEST_API UQuest : public UQuestNodeBase
 	GENERATED_BODY()
 
 	friend class FQuestlineGraphCompiler;
+	friend class UQuestManagerSubsystem;
 
+public:
+	virtual bool IsContainerNode() const override { return true; }
+	
 protected:
 	/** Tags of nodes to activate when this quest starts (the "Any Outcome" path). Compiler-written from the inner Entry node's Any Outcome pin. */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	TArray<FName> EntryStepTags;
 
 	/**
-	 * Per-outcome, source-filtered entry routing. When this quest is entered via a specific outcome from a specific source,
-	 * each FQuestEntryDestination in the matching list fires only if its SourceFilter matches the IncomingSourceTag passed
-	 * by the activating parent. Compiler-written from the inner Entry node's exposed specs — one entry per spec.
+	 * Per-path, source-filtered entry routing. When this quest is entered via a specific completion path identity from a
+	 * specific source, each FQuestEntryDestination in the matching list fires only if its SourceFilter matches the
+	 * IncomingSourceTag passed by the activating parent. Compiler-written from the inner Entry node's exposed specs: one
+	 * entry per spec; spec.Outcome.GetTagName() is the path identity for static placements.
 	 */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-	TMap<FGameplayTag, FQuestEntryRouteList> EntryStepTagsByOutcome;
+	TMap<FName, FQuestEntryRouteList> EntryStepTagsByPath;
+
+	/**
+	 * All Steps reachable inside this container at any depth (own direct children + nested containers' Steps).
+	 * Compile-time populated by FQuestlineGraphCompiler::ComputeContainerReachability. Read by the runtime
+	 * container Live derivation: a container is Live if any tag in InnerStepTags has its Live fact set in
+	 * WorldState (no inner Steps Live → container not Live).
+	 */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+	TArray<FGameplayTag> InnerStepTags;
+
+	/**
+	 * Per-Activate-pin Step reachability — keys mirror EntryStepTagsByPath plus NAME_None for the Any-Outcome pin.
+	 * Compile-time populated by ComputeContainerReachability via a precise routing walk filtered by structural
+	 * containment. Read by the path-aware giver gate: gate fires only if some reachable Step from the entered pin
+	 * is not-yet-Live; if all reachable are already Live, the iteration has no work to enable so the gate skips.
+	 */
+	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+	TMap<FName, FQuestReachableSteps> ReachableStepsByActivatePin;
+	
+	/**
+	 * Per-cascade activation snapshots. Each call to UQuestManagerSubsystem::ActivateNodeByTag for this Quest
+	 * appends one snapshot of PendingActivationContext to this queue. HandleOnNodeStarted drains the queue when
+	 * ActivateInternal fires (immediately or via TryActivateDeferred) and fires entry routes for each queued
+	 * cascade. Necessary for fan-in convergence patterns where multiple upstream outcomes feed into the same
+	 * Quest while its prereq is unmet: without this queue, only the most-recent cascade's IncomingOutcomeTag
+	 * survives when the prereq satisfies and earlier cascades' entry routes are silently dropped.
+	 */
+	UPROPERTY(Transient)
+	TArray<FQuestObjectiveActivationContext> PendingEntryActivations;
+	
+	/**
+	 * Set of cascade event IDs that have already resolved this wrapper in the current tick. Populated by
+	 * FireWrapperBoundaryCompletion's gate when an OriginatingEventID first reaches the wrapper; checked
+	 * on subsequent fires so the multi-tag fanout of a single gameplay event produces exactly one
+	 * resolution record per perspective. The gate prunes entries with strictly earlier timestamps when a new
+	 * event lands — keeps the set bounded to events from the current tick (typically 1 entry, a few in
+	 * multi-resolution scenarios). PIE re-entry clears via ResetTransientState. Invalid (default-constructed)
+	 * event IDs are never added — non-cascade resolution paths skip the gate entirely.
+	 */
+	UPROPERTY(Transient)
+	TSet<FOriginatingEventID> ResolvedByEvents;
+
+	/**
+	 * Clears the per-cascade queue and the per-Live-phase resolved-events set between PIE sessions. Base
+	 * ResetTransientState handles PendingActivationContext.
+	 */
+	virtual void ResetTransientState() override;
 
 public:
 	FORCEINLINE const TArray<FName>& GetEntryStepTags() const { return EntryStepTags; }
-	FORCEINLINE const TMap<FGameplayTag, FQuestEntryRouteList>& GetEntryStepTagsByOutcome() const { return EntryStepTagsByOutcome; }
+	FORCEINLINE const TMap<FName, FQuestEntryRouteList>& GetEntryStepTagsByPath() const { return EntryStepTagsByPath; }
+	FORCEINLINE const TArray<FGameplayTag>& GetInnerStepTags() const { return InnerStepTags; }
+	FORCEINLINE const TMap<FName, FQuestReachableSteps>& GetReachableStepsByActivatePin() const { return ReachableStepsByActivatePin; }
 };

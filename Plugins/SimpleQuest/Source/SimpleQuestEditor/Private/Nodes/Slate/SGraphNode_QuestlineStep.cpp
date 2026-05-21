@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 
@@ -74,10 +75,10 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
 		}
 
-		// Contextual watchers (QuestTargetComponent actors watching via OUTER-asset inlinings of this Step) append the
+		// Contextual observers (QuestTriggerComponent actors watching via OUTER-asset inlinings of this Step) append the
 		// same "(via OuterAssetName)" annotation to the targets list.
 		for (const FSimpleQuestEditorUtilities::FQuestContextualActor& Entry
-			: FSimpleQuestEditorUtilities::FindContextualWatchersForNode(StepNode))
+			: FSimpleQuestEditorUtilities::FindContextualObserversForNode(StepNode))
 		{
 			WatchingTargetNames.Add(FString::Printf(TEXT("%s (via %s)"),
 				*Entry.ActorName, *Entry.OuterAssetDisplayName.ToString()));
@@ -670,7 +671,10 @@ int32 SGraphNode_QuestlineStep::OnPaint(
 
 const UClass* SGraphNode_QuestlineStep::GetObjectiveClass() const
 {
-	return StepNode ? StepNode->ObjectiveClass.Get() : nullptr;
+	// LoadSynchronous (not Get): ObjectiveClass is TSoftClassPtr and .Get() returns null until something else loads the
+	// class, so nodes display "None" until a Compile/Compile All forces the references resident. Synchronous load is
+	// acceptable here: editor-only, first-display cost is a few ms, and subsequent calls are O(1) once loaded.
+	return StepNode ? StepNode->ObjectiveClass.LoadSynchronous() : nullptr;
 }
 
 void SGraphNode_QuestlineStep::OnObjectiveClassChanged(const UClass* NewClass)

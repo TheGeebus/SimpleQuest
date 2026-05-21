@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Toolkit/QuestlineGraphEditor.h"
 
@@ -29,6 +30,7 @@
 #include "Widgets/SPrereqExaminerPanel.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "EdGraphNode_Comment.h"
+#include "GameplayTagsManager.h"
 #include "GraphEditorActions.h"
 #include "ScopedTransaction.h"
 
@@ -74,7 +76,7 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
                 UQuestlineGraph* AssetGraph = Cast<UQuestlineGraph>(Asset);
                 if (!AssetGraph) continue;
 
-                IAssetEditorInstance* Instance = EditorSubsystem->FindEditorForAsset(AssetGraph, /*bFocusIfOpen=*/ false);
+                IAssetEditorInstance* Instance = EditorSubsystem->FindEditorForAsset(AssetGraph, false);
                 if (!Instance) continue;
 
                 FQuestlineGraphEditor* OtherEditor = static_cast<FQuestlineGraphEditor*>(Instance);
@@ -615,10 +617,10 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
     // Aggregate state across primary + linked neighborhood.
     int32 TotalErrors = 0;
     int32 TotalWarnings = 0;
-    int32 TotalRenames = 0;
     int32 TotalRenamedActors = 0;
     int32 NeighborSuccessCount = 0;
     int32 NeighborFailCount = 0;
+    TMap<FName, FName> AllRenames;
 
     FMessageLog CompilerLog("QuestCompiler");
     bool bLogPageOpen = false;
@@ -630,8 +632,9 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         bLogPageOpen = true;
     };
 
-    // Per-asset compile body — runs for primary and each neighbor. Broadcasts OnQuestlineCompiled per asset so
-    // every open editor (this one + any others) refreshes via the existing OnExternalCompile path.
+    // Per-asset compile body — runs for primary and each neighbor. Broadcasts OnQuestlineCompiled per asset so every open
+    // editor (this one + any others) refreshes via the existing OnExternalCompile path. Renames accumulate into AllRenames
+    // for a single coalesced redirect write at end-of-batch.
     auto CompileAsset = [&](UQuestlineGraph* Graph, bool bIsPrimary)
     {
         if (!Graph) return;
@@ -642,18 +645,13 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         if (bSuccess)
         {
             if (!bIsPrimary) ++NeighborSuccessCount;
-            const TMap<FName, FName>& Renames = Compiler->GetDetectedRenames();
-            if (Renames.Num() > 0)
-            {
-                TotalRenames       += Renames.Num();
-                TotalRenamedActors += FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(Renames);
-            }
+            AllRenames.Append(Compiler->GetDetectedRenames());
         }
         else if (!bIsPrimary)
         {
             ++NeighborFailCount;
         }
-        TotalErrors   += Compiler->GetNumErrors();
+        TotalErrors += Compiler->GetNumErrors();
         TotalWarnings += Compiler->GetNumWarnings();
 
         if (Compiler->GetMessages().Num() > 0)
@@ -662,26 +660,49 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
             CompilerLog.AddMessages(Compiler->GetMessages());
         }
 
-        ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(
-            Graph->GetOutermost()->GetName(), bSuccess);
+        ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Broadcast(Graph->GetOutermost()->GetName(), bSuccess);
     };
 
-    // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
-    CompileAsset(QuestlineGraph, /*bIsPrimary=*/ true);
-
-    // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references. See
-    // ISimpleQuestEditorModule::CollectLinkedNeighborhood.
-    TArray<UQuestlineGraph*> Neighborhood;
-    ISimpleQuestEditorModule::Get().CollectLinkedNeighborhood(QuestlineGraph, Neighborhood);
-
-    if (Neighborhood.Num() > 0)
+    // Single batch covers primary + every linked neighbor + the coalesced WriteGameplayTagRedirects call. RegisterCompiledTags
+    // inside Compile() takes the batched path (no per-graph WriteCompiledTagsIni / RebuildNativeTags), so the final rebuild fires
+    // ONCE in EndCompileBatch — under the new redirect map written below — and registers each new canonical name as itself.
     {
-        UE_LOG(LogSimpleQuest, Log, TEXT("Compile: auto-compiling %d linked neighbor(s) of '%s'"), Neighborhood.Num(), *QuestlineGraph->GetName());
+        ISimpleQuestEditorModule::Get().BeginCompileBatch();
+        ON_SCOPE_EXIT { ISimpleQuestEditorModule::Get().EndCompileBatch(); };
+
+        // Primary first so its status/outliner update (via OnExternalCompile's bIsOwnAsset branch) reflects its own result.
+        CompileAsset(QuestlineGraph, true);
+
+        // Linked neighborhood — bidirectional transitive closure of LinkedQuestline references.
+        TArray<UQuestlineGraph*> Neighborhood;
+        ISimpleQuestEditorModule::Get().CollectLinkedNeighborhood(QuestlineGraph, Neighborhood);
+
+        if (Neighborhood.Num() > 0)
+        {
+            UE_LOG(LogSimpleQuest, Log, TEXT("Compile: auto-compiling %d linked neighbor(s) of '%s'"), Neighborhood.Num(), *QuestlineGraph->GetName());
+        }
+
+        for (UQuestlineGraph* Neighbor : Neighborhood)
+        {
+            CompileAsset(Neighbor, false);
+        }
+
+        // Coalesced redirect write inside the batch scope so EndCompileBatch's RebuildNativeTags fires AFTER the CDO + manager
+        // redirect-map are current.
+        if (AllRenames.Num() > 0)
+        {
+            FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(AllRenames);
+        }
     }
 
-    for (UQuestlineGraph* Neighbor : Neighborhood)
+    // Swap helpers run AFTER the batch closes — the tag tree reflects the new redirects and the new canonical names are
+    // registered as themselves, so RequestGameplayTag inside the helpers returns valid tags rather than silently clearing
+    // adopter data on cycle-closing renames.
+    if (AllRenames.Num() > 0)
     {
-        CompileAsset(Neighbor, /*bIsPrimary=*/ false);
+        TotalRenamedActors = FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(AllRenames);
+        FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(AllRenames);
+        FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(AllRenames);
     }
 
     // Notifications — MessageLog already shows pages if anything wrote to them. Emit a notify summary for
@@ -711,12 +732,12 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
     }
 
-    if (TotalRenames > 0)
+    if (AllRenames.Num() > 0)
     {
         FNotificationInfo RenameInfo(FText::Format(
             NSLOCTEXT("SimpleQuestEditor", "TagRenames",
                 "{0} tag(s) renamed. {1} actor(s) updated in loaded levels."),
-            TotalRenames, TotalRenamedActors));
+            AllRenames.Num(), TotalRenamedActors));
         RenameInfo.ExpireDuration = 5.f;
         RenameInfo.bUseSuccessFailIcons = true;
         FSlateNotificationManager::Get().AddNotification(RenameInfo)->SetCompletionState(SNotificationItem::CS_Success);
@@ -793,7 +814,7 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
         TAttribute<FText>(),
         NSLOCTEXT("SimpleQuestEditor", "CompileOptions_Tooltip", "Compile options"),
         TAttribute<FSlateIcon>(),
-        /*bInSimpleComboBox=*/ true);
+        true);
 
     // Compile All — dedicated button
     ToolbarBuilder.AddToolBarButton(
@@ -832,7 +853,7 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
 
 TSharedRef<SWidget> FQuestlineGraphEditor::GenerateCompileOptionsMenu()
 {
-    FMenuBuilder MenuBuilder(/*bInShouldCloseWindowAfterMenuSelection=*/ true, GraphEditorCommands);
+    FMenuBuilder MenuBuilder(true, GraphEditorCommands);
 
     // Placeholder for future options:
     // MenuBuilder.BeginSection("CompileSettings", LOCTEXT("CompileSettings", "Settings"));
@@ -941,6 +962,23 @@ void FQuestlineGraphEditor::OnNodeTitleCommitted(const FText& NewText, ETextComm
 {
     if (CommitType == ETextCommit::OnCleared) return;
     if (!NodeBeingChanged || !NodeBeingChanged->GetCanRenameNode()) return;
+
+    // Reject collisions with sibling live labels or compiled identities BEFORE applying the rename. The compile-time
+    // redirect machinery can't gracefully resolve two nodes claiming the same name in one compile cycle — the cleanest
+    // outcome there is to drop one of the renames, which orphans that node's subscribers. Catching the collision here
+    // surfaces the situation to the designer with a clear path forward (recompile, then rename).
+    if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(NodeBeingChanged))
+    {
+        FText ErrorText;
+        if (!ContentNode->IsLabelAvailable(NewText.ToString(), ErrorText))
+        {
+            FNotificationInfo Info(ErrorText);
+            Info.ExpireDuration = 6.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+            return;
+        }
+    }
 
     const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "RenameNode", "Rename Node"));
     NodeBeingChanged->Modify();
@@ -1068,37 +1106,42 @@ void FQuestlineGraphEditor::ClearNodeHighlight()
     }
 }
 
-static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid)
+// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
+// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
+// preserved when descending into an inline Quest's inner graph. See QuestlineGraphCompiler.cpp lines 429-430 for the
+// compiler-side push and line 465 for the assignment to QuestContentGuid that this lookup pairs with.
+static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
 {
     if (!Graph) return {};
 
     for (UEdGraphNode* Node : Graph->Nodes)
     {
-        // GUID match — this node is the target
         if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
         {
-            if (Content->QuestGuid == ContentGuid)
+            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
+            if (Combined == ContentGuid)
                 return { Graph, Node };
         }
 
-        // Recurse into quest inner graphs
+        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
         if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
         {
             if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
             {
-                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid);
+                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
                 if (Inner.IsValid()) return Inner;
             }
         }
 
-        // Recurse into linked questline graphs
+        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
         if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
         {
             if (!LinkedNode->LinkedGraph.IsNull())
             {
                 if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
                 {
-                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid);
+                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
+                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
                     if (Linked.IsValid()) return Linked;
                 }
             }
@@ -1170,36 +1213,59 @@ void FQuestlineGraphEditor::OnOutlinerItemNavigate(TSharedPtr<FQuestlineOutliner
         NavigateToEntry();
         return;
     }
-    
-    if (Item->LinkDepth == 0)
+
+    // Synthetic LinkedGraph intermediates (Pass 3 fallback for cases where the wrapper's own tag isn't in CompiledNodes)
+    // have no Node, so there's nothing to look up by GUID. Fall back to opening the linked asset and jumping to its entry.
+    // Real LinkedQuestline wrapper items classified by Pass 1 carry a Node and follow the unified path below.
+    if (!Item->Node)
     {
-        NavigateToContentNode(Item->Node->GetQuestGuid());
+        if (Item->ItemType != EOutlinerItemType::LinkedGraph || !Item->SourceGraph) return;
+        UAssetEditorSubsystem* AssetEditors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+        if (!AssetEditors) return;
+        AssetEditors->OpenEditorForAsset(Item->SourceGraph);
+        IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(Item->SourceGraph, false);
+        FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
+        if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
+        FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
+        LinkedEditor->CrossAssetBackEditor = StaticCastSharedRef<FQuestlineGraphEditor>(AsShared());
+        LinkedEditor->NavigateToEntry();
         return;
     }
 
-    UQuestlineGraph* SourceAsset = Item->SourceGraph;
-    if (!SourceAsset) return;
+    // Unified content-node navigation. FindEdNodeLocation walks this asset's graph hierarchy and descends into linked
+    // questline asset graphs reachable from it, so it locates the EdNode regardless of which asset hosts it. Owning
+    // asset is recovered from the EdNode's host UEdGraph via outer-chain walk, no per-item SourceGraph cache needed.
+    FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid());
+    if (!Location.IsValid()) return;
 
+    UQuestlineGraph* HostAsset = nullptr;
+    for (UObject* Outer = Location.HostGraph; Outer; Outer = Outer->GetOuter())
+    {
+        if (UQuestlineGraph* AsAsset = Cast<UQuestlineGraph>(Outer))
+        {
+            HostAsset = AsAsset;
+            break;
+        }
+    }
+
+    // Same-asset (or unresolvable host) - center locally. LinkedQuestline wrapper headers fall here too: their EdNode
+    // lives in THIS asset's graph, so double-click centers on the wrapper instead of jumping into the linked asset.
+    if (HostAsset == nullptr || HostAsset == QuestlineGraph)
+    {
+        NavigateToLocation(Location.HostGraph, Location.EdNode);
+        return;
+    }
+
+    // Cross-asset: open the host asset's editor, hand off navigation to it.
     UAssetEditorSubsystem* AssetEditors = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
-    AssetEditors->OpenEditorForAsset(SourceAsset);
-
-    IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(SourceAsset, false);
+    if (!AssetEditors) return;
+    AssetEditors->OpenEditorForAsset(HostAsset);
+    IAssetEditorInstance* Instance = AssetEditors->FindEditorForAsset(HostAsset, false);
     FAssetEditorToolkit* Toolkit = static_cast<FAssetEditorToolkit*>(Instance);
     if (!Toolkit || Toolkit->GetToolkitFName() != TEXT("QuestlineGraphEditor")) return;
-
     FQuestlineGraphEditor* LinkedEditor = static_cast<FQuestlineGraphEditor*>(Toolkit);
     LinkedEditor->CrossAssetBackEditor = StaticCastSharedRef<FQuestlineGraphEditor>(AsShared());
-
-    if (Item->ItemType == EOutlinerItemType::LinkedGraph)
-    {
-        LinkedEditor->NavigateToEntry();
-    }
-    else
-    {
-        FEdNodeLocation Location = FindEdNodeLocation(Item->Node->GetQuestGuid()); 
-        if (!Location.IsValid()) return;
-        LinkedEditor->NavigateToLocation(Location.HostGraph, Location.EdNode);
-    }
+    LinkedEditor->NavigateToLocation(Location.HostGraph, Location.EdNode);
 }
 
 void FQuestlineGraphEditor::NavigateTo(UEdGraph* Graph)

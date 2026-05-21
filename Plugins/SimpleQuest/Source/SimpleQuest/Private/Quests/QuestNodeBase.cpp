@@ -1,16 +1,26 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Quests/QuestNodeBase.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
-#include "Signals/SignalSubsystem.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
+#include "Events/QuestResolutionRecordedEvent.h"
+#include "Events/QuestEntryRecordedEvent.h"
+
+
+UWorld* UQuestNodeBase::GetWorld() const
+{
+    return CachedGameInstance.IsValid() ? CachedGameInstance->GetWorld() : nullptr;
+}
 
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
     UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-
-    if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState))
+    UQuestStateSubsystem* StateSubsystem = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (PrerequisiteExpression.IsAlways() || PrerequisiteExpression.Evaluate(WorldState, StateSubsystem))
     {
         ActivateInternal(InContextualTag);
         return;
@@ -20,8 +30,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 
 void UQuestNodeBase::ActivateInternal(FGameplayTag InContextualTag)
 {
-    SetContextualTag(InContextualTag);
-    OnNodeActivated.ExecuteIfBound(this, InContextualTag);
+    OnNodeStarted.ExecuteIfBound(this, InContextualTag);
 }
 
 void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)
@@ -29,14 +38,8 @@ void UQuestNodeBase::DeactivateInternal(FGameplayTag InContextualTag)
     // Cancel any deferred prereq subscriptions that are still live
     if (DeferredContextualTag.IsValid())
     {
-        if (USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr)
-        {
-            for (auto& Pair : PrereqSubscriptionHandles)
-            {
-                Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
-            }
-            PrereqSubscriptionHandles.Reset();
-        }
+        USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
+        FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
         DeferredContextualTag = FGameplayTag::EmptyTag;
     }
 }
@@ -52,26 +55,20 @@ void UQuestNodeBase::ResetTransientState()
     // unsubscribing is safe: the owning subsystem is gone, there's nothing left to unsubscribe from.
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
-    ContextualTag = FGameplayTag::EmptyTag;
     bWasGiverGated = false;
-    PendingActivationParams = FQuestObjectiveActivationParams{};
+    PendingActivationContext = FQuestObjectiveActivationContext{};
 }
 
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 {
     DeferredContextualTag = InContextualTag;
-
-    USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
-    if (!Signals) return;
-
-    TArray<FGameplayTag> LeafTags;
-    PrerequisiteExpression.CollectLeafTags(LeafTags);
-    
-    for (const FGameplayTag& LeafTag : LeafTags)
-    {
-        FDelegateHandle Handle = Signals->SubscribeMessage<FWorldStateFactAddedEvent>(LeafTag, this, &UQuestNodeBase::OnPrereqFactAdded);
-        PrereqSubscriptionHandles.Add(LeafTag, Handle);
-    }
+    FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
+        PrerequisiteExpression,
+        this,
+        &UQuestNodeBase::OnPrereqFactAdded,
+        &UQuestNodeBase::OnPrereqResolutionRecorded,
+        &UQuestNodeBase::OnPrereqEntryRecorded,
+        PrereqSubscriptionHandles);
 }
 
 void UQuestNodeBase::OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
@@ -79,44 +76,75 @@ void UQuestNodeBase::OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFa
     TryActivateDeferred();
 }
 
+void UQuestNodeBase::OnPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event)
+{
+    TryActivateDeferred();
+}
+
+void UQuestNodeBase::OnPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event)
+{
+    TryActivateDeferred();
+}
+
 void UQuestNodeBase::TryActivateDeferred()
 {
-    UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
-    if (!WorldState) return;
+    if (!CachedGameInstance.IsValid()) return;
+    UWorldStateSubsystem* WorldState = CachedGameInstance->GetSubsystem<UWorldStateSubsystem>();
+    UQuestStateSubsystem* StateSubsystem = CachedGameInstance->GetSubsystem<UQuestStateSubsystem>();
+    if (!WorldState || !StateSubsystem) return;
 
-    if (!PrerequisiteExpression.Evaluate(WorldState)) return;
+    if (!PrerequisiteExpression.Evaluate(WorldState, StateSubsystem)) return;
 
-    if (USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>())
-    {
-        for (auto& Pair : PrereqSubscriptionHandles)
-        {
-            Signals->UnsubscribeMessage(Pair.Key, Pair.Value);
-        }
-        PrereqSubscriptionHandles.Reset();
-    }
+    USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>();
+    FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
 
     const FGameplayTag TagToActivate = DeferredContextualTag;
     DeferredContextualTag = FGameplayTag::EmptyTag;
     ActivateInternal(TagToActivate);
 }
 
-void UQuestNodeBase::ResolveQuestTag(FName TagName)
+void UQuestNodeBase::ResolveContextualTag(FName TagName)
 {
-    QuestTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName, /*ErrorIfNotFound*/ false);
-    NodeInfo.QuestTag = QuestTag;
-    if (!QuestTag.IsValid())
+    ContextualTag = UGameplayTagsManager::Get().RequestGameplayTag(TagName, false);
+    NodeInfo.QuestTag = ContextualTag;
+    if (!ContextualTag.IsValid())
     {
-        UE_LOG(LogSimpleQuest, Warning,
-            TEXT("ResolveQuestTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
+        UE_LOG(LogSimpleQuestActivation, Warning,
+            TEXT("ResolveContextualTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
             TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
             *TagName.ToString());
         return;
     }
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ResolveQuestTag: %s → DisplayName='%s'"), *QuestTag.ToString(), *NodeInfo.DisplayName.ToString());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveContextualTag: %s → DisplayName='%s'"), *ContextualTag.ToString(), *NodeInfo.DisplayName.ToString());
 }
 
-const TArray<FName>* UQuestNodeBase::GetNextNodesForOutcome(FGameplayTag OutcomeTag) const
+void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
 {
-    const FQuestOutcomeNodeList* List = NextNodesByOutcome.Find(OutcomeTag);
+    AssetScopedAliasTags.Reset();
+    AssetScopedAliasTags.Reserve(TagNames.Num());
+
+    UGameplayTagsManager& Manager = UGameplayTagsManager::Get();
+    for (const FName& TagName : TagNames)
+    {
+        const FGameplayTag Resolved = Manager.RequestGameplayTag(TagName, false);
+        if (!Resolved.IsValid())
+        {
+            UE_LOG(LogSimpleQuestActivation, Warning,
+                TEXT("ResolveAssetScopedAliasTags: '%s' is not registered in the runtime tag manager — stale compiled alias, skipping. ")
+                TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
+                *TagName.ToString());
+            continue;
+        }
+        AssetScopedAliasTags.Add(Resolved);
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAssetScopedAliasTags: %d alias(es) resolved for '%s'"),
+        AssetScopedAliasTags.Num(),
+        *ContextualTag.ToString());
+}
+
+const TArray<FName>* UQuestNodeBase::GetNextNodesForPath(FName PathIdentity) const
+{
+    const FQuestPathNodeList* List = NextNodesByPath.Find(PathIdentity);
     return List ? &List->NodeTags : nullptr;
 }

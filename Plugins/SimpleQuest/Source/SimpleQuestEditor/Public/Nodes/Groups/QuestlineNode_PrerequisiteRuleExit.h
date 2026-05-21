@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -21,9 +22,9 @@ public:
 
 	virtual FGameplayTag GetGroupTag() const override { return GroupTag; }
 	virtual void SetGroupTag(const FGameplayTag& NewTag) override { GroupTag = NewTag; }
-	virtual FString GetTagFilterString() const override { return TEXT("QuestPrereqRule"); }
+	virtual FString GetTagFilterString() const override { return TEXT("SimpleQuest.PrereqRule"); }
 	
 	/** The group tag this getter resolves. Must match a Setter node's GroupTag. */
-	UPROPERTY(EditAnywhere, Category="Prerequisite Group", meta=(Categories="QuestPrereqRule"))
+	UPROPERTY(EditAnywhere, Category="Prerequisite Group", meta=(Categories="SimpleQuest.PrereqRule"))
 	FGameplayTag GroupTag;
 };

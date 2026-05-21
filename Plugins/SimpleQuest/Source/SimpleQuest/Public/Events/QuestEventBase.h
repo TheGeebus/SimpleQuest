@@ -1,12 +1,16 @@
-// Copyright 2026, Greg Bussell, All Rights Reserved.
+// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include "Quests/Types/QuestEventContext.h"
+#include <concepts>
+
+#include "Events/SignalEventBase.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "QuestEventBase.generated.h"
 
 USTRUCT(BlueprintType)
-struct FQuestEventBase
+struct FQuestEventBase : public FSignalEventBase
 {
 	GENERATED_BODY()
 
@@ -16,16 +20,24 @@ struct FQuestEventBase
 		: QuestTag(InQuestTag)
 	{}
 
-	FQuestEventBase(const FGameplayTag InQuestTag, const FQuestEventContext& InContext)
+	FQuestEventBase(const FGameplayTag InQuestTag, const FQuestEventPayload& InPayload)
 		: QuestTag(InQuestTag)
-		, Context(InContext)
+		, Payload(InPayload)
 	{}
 	
 	UPROPERTY(BlueprintReadWrite)
 	FGameplayTag QuestTag;
 
 	UPROPERTY(BlueprintReadOnly)
-	FQuestEventContext Context;
+	FQuestEventPayload Payload;
 	
 	FGameplayTag GetQuestTag() const { return QuestTag; }
 };
+
+/**
+ * Concept satisfied by any struct deriving from FQuestEventBase. Use as a template-parameter constraint
+ * (`template<CQuestEvent TEvent>` or `requires CQuestEvent<TEvent>`) wherever a public API needs to accept
+ * "any quest event" without admitting unrelated types with compile time enforcement that generates readable errors.
+ */
+template<typename T>
+concept CQuestEvent = std::derived_from<T, FQuestEventBase>;

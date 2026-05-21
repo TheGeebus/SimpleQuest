@@ -1,7 +1,9 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Utilities/SimpleQuestEditorUtils.h"
 
+#include "DataTableEditorUtils.h"
 #include "SimpleQuestLog.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Nodes/QuestlineNode_Exit.h"
@@ -10,11 +12,13 @@
 #include "EditorWorldUtils.h"
 #include "EngineUtils.h"
 #include "GameplayTagsManager.h"
+#include "GameplayTagsSettings.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/FileHelper.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
-#include "Components/QuestTargetComponent.h"
+#include "Components/QuestTriggerComponent.h"
 #include "Components/QuestGiverComponent.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
@@ -22,10 +26,9 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Utilities/GroupExaminerTypes.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
-#include "Toolkit/QuestlineGraphEditor.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
-#include "Components/QuestWatcherComponent.h"
+#include "Components/QuestObserverComponent.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Engine/SCS_Node.h"
 #include "Nodes/QuestlineNode_Knot.h"
@@ -36,7 +39,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
-#include "Utilities/QuestStateTagUtils.h"
+#include "Utilities/QuestTagComposer.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
 #include "WorldPartition/WorldPartitionHelpers.h"
@@ -80,19 +83,30 @@ namespace
 
         const FName HomePackageName = HomeAsset->GetOutermost()->GetFName();
         const FString HomeID = HomeAsset->GetQuestlineID().IsEmpty() ? HomeAsset->GetName() : HomeAsset->GetQuestlineID();
-        const FString ExpectedPrefix = FString::Printf(TEXT("Quest.%s."), *FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID));
-        const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
+    	const FString ExpectedPrefix = FQuestTagComposer::IdentityNamespace + FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(HomeID) + TEXT(".");
+    	const FString CompiledTagStr = CompiledTag.GetTagName().ToString();
         if (!CompiledTagStr.StartsWith(ExpectedPrefix)) return Result;
         const FString RelativePath = CompiledTagStr.RightChop(ExpectedPrefix.Len());
         const FString SuffixToMatch = FString::Printf(TEXT(".%s"), *RelativePath);
 
-        IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
-        TArray<FAssetData> QuestlineAssets;
-        AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
+    	IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+    	TArray<FAssetData> QuestlineAssets;
+    	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
 
-        for (const FAssetData& AssetData : QuestlineAssets)
-        {
-            if (AssetData.PackageName == HomePackageName) continue;
+    	// Filter to assets that actually reference the home asset's package. An asset that doesn't reference
+    	// the home asset can't have a LinkedQuestline node pointing at it, so its tags can't legitimately be
+    	// contextualized inlinings of this node. They're at most coincidental leaf-name collisions. Without
+    	// this filter, two unrelated graphs with same-named leaf nodes (e.g. both have a "Step") cross-attribute
+    	// each other's actor observers via the suffix-match logic below, producing false "(via OtherAsset)"
+    	// entries on the expanded node panel.
+    	TArray<FName> ReferencerPackageNames;
+    	AR.GetReferencers(HomePackageName, ReferencerPackageNames);
+    	const TSet<FName> ReferencerSet(ReferencerPackageNames);
+
+    	for (const FAssetData& AssetData : QuestlineAssets)
+    	{
+    		if (AssetData.PackageName == HomePackageName) continue;
+    		if (!ReferencerSet.Contains(AssetData.PackageName)) continue;
 
             const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
             if (CompiledTagsJoined.IsEmpty()) continue;
@@ -100,13 +114,51 @@ namespace
             const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
             const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
 
+            // Compute the outer asset's expected prefix. Each outer asset's CompiledQuestTags carries both
+            // ContextualTag-form entries (rooted at the outer's own QuestlineID) AND asset-scoped alias entries
+            // that root at descendant home assets. Without the prefix filter below, suffix-matching would catch
+            // the aliases too — producing false-positive "(via OuterAsset)" attributions for observers / givers
+            // that subscribe through the home asset's own compile only.
+            const FString OuterAssetID = AssetData.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
+            const FString EffectiveOuterID = OuterAssetID.IsEmpty() ? AssetData.AssetName.ToString() : OuterAssetID;
+            const FString OuterExpectedPrefix = FQuestTagComposer::IdentityNamespace + FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(EffectiveOuterID) + TEXT(".");
+
             TArray<FString> CompiledTagStrs;
             CompiledTagsJoined.ParseIntoArray(CompiledTagStrs, TEXT("|"));
+
+            // Build a lookup of outer's compiler-stamped contextual→alias pairs so we can verify each suffix-matched
+            // contextual is actually an inlining of THIS home node (carries an alias equal to home's compiled tag),
+            // not just a coincidental leaf-name collision in the outer's own top-level structure.
+            const FString AliasPairsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledNodeAliases"));
+            TMap<FString, TArray<FString>> OuterAliasesByContextual;
+            if (!AliasPairsJoined.IsEmpty())
+            {
+                TArray<FString> PairStrs;
+                AliasPairsJoined.ParseIntoArray(PairStrs, TEXT("|"));
+                for (const FString& PairStr : PairStrs)
+                {
+                    FString ContextualPart, AliasPart;
+                    if (PairStr.Split(TEXT("="), &ContextualPart, &AliasPart))
+                    {
+                        OuterAliasesByContextual.FindOrAdd(ContextualPart).Add(AliasPart);
+                    }
+                }
+            }
 
             for (const FString& TagStr : CompiledTagStrs)
             {
                 if (TagStr.Len() <= SuffixToMatch.Len()) continue;
                 if (!TagStr.EndsWith(SuffixToMatch)) continue;
+                // Only consider tags rooted under the outer asset's QuestlineID prefix. Asset-scoped alias entries
+                // (compiler-emitted under multi-tag) start with the HOME asset's prefix and don't belong to
+                // this outer's "contextual" perspective on the home node.
+                if (!TagStr.StartsWith(OuterExpectedPrefix)) continue;
+
+                // Discriminate legitimate inlinings from coincidental leaf-name collisions. A legitimate inlining of
+                // this home node carries an alias matching the home's compiled tag (its standalone-perspective form);
+                // an unrelated top-level node in the outer that happens to share a leaf name has no such alias.
+                const TArray<FString>* AliasList = OuterAliasesByContextual.Find(TagStr);
+                if (!AliasList || !AliasList->Contains(CompiledTagStr)) continue;
 
                 const FGameplayTag ContextualTag = FGameplayTag::RequestGameplayTag(FName(*TagStr), false);
                 if (!ContextualTag.IsValid()) continue;
@@ -151,13 +203,21 @@ TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdG
 	return Result;
 }
 
-TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSubclassOf<UQuestObjective> ObjectiveClass)
+TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectivePaths(TSubclassOf<UQuestObjective> ObjectiveClass)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(FSimpleQuestEditorUtilities_DiscoverObjectivePaths);
+	
 	if (!ObjectiveClass) return {};
-
-	TArray<FGameplayTag> AllOutcomes;
+	
+	TArray<FObjectivePathDescriptor> AllPaths;
 
 	// ── Source 1: K2 node scan (Blueprint graphs) ──
+	// Each K2 placement resolves via UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity (single source
+	// of truth across the K2 node, the title-display path, and discovery here):
+	//   PathName (dynamic) > "Dynamic N" (dynamic, wired no PathName) > OutcomeTag.GetTagName() (static).
+	// The out-param tells us which branch fired so we can stamp bIsRegisteredTag at the source — the
+	// compiler then registers only registered-tag identities at the tag manager root, without relying
+	// on string-shape heuristics that a designer-authored dotted PathName could defeat.
 	if (UBlueprint* Blueprint = Cast<UBlueprint>(ObjectiveClass->ClassGeneratedBy))
 	{
 		TArray<UEdGraph*> AllGraphs;
@@ -168,12 +228,20 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 			Graph->GetNodesOfClass(Nodes);
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				if (Node->OutcomeTag.IsValid())	AllOutcomes.AddUnique(Node->OutcomeTag);
+				bool bIsRegisteredTag = false;
+				const FName ResolvedPath = Node->ResolvePathIdentity(&bIsRegisteredTag);
+				if (!ResolvedPath.IsNone())
+				{
+					AllPaths.AddUnique({ ResolvedPath, bIsRegisteredTag });
+				}
+				// Else: misconfigured placement (no PathName, no OutcomeTag default, no wire). Discovery
+				// silently skips; ValidateNodeDuringCompilation flags it as a Warning at compile time.
 			}
 		}
 	}
 
 	// ── Source 2: UPROPERTY reflection scan (ObjectiveOutcome meta) ──
+	// Always a registered FGameplayTag — bIsRegisteredTag = true.
 	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
 	{
 		for (TFieldIterator<FStructProperty> PropIt(ObjectiveClass); PropIt; ++PropIt)
@@ -184,33 +252,34 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(TSub
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllOutcomes.AddUnique(*Tag);
+					AllPaths.AddUnique({ Tag->GetTagName(), /*bIsRegisteredTag=*/ true });
 				}
 			}
 		}
 
 		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
+		// Returns FGameplayTags; always registered tags — bIsRegisteredTag = true.
 		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
 			if (Tag.IsValid())
 			{
-				AllOutcomes.AddUnique(Tag);
+				AllPaths.AddUnique({ Tag.GetTagName(), /*bIsRegisteredTag=*/ true });
 			}
 		}
 	}
 
-	if (AllOutcomes.Num() > 0)
+	if (AllPaths.Num() > 0)
 	{
 		// Deterministic pin order regardless of discovery source — prevents pin shuffling across rebuilds
-		AllOutcomes.Sort([](const FGameplayTag& A, const FGameplayTag& B)
+		AllPaths.Sort([](const FObjectivePathDescriptor& A, const FObjectivePathDescriptor& B)
 		{
-			return A.GetTagName().LexicalLess(B.GetTagName());
+			return A.Identity.LexicalLess(B.Identity);
 		});
-		
-		UE_LOG(LogSimpleQuest, Verbose,	TEXT("DiscoverObjectiveOutcomes: Found %d outcome(s) for %s"),	AllOutcomes.Num(), *ObjectiveClass->GetName());
+
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("DiscoverObjectivePaths: Found %d path(s) for %s"), AllPaths.Num(), *ObjectiveClass->GetName());
 	}
 
-	return AllOutcomes;
+	return AllPaths;
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQuestlineNode_ContentBase* ContentNode)
@@ -246,12 +315,8 @@ FGameplayTag FSimpleQuestEditorUtilities::ReconstructNodeTagInternal(const UQues
 	if (!QuestlineAsset) return FGameplayTag();
 
 	const FString& QuestlineID = QuestlineAsset->GetQuestlineID();
-	const FString QuestlineSegment = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(
-		QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
-	Segments.Insert(QuestlineSegment, 0);
-
-	const FString TagName = TEXT("Quest.") + FString::Join(Segments, TEXT("."));
-	return FGameplayTag::RequestGameplayTag(FName(*TagName), false);
+	const FString QuestlineSegment = SanitizeQuestlineTagSegment(QuestlineID.IsEmpty() ? QuestlineAsset->GetName() : QuestlineID);
+	return FGameplayTag::RequestGameplayTag(FQuestTagComposer::MakeIdentityTag(QuestlineSegment, Segments), false);
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::ReconstructStepTag(const UQuestlineNode_Step* StepNode)
@@ -283,9 +348,9 @@ TArray<FString> FSimpleQuestEditorUtilities::FindActorNamesWatchingTag(const FGa
 
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
-			if (const UQuestTargetComponent* Comp = It->FindComponentByClass<UQuestTargetComponent>())
+			if (const UQuestTriggerComponent* Comp = It->FindComponentByClass<UQuestTriggerComponent>())
 			{
-				if (Comp->GetStepTagsToWatch().HasTagExact(StepTag))
+				if (Comp->GetStepTagsToTrigger().HasTagExact(StepTag))
 				{
 					Names.Add(It->GetActorLabel());
 				}
@@ -358,7 +423,7 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
 		LogLabel, *ContentNode->NodeLabel.ToString(), Result.Num());
 
 	return Result;
@@ -379,9 +444,110 @@ TArray<FGameplayTag> FSimpleQuestEditorUtilities::CollectContextualNodeTagsForEd
 	return Result;
 }
 
-TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualWatchersForNode(const UQuestlineNode_ContentBase* ContentNode)
+TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUtilities::FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode)
 {
-	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualWatchersForNode"));
+	return CollectContextualActorEntries(ContentNode, &FindActorNamesWatchingTag, TEXT("FindContextualObserversForNode"));
+}
+
+namespace
+{
+	// Recursive struct-layout walk. Handles FGameplayTag and FGameplayTagContainer at any depth — recurses into
+	// nested USTRUCT fields so adopter types with embedded structs get covered without per-class hooks. Cycle-free
+	// because UE forbids by-value struct self-references (a struct can't contain itself; pointers go through
+	// FObjectProperty, not FStructProperty, and we don't iterate those).
+	int32 ApplyTagRenamesToStructLayout(const UStruct* Struct, void* ContainerPtr, const TMap<FName, FName>& Renames)
+	{
+		if (!Struct || !ContainerPtr) return 0;
+
+		int32 Swaps = 0;
+		for (TFieldIterator<FStructProperty> PropIt(Struct); PropIt; ++PropIt)
+		{
+			FStructProperty* StructProp = *PropIt;
+
+			if (StructProp->Struct == FGameplayTag::StaticStruct())
+			{
+				FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(ContainerPtr);
+				if (!TagPtr) continue;
+
+				if (const FName* NewName = Renames.Find(TagPtr->GetTagName()))
+				{
+					*TagPtr = FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false);
+					++Swaps;
+				}
+			}
+			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
+			{
+				FGameplayTagContainer* ContainerProp = StructProp->ContainerPtrToValuePtr<FGameplayTagContainer>(ContainerPtr);
+				if (!ContainerProp) continue;
+
+				FGameplayTagContainer Rebuilt;
+				bool bAnyChanges = false;
+				for (const FGameplayTag& Tag : *ContainerProp)
+				{
+					if (const FName* NewName = Renames.Find(Tag.GetTagName()))
+					{
+						Rebuilt.AddTag(FGameplayTag::RequestGameplayTag(*NewName, /*ErrorIfNotFound*/ false));
+						bAnyChanges = true;
+					}
+					else
+					{
+						Rebuilt.AddTag(Tag);
+					}
+				}
+				if (bAnyChanges)
+				{
+					*ContainerProp = Rebuilt;
+					++Swaps;
+				}
+			}
+			else
+			{
+				// Recurse into nested USTRUCTs. Adopter assets with FGameplayTag fields inside their own struct types
+				// get covered without per-class wiring.
+				void* NestedPtr = StructProp->ContainerPtrToValuePtr<void>(ContainerPtr);
+				Swaps += ApplyTagRenamesToStructLayout(StructProp->Struct, NestedPtr, Renames);
+			}
+		}
+		return Swaps;
+	}
+}
+
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames)
+{
+	if (!Object || Renames.Num() == 0) return 0;
+
+	int32 Swaps = ApplyTagRenamesToStructLayout(Object->GetClass(), Object, Renames);
+
+	// UDataTable special case: rows live in TMap<FName, uint8*> RowMap with layout described by RowStruct. The
+	// struct-layout walk above only sees UDataTable's own UPROPERTYs, not the row data behind the map. Walk each
+	// row's struct interior explicitly.
+	if (UDataTable* DataTable = Cast<UDataTable>(Object))
+	{
+		if (const UScriptStruct* RowStruct = DataTable->RowStruct)
+		{
+			int32 RowSwaps = 0;
+			for (const TPair<FName, uint8*>& RowPair : DataTable->GetRowMap())
+			{
+				if (RowPair.Value)
+				{
+					RowSwaps += ApplyTagRenamesToStructLayout(RowStruct, RowPair.Value, Renames);
+				}
+			}
+			if (RowSwaps > 0)
+			{
+				// Two-stage notification. UDataTable::HandleDataTableChanged broadcasts the table's own OnDataTableChanged
+				// delegate (consumers that watch the asset directly); FDataTableEditorUtils::BroadcastPostChange fires the
+				// editor-side OnPostDataTableChange that the FDataTableEditor widget subscribes to for its row-list view
+				// refresh. Without the second one, the row detail editor refreshes but the row grid stays stale until
+				// close + reopen.
+				DataTable->HandleDataTableChanged(NAME_None);
+				FDataTableEditorUtils::BroadcastPostChange(DataTable, FDataTableEditorUtils::EDataTableChangeInfo::RowList);
+			}
+			Swaps += RowSwaps;
+		}
+	}
+
+	return Swaps;
 }
 
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FName, FName>& Renames)
@@ -398,32 +564,386 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 		for (TActorIterator<AActor> It(World); It; ++It)
 		{
 			AActor* Actor = *It;
-			bool bActorModified = false;
+			int32 ActorSwapCount = 0;
 
-			TInlineComponentArray<UQuestComponentBase*> QuestComps;
-			Actor->GetComponents(QuestComps);
-
-			for (UQuestComponentBase* Comp : QuestComps)
+			// Actor-level FGameplayTag UPROPERTYs (adopter use case where the tag field lives directly on the actor
+			// rather than on a component). Reflection sweep covers the generic case.
+			const int32 ActorLevelSwaps = ApplyTagRenamesToObject(Actor, Renames);
+			if (ActorLevelSwaps > 0)
 			{
-				const int32 SwapCount = Comp->ApplyTagRenames(Renames);
-				if (SwapCount > 0)
+				Actor->Modify();
+				ActorSwapCount += ActorLevelSwaps;
+				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated (actor-level field)"),
+					*Actor->GetClass()->GetName(), *Actor->GetActorLabel(), ActorLevelSwaps);
+			}
+
+			// Walk every component (not just UQuestComponentBase subclasses). The reflection sweep handles adopter
+			// custom components that hold FGameplayTag UPROPERTYs without needing to derive from our base class. For
+			// UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
+			// cover (Observer's TMap<FGameplayTag, ...>::Keys is the canonical specialty case).
+			TInlineComponentArray<UActorComponent*> AllComponents;
+			Actor->GetComponents(AllComponents);
+
+			for (UActorComponent* Comp : AllComponents)
+			{
+				if (!Comp) continue;
+
+				int32 CompSwaps = ApplyTagRenamesToObject(Comp, Renames);
+
+				if (UQuestComponentBase* QuestComp = Cast<UQuestComponentBase>(Comp))
+				{
+					CompSwaps += QuestComp->ApplyTagRenames(Renames);
+				}
+
+				if (CompSwaps > 0)
 				{
 					Comp->Modify();
-					bActorModified = true;
-					UE_LOG(LogSimpleQuest, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
-						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), SwapCount);
+					ActorSwapCount += CompSwaps;
+					UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
+						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), CompSwaps);
 				}
 			}
 
-			if (bActorModified)
+			if (ActorSwapCount > 0)
 			{
 				Actor->MarkPackageDirty();
-				ModifiedActors++;
+				++ModifiedActors;
 			}
 		}
 	}
 
 	return ModifiedActors;
+}
+
+int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	const FString ConfigFile = FPaths::ProjectConfigDir() / TEXT("DefaultGameplayTags.ini");
+	static const FString SectionHeader = TEXT("[/Script/GameplayTags.GameplayTagsSettings]");
+	static const FString RedirectLinePrefix = TEXT("+GameplayTagRedirects=");
+	static const FString OldNameMarker = TEXT("OldTagName=\"");
+	static const FString NewNameMarker = TEXT("NewTagName=\"");
+
+	auto ExtractQuotedAfter = [](const FString& Text, const FString& Marker) -> FName
+	{
+		const int32 Pos = Text.Find(Marker);
+		if (Pos == INDEX_NONE) return NAME_None;
+		const int32 Start = Pos + Marker.Len();
+		const int32 End = Text.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+		if (End == INDEX_NONE) return NAME_None;
+		return FName(*Text.Mid(Start, End - Start));
+	};
+
+	FString FileContents;
+	FFileHelper::LoadFileToString(FileContents, *ConfigFile);
+
+	// Locate the section bounds. Section spans from its header to the next section header (or EOF).
+	const int32 SectionStart = FileContents.Find(SectionHeader);
+	int32 SectionEnd = INDEX_NONE;
+	FString SectionContent;
+	if (SectionStart != INDEX_NONE)
+	{
+		const int32 AfterHeader = SectionStart + SectionHeader.Len();
+		const int32 NextSectionPos = FileContents.Find(TEXT("\n["), ESearchCase::CaseSensitive, ESearchDir::FromStart, AfterHeader);
+		SectionEnd = (NextSectionPos != INDEX_NONE) ? NextSectionPos + 1 : FileContents.Len();
+		SectionContent = FileContents.Mid(AfterHeader, SectionEnd - AfterHeader);
+	}
+
+	// Parse existing redirect lines into a map for dedup + cycle detection. Non-redirect lines (comments, blank
+	// lines, other keys in the section) are ignored here and preserved verbatim by the rebuild loop below.
+	TMap<FName, FName> ExistingRedirects;
+	if (!SectionContent.IsEmpty())
+	{
+		TArray<FString> Lines;
+		SectionContent.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
+		for (const FString& Line : Lines)
+		{
+			const FString Trimmed = Line.TrimStartAndEnd();
+			if (!Trimmed.StartsWith(RedirectLinePrefix)) continue;
+			const FName OldName = ExtractQuotedAfter(Trimmed, OldNameMarker);
+			const FName NewName = ExtractQuotedAfter(Trimmed, NewNameMarker);
+			if (OldName.IsNone() || NewName.IsNone()) continue;
+			ExistingRedirects.Add(OldName, NewName);
+		}
+	}
+
+	// Classify each incoming rename. Skip if OldName already maps to something — UE's resolver walks the map
+	// transitively at lookup time, so a stale reference is already covered by the existing entry.
+	//
+	// Three collision shapes need surgery to avoid breaking adopter resolution:
+	//
+	// 1. Cycle closure: walking the existing redirect map from NewName eventually reaches OldName. Adding the new
+	//    entry would close the chain back into a non-terminating loop.
+	// 2. Cross-chain collision against existing redirects: NewName currently has an outgoing redirect that belongs
+	//    to a different node's rename history. Adding the new entry would extend that other chain — adopters of the
+	//    new rename's node would end up at the other chain's terminal.
+	// 3. In-batch collision: OldName of this rename is also the NewName of another rename in this same compile.
+	//    Neither redirect is in the existing map yet, so case 2's check against ExistingRedirects misses it. If both
+	//    redirects land, adopters of the second rename's node walk transitively past the colliding name to wherever
+	//    the first rename points.
+	//
+	// Surgery:
+	//   - Cases 1 + 2: remove the existing redirect originating at NewName, knit predecessors past it, add the new
+	//     entry.
+	//   - Case 3: drop this rename entirely so the OTHER rename's canonical claim wins. Adopters of THIS rename's
+	//     node at OldName orphan to whoever now owns the colliding name — the unavoidable cost of two nodes claiming
+	//     the same name in one compile.
+	//
+	// Adopter references at NewName itself become ambiguous after any of these surgeries when the original chain had
+	// adopters using that name — they previously walked through NewName to reach some other terminal and now resolve
+	// to the new canonical instead.
+
+	// Pre-build the set of new-names in this batch so the case-3 check is O(1) per rename.
+	TSet<FName> InBatchNewNames;
+	InBatchNewNames.Reserve(Renames.Num());
+	for (const TPair<FName, FName>& Pair : Renames)
+	{
+		InBatchNewNames.Add(Pair.Value);
+	}
+
+	TSet<FName> RedirectsToRemove;
+	TMap<FName, FName> RedirectsToAdd;
+	for (const TPair<FName, FName>& NewPair : Renames)
+	{
+		const FName NewOld = NewPair.Key;
+		const FName NewNew = NewPair.Value;
+
+		if (NewOld == NewNew) continue;  // identity rename — should be pruned upstream, guard defensively
+		if (ExistingRedirects.Contains(NewOld)) continue;
+
+		// Case 3: in-batch collision. OldName is also the new canonical of another rename in this compile.
+		// Drop this rename so the other rename's canonical claim isn't overridden by this rename's redirect.
+		if (InBatchNewNames.Contains(NewOld))
+		{
+			UE_LOG(LogSimpleQuestCompiler, Warning,
+				TEXT("WriteGameplayTagRedirects: %s to %s — in-batch collision (%s is the new canonical of another rename in this compile); this shouldn't fire with up-front validation — please report"),
+				*NewOld.ToString(), *NewNew.ToString(), *NewOld.ToString());
+			continue;
+		}
+
+		// If NewName isn't currently a redirect source, this is a clean forward rename.
+		const FName* NewNewSuccessorPtr = ExistingRedirects.Find(NewNew);
+		if (!NewNewSuccessorPtr)
+		{
+			RedirectsToAdd.Add(NewOld, NewNew);
+			continue;
+		}
+		const FName NewNewSuccessor = *NewNewSuccessorPtr;
+
+		// NewName has an outgoing redirect. Characterize the chain (cycle vs cross-chain collision) for logging.
+		FName Current = NewNew;
+		int32 ChainDepth = 0;
+		TSet<FName> Visited;
+		bool bCycleDetected = false;
+		while (true)
+		{
+			if (Visited.Contains(Current)) break;
+			Visited.Add(Current);
+			const FName* Next = ExistingRedirects.Find(Current);
+			if (!Next) break;
+			++ChainDepth;
+			if (*Next == NewOld) { bCycleDetected = true; break; }
+			Current = *Next;
+		}
+
+		// Find every existing entry pointing TO NewName — these are the predecessors we need to knit past it.
+		TArray<FName> Predecessors;
+		for (const TPair<FName, FName>& Entry : ExistingRedirects)
+		{
+			if (Entry.Value == NewNew)
+			{
+				Predecessors.Add(Entry.Key);
+			}
+		}
+
+		// Apply the surgery.
+		RedirectsToRemove.Add(NewNew);
+		for (const FName& Pred : Predecessors)
+		{
+			RedirectsToRemove.Add(Pred);            // re-added with the new target below; net effect is a value rewrite
+			RedirectsToAdd.Add(Pred, NewNewSuccessor);
+		}
+		RedirectsToAdd.Add(NewOld, NewNew);
+
+		UE_LOG(LogSimpleQuestCompiler, Log,
+			TEXT("WriteGameplayTagRedirects: %s to %s — %s (chain depth %d); removed %s to %s, knit %d predecessor(s) past the removed link"),
+			*NewOld.ToString(),
+			*NewNew.ToString(),
+			bCycleDetected ? TEXT("cycle closure") : TEXT("cross-chain collision"),
+			ChainDepth,
+			*NewNew.ToString(),
+			*NewNewSuccessor.ToString(),
+			Predecessors.Num());
+	}
+
+	if (RedirectsToRemove.IsEmpty() && RedirectsToAdd.IsEmpty()) return 0;
+
+	// Rebuild the section line-by-line. Drop redirect lines whose OldName is in the removal set; preserve every
+	// other line (comments, blanks, non-redirect keys) byte-for-byte so authored documentation survives.
+	FString NewSectionContent;
+	if (!SectionContent.IsEmpty())
+	{
+		TArray<FString> Lines;
+		SectionContent.ParseIntoArrayLines(Lines, false);
+		for (const FString& Line : Lines)
+		{
+			if (!RedirectsToRemove.IsEmpty())
+			{
+				const FString Trimmed = Line.TrimStartAndEnd();
+				if (Trimmed.StartsWith(RedirectLinePrefix))
+				{
+					const FName OldName = ExtractQuotedAfter(Trimmed, OldNameMarker);
+					if (RedirectsToRemove.Contains(OldName))
+					{
+						UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("WriteGameplayTagRedirects: removing %s (per surgery above)"), *OldName.ToString());
+						continue;
+					}
+				}
+			}
+			NewSectionContent += Line;
+			NewSectionContent += LINE_TERMINATOR;
+		}
+	}
+
+	// Trim trailing whitespace before appending so the new entries don't pile up after a growing tail of blanks.
+	NewSectionContent = NewSectionContent.TrimEnd();
+
+	int32 Added = 0;
+	for (const TPair<FName, FName>& Pair : RedirectsToAdd)
+	{
+		NewSectionContent += LINE_TERMINATOR;
+		NewSectionContent += FString::Printf(TEXT("+GameplayTagRedirects=(OldTagName=\"%s\",NewTagName=\"%s\")"),
+			*Pair.Key.ToString(), *Pair.Value.ToString());
+		++Added;
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("WriteGameplayTagRedirects: %s to %s"), *Pair.Key.ToString(), *Pair.Value.ToString());
+	}
+	NewSectionContent += LINE_TERMINATOR;
+
+	// Reassemble the file. If the section didn't exist before (uncommon — UE projects ship with this section),
+	// append a fresh one at the end.
+	if (SectionStart == INDEX_NONE)
+	{
+		if (!FileContents.IsEmpty() && !FileContents.EndsWith(LINE_TERMINATOR))
+		{
+			FileContents += LINE_TERMINATOR;
+		}
+		if (!FileContents.IsEmpty()) FileContents += LINE_TERMINATOR;
+		FileContents += SectionHeader + NewSectionContent;
+	}
+	else
+	{
+		const int32 AfterHeader = SectionStart + SectionHeader.Len();
+		const FString HeaderAndBefore = FileContents.Left(AfterHeader);
+		const FString TailAfterSection = FileContents.Mid(SectionEnd);
+		FileContents = HeaderAndBefore + NewSectionContent;
+		if (!TailAfterSection.IsEmpty())
+		{
+			FileContents += LINE_TERMINATOR;
+			FileContents += TailAfterSection;
+		}
+	}
+
+	if (!FFileHelper::SaveStringToFile(FileContents, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("WriteGameplayTagRedirects: failed to write '%s'"), *ConfigFile);
+		return 0;
+	}
+
+	// Mirror the file write into the in-memory CDO array directly. UE's LoadConfig path appends to TArray-typed
+	// config properties on the `+` INI syntax rather than replacing, so a reload would duplicate every existing
+	// entry. Direct CDO manipulation keeps memory aligned with disk and avoids dirty-marking the CDO (which
+	// could trigger UE's settings auto-save over our comment-preserving file write).
+	if (UGameplayTagsSettings* Settings = GetMutableDefault<UGameplayTagsSettings>())
+	{
+		if (!RedirectsToRemove.IsEmpty())
+		{
+			Settings->GameplayTagRedirects.RemoveAll([&RedirectsToRemove](const FGameplayTagRedirect& R) {
+				return RedirectsToRemove.Contains(R.OldTagName);
+			});
+		}
+		for (const TPair<FName, FName>& Pair : RedirectsToAdd)
+		{
+			FGameplayTagRedirect NewRedirect;
+			NewRedirect.OldTagName = Pair.Key;
+			NewRedirect.NewTagName = Pair.Value;
+			Settings->GameplayTagRedirects.Add(NewRedirect);
+		}
+	}
+
+	if (Added > 0 || !RedirectsToRemove.IsEmpty())
+	{
+		// Push the redirect-map update into UGameplayTagsManager immediately so subsequent FGameplayTag operations
+		// (RequestGameplayTag, deserialization, the swap helpers downstream of this call) see the new state. Critical
+		// when this compilation cycle changes a tag's redirect-chain membership: compilation's own RebuildNativeTags ran
+		// BEFORE this write, registering native tags under the prior redirect map. Without this refresh, the new
+		// canonical name can stay unregistered (or registered under its previous redirect target) until the next
+		// compile reaches it again — and any in-session swap that queries it would get an invalid FGameplayTag back
+		// and silently clear adopter data.
+		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+
+		UE_LOG(LogSimpleQuestCompiler, Log, TEXT("WriteGameplayTagRedirects: +%d added, -%d removed in %s; tag tree refreshed"),
+			Added,
+			RedirectsToRemove.Num(),
+			*ConfigFile);
+	}
+
+	return Added;
+}
+
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	int32 ModifiedBPs = 0;
+
+	for (TObjectIterator<UBlueprint> BPIt; BPIt; ++BPIt)
+	{
+		UBlueprint* BP = *BPIt;
+		if (!BP || !BP->GeneratedClass) continue;
+
+		UObject* CDO = BP->GeneratedClass->GetDefaultObject(/*bCreateIfNeeded*/ false);
+		if (!CDO) continue;
+
+		const int32 SwapsInBP = ApplyTagRenamesToObject(CDO, Renames);
+		if (SwapsInBP > 0)
+		{
+			BP->Modify();
+			BP->MarkPackageDirty();
+			++ModifiedBPs;
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' — %d field(s) updated on CDO"),
+				*BP->GetName(), SwapsInBP);
+		}
+	}
+
+	return ModifiedBPs;
+}
+
+int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(const TMap<FName, FName>& Renames)
+{
+	if (Renames.Num() == 0) return 0;
+
+	int32 ModifiedAssets = 0;
+
+	for (TObjectIterator<UObject> It; It; ++It)
+	{
+		UObject* Asset = *It;
+		if (!Asset || !Asset->IsAsset()) continue;
+		if (Cast<UBlueprint>(Asset)) continue;  // covered by ApplyTagRenamesToLoadedBlueprintCDOs (CDO indirection)
+		if (Cast<UWorld>(Asset)) continue;       // contents covered by ApplyTagRenamesToLoadedWorlds (per-actor walk)
+
+		const int32 Swaps = ApplyTagRenamesToObject(Asset, Renames);
+		if (Swaps > 0)
+		{
+			Asset->Modify();
+			Asset->MarkPackageDirty();
+			++ModifiedAssets;
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedAssets: '%s' (%s) — %d field(s) updated"),
+				*Asset->GetName(), *Asset->GetClass()->GetName(), Swaps);
+		}
+	}
+
+	return ModifiedAssets;
 }
 
 FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode)
@@ -453,7 +973,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
 	if (!QuestlineAsset)
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
 			*ContentNode->NodeLabel.ToString(), Outer ? *Outer->GetClass()->GetName() : TEXT("null"));
 		return FGameplayTag();
 	}
@@ -471,7 +991,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 		}
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
 		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString());
 	return FGameplayTag();
 }
@@ -503,21 +1023,23 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	}
 	if (SourceTagName.IsNone()) return FGameplayTag();
 
-	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, /*ErrorIfNotFound*/ false);
+	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, false);
 
 	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
-	// branch. AnyOutcome → QuestState.<src>.Completed (source done, regardless of outcome). Named outcome →
-	// QuestState.<src>.Outcome.<leaf>.
+	// branch. AnyOutcome → SimpleQuest.State.<src>.Completed (source done, regardless of path). Named path →
+	// SimpleQuest.State.<src>.Path.<leaf>.
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
 	if (Role == EQuestPinRole::AnyOutcomeOut)
 	{
-		const FName FactName = FQuestStateTagUtils::MakeStateFact(SourceTagName, FQuestStateTagUtils::Leaf_Completed);
+		const FName FactName = FQuestTagComposer::MakeStateFact(SourceTagName, EQuestStateLeaf::Completed);
 		return FGameplayTag::RequestGameplayTag(FactName, false);
 	}
 
-	const FGameplayTag OutcomeTag = UGameplayTagsManager::Get().RequestGameplayTag(OutputPin->PinName, false);
-	if (!OutcomeTag.IsValid()) return FGameplayTag();
-	const FName FactName = FQuestStateTagUtils::MakeNodeOutcomeFact(SourceTagName, OutcomeTag);
+	// PinName IS the path identity (FName matching the upstream K2 node's outcome tag for static placements,
+	// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip needed —
+	// MakeNodePathFact takes the FName directly and handles prefix stripping internally.
+	const FName FactName = FQuestTagComposer::MakeNodePathFact(SourceTagName, OutputPin->PinName);
+	if (FactName.IsNone()) return FGameplayTag();
 	return FGameplayTag::RequestGameplayTag(FactName, false);
 }
 
@@ -526,7 +1048,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
 	if (!CompiledTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
 			ContentNode ? *ContentNode->NodeLabel.ToString() : TEXT("(null)"));
 		return false;
 	}
@@ -534,7 +1056,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag ReconstructedTag = ReconstructNodeTagInternal(ContentNode);
 	if (!ReconstructedTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
 			*ContentNode->NodeLabel.ToString());
 		return false;
 	}
@@ -740,7 +1262,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 				if (!ActivatePin)
 				{
-					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
 						*Setter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -782,7 +1304,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
 				if (!ForwardPin)
 				{
-					UE_LOG(LogSimpleQuest, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
 						*Getter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -958,7 +1480,7 @@ namespace PrereqExaminer_Internal
     	Leaf.Type = EPrereqExaminerNodeType::Leaf;
     	Leaf.SourceNode = OwningNode;
 
-    	// Populate the compiler-equivalent fact tag + source runtime tag so the panel can query PIE state per leaf.
+    	// Populate the compiler-equivalent fact tag and source runtime tag so the panel can query PIE state per leaf.
     	// Both stay invalid for node types the helper doesn't cover (Entry outcome leaves, etc.) — the panel then
     	// renders neutral for those leaves rather than a misleading "NotStarted" grey.
     	Leaf.LeafTag = FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(OutputPin, Leaf.LeafSourceTag);
@@ -968,31 +1490,32 @@ namespace PrereqExaminer_Internal
     	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
     	if (Role == EQuestPinRole::AnyOutcomeOut)
     	{
-    		Leaf.LeafOutcomeLabel = FText::FromString(TEXT("Any Outcome"));
+    		Leaf.LeafPathLabel = FText::FromString(TEXT("Any Outcome"));
     	}
     	else
     	{
-    		// Tag-picker syntax: strip the Quest.Outcome. root (present on all named outcome pins), then split the remainder
-    		// into category prefix + leaf so the widget can render the hierarchy deemphasized above the leaf segment.
-    		static const FString OutcomePrefix = TEXT("Quest.Outcome.");
+    		// Tag-picker syntax: strip the SimpleQuest.Outcome. root (present on static outcome-derived pin
+    		// names), then split the remainder into category prefix and leaf so the widget can render the hierarchy
+    		// de-emphasized above the leaf. Bare path identities (dynamic placements) lack the prefix and the dot -
+    		// they fall through to the no-LastDot branch with the whole identity going to LeafPathLabel.
     		FString Remainder = OutputPin->PinName.ToString();
-    		if (Remainder.StartsWith(OutcomePrefix)) Remainder = Remainder.RightChop(OutcomePrefix.Len());
+    		FQuestTagComposer::TryStripOutcomePrefix(Remainder);
 
     		int32 LastDot = INDEX_NONE;
     		if (Remainder.FindLastChar(TEXT('.'), LastDot))
     		{
-    			Leaf.LeafOutcomeCategory = FText::FromString(Remainder.Left(LastDot + 1)); // includes trailing dot
-    			Leaf.LeafOutcomeLabel    = FText::FromString(Remainder.Mid(LastDot + 1));
+    			Leaf.LeafPathCategory = FText::FromString(Remainder.Left(LastDot + 1)); // includes trailing dot
+    			Leaf.LeafPathLabel    = FText::FromString(Remainder.Mid(LastDot + 1));
     		}
     		else
     		{
-    			Leaf.LeafOutcomeLabel = FText::FromString(Remainder);
+    			Leaf.LeafPathLabel = FText::FromString(Remainder);
     		}
     	}
 
-    	// DisplayLabel retained for any legacy consumers (currently none for Leaf — pills filter by type — but kept
+    	// DisplayLabel retained for any legacy consumers (currently none for Leaf - pills filter by type - but kept
     	// populated for diagnostics / future reuse).
-    	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafOutcomeCategory.ToString(), *Leaf.LeafOutcomeLabel.ToString()));
+    	Leaf.DisplayLabel = FText::FromString(FString::Printf(TEXT("%s: %s%s"), *Leaf.LeafSourceLabel.ToString(), *Leaf.LeafPathCategory.ToString(), *Leaf.LeafPathLabel.ToString()));
 
     	return Tree.Nodes.Add(Leaf);
     }
@@ -1284,7 +1807,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 			for (const FPrereqExaminerNode& ExamNode : Tree.Nodes)
 			{
 				if (ExamNode.Type != EPrereqExaminerNodeType::Leaf) continue;
-				if (FQuestStateTagUtils::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
+				if (FQuestTagComposer::IsTagRegisteredInRuntime(ExamNode.LeafTag)) continue;
 
 				const UEdGraphNode* SourceForJump = ExamNode.SourceNode.IsValid() ? ExamNode.SourceNode.Get() : ContentNode;
 				const FText Lead = FText::Format(
@@ -1350,7 +1873,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 	    ++Result.WarningCount;
 	}
 
-	UE_LOG(LogSimpleQuest, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
+	UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ValidateProjectPrereqTags: scanned %d asset(s), %d error(s), %d warning(s)"),
 		QuestlineAssets.Num(), Result.ErrorCount, Result.WarningCount);
 
 	return Result;
@@ -1359,7 +1882,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 namespace
 {
 	/**
-	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Watcher),
+	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Observer),
 	 * emits one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are stamped on
 	 * every entry; Component pointer is the specific component carrying the stale tag.
 	 *
@@ -1378,7 +1901,7 @@ namespace
 
 		auto EmitIfStale = [&](UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
-			if (FQuestStateTagUtils::IsTagRegisteredInRuntime(Tag)) return;
+			if (FQuestTagComposer::IsTagRegisteredInRuntime(Tag)) return;
 			FStaleQuestTagEntry Entry;
 			Entry.Actor = AssociatedActor;
 			Entry.Component = Component;
@@ -1398,17 +1921,17 @@ namespace
 				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive())
 					EmitIfStale(Giver, TEXT("QuestTagsToGive"), Tag);
 			}
-			else if (UQuestTargetComponent* Target = Cast<UQuestTargetComponent>(Comp))
+			else if (UQuestTriggerComponent* Target = Cast<UQuestTriggerComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Target->GetStepTagsToWatch())
+				for (const FGameplayTag& Tag : Target->GetStepTagsToTrigger())
 					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
 			}
-			else if (UQuestWatcherComponent* Watcher = Cast<UQuestWatcherComponent>(Comp))
+			else if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Watcher->GetWatchedStepTags())
-					EmitIfStale(Watcher, TEXT("WatchedStepTags"), Tag);
-				for (const auto& Pair : Watcher->GetWatchedTags())
-					EmitIfStale(Watcher, TEXT("WatchedTags"), Pair.Key);
+				for (const FGameplayTag& Tag : Observer->GetWatchedStepTags())
+					EmitIfStale(Observer, TEXT("WatchedStepTags"), Tag);
+				for (const auto& Pair : Observer->GetObservedTags())
+					EmitIfStale(Observer, TEXT("ObservedTags"), Pair.Key);
 			}
 		}
 	}
@@ -1424,7 +1947,7 @@ namespace
 	 *
 	 * Walking all three is necessary because Actor->GetComponents on a CDO is unreliable for SCS / ICH-sourced
 	 * components in the general case (depends on whether the BP has been compiled and the CDO recreated). The
-	 * explicit walk catches all three of UQuestGiverComponent / UQuestTargetComponent / UQuestWatcherComponent
+	 * explicit walk catches all three of UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent
 	 * regardless of how the designer added them.
 	 *
 	 * Pre-filters via AR-cached NativeParentClass tag so we don't sync-load non-actor BPs (UMG widget BPs, anim
@@ -1437,7 +1960,7 @@ namespace
 		IAssetRegistry& AR = ARM.Get();
 		if (AR.IsLoadingAssets())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanActorBlueprintCDOs: AssetRegistry still loading; waiting for completion before scan"));
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ScanActorBlueprintCDOs: AssetRegistry still loading; waiting for completion before scan"));
 			AR.WaitForCompletion();
 		}
 
@@ -1514,7 +2037,7 @@ namespace
 				PackagePath, OutEntries);
 		}
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanActorBlueprintCDOs: scanned %d actor-derived blueprint(s) of %d total blueprint(s) found in AR"),
 			ActorBlueprints.Num(), BlueprintAssets.Num());
 	}
@@ -1641,7 +2164,7 @@ namespace
 			}
 		}
 
-		UE_LOG(LogSimpleQuest, Verbose,
+		UE_LOG(LogSimpleQuestCompiler, Verbose,
 			TEXT("BuildQuestComponentClassSet: %d quest-component-bearing classes (native + BP combined)"),
 			Result.Num());
 		return Result;
@@ -1709,7 +2232,7 @@ namespace
 				return true;
 			});
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanWorldPartitionActors: %s — %d descriptors, %d scanned, %d filtered by class (filter=%s)"),
 			*PackagePath, NumDescriptors, NumScanned, NumFilteredByClass,
 			ClassFilter ? TEXT("on") : TEXT("off"));
@@ -1749,7 +2272,7 @@ namespace
 		IAssetRegistry& AR = ARM.Get();
 		if (AR.IsLoadingAssets())
 		{
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ScanUnloadedLevels: AssetRegistry still loading; waiting for completion before scan"));
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ScanUnloadedLevels: AssetRegistry still loading; waiting for completion before scan"));
 			AR.WaitForCompletion();
 		}
 
@@ -1859,7 +2382,7 @@ namespace
 					// Already-initialized (resident from a prior run still pending GC, or some external owner
 					// holds it). Scan directly without taking ownership of the lifecycle — FScopedEditorWorld
 					// asserts on already-initialized worlds and would interfere with the real owner anyway.
-					UE_LOG(LogSimpleQuest, Verbose,
+					UE_LOG(LogSimpleQuestCompiler, Verbose,
 						TEXT("ScanUnloadedLevels: '%s' already initialized; scanning without lifecycle wrapper"),
 						*PackagePath);
 					ScanWorldPartitionActors(World, PackagePath, EnsureClassFilter(), OutEntries);
@@ -1875,14 +2398,14 @@ namespace
 					FSimpleQuestEditorUtilities::ScanActorForStaleTags(Actor, FSimpleQuestEditorUtilities::EStaleQuestTagSource::UnloadedLevelInstance,	PackagePath, OutEntries);
 					++NumActorsInLevel;
 				}
-				UE_LOG(LogSimpleQuest, Display,
+				UE_LOG(LogSimpleQuestCompiler, Display,
 					TEXT("ScanUnloadedLevels: non-WP world '%s' — %d actors walked"),
 					*PackagePath, NumActorsInLevel);
 				++NumNonWPScanned;
 			}
 		}
 
-		UE_LOG(LogSimpleQuest, Display,
+		UE_LOG(LogSimpleQuestCompiler, Display,
 			TEXT("ScanUnloadedLevels: %d total worlds in AR; %d already loaded (Tier 1), %d non-WP scanned, %d WP scanned (mode=%s), %d load failures"),
 			WorldAssets.Num(), NumAlreadyLoaded, NumNonWPScanned, NumWPScanned,
 			Scope.bComprehensiveWPScan ? TEXT("comprehensive") : TEXT("class-filtered"),
@@ -1931,7 +2454,7 @@ TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtili
 		ScanUnloadedLevels(Scope, Result);
 	}
 	
-	UE_LOG(LogSimpleQuest, Display,
+	UE_LOG(LogSimpleQuestCompiler, Display,
 		TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found (scope flags: loaded=%s, bpCDOs=%s, unloaded=%s)"),
 		Result.Num(),
 		Scope.bLoadedLevels ? TEXT("on") : TEXT("off"),

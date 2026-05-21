@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/QuestlineNode_Step.h"
 
@@ -12,14 +13,12 @@ void UQuestlineNode_Step::AllocateOutcomePins()
 {
 	if (ObjectiveClass.IsNull()) return;
 
-	TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass.LoadSynchronous());
-	for (const FGameplayTag& Tag : Outcomes)
+	TArray<FObjectivePathDescriptor> Paths = FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
+	for (const FObjectivePathDescriptor& Desc : Paths)
 	{
-		if (Tag.IsValid())
-		{
-			UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Tag.GetTagName());
-			if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Tag.GetTagName());
-		}
+		if (Desc.Identity.IsNone()) continue;
+		UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Desc.Identity);
+		if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Desc.Identity);
 	}
 }
 
@@ -40,11 +39,13 @@ void UQuestlineNode_Step::RefreshOutcomePins()
 	TArray<FName> DesiredNames;
 	if (!ObjectiveClass.IsNull())
 	{
-		TArray<FGameplayTag> Outcomes = FSimpleQuestEditorUtilities::DiscoverObjectiveOutcomes(ObjectiveClass.LoadSynchronous());
-		for (const FGameplayTag& Tag : Outcomes)
+		const TArray<FObjectivePathDescriptor> Paths =
+			FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjectiveClass.LoadSynchronous());
+		DesiredNames.Reserve(Paths.Num());
+		for (const FObjectivePathDescriptor& Desc : Paths)
 		{
-			if (Tag.IsValid()) DesiredNames.Add(Tag.GetTagName());
-		}	
+			if (!Desc.Identity.IsNone()) DesiredNames.Add(Desc.Identity);
+		}
 	}
 	FSimpleQuestEditorUtilities::SortPinNamesAlphabetical(DesiredNames);
 	SyncPinsByCategory(EGPD_Output, TEXT("QuestOutcome"), DesiredNames, { TEXT("QuestDeactivate"), TEXT("QuestDeactivated") });

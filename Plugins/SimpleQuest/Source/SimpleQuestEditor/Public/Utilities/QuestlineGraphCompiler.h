@@ -1,11 +1,13 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Logging/TokenizedMessage.h"
-#include "Quests/PrerequisiteExpression.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 
+struct FQuestBoundaryCompletion;
 struct FIncomingSignalPinSpec;
 struct FQuestEntryRouteList;
 class UQuestlineGraph;
@@ -22,8 +24,8 @@ class FQuestlineGraphTraversalPolicy;
  *
  * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
  * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
- * (Quest.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner routing
- * but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
+ * (SimpleQuest.Questline.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner
+ * routing but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
  *
@@ -44,33 +46,53 @@ public:
 
 protected:
 	/**
-	 * Compiles one graph level. Assigns QuestContentGuid and QuestTag to all content node CDOs, then resolves output pin
+	 * Compiles one graph level. Assigns QuestContentGuid and ContextualTag to all content node CDOs, then resolves output pin
 	 * wiring into NextNodesOnSuccess / NextNodesOnFailure. Recurses into linked questline graph assets.
 	 *
-	 * @param Graph					The questline graph asset to compile.
-	 * @param TagPrefix				Sanitized questline ID used as the tag namespace for this graph's nodes.
-	 * @param BoundaryTagsByOutcome	Tags injected when an Exit_Success node is reached (empty at top level).
-	 * @param VisitedAssetPaths		Stack of asset paths currently open in the recursion, used for cycle detection.
-	 * @param OutEntryTagsByOutcome Tags from input pins connected to optional Outcome graph entry pins on Quest or Linked
-	 *								Questline child graphs 
-	 * @return						Returns the tags connected to an Any Outcome graph entry pin
+	 * @param Graph							The questline graph asset to compile.
+	 * @param TagPrefix						Sanitized questline ID used as the tag namespace for this graph's nodes.
+	 * @param AssetScopedAliasPrefixes
+ 	 * @param BoundaryCompletionsByPath		Inherited boundary completions keyed by Exit OutcomeTag (NAME_None for Any-Outcome catch-all).
+	 *										Mirrors BoundaryTagsByPath: consumed by ResolvePinToTags when crossing an Exit.
+	 * @param VisitedAssetPaths				Stack of asset paths currently open in the recursion, used for cycle detection.
+	 * @param OutEntryTagsByPath			Tags from input pins connected to optional Outcome graph entry pins on Quest or Linked
+	 *										Questline child graphs 
+	 * @return								Returns the tags connected to an Any Outcome graph entry pin
 	 */
-	virtual TArray<FName> CompileGraph(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome = nullptr);	
+	virtual TArray<FName> CompileGraph(
+		UEdGraph* Graph,
+		const FString& TagPrefix,
+		const TArray<FString>& AssetScopedAliasPrefixes,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths,
+		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr);	
 
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
 	 * content nodes. Exit nodes return the appropriate boundary tag set. LinkedQuestline nodes are compiled recursively and
 	 * their entry tags are returned in their place.
 	 *
-	 * @param FromPin					The output pin to trace.
-	 * @param TagPrefix					Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
-	 *									connections before recursing into the linked asset.
-	 * @param BoundaryTagsByOutcome		Forwarded to Exit_Success resolution.
-	 * @param VisitedAssetPaths			Cycle detection stack, shared with CompileGraph.
-	 * @param OutTags					Accumulates the resolved tags.
-	 * @param OutVisitedExitsByOutcome	Outcome deduplication detection stack.
+	 * @param FromPin						The output pin to trace.
+	 * @param TagPrefix						Tag namespace of the currently compiling graph. Used to resolve the linked node's own downstream
+	 *										connections before recursing into the linked asset.
+     * @param BoundaryCompletionsByPath	    Inherited boundary completions for this compile context, keyed by Exit OutcomeTag. Looked up by
+	 *										the Exit-crossing branch of the walk and accumulated into OutBoundaryCompletions.
+	 * @param VisitedAssetPaths				Cycle detection stack, shared with CompileGraph.
+	 * @param OutTags						Accumulates the resolved tags.
+	 * @param OutBoundaryCompletions		Out-accumulator for boundary completions picked up as the walk crosses Exits. Caller appends
+	 *										these to the corresponding routing table so ChainToNextNodes can fire them at runtime.
+	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
+	 * @param OutExitedGraphTags
 	 */
-	virtual void ResolvePinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutTags, TMap<FGameplayTag, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByOutcome = nullptr);
+	virtual void ResolvePinToTags(
+		UEdGraphPin* FromPin,
+		const FString& TagPrefix,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<FName>& OutTags,
+		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
+		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
+		TArray<FGameplayTag>* OutExitedGraphTags = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -100,27 +122,70 @@ protected:
 private:
 
 	/**
+	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during
+	 * CompileNodeRegistration as instances are registered, while CurrentInnerContainerTag tracks the wrapper
+	 * whose inner graph is currently being compiled. Cleared at Compile() start. Read by ComputeContainerReachability
+	 * to walk ancestor chains and to filter routing-walk traversal by structural containment.
+	 */
+	TMap<FName, FName> ImmediateContainerByTag;
+
+	/**
+	 * Tracks the wrapper UQuest whose inner graph is currently being compiled. NAME_None at root level.
+	 * Save/restored across recursive CompileGraph calls in CompileNodeRegistration's wrapper branches so each
+	 * inner registration sees its direct container. Cleared at Compile() start.
+	 */
+	FName CurrentInnerContainerTag = NAME_None;
+	
+	/**
+	 * The questline asset whose root scope is being compiled at the current recursion depth. Set at the top of
+	 * Compile() to the root asset's identity tag, and save/restore-guarded around each LinkedQuestline inner
+	 * CompileGraph recursion to the linked asset's identity. Unchanged across Quest container inner-graph
+	 * recursion (containers don't change the asset). Read by the Exit-visit branch of ResolvePinToTags to
+	 * attribute root-scope Exit reaches to the right asset for graph-resolution publishing.
+	 */
+	FGameplayTag CurrentAssetIdentityTag;
+
+	/**
+	 * Per-compile accumulators for ActivationGroup signal-side dependencies. Populated during CompileNode-
+	 * Registration's setter / listener walks; stamped onto UQuestlineGraph::OutwardSetterGroupTags + Listener-
+	 * GroupTags at the end of Compile(). Drives the manager's reachability-walked async-load: when a graph
+	 * registers, the manager walks the graph's outward setter tags, finds any other graph with a listener on
+	 * the same tag, and async-loads it. Replaces the broader "auto-load all listener-bearing graphs at
+	 * startup" pattern with reachability-driven lazy loading.
+	 */
+	TSet<FGameplayTag> CompiledSetterGroupTags;
+	TSet<FGameplayTag> CompiledListenerGroupTags;
+	
+	/**
+	 * Post-compile pass — populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and
+	 * UQuestStep::AncestorContainerTags. Called from Compile() after RegisterCompiledTags so FGameplayTag
+	 * resolution succeeds.
+	 */
+	void ComputeContainerReachability(UQuestlineGraph* InGraph);
+
+	/**
 	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
 	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
 	 * the compiler uses. Cleared at Compile() start.
 	 */
-	struct FSourceOutcomeKey
+	struct FSourcePathKey
 	{
-		FName SourceTag;       // compiled tag of the source content node
-		FGameplayTag Outcome;  // invalid = "any outcome from this source"
+		FName SourceTag;	// compiled tag of the source content node
+		FName Path;			// path identity (outcome tag's full FName for static placements; sanitized PathName for dynamic
+							// placements). NAME_None = "any path from this source".
 
-		bool operator==(const FSourceOutcomeKey& Other) const
+		bool operator==(const FSourcePathKey& Other) const
 		{
-			return SourceTag == Other.SourceTag && Outcome == Other.Outcome;
+			return SourceTag == Other.SourceTag && Path == Other.Path;
 		}
-		friend uint32 GetTypeHash(const FSourceOutcomeKey& Key)
+		friend uint32 GetTypeHash(const FSourcePathKey& Key)
 		{
-			return HashCombine(GetTypeHash(Key.SourceTag), GetTypeHash(Key.Outcome));
+			return HashCombine(GetTypeHash(Key.SourceTag), GetTypeHash(Key.Path));
 		}
 	};
 	
 	/**
-	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled QuestTag of the source content node. Used as the
+	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled ContextualTag of the source content node. Used as the
 	 * SourceFilter on entry destinations so runtime routing can discriminate per-source. Returns NAME_None when the source
 	 * cannot be located (unresolvable asset, missing node, etc.) — caller emits a warning and skips the spec.
 	 */
@@ -132,12 +197,12 @@ private:
 	 * by continuing the walk up through Entry indirections until a concrete content-node source is found or the walk escapes
 	 * the compile tree (filtered by VisitedAssetPaths). Cycle-guarded via VisitedGraphs — a graph visited once doesn't re-emit.
 	 */
-	void CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourceOutcomeKey>& OutKeys, TSet<UEdGraph*>& VisitedGraphs);
+	void CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourcePathKey>& OutKeys, TSet<UEdGraph*>& VisitedGraphs);
 	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
-	 * the compiled QuestTag: Quest.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass ordering — uses
-	 * editor-time data only.
+	 * the compiled ContextualTag: SimpleQuest.Questline.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
+	 * ordering — uses editor-time data only.
 	 */
 	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;
 
@@ -171,6 +236,14 @@ private:
 	TArray<FName> AllCompiledQuestTags;	
 
 	/**
+	 * Per-node asset-scoped alias FName lists, keyed by ContextualTag's FName. Populated during CompileNodeRegistration
+	 * as each node materializes; consumed by ComputeContainerReachability's post-pass to call ResolveAssetScopedAliasTags
+	 * on each instance once the runtime tag manager has the alias FNames registered. Empty entry for nodes with no
+	 * LinkedQuestline ancestors (top-level content of the compile asset).
+	 */
+	TMap<FName, TArray<FName>> CompiledAliasFNamesByContextualTag;
+	
+	/**
 	 * Maps utility editor nodes to their compile-time FName keys. Keyed by editor node pointer; values are GUID-derived FNames
 	 * (Util_<NodeGuid>) used as AllCompiledNodes lookup keys. Not gameplay tags — utility nodes are internal routing only,
 	 * not tracked quest states.
@@ -187,12 +260,6 @@ private:
 	int32 CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression);
 
 	/**
-	 * Given a Success or Failure output pin on a content node, returns the corresponding WorldState state fact FName (Quest.State.<Tag>.Succeeded / Failed).
-	 * Returns NAME_None for Any Outcome (caller builds the OR node) or non-content-node pins.
-	 */
-	FName ResolveOutputPinToStateFact(UEdGraphPin* OutputPin, const FString& TagPrefix) const;
-
-	/**
 	 * Follows the Deactivated output pin and splits resolved node tags by destination pin category: connections to Activate inputs
 	 * populate OutActivateTags (NextNodesOnDeactivation); connections to Deactivate inputs populate OutDeactivateTags
 	 * (NextNodesToDeactivateOnDeactivation).
@@ -205,31 +272,71 @@ private:
 	 * is ambiguous — one outcome should route through one terminal. Called from the outcome-routing pass after
 	 * ResolvePinToTags returns the visited-exits collection.
 	 */
-	void EmitDuplicateOutcomeRoutingWarning(const UEdGraphNode* SourceNode, const UEdGraphPin* SourcePin, const FGameplayTag& DuplicatedOutcomeTag,	const TArray<TWeakObjectPtr<const UEdGraphNode>>& DuplicateExits, const FString& TagPrefix);
+	void EmitDuplicateOutcomeRoutingWarning(
+		const UEdGraphNode* SourceNode,
+		const UEdGraphPin* SourcePin,
+		const FName& DuplicatedPathIdentity,
+		const TArray<TWeakObjectPtr<const UEdGraphNode>>& DuplicateExits,
+		const FString& TagPrefix);
 	
 	/** Appends a clickable action token that navigates to the given node in the graph editor. */
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
 
 	/** Pass 1: iterate content nodes, validate labels, create runtime instances, assign tags. */
-	void CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
+	void CompileNodeRegistration(
+		UEdGraph* Graph,
+		const FString& TagPrefix,
+		const TArray<FString>& AssetScopedAliasPrefixes,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
+		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
 
 	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */
-	void CompileGroupSetters(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutMonitorTags, TArray<FName>& OutGetterEntryTags);
+	void CompileGroupSetters(
+		UEdGraph* Graph,
+		const FString& TagPrefix,
+		TArray<FString>& VisitedAssetPaths);
 
 	/** Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, GroupSignal). */
-	void CompileUtilityNodes(UEdGraph* Graph, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
+	void CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
 
 	/** Pass 2: route each content node's output pins into the runtime routing sets. */
-	void CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths);
+	void CompileOutputWiring(
+		const TArray<UQuestlineNode_ContentBase*>& ContentNodes,
+		const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap,
+		const FString& TagPrefix,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths);
 
-	/** Resolve entry tags from the graph's Entry node, splitting per-outcome when applicable. */
-	TArray<FName> ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FGameplayTag, TArray<FName>>& BoundaryTagsByOutcome, TArray<FString>& VisitedAssetPaths, TMap<FGameplayTag, FQuestEntryRouteList>* OutEntryTagsByOutcome);
+	/** Resolve entry tags from the graph's Entry node, splitting per-path when applicable. */
+	TArray<FName> ResolveEntryTags(
+		UEdGraph* Graph,
+		const FString& TagPrefix,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths,
+		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath);
 
 	/** GUID-bridge rename detection: chain-collapse existing ledger, add new renames, prune identities. */
 	void DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid);
 
 	/** Shared handler for AND/OR combinator nodes — creates expression node and recurses into all input pins. */
 	int32 CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths,	FPrerequisiteExpression& OutExpression);
+
+	/**
+	 * Walks a container content node's (Quest or LinkedQuestline) output pins and builds the per-path
+	 * boundary maps for the recursive inner CompileGraph call. For each named outcome pin (and the
+	 * Any-Outcome pin), computes outer-side destination tags via ResolvePinToTags and accumulates the
+	 * container's own wrapper boundary completion (inserted at the front of each list for innermost-
+	 * first cascade order through nested containers).
+	 */
+	void ComputeInnerBoundaryMaps(
+		UQuestlineNode_ContentBase* ContentNode,
+		const FString& TagPrefix,
+		const FString& Label,
+		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+		TArray<FString>& VisitedAssetPaths,
+		TMap<FName, TArray<FQuestBoundaryCompletion>>& OutBoundaryCompletionsByPath);
 	
 	UQuestlineGraph* RootGraph = nullptr;
 
@@ -241,14 +348,11 @@ private:
 	 */
 	FGuid CurrentOuterGuidChain;
 
-	/** Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). */
-	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
-
 	/** (source, outcome) pairs that reach each destination via direct outcome→Activate wiring (through utilities and Setter.Forward chains). */
-	TMap<FName, TSet<FSourceOutcomeKey>> DirectReachesByDest;
+	TMap<FName, TSet<FSourcePathKey>> DirectReachesByDest;
 
 	/** (source, outcome) pairs feeding ActivationGroupSetters of each group tag. */
-	TMap<FGameplayTag, TSet<FSourceOutcomeKey>> GroupSetterSourcesByTag;
+	TMap<FGameplayTag, TSet<FSourcePathKey>> GroupSetterSourcesByTag;
 
 	/** Destinations reached by ActivationGroupGetters of each group tag (via the getter's Forward output chain). */
 	TMap<FGameplayTag, TSet<FName>> GroupGetterDestsByTag;
@@ -258,7 +362,7 @@ private:
 	 * Lets the warning emitter identify the setter that actually contributed THIS collision's source rather than picking an
 	 * arbitrary setter with a matching tag. Nested TMap avoids a custom hash pair-key.
 	 */
-	TMap<FGameplayTag, TMap<FSourceOutcomeKey, UEdGraphNode*>> SetterEdNodeByGroupAndSource;
+	TMap<FGameplayTag, TMap<FSourcePathKey, UEdGraphNode*>> SetterEdNodeByGroupAndSource;
 
 	/**
 	 * Getter editor-node lookup keyed by group tag and then by destination tag. Lets the warning emitter identify the specific
@@ -271,7 +375,7 @@ private:
 	 * Collision test with AnyOutcome absorption: two keys collide when their sources match AND their outcomes match OR either
 	 * outcome is invalid (the "any outcome" sentinel). Mirrors UQuestlineGraphSchema::PinsRepresentSameSignal semantics.
 	 */
-	static bool ParallelPathKeysCollide(const FSourceOutcomeKey& A, const FSourceOutcomeKey& B);
+	static bool ParallelPathKeysCollide(const FSourcePathKey& A, const FSourcePathKey& B);
 
 	/** Runs at the end of Compile() to analyze collected data and emit parallel-path warnings. */
 	void EmitParallelPathWarnings();
@@ -281,7 +385,7 @@ private:
 	 * clickable tokens for source, destination, setter, and (first) getter so designers can navigate directly to each offending
 	 * node from the Quest Compiler message log. Falls back to plain text for any node ref that didn't resolve.
 	 */
-	void EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourceOutcomeKey& SetterSource, const FSourceOutcomeKey& DirectSource, const FName& DestTag);
+	void EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourcePathKey& SetterSource, const FSourcePathKey& DirectSource, const FName& DestTag);
 	
 	/**
 	 * Activation Group metadata collection pass — iterates graph nodes for ActivationGroupSetters and ActivationGroupGetters,
@@ -297,5 +401,12 @@ public:
 	int32 GetNumErrors() const { return NumErrors; }
 	int32 GetNumWarnings() const { return NumWarnings; }
 	const TMap<FName, FName>& GetDetectedRenames() const { return DetectedTagRenames; }
+
+	/**
+	 * Deterministic compound of two GUIDs; asymmetric so (Outer, Inner) differs from (Inner, Outer). Public so editor
+	 * navigation code can mirror the compiler's GUID-chain logic when looking up the editor node corresponding to a
+	 * runtime instance whose QuestContentGuid was combined through one or more LinkedQuestline placements.
+	 */
+	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
 	
 };

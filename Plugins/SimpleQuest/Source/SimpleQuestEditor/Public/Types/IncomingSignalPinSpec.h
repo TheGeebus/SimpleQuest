@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -45,7 +46,7 @@ struct SIMPLEQUESTEDITOR_API FIncomingSignalPinSpec
 	FString CachedSourceLabel;
 
 	/** The specific outcome tag this spec represents. Must be valid. */
-	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal", meta = (Categories = "Quest.Outcome"))
+	UPROPERTY(VisibleAnywhere, Category = "Incoming Signal", meta = (Categories = "SimpleQuest.Outcome"))
 	FGameplayTag Outcome;
 
 	/**

@@ -1,10 +1,11 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/Slate/SGraphNode_GroupNode.h"
 #include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Groups/QuestlineNode_PortalExitBase.h"
 #include "SGraphPin.h"
-#include "SGameplayTagCombo.h"
+#include "Widgets/SQuestTagPicker.h"
 #include "ScopedTransaction.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
@@ -143,6 +144,7 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 	{
 		InnerVerticalBox->AddSlot()
 			.AutoHeight()
+			.HAlign(HAlign_Left)
 			.Padding(FMargin(10.f, 4.f, 10.f, 1.f))
 			[
 				CreateTagPickerWidget()
@@ -376,7 +378,7 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreateTagPickerWidget()
 	if (SetterNode) FilterString = SetterNode->GetTagFilterString();
 	else if (GetterNode) FilterString = GetterNode->GetTagFilterString();
 
-	return SNew(SGameplayTagCombo)
+	return SNew(SQuestTagPicker)
 		.Filter(*FilterString)
 		.Tag_Lambda([this]()
 		{

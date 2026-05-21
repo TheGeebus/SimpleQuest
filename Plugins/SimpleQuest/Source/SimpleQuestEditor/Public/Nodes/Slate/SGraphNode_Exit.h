@@ -1,4 +1,5 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -10,7 +11,7 @@ struct FGameplayTag;
 
 /**
  * Slate widget for the Outcome (Exit) terminal node. Adds an inline SGameplayTagCombo filtered to the
- * Quest.Outcome namespace so designers can pick the outcome tag directly on the node without opening the
+ * SimpleQuest.Outcome namespace so designers can pick the outcome tag directly on the node without opening the
  * Details panel. Title continues to reflect the picked tag via GetNodeTitle's existing format string.
  */
 class SIMPLEQUESTEDITOR_API SGraphNode_Exit : public SGraphNode

@@ -1,17 +1,17 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Types/IncomingSignalPinSpec.h"
-
 #include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
 #include "IDetailGroup.h"
 #include "IPropertyUtilities.h"
 #include "PropertyHandle.h"
-
+#include "Utilities/QuestTagComposer.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -177,8 +177,7 @@ void FQuestlineNodeEntryDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 			else
 			{
 				const FString FullTag = Spec.Outcome.GetTagName().ToString();
-				int32 LastDot;
-				const FString Leaf = FullTag.FindLastChar(TEXT('.'), LastDot) ? FullTag.Mid(LastDot + 1) : FullTag;
+				const FString Leaf = FQuestTagComposer::GetLeafSegment(Spec.Outcome.GetTagName());
 				OutcomeLabel = FText::FromString(Leaf);
 				RowTooltip = FText::Format(LOCTEXT("SpecificOutcomeRowTooltip", "Exposes a pin that fires only when this source triggers entry with outcome '{0}'."), FText::FromString(FullTag));
 			}

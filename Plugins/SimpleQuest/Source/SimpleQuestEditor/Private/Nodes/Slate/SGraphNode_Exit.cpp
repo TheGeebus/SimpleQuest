@@ -1,10 +1,11 @@
-﻿// Copyright 2026, Greg Bussell, All Rights Reserved.
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
 
 #include "Nodes/Slate/SGraphNode_Exit.h"
 
 #include "Nodes/QuestlineNode_Exit.h"
 #include "SGraphPin.h"
-#include "SGameplayTagCombo.h"
+#include "Widgets/SQuestTagPicker.h"
 #include "ScopedTransaction.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
@@ -106,8 +107,9 @@ void SGraphNode_Exit::UpdateGraphNode()
 		.Padding(EditorSettings->GetNonPinNodeBodyPadding())
 		[ DefaultTitleAreaWidget ]
 
-		// Outcome tag picker — filtered to Quest.Outcome namespace
-		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(10.f, 4.f, 10.f, 4.f))
+		// Outcome tag picker: filtered to SimpleQuest.Outcome namespace. HAlign_Left so the slot
+		// shrinks to the picker's content width instead of stretching to fill the node body horizontally.
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[ CreateTagPickerWidget() ]
 
 		// Pin content area (single Outcome input pin)
@@ -206,10 +208,10 @@ void SGraphNode_Exit::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 
 TSharedRef<SWidget> SGraphNode_Exit::CreateTagPickerWidget()
 {
-	// Filter matches the UPROPERTY meta = (Categories = "Quest.Outcome") on UQuestlineNode_Exit::OutcomeTag —
+	// Filter matches the UPROPERTY meta = (Categories = "SimpleQuest.Outcome") on UQuestlineNode_Exit::OutcomeTag —
 	// picker surfaces only tags under that root, same as the Details-panel picker.
-	return SNew(SGameplayTagCombo)
-		.Filter(TEXT("Quest.Outcome"))
+	return SNew(SQuestTagPicker)
+		.Filter(TEXT("SimpleQuest.Outcome"))
 		.Tag_Lambda([this]()
 		{
 			return ExitNode ? ExitNode->OutcomeTag : FGameplayTag();

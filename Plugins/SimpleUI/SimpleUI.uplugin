@@ -1,0 +1,25 @@
+﻿{
+    "FileVersion": 3,
+    "Version": 1,
+    "VersionName": "0.1.0",
+    "FriendlyName": "Simple UI",
+    "Description": "A small library of reusable, design-agnostic UMG widgets for the Simple Suite and adopter projects.",
+    "Category": "UI",
+    "CreatedBy": "Greg Bussell",
+    "CreatedByURL": "",
+    "DocsURL": "",
+    "MarketplaceURL": "",
+    "SupportURL": "",
+    "EngineVersion": "5.6.0",
+    "CanContainContent": false,
+    "IsBetaVersion": true,
+    "IsExperimentalVersion": false,
+    "Installed": false,
+    "Modules": [
+        {
+            "Name": "SimpleUI",
+            "Type": "Runtime",
+            "LoadingPhase": "Default"
+        }
+    ]
+}

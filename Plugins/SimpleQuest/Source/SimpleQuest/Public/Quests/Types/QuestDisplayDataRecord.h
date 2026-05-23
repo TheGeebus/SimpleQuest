@@ -4,9 +4,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Display/QuestDisplayData.h"
 #include "QuestDisplayDataRecord.generated.h"
 
+class UQuestDisplayData;
 
 /**
  * Per-tag display data record stored by UQuestStateSubsystem. Mirrors the authored DisplayName / Description / DisplayData

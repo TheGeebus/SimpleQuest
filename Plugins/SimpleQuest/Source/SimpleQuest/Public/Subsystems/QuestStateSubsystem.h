@@ -13,10 +13,10 @@
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/QuestRuntimeRecord.h"
+#include "Quests/Types/QuestDisplayDataRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
 class UQuestDisplayData;
-struct FQuestDisplayDataRecord;
 class AActor;
 class USignalSubsystem;
 class UWorldStateSubsystem;

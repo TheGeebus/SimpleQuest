@@ -17,7 +17,7 @@ struct FQuestResolutionRecordedEvent;
 struct FQuestEntryRecordedEvent;
 
 class UQuestReward;
-
+class UQuestDisplayData;
 
 
 /**
@@ -363,6 +363,30 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FQuestNodeInfo NodeInfo;
+    
+    /**
+     * UI-friendly title for this node. Compiler-populated from the matching UQuestlineNode_ContentBase's DisplayName
+     * UPROPERTY at compile time; empty FText when the designer didn't author one. Queried at runtime via
+     * UQuestStateSubsystem::GetDisplayName, which applies a derived-fallback (formatted leaf-name from ContextualTag)
+     * when this field is unset.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Display")
+    FText DisplayName;
+
+    /**
+     * Flavor / context blurb for this node. Compiler-populated from the matching UQuestlineNode_ContentBase's Description.
+     * Empty by default. Queried via UQuestStateSubsystem::GetDisplayDescription.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Display")
+    FText Description;
+
+    /**
+     * Optional richer UI metadata. Compiler-populated from the matching UQuestlineNode_ContentBase's DisplayData reference.
+     * Adopter UI casts to its expected UQuestDisplayData subclass at consumption time. Queried via
+     * UQuestStateSubsystem::GetDisplayData.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Display")
+    TObjectPtr<UQuestDisplayData> DisplayData;
 
 private:
     // Stores the contextual tag while waiting for prerequisites to clear
@@ -402,4 +426,7 @@ public:
     FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }
     FORCEINLINE const TArray<FGameplayTag>& GetExitedGraphTagsOnAnyOutcome() const { return ExitedGraphTagsOnAnyOutcome; }
+    FORCEINLINE const FText& GetDisplayName() const { return DisplayName; }
+    FORCEINLINE const FText& GetDescription() const { return Description; }
+    FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }
 };

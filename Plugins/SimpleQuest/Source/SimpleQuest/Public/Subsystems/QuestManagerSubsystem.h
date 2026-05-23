@@ -56,8 +56,41 @@ template<typename T>
 concept CSoftLoadable = std::derived_from<T, UObject>;
 
 /**
- * This class manages quests and quest givers, loading and unloading quests as needed. It handles the registration of actors
- * who have a quest giver component when they begin play. 
+ * Opaque orchestration subsystem for the SimpleQuest runtime. Owns the activation cascade, the lifecycle state machine,
+ * the giver-component registry, and the event-handler graph that ties them together. Friend-only writer to
+ * UQuestStateSubsystem — the manager IS the writer, QSS is the reader. Friend-only consumer of the SimpleCore
+ * subsystems (USignalSubsystem for publish/subscribe routing, UWorldStateSubsystem for boolean state facts) — the
+ * manager pushes facts and publishes events as quest lifecycle transitions fire.
+ *
+ * ARCHITECTURAL CONTRACT — adopters do NOT reach into this subsystem directly. The public BP-callable surface lives on
+ * USimpleQuestBlueprintLibrary (request-side: ActivateQuestlineGraph, BlockQuest, DeactivateQuest, GiveQuest, etc.)
+ * and on UQuestStateSubsystem (read-side: GetQuestResolution, QueryQuestActivationBlockers, GetDisplayName, etc.).
+ * The manager's own surface is intentionally internal — orchestration logic is not part of the adopter contract, and
+ * exposing it would couple adopter code to implementation details the framework reserves the right to evolve.
+ *
+ * Internal responsibilities:
+ *   - Quest lifecycle orchestration: PendingGiver → Live → Resolved (or Deactivated), with prereq gating, multi-tag
+ *     cascade deduplication, and container Live derivation from inner-Step state.
+ *   - Activation cascade routing: walks each registered graph's compiled NextNodesByPath / NextNodesOnAnyOutcome tables
+ *     to deliver outcomes from completing nodes to their downstream destinations.
+ *   - Boundary completion firing: emits wrapper-level resolutions when an inner-graph outcome crosses a LinkedQuestline
+ *     boundary so consumers subscribed at the wrapper see the resolution at the wrapper's perspective.
+ *   - Loaded-instance registry (LoadedNodeInstances): maps every registered tag perspective (canonical +
+ *     AssetScopedAliasTag) to its runtime UQuestNodeBase, with deduplication so one logical authored node produces
+ *     one runtime instance even when compiled into multiple assets via LinkedQuestline.
+ *   - Giver-component registration: actors with UQuestGiverComponent register on BeginPlay, match against compiled
+ *     quest tags, and have their availability re-evaluated as prereq state changes.
+ *   - Async-load orchestration: reachability-walks loaded graphs' OutwardSetterGroupTags against the project-wide
+ *     listener-graph index to async-load listener-bearing graphs on demand rather than at startup.
+ *   - Fact + event push to SimpleCore: WorldState boolean facts (Started / Live / Resolved / Deactivated) and bus
+ *     events (FQuestStartedEvent, FQuestEndedEvent, FQuestActivationFailedEvent, etc.) for every registered perspective
+ *     so any-perspective queries and subscribers see consistent state.
+ *   - Pushes display data into UQuestStateSubsystem's registry at graph-registration time so adopter UI queries
+ *     (GetDisplayName / GetDisplayDescription / GetDisplayData) resolve without crossing the manager boundary.
+ *
+ * Naming convention mirrored across SimpleCore + SimpleQuest: "Manager Subsystem" denotes opaque orchestration with
+ * limited public surface; "State Subsystem" denotes a public query registry the manager writes to via friend access.
+ * See UQuestStateSubsystem for the read-side counterpart and the two-layer state architecture rationale.
  */
 UCLASS(Blueprintable, config = Game)
 class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
@@ -70,10 +103,6 @@ protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
-	
-	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
-
-	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 
 	/**
 	 * Registers a graph's compiled node instances into LoadedNodeInstances WITHOUT firing entry nodes.
@@ -129,6 +158,11 @@ protected:
 		FGameplayTag IncomingOutcomeTag = FGameplayTag(),
 		FName IncomingSourceTag = NAME_None,
 		bool bBypassGiverGate = false);
+
+private:		
+	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
+
+	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 	
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
@@ -215,6 +249,19 @@ protected:
 	 *     Instance via the multi-tag stack; surfacing the violation is preferable to silent overwrite.
 	 */
 	void RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance);
+		
+	/**
+	 * Pushes all per-perspective state-subsystem registrations for a freshly-registered or freshly-merged node
+	 * instance — canonical + every AssetScopedAliasTag. Per perspective: KnownQuests, alias mapping (when not the
+	 * canonical), container classification, display data. Centralizes the registration bundle so the invariant
+	 * "every perspective gets the full bookkeeping" lives in one place.
+	 *
+	 * Called by RegisterQuestlineGraph (fresh instance registration) and MergePerspectiveTagsInto (merging a duplicate
+	 * compile's perspective set into the existing canonical). Idempotent across the underlying registrations — re-
+	 * registering an already-known tag/alias/container/display-data record is a no-op or harmless overwrite, so the
+	 * merge case safely re-iterates the canonical and existing aliases alongside the new ones.
+	 */
+	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 
 	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
 	virtual void ChainToNextNodes(
@@ -312,7 +359,6 @@ protected:
 				}));
 	}
 
-private:
 	/**
 	 * Assembles an outbound FQuestEventPayload from a node instance for publish sites that emit an
 	 * FQuestEventBase-derived event. Sources:
@@ -411,7 +457,7 @@ private:
 	 */
 	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context = FQuestEventPayload());
 
-	void RegisterGiversFromAssetRegistry();
+	void RegisterGiversFromAssetRegistry();	
 	
 	/**
 	 * Quest tags for which at least one QuestGiverComponent Blueprint exists in the project. Populated once at Initialize

@@ -11,6 +11,7 @@
 class FNativeGameplayTag;
 #endif
 
+class UQuestDisplayData;
 struct FGameplayTag;
 class UQuestNodeBase;
 class UEdGraph;
@@ -134,7 +135,22 @@ private:
      * is purely presentational — changing it never affects compiled tag identity, so designers can rename freely.
      */
     UPROPERTY(EditAnywhere)
-    FText FriendlyName;
+    FText DisplayName;
+    
+    /**
+     * Flavor / context blurb for the questline as a whole. Shown alongside DisplayName in quest log overview, journal
+     * entries, and asset tooltips. Empty by default. Multi-line authoring.
+     */
+    UPROPERTY(EditAnywhere, meta = (MultiLine = true))
+    FText Description;
+
+    /**
+     * Optional richer UI metadata for the questline (overview icon, hero image, chapter art, etc.). Adopter UI casts to
+     * its expected UQuestDisplayData subclass at consumption time. Queried at runtime via UQuestStateSubsystem::
+     * GetDisplayData using a questline-level tag.
+     */
+    UPROPERTY(EditAnywhere)
+    TObjectPtr<UQuestDisplayData> DisplayData;
 
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
@@ -151,10 +167,12 @@ public:
     const FString& GetQuestlineID() const { return QuestlineID; }
     const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
     void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
+    const FText& GetDescription() const { return Description; }
+    UQuestDisplayData* GetDisplayData() const { return DisplayData; }
 
     /**
-     * FriendlyName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
-     * label for this questline — avoids scattered "is FriendlyName empty?" checks.
+     * DisplayName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
+     * label for this questline — avoids scattered "is DisplayName empty?" checks.
      */
     FText GetDisplayName() const;
 

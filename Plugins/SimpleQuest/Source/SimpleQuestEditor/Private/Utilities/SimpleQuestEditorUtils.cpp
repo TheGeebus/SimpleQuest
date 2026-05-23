@@ -57,7 +57,7 @@ namespace
     /**
      * Scans the Asset Registry for questline assets (other than this node's home) whose CompiledQuestTags contain an
      * entry ending with this node's relative path. Returns one match per compiled-tag hit, with the parent asset's
-     * display name (FriendlyName override if present, otherwise asset name). Used by both the tag-only and
+     * display name (DisplayName override if present, otherwise asset name). Used by both the tag-only and
      * actor-entry public accessors below.
      */
     TArray<FQuestContextualTagMatch> CollectContextualTagMatchesForEditorNode(const UQuestlineNode_ContentBase* ContentNode)
@@ -111,7 +111,7 @@ namespace
             const FString CompiledTagsJoined = AssetData.GetTagValueRef<FString>(TEXT("CompiledQuestTags"));
             if (CompiledTagsJoined.IsEmpty()) continue;
 
-            const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("FriendlyName"));
+            const FString FriendlyStr = AssetData.GetTagValueRef<FString>(TEXT("DisplayName"));
             const FText OuterDisplay = !FriendlyStr.IsEmpty() ? FText::FromString(FriendlyStr) : FText::FromName(AssetData.AssetName);
 
             // Compute the outer asset's expected prefix. Each outer asset's CompiledQuestTags carries both

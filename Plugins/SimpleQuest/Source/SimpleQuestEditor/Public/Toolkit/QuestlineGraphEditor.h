@@ -86,7 +86,7 @@ private:
 
 	/**
 	 * Toggles the Details panel between node-selection tracking and a pinned asset view — the Questline Graph's own
-	 * properties (QuestlineID, FriendlyName, etc.). Mirror of Blueprint's Class Defaults button. Click to pin; click
+	 * properties (QuestlineID, DisplayName, etc.). Mirror of Blueprint's Class Defaults button. Click to pin; click
 	 * again to restore normal selection tracking. When pinned, OnGraphSelectionChanged short-circuits to the asset
 	 * regardless of node selection.
 	 */

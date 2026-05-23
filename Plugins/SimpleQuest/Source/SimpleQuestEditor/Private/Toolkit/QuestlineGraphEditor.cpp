@@ -141,7 +141,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
     DetailsViewArgs.bAllowSearch = false;
     DetailsView = PropertyModule.CreateDetailView(DetailsViewArgs);
 
-    // Initial target — show the asset itself (QuestlineID, FriendlyName, etc.) until the designer selects a node.
+    // Initial target — show the asset itself (QuestlineID, DisplayName, etc.) until the designer selects a node.
     // Matches UE asset-editor convention where empty selection surfaces the asset's properties.
     if (DetailsView.IsValid() && QuestlineGraph)
     {
@@ -1006,7 +1006,7 @@ void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSe
         return;
     }
 
-    // Empty selection — restore the asset view so graph-level metadata (QuestlineID, FriendlyName) stays reachable
+    // Empty selection — restore the asset view so graph-level metadata (QuestlineID, DisplayName) stays reachable
     // without forcing the designer to go through content browser → Properties for every edit.
     if (SelectedNodes.IsEmpty())
     {

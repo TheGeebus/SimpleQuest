@@ -8,8 +8,12 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "Display/QuestDisplayData.h"
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Quests/Types/QuestDisplayDataRecord.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
@@ -632,8 +636,16 @@ void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayT
 
 	UE_LOG(LogSimpleQuestState, Verbose,
 		TEXT("UQuestStateSubsystem::RegisterAlias : '%s' → '%s' (forward index %d alias(es), reverse index %d contextual(s))"),
-		*AssetScopedTag.ToString(), *ContextualTag.ToString(),
-		ContextualTagsByAssetScopedTag.Num(), AssetScopedAliasTagsByContextualTag.Num());
+		*AssetScopedTag.ToString(),
+		*ContextualTag.ToString(),
+		ContextualTagsByAssetScopedTag.Num(),
+		AssetScopedAliasTagsByContextualTag.Num());
+	
+	// An alias IS a perspective tag in its own right — every alias must also appear in KnownQuests so any-perspective
+	// queries resolve uniformly. Folded in here so the invariant is enforced at the API boundary rather than relying on
+	// every caller to remember the pairing. RegisterQuestTag is idempotent (Contains guard); calling it on an already-
+	// known alias is a no-op.
+	RegisterQuestTag(AssetScopedTag);
 }
 
 TArray<FGameplayTag> UQuestStateSubsystem::ResolveCanonicalTags(FGameplayTag InputTag) const
@@ -669,5 +681,103 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetAssetScopedAliasTagsForCanonical(F
 		return *Aliases;
 	}
 	return {};
+}
+
+FText UQuestStateSubsystem::GetDisplayName(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		if (!Record->DisplayName.IsEmptyOrWhitespace())
+		{
+			return Record->DisplayName;
+		}
+	}
+	return DeriveDisplayNameFromTag(Tag);
+}
+
+FText UQuestStateSubsystem::GetDisplayDescription(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		return Record->Description;
+	}
+	return FText::GetEmpty();
+}
+
+UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid())
+	{
+		return nullptr;
+	}
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		return Record->DisplayData;
+	}
+	return nullptr;
+}
+
+void UQuestStateSubsystem::RegisterDisplayData(FGameplayTag Tag, const FText& InDisplayName, const FText& InDescription, UQuestDisplayData* InDisplayData)
+{
+	if (!Tag.IsValid())
+	{
+		return;
+	}
+	FQuestDisplayDataRecord& Record = DisplayDataByTag.FindOrAdd(Tag);
+	Record.DisplayName = InDisplayName;
+	Record.Description = InDescription;
+	Record.DisplayData = InDisplayData;
+}
+
+void UQuestStateSubsystem::UnregisterDisplayDataForTags(const TArray<FGameplayTag>& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		DisplayDataByTag.Remove(Tag);
+	}
+}
+
+void UQuestStateSubsystem::ClearDisplayDataRegistry()
+{
+	DisplayDataByTag.Empty();
+}
+
+// Private helper: derive a human-readable display name from a tag's leaf segment when no authored value exists.
+// "SimpleQuest.Questline.Main.MayorTeaTime" → "Mayor Tea Time" (underscores to spaces, CamelCase split with spaces).
+FText UQuestStateSubsystem::DeriveDisplayNameFromTag(FGameplayTag Tag) const
+{
+    FString Raw = Tag.GetTagName().ToString();
+    int32 LastDot = INDEX_NONE;
+    if (Raw.FindLastChar(TEXT('.'), LastDot))
+    {
+        Raw = Raw.Mid(LastDot + 1);
+    }
+    Raw.ReplaceInline(TEXT("_"), TEXT(" "), ESearchCase::CaseSensitive);
+
+    // CamelCase split: insert space before each uppercase letter that follows a lowercase letter or digit.
+    FString Spaced;
+    Spaced.Reserve(Raw.Len() + 8);
+    for (int32 Idx = 0; Idx < Raw.Len(); ++Idx)
+    {
+        const TCHAR Curr = Raw[Idx];
+        if (Idx > 0 && FChar::IsUpper(Curr))
+        {
+            const TCHAR Prev = Raw[Idx - 1];
+            if (FChar::IsLower(Prev) || FChar::IsDigit(Prev))
+            {
+                Spaced.AppendChar(TEXT(' '));
+            }
+        }
+        Spaced.AppendChar(Curr);
+    }
+    return FText::FromString(Spaced);
 }
 

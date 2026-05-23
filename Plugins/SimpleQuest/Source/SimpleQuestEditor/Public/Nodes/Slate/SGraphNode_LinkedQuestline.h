@@ -15,7 +15,7 @@ struct FAssetData;
  * LinkedGraph assignment, RebuildOutcomePinsFromLinkedGraph, and NotifyGraphChanged.
  *
  * Visual signal: when LinkedGraph is null, the node paints a red shadow outline (same affordance Step uses for a
- * missing ObjectiveClass). The node title ("Linked Questline - <name>") re-queries on graph-changed, so FriendlyName
+ * missing ObjectiveClass). The node title ("Linked Questline - <name>") re-queries on graph-changed, so DisplayName
  * flows through immediately after asset selection.
  */
 class SGraphNode_LinkedQuestline : public SGraphNode

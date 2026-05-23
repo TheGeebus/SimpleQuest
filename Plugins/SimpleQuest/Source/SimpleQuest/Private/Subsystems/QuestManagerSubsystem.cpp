@@ -336,8 +336,11 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                     {
                         UE_LOG(LogSimpleQuestActivation, Verbose,
                             TEXT("RegisterQuestlineGraph: '%s' — merging perspectives from '%s' into '%s' (AuthoredNodeGuid %s)"),
-                            *Graph->GetName(), *Pair.Key.ToString(), *ExistingKey->ToString(),
+                            *Graph->GetName(),
+                            *Pair.Key.ToString(),
+                            *ExistingKey->ToString(),
                             *InstanceAuthoredGuid.ToString(EGuidFormats::Short));
+                        
                         MergePerspectiveTagsInto(Existing, *ExistingKey, Instance);
                     }
                     ++SkippedDuplicateAuthoredGuid;
@@ -408,31 +411,10 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             // UpdateQuestPrereqStatus) — manager pushes structural info; state subsystem owns the public read surface.
             if (ResolvedTag.IsValid())
             {
-                if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
-                {
-                    const bool bIsContainer = Instance->IsContainerNode();
-
-                    StateSubsystem->RegisterQuestTag(ResolvedTag);
-                    if (bIsContainer)
-                    {
-                        StateSubsystem->RegisterContainerTag(ResolvedTag);
-                    }
-
-                    // Push asset-scoped alias mappings AND register each alias as a known-quest-tag in its own
-                    // right (plus container classification mirror), so the Quest State view iterates every
-                    // perspective as a top-level entry — symmetric with the registry's multi-perspective record
-                    // writes and the WorldState multi-perspective fact writes. Empty for top-level content.
-                    const TArray<FGameplayTag>& AliasesAtCallSite = Instance->GetAssetScopedAliasTags();
-                    for (const FGameplayTag& AliasTag : AliasesAtCallSite)
-                    {
-                        StateSubsystem->RegisterAlias(AliasTag, ResolvedTag);
-                        StateSubsystem->RegisterQuestTag(AliasTag);
-                        if (bIsContainer)
-                        {
-                            StateSubsystem->RegisterContainerTag(AliasTag);
-                        }
-                    }
-                }
+                // Centralized: KnownQuests + alias mapping + container classification + display data, for canonical
+                // and every AssetScopedAliasTag the instance carries. The helper handles all perspective bookkeeping
+                // so this site doesn't have to mirror it.
+                RegisterAllNodePerspectives(Instance);
             }
             ++NewlyRegistered;
         }
@@ -547,31 +529,13 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
         RegisterLoadedNodeInstance(AliasName, Existing);
     }
 
-    // Register the new aliases with the state subsystem so cross-asset query paths (HasResolvedWith,
-    // HasEnteredWith, alias-walk in catch-up) resolve through the merged perspectives. Existing aliases were
-    // already registered when the existing instance was first added; re-registering them is harmless (TMap
-    // overwrite with the same value).
-    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
-    {
-        const FGameplayTag ExistingContextual = Existing->GetContextualTag();
-        if (ExistingContextual.IsValid())
-        {
-            const bool bIsContainer = Existing->IsContainerNode();
-            for (const FName& AliasName : MergedAliasSet)
-            {
-                const FGameplayTag AliasTag = UGameplayTagsManager::Get().RequestGameplayTag(AliasName, false);
-                if (AliasTag.IsValid())
-                {
-                    StateSubsystem->RegisterAlias(AliasTag, ExistingContextual);
-                    StateSubsystem->RegisterQuestTag(AliasTag);
-                    if (bIsContainer)
-                    {
-                        StateSubsystem->RegisterContainerTag(AliasTag);
-                    }
-                }
-            }
-        }
-    }
+    // Existing has already had ResolveAssetScopedAliasTags(MergedAliasSet.Array()) called above, so its
+    // AssetScopedAliasTags now contains the merged set. The helper iterates canonical + every alias to register all
+    // perspectives with the state subsystem — KnownQuests, alias mapping, container classification, display data.
+    // Idempotent across the underlying calls, so re-registering the existing canonical + pre-merge aliases alongside
+    // the new ones is harmless. Closes the prior display-data gap where merged alias perspectives weren't getting
+    // DisplayData records.
+    RegisterAllNodePerspectives(Existing);
 
     // Structural cascade data merge. The deduped instance's compile context (e.g. the outer asset inlining this
     // node via a LinkedQuestline) carries BoundaryCompletions and ExitedGraphTags pointing at wrappers and asset
@@ -635,6 +599,42 @@ void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBas
         return;
     }
     LoadedNodeInstances.Add(Key, Instance);
+}
+
+void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const
+{
+    if (!Instance) return;
+
+    const FGameplayTag Canonical = Instance->GetContextualTag();
+    if (!Canonical.IsValid()) return;
+
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!StateSubsystem) return;
+
+    const bool bIsContainer = Instance->IsContainerNode();
+    const FText& InDisplayName = Instance->GetDisplayName();
+    const FText& InDescription = Instance->GetDescription();
+    UQuestDisplayData* InDisplayData = Instance->GetDisplayData();
+
+    // Canonical: register directly. RegisterAlias would bail on equal tags so we use RegisterQuestTag explicitly.
+    StateSubsystem->RegisterQuestTag(Canonical);
+    if (bIsContainer)
+    {
+        StateSubsystem->RegisterContainerTag(Canonical);
+    }
+    StateSubsystem->RegisterDisplayData(Canonical, InDisplayName, InDescription, InDisplayData);
+
+    // Aliases: register each as a perspective of Canonical. RegisterAlias folds in RegisterQuestTag internally.
+    for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+    {
+        if (!AliasTag.IsValid()) continue;
+        StateSubsystem->RegisterAlias(AliasTag, Canonical);
+        if (bIsContainer)
+        {
+            StateSubsystem->RegisterContainerTag(AliasTag);
+        }
+        StateSubsystem->RegisterDisplayData(AliasTag, InDisplayName, InDescription, InDisplayData);
+    }
 }
 
 void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params)

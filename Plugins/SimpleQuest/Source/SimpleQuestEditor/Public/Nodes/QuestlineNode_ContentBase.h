@@ -7,6 +7,8 @@
 #include "QuestlineNodeBase.h"
 #include "QuestlineNode_ContentBase.generated.h"
 
+class UQuestDisplayData;
+
 UCLASS(Abstract)
 class SIMPLEQUESTEDITOR_API UQuestlineNode_ContentBase : public UQuestlineNodeBase
 {
@@ -31,6 +33,31 @@ public:
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	FText NodeLabel;
+
+	/**
+	 * UI-friendly title for this node (quest log entries, HUD labels, journal). Falls back to NodeLabel when empty so
+	 * designers only author this when the UI text needs to differ from the editor-visible label. Compiler copies this
+	 * onto the corresponding runtime UQuestNodeBase at compile time; runtime queries read it via
+	 * UQuestStateSubsystem::GetDisplayName.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display")
+	FText DisplayName;
+
+	/**
+	 * Flavor / context blurb for this node. Multi-line. Empty by default. Compiler copies onto the runtime node;
+	 * runtime queries read via UQuestStateSubsystem::GetDisplayDescription.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display", meta = (MultiLine = true))
+	FText Description;
+
+	/**
+	 * Optional reference to a UQuestDisplayData asset for richer UI metadata (icon, hints, callouts, parametrized text,
+	 * etc.). Adopters subclass UQuestDisplayData and instance the .uasset per node that needs more than DisplayName /
+	 * Description. Compiler copies the reference onto the runtime node; UI consumers retrieve via
+	 * UQuestStateSubsystem::GetDisplayData and cast to their expected subclass.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display")
+	TObjectPtr<UQuestDisplayData> DisplayData;
 	
 	/**
 	 * Returns true if ProposedLabel is available for this node — i.e., no other content node on the same direct graph

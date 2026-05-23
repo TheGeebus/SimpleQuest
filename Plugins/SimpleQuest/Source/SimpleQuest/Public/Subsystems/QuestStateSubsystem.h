@@ -15,6 +15,8 @@
 #include "Quests/Types/QuestRuntimeRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
+class UQuestDisplayData;
+struct FQuestDisplayDataRecord;
 class AActor;
 class USignalSubsystem;
 class UWorldStateSubsystem;
@@ -285,6 +287,32 @@ public:
 	 */
 	TArray<FGameplayTag> GetAssetScopedAliasTagsForCanonical(FGameplayTag ContextualTag) const;
 
+	// ── Display data queries ─────────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Returns the UI-friendly display name for a Questline / Quest / Step tag. Resolves in priority order:
+	 *   1. Authored DisplayName on the matching node / asset (if non-empty).
+	 *   2. NodeLabel for content nodes (compiler-derived, always present).
+	 *   3. Formatted leaf name from the tag itself (derived fallback — never returns empty).
+	 * Alias-walks via canonical resolution; an alias-form tag yields the same result as its canonical.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
+	FText GetDisplayName(FGameplayTag Tag) const;
+
+	/**
+	 * Returns the authored description for a Questline / Quest / Step tag. Empty FText when the designer didn't author
+	 * one — no derived fallback (an unauthored description is genuinely empty, not "Mayor Tea" derived from the tag).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
+	FText GetDisplayDescription(FGameplayTag Tag) const;
+
+	/**
+	 * Returns the optional richer-data asset referenced by a Questline / Quest / Step. Nullptr when the designer didn't
+	 * reference one. Caller casts to the expected UQuestDisplayData subclass to read typed fields.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
+	UQuestDisplayData* GetDisplayData(FGameplayTag Tag) const;
+
 private:
     friend class UQuestManagerSubsystem;
 
@@ -364,10 +392,15 @@ private:
 	void RegisterContainerTag(FGameplayTag QuestTag);
 
 	/**
-	 * Pushed by the manager during graph activation for each AssetScopedAliasTag a node carries. Maintains both
-	 * directions of the alias map atomically — single-mutation-site discipline ensures the forward (alias →
-	 * contextuals) and reverse (contextual → aliases) views never fall out of sync. Idempotent on repeat calls
-	 * for the same (alias, contextual) pair. Skips when the two tags are equal (top-level content has no aliasing).
+	 * Registers an AssetScopedAliasTag → ContextualTag mapping bidirectionally (forward + reverse index) AND registers the
+	 * AssetScopedTag in KnownQuests as a perspective tag in its own right. Aliases are first-class perspectives for any-form
+	 * queries; folding the KnownQuests registration in here enforces the invariant at the API boundary instead of relying
+	 * on every caller to remember the pairing.
+	 *
+	 * Top-level content (where AssetScopedTag == ContextualTag) is a no-op — no aliasing needed; no double-registration of
+	 * the same tag.
+	 *
+	 * Called by the manager during RegisterQuestlineGraph for each AssetScopedAliasTag carried by a registered instance.
 	 */
 	void RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag);
 
@@ -424,4 +457,30 @@ private:
 			}
 		}
 	}
+	
+	/**
+	 * Per-tag display-data records keyed by registered tag. Manager registers under canonical + every alias key on
+	 * graph load (mirrors the LoadedNodeInstances multi-key registration invariant) so query-side direct lookup works
+	 * regardless of which perspective the caller passes. Cleared on graph unregister + PIE reset.
+	 */
+	UPROPERTY()
+	TMap<FGameplayTag, FQuestDisplayDataRecord> DisplayDataByTag;
+
+	/**
+	 * Friend-only write: store display data for a single tag. Called by manager during graph registration, once per
+	 * tag perspective (canonical + each alias). Replaces any existing record under the same key.
+	 */
+	void RegisterDisplayData(FGameplayTag Tag, const FText& InDisplayName, const FText& InDescription, UQuestDisplayData* InDisplayData);
+
+	/**
+	 * Friend-only write: clear all display-data records associated with a graph's tag set. Called on graph unregister.
+	 * Caller passes the full list of perspectives (canonical + aliases) the graph contributed.
+	 */
+	void UnregisterDisplayDataForTags(const TArray<FGameplayTag>& Tags);
+
+	/** Friend-only: clear DisplayDataByTag entirely. Called on PIE reset alongside the existing transient-state clear. */
+	void ClearDisplayDataRegistry();
+		
+	/** Derive a fallback display name from the tag's leaf segment when no authored DisplayName exists on the instance. */
+	FText DeriveDisplayNameFromTag(FGameplayTag Tag) const;
 };

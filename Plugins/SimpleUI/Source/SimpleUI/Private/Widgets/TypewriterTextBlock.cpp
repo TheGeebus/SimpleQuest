@@ -77,14 +77,134 @@ void UTypewriterTextBlock::ClearTextQueue(const bool bStopDisplayImmediately)
 
     if (bStopDisplayImmediately && IsValid(GetWorld()))
     {
-        // Fire End for any in-flight string BEFORE clearing the timers — the helper's IsTimerActive check needs the
-        // typewriter timer still set to recognize that a display was in progress.
         FireEndForInflightDisplay();
-
         SetText(FText());
         GetWorld()->GetTimerManager().ClearTimer(NextStringDelayHandle);
         GetWorld()->GetTimerManager().ClearTimer(CharacterDisplayTimerHandle);
+
+        // Paused state is tied to the queue's current head — clearing the queue invalidates it.
+        bIsPaused = false;
+        PausedRemainingCharDelay = 0.0f;
+        PausedRemainingDwell = 0.0f;
     }
+}
+
+void UTypewriterTextBlock::SkipToEndOfCurrentString()
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->bIsTearingDown) return;
+
+    // Valid only mid-typewriter. Dwell-state and idle have nothing to skip — the string is already shown.
+    if (!HasInflightTypewriter()) return;
+
+    bIsPaused = false;
+    PausedRemainingCharDelay = 0.0f;
+    PausedRemainingDwell = 0.0f;
+
+    World->GetTimerManager().ClearTimer(CharacterDisplayTimerHandle);
+
+    if (CharacterIndex < FullString.Len())
+    {
+        const FString Remainder = FullString.Mid(CharacterIndex);
+        DisplayString = FullString;
+        CharacterIndex = FullString.Len();
+        SetText(FText::FromString(DisplayString));
+        OnCharAdded.Broadcast(Remainder);
+    }
+
+    HandleDisplayStringEnd();
+}
+
+void UTypewriterTextBlock::SkipToNextString()
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->bIsTearingDown) return;
+
+    const bool bIsTypewriting = HasInflightTypewriter();
+    const bool bIsInDwell = HasInflightDwell();
+
+    bIsPaused = false;
+    PausedRemainingCharDelay = 0.0f;
+    PausedRemainingDwell = 0.0f;
+    
+    if (!bIsTypewriting && !bIsInDwell) return;
+
+    World->GetTimerManager().ClearTimer(CharacterDisplayTimerHandle);
+    World->GetTimerManager().ClearTimer(NextStringDelayHandle);
+
+    if (bIsTypewriting)
+    {
+        // Reveal the remainder + fire End for the in-flight string before advancing. Dwell-only path skips this
+        // block — its End event already fired when the typewriter finished naturally.
+        if (CharacterIndex < FullString.Len())
+        {
+            const FString Remainder = FullString.Mid(CharacterIndex);
+            DisplayString = FullString;
+            CharacterIndex = FullString.Len();
+            SetText(FText::FromString(DisplayString));
+            OnCharAdded.Broadcast(Remainder);
+        }
+        if (OnDisplayStringEnd.IsBound()) OnDisplayStringEnd.Broadcast();
+    }
+
+    if (!QueuedStrings.IsEmpty()) QueuedStrings.RemoveAt(0);
+
+    if (QueuedStrings.IsEmpty())
+    {
+        HandleFinalDisplayDelayEnd();
+    }
+    else
+    {
+        DisplayQueuedStrings();
+    }
+}
+
+void UTypewriterTextBlock::SkipAllRemaining()
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->bIsTearingDown) return;
+
+    const bool bIsTypewriting = HasInflightTypewriter();
+    World->GetTimerManager().ClearTimer(CharacterDisplayTimerHandle);
+    World->GetTimerManager().ClearTimer(NextStringDelayHandle);
+
+    bIsPaused = false;
+    PausedRemainingCharDelay = 0.0f;
+    PausedRemainingDwell = 0.0f;
+
+    // Skip current in-flight string (if any) first.
+    if (bIsTypewriting)
+    {
+        if (CharacterIndex < FullString.Len())
+        {
+            const FString Remainder = FullString.Mid(CharacterIndex);
+            DisplayString = FullString;
+            CharacterIndex = FullString.Len();
+            SetText(FText::FromString(DisplayString));
+            OnCharAdded.Broadcast(Remainder);
+        }
+        if (OnDisplayStringEnd.IsBound()) OnDisplayStringEnd.Broadcast();
+    }
+    if (!QueuedStrings.IsEmpty()) QueuedStrings.RemoveAt(0);
+
+    // Fire Start/End for every remaining queued string. Adopters tracking per-string telemetry see one fire
+    // per logical string regardless of whether it was revealed naturally or skipped.
+    while (!QueuedStrings.IsEmpty())
+    {
+        FullString = QueuedStrings[0];
+        DisplayString = FullString;
+        CharacterIndex = FullString.Len();
+        SetText(FText::FromString(DisplayString));
+        OnDisplayStringStart.Broadcast();
+        if (bUseTypewriterEffect && !FullString.IsEmpty())
+        {
+            OnCharAdded.Broadcast(FullString);
+        }
+        if (OnDisplayStringEnd.IsBound()) OnDisplayStringEnd.Broadcast();
+        QueuedStrings.RemoveAt(0);
+    }
+
+    HandleFinalDisplayDelayEnd();
 }
 
 void UTypewriterTextBlock::ReleaseSlateResources(bool bReleaseChildren)
@@ -96,6 +216,72 @@ void UTypewriterTextBlock::ReleaseSlateResources(bool bReleaseChildren)
     Super::ReleaseSlateResources(bReleaseChildren);
 }
 
+bool UTypewriterTextBlock::IsDisplaying() const
+{
+    const UWorld* World = GetWorld();
+    return IsValid(World) && World->GetTimerManager().IsTimerActive(CharacterDisplayTimerHandle);
+}
+
+bool UTypewriterTextBlock::IsInDwell() const
+{
+    const UWorld* World = GetWorld();
+    return IsValid(World) && World->GetTimerManager().IsTimerActive(NextStringDelayHandle);
+}
+
+bool UTypewriterTextBlock::IsIdle() const
+{
+    return !IsDisplaying() && !IsInDwell() && !bIsPaused;
+}
+
+float UTypewriterTextBlock::GetCurrentDisplayProgress() const
+{
+    if (!IsDisplaying() || FullString.IsEmpty()) return 1.0f;
+    return static_cast<float>(CharacterIndex) / static_cast<float>(FullString.Len());
+}
+
+void UTypewriterTextBlock::InsertTextAt(const FString& InText, const int32 Index)
+{
+    const int32 ClampedIndex = FMath::Clamp(Index, 0, QueuedStrings.Num());
+    QueuedStrings.EmplaceAt(ClampedIndex, InText);
+
+    // Auto-start when idle + the inserted string is now at the front of the queue. Mirrors QueueText's
+    // count==1 trigger semantic — adopters who don't want auto-display should set bInterruptQueue or
+    // bFlushQueue on the regular Queue* API instead of using Insert at index 0.
+    if (IsIdle() && ClampedIndex == 0 && QueuedStrings.Num() == 1)
+    {
+        DisplayQueuedStrings();
+    }
+}
+
+void UTypewriterTextBlock::RemoveTextAt(const int32 Index)
+{
+    if (!QueuedStrings.IsValidIndex(Index)) return;
+
+    // Removing index 0 = abort the in-flight display + advance. Delegates to SkipToNextString so the event
+    // sequencing matches the natural advance path.
+    if (Index == 0)
+    {
+        SkipToNextString();
+        return;
+    }
+
+    QueuedStrings.RemoveAt(Index);
+}
+
+void UTypewriterTextBlock::ReplaceTextAt(const FString& InText, const int32 Index)
+{
+    if (!QueuedStrings.IsValidIndex(Index)) return;
+
+    QueuedStrings[Index] = InText;
+
+    // Replacing the in-flight string: restart display with the new content. FireEndForInflightDisplay (via
+    // DisplayQueuedStrings) preserves event pairing for the abandoned in-flight reveal.
+    if (Index == 0)
+    {
+        DisplayQueuedStrings();
+    }
+}
+
 void UTypewriterTextBlock::DisplayQueuedStrings()
 {
     // Fire End for any in-flight string we're about to abandon. Covers the Queue*Text-with-bFlushQueue and
@@ -103,9 +289,15 @@ void UTypewriterTextBlock::DisplayQueuedStrings()
     // active and the in-flight string about to be replaced. When called via the natural HandleNextStringDelayEnd
     // path, the typewriter timer is already inactive (cleared in HandleDisplayStringEnd) and the helper no-ops.
     FireEndForInflightDisplay();
-    
+
     DisplayString = FString();
     CharacterIndex = 0;
+
+    // Any new display abandons the paused-in-flight string (if any). Resetting here keeps the invariant
+    // that bIsPaused only describes a paused version of the string currently at QueuedStrings[0].
+    bIsPaused = false;
+    PausedRemainingCharDelay = 0.0f;
+    PausedRemainingDwell = 0.0f;
 
     UWorld* World = GetWorld();
     if (!IsValid(World) || QueuedStrings.IsEmpty())
@@ -257,21 +449,138 @@ void UTypewriterTextBlock::HandleFinalDisplayDelayEnd() const
     if (OnFinalDisplayDelayEnd.IsBound()) OnFinalDisplayDelayEnd.Broadcast();
 }
 
-void UTypewriterTextBlock::FireEndForInflightDisplay()
+void UTypewriterTextBlock::FireEndForInflightDisplay() const
 {
-    const UWorld* World = GetWorld();
-    if (!IsValid(World))
-    {
-        return;
-    }
-
-    if (World->GetTimerManager().IsTimerActive(CharacterDisplayTimerHandle))
+    if (HasInflightTypewriter())
     {
         if (OnDisplayStringEnd.IsBound()) OnDisplayStringEnd.Broadcast();
     }
 }
 
+void UTypewriterTextBlock::PauseTypewriter()
+{
+    if (bIsPaused) return;
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->bIsTearingDown) return;
+
+    FTimerManager& Timers = World->GetTimerManager();
+    bool bSavedAnything = false;
+
+    if (Timers.IsTimerActive(CharacterDisplayTimerHandle))
+    {
+        PausedRemainingCharDelay = Timers.GetTimerRemaining(CharacterDisplayTimerHandle);
+        Timers.ClearTimer(CharacterDisplayTimerHandle);
+        bSavedAnything = true;
+    }
+    if (Timers.IsTimerActive(NextStringDelayHandle))
+    {
+        PausedRemainingDwell = Timers.GetTimerRemaining(NextStringDelayHandle);
+        Timers.ClearTimer(NextStringDelayHandle);
+        bSavedAnything = true;
+    }
+
+    // Only flip the paused flag if something was actually saved — pausing while idle is a clean no-op rather
+    // than a state-engagement that future Resume calls would have to interpret.
+    if (bSavedAnything)
+    {
+        bIsPaused = true;
+        UE_LOG(LogSimpleUI, Verbose,
+            TEXT("UTypewriterTextBlock::PauseTypewriter : paused (charDelayRemaining=%.3f, dwellRemaining=%.3f)"),
+            PausedRemainingCharDelay, PausedRemainingDwell);
+    }
+}
+
+void UTypewriterTextBlock::ResumeTypewriter()
+{
+    if (!bIsPaused) return;
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->bIsTearingDown) return;
+
+    FTimerManager& Timers = World->GetTimerManager();
+
+    // Typewriter and dwell states are mutually exclusive per pause cycle, but the if-chain handles both for
+    // robustness — at most one branch runs per Resume call.
+    if (PausedRemainingCharDelay > 0.0f)
+    {
+        Timers.SetTimer(CharacterDisplayTimerHandle, this, &ThisClass::AppendDisplayText, PausedRemainingCharDelay, false);
+    }
+    if (PausedRemainingDwell > 0.0f)
+    {
+        Timers.SetTimer(NextStringDelayHandle, this, &ThisClass::HandleNextStringDelayEnd, PausedRemainingDwell);
+    }
+
+    UE_LOG(LogSimpleUI, Verbose, TEXT("UTypewriterTextBlock::ResumeTypewriter : resumed"));
+
+    bIsPaused = false;
+    PausedRemainingCharDelay = 0.0f;
+    PausedRemainingDwell = 0.0f;
+}
+
+bool UTypewriterTextBlock::HasInflightTypewriter() const
+{
+    const UWorld* World = GetWorld();
+    if (!IsValid(World)) return false;
+    return World->GetTimerManager().IsTimerActive(CharacterDisplayTimerHandle)
+        || (bIsPaused && PausedRemainingCharDelay > 0.0f);
+}
+
+bool UTypewriterTextBlock::HasInflightDwell() const
+{
+    const UWorld* World = GetWorld();
+    if (!IsValid(World)) return false;
+    return World->GetTimerManager().IsTimerActive(NextStringDelayHandle)
+        || (bIsPaused && PausedRemainingDwell > 0.0f);
+}
+
 void UTypewriterTextBlock::GetQueuedStrings(TArray<FString>& OutQueuedStrings) const
 {
     OutQueuedStrings = QueuedStrings;
+}
+
+void UTypewriterTextBlock::SetDisplayDelayMinMax(const FVector2D& InDisplayDelayRange)
+{
+    DisplayDelayMinMax = InDisplayDelayRange;
+
+    // Re-schedule the active character timer with the new range so designers can speed up / slow down mid-
+    // display (e.g., a held fast-forward button). The current timer's elapsed time is discarded — the new
+    // range governs from now. Trade-off accepted: precise residual-time math would compound complexity for
+    // negligible designer-visible benefit.
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || !World->GetTimerManager().IsTimerActive(CharacterDisplayTimerHandle)) return;
+
+    const float MinDelay = FMath::Min(DisplayDelayMinMax.X, DisplayDelayMinMax.Y);
+    const float MaxDelay = FMath::Max(DisplayDelayMinMax.X, DisplayDelayMinMax.Y);
+    World->GetTimerManager().SetTimer(CharacterDisplayTimerHandle,
+        this, &ThisClass::AppendDisplayText,
+        FMath::RandRange(MinDelay, MaxDelay), false);
+}
+
+void UTypewriterTextBlock::SetNextStringDelay(const float InNextStringDelay)
+{
+    NextStringDelay = InNextStringDelay;
+
+    // Re-schedule the active dwell timer if running. Same elapsed-time-discarded contract as
+    // SetDisplayDelayMinMax — the new dwell value governs from now.
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || !World->GetTimerManager().IsTimerActive(NextStringDelayHandle)) return;
+
+    World->GetTimerManager().SetTimer(NextStringDelayHandle,
+        this, &ThisClass::HandleNextStringDelayEnd, NextStringDelay);
+}
+
+void UTypewriterTextBlock::SetUseTypewriterEffect(const bool InUseTypewriterEffect)
+{
+    const bool bWasUsingTypewriter = bUseTypewriterEffect;
+    bUseTypewriterEffect = InUseTypewriterEffect;
+
+    // Mid-typewriter ON-to-OFF toggle: skip to end of current string. "Stop being patient about per-char
+    // reveal; show everything from here." The OFF-to-ON direction is a no-op — if the OFF-mode short-circuit
+    // had already revealed the full string and we're in dwell, there's no typewriter state to "resume." Future
+    // queued strings will use typewriter mode naturally.
+    if (bWasUsingTypewriter && !InUseTypewriterEffect)
+    {
+        SkipToEndOfCurrentString();
+    }
 }

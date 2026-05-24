@@ -28,6 +28,9 @@
 #include "ScopedTransaction.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
+#include "Nodes/Utility/QuestlineNode_AddFact.h"
+#include "Nodes/Utility/QuestlineNode_ClearFact.h"
+#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
 #include "Types/QuestPinRole.h"
 
 
@@ -1304,6 +1307,45 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 				"Forward output to whatever should fire once the conditions are met."),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_PrereqGate>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Add Fact
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddAddFact", "Add Facts"),
+			NSLOCTEXT("SimpleQuestEditor", "AddAddFactTooltip",
+				"Add one or more facts to the WorldState when this node activates, then forward. Lets a questline "
+				"publish state into SimpleCore's quest-agnostic fact registry — consumers anywhere in the project "
+				"(UI, AI, audio, game-state systems) can react via FWorldStateFactAddedEvent or HasFact without "
+				"knowing anything about quests."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_AddFact>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Remove Fact
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddRemoveFact", "Remove Facts"),
+			NSLOCTEXT("SimpleQuestEditor", "AddRemoveFactTooltip",
+				"Remove one or more facts from the WorldState when this node activates, then forward. Decrements "
+				"the ref-count; the FactRemoved event fires on the 1→0 transition by default."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_RemoveFact>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Clear Fact
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearFact", "Clear Facts"),
+			NSLOCTEXT("SimpleQuestEditor", "AddClearFactTooltip",
+				"Fully remove one or more facts from the WorldState when this node activates (regardless of "
+				"ref-count), then forward. Use for hard resets where Remove Fact's decrement semantic is wrong — "
+				"e.g., 'the door is permanently unlocked now, drop the fact whatever its ref-count.'"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_ClearFact>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 

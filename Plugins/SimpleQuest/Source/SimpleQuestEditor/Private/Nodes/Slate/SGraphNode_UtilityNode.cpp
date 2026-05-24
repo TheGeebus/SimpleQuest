@@ -332,7 +332,7 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 		+ SWrapBox::Slot().Padding(8.f, 0.f, 2.f, 0.f).VAlign(VAlign_Center)
 		[
 			SNew(STextBlock)
-			.Text(LOCTEXT("TagsToBlockLabel", "Tags to Block:"))
+			.Text(UtilityNode ? UtilityNode->GetAuthoringTagsLabel() : LOCTEXT("DefaultTagsLabel", "Tags:"))
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
 		]
 		+ SWrapBox::Slot().Padding(4.f, 2.f, 0.f, 2.f)

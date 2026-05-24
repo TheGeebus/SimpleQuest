@@ -42,11 +42,17 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
+#include "Nodes/Utility/QuestlineNode_AddFact.h"
+#include "Nodes/Utility/QuestlineNode_ClearFact.h"
+#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
 #include "Objectives/QuestObjective.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Quests/AddFactNode.h"
+#include "Quests/ClearFactNode.h"
+#include "Quests/RemoveFactNode.h"
 #include "Utilities/QuestTagComposer.h"
 
 
@@ -876,6 +882,30 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
             UPrereqGateNode* Inst = NewObject<UPrereqGateNode>(RootGraph);
             Inst->AuthoredNodeGuid = GateNode->QuestGuid;
             Instance = Inst;
+        }
+        else if (UQuestlineNode_AddFact* AddFactNode = Cast<UQuestlineNode_AddFact>(UtilEdNode))
+        {
+        	UAddFactNode* Inst = NewObject<UAddFactNode>(RootGraph);
+        	Inst->Facts = AddFactNode->Facts;
+        	Inst->BroadcastMode = AddFactNode->BroadcastMode;
+        	Inst->AuthoredNodeGuid = AddFactNode->QuestGuid;
+        	Instance = Inst;
+        }
+        else if (UQuestlineNode_RemoveFact* RemoveFactNode = Cast<UQuestlineNode_RemoveFact>(UtilEdNode))
+        {
+        	URemoveFactNode* Inst = NewObject<URemoveFactNode>(RootGraph);
+        	Inst->Facts = RemoveFactNode->Facts;
+        	Inst->BroadcastMode = RemoveFactNode->BroadcastMode;
+        	Inst->AuthoredNodeGuid = RemoveFactNode->QuestGuid;
+        	Instance = Inst;
+        }
+        else if (UQuestlineNode_ClearFact* ClearFactNode = Cast<UQuestlineNode_ClearFact>(UtilEdNode))
+        {
+        	UClearFactNode* Inst = NewObject<UClearFactNode>(RootGraph);
+        	Inst->Facts = ClearFactNode->Facts;
+        	Inst->bSuppressBroadcast = ClearFactNode->bSuppressBroadcast;
+        	Inst->AuthoredNodeGuid = ClearFactNode->QuestGuid;
+        	Instance = Inst;
         }
 
         if (!Instance) continue;

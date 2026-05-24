@@ -16,6 +16,11 @@ public:
 		return NSLOCTEXT("SimpleQuestEditor", "SetBlockedTitle", "Set Blocked");
 	}
 
+	virtual FText GetAuthoringTagsLabel() const override
+	{
+		return NSLOCTEXT("SimpleQuestEditor", "SetBlockedLabel", "Tags to Block:");
+	}
+
 	virtual const FGameplayTagContainer& GetTargetQuestTags() const override { return TargetQuestTags; }
 	virtual void SetTargetQuestTags(const FGameplayTagContainer& NewTags) override { TargetQuestTags = NewTags; }
 	virtual FString GetTargetQuestTagsFilterString() const override { return TEXT("SimpleQuest.Questline"); }

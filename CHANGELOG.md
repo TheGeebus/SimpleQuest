@@ -180,6 +180,49 @@ in 0.5.0.
   include raw Fact leaves can double-fire under the same authoring
   pattern. Rare in practice; flag if it surfaces.
 
+### SimpleUI — Typewriter Text Block expansion
+
+The Typewriter Text widget (introduced in 0.4.0's SimpleUI plugin
+spin-up) gains a full set of designer-facing controls for the
+dialogue-pacing use cases adopters typically need.
+
+- **Skip controls.** `SkipToEndOfCurrentString` reveals the rest of
+  the currently-displaying string immediately and starts the
+  configured between-strings dwell. `SkipToNextString` does the same
+  but also skips the dwell and advances to the next queued string.
+  `SkipAllRemaining` drains the entire queue, firing the Start/End
+  event pairs for every skipped string so adopter-side per-string
+  telemetry or persistence stays consistent.
+- **Pause and resume.** `PauseTypewriter` freezes the typewriter or
+  dwell at its current point, saving the remaining timer duration.
+  `ResumeTypewriter` picks up exactly where it left off. Useful for
+  modal interruptions — open a sub-menu, dialogue pauses; close it,
+  dialogue continues from the same character.
+- **State queries.** `IsDisplaying` / `IsInDwell` / `IsPaused` /
+  `IsIdle` describe the widget's current state for input handlers
+  ("is there something to skip?"). `GetCurrentDisplayProgress`
+  returns a 0–1 progress value over the currently-displaying string,
+  suitable for driving a progress bar or skip-prompt visibility.
+- **Queue manipulation.** `InsertTextAt`, `RemoveTextAt`, and
+  `ReplaceTextAt` give narrative middleware finer control than the
+  existing append / front-of-queue / clear primitives. Index 0
+  (the currently-displaying string) interacts cleanly: replacing it
+  restarts display with the new content; removing it advances to
+  the next queued string.
+- **Live-applied configuration.** `SetDisplayDelayMinMax`,
+  `SetNextStringDelay`, and `SetUseTypewriterEffect` re-schedule the
+  active timer when called mid-display so a designer can speed up,
+  slow down, or skip-to-end via property change during playback —
+  e.g., the player holding a fast-forward button can scale the
+  per-character delay live without waiting for the current
+  character's scheduled tick to complete.
+- **Paused-state-aware integrations.** All skip functions, queue
+  manipulation, and interrupt paths recognize a paused-in-flight
+  string as still-active for event-pairing purposes. Aborting a
+  paused string via `ClearTextQueue(true)` or interrupt fires its
+  pending `OnDisplayStringEnd`; skipping a paused string reveals
+  the remainder and advances normally.
+
 
 ---
 

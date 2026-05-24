@@ -4,8 +4,7 @@
 #pragma once
 
 #include "Events/QuestEventBase.h"
-#include "Quests/Types/QuestEntryRecord.h"
-
+#include "Quests/Types/OriginatingEventID.h"
 #include "QuestEntryRecordedEvent.generated.h"
 
 /**
@@ -32,6 +31,14 @@ struct FQuestEntryRecordedEvent : public FQuestEventBase
 		, IncomingOutcomeTag(InIncomingOutcomeTag)
 		, EntryTime(InEntryTime) {}
 
+	FQuestEntryRecordedEvent(const FGameplayTag InQuestTag, const FGameplayTag InSourceQuestTag,
+		const FGameplayTag InIncomingOutcomeTag, double InEntryTime, const FOriginatingEventID& InOriginatingEventID)
+		: FQuestEventBase(InQuestTag)
+		, SourceQuestTag(InSourceQuestTag)
+		, IncomingOutcomeTag(InIncomingOutcomeTag)
+		, EntryTime(InEntryTime)
+		, OriginatingEventID(InOriginatingEventID) {}
+
 	UPROPERTY(BlueprintReadOnly)
 	FGameplayTag SourceQuestTag;
 
@@ -40,4 +47,8 @@ struct FQuestEntryRecordedEvent : public FQuestEventBase
 
 	UPROPERTY(BlueprintReadOnly)
 	double EntryTime = 0.0;
+
+	/** See FQuestResolutionRecordedEvent::OriginatingEventID — same per-event-ID deduplication contract. */
+	UPROPERTY(BlueprintReadOnly)
+	FOriginatingEventID OriginatingEventID;
 };

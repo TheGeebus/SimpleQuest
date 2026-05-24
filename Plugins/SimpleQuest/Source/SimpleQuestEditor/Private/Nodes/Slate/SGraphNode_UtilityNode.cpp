@@ -5,6 +5,7 @@
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Quests/QuestlineGraph.h"
 #include "SGraphPin.h"
@@ -152,11 +153,13 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 		// Authoring row — varies by utility node type:
 		//   - Asset picker for StartQuestline (selects the questline graph asset to activate).
 		//   - Tag picker for SetBlocked / ClearBlocked (selects the target quest tags).
+		//   - None for PrereqGate (authoring lives in the wired Prerequisites input pin; no UPROPERTY to surface here).
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
-			UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget()
+			Cast<UQuestlineNode_PrereqGate>(UtilityNode) ? SNullWidget::NullWidget
+				: (UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget())
 		]
 
 		// Optional toggles row — currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
@@ -278,7 +281,14 @@ void SGraphNode_UtilityNode::CreatePinWidgets()
 void SGraphNode_UtilityNode::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
 {
 	PinToAdd->SetOwner(SharedThis(this));
-	PinToAdd->SetShowLabel(false);
+	// Label rendering: hide when the node returns an empty display name (matches the utility-base default that
+	// suppresses labels on single-input/single-output nodes). Nodes whose geometry requires disambiguation
+	// (PrereqGate's two same-direction inputs) override GetPinDisplayName to return a non-empty label and the
+	// widget renders it.
+	UEdGraphPin* PinObj = PinToAdd->GetPinObj();
+	UQuestlineNodeBase* OwningNode = PinObj ? Cast<UQuestlineNodeBase>(PinObj->GetOwningNode()) : nullptr;
+	const bool bHasLabel = OwningNode && !OwningNode->GetPinDisplayName(PinObj).IsEmpty();
+	PinToAdd->SetShowLabel(bHasLabel);
 
 	if (PinToAdd->GetDirection() == EEdGraphPinDirection::EGPD_Input)
 	{

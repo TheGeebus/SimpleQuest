@@ -254,7 +254,7 @@ protected:
 
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;
+	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
 	
 	/**
 	 * The three overrides below all interleave Giver-specific state tracking with the inherited Observer

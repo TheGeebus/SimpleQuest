@@ -538,16 +538,16 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
     RegisterAllNodePerspectives(Existing);
 
     // Structural cascade data merge. The deduped instance's compile context (e.g. the outer asset inlining this
-    // node via a LinkedQuestline) carries BoundaryCompletions and ExitedGraphTags pointing at wrappers and asset
+    // node via a LinkedQuestline) carries BoundaryCompletions and ResolvedGraphs pointing at wrappers and asset
     // roots that don't exist in the canonical's own compile. Without folding these in, the cascade from the
     // canonical Step's completion never fires the foreign-perspective wrapper's BC — Main.Prologue (or nested
     // equivalents) stays un-resolved and any post-LinkedQuestline content un-activated. Destination FName lists
     // (NodeTags / NextNodesOnAnyOutcome / NextNodesOnDeactivation) are intentionally NOT merged — Layer 2's
     // alias-key population in LoadedNodeInstances already routes the canonical's NextNodes* entries through
-    // their alias forms, so merging would double-Activate the same Instance. BCs and ExitedGraphTags are
+    // their alias forms, so merging would double-Activate the same Instance. BCs and ResolvedGraphs are
     // wrapper-side / asset-side; F.3's event-keyed dedup gate in FireWrapperBoundaryCompletion catches
-    // duplicate cascade arrivals at the same canonical wrapper, and PublishGraphResolutions is gated on
-    // BC-empty so the asset-resolution publish doesn't double up with the wrapper's alias-publish.
+    // duplicate cascade arrivals at the same canonical wrapper, and PublishGraphResolutions's per-entry
+    // OutcomeTag attribution makes the asset-resolution publish stable across perspectives.
     for (const TPair<FName, FQuestPathNodeList>& IncomingPair : Incoming->NextNodesByPath)
     {
         FQuestPathNodeList* ExistingPath = Existing->NextNodesByPath.Find(IncomingPair.Key);
@@ -557,9 +557,9 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
         {
             ExistingPath->BoundaryCompletions.AddUnique(BC);
         }
-        for (const FGameplayTag& GraphTag : IncomingPair.Value.ExitedGraphTags)
+        for (const FQuestGraphResolution& Resolution : IncomingPair.Value.ResolvedGraphs)
         {
-            if (GraphTag.IsValid()) ExistingPath->ExitedGraphTags.AddUnique(GraphTag);
+            if (Resolution.GraphTag.IsValid()) ExistingPath->ResolvedGraphs.AddUnique(Resolution);
         }
     }
 
@@ -567,18 +567,18 @@ void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, 
     {
         Existing->BoundaryCompletionsOnAnyOutcome.AddUnique(BC);
     }
-    for (const FGameplayTag& GraphTag : Incoming->ExitedGraphTagsOnAnyOutcome)
+    for (const FQuestGraphResolution& Resolution : Incoming->ResolvedGraphsOnAnyOutcome)
     {
-        if (GraphTag.IsValid()) Existing->ExitedGraphTagsOnAnyOutcome.AddUnique(GraphTag);
+        if (Resolution.GraphTag.IsValid()) Existing->ResolvedGraphsOnAnyOutcome.AddUnique(Resolution);
     }
 
     UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("MergePerspectiveTagsInto: '%s' — merged structural cascade data from '%s' (paths=%d, AnyOutcome BCs=%d, AnyOutcome ExitedGraphs=%d)"),
+        TEXT("MergePerspectiveTagsInto: '%s' — merged structural cascade data from '%s' (paths=%d, AnyOutcome BCs=%d, AnyOutcome ResolvedGraphs=%d)"),
         *ExistingCanonicalName.ToString(),
         *Incoming->GetContextualTag().ToString(),
         Existing->NextNodesByPath.Num(),
         Existing->BoundaryCompletionsOnAnyOutcome.Num(),
-        Existing->ExitedGraphTagsOnAnyOutcome.Num());
+        Existing->ResolvedGraphsOnAnyOutcome.Num());
 }
 
 void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance)
@@ -908,7 +908,8 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     Now,
                     Snapshot.Dynamic.Provenance,
                     Snapshot,
-                    NAME_None);
+                    NAME_None,
+                    Snapshot.Dynamic.OriginatingEventID);
                 UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
                     *Node->GetContextualTag().ToString(),
                     *UEnum::GetValueAsString(Snapshot.Dynamic.Provenance),
@@ -988,7 +989,8 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                     Now,
                     CascadeContext.Dynamic.Provenance,
                     CascadeContext,
-                    IncomingSourceTag);
+                    IncomingSourceTag,
+                    CascadeContext.Dynamic.OriginatingEventID);
                 UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
                     *QuestNode->GetContextualTag().ToString(),
                     *CascadeContext.Dynamic.OriginTag.ToString(),
@@ -1044,6 +1046,13 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
 {
     if (!Node) return;
 
+    UE_LOG(LogSimpleQuestActivation, Verbose,
+        TEXT("HandleOnNodeForwardActivated: '%s' — %d boundary completion(s), %d resolved graph(s), %d next node(s)"),
+        *Node->GetContextualTag().ToString(),
+        Node->GetBoundaryCompletionsOnForward().Num(),
+        Node->GetResolvedGraphsOnForward().Num(),
+        Node->GetNextNodesOnForward().Num());
+    
     // The utility node's PendingActivationContext was populated by the upstream activation (cascade stamp, or
     // signal-driven self-stamp on UActivationGroupListenerNode). Its OriginatingEventID identifies the gameplay
     // event that drove the upstream cascade — pass it to FireWrapperBoundaryCompletion so the wrapper gate
@@ -1051,6 +1060,14 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // PendingActivationContext copy below carries OriginatingEventID onto downstream destinations naturally.
     const FOriginatingEventID& InheritedEventID = Node->PendingActivationContext.Dynamic.OriginatingEventID;
 
+    // Fire questline-asset resolutions for any Exit/Outcome terminals the utility's Forward output reaches at
+    // asset root scope. Done before boundary completions + downstream chaining so the asset's resolution
+    // record + bus event land before any cascade off the utility's other forward destinations.
+    if (!Node->GetResolvedGraphsOnForward().IsEmpty())
+    {
+        PublishGraphResolutions(Node->GetResolvedGraphsOnForward(), EQuestResolutionSource::Graph);
+    }
+    
     // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
     // downstream prereq evaluation runs. Routes through the shared FireWrapperBoundaryCompletion helper so
     // the wrapper's full outcome chain fires (including loop-back wires) — symmetric with ChainToNextNodes's
@@ -1373,7 +1390,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     if (Node->GetContextualTag().IsValid())
     {
-        SetQuestResolved(Node->GetContextualTag(), OutcomeTag, ResolvedPath, EQuestResolutionSource::Graph);
+        SetQuestResolved(Node->GetContextualTag(), OutcomeTag, ResolvedPath, EQuestResolutionSource::Graph, OriginatingEventID);
         if (QuestSignalSubsystem)
         {
             if (FDelegateHandle* Handle = LiveStepTriggerHandles.Find(Node->GetContextualTag()))
@@ -1428,7 +1445,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // direct downstream destinations activate last.
     if (const FQuestPathNodeList* PathList = Node->GetNextNodesByPath().Find(ResolvedPath))
     {
-        PublishGraphResolutions(PathList->ExitedGraphTags, OutcomeTag, EQuestResolutionSource::Graph);
+        PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph);
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
             FireWrapperBoundaryCompletion(BC, OriginatingEventID);
@@ -1440,7 +1457,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     }
 
     // Any-outcome path: same unconditional PublishGraphResolutions as the named-outcome branch.
-    PublishGraphResolutions(Node->GetExitedGraphTagsOnAnyOutcome(), OutcomeTag, EQuestResolutionSource::Graph);
+    PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph);
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
         FireWrapperBoundaryCompletion(BC, OriginatingEventID);
@@ -2366,7 +2383,8 @@ void UQuestManagerSubsystem::DeriveAllAncestorContainersForStep(UQuestStep* Step
     }
 }
 
-void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source)
+void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source, const
+                                              FOriginatingEventID& OriginatingEventID)
 {
     if (!WorldState || !QuestTag.IsValid()) return;
 
@@ -2422,7 +2440,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
         if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
         {
             const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-            Registry->RecordResolution(QuestTag, OutcomeTag, PathIdentity, Now, Source);
+            Registry->RecordResolution(QuestTag, OutcomeTag, PathIdentity, Now, Source, OriginatingEventID);
         }
     }
 
@@ -2530,37 +2548,48 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
         UE_LOG(LogSimpleQuestActivation, Warning,
             TEXT("FireWrapperBoundaryCompletion: wrapper '%s' instance not loaded — falling back to direct SetQuestResolved + publish"),
             *WrapperTag.ToString());
-        SetQuestResolved(WrapperTag, BC.OutcomeTag, NAME_None, EQuestResolutionSource::Graph);
+        SetQuestResolved(WrapperTag, BC.OutcomeTag, NAME_None, EQuestResolutionSource::Graph, OriginatingEventID);
     }
 }
 
-void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag, EQuestResolutionSource Source)
+void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source)
 {
-    if (GraphTags.IsEmpty()) return;
+    if (Resolutions.IsEmpty()) return;
 
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     if (!StateSubsystem) return;
 
     const double ResolutionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-    for (const FGameplayTag& GraphTag : GraphTags)
+    for (const FQuestGraphResolution& Resolution : Resolutions)
     {
-        if (GraphTag.IsValid())
+        if (!Resolution.GraphTag.IsValid() || !Resolution.OutcomeTag.IsValid()) continue;
+
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("PublishGraphResolutions: '%s' outcome='%s'"),
+            *Resolution.GraphTag.ToString(),
+            *Resolution.OutcomeTag.ToString());
+
+        // QSV layer: rich-record registry entry using the Exit's authored OutcomeTag (what the questline
+        // resolves WITH), not any upstream cascading path outcome.
+        StateSubsystem->RecordResolution(Resolution.GraphTag, Resolution.OutcomeTag, NAME_None, ResolutionTime, Source);
+
+        // WSV layer: Completed fact write at the asset identity. Asset identities aren't aliased in the
+        // current compile model, but AddStateFactAcrossPerspectives handles single-canonical uniformly.
+        AddStateFactAcrossPerspectives(Resolution.GraphTag, EQuestStateLeaf::Completed);
+
+        // Bus publish at the questline asset's tag channel so questline-tag subscribers (Hierarchical or
+        // ExactMatch) receive a direct questline-level Ended event. Closes the gap that previously forced
+        // questline-tag observers to rely on ancestor-walk delivery from Step-tag publishes (which the
+        // ExactMatch routing mode correctly filters out). Payload is minimal — questline-level resolutions
+        // don't have a specific completing node to attribute beyond the asset identity itself; adopters
+        // who need per-Step context subscribe to Step-tag FQuestEndedEvent (still published via the
+        // PublishQuestEndedEvent path on the completing Step's channel).
+        if (QuestSignalSubsystem)
         {
-            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("PublishGraphResolutions: '%s' outcome='%s'"),
-                *GraphTag.ToString(),
-                *OutcomeTag.ToString());
-
-            // QSV layer: rich-record registry entry. RecordResolution multi-writes across the asset identity's
-            // alias chain (typically empty for asset identities — they aren't aliased in the current compile
-            // model — but the helper handles it uniformly for forward compat).
-            StateSubsystem->RecordResolution(GraphTag, OutcomeTag, NAME_None, ResolutionTime, Source);
-
-            // WSV layer: WorldState Completed fact write at the asset identity. Symmetric with content-node
-            // SetQuestResolved's Completed fact bump — assets reach a terminal state too, and the WSV panel
-            // surfaces that state alongside its content nodes' state. Multi-perspective write collapses to a
-            // single canonical fact for asset identities (no aliases), but keeps the pattern uniform across
-            // every state-fact write site.
-            AddStateFactAcrossPerspectives(GraphTag, EQuestStateLeaf::Completed);
+            FQuestEventPayload Payload;
+            Payload.NodeInfo.QuestTag = Resolution.GraphTag;
+            QuestSignalSubsystem->PublishMessage<FQuestEndedEvent>(
+                Resolution.GraphTag,
+                FQuestEndedEvent(Resolution.GraphTag, Resolution.OutcomeTag, Source, Payload));
         }
     }
 }

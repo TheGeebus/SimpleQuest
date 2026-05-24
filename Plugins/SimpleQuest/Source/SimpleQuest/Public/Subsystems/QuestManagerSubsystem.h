@@ -17,6 +17,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestGraphResolution;
 struct FQuestActivationRequestEvent;
 struct FQuestBlockRequestEvent;
 struct FQuestBoundaryCompletion;
@@ -446,7 +447,7 @@ private:
 	 */
 	void DeriveAllAncestorContainersForStep(UQuestStep* Step);
 	
-	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source);
+	void SetQuestResolved(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, EQuestResolutionSource Source, const FOriginatingEventID& OriginatingEventID = {});
 	void SetQuestPendingGiver(FGameplayTag QuestTag);
 	void ClearQuestPendingGiver(FGameplayTag QuestTag);
 
@@ -589,14 +590,13 @@ private:
 	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
 
 	/**
-	 * Publishes a resolution event on each questline asset's identity tag in GraphTags via UQuestStateSubsystem::
-	 * RecordResolution. Called from ChainToNextNodes before BoundaryCompletions fire, so the inner asset
-	 * publishes its resolution before the wrapper-boundary cascade activates outer-asset destinations
-	 * (cascade-direction event-order invariant: inner-first on outward flow). Symmetric with how an inner
-	 * Quest container publishes FQuestEndedEvent on its own tag when its inner chain reaches an Exit —
-	 * the asset-level equivalent uses the resolution registry's standard publish path.
+	 * Per-questline-asset resolution registry write + bus publish. Each FQuestGraphResolution entry carries the
+	 * Exit's authored OutcomeTag (what the questline resolves WITH), distinct from any cascading path outcome
+	 * that led to the Exit. Writes QSS resolution record + Completed fact + publishes FQuestEndedEvent on the
+	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
+	 * questline-level lifecycle event.
 	 */
-	void PublishGraphResolutions(const TArray<FGameplayTag>& GraphTags, FGameplayTag OutcomeTag, EQuestResolutionSource Source);
+	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

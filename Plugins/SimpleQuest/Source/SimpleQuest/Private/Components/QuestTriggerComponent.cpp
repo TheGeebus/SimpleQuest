@@ -8,6 +8,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Signals/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
@@ -149,10 +150,16 @@ int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
     return Count;
 }
 
-FGameplayTagContainer UQuestTriggerComponent::GetImplicitlyObservedTags() const
+TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags() const
 {
-    FGameplayTagContainer Implicit = Super::GetImplicitlyObservedTags();
-    Implicit.AppendTags(StepTagsToTrigger);
+    TArray<FQuestObservedTagSpec> Implicit = Super::GetImplicitlyObservedTags();
+    Implicit.Reserve(Implicit.Num() + StepTagsToTrigger.Num());
+    for (const FGameplayTag& Tag : StepTagsToTrigger)
+    {
+        // Trigger keeps default routing for now — Step tags subscribed hierarchically preserve current
+        // behavior. Audit (TODO §4.38) classifies whether Trigger should narrow to ExactMatch in a future pass.
+        Implicit.Add(FQuestObservedTagSpec{Tag, SignalRoutingDefaults::HierarchicalSubscribe});
+    }
     return Implicit;
 }
 

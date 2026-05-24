@@ -7,12 +7,13 @@
 #include "StructUtils/InstancedStruct.h"
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Types/SignalRoutingFlags.h"
 #include "Utilities/SimpleCoreLog.h"
 #include "SignalSubsystem.generated.h"
 
 /**
  * One record per Subscribe* call. Handle is the unique unsubscribe key and the deduplication discriminator for
- * multi-channel publishes; Listener is the GC-safe back-reference used to skip stale subscribers without invoking;
+ * multichannel publishes; Listener is the GC-safe back-reference used to skip stale subscribers without invoking;
  * Dispatcher is the typed unpack closure built at subscription time.
  */
 struct FSignalSubscriberRecord
@@ -20,6 +21,11 @@ struct FSignalSubscriberRecord
     TWeakObjectPtr<UObject> Listener;
     FDelegateHandle Handle;
     TFunction<void(FGameplayTag, const FInstancedStruct&)> Dispatcher;
+    /**
+     * Per-subscription routing scope. Filters which ancestor-walk visits this subscription receives.
+     * Defaults to Descendants.
+     */
+    ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe;
 };
 
 /**
@@ -86,14 +92,22 @@ public:
      * and the typed payload. ListenerType must be a UObject subclass (held as TWeakObjectPtr — no manual lifetime management).
      */
     template<typename T, typename ListenerType>
-    FDelegateHandle SubscribeMessage(FGameplayTag Channel, ListenerType* Listener, void(ListenerType::* Function)(FGameplayTag, const T&));
+    FDelegateHandle SubscribeMessage(
+        FGameplayTag Channel,
+        ListenerType* Listener,
+        void(ListenerType::* Function)(FGameplayTag, const T&),
+        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Subscribe to messages on Channel where the payload IS-A T. Callback receives the original FInstancedStruct preserving the
      * concrete derived type. Use when the subscriber needs access to subclass fields without knowing the concrete type at compile time.
      */
     template<typename T, typename ListenerType>
-    FDelegateHandle SubscribeRawMessage(FGameplayTag Channel, ListenerType* Listener, void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&));
+    FDelegateHandle SubscribeRawMessage(
+        FGameplayTag Channel,
+        ListenerType* Listener,
+        void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&),
+        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
     
     /** Remove a subscription by the handle returned from SubscribeMessage. */
     void UnsubscribeMessage(FGameplayTag Channel, FDelegateHandle Handle);
@@ -108,7 +122,10 @@ public:
      * but the templated SubscribeMessage<T> / SubscribeRawMessage<T> path is preferred for compile-time payload
      * typing.
      */
-    FDelegateHandle SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate);
+    FDelegateHandle SubscribeMessageDynamic(
+        FGameplayTag Channel,
+        FOnSignalReceived Delegate,
+        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Typed-filter variant of SubscribeMessageDynamic. The bound handler only fires when the incoming
@@ -119,7 +136,11 @@ public:
      * PayloadType must be non-null; null is treated as "no filter passes" and the subscription silently
      * delivers nothing (defensive — prevents a spuriously-null type from acting as a wildcard).
      */
-    FDelegateHandle SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate);
+    FDelegateHandle SubscribeMessageOfType(
+        FGameplayTag Channel,
+        UScriptStruct* PayloadType,
+        FOnSignalReceived Delegate,
+        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Remove every subscription on every channel whose Listener is the given object. Single-call cleanup intended for
@@ -159,7 +180,7 @@ void USignalSubsystem::PublishMessage(const FGameplayTag Channel, const T& Paylo
 
 template<typename T, typename ListenerType>
 FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, ListenerType* Listener,
-    void(ListenerType::* Function)(FGameplayTag, const T&))
+                                                   void(ListenerType::* Function)(FGameplayTag, const T&), ESignalRoutingFlags Routing)
 {
     check(IsInGameThread());
 
@@ -170,6 +191,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, L
     FSignalSubscriberRecord Record;
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Routing = Routing;
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
         {
@@ -187,7 +209,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, L
 
 template<typename T, typename ListenerType>
 FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel, ListenerType* Listener,
-    void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&))
+                                                      void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&), ESignalRoutingFlags Routing)
 {
     check(IsInGameThread());
 
@@ -199,6 +221,7 @@ FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel
     FSignalSubscriberRecord Record;
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Routing = Routing;
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
         {

@@ -155,10 +155,10 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
 // Bind to Quest Event
 // -------------------------------------------------------------------------
 
-UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents)
+UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents, int32 Routing)
 {
     UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
-    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents);
+    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents, static_cast<ESignalRoutingFlags>(Routing));
     Sub->RegisterWithGameInstance(WorldContextObject);
     return Sub;
 }

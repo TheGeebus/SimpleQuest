@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Subsystems/QuestStateSubsystem.h"
@@ -21,6 +22,7 @@ struct FQuestBlockedEvent;
 struct FQuestUnblockedEvent;
 struct FQuestGivenEvent;
 struct FQuestProgressEvent;
+
 class USignalSubsystem;
 class UWorldStateSubsystem;
 
@@ -192,11 +194,12 @@ public:
      * BP-facing entry point so UK2Node_AsyncAction's subclass iteration doesn't auto-register a duplicate
      * palette entry for us.
      */
-    void InitFromFactory(UObject* InWorldContextObject, FGameplayTag InQuestTag, int32 InExposedEventsMask)
+    void InitFromFactory(UObject* InWorldContextObject, FGameplayTag InQuestTag, int32 InExposedEventsMask, ESignalRoutingFlags InRouting)
     {
         WorldContextObjectWeak = InWorldContextObject;
         QuestTag = InQuestTag;
         ExposedEventsMask = InExposedEventsMask;
+        Routing = InRouting;
     }
 
     /** Unbind from all channels and mark the action ready to destroy. Safe no-op if already cancelled. */
@@ -209,6 +212,12 @@ private:
     UPROPERTY() TWeakObjectPtr<UObject> WorldContextObjectWeak;
     FGameplayTag QuestTag;
     int32 ExposedEventsMask = 0;
+    /**
+     * Per-subscription routing scope applied to every internal SubscribeMessage call. Defaults to
+     * Descendants (hierarchical — preserves the prior per-quest-event behavior). Designers narrow via
+     * the BindToQuestEvent K2 node's Routing pin when ancestor-walk delivery is noise.
+     */
+    ESignalRoutingFlags Routing = ESignalRoutingFlags::Descendants;
 
     FDelegateHandle ActivatedHandle;
     FDelegateHandle EnabledHandle;

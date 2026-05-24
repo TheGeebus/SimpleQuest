@@ -10,6 +10,8 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 #include "QuestObserverComponent.generated.h"
 
 
@@ -96,6 +98,15 @@ struct FObservedQuestEventSettings
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.Outcome", EditCondition = "bObserveCompleted"))
 	FGameplayTagContainer OutcomeFilter;
+	
+	/**
+	 * Routing scope for subscriptions made from this observed-tag entry. Default ExactMatch | Descendants
+	 * matches the bus's hierarchical-delivery behavior — events on this tag OR any descendant fire the
+	 * observer. Set to ExactMatch alone when descendant events would be noise (e.g., observing a Quest
+	 * tag where inner-Step events shouldn't trigger this binding).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags"))
+	ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe;
 };
 
 
@@ -217,7 +228,7 @@ protected:
 	 * Use to bridge tags managed by a derived component (e.g., Giver's QuestTagsToGive) onto the
 	 * Observer's broadcast surface without requiring designers to maintain a parallel ObservedTags entry.
 	 */
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const { return FGameplayTagContainer(); }
+	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const { return {}; }
 
 	virtual void HandleQuestActivated			(FGameplayTag Channel, const FQuestActivatedEvent& Event);
 	virtual void HandleQuestActivationFailed	(FGameplayTag Channel, const FQuestActivationFailedEvent& Event);

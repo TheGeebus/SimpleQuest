@@ -359,17 +359,25 @@ private:
     TMap<FGameplayTag, FQuestPrereqStatus> CachedPrereqStatus;
 
     /** Manager calls these via friend access. */
-    void RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source);
+    void RecordResolution(
+    	FGameplayTag QuestTag,
+    	FGameplayTag OutcomeTag,
+    	FName PathIdentity,
+    	double ResolutionTime,
+    	EQuestResolutionSource Source,
+    	const FOriginatingEventID& OriginatingEventID = {});
+	
     void UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status);
     void ClearQuestPrereqStatus(FGameplayTag QuestTag);
     void RecordEntry(
-    	FGameplayTag QuestTag,
-    	FGameplayTag SourceQuestTag,
-    	FGameplayTag IncomingOutcomeTag,
-    	double EntryTime,
-    	EQuestActivationProvenance Provenance,
-    	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
-    	FName PathIdentity);
+	    FGameplayTag QuestTag,
+	    FGameplayTag SourceQuestTag,
+	    FGameplayTag IncomingOutcomeTag,
+	    double EntryTime,
+	    EQuestActivationProvenance Provenance,
+	    const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
+	    FName PathIdentity,
+	    const FOriginatingEventID& OriginatingEventID = {});
 
 	/**
 	 * Registers ContextualTag into KnownQuests with a default-constructed FQuestRuntimeRecord stamped with current world time.

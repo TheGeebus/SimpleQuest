@@ -30,13 +30,16 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
 
         if (TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(CurrentTag))
         {
-            // Snapshot before iterating — a subscriber's dispatcher might subscribe or unsubscribe re-entrantly,
-            // and we don't want those mutations to invalidate this walk. Mirrors the copy-before-broadcast pattern
-            // the prior FSignalEventMulticast storage used implicitly.
+            // Subscribers always receive events on their exact channel. Past the exact channel (walking up the
+            // ancestor chain), only subscribers who opted into Descendants want delivery — from their perspective,
+            // the published channel is a descendant of their subscribed tag.
+            const bool bAtExactChannel = (CurrentTag == Channel);
+
             TArray<FSignalSubscriberRecord> RecordsSnapshot = *Records;
             for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
             {
                 if (!Record.Listener.IsValid()) continue;
+                if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
                 Record.Dispatcher(Channel, Payload);
             }
             ++LevelsFired;
@@ -70,7 +73,7 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
     }
 }
 
-FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate)
+FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate, ESignalRoutingFlags Routing)
 {
     check(IsInGameThread());
 
@@ -88,6 +91,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, 
     FSignalSubscriberRecord Record;
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Routing = Routing;
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), Delegate]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
     {
@@ -103,7 +107,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, 
     return Handle;
 }
 
-FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate)
+FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate, ESignalRoutingFlags Routing)
 {
     check(IsInGameThread());
 
@@ -123,6 +127,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, U
     FSignalSubscriberRecord Record;
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
+    Record.Routing = Routing;
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), PayloadType, Delegate]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
     {
@@ -214,10 +219,15 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
 
                 if (TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(CurrentTag))
                 {
+                    // bAtExactChannel = "is CurrentTag one of the explicitly published channels?" Subscribers receive
+                    // exact-channel deliveries regardless of routing; ancestor-walk deliveries require the Descendants flag.
+                    const bool bAtExactChannel = Channels.Contains(CurrentTag);
+
                     TArray<FSignalSubscriberRecord> RecordsSnapshot = *Records;
                     for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
                     {
                         if (!Record.Listener.IsValid()) continue;
+                        if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
                         Record.Dispatcher(Channel, Payload);
                     }
                     ++LevelsFired;
@@ -243,12 +253,18 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
 
                 if (TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(CurrentTag))
                 {
+                    // Same routing filter as single-channel + bAllChannels paths: subscribers receive exact-channel
+                    // deliveries unconditionally; ancestor-walk deliveries require the Descendants flag. "Exact channel"
+                    // here means CurrentTag is one of the explicitly published channels, not just any walk position.
+                    const bool bAtExactChannel = Channels.Contains(CurrentTag);
+
                     TArray<FSignalSubscriberRecord> RecordsSnapshot = *Records;
                     bool bAnyFiredAtThisLevel = false;
                     for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
                     {
                         if (Delivered.Contains(Record.Handle)) { ++DedupedSkipped; continue; }
                         if (!Record.Listener.IsValid()) continue;
+                        if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
 
                         const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(Channels, CurrentTag);
                         Record.Dispatcher(MatchedChannel, Payload);

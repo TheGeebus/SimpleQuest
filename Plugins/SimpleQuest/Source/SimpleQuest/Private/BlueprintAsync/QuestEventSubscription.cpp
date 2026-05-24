@@ -58,52 +58,54 @@ void UQuestEventSubscription::Activate()
     }
 
     // Subscribe only to the channels the K2 node has exposed. Each guard saves both the SubscribeMessage cost and
-    // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side.
+    // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side. Routing applies
+    // uniformly to all ten subscriptions — designer chose at the BindToQuestEvent call site whether they want
+    // hierarchical (Descendants) or narrow (ExactOnly) delivery for this subscription instance.
 
     // Offer phase
     if (IsExposed(EQuestEventTypes::Activated))
     {
-        ActivatedHandle = Signals->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleActivated);
+        ActivatedHandle = Signals->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleActivated, Routing);
     }
     if (IsExposed(EQuestEventTypes::Enabled))
     {
-        EnabledHandle = Signals->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnabled);
+        EnabledHandle = Signals->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnabled, Routing);
     }
     if (IsExposed(EQuestEventTypes::Disabled))
     {
-        DisabledHandle = Signals->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleDisabled);
+        DisabledHandle = Signals->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleDisabled, Routing);
     }
     if (IsExposed(EQuestEventTypes::GiveBlocked))
     {
-        GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleGiveBlocked);
+        GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleGiveBlocked, Routing);
     }
 
     // Run phase
     if (IsExposed(EQuestEventTypes::Started))
     {
-        StartedHandle = Signals->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestEventSubscription::HandleStarted);
+        StartedHandle = Signals->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestEventSubscription::HandleStarted, Routing);
     }
     if (IsExposed(EQuestEventTypes::Progress))
     {
-        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestEventSubscription::HandleProgress);
+        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestEventSubscription::HandleProgress, Routing);
     }
-    
+
     // End phase
     if (IsExposed(EQuestEventTypes::Completed))
     {
-        EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnded);
+        EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnded, Routing);
     }
     if (IsExposed(EQuestEventTypes::Deactivated))
     {
-        DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleDeactivated);
+        DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleDeactivated, Routing);
     }
     if (IsExposed(EQuestEventTypes::Blocked))
     {
-        BlockedHandle = Signals->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleBlocked);
+        BlockedHandle = Signals->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleBlocked, Routing);
     }
     if (IsExposed(EQuestEventTypes::Unblocked))
     {
-        UnblockedHandle = Signals->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleUnblocked);
+        UnblockedHandle = Signals->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleUnblocked, Routing);
     }
     
     // Defer the catch-up broadcast to next tick. The K2 node's standard async expansion calls Activate() *before*

@@ -69,9 +69,14 @@ public:
         const FInstancedStruct& Payload, bool bAllChannels = false);
 
     /**
-     * Subscribe to messages published on Channel or any of its descendant tags. The bound handler receives the
-     * original published tag plus the payload as an FInstancedStruct — use UE's "Get FInstancedStruct Value"
-     * or typed-extraction nodes inside the handler to read the concrete payload type.
+     * Subscribe to messages published on Channel. Default Routing receives events on Channel or any of its
+     * descendant tags (the bus's hierarchical-delivery default). Pass ExactOnly (no flags) to receive only
+     * direct publishes on this exact Channel — useful when ancestor-walk delivery would be noise (e.g., a
+     * receptionist watching Quest X that doesn't care about Quest X's inner-Step publishes).
+     *
+     * The bound handler receives the original published tag plus the payload as an FInstancedStruct — use
+     * UE's "Get FInstancedStruct Value" or typed-extraction nodes inside the handler to read the concrete
+     * payload type.
      *
      * Listener identity comes from the bound delegate's UObject (typically the calling Blueprint actor or
      * component). For cleanup, call UnsubscribeListener(self) from your EndPlay or BeginDestroy — it clears
@@ -80,7 +85,11 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
-    static void SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived);
+    static void SubscribeMessage(
+        UObject* WorldContextObject,
+        FGameplayTag Channel,
+        const FOnSignalReceived& OnSignalReceived,
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
 
     /**
      * Typed-filter variant of SubscribeMessage. Same delivery shape — handler receives the matched channel
@@ -92,7 +101,8 @@ public:
      * base for events flowing through the signal bus. SimpleQuest's FQuestEventBase and its lifecycle
      * subclasses (FQuestStartedEvent, FQuestEndedEvent, FQuestResolutionRecordedEvent, …) all qualify,
      * as does any adopter-authored event struct that derives from FSignalEventBase. Listener identity,
-     * cleanup semantics, and channel-hierarchy delivery match the untyped SubscribeMessage variant.
+     * cleanup semantics, and channel-hierarchy delivery match the untyped SubscribeMessage variant; see its
+     * Routing parameter doc for narrowing options.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
@@ -100,7 +110,8 @@ public:
         UObject* WorldContextObject,
         FGameplayTag Channel,
         UPARAM(meta = (MetaStruct = "/Script/SimpleCore.SignalEventBase")) UScriptStruct* PayloadType,
-        const FOnSignalReceived& OnSignalReceived);
+        const FOnSignalReceived& OnSignalReceived,
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
 
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /

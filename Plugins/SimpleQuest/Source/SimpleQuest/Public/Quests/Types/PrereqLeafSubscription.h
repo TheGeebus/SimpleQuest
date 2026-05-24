@@ -161,7 +161,7 @@ namespace FPrereqLeafSubscription
 	}
 
 	/**
-	 * Monotonic overload: for sites where leaves only need re-evaluation on Added (no NOT-expression flips that
+	 * One-way overload: for sites where leaves only need re-evaluation on Added (no NOT-expression flips that
 	 * would require symmetric Add/Remove subscription). Used by UQuestNodeBase::DeferActivation,
 	 * UQuestPrereqRuleNode::Activate, and UQuestManagerSubsystem::DeferChainToNextNodes.
 	 *
@@ -189,7 +189,7 @@ namespace FPrereqLeafSubscription
 	}
 
 	/**
-	 * Symmetric overload: for sites where NOT-expressions can flip a satisfied Leaf back to unsatisfied when the
+	 * Bidirectional overload: for sites where NOT-expressions can flip a satisfied Leaf back to unsatisfied when the
 	 * underlying fact is removed. Currently only UQuestManagerSubsystem::RegisterEnablementWatch needs this
 	 * (FQuestEnabledEvent / FQuestDisabledEvent bidirectional UI sync requires it).
 	 *

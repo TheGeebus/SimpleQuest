@@ -27,6 +27,162 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.1] — In Development — Authoring Primitives + Subscriber Routing
+
+Patch release adding a new authoring primitive (the **Prereq Gate**
+utility node), giving subscribers a way to opt out of the bus's
+hierarchical-delivery default, and closing several latent gaps in
+the quest-resolution attribution chain that surfaced once the new
+primitives were exercised against real authoring patterns.
+
+### Prereq Gate utility node
+
+A new graph primitive that gates an activation cascade on a
+prerequisite expression. Wire the **Enter** input from any upstream
+cascade source, the **Prerequisites** input from a prereq expression
+(leaves through AND / OR / NOT combinators), and the **Forward**
+output to whatever should fire once the conditions hold.
+
+The gate handles the "complete these conditions in any order, then
+proceed" pattern as a graph-visible primitive — no more wiring
+phantom downstream Quests just to leverage their built-in prereq
+gating. Sibling to Set Blocked, Clear Blocked, and Start Questline
+under the Flow Control context-menu category.
+
+- **Per-leaf-kind semantics done right.** Fact-keyed prereqs (raw
+  WorldState facts — mutable state) wake on both addition and
+  removal, so `NOT(Fact)` reads naturally. Path-keyed prereqs
+  (quest resolutions, entries, named outcomes — append-only
+  historical record) inherit monotonic behavior automatically.
+  No designer-side toggle — the right semantic drops out of the
+  leaf kind the designer wired.
+- **Dedup against duplicate cascade arrival.** When a Step's
+  completion BOTH satisfies the gate's last prereq AND cascades
+  directly into the gate's Enter pin, the gate fires once for that
+  cascade event — not once per arrival path. Achieved by per-
+  cascade-event identity check; ResetTransientState clears the
+  dedup state on PIE re-entry.
+- **Per-pin labels + tooltips + node-level tooltip** so the gate's
+  three-pin geometry reads cleanly in the graph.
+
+### Subscriber-side routing scope
+
+`USignalSubsystem`'s Subscribe API gains a `Routing` parameter that
+lets subscribers opt into Exact Match delivery (receive only direct
+publishes on the exact subscribed channel) or stay with the
+hierarchical default (also receive descendant-channel publishes via
+the bus's ancestor walk).
+
+- Default `Routing` preserves prior hierarchical behavior — every
+  existing call site compiles unchanged and behaves identically.
+  Adopters explicitly narrow on a per-subscription basis when
+  ancestor-walk delivery is noise rather than signal.
+- `UQuestGiverComponent` subscribes Exact Match for its
+  `QuestTagsToGive`. An Observer or Giver bound to "Quest X" no
+  longer receives noise from Quest X's inner-Step lifecycle events
+  — handler-side filtering for that case is no longer necessary.
+- `UQuestObserverComponent` author-facing `ObservedTags` entries
+  gain a `Routing` field in the Details panel. Default Hierarchical;
+  designers can opt individual entries to Exact Match.
+- `BindToQuestEvent` K2 node gains a `Routing` pin. Designer picks
+  per-call scope; default Hierarchical preserves prior behavior.
+- BP-callable `SubscribeMessage` / `SubscribeMessageOfType` on the
+  SimpleCore Blueprint library gain the same parameter.
+
+The `Routing` value is a bitmask of `Ancestors` and `Descendants`
+flags (an unset value = Exact Match only). The publish-side
+counterpart of the bitmask is reserved for a future release; the
+subscribe-side `Ancestors` flag is reserved-but-no-op until then.
+
+### Quest-resolution attribution fixes
+
+Three related framework gaps that the Prereq Gate exercised and
+that this release fixes. All of them previously latent because the
+typical Step's pin name happens to match the downstream Exit's
+`OutcomeTag`; gaps surface when the two intentionally differ.
+
+- **Exit's authored OutcomeTag now drives the questline-level
+  resolution.** When a cascade terminates at an Exit / Outcome
+  terminal at an asset's root scope, the questline resolves with
+  the Exit's `OutcomeTag` — not the upstream Step's pin-name
+  outcome that happened to lead there. The Step's pin name remains
+  the routing-internal path identity; the Exit's tag is the
+  public-facing outcome.
+- **Utility-node Forward outputs participate in questline
+  resolution.** A Prereq Gate (or any future utility node) whose
+  Forward output reaches an Exit / Outcome terminal at the asset
+  root scope correctly resolves the enclosing questline. Previously
+  the cascade dead-ended silently — the resolution attribution
+  was only captured for content-node outcome pins.
+- **Questline-level lifecycle event published on the questline's
+  own tag.** `FQuestEndedEvent` now fires on the questline's tag
+  channel when the questline resolves, in addition to the Step's
+  tag channel. Subscribers bound at the questline tag — including
+  Exact Match subscribers, who otherwise would receive nothing —
+  now receive a direct questline-level lifecycle event.
+
+### Prereq deferral correctness — subscription cleanup
+
+Internal fix to `UQuestNodeBase::DeferActivation`: re-deferring a
+node that's already waiting on prereqs now correctly unsubscribes
+its existing leaf handles before re-subscribing. Previously the
+re-subscribe would orphan the prior handles in the SignalSubsystem
+(still firing, no longer tracked, can't be cleaned up via
+`UnsubscribeAll`), producing spurious wake-up firings on future
+fact events. Affects any node whose Activate is called multiple
+times while still in the deferred state — most visibly the Prereq
+Gate, but content-node prereq deferral inherits the fix too.
+
+### UI display data — Phase 1 (preview)
+
+Per-node `DisplayName` and `Description` properties on quest content
+nodes, plus a marker `UQuestDisplayData` base class for adopter-
+authored richer UI metadata schemas. Queryable via
+`UQuestStateSubsystem::GetDisplayName` / `GetDisplayDescription` /
+`GetDisplayData` with derived-fallback defaults (e.g., a formatted
+leaf name when `DisplayName` is unset). Phase 2 — UI display data
+sourced through the adopter-pluggable resolver pattern — lands
+in 0.5.0.
+
+### Breaking changes (compiled-data + signatures)
+
+- **`FQuestPathNodeList::ExitedGraphTags`** (and
+  `UQuestNodeBase::ExitedGraphTagsOnAnyOutcome`) replaced by
+  `ResolvedGraphs` / `ResolvedGraphsOnAnyOutcome` carrying the new
+  `FQuestGraphResolution { GraphTag, OutcomeTag }` struct. **Recompile
+  every questline asset after upgrade** — older compiled data drops
+  the asset-resolution attribution silently (questline-level
+  resolutions stop firing).
+- **`UQuestObserverComponent::GetImplicitlyObservedTags`** return
+  type changed from `FGameplayTagContainer` to
+  `TArray<FQuestObservedTagSpec>`. Adopters who subclassed Observer
+  with their own bridge override need to update the return type
+  and wrap each tag in `FQuestObservedTagSpec { Tag, Routing }`.
+  Default routing preserves prior hierarchical behavior.
+- **`FQuestResolutionRecordedEvent` and `FQuestEntryRecordedEvent`**
+  gain an `OriginatingEventID` field. New constructor overloads
+  added; existing constructors preserved. Subscribers reading the
+  events are unaffected (the field's just there to read).
+- **`UQuestManagerSubsystem::SetQuestResolved`** /
+  `UQuestStateSubsystem::RecordResolution` / `RecordEntry` gain a
+  trailing optional `FOriginatingEventID` parameter. Existing call
+  sites compile unchanged via the default argument; cascade-driven
+  callers should pass the cascade's `OriginatingEventID` to enable
+  per-event dedup downstream.
+
+### Known limitations
+
+- The Prereq Gate's per-cascade dedup covers Path-keyed prereqs
+  (Quest Resolution, Entry, Path, Outcome leaves) but not raw Fact-
+  keyed prereqs — `FWorldStateFactAddedEvent` /
+  `FactRemovedEvent` are SimpleCore primitives and don't carry the
+  SimpleQuest-specific `OriginatingEventID`. A gate whose prereqs
+  include raw Fact leaves can double-fire under the same authoring
+  pattern. Rare in practice; flag if it surfaces.
+
+
+---
+
 ## [0.4.0] — 2026-05-20 — Architectural Cohesion + Adopter Ergonomics
 
 Where v0.3 began to reveal the shape of the framework, v0.4 fully describes it.

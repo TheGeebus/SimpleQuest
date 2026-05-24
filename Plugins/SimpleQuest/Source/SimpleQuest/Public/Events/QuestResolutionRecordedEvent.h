@@ -5,7 +5,7 @@
 
 #include "Events/QuestEventBase.h"
 #include "Quests/Types/QuestResolutionRecord.h"
-
+#include "Quests/Types/OriginatingEventID.h"
 #include "QuestResolutionRecordedEvent.generated.h"
 
 /**
@@ -27,9 +27,11 @@ struct FQuestResolutionRecordedEvent : public FQuestEventBase
 
 	FQuestResolutionRecordedEvent() = default;
 
-	/** Back-compat constructor — PathIdentity defaults to NAME_None, meaning "resolved without a specific path"
-	 *  (typical for external ResolveQuest calls and wrapper boundary completions). New construction sites should
-	 *  prefer the 5-arg form to preserve graph-authored path identity. */
+	/**
+	 * Back-compat constructor — PathIdentity defaults to NAME_None, meaning "resolved without a specific path"
+	 * (typical for external ResolveQuest calls and wrapper boundary completions). New construction sites should
+	 * prefer the 5-arg form to preserve graph-authored path identity.
+	 */
 	FQuestResolutionRecordedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag,
 		double InResolutionTime, EQuestResolutionSource InSource)
 		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag), ResolutionTime(InResolutionTime), Source(InSource) {}
@@ -38,6 +40,17 @@ struct FQuestResolutionRecordedEvent : public FQuestEventBase
 		FName InPathIdentity, double InResolutionTime, EQuestResolutionSource InSource)
 		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag), PathIdentity(InPathIdentity),
 		  ResolutionTime(InResolutionTime), Source(InSource) {}
+	
+	/**
+	 * Full constructor including the originating cascade's event ID. Cascade-driven RecordResolution call sites
+	 * should prefer this form so downstream subscribers (notably the Prereq Gate's per-event-ID dedup) see the
+	 * same OriginatingEventID across both the prereq-subscription wake-up path and the cascade-arrival path.
+	 */
+	FQuestResolutionRecordedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag,
+		FName InPathIdentity, double InResolutionTime, EQuestResolutionSource InSource,
+		const FOriginatingEventID& InOriginatingEventID)
+		: FQuestEventBase(InQuestTag), OutcomeTag(InOutcomeTag), PathIdentity(InPathIdentity),
+		  ResolutionTime(InResolutionTime), Source(InSource), OriginatingEventID(InOriginatingEventID) {}
 
 	UPROPERTY(BlueprintReadOnly)
 	FGameplayTag OutcomeTag;
@@ -56,4 +69,14 @@ struct FQuestResolutionRecordedEvent : public FQuestEventBase
 
 	UPROPERTY(BlueprintReadOnly)
 	EQuestResolutionSource Source = EQuestResolutionSource::Graph;
+	
+	/**
+	 * The cascade event that originated this resolution. Populated by ChainToNextNodes-driven cascades through
+	 * the SetQuestResolved → RecordResolution chain. Invalid for external resolutions (ResolveQuest BP helper)
+	 * and wrapper boundary fallbacks. Read by per-event-ID deduplication paths — most importantly the Prereq Gate's
+	 * ActivateInternal, which dedupes against the same OriginatingEventID arriving via both the prereq-subscription
+	 * wake-up and the direct cascade arrival.
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	FOriginatingEventID OriginatingEventID;
 };

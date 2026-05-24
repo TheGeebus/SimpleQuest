@@ -22,10 +22,10 @@
 namespace
 {
 	/**
-	 * State-side multi-channel publish helper. Builds the channel set as canonical + each registered alias from
-	 * the reverse-alias map and forwards to the bus's multi-channel publish primitive (Phase F.2). Treats the call
+	 * State-side multichannel publish helper. Builds the channel set as canonical + each registered alias from
+	 * the reverse-alias map and forwards to the bus's multichannel publish primitive (Phase F.2). Treats the call
 	 * as one event instance addressable under all channels — subscribers bound to any perspective receive once
-	 * (default dedup-on), with matched-channel attribution in the callback's first arg per the channels-route /
+	 * (default deduplication-on), with matched-channel attribution in the callback's first arg per the channels-route /
 	 * payloads-decide contract. Event.QuestTag (set canonically by the caller's event constructor) stays invariant
 	 * across deliveries; payload identity vs delivery metadata are kept distinct.
 	 *
@@ -306,14 +306,14 @@ FQuestPrereqStatus UQuestStateSubsystem::GetQuestPrereqStatus(FGameplayTag Quest
 	return FQuestPrereqStatus();
 }
 
-void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source)
+void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source, const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
 	// Multi-perspective registry write: append the resolution entry at the canonical AND every AssetScopedAlias.
-	// Symmetric with WorldState's multi-perspective fact write and the bus's multi-channel publish — registry
+	// Symmetric with WorldState's multi-perspective fact write and the bus's multichannel publish — registry
 	// iterators (QSV, future telemetry) see the resolution at every perspective without per-row alias-walking.
-	// F.3's event-keyed dedup gate in the cascade ensures one logical RecordResolution call per logical event;
+	// F.3's event-keyed deduplication gate in the cascade ensures one logical RecordResolution call per logical event;
 	// the splay across perspectives is a single write fanned out, not multiple cascade-driven calls.
 	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
@@ -359,13 +359,13 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	// Outcome-channel publish lets subscribers bind on a specific outcome tag (or a parent outcome tag for
 	// hierarchical fan-in) without needing to subscribe per-quest and filter payloads. Reputation systems,
 	// achievement trackers, telemetry, and audio cue layers benefit from binding by outcome directly.
-	// Bus dedup means subscribers on both the quest channel and the outcome channel receive one callback.
+	// Bus deduplication means subscribers on both the quest channel and the outcome channel receive one callback.
 	const TArray<FGameplayTag> OutcomeChannels = { OutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
 		AssetScopedAliasTagsByContextualTag,
-		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source),
+		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source, OriginatingEventID),
 		OutcomeChannels);
 
 	OnAnyRegistryChanged.Broadcast();
@@ -378,7 +378,7 @@ void UQuestStateSubsystem::RecordEntry(
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
 	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
-	FName PathIdentity)
+	FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -421,7 +421,7 @@ void UQuestStateSubsystem::RecordEntry(
 	// is entered via a specific outcome route (matched at the outcome-tag channel). The event's payload
 	// preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime) shape — subscribers
 	// wanting the new provenance / snapshot fields read the latest entry from the registry on receipt.
-	// Bus dedup collapses delivery to one callback per subscriber across the channel set.
+	// Bus deduplication collapses delivery to one callback per subscriber across the channel set.
 	const TArray<FGameplayTag> IncomingOutcomeChannels = { IncomingOutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),

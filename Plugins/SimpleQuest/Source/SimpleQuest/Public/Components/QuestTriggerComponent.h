@@ -136,7 +136,7 @@ protected:
 	 * Chains via Super so a derived class that also bridges its own container (Giver's QuestTagsToGive)
 	 * sees both contributions in EffectiveObserved at register time.
 	 */
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;
+	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
 
 	/**
 	 * Shared cleanup body for both completion and deactivation routes. Unsubscribes the step end handle for

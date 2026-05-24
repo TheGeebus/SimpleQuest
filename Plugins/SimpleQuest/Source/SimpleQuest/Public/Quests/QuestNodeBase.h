@@ -9,10 +9,13 @@
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestNodeInfo.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/OriginatingEventID.h"
+#include "Types/QuestGraphResolution.h"
 #include "QuestNodeBase.generated.h"
 
 
 struct FWorldStateFactAddedEvent;
+struct FWorldStateFactRemovedEvent;
 struct FQuestResolutionRecordedEvent;
 struct FQuestEntryRecordedEvent;
 
@@ -95,17 +98,15 @@ struct FQuestPathNodeList
      */
     UPROPERTY(VisibleDefaultsOnly)
     TArray<FQuestBoundaryCompletion> BoundaryCompletions;
-
+    
     /**
-     * Questline asset identity tags whose root-scope Exit this path reaches. Populated by the compiler when
-     * a pin-walk visits an Exit at an asset's root scope. Distinct from BoundaryCompletions: the BC list tells
-     * ChainToNextNodes which wrapper(s) to cascade through; ExitedGraphTags tells it which questline assets
-     * reached their terminus and should publish a resolution event on their identity tag. Inner-first on
-     * outward flow — published before BoundaryCompletions fire. At the outermost root scope only this list
-     * may be populated (BC list empty) — asset resolves with no wrapper to cascade to.
+     * Per-Exit attribution of questline-asset resolutions reached via this path. Populated by the compiler
+     * when a pin-walk visits an Exit at an asset's root scope; each entry pairs the asset identity with the
+     * Exit's authored OutcomeTag. Read by ChainToNextNodes to drive PublishGraphResolutions's per-entry
+     * outcome value — the questline resolves with the Exit's OutcomeTag, not the cascading path's outcome.
      */
     UPROPERTY(VisibleDefaultsOnly)
-    TArray<FGameplayTag> ExitedGraphTags;
+    TArray<FQuestGraphResolution> ResolvedGraphs;
 };
 
 /**
@@ -203,6 +204,15 @@ protected:
      * deferred prereq subscriptions. Always call Super::DeactivateInternal.
      */
     virtual void DeactivateInternal(FGameplayTag InContextualTag);
+
+    /**
+     * Returns true to opt into symmetric prereq leaf subscription — DeferActivation wires the FactRemovedHandler
+     * alongside the added/resolution/entry handlers so NOT(Fact) leaves wake on fact removal. Default false matches
+     * the monotonic content-node behavior. Override on subclasses whose semantic requires waking when a previously 
+     * satisfied condition flips false again (e.g., UPrereqGateNode under the Path-vs-Fact ontology — Facts are
+     * reversible state; Paths are append-only history).
+     */
+    virtual bool UseSymmetricPrereqSubscription() const { return false; }
     
     /**
      * Called by utility nodes instead of the normal activation/completion lifecycle. Default implementation fires OnNodeForwardActivated
@@ -303,11 +313,11 @@ protected:
     TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnAnyOutcome;
 
     /**
-     * Any-Outcome parallel to FQuestPathNodeList::ExitedGraphTags. Same semantic — questline assets whose
-     * root-scope Exit is reached when this node resolves on the Any-Outcome path.
+     * Any-Outcome parallel to FQuestPathNodeList::ResolvedGraphs. Same per-Exit attribution shape — pairs of
+     * (asset identity, Exit OutcomeTag) — populated when this node resolves on the Any-Outcome path.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TArray<FGameplayTag> ExitedGraphTagsOnAnyOutcome;
+    TArray<FQuestGraphResolution> ResolvedGraphsOnAnyOutcome;
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
@@ -323,7 +333,7 @@ protected:
     /** Nodes to activate as a pass-through (utility node chaining; no lifecycle writes). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnForward;
-
+    
     /**
      * Boundary completions to fire when this utility node's forward output crosses one or more wrapper Exits.
      * Each entry triggers SetQuestResolved on the wrapper tag (Completed + Path facts + resolution record) and
@@ -333,6 +343,16 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnForward;
+
+    /**
+     * Per-Exit attribution of questline-asset resolutions reached when this utility node's Forward output
+     * cascade terminates at an Exit/Outcome at an asset's root scope. Sibling to BoundaryCompletionsOnForward.
+     * Read by HandleOnNodeForwardActivated to drive PublishGraphResolutions when the utility's Forward
+     * resolves the enclosing questline (typical case: a Prereq Gate whose Forward wires to an Outcome
+     * terminal). Empty for utility nodes whose forward output doesn't reach an asset-root Exit.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TArray<FQuestGraphResolution> ResolvedGraphsOnForward;
     
     /**
      * A struct that holds the composable prerequisites for this quest graph node: the relevant tags representing events and their
@@ -395,7 +415,17 @@ private:
     // Per-leaf-channel subscription handles; cleared when prerequisites are satisfied
     TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> PrereqSubscriptionHandles;
 
+    /**
+     * Cascade event ID associated with the most recent wake-up of this node — either a cascade arrival
+     * (stamped via PendingActivationContext.Dynamic.OriginatingEventID) or a prereq-subscription wake-up
+     * (from the triggering FQuestResolutionRecordedEvent / FQuestEntryRecordedEvent payload).
+     * Read by subclasses with per-event-ID deduplication logic (UPrereqGateNode); invalid when the wake-up was
+     * not cascade-driven (raw Fact event with no OriginatingEventID plumbed).
+     */
+    FOriginatingEventID LastIncomingEventID;
+
     void OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+    void OnPrereqFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);
     void OnPrereqResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
     void OnPrereqEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
     void TryActivateDeferred();
@@ -418,15 +448,17 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
-    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
     FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }
-    FORCEINLINE const TArray<FGameplayTag>& GetExitedGraphTagsOnAnyOutcome() const { return ExitedGraphTagsOnAnyOutcome; }
+    FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnAnyOutcome() const { return ResolvedGraphsOnAnyOutcome; }
+    FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }
+    FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnForward() const { return ResolvedGraphsOnForward; }
     FORCEINLINE const FText& GetDisplayName() const { return DisplayName; }
     FORCEINLINE const FText& GetDescription() const { return Description; }
     FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }
+    FORCEINLINE const FOriginatingEventID& GetLastIncomingEventID() const { return LastIncomingEventID; }
 };

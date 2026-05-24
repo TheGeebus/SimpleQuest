@@ -62,10 +62,14 @@ public:
      * Typical pattern: bind in Begin Play, wire pins, optionally call Cancel from End Play for per-actor lifetime.
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Events",
-        meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
-                HidePin = "WorldContextObject,ExposedEvents", DefaultToSelf = "WorldContextObject",
-                DisplayName = "Bind To Quest Event"))
-    static UQuestEventSubscription* BindToQuestEvent(UObject* WorldContextObject, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255);
+    meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
+            HidePin = "WorldContextObject,ExposedEvents", DefaultToSelf = "WorldContextObject",
+            DisplayName = "Bind To Quest Event"))
+    static UQuestEventSubscription* BindToQuestEvent(
+        UObject* WorldContextObject,
+        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255,
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
 
     /**
      * C++ one-liner for subscribing to a quest event. Resolves the SignalSubsystem from the world context, subscribes

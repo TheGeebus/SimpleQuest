@@ -21,6 +21,7 @@
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
@@ -1290,6 +1291,19 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 				"the graph and applies the configured Params to the entry Step's activation."),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_StartQuestline>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Prereq Gate
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqGate", "Prereq Gate"),
+			NSLOCTEXT("SimpleQuestEditor", "AddPrereqGateTooltip",
+				"Defer the activation cascade until a prerequisite expression is satisfied. Wire the Enter input from "
+				"the upstream cascade, the Prerequisites input from a prereq expression (leaves + combinators), and the "
+				"Forward output to whatever should fire once the conditions are met."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_PrereqGate>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 

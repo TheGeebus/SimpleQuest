@@ -17,6 +17,7 @@
 #include "Events/QuestProgressEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Signals/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestCatchUpFanout.h"
@@ -256,12 +257,12 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	//     entries — Progress for run-phase UI auto-binding, Blocked/Unblocked as a symmetric pair for
 	//     block-state UI. Designer-authored entries keep their authored flag values for these.
 	TMap<FGameplayTag, FObservedQuestEventSettings> EffectiveObserved = ObservedTags;
-	for (const FGameplayTag& ImplicitTag : GetImplicitlyObservedTags())
+	for (const FQuestObservedTagSpec& Spec : GetImplicitlyObservedTags())
 	{
-		if (!ImplicitTag.IsValid()) continue;
+		if (!Spec.Tag.IsValid()) continue;
 
-		const bool bDesignerAuthored = EffectiveObserved.Contains(ImplicitTag);
-		FObservedQuestEventSettings& Settings = EffectiveObserved.FindOrAdd(ImplicitTag);
+		const bool bDesignerAuthored = EffectiveObserved.Contains(Spec.Tag);
+		FObservedQuestEventSettings& Settings = EffectiveObserved.FindOrAdd(Spec.Tag);
 
 		if (!bDesignerAuthored)
 		{
@@ -269,6 +270,9 @@ void UQuestObserverComponent::RegisterQuestObserver()
 			Settings.bObserveProgress = true;
 			Settings.bObserveBlocked = true;
 			Settings.bObserveUnblocked = true;
+
+			// Routing comes from the bridge owner — designer-authored entries keep their authored Routing.
+			Settings.Routing = Spec.Routing;
 		}
 
 		// Force-on the give-flow invariant pair regardless of source — silencing either half breaks the
@@ -316,17 +320,17 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		
 		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
 		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
-		if (Settings.bObserveActivated)			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated);
-		if (Settings.bObserveActivationFailed)	SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed);
-		if (Settings.bObserveEnabled)			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled);
-		if (Settings.bObserveDisabled)			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled);
-		if (Settings.bObserveGiveBlocked)		SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked);
-		if (Settings.bObserveStarted)			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted);
-		if (Settings.bObserveProgress)			SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress);
-		if (Settings.bObserveCompleted)			SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted);
-		if (Settings.bObserveDeactivated)		SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated);
-		if (Settings.bObserveBlocked)			SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked);
-		if (Settings.bObserveUnblocked)			SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked);
+		if (Settings.bObserveActivated)			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated, Settings.Routing);
+		if (Settings.bObserveActivationFailed)	SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed, Settings.Routing);
+		if (Settings.bObserveEnabled)			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled, Settings.Routing);
+		if (Settings.bObserveDisabled)			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled, Settings.Routing);
+		if (Settings.bObserveGiveBlocked)		SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked, Settings.Routing);
+		if (Settings.bObserveStarted)			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted, Settings.Routing);
+		if (Settings.bObserveProgress)			SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress, Settings.Routing);
+		if (Settings.bObserveCompleted)			SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted, Settings.Routing);
+		if (Settings.bObserveDeactivated)		SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated, Settings.Routing);
+		if (Settings.bObserveBlocked)			SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked, Settings.Routing);
+		if (Settings.bObserveUnblocked)			SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked, Settings.Routing);
 
 		if (!WorldState) continue;
 

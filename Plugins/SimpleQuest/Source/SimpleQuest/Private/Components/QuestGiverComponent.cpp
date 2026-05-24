@@ -16,6 +16,7 @@
 #include "Events/QuestStartedEvent.h"
 #include "GameplayTagsManager.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Signals/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
@@ -429,10 +430,17 @@ int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 	return Count;
 }
 
-FGameplayTagContainer UQuestGiverComponent::GetImplicitlyObservedTags() const
+TArray<FQuestObservedTagSpec> UQuestGiverComponent::GetImplicitlyObservedTags() const
 {
-	FGameplayTagContainer Implicit = Super::GetImplicitlyObservedTags();
-	Implicit.AppendTags(QuestTagsToGive);
+	TArray<FQuestObservedTagSpec> Implicit = Super::GetImplicitlyObservedTags();
+	Implicit.Reserve(Implicit.Num() + QuestTagsToGive.Num());
+	for (const FGameplayTag& Tag : QuestTagsToGive)
+	{
+		// Giver narrows to ExactMatch — a Giver for "Quest X" cares about Quest X's lifecycle events, not
+		// inner-Step lifecycle. Hierarchical delivery would force per-handler filtering on every event;
+		// narrow subscription at the bus eliminates the noise upstream.
+		Implicit.Add(FQuestObservedTagSpec{Tag, ESignalRoutingFlags::None});
+	}
 	return Implicit;
 }
 

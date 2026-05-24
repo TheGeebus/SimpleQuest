@@ -7,6 +7,7 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
+struct FQuestGraphResolution;
 struct FQuestBoundaryCompletion;
 struct FIncomingSignalPinSpec;
 struct FQuestEntryRouteList;
@@ -82,7 +83,8 @@ protected:
 	 * @param OutBoundaryCompletions		Out-accumulator for boundary completions picked up as the walk crosses Exits. Caller appends
 	 *										these to the corresponding routing table so ChainToNextNodes can fire them at runtime.
 	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
-	 * @param OutExitedGraphTags
+	 * @param OutResolvedGraphs				Accumulator for graph resolutions as the walk encounters Outcome nodes. Gathers every declared
+	 *										outcome tag from a graph paired with that asset's root ID tag.
 	 */
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
@@ -92,7 +94,7 @@ protected:
 		TArray<FName>& OutTags,
 		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
 		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
-		TArray<FGameplayTag>* OutExitedGraphTags = nullptr);
+		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -298,8 +300,12 @@ private:
 		const FString& TagPrefix,
 		TArray<FString>& VisitedAssetPaths);
 
-	/** Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, GroupSignal). */
-	void CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
+	/**
+	 * Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, StartQuestline, PrereqGate, ...).
+	 * VisitedAssetPaths is forwarded to CompilePrerequisiteExpression for utility nodes that expose a Prerequisites
+	 * input pin (PrereqGate today; future utility nodes opt in by adding the pin).
+	 */
+	void CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
 
 	/** Pass 2: route each content node's output pins into the runtime routing sets. */
 	void CompileOutputWiring(

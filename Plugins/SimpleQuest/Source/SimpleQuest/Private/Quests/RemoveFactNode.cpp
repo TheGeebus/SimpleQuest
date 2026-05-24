@@ -19,7 +19,7 @@ void URemoveFactNode::ActivateInternal(FGameplayTag InContextualTag)
 			{
 				for (const FGameplayTag& FactTag : Facts)
 				{
-					WorldState->AddFact(FactTag, BroadcastMode);
+					WorldState->RemoveFact(FactTag, BroadcastMode);
 					UE_LOG(LogSimpleQuestActivation, Verbose,
 						TEXT("URemoveFactNode: removed fact '%s' (broadcastMode=%s)"),
 						*FactTag.ToString(),

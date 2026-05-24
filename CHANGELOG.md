@@ -29,11 +29,13 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [0.4.1] — In Development — Authoring Primitives + Subscriber Routing
 
-Patch release adding a new authoring primitive (the **Prereq Gate**
-utility node), giving subscribers a way to opt out of the bus's
-hierarchical-delivery default, and closing several latent gaps in
-the quest-resolution attribution chain that surfaced once the new
-primitives were exercised against real authoring patterns.
+Patch release adding new authoring primitives (the **Prereq Gate**
+utility node plus an **Add / Remove / Clear Facts** node trio for
+direct WorldState participation from questline graphs), giving
+subscribers a way to opt out of the bus's hierarchical-delivery
+default, and closing several latent gaps in the quest-resolution
+attribution chain that surfaced once the new primitives were
+exercised against real authoring patterns.
 
 ### Prereq Gate utility node
 
@@ -64,6 +66,38 @@ under the Flow Control context-menu category.
   dedup state on PIE re-entry.
 - **Per-pin labels + tooltips + node-level tooltip** so the gate's
   three-pin geometry reads cleanly in the graph.
+
+### Fact-manipulation utility nodes
+
+Three new utility nodes for direct WorldState fact manipulation from
+the questline graph: **Add Facts**, **Remove Facts**, and **Clear
+Facts**. Sibling to the Prereq Gate, Set Blocked, Clear Blocked, and
+Start Questline entries under the Flow Control context-menu category.
+
+Each node carries a `Facts` tag container (designer authors any
+number of fact tags per node) and forwards activation immediately
+after processing them.
+
+- **Add Facts.** Asserts each tag into the WorldState subsystem,
+  incrementing its ref-count. A `BroadcastMode` property chooses
+  how the per-fact `FWorldStateFactAddedEvent` fires: `BoundaryOnly`
+  (default; fires on the 0→1 transition only), `Always` (fires
+  every call), or `Suppress` (never fires).
+- **Remove Facts.** Decrements the ref-count for each tag. Same
+  `BroadcastMode` semantics for the corresponding
+  `FWorldStateFactRemovedEvent` — `BoundaryOnly` fires on the 1→0
+  transition.
+- **Clear Facts.** Hard-removes each fact regardless of ref-count.
+  A `bSuppressBroadcast` flag chooses whether to fire the removal
+  event (defaults to firing).
+
+Use Add / Remove for ref-counted state that multiple authored
+sources contribute to. Use Clear when authoring a definitive reset
+point. Together with the Prereq Gate, these nodes let questline
+graphs participate fully in the quest-agnostic fact system —
+adopters can publish facts that listeners outside the quest system
+react to, and gate quest activations on those same facts via the
+gate.
 
 ### Subscriber-side routing scope
 
@@ -179,6 +213,19 @@ in 0.5.0.
   SimpleQuest-specific `OriginatingEventID`. A gate whose prereqs
   include raw Fact leaves can double-fire under the same authoring
   pattern. Rare in practice; flag if it surfaces.
+
+### Fixed
+
+- **Tag rename propagation no longer suppressed by unrelated compile
+  errors.** Renaming a node while another node in the same compile
+  has an unrelated error (e.g., an unset Objective on a different
+  Step) used to silently drop the rename — the picker would update
+  but the `OldName → NewName` redirect never landed, leaving loaded
+  actor instances stuck on the old tag with nothing in the redirect
+  map to heal them. Both compile entry points (per-graph editor
+  button + Compile All toolbar command) now capture rename intent
+  regardless of compile success; the rename gets propagated even
+  when other errors fire elsewhere in the graph.
 
 ### SimpleUI — Typewriter Text Block expansion
 

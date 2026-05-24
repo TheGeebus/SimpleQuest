@@ -642,10 +642,17 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
         const bool bSuccess = Compiler->Compile(Graph);
 
+        // Capture rename intent regardless of compile success. Renames are detected via the GUID bridge — a
+        // structural property of the graph that's valid whether or not unrelated nodes failed validation in
+        // the same compile. Gating behind bSuccess silently drops the rename when ANY error fires elsewhere
+        // in the graph: RegisterCompiledTags still registers the new tag (so the picker updates), but the
+        // OldName → NewName redirect never lands, and loaded actor instances keep their stale tags with
+        // nothing in the redirect map to heal them.
+        AllRenames.Append(Compiler->GetDetectedRenames());
+
         if (bSuccess)
         {
             if (!bIsPrimary) ++NeighborSuccessCount;
-            AllRenames.Append(Compiler->GetDetectedRenames());
         }
         else if (!bIsPrimary)
         {

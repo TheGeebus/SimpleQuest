@@ -119,15 +119,19 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
 	FGameplayTag GetOwningStepTag() const { return OwningStepTag; }
 
-	/** Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
-	 *  that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
-	 *  Uncached — lookup-per-call via QSS's existing alias index. */
+	/**
+	 * Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
+	 * that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
+	 * Uncached — lookup-per-call via QSS's existing alias index.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
 	TArray<FGameplayTag> GetOwningStepAliasTags() const;
 
-	/** Convenience: every Trigger source currently registered against this Objective's owning Step (canonical
-	 *  + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag — closes the "where are
-	 *  the actors targeting me?" loop without adopters maintaining a parallel tag → actor registry. */
+	/**
+	 * Convenience: every Trigger source currently registered against this Objective's owning Step (canonical
+	 * + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag — closes the "where are
+	 * the actors targeting me?" loop without adopters maintaining a parallel tag → actor registry.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
 	TArray<FQuestRoleSourceInfo> GetTriggersTargetingThisStep() const;
 
@@ -170,6 +174,13 @@ protected:
 	 *
 	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
+	 *
+	 * UPCOMING CHANGE (0.5.0): the single-parameter signature here is scheduled for restructure into a two-
+	 * parameter shape — (FQuestObjectiveAuthoredConfig& Authored, FQuestObjectiveRuntimeContext& Runtime) —
+	 * pushing the Authored/Runtime split from a nested data shape onto the consumer boundary. Adopter override
+	 * sites will need to update their signature (FunctionRedirects can't auto-fix signature changes). Activation
+	 * payload data remains intact; the structural change is purely how the parts are delivered. Save/load
+	 * benefits from the stable shape, which is why the restructure lands alongside that release.
 	 *
 	 * @param Params a set of specific target actors in the scene
 	 */

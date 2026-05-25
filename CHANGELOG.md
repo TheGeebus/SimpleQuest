@@ -178,6 +178,55 @@ leaf name when `DisplayName` is unset). Phase 2 — UI display data
 sourced through the adopter-pluggable resolver pattern — lands
 in 0.5.0.
 
+### Source query API
+
+A new runtime channel exposing which Trigger / Giver / Observer
+components in the world handle a given quest tag. Closes the
+blocker-introspection loop — adopters with a quest tag in hand (from
+an `FQuestActivationBlocker` payload, a UI list, or anywhere else)
+can ask the framework "which actor offers this quest?" without
+maintaining a parallel tag → actor registry on their side.
+
+- **`Get Active Triggers For Tag`**, **`Get Active Givers For Tag`**,
+  **`Get Active Observers For Tag`** — BP-callable functions on the
+  SimpleQuest Blueprint library, returning an array of
+  `FQuestRoleSourceInfo` entries. Each entry carries the live
+  component reference, the live actor reference, and the tag the
+  query resolved through. Designers drive nav hints, world-map
+  markers, "head to X" arrows, and similar follow-ups directly from
+  these references.
+- **`Get Active Objective For Tag`** — returns the currently-live
+  `UQuestObjective` instance for a given Step tag. Useful for UI that
+  needs to bind directly to the Step's objective during its Live
+  window (progress UI, hint panels, etc.).
+- **Alias-aware queries.** A query against either the standalone
+  form of a LinkedQuestline-inlined Step or the contextual form
+  returns the same result. Designers don't need to know which
+  compile context a Step is currently active under — the answer is
+  consistent across every alias.
+- **Self-registration.** Trigger / Giver / Observer components
+  self-register at `BeginPlay` and unregister at `EndPlay` — no
+  designer wiring required. Stale entries from destroyed actors
+  filter out automatically.
+
+### Objective self-introspection
+
+`UQuestObjective` gains a small set of accessors letting an objective
+discover its own position in the framework's tag address space and
+find the actors targeting its Step — without manual outer-chain walks
+or adopter-side side-registries.
+
+- **`Get Owning Step Tag`** — the contextual tag of the Step that
+  hosts this objective. Valid from `OnObjectiveActivated` onward.
+- **`Get Owning Step Alias Tags`** — every additional perspective
+  tag the framework has registered for the Step (typically empty
+  outside the LinkedQuestline-inlined case).
+- **`Get Triggers Targeting This Step`** / **`Get Givers Targeting
+  This Step`** — convenience accessors chaining the owning-step tag
+  into the source query API above. Lets an objective enumerate the
+  actors authored to target it, e.g. to cache a trigger set at
+  activation and present "X of M complete" UI per-event.
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and
@@ -203,6 +252,12 @@ in 0.5.0.
   sites compile unchanged via the default argument; cascade-driven
   callers should pass the cascade's `OriginatingEventID` to enable
   per-event dedup downstream.
+- **`UQuestObjective::DispatchOnObjectiveActivated`** signature
+  widened to take a trailing `FGameplayTag InOwningStepTag`
+  parameter. Only direct C++ caller is `UQuestStep::ActivateInternal`
+  internally — adopter Blueprint objective subclasses and standard
+  C++ overrides of `OnObjectiveActivated_Implementation` are
+  unaffected.
 
 ### Known limitations
 

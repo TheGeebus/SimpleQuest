@@ -45,6 +45,16 @@ void UQuestTriggerComponent::BeginPlay()
 
         UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
+    
+    // Register this component as a Trigger source for its StepTagsToTrigger set. Observer registration runs in Super::BeginPlay
+    // (RegisterQuestObserver). EndPlay (handled in the Observer base) strips every role entry pointing at this component.
+    if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+        {
+            StateSubsystem->RegisterTriggerSource(this, StepTagsToTrigger);
+        }
+    }
 }
 
 void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)

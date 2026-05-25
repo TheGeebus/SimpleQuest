@@ -113,6 +113,8 @@ private:
 	UFUNCTION()
 	void OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
 
+	static void UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World);
+
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }

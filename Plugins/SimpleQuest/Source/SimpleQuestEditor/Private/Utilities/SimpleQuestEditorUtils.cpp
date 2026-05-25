@@ -252,7 +252,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllPaths.AddUnique({ Tag->GetTagName(), /*bIsRegisteredTag=*/ true });
+					AllPaths.AddUnique({ Tag->GetTagName(), true });
 				}
 			}
 		}
@@ -263,7 +263,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 		{
 			if (Tag.IsValid())
 			{
-				AllPaths.AddUnique({ Tag.GetTagName(), /*bIsRegisteredTag=*/ true });
+				AllPaths.AddUnique({ Tag.GetTagName(), true });
 			}
 		}
 	}

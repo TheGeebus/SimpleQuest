@@ -17,6 +17,8 @@
 #include "QuestStateSubsystem.generated.h"
 
 class UQuestDisplayData;
+class UQuestObjective;
+class UActorComponent;
 class AActor;
 class USignalSubsystem;
 class UWorldStateSubsystem;
@@ -287,6 +289,68 @@ public:
 	 */
 	TArray<FGameplayTag> GetAssetScopedAliasTagsForCanonical(FGameplayTag ContextualTag) const;
 
+	// ── Source registry queries ──────────────────────────────────────────────────────────────────────────
+	//
+	// Component-driven self-registration of which Trigger / Giver / Observer instances in the world handle a given
+	// quest tag. Powers the blocker-introspection loop: an adopter holding an FQuestActivationBlocker's leaf tag
+	// can ask "which Giver actor offers this quest?" without maintaining a parallel tag → actor registry.
+	//
+	// Registration alias-walks (ResolveCanonicalTags) at write time so a Giver authored under an alias and queried
+	// under canonical (or vice versa) surfaces correctly. Phase 1 returns live entries only (bIsActive=true);
+	// Phase 2 (0.5.0) adds an editor-baked QuestSourcesManifest channel that populates AuthoredActorPath /
+	// AuthoredLevel / AuthoredTransform for streamed-out content without changing the struct shape.
+
+	/** Returns every currently-registered UQuestTriggerComponent (or subclass) whose StepTagsToTrigger covers QueryTag,
+	 *  alias-walked. Empty when no triggers are registered against this tag or its aliases. */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Source")
+	TArray<FQuestRoleSourceInfo> GetActiveTriggersForTag(FGameplayTag QueryTag) const;
+
+	/** Returns every currently-registered UQuestGiverComponent (or subclass) whose QuestTagsToGive covers QueryTag,
+	 *  alias-walked. Empty when no givers are registered against this tag or its aliases. */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Source")
+	TArray<FQuestRoleSourceInfo> GetActiveGiversForTag(FGameplayTag QueryTag) const;
+
+	/** Returns every currently-registered UQuestObserverComponent (or subclass) whose ObservedTags covers QueryTag,
+	 *  alias-walked. Note: derived components (Trigger, Giver) also register under this role for tags they observe
+	 *  via the implicit-observed bridge — a single Giver component watching its QuestTagsToGive surfaces under both
+	 *  GetActiveGiversForTag (giver role) AND GetActiveObserversForTag (observer role on the same tags). */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Source")
+	TArray<FQuestRoleSourceInfo> GetActiveObserversForTag(FGameplayTag QueryTag) const;
+
+	/** Returns the currently-live UQuestObjective for the Step at QueryTag (alias-walked), or nullptr when no Step
+	 *  is currently active under that tag or no Objective is bound. Steps self-register their LiveObjective on
+	 *  activation and unregister on deactivation/completion. */
+	UFUNCTION(BlueprintCallable, Category = "Quest|Source")
+	UQuestObjective* GetActiveObjectiveForTag(FGameplayTag QueryTag) const;
+
+	// ── Source registry writes (framework infrastructure) ─────────────────────────────────────────────────
+	//
+	// Components call these from BeginPlay (register) and EndPlay (unregister). Not BlueprintCallable —
+	// designers don't drive the registry directly. Public-but-non-BP to avoid friend declarations across the
+	// component hierarchy; the methods themselves are cheap no-ops when the input is empty or invalid.
+
+	/** Registers Component as a Trigger source for every tag in AuthoredTags + each tag's canonical resolution.
+	 *  Idempotent — repeat calls replace the prior entry for this Component. */
+	void RegisterTriggerSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags);
+
+	/** Registers Component as a Giver source for every tag in AuthoredTags + each tag's canonical resolution. */
+	void RegisterGiverSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags);
+
+	/** Registers Component as an Observer source for every tag in AuthoredTags + each tag's canonical resolution. */
+	void RegisterObserverSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags);
+
+	/** Removes every per-role entry pointing at Component. Safe no-op when the component never registered. Called
+	 *  from component EndPlay — explicit removal keeps the registry compact across repeated activate/end cycles
+	 *  (weak-pointer queries already skip dead entries; this trims them up front). */
+	void UnregisterAllRoleSources(UActorComponent* Component);
+
+	/** Registers Objective under each tag in TagSet (canonical + aliases). The latest registration for any given tag
+	 *  wins — a Step re-activating under the same tag replaces the prior entry. */
+	void RegisterActiveObjective(UQuestObjective* Objective, const TArray<FGameplayTag>& TagSet);
+
+	/** Removes every entry pointing at Objective. Called from UQuestStep when LiveObjective transitions to null. */
+	void UnregisterActiveObjective(UQuestObjective* Objective);
+
 	// ── Display data queries ─────────────────────────────────────────────────────────────────────────────
 
 	/**
@@ -491,4 +555,49 @@ private:
 		
 	/** Derive a fallback display name from the tag's leaf segment when no authored DisplayName exists on the instance. */
 	FText DeriveDisplayNameFromTag(FGameplayTag Tag) const;
+
+	/**
+	 * Per-role source registries — TMap<TagKey, TArray<TWeakObjectPtr<UActorComponent>>>. Keys cover both authored
+	 * and canonical forms (registration alias-walks at write time via ResolveCanonicalTags so query-time lookup is
+	 * direct). Weak pointers ensure GC'd actors don't pollute results; explicit cleanup via UnregisterAllRoleSources
+	 * keeps the registry compact across repeated component activate/end cycles.
+	 */
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>> TriggerSourcesByTag;
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>> GiverSourcesByTag;
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>> ObserverSourcesByTag;
+
+	/**
+	 * Live-objective registry — one entry per (canonical or alias) tag pointing at the Step's bound LiveObjective.
+	 * Steps self-register from ActivateInternal and unregister from DeactivateInternal / OnObjectiveComplete /
+	 * ResetTransientState.
+	 */
+	TMap<FGameplayTag, TWeakObjectPtr<UQuestObjective>> ActiveObjectivesByTag;
+
+	/**
+	 * Shared body for the three Get*ForTag query methods. Alias-walks QueryTag, looks up against the per-role map,
+	 * filters dead weak refs, builds Phase-1-shaped FQuestRoleSourceInfo entries (bIsActive=true; authored fields
+	 * default). MatchedVia stamps the tag this query matched on (canonical or alias).
+	 */
+	TArray<FQuestRoleSourceInfo> QueryRoleSources(
+		FGameplayTag QueryTag,
+		const TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap) const;
+
+	/**
+	 * Shared body for the three Register*Source methods. Iterates AuthoredTags, resolves canonical for each, adds
+	 * Component under every distinct key (deduped). Replaces any prior entry for the same Component to keep
+	 * Idempotent semantics.
+	 */
+	void RegisterRoleSource(
+		UActorComponent* Component,
+		const FGameplayTagContainer& AuthoredTags,
+		TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap);
+
+	/**
+	 * Builds the full synonym set for QueryTag: the input + every canonical it alias-walks to + every alias each of
+	 * those canonicals fans out to. Catches every perspective form a component / objective could have been registered
+	 * under regardless of register-time alias-index state — components register at BeginPlay but graphs register
+	 * lazily via WarmReachableGraphs, so register-time canonical walks may miss aliases that hadn't been registered yet.
+	 * Order: input first, then canonicals, then aliases. Each entry unique.
+	 */
+	TArray<FGameplayTag> BuildTagSynonymSet(FGameplayTag QueryTag) const;
 };

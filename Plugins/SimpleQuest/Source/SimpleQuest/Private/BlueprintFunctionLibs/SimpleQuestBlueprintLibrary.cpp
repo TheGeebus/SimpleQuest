@@ -5,8 +5,6 @@
 #include "WorldState/WorldStateSubsystem.h"
 #include "Signals/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
-#include "Utilities/QuestTagComposer.h"
-#include "GameplayTagsManager.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestActivationRequestEvent.h"
@@ -18,6 +16,8 @@
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
 #include "Subsystems/QuestManagerSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
+#include "Objectives/QuestObjective.h"
 
 
 // -------------------------------------------------------------------------
@@ -170,5 +170,50 @@ void USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(UObject* WorldConte
     {
         Signals->UnsubscribeMessage(QuestTag, Handle);
     }
+}
+
+TArray<FQuestRoleSourceInfo> USimpleQuestBlueprintLibrary::GetActiveTriggersForTag(const UObject* WorldContext, FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetActiveTriggersForTag(QueryTag);
+    }
+    return {};
+}
+
+TArray<FQuestRoleSourceInfo> USimpleQuestBlueprintLibrary::GetActiveGiversForTag(const UObject* WorldContext, FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetActiveGiversForTag(QueryTag);
+    }
+    return {};
+}
+
+TArray<FQuestRoleSourceInfo> USimpleQuestBlueprintLibrary::GetActiveObserversForTag(const UObject* WorldContext, FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetActiveObserversForTag(QueryTag);
+    }
+    return {};
+}
+
+UQuestObjective* USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag(const UObject* WorldContext, FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetActiveObjectiveForTag(QueryTag);
+    }
+    return nullptr;
+}
+
+UQuestStateSubsystem* USimpleQuestBlueprintLibrary::GetQuestStateSubsystem(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 }
 

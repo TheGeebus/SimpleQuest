@@ -44,6 +44,16 @@ void UQuestObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		SignalSubsystem->UnsubscribeListener(this);
 	}
+	// Strip every per-role source-registry entry pointing at this component. Weak pointers would auto-skip on query, but
+	// explicit removal keeps the registry compact across repeated activate/end cycles (PIE bounce, level-streaming).
+	// Single call covers all three role maps.
+	if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+		{
+			StateSubsystem->UnregisterAllRoleSources(this);
+		}
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -295,6 +305,23 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+
+	// Register this component as an Observer source for every effective observed tag (designer-authored +
+	// implicit-bridge contributions). Derived components (Trigger, Giver) additionally register under
+	// their own role via their own BeginPlay path. EndPlay (UQuestObserverComponent::EndPlay) calls
+	// UnregisterAllRoleSources on the way out, which strips every per-role entry pointing at this component.
+	if (StateSubsystem)
+	{
+		FGameplayTagContainer ObserverKeys;
+		for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : EffectiveObserved)
+		{
+			if (Pair.Key.IsValid()) ObserverKeys.AddTag(Pair.Key);
+		}
+		StateSubsystem->RegisterObserverSource(this, ObserverKeys);
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : registered %d observer source tag(s) for actor '%s'"),
+			ObserverKeys.Num(),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"));
+	}
 
 	for (auto& QuestPair : EffectiveObserved)
 	{

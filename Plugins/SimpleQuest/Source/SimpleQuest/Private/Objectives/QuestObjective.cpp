@@ -3,10 +3,10 @@
 
 
 #include "Objectives/QuestObjective.h"
-
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Subsystems/QuestStateSubsystem.h"
 
 
 void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
@@ -32,8 +32,9 @@ void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveA
 	TargetClasses = Params.Authored.TargetClasses;
 }
 
-void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params)
+void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag)
 {
+	OwningStepTag = InOwningStepTag;
 	OnObjectiveActivated(Params);
 }
 
@@ -56,6 +57,10 @@ FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQues
 void UQuestObjective::DispatchOnObjectiveDeactivated()
 {
 	OnObjectiveDeactivated();
+	// Clear cached identity after the subclass override has had its last chance to read it — keeps GetOwningStepTag()
+	// honest after the Step releases this Objective. The Step also calls UnregisterActiveObjective on the QSS
+	// (see UQuestStep::DeactivateInternal / OnObjectiveComplete) so the live-objective registry stays in sync.
+	OwningStepTag = FGameplayTag();
 }
 
 void UQuestObjective::OnObjectiveDeactivated_Implementation()
@@ -141,5 +146,39 @@ void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 			OnEnableTarget.Broadcast(Loaded, bIsTargetEnabled);
 		}
 	}
+}
+
+TArray<FGameplayTag> UQuestObjective::GetOwningStepAliasTags() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	if (!QSS) return {};
+	return QSS->GetAssetScopedAliasTagsForCanonical(OwningStepTag);
+}
+
+TArray<FQuestRoleSourceInfo> UQuestObjective::GetTriggersTargetingThisStep() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	return QSS ? QSS->GetActiveTriggersForTag(OwningStepTag) : TArray<FQuestRoleSourceInfo>{};
+}
+
+TArray<FQuestRoleSourceInfo> UQuestObjective::GetGiversTargetingThisStep() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	return QSS ? QSS->GetActiveGiversForTag(OwningStepTag) : TArray<FQuestRoleSourceInfo>{};
 }
 

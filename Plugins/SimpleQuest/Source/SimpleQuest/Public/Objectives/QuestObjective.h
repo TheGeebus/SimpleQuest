@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestRoleSourceInfo.h"
 #include "QuestObjective.generated.h"
 
 
@@ -104,12 +105,42 @@ public:
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
 
+	// ── §4.33 Phase 1 — runtime self-introspection ─────────────────────────────────────────────────────────
+	//
+	// Lets an Objective discover its own identity in the framework's address space and find authored actors
+	// targeting its Step. OwningStepTag is cached at activation dispatch (lifetime-stable — the Objective
+	// doesn't migrate between Steps). Alias-tag and trigger / giver lookups chain through the QuestState-
+	// Subsystem's existing query surface; no per-instance caching for the rare-cheap cases.
+
+	/**
+	 * The ContextualTag of the Step that hosts this Objective. Valid from OnObjectiveActivated onward; empty
+	 * after OnObjectiveDeactivated.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	FGameplayTag GetOwningStepTag() const { return OwningStepTag; }
+
+	/** Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
+	 *  that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
+	 *  Uncached — lookup-per-call via QSS's existing alias index. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FGameplayTag> GetOwningStepAliasTags() const;
+
+	/** Convenience: every Trigger source currently registered against this Objective's owning Step (canonical
+	 *  + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag — closes the "where are
+	 *  the actors targeting me?" loop without adopters maintaining a parallel tag → actor registry. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FQuestRoleSourceInfo> GetTriggersTargetingThisStep() const;
+
+	/** Convenience: every Giver source currently registered against this Objective's owning Step. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FQuestRoleSourceInfo> GetGiversTargetingThisStep() const;
+
 	/**
 	 * Step-facing entry point for initializing objective target parameters. Thin C++ forwarder to the protected
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
@@ -266,6 +297,14 @@ private:
 	 */
 	UPROPERTY()
 	FQuestObjectiveActivationContext ForwardActivationParams;
+
+	/**
+	 * Cached identity of the Step that hosts this Objective. Set by UQuestStep::ActivateInternal via
+	 * DispatchOnObjectiveActivated before the BP event fires; cleared in DispatchOnObjectiveDeactivated.
+	 * Owning Step doesn't migrate during the Objective's lifetime — single cache, trivial property getter.
+	 */
+	UPROPERTY(VisibleAnywhere)
+	FGameplayTag OwningStepTag;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;

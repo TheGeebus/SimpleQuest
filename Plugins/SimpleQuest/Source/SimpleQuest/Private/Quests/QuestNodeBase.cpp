@@ -5,7 +5,7 @@
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Events/QuestEntryRecordedEvent.h"

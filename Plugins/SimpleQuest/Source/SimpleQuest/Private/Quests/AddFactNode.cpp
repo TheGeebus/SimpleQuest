@@ -4,7 +4,7 @@
 #include "Quests/AddFactNode.h"
 
 #include "SimpleQuestLog.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 void UAddFactNode::ActivateInternal(FGameplayTag InContextualTag)
 {

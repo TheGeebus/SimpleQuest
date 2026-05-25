@@ -1,8 +1,8 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-#include "WorldState/WorldStateSubsystem.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Utilities/SimpleCoreLog.h"
 
 

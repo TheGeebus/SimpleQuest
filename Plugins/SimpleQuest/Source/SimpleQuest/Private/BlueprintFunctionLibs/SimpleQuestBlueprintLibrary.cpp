@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
-#include "WorldState/WorldStateSubsystem.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "BlueprintAsync/QuestEventSubscription.h"
 #include "Engine/GameInstance.h"

@@ -71,6 +71,7 @@ public:
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;
 	virtual void GetNodeContextMenuActions(class UToolMenu* Menu, class UGraphNodeContextMenuContext* Context) const override;
+	virtual FString GetPinMetaData(FName InPinName, FName InKey) override;
 
 private:
 	/** Bitmask combining all enabled bExpose* flags. Stuffed into the factory call's ExposedEvents parameter

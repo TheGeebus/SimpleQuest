@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Utilities/SignalChannelUtils.h"
 

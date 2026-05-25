@@ -6,7 +6,7 @@
 #include "SimpleQuestLog.h"
 #include "Events/QuestBlockRequestEvent.h"
 #include "Events/QuestDeactivateRequestEvent.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 void USetBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {

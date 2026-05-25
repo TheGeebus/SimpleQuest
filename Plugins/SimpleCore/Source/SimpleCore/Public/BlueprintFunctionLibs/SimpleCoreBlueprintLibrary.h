@@ -7,8 +7,8 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "StructUtils/InstancedStruct.h"
-#include "WorldState/WorldStateSubsystem.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "SimpleCoreBlueprintLibrary.generated.h"
 
 class FOnSignalReceived;

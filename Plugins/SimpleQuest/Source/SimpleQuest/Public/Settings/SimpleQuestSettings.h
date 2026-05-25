@@ -24,6 +24,14 @@ enum class EQuestLogVerbosity : uint8
 	VeryVerbose UMETA(DisplayName = "Very Verbose"),
 };
 
+/**
+ * Broadcasts when AdditionalOutcomePickerCategories or AdditionalQuestlinePickerCategories changes via the
+ * editor's Project Settings UI. SimpleQuestEditor subscribes at module startup to refresh K2 node widgets
+ * across open Blueprint editors so existing pickers re-query GetPinMetaData and pick up the new categories
+ * without forcing designers to close + reopen the affected Blueprints.
+ */
+DECLARE_MULTICAST_DELEGATE(FOnPickerCategoriesChanged);
+
 
 UCLASS(config=SimpleQuest, DefaultConfig, meta=(DisplayName="Simple Quest"))
 class SIMPLEQUEST_API USimpleQuestSettings : public UDeveloperSettings
@@ -75,6 +83,67 @@ public:
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Module"))
 	EQuestLogVerbosity LogSimpleQuestVerbosity = EQuestLogVerbosity::Log;
+
+	// ── Authoring extensibility ──────────────────────────────────────────────────────────────────────────
+	//
+	// Designer-facing pickers (K2 node Outcome / Questline pins) narrow their gameplay-tag filter to
+	// SimpleQuest-internal namespaces by default so designers don't scroll through every project tag.
+	// Adopters bridging quest outcomes / identities with their own game tag trees can extend these
+	// filters via the two arrays below — no source fork required.
+
+	/**
+	 * Additional gameplay-tag namespaces shown in K2 node Outcome pickers alongside the default
+	 * SimpleQuest.Outcome namespace. Each entry is a tag prefix (e.g., "Game.Outcome",
+	 * "MyStudio.Quest.Outcome") whose descendants will appear in the picker. Empty by default.
+	 * Affects K2Node_CompleteObjectiveWithOutcome's OutcomeTag pin picker; runtime behavior unchanged.
+	 *
+	 * Two rules enforced at compose time (violations are dropped with a warning log):
+	 *  - Entries under the framework-owned SimpleQuest namespace are rejected — extend with your own
+	 *    namespace ("Game.*", "MyStudio.*", etc.).
+	 *  - Entries that overlap each other (duplicates, parent/child pairs) are pruned to one — the
+	 *    underlying gameplay-tag picker can't render overlapping namespace roots without crashing.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Authoring", meta=(DisplayName="Additional Outcome Picker Categories"))
+	TArray<FName> AdditionalOutcomePickerCategories;
+
+	/**
+	 * Additional gameplay-tag namespaces shown in K2 node Questline pickers alongside the default
+	 * SimpleQuest.Questline namespace. Affects K2Node_BindToQuestEvent's QuestTag pin picker; runtime
+	 * behavior unchanged.
+	 *
+	 * Same two compose-time rules as the Outcome list above: no SimpleQuest sub-namespaces, no
+	 * overlapping entries.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Authoring", meta=(DisplayName="Additional Questline Picker Categories"))
+	TArray<FName> AdditionalQuestlinePickerCategories;
+
+	/** Fires when AdditionalOutcomePickerCategories or AdditionalQuestlinePickerCategories changes. */
+	static FOnPickerCategoriesChanged OnPickerCategoriesChanged;
+	
+	/**
+	 * Composes the default outcome namespace with adopter-configured additional namespaces into the
+	 * comma-separated string format Categories meta expects. Default is always first. Overlapping
+	 * adopter entries are dropped and logged.
+	 */
+	FString ComposeOutcomePickerCategories() const;
+
+	/**
+	 * Composes the default questline namespace with adopter-configured additional namespaces. Default
+	 * is always first. Overlapping adopter entries are dropped and logged.
+	 */
+	FString ComposeQuestlinePickerCategories() const;
+
+private:
+	/**
+	 * Shared composition body for both picker-category helpers. Always keeps DefaultNamespace; iterates
+	 * AdditionalCategories in authored order, keeping each entry only when it doesn't overlap (identity,
+	 * ancestor, or descendant in tag-namespace hierarchy) with any already-kept entry. Overlapping
+	 * entries are dropped with a warning log — SGameplayTagPicker's STreeView crashes when the
+	 * Categories list contains overlapping roots.
+	 */
+	static FString ComposePickerCategories(const FString& DefaultNamespace, const TArray<FName>& AdditionalCategories);
+
+public:
 
 	/**
 	 * Pushes every verbosity value to its log category. Called from PostEditChangeProperty for live-apply during editor

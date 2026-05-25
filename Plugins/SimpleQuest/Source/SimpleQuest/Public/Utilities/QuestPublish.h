@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/QuestNodeBase.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 
 /**

@@ -15,10 +15,10 @@
 #include "Objectives/QuestObjective.h"
 #include "Display/QuestDisplayData.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 namespace

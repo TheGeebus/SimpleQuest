@@ -9,7 +9,7 @@
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 

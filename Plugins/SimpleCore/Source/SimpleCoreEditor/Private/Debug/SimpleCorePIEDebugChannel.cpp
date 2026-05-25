@@ -6,7 +6,7 @@
 #include "SimpleCoreEditorLog.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 void FSimpleCorePIEDebugChannel::Initialize()
 {

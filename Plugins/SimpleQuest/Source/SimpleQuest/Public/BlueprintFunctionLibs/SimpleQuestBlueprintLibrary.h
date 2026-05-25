@@ -10,7 +10,7 @@
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 

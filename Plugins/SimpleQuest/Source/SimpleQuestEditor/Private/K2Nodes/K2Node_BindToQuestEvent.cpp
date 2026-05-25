@@ -13,6 +13,7 @@
 #include "KismetCompiler.h"
 #include "SimpleQuestLog.h"
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "UObject/WeakObjectPtr.h"
 
 
@@ -672,6 +673,19 @@ void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraph
     }
 }
 
+FString UK2Node_BindToQuestEvent::GetPinMetaData(FName InPinName, FName InKey)
+{
+    // Override the QuestTag pin's Categories filter to compose the default SimpleQuest.Questline
+    // namespace with adopter-configured additional namespaces from USimpleQuestSettings. Inherited
+    // UPARAM meta on USimpleQuestBlueprintLibrary::BindToQuestEvent is compile-time baked; this
+    // override is what lets the picker filter stay settings-driven.
+    if (InPinName == TEXT("QuestTag") && InKey == TEXT("Categories"))
+    {
+        return GetDefault<USimpleQuestSettings>()->ComposeQuestlinePickerCategories();
+    }
+    return Super::GetPinMetaData(InPinName, InKey);
+}
+
 int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
 {
     int32 Mask = 0;
@@ -687,3 +701,4 @@ int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
     if (bExposeOnUnblocked)   Mask |= static_cast<int32>(EQuestEventTypes::Unblocked);
     return Mask;
 }
+

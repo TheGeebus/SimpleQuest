@@ -4,7 +4,7 @@
 #include "Quests/ClearFactNode.h"
 
 #include "SimpleQuestLog.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 void UClearFactNode::ActivateInternal(FGameplayTag InContextualTag)
 {

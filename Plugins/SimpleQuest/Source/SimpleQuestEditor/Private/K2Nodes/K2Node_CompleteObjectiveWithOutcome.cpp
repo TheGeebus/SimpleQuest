@@ -11,6 +11,7 @@
 #include "K2Nodes/Slate/SGraphNode_CompleteObjective.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Objectives/QuestObjective.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -432,9 +433,12 @@ bool UK2Node_CompleteObjectiveWithOutcome::IsCompatibleWithGraph(const UEdGraph*
 FString UK2Node_CompleteObjectiveWithOutcome::GetPinMetaData(FName InPinName, FName InKey)
 {
 	// FGameplayTag struct-pin customization reads "Categories" key to filter the picker namespace.
+	// Composes the default SimpleQuest.Outcome namespace with adopter-configured additional namespaces
+	// from USimpleQuestSettings — lets adopters bridge their own outcome tag trees into quest pickers
+	// without forking source.
 	if (InPinName == TEXT("OutcomeTag") && InKey == TEXT("Categories"))
 	{
-		return TEXT("SimpleQuest.Outcome");
+		return GetDefault<USimpleQuestSettings>()->ComposeOutcomePickerCategories();
 	}
 	return Super::GetPinMetaData(InPinName, InKey);
 }

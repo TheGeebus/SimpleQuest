@@ -5,7 +5,7 @@
 
 #include "SimpleQuestLog.h"
 #include "Events/QuestlineStartRequestEvent.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 void UStartQuestlineNode::ActivateInternal(FGameplayTag InContextualTag)
 {

@@ -18,12 +18,12 @@
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestCatchUpFanout.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SignalChannelUtils.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 UQuestObserverComponent::UQuestObserverComponent()

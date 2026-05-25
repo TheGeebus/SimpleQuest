@@ -9,10 +9,10 @@
 #include "Engine/World.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/PrerequisiteExpression.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 namespace FPrereqLeafSubscription
 {

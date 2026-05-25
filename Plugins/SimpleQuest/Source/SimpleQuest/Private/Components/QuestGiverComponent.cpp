@@ -17,12 +17,12 @@
 #include "GameplayTagsManager.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleCoreDebug.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 UQuestGiverComponent::UQuestGiverComponent()

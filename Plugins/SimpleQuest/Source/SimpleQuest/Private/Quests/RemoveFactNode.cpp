@@ -4,7 +4,7 @@
 #include "Quests/RemoveFactNode.h"
 
 #include "SimpleQuestLog.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 void URemoveFactNode::ActivateInternal(FGameplayTag InContextualTag)
 {

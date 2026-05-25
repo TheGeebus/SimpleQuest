@@ -7,7 +7,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Types/SignalRoutingFlags.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 #include "Utilities/SimpleCoreLog.h"
 #include "SignalSubsystem.generated.h"
 

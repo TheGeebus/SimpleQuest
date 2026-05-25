@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "QuestlineNode_AddFact.generated.h"
 
 UCLASS()

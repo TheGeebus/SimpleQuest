@@ -17,12 +17,12 @@
 #include "Events/QuestUnblockedEvent.h"
 #include "Utilities/QuestCatchUpFanout.h"
 #include "GameplayTagsManager.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SignalChannelUtils.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 void UQuestEventSubscription::Activate()

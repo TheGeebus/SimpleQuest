@@ -79,6 +79,16 @@ private:
 	 */
 	void MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset);
 	FDelegateHandle OnAssetLoadedHandle;
+
+	/**
+	 * Bound to USimpleQuestSettings::OnPickerCategoriesChanged in StartupModule. Walks every open Blueprint
+	 * editor and calls ReconstructNode on K2 nodes whose pickers consult the changed settings, so existing
+	 * picker widgets re-query GetPinMetaData and reflect the new categories without designers having to
+	 * close + reopen the BP. ReconstructNode preserves pin connections + node placement; only the picker's
+	 * Slate widget gets rebuilt, picking up the fresh Categories filter.
+	 */
+	void HandlePickerCategoriesChanged();
+	FDelegateHandle PickerCategoriesChangedHandle;
 	
 	bool bIsRegisteringTags = false;
 

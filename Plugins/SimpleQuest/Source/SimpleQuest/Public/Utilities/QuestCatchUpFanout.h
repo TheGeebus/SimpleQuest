@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 
 
 class UQuestStateSubsystem;
@@ -45,5 +46,5 @@ namespace FQuestCatchUpFanout
 	 * Null / invalid inputs return empty without warning — defensive default for early-shutdown / late-construction
 	 * call sites (e.g. catch-up firing during world teardown after the state subsystem has already deinitialized).
 	 */
-	SIMPLEQUEST_API TArray<FGameplayTag> EnumerateTagsForCatchUp(FGameplayTag SubscribedTag, const UQuestStateSubsystem* StateSubsystem);
+	SIMPLEQUEST_API TArray<FGameplayTag> EnumerateTagsForCatchUp(FGameplayTag SubscribedTag, const UQuestStateSubsystem* StateSubsystem, ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 }

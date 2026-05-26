@@ -39,7 +39,7 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
             for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
             {
                 if (!Record.Listener.IsValid()) continue;
-                if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
+                if (!bAtExactChannel && !FSignalRoutingDefaults::IncludesDescendants(Record.Routing)) continue;
                 Record.Dispatcher(Channel, Payload);
             }
             ++LevelsFired;
@@ -73,7 +73,7 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
     }
 }
 
-FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate, ESignalRoutingFlags Routing)
+FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, FOnSignalReceived Delegate, ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 
@@ -107,7 +107,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, 
     return Handle;
 }
 
-FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate, ESignalRoutingFlags Routing)
+FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, UScriptStruct* PayloadType, FOnSignalReceived Delegate, ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 
@@ -227,7 +227,7 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
                     for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
                     {
                         if (!Record.Listener.IsValid()) continue;
-                        if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
+                        if (!bAtExactChannel && !FSignalRoutingDefaults::IncludesDescendants(Record.Routing)) continue;
                         Record.Dispatcher(Channel, Payload);
                     }
                     ++LevelsFired;
@@ -264,7 +264,7 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
                     {
                         if (Delivered.Contains(Record.Handle)) { ++DedupedSkipped; continue; }
                         if (!Record.Listener.IsValid()) continue;
-                        if (!bAtExactChannel && !EnumHasAnyFlags(Record.Routing, ESignalRoutingFlags::Descendants)) continue;
+                        if (!bAtExactChannel && !FSignalRoutingDefaults::IncludesDescendants(Record.Routing)) continue;
 
                         const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(Channels, CurrentTag);
                         Record.Dispatcher(MatchedChannel, Payload);

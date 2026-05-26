@@ -89,7 +89,7 @@ public:
         UObject* WorldContextObject,
         FGameplayTag Channel,
         const FOnSignalReceived& OnSignalReceived,
-        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
      * Typed-filter variant of SubscribeMessage. Same delivery shape — handler receives the matched channel
@@ -111,7 +111,7 @@ public:
         FGameplayTag Channel,
         UPARAM(meta = (MetaStruct = "/Script/SimpleCore.SignalEventBase")) UScriptStruct* PayloadType,
         const FOnSignalReceived& OnSignalReceived,
-        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /

@@ -23,5 +23,5 @@ struct SIMPLEQUEST_API FQuestObservedTagSpec
 	 * Step events. Default = ExactMatch | Descendants (matches Observer's hierarchical default).
 	 */
 	UPROPERTY(BlueprintReadOnly)
-	ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe;
+	ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
 };

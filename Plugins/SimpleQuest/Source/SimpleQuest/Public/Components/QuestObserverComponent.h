@@ -105,8 +105,8 @@ struct FObservedQuestEventSettings
 	 * observer. Set to ExactMatch alone when descendant events would be noise (e.g., observing a Quest
 	 * tag where inner-Step events shouldn't trigger this binding).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags"))
-	ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
 };
 
 

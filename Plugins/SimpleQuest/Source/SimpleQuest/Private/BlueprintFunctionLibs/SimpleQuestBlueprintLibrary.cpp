@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
+
+#include "SimpleQuestLog.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
@@ -155,10 +157,10 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
 // Bind to Quest Event
 // -------------------------------------------------------------------------
 
-UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents, int32 Routing)
+UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents, ESignalRoutingMode Routing)
 {
     UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
-    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents, static_cast<ESignalRoutingFlags>(Routing));
+    Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents, Routing);
     Sub->RegisterWithGameInstance(WorldContextObject);
     return Sub;
 }

@@ -22,10 +22,10 @@ struct FSignalSubscriberRecord
     FDelegateHandle Handle;
     TFunction<void(FGameplayTag, const FInstancedStruct&)> Dispatcher;
     /**
-     * Per-subscription routing scope. Filters which ancestor-walk visits this subscription receives.
-     * Defaults to Descendants.
+     * Per-subscription routing mode. Picks which directional walks this subscription participates in. Defaults
+     * to Descendants — receive on the exact channel OR any descendant (the bus's hierarchical-delivery default).
      */
-    ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe;
+    ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
 };
 
 /**
@@ -96,7 +96,7 @@ public:
         FGameplayTag Channel,
         ListenerType* Listener,
         void(ListenerType::* Function)(FGameplayTag, const T&),
-        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
+        ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Subscribe to messages on Channel where the payload IS-A T. Callback receives the original FInstancedStruct preserving the
@@ -107,7 +107,7 @@ public:
         FGameplayTag Channel,
         ListenerType* Listener,
         void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&),
-        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
+        ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
     
     /** Remove a subscription by the handle returned from SubscribeMessage. */
     void UnsubscribeMessage(FGameplayTag Channel, FDelegateHandle Handle);
@@ -125,7 +125,7 @@ public:
     FDelegateHandle SubscribeMessageDynamic(
         FGameplayTag Channel,
         FOnSignalReceived Delegate,
-        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
+        ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Typed-filter variant of SubscribeMessageDynamic. The bound handler only fires when the incoming
@@ -140,7 +140,7 @@ public:
         FGameplayTag Channel,
         UScriptStruct* PayloadType,
         FOnSignalReceived Delegate,
-        ESignalRoutingFlags Routing = SignalRoutingDefaults::HierarchicalSubscribe);
+        ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
      * Remove every subscription on every channel whose Listener is the given object. Single-call cleanup intended for
@@ -180,7 +180,7 @@ void USignalSubsystem::PublishMessage(const FGameplayTag Channel, const T& Paylo
 
 template<typename T, typename ListenerType>
 FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, ListenerType* Listener,
-                                                   void(ListenerType::* Function)(FGameplayTag, const T&), ESignalRoutingFlags Routing)
+                                                   void(ListenerType::* Function)(FGameplayTag, const T&), ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 
@@ -209,7 +209,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, L
 
 template<typename T, typename ListenerType>
 FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel, ListenerType* Listener,
-                                                      void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&), ESignalRoutingFlags Routing)
+                                                      void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&), ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 

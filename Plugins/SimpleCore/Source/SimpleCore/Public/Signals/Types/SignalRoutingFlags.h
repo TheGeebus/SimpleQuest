@@ -7,49 +7,45 @@
 #include "SignalRoutingFlags.generated.h"
 
 /**
- * Shared 4-way routing vocabulary for the SimpleCore signal bus. Used on both subscribe and publish sides. 
- * The flag names describe positions in the tag hierarchy relative to the named tag; semantics mirror naturally
- * across sides.
+ * Routing mode for signal-bus subscribe / publish calls. Picks which directional walks the call participates
+ * in relative to the bound tag.
  *
- * - Subscribe-side reading: which publish channels do I want events from?
- *  - Ancestors   — published events on my ancestors
- *  - Descendants — published events on my descendants 
- *
- * - Publish-side reading (future): which subscribers do I want to reach?
- *  - Ancestors   — additional subscribers above the published channel (walk ancestor tags)
- *  - Descendants — additional subscribers below the published channel (walk descendant trees)
- *
- * Default for subscribe is ExactMatch | Descendants — preserves the bus's current hierarchical behavior.
- * Subscribers narrow to ExactMatch when ancestor-walk delivery would be noise (e.g., a Giver that cares
- * only about its specific quest tag, not the quest's inner Step publishes).
+ * - ExactMatch — receive/deliver only on the named tag itself, no walks.
+ * - Ancestors — additionally walk upward to subscribers/publishes on ancestor channels (publish-side descendant-
+ *   walk; reserved for future — currently a no-op on subscribe side, has no publish-side dispatch yet).
+ * - Descendants — additionally walk downward to events published on descendant channels (subscribe-side ancestor-
+ *   walk; the bus's existing hierarchical delivery behavior).
+ * - Bidirectional — both Ancestors and Descendants walks active.
  */
-UENUM(Flags, BlueprintType)
-enum class ESignalRoutingFlags : uint8
+UENUM(BlueprintType)
+enum class ESignalRoutingMode : uint8
 {
-    ExactMatchOnly          = 0       UMETA(Hidden, DisplayName = "Exact Match", ToolTip = "Exact-match only — receive/deliver to the named tag itself."),
-    Ancestors               = 1 << 0  UMETA(DisplayName = "Ancestors",   ToolTip = "Extend scope upward — also include tags above the named tag."),
-    Descendants             = 1 << 1  UMETA(DisplayName = "Descendants", ToolTip = "Extend scope downward — also include tags below the named tag."),
+    ExactMatch     UMETA(DisplayName = "Exact Match",    ToolTip = "Receive/deliver only on the exact named tag. No ancestor or descendant walks."),
+    Ancestors      UMETA(DisplayName = "Ancestors",      ToolTip = "Also include events on ancestor channels. Reserved for future — publish-side descendant-walk not yet implemented."),
+    Descendants    UMETA(DisplayName = "Descendants",    ToolTip = "Also include events published on descendant channels. The bus's existing hierarchical delivery default."),
+    Bidirectional  UMETA(DisplayName = "Bidirectional",  ToolTip = "Both Ancestors and Descendants walks active."),
 };
-ENUM_CLASS_FLAGS(ESignalRoutingFlags);
 
-namespace SignalRoutingDefaults
+namespace FSignalRoutingDefaults
 {
-    /** No scope extensions — receive/deliver only on the exact named channel. */
-    inline constexpr ESignalRoutingFlags ExactOnly = ESignalRoutingFlags::ExactMatchOnly;
+    /** Subscribe-side hierarchical default — receive on the exact channel OR any descendant. Preserves the
+     *  bus's prior delivery behavior for all existing call sites. */
+    inline constexpr ESignalRoutingMode HierarchicalSubscribe = ESignalRoutingMode::Descendants;
 
-    /**
-     * Subscribe-side hierarchical default — receive on the exact channel OR any descendant (the bus's
-     * current ancestor-walk behavior). Preserves prior behavior for all existing call sites.
-     */
-    inline constexpr ESignalRoutingFlags HierarchicalSubscribe = ESignalRoutingFlags::Descendants;
+    /** Convenience alias for "no scope extensions" callers — receive/deliver only on the exact named channel. */
+    inline constexpr ESignalRoutingMode ExactOnly = ESignalRoutingMode::ExactMatch;
 
-    /**
-     * Publish-side hierarchical default — reserved for the publish-side bitmask design. Deliver on the
-     * exact channel AND every ancestor (the bus's current ancestor-walk-on-publish behavior).
-     */
-    inline constexpr ESignalRoutingFlags HierarchicalPublish = ESignalRoutingFlags::Ancestors;
+    /** True when the given mode opts into receiving events from descendant channels (Descendants or Bidirectional).
+     *  Replaces the prior EnumHasAnyFlags(Routing, ::Descendants) pattern at dispatch sites. */
+    inline constexpr bool IncludesDescendants(ESignalRoutingMode Mode)
+    {
+        return Mode == ESignalRoutingMode::Descendants || Mode == ESignalRoutingMode::Bidirectional;
+    }
 
-    /** Both directions — full vertical chain through the named tag. */
-    inline constexpr ESignalRoutingFlags Bidirectional = static_cast<ESignalRoutingFlags>(
-        static_cast<uint8>(ESignalRoutingFlags::Ancestors) | static_cast<uint8>(ESignalRoutingFlags::Descendants));
+    /** True when the given mode opts into receiving events from ancestor channels (Ancestors or Bidirectional).
+     *  Reserved for future publish-side descendant-walk dispatch. */
+    inline constexpr bool IncludesAncestors(ESignalRoutingMode Mode)
+    {
+        return Mode == ESignalRoutingMode::Ancestors || Mode == ESignalRoutingMode::Bidirectional;
+    }
 }

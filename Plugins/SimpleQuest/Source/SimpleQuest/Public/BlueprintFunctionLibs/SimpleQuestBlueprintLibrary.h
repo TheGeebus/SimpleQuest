@@ -73,7 +73,7 @@ public:
         UObject* WorldContextObject,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255,
-        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleCore.ESignalRoutingFlags")) int32 Routing = 2);  // 2 = ESignalRoutingFlags::Descendants
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
      * C++ one-liner for subscribing to a quest event. Resolves the SignalSubsystem from the world context, subscribes

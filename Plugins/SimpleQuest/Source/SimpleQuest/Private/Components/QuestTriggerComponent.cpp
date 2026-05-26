@@ -162,7 +162,7 @@ TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags(
     {
         // Trigger keeps default routing for now — Step tags subscribed hierarchically preserve current
         // behavior. Audit (TODO §4.38) classifies whether Trigger should narrow to ExactMatch in a future pass.
-        Implicit.Add(FQuestObservedTagSpec{Tag, SignalRoutingDefaults::HierarchicalSubscribe});
+        Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::HierarchicalSubscribe});
     }
     return Implicit;
 }

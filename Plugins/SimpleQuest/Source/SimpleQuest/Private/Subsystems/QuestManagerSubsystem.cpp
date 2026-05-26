@@ -421,6 +421,30 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             ++NewlyRegistered;
         }
     }
+
+    // Asset-level display data — RegisterAllNodePerspectives writes per-NODE display data, but the
+    // questline ASSET (UQuestlineGraph) carries its own DisplayName / Description / DisplayData fields that need
+    // their own write to QSS under the questline's own tag. Without this, adopters querying GetDisplayName /
+    // GetDisplayDescription / GetDisplayData on the questline tag get an empty record (or a stale leftover from
+    // some unrelated registry write); the asset's authored fields are silently dropped.
+    if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
+    {
+        const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
+        const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
+        if (QuestlineTag.IsValid())
+        {
+            StateSubsystem->RegisterQuestTag(QuestlineTag);
+            StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
+        }
+        else
+        {
+            UE_LOG(LogSimpleQuestActivation, Warning,
+                TEXT("RegisterQuestlineGraph: '%s' — composed questline tag '%s' isn't registered; asset-level display data not stored. "
+                     "Adopters querying display data on this tag will receive empty + Warning."),
+                *Graph->GetName(), *QuestlineTagString);
+        }
+    }
+    
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName), %d duplicate authored-guid"),
         *Graph->GetName(),
         NewlyRegistered,
@@ -661,6 +685,52 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 
     RegisterQuestlineGraph(Graph);
 
+    // Asset-level activation publish on the questline's own tag channel. Symmetric with PublishGraphResolutions's
+    // close-out publish (§4.36) — adopters subscribed at the questline tag with ExactMatch routing previously
+    // received nothing at start because every Activated/Started publish lived on descendant content-node tags.
+    // This publish closes that gap with a direct asset-level signal. Payload carries the questline's identity +
+    // forwards Instigator / CustomData from the caller's activation params so adopters can attribute "who started
+    // this questline." PrereqStatus is default-constructed: asset-level activation doesn't have a prereq concept
+    // (gating lives on individual content nodes inside the graph).
+    if (QuestSignalSubsystem)
+    {
+        const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
+        const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
+        if (QuestlineTag.IsValid())
+        {
+            FQuestEventPayload Payload;
+            Payload.NodeInfo.QuestTag = QuestlineTag;
+            Payload.Instigator = Params.Dynamic.Instigator;
+            Payload.CustomData = Params.Dynamic.CustomData;
+            QuestSignalSubsystem->PublishMessage<FQuestActivatedEvent>(
+                QuestlineTag,
+                FQuestActivatedEvent(QuestlineTag, Payload, FQuestPrereqStatus{}));
+
+            // Asset-level Started publish — parallel to the Activated above. For asset-level, scope entry IS the
+            // Live transition (assets don't go through a giver gate), so Activated and Started fire together
+            // here. Adopters who bind to OnStarted on the questline tag (triggers, mission-active UI, etc.) get
+            // the asset-level Live signal alongside subscribers bound to OnActivated.
+            QuestSignalSubsystem->PublishMessage<FQuestStartedEvent>(
+                QuestlineTag,
+                FQuestStartedEvent(QuestlineTag, Payload, nullptr));
+
+            // Asset-level Live fact write — symmetric with PublishGraphResolutions's Completed fact write at
+            // resolution (§4.36). Persists past the transient publishes above so late subscribers reconstruct
+            // Activated + Started via UQuestEventSubscription's catch-up. Uses AddStateFactAcrossPerspectives
+            // (matching the close-out pattern) to handle alias forms; for top-level asset tags this is
+            // effectively a single-tag write.
+            AddStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Live);
+        }
+        else
+        {
+            UE_LOG(LogSimpleQuestActivation, Warning,
+                TEXT("ActivateQuestlineGraph: '%s' — composed tag '%s' isn't registered with the runtime tag manager. "
+                     "Asset-level Activated publish skipped; adopters bound on the questline tag won't receive a start signal."),
+                *Graph->GetName(),
+                *QuestlineTagString);
+        }
+    }
+
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s) (CustomData %s, Instigator %s)"),
         *Graph->GetName(), Graph->GetEntryNodeTags().Num(),
         Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
@@ -737,7 +807,9 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
 void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity)
 {
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleOnNodeCompleted: '%s' outcome='%s' path='%s'"),
-        *Node->GetContextualTag().ToString(), *OutcomeTag.ToString(), *PathIdentity.ToString());
+        *Node->GetContextualTag().ToString(),
+        *OutcomeTag.ToString(),
+        *PathIdentity.ToString());
 
     UQuestStep* Step = Cast<UQuestStep>(Node);
     if (Step

@@ -375,7 +375,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		// synchronously inside RegisterQuestObserver (called from BeginPlay), so there's no deferral window during
 		// which a live event could fire and need deduplication. The K2 node defers to next tick to avoid racing the BP
 		// execution stack; the observer has no such constraint.
-		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem);
+		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Settings.Routing);
 
 		for (const FGameplayTag& EachTag : CatchUpTags)
 		{

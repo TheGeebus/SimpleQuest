@@ -26,19 +26,19 @@ void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContext
     }
 }
 
-void USimpleCoreBlueprintLibrary::SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived, int32 Routing)
+void USimpleCoreBlueprintLibrary::SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived, ESignalRoutingMode Routing)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
-        Signals->SubscribeMessageDynamic(Channel, OnSignalReceived, static_cast<ESignalRoutingFlags>(Routing));
+        Signals->SubscribeMessageDynamic(Channel, OnSignalReceived, Routing);
     }
 }
 
-void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextObject, FGameplayTag Channel, UScriptStruct* PayloadType, const FOnSignalReceived& OnSignalReceived, int32 Routing)
+void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextObject, FGameplayTag Channel, UScriptStruct* PayloadType, const FOnSignalReceived& OnSignalReceived, ESignalRoutingMode Routing)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
-        Signals->SubscribeMessageOfType(Channel, PayloadType, OnSignalReceived, static_cast<ESignalRoutingFlags>(Routing));
+        Signals->SubscribeMessageOfType(Channel, PayloadType, OnSignalReceived, Routing);
     }
 }
 

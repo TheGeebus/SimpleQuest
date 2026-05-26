@@ -194,7 +194,7 @@ public:
      * BP-facing entry point so UK2Node_AsyncAction's subclass iteration doesn't auto-register a duplicate
      * palette entry for us.
      */
-    void InitFromFactory(UObject* InWorldContextObject, FGameplayTag InQuestTag, int32 InExposedEventsMask, ESignalRoutingFlags InRouting)
+    void InitFromFactory(UObject* InWorldContextObject, FGameplayTag InQuestTag, int32 InExposedEventsMask, ESignalRoutingMode InRouting)
     {
         WorldContextObjectWeak = InWorldContextObject;
         QuestTag = InQuestTag;
@@ -213,11 +213,11 @@ private:
     FGameplayTag QuestTag;
     int32 ExposedEventsMask = 0;
     /**
-     * Per-subscription routing scope applied to every internal SubscribeMessage call. Defaults to
+     * Per-subscription routing mode applied to every internal SubscribeMessage call. Defaults to
      * Descendants (hierarchical — preserves the prior per-quest-event behavior). Designers narrow via
      * the BindToQuestEvent K2 node's Routing pin when ancestor-walk delivery is noise.
      */
-    ESignalRoutingFlags Routing = ESignalRoutingFlags::Descendants;
+    ESignalRoutingMode Routing = ESignalRoutingMode::Descendants;
 
     FDelegateHandle ActivatedHandle;
     FDelegateHandle EnabledHandle;

@@ -60,7 +60,7 @@ void UQuestEventSubscription::Activate()
     // Subscribe only to the channels the K2 node has exposed. Each guard saves both the SubscribeMessage cost and
     // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side. Routing applies
     // uniformly to all ten subscriptions — designer chose at the BindToQuestEvent call site whether they want
-    // hierarchical (Descendants) or narrow (ExactOnly) delivery for this subscription instance.
+    // hierarchical (Descendants) or narrow (ExactMatch) delivery for this subscription instance.
 
     // Offer phase
     if (IsExposed(EQuestEventTypes::Activated))
@@ -252,7 +252,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     // exposed phases that already fired live for that specific tag during the deferral window don't double-broadcast.
     // Doesn't terminate the subscription — live events continue to flow through afterward.
     UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem();
-    const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem);
+    const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Routing);
 
     for (const FGameplayTag& EachTag : CatchUpTags)
     {
@@ -274,10 +274,17 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
         FQuestEventPayload SyntheticPayload;
         SyntheticPayload.NodeInfo.QuestTag = EachTag;
 
-        // PendingGiver fact gates both Activated and Enabled catch-up — quest is in giver state if-and-only-if
-        // the fact is set. Activated fires regardless of prereq status; Enabled gates additionally on bSatisfied.
+        // PendingGiver gates Enabled catch-up (Enabled requires the quest to be in giver state with prereqs
+        // satisfied). Activated has a broader semantic — "the quest entered its scope" — and reconstructs from
+        // EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope) OR the Live fact
+        // (non-giver-gated path went straight to Live, which implies it must have transitioned through
+        // Activated to get there). Asset-level activations are always non-giver-gated and reach catch-up via
+        // the Live fact branch.
         const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
         const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+
+        const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
+        const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
 
         FQuestPrereqStatus CachedPrereqStatus;
         if (bIsPendingGiver && StateSubsystem)
@@ -285,7 +292,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
             CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
         }
 
-        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && bIsPendingGiver)
+        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && (bIsPendingGiver || bIsLive))
         {
             if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, MatchedChannel, SyntheticPayload, CachedPrereqStatus);
         }
@@ -297,8 +304,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
         if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
         {
-            const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
-            if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
+            if (bIsLive)
             {
                 AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
                 if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, MatchedChannel, SyntheticPayload, RecoveredGiver);

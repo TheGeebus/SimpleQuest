@@ -32,6 +32,7 @@
 #include "Events/QuestTriggerBlockedEvent.h"
 #include "Events/QuestTriggerDeactivatedEvent.h"
 #include "Events/QuestTriggerResponseEvent.h"
+#include "Events/QuestTriggerSatisfiedEvent.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Quest.h"
 #include "Quests/QuestStep.h"
@@ -389,6 +390,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                 Step->OnNodeProgress.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeProgress);
                 Step->OnNodeRefused.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeRefused);
                 Step->OnNodeTriggerDeactivation.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeTriggerDeactivation);
+                Step->OnNodeTriggerSatisfied.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeTriggerSatisfied);
                 
                 // Pre-warm target classes so HandleOnNodeStarted's hot-path .Get() skips the LoadSynchronous
                 // stall when the step activates. The engine's loaded-asset cache keeps async-loaded UClasses
@@ -809,6 +811,17 @@ void UQuestManagerSubsystem::HandleOnNodeTriggerDeactivation(UQuestStep* Step, F
     // through the chain so the BP-callable's surface stays honest ("the manual way to do this").
     FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerDeactivatedEvent(
         Step->GetContextualTag(), EQuestTriggerEndReason::Manual, OutcomeTag, FinalContext));
+}
+
+void UQuestManagerSubsystem::HandleOnNodeTriggerSatisfied(UQuestStep* Step, FQuestObjectiveTriggerContext Context)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeTriggerSatisfied: '%s' satisfiedActor='%s'"),
+        *Step->GetContextualTag().ToString(),
+        Context.TriggeredActor ? *Context.TriggeredActor->GetName() : TEXT("null"));
+
+    FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerSatisfiedEvent(Step->GetContextualTag(), Context.TriggeredActor.Get(), Context));
 }
 
 void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag)

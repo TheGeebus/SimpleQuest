@@ -36,7 +36,7 @@ void UQuestlineNode_PrereqGate::GetPinHoverText(const UEdGraphPin& Pin, FString&
     {
         HoverTextOut = LOCTEXT("PinTooltipPrereqs",
             "Conditional expression that gates the activation cascade. Wire through combinator nodes (AND / OR / NOT) "
-            "to prereq leaves (Outcome, Path, Entry, Fact, etc.).").ToString();
+            "to prerequisite leaves (Outcome, Path, Entry, Fact, etc.).").ToString();
     }
     else if (Pin.PinName == TEXT("Forward"))
     {

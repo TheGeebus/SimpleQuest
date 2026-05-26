@@ -55,6 +55,16 @@ public:
 	 * step's lifecycle transitions.
 	 */
 	FOnQuestObjectiveTriggerDeactivation OnQuestObjectiveTriggerDeactivation;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveTriggerSatisfied, FQuestObjectiveTriggerContext, Context);
+
+	/**
+	 * Fired by PublishTriggerSatisfied when the Objective marks a specific Trigger Component's actor as having
+	 * been consumed by a multi-target satisfaction list. Step subscribes and forwards to the manager, which
+	 * publishes FQuestTriggerSatisfiedEvent on the step's tag channel. Trigger Components subscribe to that
+	 * event and filter by own-actor to react per-target.
+	 */
+	FOnQuestObjectiveTriggerSatisfied OnQuestObjectiveTriggerSatisfied;
 	
 	/**
 	 * Outcome Tag Discovery																						<br>
@@ -267,6 +277,23 @@ protected:
 	 */
 	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "FinalContext"), Category = "Quest|Objectives")
 	void PublishTriggerDeactivation(FGameplayTag OutcomeTag, const FQuestObjectiveTriggerContext& FinalContext);
+
+	/**
+	 * Signals that a specific Trigger Component's actor has been consumed by a multi-target satisfaction list. Step
+	 * forwards to manager, which publishes FQuestTriggerSatisfiedEvent on the step's tag channel with the satisfied
+	 * actor's reference. Trigger Components watching the step filter by SatisfiedActor == GetOwner() and broadcast
+	 * their OnQuestTriggerSatisfied delegate.
+	 *
+	 * Distinct from PublishTriggerDeactivation: that signals the trigger SIDE wrapping for all watching components;
+	 * this signals one specific actor's contribution is consumed while the step continues for other targets. Pair
+	 * with a final CompleteObjectiveWithOutcome call once every target has been satisfied.
+	 *
+	 * Use from a multi-target Objective subclass: in TryCompleteObjective_Implementation, identify the firing actor,
+	 * check it against the still-pending target set, and if matched call this with the context. Echoes the trigger
+	 * context through to the published event so own-fire filtering symmetry holds.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "TriggerContext"), Category = "Quest|Objectives")
+	void PublishTriggerSatisfied(const FQuestObjectiveTriggerContext& TriggerContext);
 	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;

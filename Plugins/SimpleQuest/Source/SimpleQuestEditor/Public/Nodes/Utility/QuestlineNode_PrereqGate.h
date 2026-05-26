@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "QuestlineNode_PrereqGate.generated.h"
 
 /**
@@ -22,8 +23,9 @@ public:
 
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override
 	{
-		return NSLOCTEXT("SimpleQuestEditor", "PrereqGateTitle", "Prereq Gate");
+		return NSLOCTEXT("SimpleQuestEditor", "PrereqGateTitle", "Prerequisite Gate");
 	}
+	virtual FLinearColor GetNodeTitleColor() const override { return SQ_ED_NODE_PREREQ_GROUP; }
 
 	/**
 	 * Override the utility-base label suppression. PrereqGate is the first utility node with two same-direction

@@ -227,6 +227,57 @@ or adopter-side side-registries.
   actors authored to target it, e.g. to cache a trigger set at
   activation and present "X of M complete" UI per-event.
 
+### Picker categories extensibility
+
+K2 node Outcome and Questline pickers gain a settings-driven
+extensibility point. Projects bridging quest outcomes / identities
+with their own tag trees can now extend the picker filters without
+forking source.
+
+- **`Project Settings → Plugins → Simple Quest → Authoring`** —
+  two new arrays: `Additional Outcome Picker Categories` and
+  `Additional Questline Picker Categories`. Each entry is a tag
+  prefix (e.g., `Game.Outcome`, `MyStudio.Quest`) whose descendants
+  will appear in the picker alongside the framework default.
+- **Affects the K2 node pickers** for the Complete Objective
+  (Outcome) and Bind To Quest Event (Questline) nodes. Designers
+  see their own tag tree alongside `SimpleQuest.Outcome` /
+  `SimpleQuest.Questline` without scrolling through unrelated
+  project tags.
+- **Live refresh.** Settings change refreshes open Blueprints
+  automatically — no close-and-reopen needed to see the new
+  categories in pickers.
+- **UPROPERTY-bound pickers** (Observer's `ObservedTags`, Giver's
+  `QuestTagsToGive`, etc.) still show only the SimpleQuest namespace
+  in their pickers; UPROPERTY meta is compile-time baked. Settings-
+  driven extension of those surfaces is planned for a future
+  release if adopter demand surfaces.
+- **Two compose-time rules enforced** (violations dropped with a
+  warning log):
+  - Entries under the framework-owned SimpleQuest namespace are
+    rejected — extend with your own namespace.
+  - Entries that overlap each other (duplicates, parent/child
+    pairs) are pruned to one — the underlying gameplay-tag picker
+    can't render overlapping namespace roots without crashing.
+
+### Activation context restructure — deprecation notice (0.5.0)
+
+`UQuestObjective::OnObjectiveActivated`'s single-parameter signature
+is scheduled for restructure in 0.5.0 alongside save/load. The new
+shape splits Authored/Runtime context onto the function signature
+itself (two parameters — `FQuestObjectiveAuthoredConfig& Authored`,
+`FQuestObjectiveRuntimeContext& Runtime`) instead of the current
+nested struct. Adopter override sites will need to update their
+signature when 0.5.0 ships (FunctionRedirects can't auto-fix
+signature changes). Payload data and field semantics remain intact;
+only the delivery container changes.
+
+Doc-comment `UPCOMING CHANGE` blocks have been added to
+`UQuestObjective::OnObjectiveActivated`,
+`FQuestObjectiveActivationContext`, and its `Authored` / `Dynamic`
+sub-struct fields telegraphing the change for adopters reading the
+headers (IDE quick-docs or auto-generated API docs).
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and
@@ -258,6 +309,16 @@ or adopter-side side-registries.
   internally — adopter Blueprint objective subclasses and standard
   C++ overrides of `OnObjectiveActivated_Implementation` are
   unaffected.
+- **SimpleCore subsystem header paths.** `USignalSubsystem` and
+  `UWorldStateSubsystem` headers moved from `Signals/` and
+  `WorldState/` into a flat `Subsystems/` directory, matching the
+  convention SimpleQuest already uses. Adopter C++ code that
+  `#include`s these directly needs to update the path:
+  - `#include "Signals/SignalSubsystem.h"` → `#include "Subsystems/SignalSubsystem.h"`
+  - `#include "WorldState/WorldStateSubsystem.h"` → `#include "Subsystems/WorldStateSubsystem.h"`
+  No source-level API change; just file location. BP-level usage
+  (Bind To Quest Event, Add/Remove/Clear Fact utility nodes, the
+  SimpleQuest BP library queries) is unaffected.
 
 ### Known limitations
 
@@ -281,6 +342,17 @@ or adopter-side side-registries.
   button + Compile All toolbar command) now capture rename intent
   regardless of compile success; the rename gets propagated even
   when other errors fire elsewhere in the graph.
+- **Reused-tag rebinding prevention.** Renaming a content node to
+  a label that was previously renamed away from another node is
+  now refused at the rename gate with a helpful error. Previously,
+  the cross-chain redirect surgery during compile would silently
+  free the old label as a fresh target, and unloaded assets
+  (sublevels, data tables, BP CDOs) still referencing the old
+  label would silently re-bind to the new owner on next load.
+  The new check consults the GameplayTag redirect map at rename
+  time and blocks reuse with a message pointing at
+  `Project Settings → GameplayTags → Gameplay Tag Redirects` for
+  the cleanup affordance when the reuse is intentional.
 
 ### SimpleUI — Typewriter Text Block expansion
 

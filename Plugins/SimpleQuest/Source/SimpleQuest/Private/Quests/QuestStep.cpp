@@ -66,6 +66,7 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);
 	LiveObjective->OnQuestObjectiveTriggerDeactivation.AddDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+	LiveObjective->OnQuestObjectiveTriggerSatisfied.AddDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 	
 	// Register the live Objective with QSS under every perspective tag (canonical + aliases) so
 	// USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag can resolve regardless of which perspective the
@@ -103,6 +104,7 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
 		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 		LiveObjective = nullptr;
 	}
 	ReceivedActivationContext = FQuestObjectiveActivationContext{};
@@ -140,6 +142,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
 		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 		LiveObjective = nullptr;
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
@@ -158,6 +161,11 @@ void UQuestStep::OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveT
 void UQuestStep::OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext)
 {
 	OnNodeTriggerDeactivation.ExecuteIfBound(this, OutcomeTag, FinalContext);
+}
+
+void UQuestStep::OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context)
+{
+	OnNodeTriggerSatisfied.ExecuteIfBound(this, Context);
 }
 
 void UQuestStep::UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World)

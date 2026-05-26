@@ -119,6 +119,15 @@ void UQuestObjective::PublishTriggerDeactivation(FGameplayTag OutcomeTag, const 
 	OnQuestObjectiveTriggerDeactivation.Broadcast(OutcomeTag, Effective);
 }
 
+void UQuestObjective::PublishTriggerSatisfied(const FQuestObjectiveTriggerContext& TriggerContext)
+{
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(TriggerContext);
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::PublishTriggerSatisfied : actor=%s — %s"),
+		Effective.TriggeredActor ? *Effective.TriggeredActor->GetName() : TEXT("null"),
+		*GetFullName());
+	OnQuestObjectiveTriggerSatisfied.Broadcast(Effective);
+}
+
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
 {
 	OnEnableTarget.Broadcast(Target, bIsTargetEnabled);

@@ -42,6 +42,7 @@ void UQuestTriggerComponent::BeginPlay()
         SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse);
         SignalSubsystem->SubscribeMessage<FQuestTriggerBlockedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked);
         SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated);
+        SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied);
 
         UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
@@ -99,7 +100,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerActivated : Channel: %s, Canonical: %s : Owner: %s"),
         *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-    SetActivated(true);
+    if (OnQuestTriggerActivated.IsBound()) OnQuestTriggerActivated.Broadcast(Event.QuestTag, Channel, Event);
 }
 
 void UQuestTriggerComponent::OnTriggerStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
@@ -127,18 +128,11 @@ void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
         ActiveStepEndHandles.Remove(Channel);
         ActiveStepDeactivatedHandles.Remove(Channel);
     }
+    SatisfiedStepChannels.Remove(Channel);
 
     UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerStepEnded : Channel: %s : Owner: %s"),
         *Channel.ToString(),
         *GetOwner()->GetClass()->GetFName().ToString());
-
-    // Only visually deactivate when no other watched steps remain active. Both subscription maps are kept in
-    // sync (each (Channel, end-event-type) pair adds and removes together), so either map's emptiness is a
-    // sufficient check — but using ActiveStepEndHandles keeps a single canonical source of truth.
-    if (ActiveStepEndHandles.IsEmpty())
-    {
-        SetActivated(false);
-    }
 }
 
 int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
@@ -171,11 +165,6 @@ TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags(
         Implicit.Add(FQuestObservedTagSpec{Tag, SignalRoutingDefaults::HierarchicalSubscribe});
     }
     return Implicit;
-}
-
-void UQuestTriggerComponent::SetActivated_Implementation(bool bIsActivated)
-{
-    OnQuestTriggerActivated.Broadcast(bIsActivated);
 }
 
 void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContext& Context)
@@ -296,6 +285,20 @@ void UQuestTriggerComponent::HandleQuestTriggerDeactivated(FGameplayTag Channel,
         *Event.OutcomeTag.ToString());
 
     OnQuestTriggerDeactivated.Broadcast(Event.QuestTag, Channel, Event);
+}
+
+void UQuestTriggerComponent::HandleQuestTriggerSatisfied(FGameplayTag Channel, const FQuestTriggerSatisfiedEvent& Event)
+{
+    // Own-fire filter — only react when this component's owner is the satisfied actor.
+    if (Event.SatisfiedActor.Get() != GetOwner()) return;
+
+    SatisfiedStepChannels.Add(Channel);
+
+    UE_LOG(LogSimpleQuestSubscription, Verbose,
+        TEXT("UQuestTriggerComponent::HandleQuestTriggerSatisfied : actor='%s' satisfied on channel='%s'"),
+        *GetOwner()->GetActorNameOrLabel(), *Channel.ToString());
+
+    if (OnQuestTriggerSatisfied.IsBound()) OnQuestTriggerSatisfied.Broadcast(Event.GetQuestTag(), Channel, Event);
 }
 
 FGameplayTagContainer UQuestTriggerComponent::GetRegisteredStepTagsToTrigger() const

@@ -386,6 +386,8 @@ private:
 	UFUNCTION()
 	void HandleOnNodeTriggerDeactivation(UQuestStep* Step, FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
 	UFUNCTION()
+	void HandleOnNodeTriggerSatisfied(UQuestStep* Step, FQuestObjectiveTriggerContext Context);
+	UFUNCTION()
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);

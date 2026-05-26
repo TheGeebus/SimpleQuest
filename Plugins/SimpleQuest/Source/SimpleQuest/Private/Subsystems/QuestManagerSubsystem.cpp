@@ -847,25 +847,39 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             RecentGiverActors.Remove(Node->GetContextualTag());
         }
 
-        // Suppress QuestStartedEvent for wrappers re-entering while already Live (loop-back wires, fan-in
-        // re-entry, GiverGateSkipPathAware / ContainerReentry decisions). The event semantically means
-        // "transitioned to Live" — firing it on a no-op re-entry tells subscribers a false transition
-        // happened, breaking state machines that pair QuestStarted/QuestEnded as Live-cycle markers (the
-        // giver component's container management is one such consumer). For real first-time activation,
-        // the wrapper isn't yet Live at this point — the inner Step's SetQuestLive runs later in the same
-        // call stack via DeriveContainerLive's ancestor walk — so the check below correctly publishes.
-        // Steps don't need this guard: their RefuseStepAlreadyLive decision returns early in
-        // ActivateNodeByTag, before reaching HandleOnNodeStarted at all. Re-entry awareness for designer
+        // Suppress lifecycle-transition events for wrappers re-entering while already Live (loop-back wires,
+        // fan-in re-entry, GiverGateSkipPathAware / ContainerReentry decisions). Both QuestActivatedEvent
+        // ("entered scope") and QuestStartedEvent ("transitioned to Live") name TRANSITIONS — firing them on
+        // a no-op re-entry signals false transitions to subscribers, breaking state machines that pair them
+        // as scope/lifecycle markers. For real first-time activation the wrapper isn't yet Live at this point
+        // (DeriveContainerLive's ancestor walk runs later in the same call stack), so the guard below
+        // correctly publishes. Steps don't need this guard: their RefuseStepAlreadyLive decision returns
+        // early in ActivateNodeByTag before reaching HandleOnNodeStarted. Re-entry awareness for designer
         // observation lives in the entry-record events (FQuestEntryRecordedEvent), which still fire below.
         const bool bIsWrapperReentry = Node->IsContainerNode() && FQuestLifecycleQuery::IsLive(WorldState, Node->GetContextualTag());
         if (!bIsWrapperReentry)
         {
+            // FQuestActivatedEvent — "this quest is now in scope." Originally fired only at the giver-gate
+            // path (where scope means PendingGiver state); broadened so adopters get a universal entry-point
+            // signal at every cascade waypoint. Giver-gated paths still fire Activated earlier at the
+            // GiverGateFire decision (with the actual evaluated PrereqStatus); skipping the publish here
+            // when bWasGiverGated avoids the double-fire. Non-gated paths get Activated alongside Started in
+            // the same call — adopters who care about the giver-gating distinction branch on the instance's
+            // bWasGiverGated flag or check PrereqStatus.bIsAlways.
+            if (!Node->bWasGiverGated)
+            {
+                // Non-gated paths reach HandleOnNodeStarted only after upstream prereq deferral cleared
+                // (DeferActivation gating). By definition prereqs are satisfied here; default-constructed
+                // PrereqStatus carries the satisfied = true semantics. Adopters can still call
+                // QuestStateSubsystem::QueryQuestActivationBlockers if they want the live snapshot.
+                FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestActivatedEvent(Node->GetContextualTag(), Context, FQuestPrereqStatus{}));
+            }
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestStartedEvent(Node->GetContextualTag(), Context, GiverActor));
         }
         else
         {
             UE_LOG(LogSimpleQuestActivation, Verbose,
-                TEXT("HandleOnNodeStarted: '%s' re-entering while already Live — suppressing QuestStartedEvent (no-op re-activation)"),
+                TEXT("HandleOnNodeStarted: '%s' re-entering while already Live — suppressing QuestActivatedEvent + QuestStartedEvent (no-op re-activation)"),
                 *Node->GetContextualTag().ToString());
         }
         

@@ -26,16 +26,16 @@
 UENUM(Flags, BlueprintType)
 enum class ESignalRoutingFlags : uint8
 {
-    None        = 0       UMETA(DisplayName = "Exact Match", ToolTip = "Exact-match only — receive/deliver to the named tag itself."),
-    Ancestors   = 1 << 0  UMETA(DisplayName = "Ancestors",   ToolTip = "Extend scope upward — also include tags above the named tag."),
-    Descendants = 1 << 1  UMETA(DisplayName = "Descendants", ToolTip = "Extend scope downward — also include tags below the named tag."),
+    ExactMatchOnly          = 0       UMETA(Hidden, DisplayName = "Exact Match", ToolTip = "Exact-match only — receive/deliver to the named tag itself."),
+    Ancestors               = 1 << 0  UMETA(DisplayName = "Ancestors",   ToolTip = "Extend scope upward — also include tags above the named tag."),
+    Descendants             = 1 << 1  UMETA(DisplayName = "Descendants", ToolTip = "Extend scope downward — also include tags below the named tag."),
 };
 ENUM_CLASS_FLAGS(ESignalRoutingFlags);
 
 namespace SignalRoutingDefaults
 {
     /** No scope extensions — receive/deliver only on the exact named channel. */
-    inline constexpr ESignalRoutingFlags ExactOnly = ESignalRoutingFlags::None;
+    inline constexpr ESignalRoutingFlags ExactOnly = ESignalRoutingFlags::ExactMatchOnly;
 
     /**
      * Subscribe-side hierarchical default — receive on the exact channel OR any descendant (the bus's

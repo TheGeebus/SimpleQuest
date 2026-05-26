@@ -35,10 +35,13 @@ public:
 	FText NodeLabel;
 
 	/**
-	 * UI-friendly title for this node (quest log entries, HUD labels, journal). Falls back to NodeLabel when empty so
-	 * designers only author this when the UI text needs to differ from the editor-visible label. Compiler copies this
-	 * onto the corresponding runtime UQuestNodeBase at compile time; runtime queries read it via
+	 * UI-friendly title for this node (quest log entries, HUD labels, journal). Compiler copies this onto the
+	 * corresponding runtime UQuestNodeBase at compile time; runtime queries read it via
 	 * UQuestStateSubsystem::GetDisplayName.
+	 *
+	 * Empty by default. Empty means "don't pipeline anything into the display" — designers who don't want this
+	 * node's tag to surface in UI leave it blank. The editor-visible NodeLabel is NOT substituted; it stays an
+	 * organizational identity (graph editor, outliner, compile logs) separate from UI text.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Display")
 	FText DisplayName;

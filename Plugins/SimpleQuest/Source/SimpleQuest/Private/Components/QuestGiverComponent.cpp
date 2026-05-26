@@ -77,9 +77,9 @@ void UQuestGiverComponent::RegisterQuestGiver()
 
 		if (SignalSubsystem)
 		{
-			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>  (QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived);
-			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived);
-			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived);
+			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>  (QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived, ESignalRoutingFlags::ExactMatchOnly);
+			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived, ESignalRoutingFlags::ExactMatchOnly);
+			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived, ESignalRoutingFlags::ExactMatchOnly);
 			// FQuestEnabledEvent / FQuestStartedEvent / FQuestEndedEvent state-tracking is folded into
 			// HandleQuestEnabled / HandleQuestStarted / HandleQuestCompleted overrides — the inherited
 			// Observer subscriptions for these events (default-on or force-on via implicit-observed
@@ -447,7 +447,7 @@ TArray<FQuestObservedTagSpec> UQuestGiverComponent::GetImplicitlyObservedTags() 
 		// Giver narrows to ExactMatch — a Giver for "Quest X" cares about Quest X's lifecycle events, not
 		// inner-Step lifecycle. Hierarchical delivery would force per-handler filtering on every event;
 		// narrow subscription at the bus eliminates the noise upstream.
-		Implicit.Add(FQuestObservedTagSpec{Tag, ESignalRoutingFlags::None});
+		Implicit.Add(FQuestObservedTagSpec{Tag, ESignalRoutingFlags::ExactMatchOnly});
 	}
 	return Implicit;
 }

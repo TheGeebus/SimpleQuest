@@ -610,6 +610,10 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
         Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
+    	Instance->DisplayName = ContentNode->DisplayName;
+    	Instance->Description = ContentNode->Description;
+    	Instance->DisplayData = ContentNode->DisplayData;
+    	
         AllCompiledQuestTags.Add(TagName);
     	for (const FName& AliasFName : AliasFNames)
     	{

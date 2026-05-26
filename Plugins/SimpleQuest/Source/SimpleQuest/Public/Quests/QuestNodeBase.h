@@ -386,9 +386,9 @@ protected:
     
     /**
      * UI-friendly title for this node. Compiler-populated from the matching UQuestlineNode_ContentBase's DisplayName
-     * UPROPERTY at compile time; empty FText when the designer didn't author one. Queried at runtime via
-     * UQuestStateSubsystem::GetDisplayName, which applies a derived-fallback (formatted leaf-name from ContextualTag)
-     * when this field is unset.
+     * UPROPERTY at compile time; empty FText when the designer didn't author one. Empty passes through to the QSS
+     * query as-is — no fallback to NodeLabel or to a derived leaf-name reformat. Empty means the designer chose not
+     * to pipeline display content; UI consumers branch on IsEmpty if they want to hide the entry entirely.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Display")
     FText DisplayName;

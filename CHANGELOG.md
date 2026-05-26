@@ -227,6 +227,44 @@ or adopter-side side-registries.
   actors authored to target it, e.g. to cache a trigger set at
   activation and present "X of M complete" UI per-event.
 
+### Multi-target Objective surface
+
+New framework primitive for per-target satisfaction signalling plus a
+turnkey example Objective exercising the surface end-to-end. Closes the
+"interact with all N target actors, disable each as they tick off"
+authoring pattern without requiring adopters to maintain a parallel
+tag → actor registry on their side.
+
+- **`Publish Trigger Satisfied`** — new BP-callable on
+  `UQuestObjective`. Pass an `FQuestObjectiveTriggerContext` whose
+  `TriggeredActor` names the specific actor whose contribution was
+  consumed. The framework publishes `FQuestTriggerSatisfiedEvent` on
+  the step's tag channel (with multi-channel alias fan-out); Trigger
+  Components on the satisfied actor filter by own-actor and react
+  via their `OnQuestTriggerSatisfied` delegate.
+- **`On Quest Trigger Satisfied`** — new multicast delegate on
+  `UQuestTriggerComponent`. Carries `(QuestTag, MatchedChannel,
+  FQuestTriggerSatisfiedEvent)`. Adopters bind to disable trigger
+  visuals / collision / interaction prompts per-target while the
+  step continues for the remaining targets. Own-fire filter
+  (`SatisfiedActor == GetOwner()`) applied internally before broadcast.
+- **`UInteractAllTargetsObjective`** — new example Objective subclass
+  under `Objectives/Examples/`. Discovers its target set at activation
+  via `Get Triggers Targeting This Step` (no authoring on the Step
+  beyond assigning the objective class). Tracks per-actor satisfaction;
+  publishes the new event per-tick; completes with the new outcome
+  `SimpleQuest.Outcome.AllTargetsInteracted` when every target has
+  fired. Designed as a reference shape for adopter multi-target
+  objectives.
+
+Adopter wiring on each target actor:
+1. Add a `UQuestTriggerComponent` with `Step Tags To Trigger`
+   including the Step's tag.
+2. Call `SendTriggerEvent` from interaction code (overlap, interact
+   key, etc.).
+3. Optionally bind `OnQuestTriggerSatisfied` to drive per-target
+   visual disable.
+
 ### Picker categories extensibility
 
 K2 node Outcome and Questline pickers gain a settings-driven
@@ -319,6 +357,23 @@ headers (IDE quick-docs or auto-generated API docs).
   No source-level API change; just file location. BP-level usage
   (Bind To Quest Event, Add/Remove/Clear Fact utility nodes, the
   SimpleQuest BP library queries) is unaffected.
+- **`UQuestTriggerComponent::SetActivated` and `SetTriggerSatisfied`
+  removed.** Both were `BlueprintNativeEvent`s with no-op default
+  impls. The framework's per-step lifecycle signals are now exclusively
+  the rich delegates `OnQuestTriggerActivated`, `OnQuestTriggerDeactivated`,
+  `OnQuestTriggerSatisfied`, `OnQuestTriggerResponded`, and
+  `OnQuestTriggerBlocked`, each carrying the full event payload.
+  Adopters previously overriding these BlueprintNativeEvents via
+  component subclassing should bind the corresponding delegates
+  instead — the rich delegates fire on the same lifecycle transitions
+  with strictly more information.
+- **`UQuestTriggerComponent::OnQuestTriggerActivated` delegate
+  signature widened.** Previously `(bool bIsActivated)`; now
+  `(FGameplayTag QuestTag, FGameplayTag MatchedChannel,
+  FQuestStartedEvent Event)` matching the rich-payload pattern of
+  the other trigger delegates. Adopter bindings need to update the
+  handler signature; the payload carries the original `Event.QuestTag`
+  identity plus the full started-event context.
 
 ### Known limitations
 
@@ -353,6 +408,29 @@ headers (IDE quick-docs or auto-generated API docs).
   time and blocks reuse with a message pointing at
   `Project Settings → GameplayTags → Gameplay Tag Redirects` for
   the cleanup affordance when the reuse is intentional.
+- **Display data queries now return authored content.** The compiler
+  previously wasn't copying authored `DisplayName` / `Description` /
+  `DisplayData` UPROPERTYs from content nodes onto their runtime
+  instances, so `Get Display Name` / `Get Display Description` /
+  `Get Display Data` on `UQuestStateSubsystem` always saw empty
+  registry records. `Get Display Name` additionally hid the bug by
+  silently falling back to a derived leaf-name reformat of the tag
+  (e.g., `"Mayor.Tea.Time"` → `"Mayor Tea Time"`), making it look
+  like authored content was working. Two-part fix:
+  - **Compiler now copies the UPROPERTYs at compile time** so the
+    runtime registry records carry the authored values. `DisplayName`
+    falls back to the editor-visible `NodeLabel` when the designer
+    didn't author an explicit one — matches the documented authoring
+    contract (only author `DisplayName` when UI text needs to differ
+    from the editor label).
+  - **`Get Display Name` / `Get Display Description` / `Get Display
+    Data` now return empty / null on missing records and log a
+    `Warning` on `LogSimpleQuestState`.** The previous derived-leaf-
+    name fallback in `Get Display Name` is removed. Loud failure
+    surfaces missing-data bugs (registration gaps, compile drift)
+    where the silent fallback masked them. Adopters who want auto-
+    derived names can call `FQuestTagComposer::FormatTagForDisplay`
+    explicitly; they're not forced into it as the framework default.
 
 ### SimpleUI — Typewriter Text Block expansion
 

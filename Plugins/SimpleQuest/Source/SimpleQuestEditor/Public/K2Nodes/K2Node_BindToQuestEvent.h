@@ -74,7 +74,9 @@ public:
 	virtual FString GetPinMetaData(FName InPinName, FName InKey) override;
 
 private:
-	/** Bitmask combining all enabled bExpose* flags. Stuffed into the factory call's ExposedEvents parameter
-	 *  during ExpandNode, then read by the proxy in Activate to gate subscriptions. */
+	/**
+	 * Bitmask combining all enabled bExpose* flags. Stuffed into the factory call's ExposedEvents parameter
+	 * during ExpandNode, then read by the proxy in Activate to gate subscriptions.
+	 */
 	int32 ComputeExposureMask() const;
 };

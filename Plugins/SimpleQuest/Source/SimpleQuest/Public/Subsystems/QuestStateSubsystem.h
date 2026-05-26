@@ -354,25 +354,31 @@ public:
 	// ── Display data queries ─────────────────────────────────────────────────────────────────────────────
 
 	/**
-	 * Returns the UI-friendly display name for a Questline / Quest / Step tag. Resolves in priority order:
-	 *   1. Authored DisplayName on the matching node / asset (if non-empty).
-	 *   2. NodeLabel for content nodes (compiler-derived, always present).
-	 *   3. Formatted leaf name from the tag itself (derived fallback — never returns empty).
+	 * Returns the authored UI display name for a Questline / Quest / Step tag. Returns the authored value as-is —
+	 * empty FText when the designer didn't author one. No silent fallback to NodeLabel or to a derived leaf-name
+	 * reformat: empty means the designer chose not to pipeline display content for this tag, distinct from a
+	 * missing-record bug.
+	 *
+	 * Returns empty FText for unknown tags + logs a Warning on LogSimpleQuestState — that's the loud-failure
+	 * path for "tag may be unregistered or compile may have missed it." Empty-authored-content (record exists,
+	 * DisplayName field intentionally blank) is silent.
+	 *
 	 * Alias-walks via canonical resolution; an alias-form tag yields the same result as its canonical.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	FText GetDisplayName(FGameplayTag Tag) const;
 
 	/**
-	 * Returns the authored description for a Questline / Quest / Step tag. Empty FText when the designer didn't author
-	 * one — no derived fallback (an unauthored description is genuinely empty, not "Mayor Tea" derived from the tag).
+	 * Returns the authored description for a Questline / Quest / Step tag. Empty FText when the designer didn't
+	 * author one. Returns empty FText for unknown tags and logs a Warning on LogSimpleQuestState.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	FText GetDisplayDescription(FGameplayTag Tag) const;
 
 	/**
-	 * Returns the optional richer-data asset referenced by a Questline / Quest / Step. Nullptr when the designer didn't
-	 * reference one. Caller casts to the expected UQuestDisplayData subclass to read typed fields.
+	 * Returns the optional richer-data asset referenced by a Questline / Quest / Step. Nullptr when the designer
+	 * didn't reference one. Returns nullptr for unknown tags and logs a Warning on LogSimpleQuestState. Caller casts
+	 * to the expected UQuestDisplayData subclass to read typed fields.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	UQuestDisplayData* GetDisplayData(FGameplayTag Tag) const;
@@ -552,9 +558,6 @@ private:
 
 	/** Friend-only: clear DisplayDataByTag entirely. Called on PIE reset alongside the existing transient-state clear. */
 	void ClearDisplayDataRegistry();
-		
-	/** Derive a fallback display name from the tag's leaf segment when no authored DisplayName exists on the instance. */
-	FText DeriveDisplayNameFromTag(FGameplayTag Tag) const;
 
 	/**
 	 * Per-role source registries — TMap<TagKey, TArray<TWeakObjectPtr<UActorComponent>>>. Keys cover both authored

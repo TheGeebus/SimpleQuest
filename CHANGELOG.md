@@ -99,34 +99,37 @@ adopters can publish facts that listeners outside the quest system
 react to, and gate quest activations on those same facts via the
 gate.
 
-### Subscriber-side routing scope
+### Subscriber-side routing mode
 
 `USignalSubsystem`'s Subscribe API gains a `Routing` parameter that
-lets subscribers opt into Exact Match delivery (receive only direct
-publishes on the exact subscribed channel) or stay with the
-hierarchical default (also receive descendant-channel publishes via
-the bus's ancestor walk).
+lets subscribers pick the directional scope of their subscription.
+The parameter is a plain enum (dropdown in the Details panel and on
+K2 node pins) with four modes: **Exact Match**, **Ancestors**,
+**Descendants**, **Bidirectional**.
 
-- Default `Routing` preserves prior hierarchical behavior — every
-  existing call site compiles unchanged and behaves identically.
-  Adopters explicitly narrow on a per-subscription basis when
-  ancestor-walk delivery is noise rather than signal.
+- **Exact Match** — receive only direct publishes on the exact
+  subscribed channel.
+- **Ancestors** — also receive publishes on ancestor channels
+  (reserved for future; currently a no-op on the subscribe side until
+  publish-side dispatch lands).
+- **Descendants** (default) — also receive publishes on descendant
+  channels via the bus's hierarchical walk. Preserves prior behavior;
+  every existing call site compiles and behaves unchanged.
+- **Bidirectional** — both Ancestors and Descendants walks active.
+
+Per-subscription narrowing:
+
 - `UQuestGiverComponent` subscribes Exact Match for its
   `QuestTagsToGive`. An Observer or Giver bound to "Quest X" no
   longer receives noise from Quest X's inner-Step lifecycle events
   — handler-side filtering for that case is no longer necessary.
 - `UQuestObserverComponent` author-facing `ObservedTags` entries
-  gain a `Routing` field in the Details panel. Default Hierarchical;
+  gain a `Routing` dropdown in the Details panel. Default Descendants;
   designers can opt individual entries to Exact Match.
-- `BindToQuestEvent` K2 node gains a `Routing` pin. Designer picks
-  per-call scope; default Hierarchical preserves prior behavior.
+- `Observe Quest Lifecycle` K2 node gains a `Routing` pin. Designer picks
+  per-call scope; default Descendants preserves prior behavior.
 - BP-callable `SubscribeMessage` / `SubscribeMessageOfType` on the
   SimpleCore Blueprint library gain the same parameter.
-
-The `Routing` value is a bitmask of `Ancestors` and `Descendants`
-flags (an unset value = Exact Match only). The publish-side
-counterpart of the bitmask is reserved for a future release; the
-subscribe-side `Ancestors` flag is reserved-but-no-op until then.
 
 ### Quest-resolution attribution fixes
 
@@ -265,6 +268,99 @@ Adopter wiring on each target actor:
 3. Optionally bind `OnQuestTriggerSatisfied` to drive per-target
    visual disable.
 
+### Lifecycle event coverage — Activated event broadening
+
+`FQuestActivatedEvent` now fires from every content node activation
+path, not just giver-gated quests. Adopters building lifecycle-aware
+UI no longer have to mix-and-match Activated and Started bindings
+to cover both giver and non-giver authoring patterns.
+
+- **Every content node fires Activated when execution reaches it.**
+  Giver-gated, non-giver-gated, and asset-level scope entry all
+  emit `FQuestActivatedEvent` on the node's tag channel.
+- **Asset-level publish.** Starting a questline now publishes
+  `FQuestActivatedEvent` and `FQuestStartedEvent` on the questline's
+  own tag at scope entry, plus writes the asset-level **Live** state
+  fact. Adopters binding `Observe Quest Lifecycle` to the questline tag
+  receive the asset-level activation alongside per-content-node
+  events. The questline's `DisplayName` / `Description` /
+  `DisplayData` are also registered against the questline tag at
+  graph-registration time, so the same subscriber can query authored
+  display content for the asset-level event.
+- **Activated and Started carry distinct semantics now.** Activated
+  fires when execution reaches a node ("show the player what's
+  starting"); Started fires when the node is Live with objectives
+  bound and progress tickable. Both fire for every node; UI elements
+  generally want Activated, gameplay reactors (triggers, completion
+  watchers) generally want Started.
+- **Catch-up reconstruction extended.** Late subscribers binding mid-
+  session via `Observe Quest Lifecycle` now reconstruct `Activated` from
+  either the **Live** or **PendingGiver** state facts. Reconstruction
+  is routing-aware (Exact Match returns only the subscribed tag;
+  Descendants fans out across every known descendant) and parent-
+  first ordered so a subscriber bound on a questline tag receives
+  the asset-level events before per-content-node events — same
+  ordering the live cascade naturally produces.
+- **Symmetric with §4.36 close-out.** The asset-level Live fact +
+  questline-tag publish at activation mirrors the Completed fact +
+  questline-tag publish at resolution that landed in §4.36. Adopters
+  see consistent asset-level lifecycle signal at both ends.
+
+### Lifecycle display data sample — `UQuestLifecycleDisplayData`
+
+A new `UDataAsset` subclass shipping under `Display/Samples/` that
+gives adopters a turnkey shape for per-lifecycle-event narrative
+text. Designers populate beat arrays once on the data asset;
+lifecycle subscribers consume them per event type.
+
+- **Per-event narrative beats.** `Activated Beats`, `Enabled Beats`,
+  `Started Beats`, `Disabled Beats`, `Deactivated Beats`, `Blocked
+  Beats`, `Unblocked Beats` are each an `FQuestNarrativeBeats` wrapper
+  carrying a `TArray<FText>`. Designer authors any number of beat
+  strings per event; UI iterates them at delivery time.
+- **Outcome-keyed completion beats.** `Completed Beats By Outcome` is
+  a `TMap<FGameplayTag, FQuestNarrativeBeats>` keyed by outcome tag.
+  Different outcomes can carry different completion text — `Victory`
+  beats vs. `Defeat` beats, etc.
+- **`Get Completed Beats` accessor with fallback chain.** Blueprints
+  access completion beats through `GetCompletedBeats(OutcomeTag)`
+  which returns the exact-outcome entry if present, falls back to a
+  shared all-outcomes entry if authored, returns empty otherwise.
+  The raw map is protected — adopters can't accidentally bypass the
+  fallback by binding the map directly.
+- **Extends `UQuestDisplayData`** — the marker base class introduced
+  in §4.34 Phase 1. Adopter subclasses with different schema shapes
+  (richer text, audio refs, etc.) compose alongside this sample
+  via the same base.
+- **Assignable on every content node.** Pick the data asset in the
+  node's `Display Data` UPROPERTY; queryable at runtime via `Get
+  Display Data` and cast to `UQuestLifecycleDisplayData`.
+
+### SimpleUI — Typewriter Text Block FText migration
+
+The Typewriter Text widget's queue API migrates from `FString` to
+`FText` throughout, removing the `.ToString()` losses adopters were
+hitting when piping localized strings into the widget.
+
+- **All queue API methods take `FText`.** `Queue Text`, `Queue
+  Texts`, `Insert Text At`, `Replace Text At`, `Get Queued Texts`
+  (renamed from `Get Queued Strings`) — every input and the
+  collection getter operate on `FText` directly.
+- **Localization-respecting.** `FText` carries its namespace +
+  source-string-key context through every queue operation;
+  per-language displays update automatically when the project's
+  active culture changes.
+- **Empty-`FText` no-op semantic.** An empty `FText` queued via any
+  entry path silently no-ops — the widget's internal guards check
+  `IsEmpty` (not `IsEmptyOrWhitespace`), so whitespace-only entries
+  are honored as legitimate designer-authored padding beats ("wait
+  two seconds, show nothing, advance").
+- **Per-character internals unchanged.** The internal display state
+  is still `FString` (per-character revealing happens in string
+  space); the `OnCharAdded` delegate still receives `FString`
+  chunks. The migration is at the queue input/output boundary —
+  exactly where adopters interact with the widget.
+
 ### Picker categories extensibility
 
 K2 node Outcome and Questline pickers gain a settings-driven
@@ -278,7 +374,7 @@ forking source.
   prefix (e.g., `Game.Outcome`, `MyStudio.Quest`) whose descendants
   will appear in the picker alongside the framework default.
 - **Affects the K2 node pickers** for the Complete Objective
-  (Outcome) and Bind To Quest Event (Questline) nodes. Designers
+  (Outcome) and Observe Quest Lifecycle (Questline) nodes. Designers
   see their own tag tree alongside `SimpleQuest.Outcome` /
   `SimpleQuest.Questline` without scrolling through unrelated
   project tags.
@@ -355,7 +451,7 @@ headers (IDE quick-docs or auto-generated API docs).
   - `#include "Signals/SignalSubsystem.h"` → `#include "Subsystems/SignalSubsystem.h"`
   - `#include "WorldState/WorldStateSubsystem.h"` → `#include "Subsystems/WorldStateSubsystem.h"`
   No source-level API change; just file location. BP-level usage
-  (Bind To Quest Event, Add/Remove/Clear Fact utility nodes, the
+  (Observe Quest Lifecycle, Add/Remove/Clear Fact utility nodes, the
   SimpleQuest BP library queries) is unaffected.
 - **`UQuestTriggerComponent::SetActivated` and `SetTriggerSatisfied`
   removed.** Both were `BlueprintNativeEvent`s with no-op default
@@ -374,6 +470,69 @@ headers (IDE quick-docs or auto-generated API docs).
   the other trigger delegates. Adopter bindings need to update the
   handler signature; the payload carries the original `Event.QuestTag`
   identity plus the full started-event context.
+- **`ESignalRoutingFlags` renamed and reshaped to `ESignalRoutingMode`.**
+  The bitmask-style `UENUM(Flags)` is replaced by a plain
+  `UENUM(BlueprintType)` with four discrete modes: `ExactMatch`,
+  `Ancestors`, `Descendants`, `Bidirectional`. Routing pins / fields
+  now render as a dropdown instead of a bitmask checkbox set. C++
+  call sites pass the enum value directly (no `static_cast` from
+  `int32`); UPROPERTY meta `Bitmask` + `BitmaskEnum` annotations
+  removed at every site. A CoreRedirect entry handles the type +
+  value renames for enum-typed properties; Blueprint K2 nodes that
+  manually overrode the previous bitmask `int32` `Routing` pin may
+  reset to the default `Descendants` on first load (re-pick the
+  intended mode if needed). Helpers `FSignalRoutingDefaults::
+  IncludesDescendants` and `IncludesAncestors` replace the prior
+  `EnumHasAnyFlags(...)` checks at dispatch sites.
+- **SimpleUI Typewriter Text Block queue API migrated `FString` →
+  `FText`.** `Queue Text`, `Queue Texts`, `Insert Text At`, `Replace
+  Text At`, and `Get Queued Texts` (renamed from `Get Queued
+  Strings`) now take/return `FText`. Adopters with C++ or BP call
+  sites passing `FString` need to wrap with `FText::FromString(...)`
+  at the call boundary (or migrate the upstream value to `FText`
+  directly to preserve localization context). The per-character
+  internals and `OnCharAdded` delegate still operate in `FString`.
+- **Compiler no longer substitutes `NodeLabel` for empty
+  `DisplayName`.** Content nodes with an empty authored `DisplayName`
+  now produce an empty runtime `DisplayName` (was: silent fallback
+  to the editor-visible `NodeLabel`). Adopters who were relying on
+  the implicit fallback for any content node should either author
+  the desired `DisplayName` explicitly or pipe `NodeLabel` through
+  themselves at the consumer.
+- **`Bind To Quest Event` renamed to `Observe Quest Lifecycle`.** The
+  K2 async-action node, its underlying class, and the BP library
+  factory function all rename for naming honesty — the node is a
+  latent observer of lifecycle state, not an explicit
+  delegate-binding operation, and the new name reflects the
+  designer-facing role rather than the subscription mechanism
+  underneath. CoreRedirects (`ClassRedirect` for the async-action
+  class, `ClassRedirect` for the K2 node class, `FunctionRedirect`
+  for the factory function) auto-migrate saved Blueprint graphs and
+  any C++ code referencing the names by reflected path. Specifics
+  for adopters touching these directly:
+  - K2 node display name `Bind To Quest Event` → `Observe Quest
+    Lifecycle`.
+  - Async-action class `UQuestEventSubscription` →
+    `UQuestLifecycleObserver`.
+  - K2 node class `UK2Node_BindToQuestEvent` →
+    `UK2Node_ObserveQuestLifecycle`.
+  - BP library factory `USimpleQuestBlueprintLibrary::BindToQuestEvent`
+    → `USimpleQuestBlueprintLibrary::ObserveQuestLifecycle`.
+  - The `ExposedAsyncProxy` reference output on the K2 node renames
+    from `Subscription` to `Observer`. Existing graphs auto-update
+    via the class redirect; saved variable pin names in BP graphs
+    that captured the old `Subscription` name will need a one-time
+    re-wire (the var-pin's underlying type updates correctly, only
+    its label is stale until re-touched).
+  - C++ headers move alongside their classes:
+    `BlueprintAsync/QuestEventSubscription.h` →
+    `BlueprintAsync/QuestLifecycleObserver.h`, and
+    `K2Nodes/K2Node_BindToQuestEvent.h` →
+    `K2Nodes/K2Node_ObserveQuestLifecycle.h`. Adopter C++ code
+    `#include`ing these directly updates the path. C++ adopter code
+    referencing the class name itself auto-resolves via the
+    reflection redirect; direct C++ symbol references update at
+    next recompile.
 
 ### Known limitations
 
@@ -416,13 +575,9 @@ headers (IDE quick-docs or auto-generated API docs).
   registry records. `Get Display Name` additionally hid the bug by
   silently falling back to a derived leaf-name reformat of the tag
   (e.g., `"Mayor.Tea.Time"` → `"Mayor Tea Time"`), making it look
-  like authored content was working. Two-part fix:
+  like authored content was working. Three-part fix:
   - **Compiler now copies the UPROPERTYs at compile time** so the
-    runtime registry records carry the authored values. `DisplayName`
-    falls back to the editor-visible `NodeLabel` when the designer
-    didn't author an explicit one — matches the documented authoring
-    contract (only author `DisplayName` when UI text needs to differ
-    from the editor label).
+    runtime registry records carry the authored values.
   - **`Get Display Name` / `Get Display Description` / `Get Display
     Data` now return empty / null on missing records and log a
     `Warning` on `LogSimpleQuestState`.** The previous derived-leaf-
@@ -431,6 +586,15 @@ headers (IDE quick-docs or auto-generated API docs).
     where the silent fallback masked them. Adopters who want auto-
     derived names can call `FQuestTagComposer::FormatTagForDisplay`
     explicitly; they're not forced into it as the framework default.
+  - **NodeLabel fallback for empty `DisplayName` is removed.** An
+    empty authored `DisplayName` is now treated as the designer's
+    explicit "don't pipeline anything to display" signal — the
+    compiler no longer substitutes the editor-visible `NodeLabel`.
+    Paired with the loud-failure mode above and the Typewriter
+    widget's empty-`FText` no-op (this release), the signal is
+    clean end-to-end: empty author → empty registry → empty query
+    → silent widget. Adopters who want to pipe the node label
+    explicitly can read it via `NodeLabel` and queue it themselves.
 
 ### SimpleUI — Typewriter Text Block expansion
 

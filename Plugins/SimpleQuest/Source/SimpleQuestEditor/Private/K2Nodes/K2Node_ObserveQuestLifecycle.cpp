@@ -1,10 +1,10 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-#include "K2Nodes/K2Node_BindToQuestEvent.h"
+#include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 
 #include "BlueprintActionDatabaseRegistrar.h"
-#include "BlueprintAsync/QuestEventSubscription.h"
+#include "BlueprintAsync/QuestLifecycleObserver.h"
 #include "BlueprintFunctionNodeSpawner.h"
 #include "BlueprintNodeSpawner.h"
 #include "K2Node_AssignmentStatement.h"
@@ -17,7 +17,7 @@
 #include "UObject/WeakObjectPtr.h"
 
 
-void UK2Node_BindToQuestEvent::AllocateDefaultPins()
+void UK2Node_ObserveQuestLifecycle::AllocateDefaultPins()
 {
     Super::AllocateDefaultPins();
 
@@ -122,7 +122,7 @@ void UK2Node_BindToQuestEvent::AllocateDefaultPins()
     }
 }
 
-void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
+void UK2Node_ObserveQuestLifecycle::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
 {
     // Super::ExpandNode (UK2Node_BaseAsyncTask) iterates every BlueprintAssignable multicast delegate on the
     // proxy class and looks for a matching pin on this K2 node via FindPin. If a pin's been stripped (because
@@ -200,7 +200,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     {
         UK2Node_TemporaryVariable* TempVar = Cast<UK2Node_TemporaryVariable>(Node);
         if (!TempVar) continue;
-        if (TempVar->VariableType.PinSubCategoryObject == UQuestEventSubscription::StaticClass())
+        if (TempVar->VariableType.PinSubCategoryObject == UQuestLifecycleObserver::StaticClass())
         {
             AsyncTaskTemp = TempVar;
             break;
@@ -208,18 +208,18 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
     if (!AsyncTaskTemp)
     {
-        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[BindToQuestEvent::ExpandNode] AsyncTask temp variable not found — base didn't generate one"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] AsyncTask temp variable not found — base didn't generate one"));
         return;
     }
 
-    // 2. Find the factory call (return type matches UQuestEventSubscription)
+    // 2. Find the factory call (return type matches UQuestLifecycleObserver)
     UK2Node_CallFunction* FactoryCall = nullptr;
     for (UEdGraphNode* Node : SourceGraph->Nodes)
     {
         UK2Node_CallFunction* Call = Cast<UK2Node_CallFunction>(Node);
         if (!Call) continue;
         UEdGraphPin* Ret = Call->GetReturnValuePin();
-        if (Ret && Ret->PinType.PinSubCategoryObject == UQuestEventSubscription::StaticClass())
+        if (Ret && Ret->PinType.PinSubCategoryObject == UQuestLifecycleObserver::StaticClass())
         {
             FactoryCall = Call;
             break;
@@ -257,7 +257,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     AssignVariable->MakeLinkTo(TempVarPin);
     AssignValue->MakeLinkTo(FactoryReturn);
 
-    // 6. Notify type propagation so the wildcard pins on the Assignment node resolve to UQuestEventSubscription*.
+    // 6. Notify type propagation so the wildcard pins on the Assignment node resolve to UQuestLifecycleObserver*.
     Assignment->NotifyPinConnectionListChanged(AssignVariable);
     Assignment->NotifyPinConnectionListChanged(AssignValue);
 
@@ -271,17 +271,17 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
     else
     {
-        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[BindToQuestEvent::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
     }
 
     if (Mask == 0)
     {
         CompilerContext.MessageLog.Warning(*FString::Printf(TEXT(
-            "@@: Bind To Quest Event has no exposed event pins — subscription will be a no-op. ")
+            "@@: Observe Quest Lifecycle has no exposed event pins — subscription will be a no-op. ")
             TEXT("Enable at least one event under Pins | <phase> in the Details panel.")), this);
     }
 
-    UE_LOG(LogSimpleQuestCompiler, Log, TEXT("[BindToQuestEvent::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
+    UE_LOG(LogSimpleQuestCompiler, Log, TEXT("[ObserveQuestLifecycle::ExpandNode] Inserted AsyncTask = factory-return assignment; ExposedEvents mask = %d"), Mask);
 
     // Cleanup: remove the temp pins so the K2 node's saved pin set matches the bExpose* configuration. Without
     // this, the temp pins persist across save/load and surface as ghost pins in the graph editor on next open.
@@ -296,7 +296,7 @@ void UK2Node_BindToQuestEvent::ExpandNode(FKismetCompilerContext& CompilerContex
     }
 }
 
-void UK2Node_BindToQuestEvent::PostPlacedNewNode()
+void UK2Node_ObserveQuestLifecycle::PostPlacedNewNode()
 {
     Super::PostPlacedNewNode();
 
@@ -309,7 +309,7 @@ void UK2Node_BindToQuestEvent::PostPlacedNewNode()
     // Setting the proxy fields here means base's AllocateDefaultPins sees the correct proxy reference
     // and generates the full pin set naturally. No defensive overrides needed downstream.
     if (UFunction* FactoryFunc = USimpleQuestBlueprintLibrary::StaticClass()->FindFunctionByName(
-        GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, BindToQuestEvent)))
+        GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, ObserveQuestLifecycle)))
     {
         FObjectProperty* ReturnProperty = CastField<FObjectProperty>(FactoryFunc->GetReturnProperty());
         ProxyFactoryFunctionName = FactoryFunc->GetFName();
@@ -318,7 +318,7 @@ void UK2Node_BindToQuestEvent::PostPlacedNewNode()
     }
 }
 
-void UK2Node_BindToQuestEvent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+void UK2Node_ObserveQuestLifecycle::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
     Super::PostEditChangeProperty(PropertyChangedEvent);
 
@@ -335,7 +335,7 @@ void UK2Node_BindToQuestEvent::PostEditChangeProperty(FPropertyChangedEvent& Pro
     }
 }
 
-void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& HoverTextOut) const
+void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FString& HoverTextOut) const
 {
     const FName PinName = Pin.PinName;
     const EEdGraphPinDirection Direction = Pin.Direction;
@@ -559,7 +559,7 @@ void UK2Node_BindToQuestEvent::GetPinHoverText(const UEdGraphPin& Pin, FString& 
     Super::GetPinHoverText(Pin, HoverTextOut);
 }
 
-FSlateIcon UK2Node_BindToQuestEvent::GetIconAndTint(FLinearColor& OutColor) const
+FSlateIcon UK2Node_ObserveQuestLifecycle::GetIconAndTint(FLinearColor& OutColor) const
 {
 	OutColor = FLinearColor::White;
 	// Reuses the existing Questline class icon registered by FSimpleQuestEditor::StartupModule - same brush
@@ -567,15 +567,15 @@ FSlateIcon UK2Node_BindToQuestEvent::GetIconAndTint(FLinearColor& OutColor) cons
 	return FSlateIcon(TEXT("SimpleQuestStyle"), TEXT("ClassIcon.QuestlineGraph"));
 }
 
-void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const
+void UK2Node_ObserveQuestLifecycle::GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const
 {
     const UClass* ActionKey = GetClass();
     if (!ActionRegistrar.IsOpenForRegistration(ActionKey)) return;
 
-    // Factory lives on USimpleQuestBlueprintLibrary (not on UQuestEventSubscription) so UK2Node_AsyncAction's
-    // base iteration doesn't scan it - this K2 node is the only entry point for the Bind To Quest Event action.
+    // Factory lives on USimpleQuestBlueprintLibrary (not on UQuestLifecycleObserver) so UK2Node_AsyncAction's
+    // base iteration doesn't scan it - this K2 node is the only entry point for the Observe Quest Lifecycle action.
     UFunction* FactoryFunc = USimpleQuestBlueprintLibrary::StaticClass()->FindFunctionByName(
-        GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, BindToQuestEvent));
+        GET_FUNCTION_NAME_CHECKED(USimpleQuestBlueprintLibrary, ObserveQuestLifecycle));
     if (!FactoryFunc) return;
 
     UBlueprintNodeSpawner* Spawner = UBlueprintFunctionNodeSpawner::Create(FactoryFunc);
@@ -596,7 +596,7 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     Spawner->CustomizeNodeDelegate = UBlueprintFunctionNodeSpawner::FCustomizeNodeDelegate::CreateLambda(
         [FactoryFuncWeak](UEdGraphNode* NewNode, bool bIsTemplateNode)
         {
-            UK2Node_BindToQuestEvent* AsyncNode = CastChecked<UK2Node_BindToQuestEvent>(NewNode);
+            UK2Node_ObserveQuestLifecycle* AsyncNode = CastChecked<UK2Node_ObserveQuestLifecycle>(NewNode);
             if (UFunction* Func = FactoryFuncWeak.Get())
             {
                 FObjectProperty* ReturnProperty = CastField<FObjectProperty>(Func->GetReturnProperty());
@@ -609,26 +609,26 @@ void UK2Node_BindToQuestEvent::GetMenuActions(FBlueprintActionDatabaseRegistrar&
     ActionRegistrar.AddBlueprintAction(ActionKey, Spawner);
 }
 
-void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+void UK2Node_ObserveQuestLifecycle::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
 {
     Super::GetNodeContextMenuActions(Menu, Context);
     if (Context->Pin) return;  // pin context, not node context
 
-    TWeakObjectPtr<UK2Node_BindToQuestEvent> WeakThis(const_cast<UK2Node_BindToQuestEvent*>(this));
+    TWeakObjectPtr<UK2Node_ObserveQuestLifecycle> WeakThis(const_cast<UK2Node_ObserveQuestLifecycle*>(this));
     auto AddToggle = [WeakThis](FToolMenuSection& Section, const FText& Label, bool* PropPtr)
     {
         Section.AddMenuEntry(
             FName(*Label.ToString()),
             Label,
-            FText::Format(NSLOCTEXT("BindToQuestEvent", "ToggleTooltip",
+            FText::Format(NSLOCTEXT("ObserveQuestLifecycle", "ToggleTooltip",
                 "Show or hide the {0} exec pin on this node."), Label),
             FSlateIcon(),
             FUIAction(
             FExecuteAction::CreateLambda([WeakThis, PropPtr]()
                 {
-                    if (UK2Node_BindToQuestEvent* Node = WeakThis.Get())
+                    if (UK2Node_ObserveQuestLifecycle* Node = WeakThis.Get())
                     {
-                        const FScopedTransaction Transaction(NSLOCTEXT("BindToQuestEvent", "ToggleEventTransaction", "Toggle Quest Event Pin"));
+                        const FScopedTransaction Transaction(NSLOCTEXT("ObserveQuestLifecycle", "ToggleEventTransaction", "Toggle Quest Event Pin"));
                         Node->Modify();
                         *PropPtr = !*PropPtr;
                         Node->ReconstructNode();
@@ -640,44 +640,44 @@ void UK2Node_BindToQuestEvent::GetNodeContextMenuActions(UToolMenu* Menu, UGraph
     };
 
     {
-        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_Offer",
-            NSLOCTEXT("BindToQuestEvent", "OfferPhase", "Exposed Events — Offer Phase"));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnActivated", "On Activated"),
+        FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_Offer",
+            NSLOCTEXT("ObserveQuestLifecycle", "OfferPhase", "Exposed Events — Offer Phase"));
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnActivated", "On Activated"),
             const_cast<bool*>(&bExposeOnActivated));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnEnabled", "On Enabled"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnEnabled", "On Enabled"),
             const_cast<bool*>(&bExposeOnEnabled));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnDisabled", "On Disabled"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnDisabled", "On Disabled"),
             const_cast<bool*>(&bExposeOnDisabled));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnGiveBlocked", "On Give Blocked"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnGiveBlocked", "On Give Blocked"),
             const_cast<bool*>(&bExposeOnGiveBlocked));
     }
     {
-        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_Run",
-            NSLOCTEXT("BindToQuestEvent", "RunPhase", "Exposed Events — Run Phase"));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnStarted", "On Started"),
+        FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_Run",
+            NSLOCTEXT("ObserveQuestLifecycle", "RunPhase", "Exposed Events — Run Phase"));
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnStarted", "On Started"),
             const_cast<bool*>(&bExposeOnStarted));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnProgress", "On Progress"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnProgress", "On Progress"),
             const_cast<bool*>(&bExposeOnProgress));
     }
     {
-        FToolMenuSection& Section = Menu->AddSection("BindToQuestEvent_End",
-            NSLOCTEXT("BindToQuestEvent", "EndPhase", "Exposed Events — End Phase"));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnCompleted", "On Completed"),
+        FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_End",
+            NSLOCTEXT("ObserveQuestLifecycle", "EndPhase", "Exposed Events — End Phase"));
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnCompleted", "On Completed"),
             const_cast<bool*>(&bExposeOnCompleted));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnDeactivated", "On Deactivated"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnDeactivated", "On Deactivated"),
             const_cast<bool*>(&bExposeOnDeactivated));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnBlocked", "On Blocked"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnBlocked", "On Blocked"),
             const_cast<bool*>(&bExposeOnBlocked));
-        AddToggle(Section, NSLOCTEXT("BindToQuestEvent", "OnUnblocked", "On Unblocked"),
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnUnblocked", "On Unblocked"),
             const_cast<bool*>(&bExposeOnUnblocked));
     }
 }
 
-FString UK2Node_BindToQuestEvent::GetPinMetaData(FName InPinName, FName InKey)
+FString UK2Node_ObserveQuestLifecycle::GetPinMetaData(FName InPinName, FName InKey)
 {
     // Override the QuestTag pin's Categories filter to compose the default SimpleQuest.Questline
     // namespace with adopter-configured additional namespaces from USimpleQuestSettings. Inherited
-    // UPARAM meta on USimpleQuestBlueprintLibrary::BindToQuestEvent is compile-time baked; this
+    // UPARAM meta on USimpleQuestBlueprintLibrary::ObserveQuestLifecycle is compile-time baked; this
     // override is what lets the picker filter stay settings-driven.
     if (InPinName == TEXT("QuestTag") && InKey == TEXT("Categories"))
     {
@@ -686,7 +686,7 @@ FString UK2Node_BindToQuestEvent::GetPinMetaData(FName InPinName, FName InKey)
     return Super::GetPinMetaData(InPinName, InKey);
 }
 
-int32 UK2Node_BindToQuestEvent::ComputeExposureMask() const
+int32 UK2Node_ObserveQuestLifecycle::ComputeExposureMask() const
 {
     int32 Mask = 0;
     if (bExposeOnActivated)   Mask |= static_cast<int32>(EQuestEventTypes::Activated);

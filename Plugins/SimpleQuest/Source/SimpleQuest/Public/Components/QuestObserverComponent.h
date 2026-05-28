@@ -30,7 +30,7 @@ struct FQuestUnblockedEvent;
 
 /**
  * Per-observed-quest flags controlling which lifecycle events this observer subscribes to. Mirrors the
- * BindToQuestEvent K2 node's per-event exposure mask but flagged per-quest-tag for finer authoring control.
+ * ObserveQuestLifecycle K2 node's per-event exposure mask but flagged per-quest-tag for finer authoring control.
  * Each flag gates its corresponding subscription in RegisterQuestObserver; unticked flags incur zero
  * subscription cost and skip catch-up for that event.
  *
@@ -115,7 +115,7 @@ struct FObservedQuestEventSettings
  * specific quest state changes — UI receptionists, level-bound gameplay objects, world services. Each watched
  * tag's FObservedQuestEventSettings controls which of the 10 lifecycle events broadcast.
  *
- * Surface mirrors the BindToQuestEvent K2 node's per-event delegates: same events, same payload shapes,
+ * Surface mirrors the ObserveQuestLifecycle K2 node's per-event delegates: same events, same payload shapes,
  * same catch-up semantics. The observer is the curated component-form alternative for designers who want
  * config-authored per-quest observation rather than ad-hoc K2 subscription.
  */
@@ -148,7 +148,7 @@ public:
 	// under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
 	// observers, MatchedChannel reflects each observer's own perspective. Branch on QuestTag for "what quest
 	// instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
-	// Mirrors UQuestEventSubscription's K2-node delegate contract; same shape, same semantics.
+	// Mirrors UQuestLifecycleObserver's K2-node delegate contract; same shape, same semantics.
 	//
 	// ── Offer phase ──────────────────────────────────────────────────────────────────────────────
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, FQuestPrereqStatus, PrereqStatus);

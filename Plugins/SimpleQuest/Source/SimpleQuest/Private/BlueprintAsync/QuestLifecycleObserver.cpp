@@ -1,7 +1,7 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-#include "BlueprintAsync/QuestEventSubscription.h"
+#include "BlueprintAsync/QuestLifecycleObserver.h"
 
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
@@ -25,12 +25,12 @@
 #include "Subsystems/WorldStateSubsystem.h"
 
 
-void UQuestEventSubscription::Activate()
+void UQuestLifecycleObserver::Activate()
 {
     if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestEventSubscription: stale or invalid QuestTag '%s' — aborting subscription."),
+            TEXT("UQuestLifecycleObserver: stale or invalid QuestTag '%s' — aborting subscription."),
             *QuestTag.ToString());
         SetReadyToDestroy();
         return;
@@ -39,8 +39,8 @@ void UQuestEventSubscription::Activate()
     if (ExposedEventsMask == 0)
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestEventSubscription: '%s' has no exposed events — subscription is a no-op. ")
-            TEXT("Enable at least one event under Pins | <phase> in the BindToQuestEvent node's Details panel."),
+            TEXT("UQuestLifecycleObserver: '%s' has no exposed events — subscription is a no-op. ")
+            TEXT("Enable at least one event under Pins | <phase> in the ObserveQuestLifecycle node's Details panel."),
             *QuestTag.ToString());
         SetReadyToDestroy();
         return;
@@ -51,61 +51,61 @@ void UQuestEventSubscription::Activate()
     if (!Signals || !WorldState)
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestEventSubscription: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting. ")
-            TEXT("Common causes: BindToQuestEvent fired before the world finished initializing, or the WorldContextObject pin is wired to an actor whose UWorld isn't valid."));
+            TEXT("UQuestLifecycleObserver: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting. ")
+            TEXT("Common causes: ObserveQuestLifecycle fired before the world finished initializing, or the WorldContextObject pin is wired to an actor whose UWorld isn't valid."));
         SetReadyToDestroy();
         return;
     }
 
     // Subscribe only to the channels the K2 node has exposed. Each guard saves both the SubscribeMessage cost and
     // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side. Routing applies
-    // uniformly to all ten subscriptions — designer chose at the BindToQuestEvent call site whether they want
+    // uniformly to all ten subscriptions — designer chose at the ObserveQuestLifecycle call site whether they want
     // hierarchical (Descendants) or narrow (ExactMatch) delivery for this subscription instance.
 
     // Offer phase
     if (IsExposed(EQuestEventTypes::Activated))
     {
-        ActivatedHandle = Signals->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleActivated, Routing);
+        ActivatedHandle = Signals->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleActivated, Routing);
     }
     if (IsExposed(EQuestEventTypes::Enabled))
     {
-        EnabledHandle = Signals->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnabled, Routing);
+        EnabledHandle = Signals->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleEnabled, Routing);
     }
     if (IsExposed(EQuestEventTypes::Disabled))
     {
-        DisabledHandle = Signals->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestEventSubscription::HandleDisabled, Routing);
+        DisabledHandle = Signals->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleDisabled, Routing);
     }
     if (IsExposed(EQuestEventTypes::GiveBlocked))
     {
-        GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleGiveBlocked, Routing);
+        GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleGiveBlocked, Routing);
     }
 
     // Run phase
     if (IsExposed(EQuestEventTypes::Started))
     {
-        StartedHandle = Signals->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestEventSubscription::HandleStarted, Routing);
+        StartedHandle = Signals->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleStarted, Routing);
     }
     if (IsExposed(EQuestEventTypes::Progress))
     {
-        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestEventSubscription::HandleProgress, Routing);
+        ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleProgress, Routing);
     }
 
     // End phase
     if (IsExposed(EQuestEventTypes::Completed))
     {
-        EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestEventSubscription::HandleEnded, Routing);
+        EndedHandle = Signals->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleEnded, Routing);
     }
     if (IsExposed(EQuestEventTypes::Deactivated))
     {
-        DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestEventSubscription::HandleDeactivated, Routing);
+        DeactivatedHandle = Signals->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleDeactivated, Routing);
     }
     if (IsExposed(EQuestEventTypes::Blocked))
     {
-        BlockedHandle = Signals->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleBlocked, Routing);
+        BlockedHandle = Signals->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleBlocked, Routing);
     }
     if (IsExposed(EQuestEventTypes::Unblocked))
     {
-        UnblockedHandle = Signals->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestEventSubscription::HandleUnblocked, Routing);
+        UnblockedHandle = Signals->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleUnblocked, Routing);
     }
     
     // Defer the catch-up broadcast to next tick. The K2 node's standard async expansion calls Activate() *before*
@@ -119,15 +119,15 @@ void UQuestEventSubscription::Activate()
     if (!World)
     {
         UE_LOG(LogSimpleQuestSubscription, Verbose,
-            TEXT("UQuestEventSubscription: no world available for deferred catch-up — running inline (acceptable: no BP execution stack to race with)."));
+            TEXT("UQuestLifecycleObserver: no world available for deferred catch-up — running inline (acceptable: no BP execution stack to race with)."));
         RunCatchUp(Signals, WorldState);
         return;
     }
 
-    TWeakObjectPtr<UQuestEventSubscription> WeakThis(this);
+    TWeakObjectPtr<UQuestLifecycleObserver> WeakThis(this);
     World->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakThis]()
     {
-        UQuestEventSubscription* Self = WeakThis.Get();
+        UQuestLifecycleObserver* Self = WeakThis.Get();
         if (!Self || Self->bCancelled) return;
         USignalSubsystem* DeferredSignals = Self->ResolveSignalSubsystem();
         UWorldStateSubsystem* DeferredWorldState = Self->ResolveWorldStateSubsystem();
@@ -136,7 +136,7 @@ void UQuestEventSubscription::Activate()
     }));
 }
 
-void UQuestEventSubscription::Cancel()
+void UQuestLifecycleObserver::Cancel()
 {
     if (bCancelled) return;
     bCancelled = true;
@@ -144,27 +144,27 @@ void UQuestEventSubscription::Cancel()
     SetReadyToDestroy();
 }
 
-void UQuestEventSubscription::HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
+void UQuestLifecycleObserver::HandleActivated(FGameplayTag Channel, const FQuestActivatedEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveActivatedSeen.Add(Event.GetQuestTag());
     if (OnActivated.IsBound()) OnActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.PrereqStatus);
 }
 
-void UQuestEventSubscription::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+void UQuestLifecycleObserver::HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveEnabledSeen.Add(Event.GetQuestTag());
     if (OnEnabled.IsBound()) OnEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 }
 
-void UQuestEventSubscription::HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
+void UQuestLifecycleObserver::HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
 {
     if (bCancelled) return;
     if (OnDisabled.IsBound()) OnDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 }
 
-void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+void UQuestLifecycleObserver::HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
 {
     if (bCancelled) return;
     if (OnGiveBlocked.IsBound())
@@ -173,7 +173,7 @@ void UQuestEventSubscription::HandleGiveBlocked(FGameplayTag Channel, const FQue
     }
 }
 
-void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
+void UQuestLifecycleObserver::HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveStartedSeen.Add(Event.GetQuestTag());
@@ -183,7 +183,7 @@ void UQuestEventSubscription::HandleStarted(FGameplayTag Channel, const FQuestSt
     }
 }
 
-void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event)
+void UQuestLifecycleObserver::HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveCompletedSeen.Add(Event.GetQuestTag());
@@ -191,7 +191,7 @@ void UQuestEventSubscription::HandleEnded(FGameplayTag Channel, const FQuestEnde
     // Persistent — no finalize here. Parent-tag subscriptions need to stay alive across multiple child completions.
 }
 
-void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
+void UQuestLifecycleObserver::HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveDeactivatedSeen.Add(Event.GetQuestTag());
@@ -203,27 +203,27 @@ void UQuestEventSubscription::HandleDeactivated(FGameplayTag Channel, const FQue
     // Persistent — no finalize here. Same rationale as HandleEnded.
 }
 
-void UQuestEventSubscription::HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
+void UQuestLifecycleObserver::HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
 {
     if (bCancelled) return;
     TagsWithLiveBlockedSeen.Add(Event.GetQuestTag());
     if (OnBlocked.IsBound()) OnBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 }
 
-void UQuestEventSubscription::HandleUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
+void UQuestLifecycleObserver::HandleUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
 {
     if (bCancelled) return;
     if (OnUnblocked.IsBound()) OnUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 }
 
 
-void UQuestEventSubscription::HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
+void UQuestLifecycleObserver::HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
 {
     if (bCancelled) return;
     if (OnProgress.IsBound()) OnProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 }
 
-void UQuestEventSubscription::UnbindAll()
+void UQuestLifecycleObserver::UnbindAll()
 {
     USignalSubsystem* Signals = ResolveSignalSubsystem();
     if (!Signals) return;
@@ -242,7 +242,7 @@ void UQuestEventSubscription::UnbindAll()
     BlockedHandle = UnblockedHandle = FDelegateHandle();
 }
 
-void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState)
+void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateSubsystem* WorldState)
 {
     // Catch-up runs once, deferred to the tick after Activate(). For an exact-tag subscription this fires per-pin
     // if a matching state fact is set for QuestTag itself; for a parent-prefix subscription (subscribed tag is an
@@ -351,7 +351,7 @@ void UQuestEventSubscription::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     }
 }
 
-USignalSubsystem* UQuestEventSubscription::ResolveSignalSubsystem() const
+USignalSubsystem* UQuestLifecycleObserver::ResolveSignalSubsystem() const
 {
     if (UObject* Context = WorldContextObjectWeak.Get())
     {
@@ -366,7 +366,7 @@ USignalSubsystem* UQuestEventSubscription::ResolveSignalSubsystem() const
     return nullptr;
 }
 
-UWorldStateSubsystem* UQuestEventSubscription::ResolveWorldStateSubsystem() const
+UWorldStateSubsystem* UQuestLifecycleObserver::ResolveWorldStateSubsystem() const
 {
     if (UObject* Context = WorldContextObjectWeak.Get())
     {
@@ -381,7 +381,7 @@ UWorldStateSubsystem* UQuestEventSubscription::ResolveWorldStateSubsystem() cons
     return nullptr;
 }
 
-UQuestStateSubsystem* UQuestEventSubscription::ResolveQuestStateSubsystem() const
+UQuestStateSubsystem* UQuestLifecycleObserver::ResolveQuestStateSubsystem() const
 {
     if (UObject* Context = WorldContextObjectWeak.Get())
     {

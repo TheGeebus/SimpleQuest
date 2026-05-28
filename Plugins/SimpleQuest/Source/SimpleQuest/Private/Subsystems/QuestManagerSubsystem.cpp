@@ -716,7 +716,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 
             // Asset-level Live fact write — symmetric with PublishGraphResolutions's Completed fact write at
             // resolution (§4.36). Persists past the transient publishes above so late subscribers reconstruct
-            // Activated + Started via UQuestEventSubscription's catch-up. Uses AddStateFactAcrossPerspectives
+            // Activated + Started via UQuestLifecycleObserver's catch-up. Uses AddStateFactAcrossPerspectives
             // (matching the close-out pattern) to handle alias forms; for top-level asset tags this is
             // effectively a single-tag write.
             AddStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Live);

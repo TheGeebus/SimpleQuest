@@ -171,11 +171,15 @@ public:
     static int32 GetFactValue(UObject* WorldContextObject, FGameplayTag Tag);
 
 private:
-    /** Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null
-     *  on any resolution failure (callers no-op silently — same pattern as USimpleQuestBlueprintLibrary). */
+    /**
+     * Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null
+     * on any resolution failure (callers no-op silently — same pattern as USimpleQuestBlueprintLibrary).
+     */
     static USignalSubsystem* GetSignalSubsystem(const UObject* WorldContextObject);
 
-    /** Resolves the WorldStateSubsystem from a WorldContext via the same chain. Same null-on-failure
-     *  contract as GetSignalSubsystem. */
+    /**
+     * Resolves the WorldStateSubsystem from a WorldContext via the same chain. Same null-on-failure
+     * contract as GetSignalSubsystem.
+     */
     static UWorldStateSubsystem* GetWorldStateSubsystem(const UObject* WorldContextObject);
 };

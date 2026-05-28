@@ -14,9 +14,10 @@
 #include "Utilities/QuestTagComposer.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
+class UQuestDisplayData;
 class UQuestStateSubsystem;
 class UQuestObjective;
-class UQuestEventSubscription;
+class UQuestLifecycleObserver;
 class UQuestlineGraph;
 class UQuestManagerSubsystem;
 class UWorldStateSubsystem;
@@ -65,11 +66,11 @@ public:
      * The subscription persists until you call Cancel on the returned node or the Game Instance tears down.
      * Typical pattern: bind in Begin Play, wire pins, optionally call Cancel from End Play for per-actor lifetime.
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Events",
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Events",
     meta = (BlueprintInternalUseOnly = "true", WorldContext = "WorldContextObject",
             HidePin = "WorldContextObject,ExposedEvents", DefaultToSelf = "WorldContextObject",
-            DisplayName = "Bind To Quest Event"))
-    static UQuestEventSubscription* BindToQuestEvent(
+            DisplayName = "Observe Quest Lifecycle"))
+    static UQuestLifecycleObserver* ObserveQuestLifecycle(
         UObject* WorldContextObject,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255,
@@ -102,28 +103,25 @@ public:
     // Quest state queries: read directly from WorldState and/or QuestState
     // -------------------------------------------------------------------------------------------------------------
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Questline|State", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestLive(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Questline|State", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestCompleted(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Questline|State", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestPendingGiver(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Questline|State", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag);
 
-    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Questline|State", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
     // -------------------------------------------------------------------------------------------------------------
-    // Source registry queries (§4.33 Phase 1 — runtime channel). Closes the blocker-introspection loop:
-    // designers holding an FQuestActivationBlocker's leaf tag can ask "which Giver / Trigger / Observer in the
-    // world handles this?" without maintaining a parallel tag → actor registry. Queries alias-walk via the
-    // existing QuestStateSubsystem canonical-resolution infrastructure — a result surfaces regardless of
-    // whether the query was authored against the canonical or an alias form. Phase 1 returns live entries only
-    // (bIsActive=true); Phase 2 (0.5.0) adds an editor-baked authored channel for streamed-out content.
+    // Source registry queries — find "which Giver / Trigger / Observer in the world handles this?" without maintaining a
+    // parallel tag → actor registry. Queries alias-walk via the existing QuestStateSubsystem canonical-resolution
+    // infrastructure — a result surfaces regardless of whether the query was authored against the canonical or an alias form.
     // -------------------------------------------------------------------------------------------------------------
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Source", meta = (WorldContext = "WorldContext"))
@@ -139,6 +137,19 @@ public:
     static UQuestObjective* GetActiveObjectiveForTag(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
 
     // -------------------------------------------------------------------------------------------------------------
+    // Display data queries — lookup the display data associated with a given quest tag.
+    // -------------------------------------------------------------------------------------------------------------
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Display", meta = (WorldContext = "WorldContext"))
+    static FText GetQuestDisplayNameText(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Display", meta = (WorldContext = "WorldContext"))
+    static FText GetQuestDescriptionText(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
+
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Display", meta = (WorldContext = "WorldContext"))
+    static UQuestDisplayData* GetQuestDisplayDataAsset(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
+    
+    // -------------------------------------------------------------------------------------------------------------
     // Quest actions: publish to the signal bus; designer never touches the bus
     //
     // Each action accepts an optional payload — Context (FQuestEventPayload) for lifecycle-control ops carries
@@ -148,46 +159,46 @@ public:
     // optional via AutoCreateRefTerm; callers that don't supply one publish with an empty payload.
     // -------------------------------------------------------------------------------------------------------------
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void DeactivateQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestEventPayload& Payload = FQuestEventPayload());
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void GiveQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void ActivateQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void SetQuestBlocked(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestEventPayload& Payload = FQuestEventPayload(),
         bool bAlsoDeactivate = false);
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void ClearQuestBlocked(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestEventPayload& Payload = FQuestEventPayload());
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void ResolveQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         UPARAM(meta = (Categories = "SimpleQuest.Outcome")) FGameplayTag OutcomeTag,
         bool bOverrideExisting = false,
         const FQuestEventPayload& Payload = FQuestEventPayload());
 
-    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Questline|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph,
         const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
 private:
-    static UWorldStateSubsystem* GetWorldState(const UObject* WorldContext);
+    static UWorldStateSubsystem* GetWorldStateSubsystem(const UObject* WorldContext);
     static USignalSubsystem* GetSignalSubsystem(const UObject* WorldContext);
-    static UQuestManagerSubsystem* GetQuestManager(const UObject* WorldContext);
+    static UQuestManagerSubsystem* GetQuestManagerSubsystem(const UObject* WorldContext);
     static UQuestStateSubsystem* GetQuestStateSubsystem(const UObject* WorldContext);    
 };

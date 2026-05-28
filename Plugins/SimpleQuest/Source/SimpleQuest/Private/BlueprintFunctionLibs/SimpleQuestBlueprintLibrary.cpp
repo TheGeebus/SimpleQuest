@@ -7,7 +7,7 @@
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
-#include "BlueprintAsync/QuestEventSubscription.h"
+#include "BlueprintAsync/QuestLifecycleObserver.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestActivationRequestEvent.h"
 #include "Events/QuestBlockRequestEvent.h"
@@ -26,7 +26,7 @@
 // Private helpers
 // -------------------------------------------------------------------------
 
-UWorldStateSubsystem* USimpleQuestBlueprintLibrary::GetWorldState(const UObject* WorldContext)
+UWorldStateSubsystem* USimpleQuestBlueprintLibrary::GetWorldStateSubsystem(const UObject* WorldContext)
 {
     if (!WorldContext) return nullptr;
     const UWorld* World = WorldContext->GetWorld();
@@ -44,7 +44,7 @@ USignalSubsystem* USimpleQuestBlueprintLibrary::GetSignalSubsystem(const UObject
     return GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;
 }
 
-UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObject* WorldContext)
+UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManagerSubsystem(const UObject* WorldContext)
 {
     if (!WorldContext) return nullptr;
     const UWorld* World = WorldContext->GetWorld();
@@ -60,17 +60,17 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManager(const UObj
 
 bool USimpleQuestBlueprintLibrary::IsQuestLive(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    return FQuestLifecycleQuery::IsLive(GetWorldState(WorldContext), QuestTag);
+    return FQuestLifecycleQuery::IsLive(GetWorldStateSubsystem(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestCompleted(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    return FQuestLifecycleQuery::IsCompleted(GetWorldState(WorldContext), QuestTag);
+    return FQuestLifecycleQuery::IsCompleted(GetWorldStateSubsystem(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldContext, FGameplayTag QuestTag)
 {
-    return FQuestLifecycleQuery::IsPendingGiver(GetWorldState(WorldContext), QuestTag);
+    return FQuestLifecycleQuery::IsPendingGiver(GetWorldStateSubsystem(WorldContext), QuestTag);
 }
 
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
@@ -88,7 +88,7 @@ bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldConte
 
 int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)
 {
-    UQuestManagerSubsystem* QM = GetQuestManager(WorldContext);
+    UQuestManagerSubsystem* QM = GetQuestManagerSubsystem(WorldContext);
     return QM ? QM->GetQuestCompletionCount(QuestTag) : 0;
 }
 
@@ -154,12 +154,12 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
 
 
 // -------------------------------------------------------------------------
-// Bind to Quest Event
+// Observe Quest Lifecycle
 // -------------------------------------------------------------------------
 
-UQuestEventSubscription* USimpleQuestBlueprintLibrary::BindToQuestEvent(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents, ESignalRoutingMode Routing)
+UQuestLifecycleObserver* USimpleQuestBlueprintLibrary::ObserveQuestLifecycle(UObject* WorldContextObject, FGameplayTag QuestTag, int32 ExposedEvents, ESignalRoutingMode Routing)
 {
-    UQuestEventSubscription* Sub = NewObject<UQuestEventSubscription>();
+    UQuestLifecycleObserver* Sub = NewObject<UQuestLifecycleObserver>();
     Sub->InitFromFactory(WorldContextObject, QuestTag, ExposedEvents, Routing);
     Sub->RegisterWithGameInstance(WorldContextObject);
     return Sub;
@@ -206,6 +206,33 @@ UQuestObjective* USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag(const UO
     if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
     {
         return QSS->GetActiveObjectiveForTag(QueryTag);
+    }
+    return nullptr;
+}
+
+FText USimpleQuestBlueprintLibrary::GetQuestDisplayNameText(const UObject* WorldContext, const FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetDisplayName(QueryTag);
+    }
+    return {};
+}
+
+FText USimpleQuestBlueprintLibrary::GetQuestDescriptionText(const UObject* WorldContext, const FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetDisplayDescription(QueryTag);
+    }
+    return {};
+}
+
+UQuestDisplayData* USimpleQuestBlueprintLibrary::GetQuestDisplayDataAsset(const UObject* WorldContext, const FGameplayTag QueryTag)
+{
+    if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))
+    {
+        return QSS->GetDisplayData(QueryTag);
     }
     return nullptr;
 }

@@ -5,10 +5,10 @@
 
 #include "CoreMinimal.h"
 #include "K2Node_AsyncAction.h"
-#include "K2Node_BindToQuestEvent.generated.h"
+#include "K2Node_ObserveQuestLifecycle.generated.h"
 
 /**
- * Dedicated K2 node for the UQuestEventSubscription async action. Inherits all pin generation + expansion +
+ * Dedicated K2 node for the UQuestLifecycleObserver async action. Inherits all pin generation + expansion +
  * latent-node visual framing from UK2Node_AsyncAction. Two responsibilities on top of the base:
  *   1. Swap the title-bar icon for the Questline icon — same visual signifier UK2Node_CompleteObjectiveWithOutcome
  *      uses — so every SimpleQuest K2 node reads as part of the same system at a glance.
@@ -17,7 +17,7 @@
  *      events incur zero subscription cost.
  */
 UCLASS()
-class SIMPLEQUESTEDITOR_API UK2Node_BindToQuestEvent : public UK2Node_AsyncAction
+class SIMPLEQUESTEDITOR_API UK2Node_ObserveQuestLifecycle : public UK2Node_AsyncAction
 {
 	GENERATED_BODY()
 

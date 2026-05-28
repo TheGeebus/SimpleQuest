@@ -282,7 +282,7 @@ private:
 
 	/**
 	 * Rich-record registry paired with WorldState's QuestState.<X>.Completed fact. Written atomically alongside
-	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestEventSubscription and UQuestObserverComponent.
+	 * WorldState in SetQuestResolved; read by catch-up paths on UQuestLifecycleObserver and UQuestObserverComponent.
 	 * Holds the current session's resolution record per quest: outcome, timestamp, running count.
 	 */
 	UPROPERTY()

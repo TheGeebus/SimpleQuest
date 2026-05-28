@@ -8,8 +8,9 @@
 #include "Signals/Types/SignalRoutingFlags.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "Quests/Types/QuestEventPayload.h"
+#include "Quests/Types/QuestEventTypes.h"
 #include "Subsystems/QuestStateSubsystem.h"
-#include "QuestEventSubscription.generated.h"
+#include "QuestLifecycleObserver.generated.h"
 
 struct FQuestGiveBlockedEvent;
 struct FQuestDisabledEvent;
@@ -26,27 +27,6 @@ struct FQuestProgressEvent;
 class USignalSubsystem;
 class UWorldStateSubsystem;
 
-/**
- * Bitflag mask of which lifecycle events the BindToQuestEvent K2 node has exposed. Both the K2 node's per-flag
- * Details-panel checkboxes and the factory's hidden ExposedEvents parameter use these bits — the proxy gates
- * SubscribeMessage calls and catch-up branches by mask, so unexposed events incur zero subscription cost.
- */
-UENUM(meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
-enum class EQuestEventTypes : uint16
-{
-    None        = 0       UMETA(Hidden),
-    Activated   = 1 << 0,
-    Enabled     = 1 << 1,
-    Disabled    = 1 << 2,
-    GiveBlocked = 1 << 3,
-    Started     = 1 << 4,
-    Progress    = 1 << 5,
-    Completed   = 1 << 6,
-    Deactivated = 1 << 7,
-    Blocked     = 1 << 8,
-    Unblocked   = 1 << 9,
-};
-ENUM_CLASS_FLAGS(EQuestEventTypes);
 
 /**
  * BP-facing delegate for quest lifecycle events other than completion. Matches the UQuestObserverComponent pattern
@@ -107,7 +87,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionGiveBlockedDeleg
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 /**
- * Async BP action — "Bind To Quest Event". Subscribes to the lifecycle channels selected via the K2 node's
+ * Async BP action — "Observe Quest Lifecycle". Subscribes to the lifecycle channels selected via the K2 node's
  * Details-panel checkboxes (or the factory's ExposedEvents bitmask) on the given tag and stays bound until
  * Cancel() is called or the GameInstance is torn down.
  *
@@ -124,7 +104,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionGiveBlockedDeleg
  * EndPlay or equivalent. Otherwise the action lives for the GameInstance's lifetime.
  */
 UCLASS(BlueprintType, meta = (ExposedAsyncProxy = "Subscription"))
-class SIMPLEQUEST_API UQuestEventSubscription : public UBlueprintAsyncActionBase
+class SIMPLEQUEST_API UQuestLifecycleObserver : public UBlueprintAsyncActionBase
 {
     GENERATED_BODY()
 
@@ -215,7 +195,7 @@ private:
     /**
      * Per-subscription routing mode applied to every internal SubscribeMessage call. Defaults to
      * Descendants (hierarchical — preserves the prior per-quest-event behavior). Designers narrow via
-     * the BindToQuestEvent K2 node's Routing pin when ancestor-walk delivery is noise.
+     * the ObserveQuestLifecycle K2 node's Routing pin when ancestor-walk delivery is noise.
      */
     ESignalRoutingMode Routing = ESignalRoutingMode::Descendants;
 

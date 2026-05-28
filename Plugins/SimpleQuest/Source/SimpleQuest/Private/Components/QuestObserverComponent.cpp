@@ -371,7 +371,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		// Started catch-up additionally recovers the last giver actor via StateSubsystem). Mirrors UQuestEvent-
 		// Subscription's catch-up pattern.
 		//
-		// No per-tag deduplication against live events here (unlike UQuestEventSubscription): the observer's catch-up runs
+		// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): the observer's catch-up runs
 		// synchronously inside RegisterQuestObserver (called from BeginPlay), so there's no deferral window during
 		// which a live event could fire and need deduplication. The K2 node defers to next tick to avoid racing the BP
 		// execution stack; the observer has no such constraint.

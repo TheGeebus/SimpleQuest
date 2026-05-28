@@ -60,7 +60,7 @@
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "FactsPanel/FactsPanelRegistry.h"
-#include "K2Nodes/K2Node_BindToQuestEvent.h"
+#include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
@@ -1067,7 +1067,7 @@ void FSimpleQuestEditor::HandlePickerCategoriesChanged()
 			for (UEdGraphNode* Node : Graph->Nodes)
 			{
 				// Only reconstruct nodes whose picker filter we actually source from settings.
-				if (Cast<UK2Node_CompleteObjectiveWithOutcome>(Node) || Cast<UK2Node_BindToQuestEvent>(Node))
+				if (Cast<UK2Node_CompleteObjectiveWithOutcome>(Node) || Cast<UK2Node_ObserveQuestLifecycle>(Node))
 				{
 					Node->ReconstructNode();
 					++ReconstructedCount;

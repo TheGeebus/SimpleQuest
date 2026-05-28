@@ -29,7 +29,7 @@
  * bWasGiverGated flag or check PrereqStatus.bIsAlways. Wrapper re-entries while already Live suppress this event
  * (no-op re-activation isn't a transition).
  *
- * Late-subscriber catch-up: UQuestEventSubscription::RunCatchUp reconstructs this event for subscribers that
+ * Late-subscriber catch-up: UQuestLifecycleObserver::RunCatchUp reconstructs this event for subscribers that
  * bind after the live publish fired. Reconstructs from EITHER the PendingGiver fact (giver-gated path entered
  * PendingGiver scope and is still there) OR the Live fact (non-gated path or asset-level activation, where being
  * Live implies having transitioned through Activated). Catch-up runs on next tick via FTimerManager — adopters

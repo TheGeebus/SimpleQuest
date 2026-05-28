@@ -108,7 +108,7 @@ public:
 
 	/**
 	 * Additional gameplay-tag namespaces shown in K2 node Questline pickers alongside the default
-	 * SimpleQuest.Questline namespace. Affects K2Node_BindToQuestEvent's QuestTag pin picker; runtime
+	 * SimpleQuest.Questline namespace. Affects K2Node_ObserveQuestLifecycle's QuestTag pin picker; runtime
 	 * behavior unchanged.
 	 *
 	 * Same two compose-time rules as the Outcome list above: no SimpleQuest sub-namespaces, no

@@ -73,6 +73,7 @@ void UInteractAllTargetsObjective::TryCompleteObjective_Implementation(const FQu
 		*GetOwningStepTag().ToString());
 
 	PublishTriggerSatisfied(InContext);
+	ReportProgress(InContext);
 
 	// Check completion. Prune dead weak refs first so a target actor destroyed mid-step doesn't permanently
 	// gate completion.

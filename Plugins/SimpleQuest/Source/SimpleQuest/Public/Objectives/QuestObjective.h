@@ -243,8 +243,14 @@ protected:
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationContext& InForwardParams = FQuestObjectiveActivationContext());
 	
 	/**
-	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
-	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
+	 * Broadcasts an objective-progress signal to the framework via OnQuestObjectiveProgress. Progress events
+	 * are PURELY EXPLICIT — the framework never auto-fires Progress as part of completion or any other
+	 * implicit lifecycle path. Objectives that want a "final X/X tick" before completing call ReportProgress
+	 * with the final state, then CompleteObjectiveWithOutcome.
+	 *
+	 * Some objectives have no per-fire progress semantic at all (e.g., a binary "interacted yes/no" objective)
+	 * and never call this method. Listeners receive zero Progress events for those objectives, exactly as
+	 * intended — no event-shape filtering required at the listener side.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);

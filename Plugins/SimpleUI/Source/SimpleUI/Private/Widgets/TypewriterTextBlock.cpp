@@ -448,6 +448,8 @@ void UTypewriterTextBlock::HandleNextTextDelayEnd()
         return;
     }    
 
+    World->GetTimerManager().ClearTimer(NextTextDelayHandle);
+    
     // Empty queue at this point means the queue was externally drained (ClearTextQueue, etc.) — the natural-completion
     // semantic doesn't apply, so we bail without popping or broadcasting OnFinalDisplayDelayEnd. The in-flight string's
     // own OnDisplayStringEnd already fired in HandleDisplayStringEnd; that paired event survives the abort. Only the

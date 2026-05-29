@@ -595,6 +595,34 @@ headers (IDE quick-docs or auto-generated API docs).
     clean end-to-end: empty author → empty registry → empty query
     → silent widget. Adopters who want to pipe the node label
     explicitly can read it via `NodeLabel` and queue it themselves.
+- **`OnQuestObjectiveProgress` no longer auto-fires from inside
+  `CompleteObjectiveWithOutcome`.** Previously, completing an
+  objective implicitly broadcast a final Progress event before the
+  Completion event, regardless of whether the objective had called
+  `ReportProgress` on the same trigger. This caused duplicate
+  Progress events for objectives that called `ReportProgress`
+  themselves before completing, and produced spurious Progress
+  events for objectives that have no per-fire progress semantic
+  at all (e.g., binary "interacted yes/no" objectives). Progress
+  is now purely explicit: the framework never auto-fires Progress.
+  Objectives that want a final X/X tick before completion call
+  `ReportProgress` explicitly first, then `CompleteObjectiveWithOutcome`.
+  `UCountingQuestObjective::AddProgress` was updated cooperatively
+  to preserve its existing observable "final X/X tick before
+  completion" behavior — Counting-objective adopters see no
+  behavior change. Listeners subscribing to Progress no longer
+  receive events from objectives that never call `ReportProgress`,
+  removing the need for defensive event-shape filtering.
+- **`UTypewriterTextBlock::IsIdle` now correctly reports idle from
+  inside `OnFinalDisplayDelayEnd` handlers.** Previously the
+  `NextTextDelay` timer handle was still considered active by UE's
+  TimerManager during the broadcast, so listeners querying
+  `IsIdle()` (e.g., to decide whether to advance a queued display
+  pipeline from a HUD-level joint-idle gate) saw the widget as
+  still-not-idle. Fixed by explicitly clearing `NextTextDelayHandle`
+  before the broadcast. Adopters relying on `IsIdle()` from within
+  `OnFinalDisplayDelayEnd` handlers will now see the expected
+  post-natural-completion state.
 
 ### SimpleUI — Typewriter Text Block expansion
 

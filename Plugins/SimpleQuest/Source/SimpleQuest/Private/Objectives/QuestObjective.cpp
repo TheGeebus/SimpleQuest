@@ -79,11 +79,6 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(InCompletionContext);
 	CompletionContext = Effective;
 	ForwardActivationParams = InForwardParams;
-
-	// Emit a final progress tick before completing so consumers driving a progress bar see the "full"
-	// state before the completion delegate takes over. The CompletionContext typically already has
-	// CurrentCount == RequiredCount at this point.
-	OnQuestObjectiveProgress.Broadcast(Effective);
 	
 	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
 	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements supply an

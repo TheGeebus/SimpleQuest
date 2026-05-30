@@ -10,6 +10,7 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
+#include "Quests/Types/QuestEventTypes.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
 #include "Signals/Types/SignalRoutingFlags.h"
 #include "QuestObserverComponent.generated.h"
@@ -167,6 +168,9 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 
+	// ── Catch-all (any event) ────────────────────────────────────────────────────────────────────
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAnyQuestEvent, FQuestLifecycleEventReport, Report);
+	
 	/** Fires when execution reaches a giver-gated quest. PrereqStatus describes whether prereqs are currently satisfied. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
@@ -214,6 +218,22 @@ public:
 	/** Fires when the quest's Blocked state fact transitions from present to absent. Symmetric partner to OnQuestBlocked. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestUnblocked OnQuestUnblocked;
+	
+	/**
+	 * Catch-all delegate that fires for every lifecycle event this observer receives, packaged into a single
+	 * FQuestLifecycleEventReport payload. Convenient for broad-audience consumers (UI sidebars, audio routers,
+	 * telemetry pipelines) that would otherwise bind every per-type delegate just to route on EventType.
+	 *
+	 * Gated by the same per-tag opt-in flags in FObservedQuestEventSettings — events with their per-tag flag
+	 * off don't fire the catch-all (they never enter the observer's pipeline). Set the bObserveX flags
+	 * accordingly when configuring ObservedTags.
+	 *
+	 * Bind this OR the narrow delegates, not both unless you want the same event delivered twice — there is no
+	 * framework-side cross-subscription deduplication. ActivationFailed stays on its narrow delegate only (outside
+	 * the lifecycle enum's scope; debug-leaning audience).
+	 */
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnAnyQuestEvent OnAnyQuestEvent;
 
 protected:
 	virtual void BeginPlay() override;
@@ -241,6 +261,13 @@ protected:
 	virtual void HandleQuestDeactivated			(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	virtual void HandleQuestBlocked				(FGameplayTag Channel, const FQuestBlockedEvent& Event);
 	virtual void HandleQuestUnblocked			(FGameplayTag Channel, const FQuestUnblockedEvent& Event);
+	
+	/**
+	 * Packs the supplied identity and event-specific fields into a FQuestLifecycleEventReport and broadcasts
+	 * on OnAnyQuestEvent. Called from every per-event Handle* site (and from each catch-up branch) after
+	 * the corresponding narrow delegate broadcasts. No-op if OnAnyQuestEvent has no listeners.
+	 */
+	void BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGameplayTag MatchedChannel, EQuestLifecycleEventType EventType, const FQuestEventPayload& Payload, FGameplayTag OutcomeTag = FGameplayTag(), AActor* GiverActor = nullptr);
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;

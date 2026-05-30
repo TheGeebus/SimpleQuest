@@ -63,6 +63,7 @@ void UQuestObserverComponent::HandleQuestActivated(FGameplayTag Channel, const F
 	{
 		OnQuestActivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.PrereqStatus);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Activated, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestActivationFailed(FGameplayTag Channel, const FQuestActivationFailedEvent& Event)
@@ -80,6 +81,7 @@ void UQuestObserverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQu
 	{
 		OnQuestEnabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Enabled, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event)
@@ -88,6 +90,7 @@ void UQuestObserverComponent::HandleQuestDisabled(FGameplayTag Channel, const FQ
 	{
 		OnQuestDisabled.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Disabled, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
@@ -96,6 +99,7 @@ void UQuestObserverComponent::HandleQuestGiveBlocked(FGameplayTag Channel, const
 	{
 		OnQuestGiveBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Blockers, Event.GiverActor.Get());
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::GiveBlocked, Event.Payload, FGameplayTag(), Event.GiverActor.Get());
 }
 
 void UQuestObserverComponent::HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
@@ -104,6 +108,7 @@ void UQuestObserverComponent::HandleQuestStarted(FGameplayTag Channel, const FQu
 	{
 		OnQuestStarted.Broadcast(Event.GetQuestTag(), Channel, Event.Payload, Event.GiverActor.Get());
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Started, Event.Payload, FGameplayTag(), Event.GiverActor.Get());
 }
 
 void UQuestObserverComponent::HandleQuestProgress(FGameplayTag Channel, const FQuestProgressEvent& Event)
@@ -112,6 +117,7 @@ void UQuestObserverComponent::HandleQuestProgress(FGameplayTag Channel, const FQ
 	{
 		OnQuestProgress.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Progress, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
@@ -162,6 +168,7 @@ void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const F
 	{
 		OnQuestCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Completed, Event.Payload, Event.OutcomeTag);
 }
 
 void UQuestObserverComponent::HandleQuestDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
@@ -171,6 +178,7 @@ void UQuestObserverComponent::HandleQuestDeactivated(FGameplayTag Channel, const
 	{
 		OnQuestDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Deactivated, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
@@ -179,6 +187,7 @@ void UQuestObserverComponent::HandleQuestBlocked(FGameplayTag Channel, const FQu
 	{
 		OnQuestBlocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Blocked, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestUnblocked(FGameplayTag Channel, const FQuestUnblockedEvent& Event)
@@ -187,6 +196,20 @@ void UQuestObserverComponent::HandleQuestUnblocked(FGameplayTag Channel, const F
 	{
 		OnQuestUnblocked.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Unblocked, Event.Payload);
+}
+
+void UQuestObserverComponent::BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGameplayTag MatchedChannel, EQuestLifecycleEventType EventType, const FQuestEventPayload& Payload, FGameplayTag OutcomeTag, AActor* GiverActor)
+{
+	if (!OnAnyQuestEvent.IsBound()) return;
+	FQuestLifecycleEventReport Report;
+	Report.QuestTag = QuestTag;
+	Report.MatchedChannel = MatchedChannel;
+	Report.EventType = EventType;
+	Report.Payload = Payload;
+	Report.OutcomeTag = OutcomeTag;
+	Report.GiverActor = GiverActor;
+	OnAnyQuestEvent.Broadcast(Report);
 }
 
 int32 UQuestObserverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
@@ -411,12 +434,14 @@ void UQuestObserverComponent::RegisterQuestObserver()
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Activated, Payload);
 			}
 
 			if (Settings.bObserveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Disabled, Payload);
 			}
 
 			if (Settings.bObserveStarted)
@@ -427,6 +452,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 					ActiveQuestTags.AddTag(EachTag);
 					AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
 					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
+					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
 				}
 			}
 
@@ -463,6 +489,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *RecoveredOutcome.ToString());
 						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
+						BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Completed, Payload, RecoveredOutcome);
 					}
 				}
 			}
@@ -474,6 +501,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 				{
 					ActiveQuestTags.RemoveTag(EachTag);
 					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, Payload);
+					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Deactivated, Payload);
 				}
 			}
 
@@ -483,6 +511,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 				if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
 				{
 					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, Payload);
+					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Blocked, Payload);
 				}
 			}
 		}

@@ -4,7 +4,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "QuestEventTypes.generated.h"
+
+class AActor;
 
 /**
  * Quest lifecycle event-type enums — two shapes for two roles.
@@ -60,7 +64,8 @@ ENUM_CLASS_FLAGS(EQuestEventTypes);
 UENUM(BlueprintType)
 enum class EQuestLifecycleEventType : uint8
 {
-    None = 0        UMETA(Hidden),
+    /** Configuration-only flag meaning "no event chosen". Lifecycle events arriving at runtime are always one of the non-None values below. */
+    None,
     Activated,
     Enabled,
     Disabled,
@@ -91,3 +96,52 @@ FORCEINLINE EQuestEventTypes ToEventTypeMask(EQuestLifecycleEventType Single)
         default:                                    return EQuestEventTypes::None;
     }
 }
+
+/**
+ * Aggregate payload for the catch-all OnAnyQuestEvent delegate on UQuestObserverComponent. Carries the common
+ * fields a broad-audience consumer needs (UI sidebars, audio routers, telemetry pipelines, etc.) without
+ * requiring the consumer to bind every per-type delegate just to discriminate on EventType.
+ *
+ * Field population by EventType:
+ *   - QuestTag, MatchedChannel, EventType: always populated
+ *   - OutcomeTag: populated on Completed; default (empty) otherwise
+ *   - GiverActor: populated on Started for giver-gated quests; nullptr otherwise
+ *
+ * Consumers needing richer event-specific payloads (Progress amounts, Block reasons, GiveBlocked blocker
+ * arrays, etc.) bind the corresponding narrow delegate instead — those payloads stay on the per-type
+ * delegates rather than bloating the catch-all into a union.
+ */
+USTRUCT(BlueprintType)
+struct FQuestLifecycleEventReport
+{
+    GENERATED_BODY()
+
+    /** Canonical quest tag for the event source (the publishing instance's ContextualTag / Stack[0]). */
+    UPROPERTY(BlueprintReadOnly)
+    FGameplayTag QuestTag;
+
+    /** Delivery metadata — the channel from the publishing set most specific to this observer's bound tag. */
+    UPROPERTY(BlueprintReadOnly)
+    FGameplayTag MatchedChannel;
+
+    /** Which lifecycle event arrived. Never None at dispatch — None is reserved for configuration sentinels. */
+    UPROPERTY(BlueprintReadOnly)
+    EQuestLifecycleEventType EventType = EQuestLifecycleEventType::None;
+
+    /**
+     * Per-event payload — NodeInfo, CompletionTrigger, plus inherited FQuestContextBase fields (Instigator,
+     * CustomData, OriginTag, OriginChain). Common across all lifecycle events; carries the same data the
+     * narrow delegates' Payload parameter does. On catch-up, only NodeInfo.QuestTag is populated — full
+     * payload isn't recoverable from state alone (matches the narrow delegates' catch-up contract).
+     */
+    UPROPERTY(BlueprintReadOnly)
+    FQuestEventPayload Payload;
+    
+    /** Populated on Completed; default (empty) tag otherwise. */
+    UPROPERTY(BlueprintReadOnly)
+    FGameplayTag OutcomeTag;
+
+    /** Populated on Started or Give Blocked for giver-gated quests; nullptr otherwise. */
+    UPROPERTY(BlueprintReadOnly)
+    AActor* GiverActor = nullptr;
+};

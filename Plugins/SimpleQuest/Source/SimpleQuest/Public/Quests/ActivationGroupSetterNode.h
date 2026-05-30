@@ -9,9 +9,9 @@
 
 /**
  * Runtime instance for the editor "Activation Group: Entry" node — the SETTER half of a group portal pair.
- * When activation arrives at this node's input, it publishes the GroupTag (currently as a UWorldStateSubsystem
- * fact; switches to a transient FQuestActivationGroupTriggeredEvent on the GroupTag signal channel in a later
- * migration step). Forwards activation locally regardless.
+ * When activation arrives at this node's input, it publishes FQuestActivationGroupTriggeredEvent on the
+ * GroupTag's SignalSubsystem channel — every UActivationGroupListenerNode subscribed to that channel receives
+ * the signal. Forwards activation locally regardless.
  *
  * Editor naming follows graph-flow direction (signal entering the group portal); runtime naming follows
  * functional role (this class publishes the group's signal).

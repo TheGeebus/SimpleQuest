@@ -623,6 +623,22 @@ headers (IDE quick-docs or auto-generated API docs).
   before the broadcast. Adopters relying on `IsIdle()` from within
   `OnFinalDisplayDelayEnd` handlers will now see the expected
   post-natural-completion state.
+- **Activation Group node tooltips + doc comments corrected to
+  reference SignalSubsystem rather than WorldState.** Three sites
+  carried stale "WorldState" references from an earlier
+  implementation that has since migrated to the transient signal
+  channel approach: the Activation Group Entry node's input pin
+  tooltip (designer-facing), the Activation Group Exit node's pin
+  allocation source comment, and the `UActivationGroupSetterNode`
+  runtime class doc comment (which still described the migration
+  as future-tense after it had completed). Activation Groups
+  publish `FQuestActivationGroupTriggeredEvent` on the GroupTag's
+  SignalSubsystem channel; Listeners subscribe to that channel.
+  Designer-facing tooltip and source documentation now accurately
+  describe the publish mechanism. Adopters reading source for
+  cross-system bridge patterns (any system can publish on a group's
+  tag channel — Setter nodes are one publisher among potentially
+  many) see the correct subsystem reference.
 
 ### SimpleUI — Typewriter Text Block expansion
 

@@ -94,6 +94,13 @@ int32 USimpleCoreBlueprintLibrary::GetFactValue(UObject* WorldContextObject, FGa
     return 0;
 }
 
+// ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
+
+FGameplayTag USimpleCoreBlueprintLibrary::GetDirectParentTag(FGameplayTag Tag)
+{
+    return Tag.RequestDirectParent();
+}
+
 // ── Resolution helpers ─────────────────────────────────────────────────────────────────────────────
 
 USignalSubsystem* USimpleCoreBlueprintLibrary::GetSignalSubsystem(const UObject* WorldContextObject)

@@ -170,6 +170,17 @@ public:
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static int32 GetFactValue(UObject* WorldContextObject, FGameplayTag Tag);
 
+    // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the direct parent of the given gameplay tag (e.g., "X.Y.Z" → "X.Y"). Returns an invalid
+     * (empty) tag if the input has no parent (root-level tag) or is itself invalid. Wraps the C++-only
+     * FGameplayTag::RequestDirectParent() so BP code can walk tag hierarchies — used by patterns like
+     * sidebar parent-resolution walks where each step of the walk checks the next-up ancestor.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleCore|Tags")
+    static FGameplayTag GetDirectParentTag(FGameplayTag Tag);
+
 private:
     /**
      * Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null

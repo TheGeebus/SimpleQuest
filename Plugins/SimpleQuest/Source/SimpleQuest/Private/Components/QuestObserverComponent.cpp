@@ -441,7 +441,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
-				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Disabled, Payload);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Enabled, Payload);
 			}
 
 			if (Settings.bObserveStarted)

@@ -40,7 +40,7 @@ void UQuestTriggerComponent::BeginPlay()
         // fire BEFORE the step ever goes Live (PendingGiver-with-structural-blockers case) and Deactivated needs to
         // catch the end transition regardless of which fire (if any) drove it.
         SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse);
-        SignalSubsystem->SubscribeMessage<FQuestTriggerBlockedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked);
+        SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked);
         SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated);
         SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied);
 
@@ -249,7 +249,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
             // Canonical identity for the event payload — first channel in the set after resolve, matches
             // FQuestPublish::OnAllNodeTags semantics where Event.QuestTag is set to the canonical ContextualTag.
             const FGameplayTag IdentityTag = Channels[0];
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerBlockedEvent(IdentityTag, StructuralBlockers, EchoContext));
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestProgressRefusedEvent(IdentityTag, StructuralBlockers, EchoContext));
         }
     }
 }
@@ -267,7 +267,7 @@ void UQuestTriggerComponent::HandleQuestTriggerResponse(FGameplayTag Channel, co
     OnQuestTriggerResponded.Broadcast(Event.QuestTag, Channel, Event);
 }
 
-void UQuestTriggerComponent::HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestTriggerBlockedEvent& Event)
+void UQuestTriggerComponent::HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
 {
     if (Event.TriggerContext.OriginatingTriggerComponent.Get() != this) return;
 

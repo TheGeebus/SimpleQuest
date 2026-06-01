@@ -27,6 +27,7 @@ struct FQuestEndedEvent;
 struct FQuestDeactivatedEvent;
 struct FQuestBlockedEvent;
 struct FQuestUnblockedEvent;
+struct FQuestProgressRefusedEvent;
 
 
 /**
@@ -74,7 +75,16 @@ struct FObservedQuestEventSettings
 	/** Per-step progress tick during Live phase. Transient; no catch-up. Opt-in (can be noisy). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveProgress = false;
-
+	
+	/**
+	 * A progress attempt against this quest was refused — typically a trigger fire on a step whose Progress
+	 * gate isn't open (prereq unsatisfied, Blocked state, etc.). Carries the FQuestActivationBlocker array
+	 * plus the originating TriggerContext. Transient; no catch-up — refusals are interaction events, not
+	 * recoverable state.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bObserveProgressRefused = false;
+	
 	/** Quest resolved with an outcome. OutcomeFilter (below) further narrows broadcast to specific outcomes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveCompleted = true;
@@ -167,6 +177,7 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestProgressRefused, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, const FQuestObjectiveTriggerContext&, TriggerContext);
 
 	// ── Catch-all (any event) ────────────────────────────────────────────────────────────────────
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAnyQuestEvent, FQuestLifecycleEventReport, Report);
@@ -220,6 +231,14 @@ public:
 	FOnQuestUnblocked OnQuestUnblocked;
 	
 	/**
+	 * Fires when a progress attempt against this quest is refused — typically a trigger fire on a step whose
+	 * Progress gate isn't open (prereq unsatisfied, Blocked state, etc.). Mirrors OnQuestGiveBlocked's shape
+	 * but for the run phase. Carries the blocker array + originating TriggerContext.
+	 */
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestProgressRefused OnQuestProgressRefused;
+	
+	/**
 	 * Catch-all delegate that fires for every lifecycle event this observer receives, packaged into a single
 	 * FQuestLifecycleEventReport payload. Convenient for broad-audience consumers (UI sidebars, audio routers,
 	 * telemetry pipelines) that would otherwise bind every per-type delegate just to route on EventType.
@@ -261,6 +280,7 @@ protected:
 	virtual void HandleQuestDeactivated			(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	virtual void HandleQuestBlocked				(FGameplayTag Channel, const FQuestBlockedEvent& Event);
 	virtual void HandleQuestUnblocked			(FGameplayTag Channel, const FQuestUnblockedEvent& Event);
+	virtual void HandleQuestProgressRefused		(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
 	
 	/**
 	 * Packs the supplied identity and event-specific fields into a FQuestLifecycleEventReport and broadcasts

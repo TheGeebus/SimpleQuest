@@ -95,6 +95,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative|Run Phase", meta = (MultiLine = true))
 	TArray<FText> ProgressBeats;
 
+	/** Objective progress was refused during Live phase. Transient; UI may wish to display an effect when progress
+	 *  is denied. Leave empty unless you need narration when progress is refused. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Narrative|Run Phase", meta = (MultiLine = true))
+	TArray<FText> ProgressRefusedBeats;
+
 	// ── End phase ────────────────────────────────────────────────────────────────────────────────
 
 protected:

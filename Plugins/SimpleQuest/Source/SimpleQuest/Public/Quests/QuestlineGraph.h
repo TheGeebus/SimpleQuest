@@ -176,6 +176,15 @@ public:
      */
     FText GetDisplayName() const;
 
+    /**
+     * Returns the raw authored DisplayName field WITHOUT the asset-short-name fallback. Use when empty
+     * carries semantic meaning — e.g., runtime registry writes where adopter sidebars rely on "empty
+     * means drop this entry from the UI." GetDisplayName() above is for editor surfaces (outliner,
+     * tooltips, asset chips) that always want a renderable label and don't carry the empty-as-meaningful
+     * convention.
+     */
+    const FText& GetAuthoredDisplayName() const { return DisplayName; }
+
     // Editor-only: the actual UEdGraph object is only needed in the editor. The data it represents is compiled in-editor for use at runtime
 #if WITH_EDITORONLY_DATA
 public:	

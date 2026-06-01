@@ -8,7 +8,7 @@
 #include "QuestObserverComponent.h"
 #include "Components/ActorComponent.h"
 #include "Events/QuestStartedEvent.h"
-#include "Events/QuestTriggerBlockedEvent.h"
+#include "Events/QuestProgressRefusedEvent.h"
 #include "Events/QuestTriggerDeactivatedEvent.h"
 #include "Events/QuestTriggerResponseEvent.h"
 #include "Events/QuestTriggerSatisfiedEvent.h"
@@ -49,7 +49,7 @@ public:
 	 * currently progress because of structural blockers (Blocked fact set, or unmet prereqs). Mirrors the Giver's
 	 * OnQuestGiveBlocked shape — same FQuestActivationBlocker[] payload. Own-fire filter applied internally.
 	 */
-	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerBlockedEvent, Event);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestProgressRefusedEvent, Event);
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
 	FOnQuestTriggerBlocked OnQuestTriggerBlocked;
 
@@ -114,7 +114,7 @@ protected:
 	 * Receives Blocked publishes from any Trigger Component's SendTriggerEvent (including this one's own publishes
 	 * bouncing back). Own-fire filter scopes the broadcast to this component's owning actor.
 	 */
-	virtual void HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestTriggerBlockedEvent& Event);
+	virtual void HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
 
 	/**
 	 * Receives the trigger-side wrap signal — Completed / Interrupted / Manual. No own-fire filter; all watching

@@ -605,14 +605,29 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 			}
 		}
         
-        if (!Instance) continue;
-        
+    	if (!Instance) continue;
+
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
-        Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
-    	Instance->DisplayName = ContentNode->DisplayName;
-    	Instance->Description = ContentNode->Description;
-    	Instance->DisplayData = ContentNode->DisplayData;
+    	Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
+
+    	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
+    	// outer node leaves the corresponding field empty/null. Outer overrides where authored, inner
+    	// fills the gap. Designers can rely on inner being the project-wide default for the questline
+    	// while still per-instance-overriding specific fields per context.
+    	if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(ContentNode))
+    	{
+    		UQuestlineGraph* InnerAsset = LinkedNode->LinkedGraph.LoadSynchronous();
+    		Instance->DisplayName = (LinkedNode->DisplayName.IsEmpty() && InnerAsset) ? InnerAsset->DisplayName : LinkedNode->DisplayName;
+    		Instance->Description = (LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description;
+    		Instance->DisplayData = (!LinkedNode->DisplayData && InnerAsset) ? InnerAsset->DisplayData : LinkedNode->DisplayData;
+    	}
+    	else
+    	{
+    		Instance->DisplayName = ContentNode->DisplayName;
+    		Instance->Description = ContentNode->Description;
+    		Instance->DisplayData = ContentNode->DisplayData;
+    	}
     	
         AllCompiledQuestTags.Add(TagName);
     	for (const FName& AliasFName : AliasFNames)

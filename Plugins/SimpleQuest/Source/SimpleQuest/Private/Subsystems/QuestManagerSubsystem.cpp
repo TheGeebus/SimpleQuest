@@ -29,7 +29,7 @@
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestBlockedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
-#include "Events/QuestTriggerBlockedEvent.h"
+#include "Events/QuestProgressRefusedEvent.h"
 #include "Events/QuestTriggerDeactivatedEvent.h"
 #include "Events/QuestTriggerResponseEvent.h"
 #include "Events/QuestTriggerSatisfiedEvent.h"
@@ -281,7 +281,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
                 if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
             }
 
-            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerBlockedEvent(Step->GetContextualTag(), { Blocker }, EchoContext));
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, EchoContext));
             return;
         }
     }
@@ -434,7 +434,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         if (QuestlineTag.IsValid())
         {
             StateSubsystem->RegisterQuestTag(QuestlineTag);
-            StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
+            StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetAuthoredDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
         }
         else
         {

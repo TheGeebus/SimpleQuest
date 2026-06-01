@@ -39,17 +39,18 @@ class AActor;
 UENUM(meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
 enum class EQuestEventTypes : uint16
 {
-    None        = 0       UMETA(Hidden),
-    Activated   = 1 << 0,
-    Enabled     = 1 << 1,
-    Disabled    = 1 << 2,
-    GiveBlocked = 1 << 3,
-    Started     = 1 << 4,
-    Progress    = 1 << 5,
-    Completed   = 1 << 6,
-    Deactivated = 1 << 7,
-    Blocked     = 1 << 8,
-    Unblocked   = 1 << 9,
+    None            = 0       UMETA(Hidden),
+    Activated       = 1 << 0,
+    Enabled         = 1 << 1,
+    Disabled        = 1 << 2,
+    GiveBlocked     = 1 << 3,
+    Started         = 1 << 4,
+    Progress        = 1 << 5,
+    Completed       = 1 << 6,
+    Deactivated     = 1 << 7,
+    Blocked         = 1 << 8,
+    Unblocked       = 1 << 9,
+    ProgressRefused = 1 << 10,
 };
 ENUM_CLASS_FLAGS(EQuestEventTypes);
 
@@ -76,6 +77,7 @@ enum class EQuestLifecycleEventType : uint8
     Deactivated,
     Blocked,
     Unblocked,
+    ProgressRefused,
 };
 
 /** Convert a single-value lifecycle identifier to its bitmask equivalent. */
@@ -83,17 +85,18 @@ FORCEINLINE EQuestEventTypes ToEventTypeMask(EQuestLifecycleEventType Single)
 {
     switch (Single)
     {
-        case EQuestLifecycleEventType::Activated:   return EQuestEventTypes::Activated;
-        case EQuestLifecycleEventType::Enabled:     return EQuestEventTypes::Enabled;
-        case EQuestLifecycleEventType::Disabled:    return EQuestEventTypes::Disabled;
-        case EQuestLifecycleEventType::GiveBlocked: return EQuestEventTypes::GiveBlocked;
-        case EQuestLifecycleEventType::Started:     return EQuestEventTypes::Started;
-        case EQuestLifecycleEventType::Progress:    return EQuestEventTypes::Progress;
-        case EQuestLifecycleEventType::Completed:   return EQuestEventTypes::Completed;
-        case EQuestLifecycleEventType::Deactivated: return EQuestEventTypes::Deactivated;
-        case EQuestLifecycleEventType::Blocked:     return EQuestEventTypes::Blocked;
-        case EQuestLifecycleEventType::Unblocked:   return EQuestEventTypes::Unblocked;
-        default:                                    return EQuestEventTypes::None;
+        case EQuestLifecycleEventType::Activated:       return EQuestEventTypes::Activated;
+        case EQuestLifecycleEventType::Enabled:         return EQuestEventTypes::Enabled;
+        case EQuestLifecycleEventType::Disabled:        return EQuestEventTypes::Disabled;
+        case EQuestLifecycleEventType::GiveBlocked:     return EQuestEventTypes::GiveBlocked;
+        case EQuestLifecycleEventType::Started:         return EQuestEventTypes::Started;
+        case EQuestLifecycleEventType::Progress:        return EQuestEventTypes::Progress;
+        case EQuestLifecycleEventType::Completed:       return EQuestEventTypes::Completed;
+        case EQuestLifecycleEventType::Deactivated:     return EQuestEventTypes::Deactivated;
+        case EQuestLifecycleEventType::Blocked:         return EQuestEventTypes::Blocked;
+        case EQuestLifecycleEventType::Unblocked:       return EQuestEventTypes::Unblocked;
+        case EQuestLifecycleEventType::ProgressRefused: return EQuestEventTypes::ProgressRefused;
+        default:                                        return EQuestEventTypes::None;
     }
 }
 
@@ -141,7 +144,10 @@ struct FQuestLifecycleEventReport
     UPROPERTY(BlueprintReadOnly)
     FGameplayTag OutcomeTag;
 
-    /** Populated on Started or Give Blocked for giver-gated quests; nullptr otherwise. */
+    /**
+     * Populated on Started / GiveBlocked / ProgressRefused with the actor relevant to that event (the
+     * giver actor for Started + GiveBlocked, the triggered actor for ProgressRefused); nullptr otherwise.
+     */
     UPROPERTY(BlueprintReadOnly)
     AActor* GiverActor = nullptr;
 };

@@ -15,6 +15,7 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestProgressEvent.h"
+#include "Events/QuestProgressRefusedEvent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
@@ -199,6 +200,15 @@ void UQuestObserverComponent::HandleQuestUnblocked(FGameplayTag Channel, const F
 	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::Unblocked, Event.Payload);
 }
 
+void UQuestObserverComponent::HandleQuestProgressRefused(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
+{
+	if (OnQuestProgressRefused.IsBound())
+	{
+		OnQuestProgressRefused.Broadcast(Event.GetQuestTag(), Channel, Event.Blockers, Event.TriggerContext);
+	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::ProgressRefused, Event.Payload, FGameplayTag(), Event.TriggerContext.TriggeredActor.Get());
+}
+
 void UQuestObserverComponent::BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGameplayTag MatchedChannel, EQuestLifecycleEventType EventType, const FQuestEventPayload& Payload, FGameplayTag OutcomeTag, AActor* GiverActor)
 {
 	if (!OnAnyQuestEvent.IsBound()) return;
@@ -381,7 +391,8 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		if (Settings.bObserveDeactivated)		SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated, Settings.Routing);
 		if (Settings.bObserveBlocked)			SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked, Settings.Routing);
 		if (Settings.bObserveUnblocked)			SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked, Settings.Routing);
-
+		if (Settings.bObserveProgressRefused)	SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgressRefused, Settings.Routing);
+		
 		if (!WorldState) continue;
 
 		// Catch-up: fire delegates immediately for state already present at subscription time. For an exact-tag
@@ -456,8 +467,8 @@ void UQuestObserverComponent::RegisterQuestObserver()
 				}
 			}
 
-			// Disabled / GiveBlocked / Progress / Unblocked have no catch-up — transient or one-shot events without
-			// recoverable state.
+			// Disabled / GiveBlocked / Progress / Unblocked / ProgressRefused have no catch-up — transient or
+			// one-shot events without recoverable state.
 
 			if (Settings.bObserveCompleted)
 			{

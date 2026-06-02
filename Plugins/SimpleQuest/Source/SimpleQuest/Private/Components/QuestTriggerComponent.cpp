@@ -233,7 +233,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
 
         if (bIsLive)
         {
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this));
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this, Context.CustomTag));
             continue;
         }
 

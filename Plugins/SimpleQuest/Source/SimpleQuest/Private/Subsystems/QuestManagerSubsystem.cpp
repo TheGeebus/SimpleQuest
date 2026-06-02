@@ -272,6 +272,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
             EchoContext.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
             EchoContext.Instigator = Cast<AActor>(Event->Instigator);
             EchoContext.CustomData = Event->CustomData;
+            EchoContext.CustomTag = Event->CustomTag;
             EchoContext.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
 
             FQuestActivationBlocker Blocker;
@@ -290,6 +291,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
     Context.Instigator = Cast<AActor>(Event->Instigator);
     Context.CustomData = Event->CustomData;
+    Context.CustomTag = Event->CustomTag;
     Context.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
     Step->GetLiveObjective()->DispatchTryCompleteObjective(Context);
 }

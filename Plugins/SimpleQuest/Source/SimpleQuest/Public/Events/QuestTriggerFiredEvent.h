@@ -2,6 +2,7 @@
 
 #include "NativeGameplayTags.h"
 #include "Events/QuestEventBase.h"
+#include "GameplayTagContainer.h"
 #include "Components/ActorComponent.h"
 #include "QuestTriggerFiredEvent.generated.h"
 
@@ -16,8 +17,8 @@ struct FQuestTriggerFiredEvent
 	FQuestTriggerFiredEvent() = default;
 
 	explicit FQuestTriggerFiredEvent(UObject* InTriggeredActor, UObject* InInstigator = nullptr, const FInstancedStruct& InCustomData = FInstancedStruct(),
-		UActorComponent* InOriginatingTriggerComponent = nullptr)
-		: TriggeredActor(InTriggeredActor), Instigator(InInstigator), CustomData(InCustomData), OriginatingTriggerComponent(InOriginatingTriggerComponent)
+		UActorComponent* InOriginatingTriggerComponent = nullptr, FGameplayTag InCustomTag = FGameplayTag())
+		: TriggeredActor(InTriggeredActor), Instigator(InInstigator), CustomData(InCustomData), OriginatingTriggerComponent(InOriginatingTriggerComponent), CustomTag(InCustomTag)
 	{}
 
 	/** The target actor that was triggered (victim, interact point, waypoint). */
@@ -44,4 +45,13 @@ struct FQuestTriggerFiredEvent
 	 */
 	UPROPERTY(BlueprintReadOnly)
 	TWeakObjectPtr<UActorComponent> OriginatingTriggerComponent;
+
+	/**
+	 * Typed single-tag designer extension, routed through to FQuestObjectiveTriggerContext::CustomTag by
+	 * UQuestManagerSubsystem::CheckQuestObjectives — the lightweight complement to CustomData for the common
+	 * case where the trigger's game-specific data is a single tag (outcome routing, category, variant). Empty
+	 * by default.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	FGameplayTag CustomTag;
 };

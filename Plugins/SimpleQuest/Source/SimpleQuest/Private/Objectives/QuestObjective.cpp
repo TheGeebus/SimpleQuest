@@ -47,9 +47,10 @@ void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveTriggerC
 FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQuestObjectiveTriggerContext& AdopterContext) const
 {
 	FQuestObjectiveTriggerContext Out = AdopterContext;
-	if (!Out.TriggeredActor)         Out.TriggeredActor = LastTriggerContext.TriggeredActor;
-	if (!Out.Instigator.IsValid())   Out.Instigator    = LastTriggerContext.Instigator;
-	if (!Out.CustomData.IsValid())   Out.CustomData    = LastTriggerContext.CustomData;
+	if (!Out.TriggeredActor) Out.TriggeredActor = LastTriggerContext.TriggeredActor;
+	if (!Out.Instigator.IsValid()) Out.Instigator = LastTriggerContext.Instigator;
+	if (!Out.CustomData.IsValid()) Out.CustomData = LastTriggerContext.CustomData;
+	if (!Out.CustomTag.IsValid()) Out.CustomTag = LastTriggerContext.CustomTag;
 	Out.OriginatingTriggerComponent = LastTriggerContext.OriginatingTriggerComponent;
 	return Out;
 }

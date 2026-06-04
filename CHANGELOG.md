@@ -35,7 +35,11 @@ direct WorldState participation from questline graphs), giving
 subscribers a way to opt out of the bus's hierarchical-delivery
 default, and closing several latent gaps in the quest-resolution
 attribution chain that surfaced once the new primitives were
-exercised against real authoring patterns.
+exercised against real authoring patterns. It also broadens the
+observer surface — a catch-all `OnAnyQuestEvent` delegate and a new
+run-phase `ProgressRefused` event that completes the refusal-event
+family — and adds a typed `CustomTag` designer channel on the shared
+context base.
 
 ### Prereq Gate utility node
 
@@ -315,9 +319,12 @@ lifecycle subscribers consume them per event type.
 
 - **Per-event narrative beats.** `Activated Beats`, `Enabled Beats`,
   `Started Beats`, `Disabled Beats`, `Deactivated Beats`, `Blocked
-  Beats`, `Unblocked Beats` are each an `FQuestNarrativeBeats` wrapper
-  carrying a `TArray<FText>`. Designer authors any number of beat
-  strings per event; UI iterates them at delivery time.
+  Beats`, `Unblocked Beats`, `Activation Failed Beats`, and `Progress
+  Refused Beats` are each an `FQuestNarrativeBeats` wrapper carrying a
+  `TArray<FText>`. Designer authors any number of beat strings per
+  event; UI iterates them at delivery time. The set now covers every
+  observable lifecycle event, including the offer-phase and run-phase
+  refusals.
 - **Outcome-keyed completion beats.** `Completed Beats By Outcome` is
   a `TMap<FGameplayTag, FQuestNarrativeBeats>` keyed by outcome tag.
   Different outcomes can carry different completion text — `Victory`
@@ -411,6 +418,83 @@ Doc-comment `UPCOMING CHANGE` blocks have been added to
 `FQuestObjectiveActivationContext`, and its `Authored` / `Dynamic`
 sub-struct fields telegraphing the change for adopters reading the
 headers (IDE quick-docs or auto-generated API docs).
+
+### Catch-all lifecycle delegate — `OnAnyQuestEvent`
+
+`UQuestObserverComponent` gains a single catch-all delegate that fires
+for every lifecycle event the observer receives, packaged into one
+`FQuestLifecycleEventReport`. Broad-audience consumers — quest-log
+HUDs, audio routers, telemetry — bind once and branch on event type,
+instead of binding all ten per-type delegates and fanning them into
+the same handler.
+
+- **`FQuestLifecycleEventReport`** carries `QuestTag`, `MatchedChannel`,
+  `EventType`, `Payload`, `OutcomeTag` (populated on Completed), and
+  `GiverActor` (populated on Started, Give Blocked, and Progress
+  Refused). The common fields a broad consumer needs; consumers wanting
+  richer event-specific data (progress counts, blocker arrays) still
+  bind the corresponding narrow delegate.
+- **`EQuestLifecycleEventType`** — a `uint8` `BlueprintType` enum
+  identifying which event arrived (the single-value companion to the
+  multi-select `EQuestEventTypes` exposure bitmask), usable as a
+  Blueprint `Switch` operand in the catch-all handler. Includes a
+  `None` value for configuration use ("no event selected"); runtime
+  dispatch never emits `None`.
+- **Gated by the same per-tag opt-in flags** as the narrow delegates
+  (`FObservedQuestEventSettings`) — events whose per-tag flag is off
+  don't fire the catch-all. Bind `OnAnyQuestEvent` *or* the narrow
+  delegates, not both, unless you want the same event delivered twice
+  (there's no framework-side cross-subscription dedup).
+- **Stays a thin fan-out, not a discriminating firehose** because the
+  bus's subscribe-time filtering (per-tag flags, outcome filter,
+  routing mode) has already narrowed delivery by the time it fires.
+
+### Run-phase refusal event — `FQuestProgressRefusedEvent`
+
+The refusal-event family now spans all three lifecycle phases: offer
+(`FQuestActivationFailedEvent`), give (`FQuestGiveBlockedEvent`), and —
+new — run (`FQuestProgressRefusedEvent`). It fires when an interaction
+(typically a trigger) tries to progress a step that's structurally
+reachable but can't advance: a prerequisite isn't met, or the step is
+Blocked.
+
+- **Observable through the standard surfaces.** New
+  `UQuestObserverComponent::OnQuestProgressRefused` delegate plus a
+  `bObserveProgressRefused` per-tag opt-in flag, and it flows through
+  `OnAnyQuestEvent` automatically. Carries the blocker array and the
+  originating trigger context, so adopter UI can surface contextual
+  "can't do that yet, because X" feedback.
+- **`ProgressRefused`** added to both `EQuestEventTypes` (exposure
+  bitmask) and `EQuestLifecycleEventType` (arrival identifier).
+- The struct is the former `FQuestTriggerBlockedEvent`, renamed and
+  broadened — see Breaking changes for the migration.
+
+### Per-context `CustomTag` — typed single-tag designer channel
+
+`FQuestContextBase` (the shared base for trigger contexts, activation
+contexts, and event payloads) gains a `CustomTag` `FGameplayTag` field
+— a lightweight typed complement to the existing `CustomData`
+(`FInstancedStruct`) for the common case where the game-specific data a
+source carries is just a single tag (outcome routing, category, variant
+selector).
+
+- **No category filter.** Adopter-defined and framework-agnostic,
+  symmetric with `CustomData`'s zero type restriction. The framework
+  never interprets it; consumers read and branch on it.
+- **Flows through the full pipeline.** A trigger's `CustomTag` rides
+  through the trigger → objective boundary (readable in
+  `TryCompleteObjective`) and back out onto completion / progress
+  event payloads, the same as `CustomData`. Lets one trigger among
+  several tell a shared objective which named outcome to resolve,
+  without packing a one-field struct into `CustomData`.
+
+### `Get Direct Parent Tag` — SimpleCore tag helper
+
+A small `BlueprintPure` helper on the SimpleCore Blueprint library
+returning a gameplay tag's direct parent (`X.Y.Z` → `X.Y`; an invalid
+tag when the input is root-level or invalid). Exposes
+`FGameplayTag::RequestDirectParent` to Blueprint graphs that walk tag
+hierarchies — e.g., resolving a parent entry from a child's tag.
 
 ### Breaking changes (compiled-data + signatures)
 
@@ -534,6 +618,18 @@ headers (IDE quick-docs or auto-generated API docs).
     reflection redirect; direct C++ symbol references update at
     next recompile.
 
+- **`FQuestTriggerBlockedEvent` renamed to `FQuestProgressRefusedEvent`.**
+  The struct was always semantically a "progress refused" signal; the
+  rename aligns the name with the meaning and broadens it onto the
+  lifecycle observation surface (the new `OnQuestProgressRefused`
+  delegate, `bObserveProgressRefused` flag, and `OnAnyQuestEvent`
+  coverage — see *Run-phase refusal event* above). `UQuestTrigger-
+  Component`'s own `OnQuestTriggerBlocked` delegate keeps its name for
+  now and references the renamed struct. A `CoreRedirect` (`Struct`
+  rename) auto-migrates saved Blueprint data and reflected C++
+  references; direct C++ `#include` / symbol references update at next
+  recompile.
+
 ### Known limitations
 
 - The Prereq Gate's per-cascade dedup covers Path-keyed prereqs
@@ -639,6 +735,23 @@ headers (IDE quick-docs or auto-generated API docs).
   cross-system bridge patterns (any system can publish on a group's
   tag channel — Setter nodes are one publisher among potentially
   many) see the correct subsystem reference.
+- **LinkedQuestline node display fields fall back to the linked
+  asset's defaults.** A LinkedQuestline node's `DisplayName` /
+  `Description` / `DisplayData` now fall back per-field to the linked
+  questline asset's own authored class-default values when the outer
+  node leaves them empty. Previously the asset-level defaults were
+  silently dropped on the inline path, surfacing only when the
+  questline was used at root level. Outer-node authoring still
+  overrides per-field where present.
+- **Questline asset-level display registration honors an empty
+  `DisplayName`.** The runtime registry write for a questline's
+  asset-level display data no longer substitutes the asset's short
+  name when the authored `DisplayName` is empty — the "empty means
+  don't surface this in UI" convention now holds at the questline
+  level, matching content nodes. Editor surfaces (outliner, tooltips)
+  still show the asset short name for readability; only the runtime
+  registry write changed, via a new accessor that returns the raw
+  authored field rather than the editor-convenience fallback.
 
 ### SimpleUI — Typewriter Text Block expansion
 

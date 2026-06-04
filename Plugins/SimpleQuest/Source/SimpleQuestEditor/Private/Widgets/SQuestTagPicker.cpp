@@ -26,7 +26,7 @@ void SQuestTagPicker::Construct(const FArguments& InArgs)
 	// behavior (via FQuestTagComposer::FormatTagForDisplay) is preserved through GetDisplayText.
 	ChildSlot
 	[
-		SNew(SComboButton)
+		SAssignNew(ComboButton, SComboButton)
 		.Cursor(EMouseCursor::Default)
 		.OnGetMenuContent(this, &SQuestTagPicker::OnGetMenuContent)
 		.ButtonContent()
@@ -36,7 +36,7 @@ void SQuestTagPicker::Construct(const FArguments& InArgs)
 			.ShowClearButton(true)
 			.Text(this, &SQuestTagPicker::GetDisplayText)
 			.ToolTipText(this, &SQuestTagPicker::GetTooltipText)
-			// OnEditPressed intentionally unbound — SComboButton intercepts the click to drive the dropdown.
+			.OnEditPressed(this, &SQuestTagPicker::OnChipPressed)
 			.OnClearPressed(this, &SQuestTagPicker::OnClearPressed)
 		]
 	];
@@ -65,6 +65,15 @@ FReply SQuestTagPicker::OnClearPressed()
 	if (!bReadOnly)
 	{
 		OnTagChangedDelegate.ExecuteIfBound(FGameplayTag());
+	}
+	return FReply::Handled();
+}
+
+FReply SQuestTagPicker::OnChipPressed()
+{
+	if (ComboButton.IsValid())
+	{
+		ComboButton->SetIsOpen(ComboButton->ShouldOpenDueToClick());
 	}
 	return FReply::Handled();
 }

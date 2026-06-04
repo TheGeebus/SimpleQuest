@@ -9,6 +9,7 @@
 #include "GameplayTagContainer.h"
 
 class SWidget;
+class SComboButton;
 
 /**
  * Inline tag-picker widget for K2 graph nodes. Drop-in wrapper around SGameplayTagChip + SGameplayTagPicker
@@ -46,9 +47,11 @@ private:
 	FText GetDisplayText() const;
 	FText GetTooltipText() const;
 	FReply OnClearPressed();
+	FReply OnChipPressed();
 	TSharedRef<SWidget> OnGetMenuContent();
 	void OnPickerTagSelected(const TArray<FGameplayTagContainer>& TagContainers);
 
+	TSharedPtr<SComboButton> ComboButton;
 	TAttribute<FGameplayTag> TagAttribute;
 	FOnTagChanged OnTagChangedDelegate;
 	FString Filter;

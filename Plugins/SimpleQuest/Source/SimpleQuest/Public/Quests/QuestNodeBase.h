@@ -435,7 +435,14 @@ private:
      * When false, prerequisites gate progression only — activation is immediate.
      */
     bool bWasGiverGated = false;
-    
+
+    /**
+     * One-shot prerequisite-bypass directive for the next Activate. Set by ActivateNodeByTag from its
+     * bBypassPrerequisites parameter (re-stamped on every call, so it never goes stale); consumed and cleared in
+     * Activate, which then skips prereq evaluation and tears down any pending deferral. Cleared in ResetTransientState.
+     */
+    bool bBypassPrerequisitesOnce = false;
+
 public:
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
     FORCEINLINE FGuid GetAuthoredNodeGuid() const { return AuthoredNodeGuid; }

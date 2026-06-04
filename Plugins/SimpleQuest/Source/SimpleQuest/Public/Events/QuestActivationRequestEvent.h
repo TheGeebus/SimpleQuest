@@ -28,8 +28,18 @@ struct SIMPLEQUEST_API FQuestActivationRequestEvent : public FQuestEventBase
 	FQuestActivationRequestEvent() = default;
 	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationContext& InParams)
 		: FQuestEventBase(InQuestTag), Params(InParams) {}
+	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationContext& InParams, bool bInBypassPrerequisites)
+		: FQuestEventBase(InQuestTag), Params(InParams), bBypassPrerequisites(bInBypassPrerequisites) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	FQuestObjectiveActivationContext Params;
+
+	/**
+	 * When true, the activation skips prerequisite evaluation on the target and tears down any deferral it is already
+	 * holding — a deliberate "activate regardless" path (unlock / replay / debug). Default false leaves normal
+	 * prereq-gated behavior intact.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	bool bBypassPrerequisites = false;
 };
 

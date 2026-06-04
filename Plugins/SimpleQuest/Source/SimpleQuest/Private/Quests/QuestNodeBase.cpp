@@ -21,6 +21,23 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
     // Stash the cascade's event ID so subclasses (UPrereqGateNode) can read it during ActivateInternal for
     // per-event-ID dedup. PendingActivationContext was populated by the manager before Activate runs.
     LastIncomingEventID = PendingActivationContext.Dynamic.OriginatingEventID;
+    
+    // Prerequisite bypass — a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
+    // Consume the one-shot flag and, crucially, cancel any deferral this instance is still holding from an earlier
+    // armed activation. Without the cancel, that lingering subscription would fire a SECOND ActivateInternal later
+    // when the skipped prereq belatedly satisfies (player jumps ahead, then finishes the chapter they skipped).
+    if (bBypassPrerequisitesOnce)
+    {
+        bBypassPrerequisitesOnce = false;
+        if (DeferredContextualTag.IsValid())
+        {
+            USignalSubsystem* Signals = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<USignalSubsystem>() : nullptr;
+            FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);
+            DeferredContextualTag = FGameplayTag::EmptyTag;
+        }
+        ActivateInternal(InContextualTag);
+        return;
+    }
 
     UWorldStateSubsystem* WorldState = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
     UQuestStateSubsystem* StateSubsystem = CachedGameInstance.IsValid() ? CachedGameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
@@ -60,6 +77,7 @@ void UQuestNodeBase::ResetTransientState()
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
     bWasGiverGated = false;
+    bBypassPrerequisitesOnce = false;
     PendingActivationContext = FQuestObjectiveActivationContext{};
     LastIncomingEventID = FOriginatingEventID{};
 }

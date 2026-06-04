@@ -174,6 +174,22 @@ fact events. Affects any node whose Activate is called multiple
 times while still in the deferred state — most visibly the Prereq
 Gate, but content-node prereq deferral inherits the fix too.
 
+### Activate Quest — prerequisite bypass
+
+`Activate Quest` gains an optional **Bypass Prerequisites** input. When
+set, the quest activates immediately: its prerequisite expression is
+skipped, and any prerequisite wait the quest was already holding is
+cancelled. Default off leaves the normal prereq-gated behavior unchanged.
+
+For flows that deliberately start a quest out of its gated order — a
+chapter-select / unlock screen, a debug "jump to here" control, or
+save-restore reconstituting a quest that was already past its gate. The
+wait-cancellation is what makes the unlock case safe: a quest that was
+armed and waiting on a prerequisite won't later re-activate on its own
+once that prerequisite is belatedly satisfied, so jumping ahead and then
+completing the content you skipped doesn't double-fire the quest you
+jumped to.
+
 ### UI display data — Phase 1 (preview)
 
 Per-node `DisplayName` and `Description` properties on quest content
@@ -400,6 +416,13 @@ forking source.
   - Entries that overlap each other (duplicates, parent/child
     pairs) are pruned to one — the underlying gameplay-tag picker
     can't render overlapping namespace roots without crashing.
+
+### Tag picker — click the label to open
+
+The prefix-stripped tag pickers on quest graph nodes (Exit outcome chips,
+Activation Group and Prerequisite Rule tag chips) now open the tag menu
+when you click the tag label itself, not only the small dropdown arrow
+beside it — matching the click behavior of the standard engine tag picker.
 
 ### Activation context restructure — deprecation notice (0.5.0)
 

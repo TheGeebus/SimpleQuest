@@ -1200,7 +1200,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     }
 }
 
-void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivationProvenance Provenance, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate)
+void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivationProvenance Provenance, FGameplayTag IncomingOutcomeTag, FName IncomingSourceTag, bool bBypassGiverGate, bool bBypassPrerequisites)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_ActivateNodeByTag);
 
@@ -1219,6 +1219,10 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // FQuestEntryArrival. Stamped after lookup, before the rest of ActivateNodeByTag's flow touches PendingActivation-
     // Params, so this value rides through the merge regardless of whether the caller pre-stamped other fields on the struct.
     Instance->PendingActivationContext.Dynamic.Provenance = Provenance;
+    
+    // One-shot prereq-bypass directive for this activation, consumed in UQuestNodeBase::Activate. Re-stamped on every
+    // ActivateNodeByTag call (organic cascade activations pass false), so a true value can't leak into a later call.
+    Instance->bBypassPrerequisitesOnce = bBypassPrerequisites;
 
     const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 
@@ -1912,7 +1916,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
             Step->PendingActivationContext = Event.Params;
         }
 
-        ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::ExternalAPI);
+        ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::ExternalAPI, FGameplayTag(), NAME_None, false, Event.bBypassPrerequisites);
         ++SuccessfulDispatches;
     }
     

@@ -172,7 +172,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void ActivateQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext(),
+        bool bBypassPrerequisites = false);
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void SetQuestBlocked(const UObject* WorldContext,

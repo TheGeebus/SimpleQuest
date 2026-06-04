@@ -148,6 +148,7 @@ protected:
 	 *                            so re-entering PendingGiver would be incorrect. The structural giver-gated set still
 	 *                            contains the tag for the next loop iteration / external re-activation. Defaults to
 	 *                            false for all non-give paths.
+	 * @param bBypassPrerequisites
 	 *
 	 * @see UQuestStateSubsystem::RecordEntry
 	 * @see UQuestManagerSubsystem::HandleOnNodeStarted
@@ -158,7 +159,8 @@ protected:
 		EQuestActivationProvenance Provenance,
 		FGameplayTag IncomingOutcomeTag = FGameplayTag(),
 		FName IncomingSourceTag = NAME_None,
-		bool bBypassGiverGate = false);
+		bool bBypassGiverGate = false,
+		bool bBypassPrerequisites = false);
 
 private:		
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);

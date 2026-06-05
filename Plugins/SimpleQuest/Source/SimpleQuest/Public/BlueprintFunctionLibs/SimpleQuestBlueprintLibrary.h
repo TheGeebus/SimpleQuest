@@ -111,6 +111,9 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestPendingGiver(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
+    
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static bool IsQuestBlocked(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag);

@@ -73,6 +73,11 @@ bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldConte
     return FQuestLifecycleQuery::IsPendingGiver(GetWorldStateSubsystem(WorldContext), QuestTag);
 }
 
+bool USimpleQuestBlueprintLibrary::IsQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    return FQuestLifecycleQuery::IsBlocked(GetWorldStateSubsystem(WorldContext), QuestTag);
+}
+
 bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag)
 {
     if (!QuestTag.IsValid() || !OutcomeTag.IsValid()) return false;

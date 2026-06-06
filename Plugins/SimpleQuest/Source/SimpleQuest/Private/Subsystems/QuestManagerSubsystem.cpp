@@ -257,6 +257,26 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
     if (!Step || !Step->GetLiveObjective()) return;
 
+    // Build the trigger context — reused by both refusal-feedback publishes below and the completion dispatch.
+    FQuestObjectiveTriggerContext Context;
+    Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
+    Context.Instigator = Cast<AActor>(Event->Instigator);
+    Context.CustomData = Event->CustomData;
+    Context.CustomTag = Event->CustomTag;
+    Context.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
+
+    // Manual Block gate — a Blocked step refuses trigger-driven progress. Block leaves the trigger active so the player
+    // can poke it for feedback (Block doesn't disable targets — that's Deactivate's job), but it can't advance until
+    // ClearBlocked. Distinct from the prerequisite gate below: this is the SetBlocked / SetQuestBlocked fact, not a
+    // prereq expression. Publishes ProgressRefused with Reason=Blocked so consumers can tell the two refusals apart.
+    if (FQuestLifecycleQuery::IsBlocked(WorldState, Step->GetContextualTag()))
+    {
+        FQuestActivationBlocker Blocker;
+        Blocker.Reason = EQuestActivationBlocker::Blocked;
+        FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
+        return;
+    }
+
     if (Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesProgression
         && !Step->IsGiverGated()
         && !Step->PrerequisiteExpression.IsAlways())
@@ -264,17 +284,9 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
         const FQuestPrereqStatus PrereqStatus = Step->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
         if (!PrereqStatus.bSatisfied)
         {
-            // Trigger-side per-fire feedback for the GatesProgression silent-ignore case. Echo the trigger context
-            // (TriggeredActor / Instigator / CustomData) from the inbound fire so subscriber-side own-fire filter
-            // resolves. Multichannel publish via FQuestPublish::OnAllNodeTags so subscribers on any perspective
-            // (canonical or asset-scoped alias) receive the Blocked event.
-            FQuestObjectiveTriggerContext EchoContext;
-            EchoContext.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
-            EchoContext.Instigator = Cast<AActor>(Event->Instigator);
-            EchoContext.CustomData = Event->CustomData;
-            EchoContext.CustomTag = Event->CustomTag;
-            EchoContext.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
-
+            // Trigger-side per-fire feedback for the GatesProgression case: prereqs aren't satisfied, so the trigger
+            // is refused. Multichannel publish via FQuestPublish::OnAllNodeTags so subscribers on any perspective
+            // (canonical or asset-scoped alias) receive the refusal.
             FQuestActivationBlocker Blocker;
             Blocker.Reason = EQuestActivationBlocker::PrereqUnmet;
             for (const FQuestPrereqLeafStatus& Leaf : PrereqStatus.Leaves)
@@ -282,17 +294,11 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
                 if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
             }
 
-            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, EchoContext));
+            FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
             return;
         }
     }
 
-    FQuestObjectiveTriggerContext Context;
-    Context.TriggeredActor = Cast<AActor>(Event->TriggeredActor);
-    Context.Instigator = Cast<AActor>(Event->Instigator);
-    Context.CustomData = Event->CustomData;
-    Context.CustomTag = Event->CustomTag;
-    Context.OriginatingTriggerComponent = Event->OriginatingTriggerComponent;
     Step->GetLiveObjective()->DispatchTryCompleteObjective(Context);
 }
 

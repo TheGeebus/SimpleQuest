@@ -31,6 +31,10 @@
 			"Name": "WorldIndicator",
 			"Enabled": false,
 			"MarketplaceURL": "com.epicgames.launcher://ue/Fab/product/92bc1929-25f4-42a9-bc9c-833de79f4029"
+		},
+		{
+			"Name": "StaticMeshEditorModeling",
+			"Enabled": true
 		}
 	]
 }

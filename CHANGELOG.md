@@ -519,6 +519,28 @@ tag when the input is root-level or invalid). Exposes
 `FGameplayTag::RequestDirectParent` to Blueprint graphs that walk tag
 hierarchies — e.g., resolving a parent entry from a child's tag.
 
+### Block now gates trigger progress
+
+A Blocked step now refuses trigger-driven progress, not just gives and
+(re)activation. Previously a manually Blocked step (the **Set Blocked**
+node or `Set Quest Blocked`) would still complete when its trigger fired —
+Block was enforced at the giver and at activation, but the trigger →
+objective path checked only prerequisites, never the Blocked state. Firing
+a trigger against a Blocked step now publishes a progress-refused event
+(with the blocker reason set to **Blocked**, distinct from a prerequisite
+refusal) and the step holds until it's cleared. Block still leaves the
+trigger active and interactable — it refuses progress without disabling the
+target, the same way it leaves a giver visible.
+
+### `Is Quest Blocked` — lifecycle-state query
+
+A `BlueprintPure` **Is Quest Blocked** on the SimpleQuest Blueprint library,
+completing the lifecycle-state set alongside `Is Quest Live`, `Is Quest
+Completed`, and `Is Quest Pending Giver`. Returns whether a quest or step
+currently holds the Blocked state — for driving UI enablement, interactable
+affordances, or any logic that needs to branch on whether a target is
+blocked.
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and

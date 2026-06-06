@@ -257,6 +257,14 @@ public:
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
+	/**
+	 * Registration and catch-up, deferred to the tick after BeginPlay so the owning actor finishes its own
+	 * initialization (its Event BeginPlay — created state, bound delegates) before any event reaches this
+	 * component. Component BeginPlay runs ahead of the actor's, so firing here directly hits a half-built owner.
+	 * Virtual so Trigger / Giver chain their role-specific registration via Super.
+	 */
+	virtual void PerformDeferredRegistration();
 
 	/**
 	 * Derived components may expose a set of tags to be implicitly observed alongside the

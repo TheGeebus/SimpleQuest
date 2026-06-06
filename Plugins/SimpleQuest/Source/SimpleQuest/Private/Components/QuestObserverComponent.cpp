@@ -35,11 +35,30 @@ UQuestObserverComponent::UQuestObserverComponent()
 void UQuestObserverComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Defer registration and catch-up to the next tick. Component BeginPlay runs before the owning actor's Event
+	// BeginPlay (where it creates state and binds our delegates), so registering synchronously here would deliver
+	// catch-up — and any same-frame live event — to a half-initialized owner. An actor's whole BeginPlay is
+	// synchronous within the frame, so one tick is guaranteed to land after it. RegisterQuestObserver stays public
+	// for the rare owner that finishes setup across multiple frames and wants to register explicitly.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimerForNextTick(this, &UQuestObserverComponent::PerformDeferredRegistration);
+	}
+}
+
+void UQuestObserverComponent::PerformDeferredRegistration()
+{
 	RegisterQuestObserver();
 }
 
 void UQuestObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// Cancel a still-pending deferred registration so it can't fire onto a torn-down component.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearAllTimersForObject(this);
+	}
 	// Bulk-clear every channel subscription this component (and any derived subclass — Trigger, Giver) registered with the bus.
 	if (SignalSubsystem)
 	{
@@ -405,10 +424,10 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		// Started catch-up additionally recovers the last giver actor via StateSubsystem). Mirrors UQuestEvent-
 		// Subscription's catch-up pattern.
 		//
-		// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): the observer's catch-up runs
-		// synchronously inside RegisterQuestObserver (called from BeginPlay), so there's no deferral window during
-		// which a live event could fire and need deduplication. The K2 node defers to next tick to avoid racing the BP
-		// execution stack; the observer has no such constraint.
+		// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): subscription and catch-up
+		// happen together in this call, so there's no window where the component is subscribed but not yet caught up —
+		// a live event can't slip in mid-pass and need deduplication. This call is itself deferred one tick past BeginPlay
+		// (PerformDeferredRegistration) so the owning actor initializes first, but subscribe + catch-up stay atomic within it.
 		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Settings.Routing);
 
 		for (const FGameplayTag& EachTag : CatchUpTags)

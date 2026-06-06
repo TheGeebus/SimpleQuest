@@ -232,7 +232,7 @@ public:
 	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
 
 protected:
-	virtual void BeginPlay() override;
+	virtual void PerformDeferredRegistration() override;
 
 	/** Quest tags this giver offers. Designer-authored on the placed component instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline"))

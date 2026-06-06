@@ -88,7 +88,7 @@ public:
 	virtual void SendTriggerEvent(const FQuestObjectiveTriggerContext& Context = FQuestObjectiveTriggerContext());
 
 protected:
-	virtual void BeginPlay() override;
+	virtual void PerformDeferredRegistration() override;
 
 	virtual void OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
 

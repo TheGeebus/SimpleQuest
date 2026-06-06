@@ -11,6 +11,7 @@
 #include "Quests/Types/QuestObservedTagSpec.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 
 UQuestTriggerComponent::UQuestTriggerComponent()
@@ -18,9 +19,9 @@ UQuestTriggerComponent::UQuestTriggerComponent()
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestTriggerComponent::BeginPlay()
+void UQuestTriggerComponent::PerformDeferredRegistration()
 {
-    Super::BeginPlay();
+    Super::PerformDeferredRegistration();
     if (!SignalSubsystem) return;
 
     for (const FGameplayTag& StepTag : StepTagsToTrigger)
@@ -28,7 +29,7 @@ void UQuestTriggerComponent::BeginPlay()
         if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
         {
             UE_LOG(LogSimpleQuestSubscription, Warning,
-                TEXT("UQuestTriggerComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
+                TEXT("UQuestTriggerComponent::PerformDeferredRegistration : '%s' holds stale step tag '%s' — skipping subscribe. ")
                 TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
                 *GetOwner()->GetActorNameOrLabel(), *StepTag.ToString());
             continue;
@@ -44,16 +45,35 @@ void UQuestTriggerComponent::BeginPlay()
         SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated);
         SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied);
 
-        UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
+        UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::PerformDeferredRegistration : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
     }
-    
-    // Register this component as a Trigger source for its StepTagsToTrigger set. Observer registration runs in Super::BeginPlay
-    // (RegisterQuestObserver). EndPlay (handled in the Observer base) strips every role entry pointing at this component.
-    if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+
+    // Register this component as a Trigger source for its StepTagsToTrigger set. Observer registration runs in
+    // Super::PerformDeferredRegistration (RegisterQuestObserver). EndPlay (handled in the Observer base) strips every
+    // role entry pointing at this component.
+    const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UQuestStateSubsystem* StateSubsystem = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (StateSubsystem)
     {
-        if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+        StateSubsystem->RegisterTriggerSource(this, StepTagsToTrigger);
+    }
+
+    // Late-join catch-up. A trigger spawned into an already-Live step missed the live FQuestStartedEvent (it fired before
+    // this component subscribed), so replay the activation path here for any watched step whose Live fact is already set —
+    // otherwise OnQuestTriggerActivated and the step-end bookkeeping never run for a spawned-in trigger. OnTriggerActivated's
+    // dup-guard keeps this idempotent against the live path. Runs in the deferred registration pass (one tick past BeginPlay),
+    // so the owning actor's Event BeginPlay has completed — OnQuestTriggerActivated bound there receives this normally.
+    if (UWorldStateSubsystem* WorldState = GI ? GI->GetSubsystem<UWorldStateSubsystem>() : nullptr)
+    {
+        for (const FGameplayTag& StepTag : GetRegisteredStepTagsToTrigger())
         {
-            StateSubsystem->RegisterTriggerSource(this, StepTagsToTrigger);
+            const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
+            if (!LiveFact.IsValid() || !WorldState->HasFact(LiveFact)) continue;
+
+            FQuestEventPayload Payload;
+            Payload.NodeInfo.QuestTag = StepTag;
+            AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(StepTag) : nullptr;
+            OnTriggerActivated(StepTag, FQuestStartedEvent(StepTag, Payload, RecoveredGiver));
         }
     }
 }

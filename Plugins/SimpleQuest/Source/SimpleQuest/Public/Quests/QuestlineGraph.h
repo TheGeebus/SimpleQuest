@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Types/QuestStepEnums.h"
 #include "UObject/Object.h"
 #include "QuestlineGraph.generated.h"
 
@@ -151,6 +152,16 @@ private:
      */
     UPROPERTY(EditAnywhere)
     TObjectPtr<UQuestDisplayData> DisplayData;
+    
+    /**
+     * Asset-level default for per-run resettability — the root rung of this questline's inherit walk. Inherit
+     * (default) defers to the nearest ancestor: the host LinkedQuestline node when this graph is embedded, otherwise
+     * Off (permanent) at the top level. On / Off overrides that, opting the whole questline's content in / out.
+     * Content nodes and inner containers override this further (nearest wins). The compiler folds it into the
+     * per-node effective bResettableReplay it stamps onto the runtime instances.
+     */
+    UPROPERTY(EditAnywhere)
+    EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
@@ -169,6 +180,7 @@ public:
     void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
+    EResettableReplay GetResettableReplay() const { return ResettableReplay; }
 
     /**
      * DisplayName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable

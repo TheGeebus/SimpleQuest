@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "QuestlineNodeBase.h"
+#include "Quests/Types/QuestStepEnums.h"
 #include "QuestlineNode_ContentBase.generated.h"
 
 class UQuestDisplayData;
@@ -74,6 +75,16 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
+	
+	/**
+	 * Per-run resettability for replayable content. Inherit (default) takes the nearest ancestor container's
+	 * setting (root = permanent); On opts this node and inheriting descendants into per-run resettable gating; Off
+	 * overrides out to permanent. The compiler resolves the effective value through the alias (host-scoped)
+	 * hierarchy and stamps it onto the runtime node. Applies to this node's structural resolution (Path /
+	 * Resolution / Entry); no effect on Outcome or raw Fact gates.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Quest")
+	EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
 	/** Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
 	the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating

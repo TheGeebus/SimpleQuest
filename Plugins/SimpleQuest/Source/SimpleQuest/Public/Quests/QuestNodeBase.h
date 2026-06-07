@@ -360,6 +360,15 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FPrerequisiteExpression PrerequisiteExpression;
+    
+    /**
+     * Effective per-run resettability, resolved by the compiler from the authored EResettableReplay tri-state via
+     * the alias-hierarchy inherit walk. When true, this node's structural resolution is mirrored to a clearable
+     * WorldState fact (the per-run projection) alongside the permanent registry record, and gates wired from it read
+     * the mirror so they re-gate on replay. False (default) = permanent, registry-only — current behavior.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    bool bResettableReplay = false;
 
     /** Reward granted on completion of this node. */
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
@@ -456,6 +465,7 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
+    FORCEINLINE bool IsResettableReplay() const { return bResettableReplay; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }

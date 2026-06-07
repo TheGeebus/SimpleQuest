@@ -541,6 +541,20 @@ currently holds the Blocked state — for driving UI enablement, interactable
 affordances, or any logic that needs to branch on whether a target is
 blocked.
 
+### Components join an in-progress quest cleanly
+
+Quest components (observers, triggers, givers) now finish their registration
+and catch-up one tick after `BeginPlay` instead of during it. A component's
+`BeginPlay` runs before its owning actor's, so a component coming online into
+an already-running quest could previously fire its catch-up — a Started cue,
+an availability change, a trigger's activation — before the actor had finished
+its own setup (built its materials, bound its delegates). Deferring a single
+frame guarantees the actor is fully initialized first: spawn a trigger or
+giver at runtime into a quest that's already live and it now syncs to the
+current state with no setup-order workarounds. A trigger spawned onto an
+already-live step also receives its activation event, which it previously
+missed.
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and

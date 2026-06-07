@@ -35,7 +35,7 @@ void UQuestGiverComponent::PerformDeferredRegistration()
 	Super::PerformDeferredRegistration();
 	RegisterQuestGiver();
 	
-	// Register this component as a Giver source for its QuestTagsToGive set. Observer + Trigger roles register in their
+	// Register this component as a Giver source for its QuestTagsToGive set. Observer and Trigger roles register in their
 	// respective Super::PerformDeferredRegistration paths. EndPlay (handled in the Observer base) strips every role
 	// entry pointing at this component.
 	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())

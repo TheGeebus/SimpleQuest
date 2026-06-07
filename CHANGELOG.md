@@ -555,6 +555,17 @@ current state with no setup-order workarounds. A trigger spawned onto an
 already-live step also receives its activation event, which it previously
 missed.
 
+### Observer components replay *Activated* when joining a running quest
+
+An observer component bound to a quest's `Activated` event now receives it
+when the component joins a quest that's already live — including a quest that
+started at game launch. Previously the component's catch-up reconstructed only
+`Started` for a running non-giver quest, so a binding on `Activated` saw
+nothing until the next live event. The `Observe Quest Lifecycle` Blueprint node
+already reconstructed `Activated` from live state (see *Activated event
+broadening* above); the component now matches it, so both observer surfaces
+replay identically on join.
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and

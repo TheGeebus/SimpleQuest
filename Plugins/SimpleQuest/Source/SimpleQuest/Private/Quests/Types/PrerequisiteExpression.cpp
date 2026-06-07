@@ -347,19 +347,21 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 	return Nodes.Add(Node);
 }
 
-int32 FPrerequisiteExpression::AddPathLeaf(FName NodeTagName, FName PathIdentity)
+int32 FPrerequisiteExpression::AddPathLeaf(FName NodeTagName, FName PathIdentity, bool bResettable)
 {
 	// Bridge LeafTag preserved for Prereq Examiner display compat — same MakeNodePathFact mechanism as
 	// AddResolutionLeaf, keyed on the path identity directly rather than the outcome tag's name. Runtime
-	// evaluation reads LeafQuestTag / LeafPathIdentity via UQuestStateSubsystem::HasResolvedAtPath; the
-	// bridge tag is editor-side only. Path leaves are satisfied only when the named quest resolved through
-	// this specific authored path — distinct from Leaf_Resolution which is outcome-keyed and satisfies on
-	// any path producing the named outcome.
+	// evaluation reads LeafQuestTag / LeafPathIdentity via UQuestStateSubsystem::HasResolvedAtPath; the bridge
+	// tag is editor-side only UNLESS bResettable is set, in which case the same LeafTag doubles as the per-run
+	// mirror fact the runtime reads (the resettable-replay projection). Path leaves are satisfied only when the
+	// named quest resolved through this specific authored path — distinct from Leaf_Resolution which is
+	// outcome-keyed and satisfies on any path producing the named outcome.
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf_Path;
 	Node.LeafTag = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeNodePathFact(NodeTagName, PathIdentity), false);
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafPathIdentity = PathIdentity;
+	Node.bResettableRead = bResettable;
 	return Nodes.Add(Node);
 }
 

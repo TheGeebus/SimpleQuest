@@ -630,12 +630,6 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     	Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
     	Instance->bResettableReplay = bNodeResettable;
 
-    	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("[Resettable] %s -> %s  (own=%d incoming=%d)"),
-			*TagName.ToString(),
-			bNodeResettable ? TEXT("On") : TEXT("Off"),
-			(int32)ContentNode->ResettableReplay,
-			bIncomingResettable ? 1 : 0);
-
     	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
     	// outer node leaves the corresponding field empty/null. Outer overrides where authored, inner
     	// fills the gap. Designers can rely on inner being the project-wide default for the questline
@@ -1850,6 +1844,9 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 			// Build OR over all named output paths. AnyOutcomeOut is satisfied when ANY of the source node's
 			// declared paths fires — each path becomes its own Leaf_Path child.
 			const int32 OrIndex = OutExpression.AddCombinator(EPrerequisiteExpressionType::Or);
+			
+			// Resettable-replay scope is per node, so every path leaf for this node shares the same read-mode.
+			const bool bResettable = IsNodeTagResettable(NodeTagName);
 
 			for (UEdGraphPin* OutcomePin : OutcomePins)
 			{
@@ -1862,7 +1859,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 				//
 				// AddPathLeaf may reallocate Nodes; AddCombinatorChild's parent index is reused after the leaf
 				// add so the index stays valid (TArray Add returns by value, no dangling reference into the array).
-				const int32 LeafIdx = OutExpression.AddPathLeaf(NodeTagName, OutcomePin->PinName);
+				const int32 LeafIdx = OutExpression.AddPathLeaf(NodeTagName, OutcomePin->PinName, bResettable);
 				OutExpression.AddCombinatorChild(OrIndex, LeafIdx);
 			}
 
@@ -1881,7 +1878,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     	const FName NodeTagName = MakeNodeTagName(TagPrefix, Label);
     	if (OutputPin->PinName.IsNone()) return INDEX_NONE;
 
-    	return OutExpression.AddPathLeaf(NodeTagName, OutputPin->PinName);
+    	return OutExpression.AddPathLeaf(NodeTagName, OutputPin->PinName, IsNodeTagResettable(NodeTagName));
     }
 
     return INDEX_NONE;
@@ -2305,6 +2302,12 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 bool FQuestlineGraphCompiler::ResolveResettable(EResettableReplay Flag, bool bIncoming)
 {
 	return Flag == EResettableReplay::Enabled ? true : (Flag == EResettableReplay::Disabled ? false : bIncoming);
+}
+
+bool FQuestlineGraphCompiler::IsNodeTagResettable(FName CanonicalNodeTag) const
+{
+	const UQuestNodeBase* Owner = AllCompiledNodes.FindRef(CanonicalNodeTag);
+	return Owner && Owner->IsResettableReplay();
 }
 
 // -------------------------------------------------------------------------------------------------

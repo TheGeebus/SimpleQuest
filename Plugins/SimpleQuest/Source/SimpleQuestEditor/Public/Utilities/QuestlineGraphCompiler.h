@@ -408,6 +408,14 @@ private:
 	/** Resolve a tri-state resettable flag over the value inherited from above: explicit On/Off wins, Inherit defers. */
 	static bool ResolveResettable(EResettableReplay Flag, bool bIncoming);
 	
+	/**
+	 * True if the node compiled under this canonical tag resolved to resettable-replay scope — i.e. its runtime
+	 * instance (registered in Pass 1) was stamped resettable. Read at prereq-compile time to mark Leaf_Path leaves
+	 * that should read the per-run mirror fact. Unknown tags (utility keys, anything not registered) return false,
+	 * so the leaf defaults to registry-read / permanent.
+	 */
+	bool IsNodeTagResettable(FName CanonicalNodeTag) const;
+	
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */
 	const TArray<TSharedRef<FTokenizedMessage>>& GetMessages() const { return Messages; }

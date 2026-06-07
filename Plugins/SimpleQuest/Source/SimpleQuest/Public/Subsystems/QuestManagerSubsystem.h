@@ -221,6 +221,14 @@ private:
 	 */
 	void AddStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
 	void RemoveStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
+	
+	/**
+	 * Writes the per-run resettable mirror — the MakeNodePathFact tag pin-wired prereqs carry — across the canonical
+	 * tag and every AssetScopedAlias, matching AddStateFactAcrossPerspectives' multi-perspective fan. Called on
+	 * resolution for resettable-replay-scoped nodes only; the resolution registry stays the permanent record. A
+	 * None PathIdentity is a no-op (non-path resolutions don't project a mirror).
+	 */
+	void AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
 
 	/**
 	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical

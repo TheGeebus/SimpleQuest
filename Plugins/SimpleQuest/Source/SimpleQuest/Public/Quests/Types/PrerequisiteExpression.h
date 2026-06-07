@@ -153,6 +153,7 @@ struct FPrereqLeafDescriptor
 	FGameplayTag LeafQuestTag;
 	FGameplayTag LeafOutcomeTag;
 	FName LeafPathIdentity;
+	bool bResettableRead = false;		// Leaf_Path only: leaf reads/subscribes the per-run mirror fact, not the registry
 };
 
 USTRUCT(Blueprintable)

@@ -71,10 +71,12 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 		{
 			FQuestPrereqLeafStatus LeafStatus;
 			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag: preserves blocker-display API shape
-			LeafStatus.bSatisfied = StateSubsystem
-				&& Node.LeafQuestTag.IsValid()
-				&& !Node.LeafPathIdentity.IsNone()
-				&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity);
+			// Match EvaluateNode: resettable path leaves report against the per-run mirror fact, permanent ones
+			// against the resolution registry, so display tracks the re-gated state after a reset.
+			LeafStatus.bSatisfied = Node.bResettableRead
+				? (WorldState && Node.LeafTag.IsValid() && WorldState->HasFact(Node.LeafTag))
+				: (StateSubsystem && Node.LeafQuestTag.IsValid() && !Node.LeafPathIdentity.IsNone()
+					&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity));
 			Status.Leaves.Add(LeafStatus);
 		}
 		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Outcome)
@@ -136,13 +138,17 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 
 	case EPrerequisiteExpressionType::Leaf_Path:
 		{
-			const bool bResolvedAtPath = StateSubsystem
-				&& Node.LeafQuestTag.IsValid()
-				&& !Node.LeafPathIdentity.IsNone()
-				&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity);
-			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Path]: quest='%s' path='%s' → HasResolvedAtPath=%d"),
-				*Node.LeafQuestTag.ToString(), *Node.LeafPathIdentity.ToString(), bResolvedAtPath);
-			return bResolvedAtPath;
+			// Resettable path leaves read the per-run mirror fact (cleared on replay reset); permanent ones read
+			// the append-only resolution registry. The two agree until a reset clears the mirror — that gap is
+			// exactly what re-gates a replayed chapter.
+			const bool bSatisfied = Node.bResettableRead
+				? (WorldState && Node.LeafTag.IsValid() && WorldState->HasFact(Node.LeafTag))
+				: (StateSubsystem && Node.LeafQuestTag.IsValid() && !Node.LeafPathIdentity.IsNone()
+					&& StateSubsystem->HasResolvedAtPath(Node.LeafQuestTag, Node.LeafPathIdentity));
+			UE_LOG(LogSimpleQuestActivation, VeryVerbose, TEXT("Prereq leaf [Path]: quest='%s' path='%s' read=%s → %d"),
+				*Node.LeafQuestTag.ToString(), *Node.LeafPathIdentity.ToString(),
+				Node.bResettableRead ? TEXT("mirror") : TEXT("registry"), bSatisfied);
+			return bSatisfied;
 		}
 		
 	case EPrerequisiteExpressionType::Leaf_Outcome:
@@ -252,6 +258,7 @@ void FPrerequisiteExpression::CollectLeavesFromNode(int32 NodeIndex, TArray<FPre
 		Desc.Type = EPrerequisiteExpressionType::Leaf_Path;
 		Desc.LeafQuestTag = Node.LeafQuestTag;
 		Desc.LeafPathIdentity = Node.LeafPathIdentity;
+		Desc.bResettableRead = Node.bResettableRead;
 		OutLeaves.Add(Desc);
 		return;
 	}

@@ -526,6 +526,29 @@ void UQuestManagerSubsystem::RemoveStateFactAcrossPerspectives(FGameplayTag Inpu
     }
 }
 
+void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity)
+{
+    if (!WorldState || !InputTag.IsValid() || PathIdentity.IsNone()) return;
+
+    const FGameplayTag CanonicalTag = ResolveToCanonicalTag(InputTag);
+    if (!CanonicalTag.IsValid()) return;
+
+    const FGameplayTag CanonicalFact = FQuestTagComposer::ResolvePathFactTag(CanonicalTag, PathIdentity);
+    if (CanonicalFact.IsValid()) WorldState->AddFact(CanonicalFact);
+
+    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName()))
+    {
+        for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+        {
+            if (AliasTag.IsValid() && AliasTag != CanonicalTag)
+            {
+                const FGameplayTag AliasFact = FQuestTagComposer::ResolvePathFactTag(AliasTag, PathIdentity);
+                if (AliasFact.IsValid()) WorldState->AddFact(AliasFact);
+            }
+        }
+    }
+}
+
 void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
 {
     if (!Existing || !Incoming) return;
@@ -2537,11 +2560,19 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // (matches Layer 2's resolution record count).
     AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Completed);
 
-    // Path fact write to WorldState removed in the Outcome/Path data-layer migration. The resolution
-    // registry (UQuestStateSubsystem) is now the canonical source of truth for outcome-keyed queries
-    // via HasResolvedWith. Subscribers that previously watched <Quest>.Path.<Outcome> facts now subscribe
-    // to FQuestResolutionRecordedEvent on the ContextualTag channel. See RegisterEnablementWatch and
-    // DeferChainToNextNodes for the subscription wiring. RecordResolution below publishes the event.
+    // The blanket path-fact-to-WorldState write was removed in the Outcome/Path data-layer migration — the
+    // resolution registry (UQuestStateSubsystem, Layer 2 below) is the canonical, append-only source of truth for
+    // outcome/path queries (HasResolvedWith / HasResolvedAtPath), and subscribers watch FQuestResolutionRecorded-
+    // Event on the ContextualTag channel (see RegisterEnablementWatch / DeferChainToNextNodes).
+    //
+    // Re-introduced NARROWLY here as the per-run resettable mirror: when the resolving node is resettable-replay
+    // scoped, project this path resolution to a clearable WorldState fact — the same MakeNodePathFact tag pin-wired
+    // prereqs carry — so a replay reset can clear it and the gate re-gates honestly. The registry record is never
+    // touched by a reset; only this projection is. Non-resettable nodes keep the registry-only behavior.
+    if (Node && Node->IsResettableReplay() && !PathIdentity.IsNone())
+    {
+        AddPathFactAcrossPerspectives(QuestTag, PathIdentity);
+    }
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,
     // but the manager writes it atomically with its own fact updates so the two layers stay consistent.

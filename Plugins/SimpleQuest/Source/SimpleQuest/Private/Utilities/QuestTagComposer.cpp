@@ -94,6 +94,13 @@ FGameplayTag FQuestTagComposer::ResolveStateFactTag(FGameplayTag IdentityTag, EQ
 	return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
 }
 
+FGameplayTag FQuestTagComposer::ResolvePathFactTag(FGameplayTag IdentityTag, FName PathIdentity)
+{
+	const FName FactName = MakeNodePathFact(IdentityTag.GetTagName(), PathIdentity);
+	if (FactName.IsNone()) return FGameplayTag();
+	return UGameplayTagsManager::Get().RequestGameplayTag(FactName, false);
+}
+
 FName FQuestTagComposer::SwapNamespacePrefix(FName InTagName, const FString& From, const FString& To)
 {
 	if (InTagName.IsNone()) return NAME_None;

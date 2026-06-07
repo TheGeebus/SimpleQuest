@@ -148,6 +148,12 @@ public:
 
 	/** Resolves a state-fact name to a registered FGameplayTag. Returns invalid tag if not registered. */
 	static FGameplayTag ResolveStateFactTag(FGameplayTag IdentityTag, EQuestStateLeaf Leaf);
+	
+	/**
+	 * Resolves a per-node path-fact name (MakeNodePathFact) to a registered FGameplayTag. Returns invalid tag
+	 * if PathIdentity is None or the tag isn't registered. Symmetric with ResolveStateFactTag, for path facts.
+	 */
+	static FGameplayTag ResolvePathFactTag(FGameplayTag IdentityTag, FName PathIdentity);
 
 	/** Swap one namespace prefix for another. Returns InTag unchanged if InTag doesn't start with From. */
 	static FName SwapNamespacePrefix(FName InTagName, const FString& From, const FString& To);

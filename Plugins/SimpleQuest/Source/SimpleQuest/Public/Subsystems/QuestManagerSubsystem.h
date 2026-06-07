@@ -229,6 +229,13 @@ private:
 	 * None PathIdentity is a no-op (non-path resolutions don't project a mirror).
 	 */
 	void AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
+	
+	/**
+	 * Clears the per-run path mirror (the MakeNodePathFact tag) across the canonical tag and every AssetScopedAlias —
+	 * the ClearFact (count-agnostic) twin of AddPathFactAcrossPerspectives, used by the resettable-replay reset. The
+	 * resolution registry is never touched; only this clearable projection.
+	 */
+	void ClearPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
 
 	/**
 	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical

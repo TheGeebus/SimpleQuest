@@ -549,6 +549,29 @@ void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag
     }
 }
 
+void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity)
+{
+    if (!WorldState || !InputTag.IsValid() || PathIdentity.IsNone()) return;
+
+    const FGameplayTag CanonicalTag = ResolveToCanonicalTag(InputTag);
+    if (!CanonicalTag.IsValid()) return;
+
+    const FGameplayTag CanonicalFact = FQuestTagComposer::ResolvePathFactTag(CanonicalTag, PathIdentity);
+    if (CanonicalFact.IsValid()) WorldState->ClearFact(CanonicalFact);
+
+    if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName()))
+    {
+        for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
+        {
+            if (AliasTag.IsValid() && AliasTag != CanonicalTag)
+            {
+                const FGameplayTag AliasFact = FQuestTagComposer::ResolvePathFactTag(AliasTag, PathIdentity);
+                if (AliasFact.IsValid()) WorldState->ClearFact(AliasFact);
+            }
+        }
+    }
+}
+
 void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
 {
     if (!Existing || !Incoming) return;
@@ -1331,6 +1354,44 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     if (NodeTag.IsValid() && WorldState)
     {
         RemoveStateFactAcrossPerspectives(NodeTag, EQuestStateLeaf::Deactivated);
+    }
+
+    // Resettable-replay reset. A resettable-scoped node that (re-)activates after having completed — or via an
+    // explicit prerequisite bypass — begins a fresh run, so clear its per-run path mirror(s) before it runs so
+    // gates wired from it re-gate honestly. The append-only resolution registry and the Completed anchor are NEVER
+    // touched; only the clearable projection (ClearFact, count-agnostic). Guards: the activation must proceed (a
+    // Block-refused activation doesn't re-run), and the node must not already be Live (a no-op mid-run re-entry must
+    // not wipe in-flight mirrors). Descendants need no explicit walk — the inward activation cascade re-activates
+    // each one, which resets itself here the same way; that also correctly leaves the mirrors of any branch a replay
+    // doesn't re-enter. Mirrors to clear come from the node's own resolution history (the registry knows the paths).
+    if (Decision != EQuestActivationGuardDecision::RefuseBlocked && Instance->IsResettableReplay() && NodeTag.IsValid() && WorldState)
+    {
+        const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Completed);
+        const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live);
+        const bool bWasCompleted = CompletedFact.IsValid() && WorldState->HasFact(CompletedFact);
+        const bool bCurrentlyLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
+        if (!bCurrentlyLive && (bWasCompleted || bBypassPrerequisites))
+        {
+            if (UGameInstance* GI = GetGameInstance())
+            {
+                if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
+                {
+                    TSet<FName> ClearedPaths;
+                    for (const FQuestResolutionEntry& Entry : Registry->GetResolutionHistory(NodeTag))
+                    {
+                        if (!Entry.PathIdentity.IsNone() && !ClearedPaths.Contains(Entry.PathIdentity))
+                        {
+                            ClearPathFactAcrossPerspectives(NodeTag, Entry.PathIdentity);
+                            ClearedPaths.Add(Entry.PathIdentity);
+                        }
+                    }
+                }
+            }
+            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("[Resettable] reset path mirrors for '%s' (completed=%d bypass=%d)"),
+                *NodeTag.ToString(),
+                bWasCompleted,
+                bBypassPrerequisites);
+        }
     }
 
     switch (Decision)

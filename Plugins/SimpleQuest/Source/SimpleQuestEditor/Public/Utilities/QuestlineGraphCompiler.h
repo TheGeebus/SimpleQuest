@@ -7,6 +7,7 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
+enum class EResettableReplay : uint8;
 struct FQuestGraphResolution;
 struct FQuestBoundaryCompletion;
 struct FIncomingSignalPinSpec;
@@ -52,12 +53,13 @@ protected:
 	 *
 	 * @param Graph							The questline graph asset to compile.
 	 * @param TagPrefix						Sanitized questline ID used as the tag namespace for this graph's nodes.
-	 * @param AssetScopedAliasPrefixes
+	 * @param AssetScopedAliasPrefixes		
  	 * @param BoundaryCompletionsByPath		Inherited boundary completions keyed by Exit OutcomeTag (NAME_None for Any-Outcome catch-all).
 	 *										Mirrors BoundaryTagsByPath: consumed by ResolvePinToTags when crossing an Exit.
 	 * @param VisitedAssetPaths				Stack of asset paths currently open in the recursion, used for cycle detection.
 	 * @param OutEntryTagsByPath			Tags from input pins connected to optional Outcome graph entry pins on Quest or Linked
-	 *										Questline child graphs 
+	 *										Questline child graphs
+	 * @param bIncomingResettable			
 	 * @return								Returns the tags connected to an Any Outcome graph entry pin
 	 */
 	virtual TArray<FName> CompileGraph(
@@ -66,7 +68,8 @@ protected:
 		const TArray<FString>& AssetScopedAliasPrefixes,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
-		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr);	
+		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr,
+		bool bIncomingResettable = false);	
 
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
@@ -292,7 +295,8 @@ private:
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
-		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
+		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap,
+		bool bIncomingResettable);
 
 	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */
 	void CompileGroupSetters(
@@ -400,6 +404,9 @@ private:
 	 * accumulate entries from the entire compile tree.
 	 */
 	void CollectActivationGroupMetadata(UEdGraph* Graph, const FString& TagPrefix);
+
+	/** Resolve a tri-state resettable flag over the value inherited from above: explicit On/Off wins, Inherit defers. */
+	static bool ResolveResettable(EResettableReplay Flag, bool bIncoming);
 	
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */

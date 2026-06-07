@@ -450,9 +450,15 @@ void UQuestObserverComponent::RegisterQuestObserver()
 			FQuestEventPayload Payload;
 			Payload.NodeInfo.QuestTag = EachTag;
 
-			// PendingGiver fact gates both Activated and Enabled catch-up.
+			// Activated reconstructs from EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope)
+			// OR the Live fact (a non-giver path — including asset/container-level activations — went straight to
+			// Live, which implies it transitioned through Activated to get there). Enabled stays PendingGiver-only.
+			// Matches UQuestLifecycleObserver's catch-up so the component and the K2 node replay identically.
 			const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
 			const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+
+			const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
+			const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
 
 			FQuestPrereqStatus CachedPrereqStatus;
 			if (bIsPendingGiver && StateSubsystem)
@@ -460,7 +466,7 @@ void UQuestObserverComponent::RegisterQuestObserver()
 				CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
 			}
 
-			if (Settings.bObserveActivated && bIsPendingGiver)
+			if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive))
 			{
 				ActiveQuestTags.AddTag(EachTag);
 				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
@@ -474,16 +480,12 @@ void UQuestObserverComponent::RegisterQuestObserver()
 				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Enabled, Payload);
 			}
 
-			if (Settings.bObserveStarted)
+			if (Settings.bObserveStarted && bIsLive)
 			{
-				const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
-				if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
-				{
-					ActiveQuestTags.AddTag(EachTag);
-					AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-					if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
-					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
-				}
+				ActiveQuestTags.AddTag(EachTag);
+				AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
+				if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
 			}
 
 			// Disabled / GiveBlocked / Progress / Unblocked / ProgressRefused have no catch-up — transient or

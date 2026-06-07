@@ -217,7 +217,15 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	TMap<FName, TArray<FQuestBoundaryCompletion>> BoundaryCompletionsByPath;
 
     // Start recursive compilation, working forward from the Start node.
-    TArray<FName> EntryTags = CompileGraph(InGraph->QuestlineEdGraph, TagPrefix, {}, BoundaryCompletionsByPath, VisitedAssetPaths);
+    TArray<FName> EntryTags = CompileGraph(
+    	InGraph->QuestlineEdGraph,
+    	TagPrefix,
+    	{},
+    	BoundaryCompletionsByPath,
+    	VisitedAssetPaths,
+    	nullptr,
+    	ResolveResettable(InGraph->GetResettableReplay(), false));
+	
     InGraph->EntryNodeTags = EntryTags;
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
@@ -270,7 +278,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 	const FString& TagPrefix,
 	const TArray<FString>& AssetScopedAliasPrefixes,
 	const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
-	TArray<FString>& VisitedAssetPaths, TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath)		
+	TArray<FString>& VisitedAssetPaths, TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath, bool bIncomingResettable)		
 {
     if (!Graph) return {};
 
@@ -279,7 +287,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
     // ---- Pass 1: label uniqueness, GUID write, tag assignment ----
     TArray<UQuestlineNode_ContentBase*> ContentNodes;
     TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*> NodeInstanceMap;
-    CompileNodeRegistration(Graph, TagPrefix, AssetScopedAliasPrefixes, BoundaryCompletionsByPath, VisitedAssetPaths, ContentNodes, NodeInstanceMap);
+    CompileNodeRegistration(Graph, TagPrefix, AssetScopedAliasPrefixes, BoundaryCompletionsByPath, VisitedAssetPaths, ContentNodes, NodeInstanceMap, bIncomingResettable);
 
     // ---- Pass 1b: setter nodes — create UQuestPrereqRuleNode monitors ----
     CompileGroupSetters(Graph, TagPrefix, VisitedAssetPaths);
@@ -354,8 +362,15 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
     return EntryTags;
 }
 
-void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FString& TagPrefix, const TArray<FString>& AssetScopedAliasPrefixes, const TMap<FName,
-	                                                      TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_ContentBase*>& OutContentNodes, TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap)
+void FQuestlineGraphCompiler::CompileNodeRegistration(
+	UEdGraph* Graph,
+	const FString& TagPrefix,
+	const TArray<FString>& AssetScopedAliasPrefixes,
+	const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+	TArray<FString>& VisitedAssetPaths,
+	TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
+	TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap,
+	bool bIncomingResettable)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_CompileNodeRegistration);
 	
@@ -418,6 +433,9 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     		AliasFNames.Add(MakeNodeTagName(AliasPrefix, Label));
     	}
     	
+    	// Effective per-run resettability: own flag wins, else inherit from above (asset / container / host).
+    	const bool bNodeResettable = ResolveResettable(ContentNode->ResettableReplay, bIncomingResettable);
+    	
         // Create the appropriate runtime instance
         UQuestNodeBase* Instance = nullptr;
 
@@ -447,7 +465,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     			// save/restore pattern in the LinkedQuestline branch below.
     			const FName PreviousContainer = CurrentInnerContainerTag;
     			CurrentInnerContainerTag = TagName;
-    			QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, InnerAliasPrefixes, InlineBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
+    			QuestInstance->EntryStepTags = CompileGraph(QuestEdNode->GetInnerGraph(), InnerPrefix, InnerAliasPrefixes, InlineBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath, bNodeResettable);
     			CurrentInnerContainerTag = PreviousContainer;
 
     			QuestInstance->EntryStepTagsByPath = MoveTemp(InnerEntryByPath);
@@ -591,7 +609,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
 				AllCompiledQuestTags.AddUnique(LinkedAssetIdentityName);
 				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(LinkedAssetIdentityName, false);
 
-				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath);
+				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath, ResolveResettable(LinkedGraph->GetResettableReplay(), bNodeResettable));
 
 				CurrentAssetIdentityTag = PreviousAssetIdentity;
 				CurrentInnerContainerTag = PreviousContainer;
@@ -610,6 +628,13 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(UEdGraph* Graph, const FSt
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
     	Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
+    	Instance->bResettableReplay = bNodeResettable;
+
+    	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("[Resettable] %s -> %s  (own=%d incoming=%d)"),
+			*TagName.ToString(),
+			bNodeResettable ? TEXT("On") : TEXT("Off"),
+			(int32)ContentNode->ResettableReplay,
+			bIncomingResettable ? 1 : 0);
 
     	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
     	// outer node leaves the corresponding field empty/null. Outer overrides where authored, inner
@@ -2275,6 +2300,11 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 				GetterEdNodeByGroupAndDest.FindOrAdd(GroupTag).Add(DestTag, Getter);			}
 		}
 	}
+}
+
+bool FQuestlineGraphCompiler::ResolveResettable(EResettableReplay Flag, bool bIncoming)
+{
+	return Flag == EResettableReplay::Enabled ? true : (Flag == EResettableReplay::Disabled ? false : bIncoming);
 }
 
 // -------------------------------------------------------------------------------------------------

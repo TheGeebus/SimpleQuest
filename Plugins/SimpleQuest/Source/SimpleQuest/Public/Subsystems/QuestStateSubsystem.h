@@ -338,14 +338,27 @@ public:
 
 	/** Registers Component as an Observer source for every tag in AuthoredTags + each tag's canonical resolution. */
 	void RegisterObserverSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags);
+	
+	/**
+	 * Granular counterpart to UnregisterAllRoleSources: drops Component as a source for a SINGLE tag in the named
+	 * role registry — for components whose watched-tag set changes at runtime. No-op if Component isn't registered
+	 * for Tag. Pass the same (authored) tag form used at registration.
+	 */
+	void UnregisterTriggerSource(UActorComponent* Component, FGameplayTag Tag);
+	void UnregisterGiverSource(UActorComponent* Component, FGameplayTag Tag);
+	void UnregisterObserverSource(UActorComponent* Component, FGameplayTag Tag);
 
-	/** Removes every per-role entry pointing at Component. Safe no-op when the component never registered. Called
-	 *  from component EndPlay — explicit removal keeps the registry compact across repeated activate/end cycles
-	 *  (weak-pointer queries already skip dead entries; this trims them up front). */
+	/**
+	 * Removes every per-role entry pointing at Component. Safe no-op when the component never registered. Called
+	 * from component EndPlay — explicit removal keeps the registry compact across repeated activate/end cycles
+	 * (weak-pointer queries already skip dead entries; this trims them up front).
+	 */
 	void UnregisterAllRoleSources(UActorComponent* Component);
 
-	/** Registers Objective under each tag in TagSet (canonical + aliases). The latest registration for any given tag
-	 *  wins — a Step re-activating under the same tag replaces the prior entry. */
+	/**
+	 * Registers Objective under each tag in TagSet (canonical + aliases). The latest registration for any given tag
+	 * wins — a Step re-activating under the same tag replaces the prior entry.
+	 */
 	void RegisterActiveObjective(UQuestObjective* Objective, const TArray<FGameplayTag>& TagSet);
 
 	/** Removes every entry pointing at Objective. Called from UQuestStep when LiveObjective transitions to null. */
@@ -583,16 +596,22 @@ private:
 	 */
 	TArray<FQuestRoleSourceInfo> QueryRoleSources(
 		FGameplayTag QueryTag,
-		const TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap) const;
+		const TMap<FGameplayTag,
+		TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap) const;
 
 	/**
 	 * Shared body for the three Register*Source methods. Iterates AuthoredTags, resolves canonical for each, adds
 	 * Component under every distinct key (deduped). Replaces any prior entry for the same Component to keep
 	 * Idempotent semantics.
 	 */
-	void RegisterRoleSource(
+    static void RegisterRoleSource(
 		UActorComponent* Component,
 		const FGameplayTagContainer& AuthoredTags,
+		TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap);
+
+	static void UnregisterRoleSource(
+		UActorComponent* Component,
+		FGameplayTag Tag,
 		TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap);
 
 	/**

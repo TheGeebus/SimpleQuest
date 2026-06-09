@@ -794,6 +794,21 @@ void UQuestStateSubsystem::RegisterObserverSource(UActorComponent* Component, co
 	RegisterRoleSource(Component, AuthoredTags, ObserverSourcesByTag);
 }
 
+void UQuestStateSubsystem::UnregisterTriggerSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, TriggerSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterGiverSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, GiverSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterObserverSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, ObserverSourcesByTag);
+}
+
 void UQuestStateSubsystem::UnregisterAllRoleSources(UActorComponent* Component)
 {
 	if (!Component) return;
@@ -886,8 +901,26 @@ void UQuestStateSubsystem::RegisterRoleSource(
 		TArray<TWeakObjectPtr<UActorComponent>>& Bucket = SourceMap.FindOrAdd(Authored);
 		// Idempotent: replace any prior entry for the same component (re-register pattern preserves uniqueness).
 		Bucket.RemoveAll([Component](const TWeakObjectPtr<UActorComponent>& Existing)
-			{ return !Existing.IsValid() || Existing.Get() == Component; });
+		{
+			return !Existing.IsValid() || Existing.Get() == Component;
+		});
 		Bucket.Add(WeakComp);
+	}
+}
+
+void UQuestStateSubsystem::UnregisterRoleSource(
+	UActorComponent* Component,
+	FGameplayTag Tag,
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap)
+{
+	if (!Component || !Tag.IsValid()) return;
+
+	// Registration keys under the authored tag form only (see RegisterRoleSource), so remove by that same form.
+	if (TArray<TWeakObjectPtr<UActorComponent>>* Bucket = SourceMap.Find(Tag))
+	{
+		Bucket->RemoveAll([Component](const TWeakObjectPtr<UActorComponent>& Weak)
+			{ return !Weak.IsValid() || Weak.Get() == Component; });
+		if (Bucket->IsEmpty()) SourceMap.Remove(Tag);
 	}
 }
 

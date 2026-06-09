@@ -29,6 +29,9 @@ struct FQuestBlockedEvent;
 struct FQuestUnblockedEvent;
 struct FQuestProgressRefusedEvent;
 
+class UWorldStateSubsystem;
+class UQuestStateSubsystem;
+
 
 /**
  * Per-observed-quest flags controlling which lifecycle events this observer subscribes to. Mirrors the
@@ -303,6 +306,21 @@ protected:
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestObserver();
 
+	/**
+	 * Subscribe + source-register + catch up ONE tag. Shared by RegisterQuestObserver's loop and the runtime
+	 * AddObservedTag path; captures the bus handles into SubscriptionHandlesByTag.
+	 */
+	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings);
+
+	/** Unsubscribe (by stored handle) + source-unregister + clear bookkeeping for ONE tag. */
+	void UnregisterSingleObservedTag(const FGameplayTag& QuestTag);
+
+	/**
+	 * Per-tag catch-up: replays current state for QuestTag as synthetic events. Virtual so Trigger/Giver layer
+	 * their role catch-up (OnQuestTriggerActivated replay, giver availability) on top via Super.
+	 */
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
+
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FObservedQuestEventSettings> ObservedTags;
@@ -315,6 +333,18 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer CompletedQuestTags;
+
+	/**
+	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed
+	 * selectively (RemoveObservedTag / RemoveTagsFromTrigger) without tearing down the whole component.
+	 */
+	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
+
+	/**
+	 * True once RegisterQuestObserver has run. Gates the live-vs-deferred branch in AddObservedTag/RemoveObservedTag:
+	 * before registration, mutating the container suffices; after, it does live subscribe/unsubscribe work.
+	 */
+	bool bRegistered = false;
 
 public:
 	UFUNCTION(BlueprintCallable)

@@ -74,6 +74,8 @@ void UQuestObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			StateSubsystem->UnregisterAllRoleSources(this);
 		}
 	}
+	SubscriptionHandlesByTag.Empty();
+	bRegistered = false;
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -354,200 +356,218 @@ void UQuestObserverComponent::RegisterQuestObserver()
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestObserverComponent_RegisterQuestObserver);
 
+	for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : EffectiveObserved)
+	{
+		RegisterSingleObservedTag(Pair.Key, Pair.Value);
+	}
+	bRegistered = true;
+}
+
+void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings)
+{
+	if (!SignalSubsystem || !QuestTag.IsValid()) return;
+
+	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
+	{
+		UE_LOG(LogSimpleQuestSubscription, Warning,
+			TEXT("UQuestObserverComponent::RegisterSingleObservedTag : '%s' holds stale tag '%s' — skipping subscribe. ")
+			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"), *QuestTag.ToString());
+		return;
+	}
+
 	UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
-	// Register this component as an Observer source for every effective observed tag (designer-authored +
-	// implicit-bridge contributions). Derived components (Trigger, Giver) additionally register under
-	// their own role via their own BeginPlay path. EndPlay (UQuestObserverComponent::EndPlay) calls
-	// UnregisterAllRoleSources on the way out, which strips every per-role entry pointing at this component.
+	// Per-tag observer-source registration (additive — RegisterRoleSource only touches this tag's bucket).
 	if (StateSubsystem)
 	{
-		FGameplayTagContainer ObserverKeys;
-		for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : EffectiveObserved)
-		{
-			if (Pair.Key.IsValid()) ObserverKeys.AddTag(Pair.Key);
-		}
-		StateSubsystem->RegisterObserverSource(this, ObserverKeys);
-		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : registered %d observer source tag(s) for actor '%s'"),
-			ObserverKeys.Num(),
-			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"));
+		StateSubsystem->RegisterObserverSource(this, FGameplayTagContainer(QuestTag));
 	}
 
-	for (auto& QuestPair : EffectiveObserved)
-	{
-		const FGameplayTag& QuestTag = QuestPair.Key;
-		const FObservedQuestEventSettings& Settings = QuestPair.Value;
+	// Live subscriptions — one per opted-in event type — capturing each handle for selective unsubscribe later.
+	TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(QuestTag);
+	if (Settings.bObserveActivated)        Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated, Settings.Routing));
+	if (Settings.bObserveActivationFailed) Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed, Settings.Routing));
+	if (Settings.bObserveEnabled)          Handles.Add(SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled, Settings.Routing));
+	if (Settings.bObserveDisabled)         Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled, Settings.Routing));
+	if (Settings.bObserveGiveBlocked)      Handles.Add(SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked, Settings.Routing));
+	if (Settings.bObserveStarted)          Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted, Settings.Routing));
+	if (Settings.bObserveProgress)         Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress, Settings.Routing));
+	if (Settings.bObserveCompleted)        Handles.Add(SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted, Settings.Routing));
+	if (Settings.bObserveDeactivated)      Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated, Settings.Routing));
+	if (Settings.bObserveBlocked)          Handles.Add(SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked, Settings.Routing));
+	if (Settings.bObserveUnblocked)        Handles.Add(SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked, Settings.Routing));
+	if (Settings.bObserveProgressRefused)  Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgressRefused, Settings.Routing));
 
-		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
+	CatchUpSingleTag(QuestTag, Settings, WorldState, StateSubsystem);
+}
+
+void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings,
+	UWorldStateSubsystem* WorldState, UQuestStateSubsystem* StateSubsystem)
+{
+	if (!WorldState) return;
+
+	// Catch-up: fire delegates immediately for state already present at subscription time. For an exact-tag
+	// observer this fires per-pin if a matching state fact is set for QuestTag itself; for a parent-prefix
+	// observer (subscribed tag is an unknown namespace OR a known wrapper container) it fans out to every
+	// known descendant via FQuestCatchUpFanout and probes each one in turn, mirroring the signal bus's
+	// hierarchical broadcast on the live side. Synthetic Payload carries each descendant's tag only — full
+	// Payload isn't recoverable from state alone (NodeInfo display fields, CompletionTrigger, and the
+	// inherited FQuestContextBase attribution come from runtime publish-time AssembleEventContext calls;
+	// Started catch-up additionally recovers the last giver actor via StateSubsystem). Mirrors UQuestEvent-
+	// Subscription's catch-up pattern.
+	//
+	// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): subscription and catch-up
+	// happen together in this call, so there's no window where the component is subscribed but not yet caught up —
+	// a live event can't slip in mid-pass and need deduplication. This call is itself deferred one tick past BeginPlay
+	// (PerformDeferredRegistration) so the owning actor initializes first, but subscribe + catch-up stay atomic within it.
+	const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Settings.Routing);
+
+	for (const FGameplayTag& EachTag : CatchUpTags)
+	{
+		// EachTag is the canonical for this catch-up entry (post-GetQuestTagsUnderPrefix's alias-resolution).
+		// Build the channel set [canonical, ...aliases] and pick the best match for this watched-key tag —
+		// same selection the live bus dispatcher uses, so observer delegates see consistent MatchedChannel
+		// values across catch-up and live deliveries (no need to branch by delivery path).
+		TArray<FGameplayTag> ChannelSet;
+		ChannelSet.Add(EachTag);
+		if (StateSubsystem)
 		{
-			UE_LOG(LogSimpleQuestSubscription, Warning,
-				TEXT("UQuestObserverComponent::RegisterQuestObserver : '%s' holds stale tag '%s' — skipping subscribe. ")
-				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
-				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
-			continue;
+			for (const FGameplayTag& AliasTag : StateSubsystem->GetAssetScopedAliasTagsForCanonical(EachTag))
+			{
+				ChannelSet.Add(AliasTag);
+			}
+		}
+		const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, QuestTag);
+
+		FQuestEventPayload Payload;
+		Payload.NodeInfo.QuestTag = EachTag;
+
+		// Activated reconstructs from EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope)
+		// OR the Live fact (a non-giver path — including asset/container-level activations — went straight to
+		// Live, which implies it transitioned through Activated to get there). Enabled stays PendingGiver-only.
+		// Matches UQuestLifecycleObserver's catch-up so the component and the K2 node replay identically.
+		const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
+		const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+
+		const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
+		const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
+
+		FQuestPrereqStatus CachedPrereqStatus;
+		if (bIsPendingGiver && StateSubsystem)
+		{
+			CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
 		}
 
-		// Source annotation helps debugging the implicit-observed bridge — adopters who see a tag firing
-		// delegates without an explicit ObservedTags entry can confirm it came from a derived component's
-		// GetImplicitlyObservedTags() override.
-		const bool bFromImplicitBridge = !ObservedTags.Contains(QuestTag);
-		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : Registered observer for tag: %s (%s)"),
-			*QuestTag.ToString(),
-			bFromImplicitBridge ? TEXT("implicit") : TEXT("authored"));
-		
-		// Live subscriptions — one per opted-in event type. Blocked/Unblocked subscribe directly to their own
-		// dedicated events (no piggybacking on FQuestDeactivatedEvent).
-		if (Settings.bObserveActivated)			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated, Settings.Routing);
-		if (Settings.bObserveActivationFailed)	SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed, Settings.Routing);
-		if (Settings.bObserveEnabled)			SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestEnabled, Settings.Routing);
-		if (Settings.bObserveDisabled)			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDisabled, Settings.Routing);
-		if (Settings.bObserveGiveBlocked)		SignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestGiveBlocked, Settings.Routing);
-		if (Settings.bObserveStarted)			SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestStarted, Settings.Routing);
-		if (Settings.bObserveProgress)			SignalSubsystem->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgress, Settings.Routing);
-		if (Settings.bObserveCompleted)			SignalSubsystem->SubscribeMessage<FQuestEndedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestCompleted, Settings.Routing);
-		if (Settings.bObserveDeactivated)		SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestDeactivated, Settings.Routing);
-		if (Settings.bObserveBlocked)			SignalSubsystem->SubscribeMessage<FQuestBlockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestBlocked, Settings.Routing);
-		if (Settings.bObserveUnblocked)			SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked, Settings.Routing);
-		if (Settings.bObserveProgressRefused)	SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgressRefused, Settings.Routing);
-		
-		if (!WorldState) continue;
-
-		// Catch-up: fire delegates immediately for state already present at subscription time. For an exact-tag
-		// observer this fires per-pin if a matching state fact is set for QuestTag itself; for a parent-prefix
-		// observer (subscribed tag is an unknown namespace OR a known wrapper container) it fans out to every
-		// known descendant via FQuestCatchUpFanout and probes each one in turn, mirroring the signal bus's
-		// hierarchical broadcast on the live side. Synthetic Payload carries each descendant's tag only — full
-		// Payload isn't recoverable from state alone (NodeInfo display fields, CompletionTrigger, and the
-		// inherited FQuestContextBase attribution come from runtime publish-time AssembleEventContext calls;
-		// Started catch-up additionally recovers the last giver actor via StateSubsystem). Mirrors UQuestEvent-
-		// Subscription's catch-up pattern.
-		//
-		// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): subscription and catch-up
-		// happen together in this call, so there's no window where the component is subscribed but not yet caught up —
-		// a live event can't slip in mid-pass and need deduplication. This call is itself deferred one tick past BeginPlay
-		// (PerformDeferredRegistration) so the owning actor initializes first, but subscribe + catch-up stay atomic within it.
-		const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Settings.Routing);
-
-		for (const FGameplayTag& EachTag : CatchUpTags)
+		if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive))
 		{
-			// EachTag is the canonical for this catch-up entry (post-GetQuestTagsUnderPrefix's alias-resolution).
-			// Build the channel set [canonical, ...aliases] and pick the best match for this watched-key tag —
-			// same selection the live bus dispatcher uses, so observer delegates see consistent MatchedChannel
-			// values across catch-up and live deliveries (no need to branch by delivery path).
-			TArray<FGameplayTag> ChannelSet;
-			ChannelSet.Add(EachTag);
-			if (StateSubsystem)
+			ActiveQuestTags.AddTag(EachTag);
+			if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
+			BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Activated, Payload);
+		}
+
+		if (Settings.bObserveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
+		{
+			ActiveQuestTags.AddTag(EachTag);
+			if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
+			BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Enabled, Payload);
+		}
+
+		if (Settings.bObserveStarted && bIsLive)
+		{
+			ActiveQuestTags.AddTag(EachTag);
+			AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
+			if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
+			BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
+		}
+
+		// Disabled / GiveBlocked / Progress / Unblocked / ProgressRefused have no catch-up — transient or
+		// one-shot events without recoverable state.
+
+		if (Settings.bObserveCompleted)
+		{
+			const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
+			if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
 			{
-				for (const FGameplayTag& AliasTag : StateSubsystem->GetAssetScopedAliasTagsForCanonical(EachTag))
+				ActiveQuestTags.RemoveTag(EachTag);
+				CompletedQuestTags.AddTag(EachTag);
+
+				FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
+				if (StateSubsystem)
 				{
-					ChannelSet.Add(AliasTag);
-				}
-			}
-			const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, QuestTag);
-
-			FQuestEventPayload Payload;
-			Payload.NodeInfo.QuestTag = EachTag;
-
-			// Activated reconstructs from EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope)
-			// OR the Live fact (a non-giver path — including asset/container-level activations — went straight to
-			// Live, which implies it transitioned through Activated to get there). Enabled stays PendingGiver-only.
-			// Matches UQuestLifecycleObserver's catch-up so the component and the K2 node replay identically.
-			const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
-			const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
-
-			const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
-			const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
-
-			FQuestPrereqStatus CachedPrereqStatus;
-			if (bIsPendingGiver && StateSubsystem)
-			{
-				CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
-			}
-
-			if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive))
-			{
-				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
-				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Activated, Payload);
-			}
-
-			if (Settings.bObserveEnabled && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
-			{
-				ActiveQuestTags.AddTag(EachTag);
-				if (OnQuestEnabled.IsBound()) OnQuestEnabled.Broadcast(EachTag, MatchedChannel, Payload);
-				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Enabled, Payload);
-			}
-
-			if (Settings.bObserveStarted && bIsLive)
-			{
-				ActiveQuestTags.AddTag(EachTag);
-				AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-				if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
-				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
-			}
-
-			// Disabled / GiveBlocked / Progress / Unblocked / ProgressRefused have no catch-up — transient or
-			// one-shot events without recoverable state.
-
-			if (Settings.bObserveCompleted)
-			{
-				const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
-				if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
-				{
-					ActiveQuestTags.RemoveTag(EachTag);
-					CompletedQuestTags.AddTag(EachTag);
-
-					FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-					if (StateSubsystem)
+					if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(EachTag))
 					{
-						if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(EachTag))
+						if (const FQuestResolutionEntry* Latest = Record->GetLatest())
 						{
-							if (const FQuestResolutionEntry* Latest = Record->GetLatest())
-							{
-								RecoveredOutcome = Latest->OutcomeTag;
-							}
+							RecoveredOutcome = Latest->OutcomeTag;
 						}
 					}
-					
-					if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
-					{
-						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
-							*EachTag.ToString(), *RecoveredOutcome.ToString());
-					}
-					else
-					{
-						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
-							*EachTag.ToString(), *RecoveredOutcome.ToString());
-						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
-						BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Completed, Payload, RecoveredOutcome);
-					}
 				}
-			}
-
-			if (Settings.bObserveDeactivated)
-			{
-				const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
-				if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
+				
+				if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
 				{
-					ActiveQuestTags.RemoveTag(EachTag);
-					if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, Payload);
-					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Deactivated, Payload);
+					UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
+						*EachTag.ToString(), *RecoveredOutcome.ToString());
 				}
-			}
-
-			if (Settings.bObserveBlocked)
-			{
-				const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
-				if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
+				else
 				{
-					if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, Payload);
-					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Blocked, Payload);
+					UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
+						*EachTag.ToString(), *RecoveredOutcome.ToString());
+					if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
+					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Completed, Payload, RecoveredOutcome);
 				}
 			}
 		}
+
+		if (Settings.bObserveDeactivated)
+		{
+			const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
+			if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
+			{
+				ActiveQuestTags.RemoveTag(EachTag);
+				if (OnQuestDeactivated.IsBound()) OnQuestDeactivated.Broadcast(EachTag, MatchedChannel, Payload);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Deactivated, Payload);
+			}
+		}
+
+		if (Settings.bObserveBlocked)
+		{
+			const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
+			if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
+			{
+				if (OnQuestBlocked.IsBound()) OnQuestBlocked.Broadcast(EachTag, MatchedChannel, Payload);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Blocked, Payload);
+			}
+		}
 	}
+}
+
+void UQuestObserverComponent::UnregisterSingleObservedTag(const FGameplayTag& QuestTag)
+{
+	if (SignalSubsystem)
+	{
+		if (const TArray<FDelegateHandle>* Handles = SubscriptionHandlesByTag.Find(QuestTag))
+		{
+			for (const FDelegateHandle& Handle : *Handles)
+			{
+				SignalSubsystem->UnsubscribeMessage(QuestTag, Handle);
+			}
+		}
+	}
+	SubscriptionHandlesByTag.Remove(QuestTag);
+
+	if (UGameInstance* GameInstance = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UQuestStateSubsystem* StateSubsystem = GameInstance->GetSubsystem<UQuestStateSubsystem>())
+		{
+			StateSubsystem->UnregisterObserverSource(this, QuestTag);
+		}
+	}
+
+	ActiveQuestTags.RemoveTag(QuestTag);
+	CompletedQuestTags.RemoveTag(QuestTag);
 }
 
 FGameplayTagContainer UQuestObserverComponent::GetRegisteredWatchedStepTags() const

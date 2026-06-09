@@ -353,6 +353,21 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetRegisteredWatchedQuestKeys() const;
 
+	/**
+	 * Runtime: start watching a quest tag (or update an already-watched tag's settings). If the component has
+	 * already registered, it subscribes + catches up the tag immediately; otherwise the tag is picked up by the
+	 * deferred registration. Safe to call repeatedly for the same tag — it refreshes rather than double-subscribes.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Quest")
+	void AddObservedTag(FGameplayTag QuestTag, FObservedQuestEventSettings Settings);
+
+	/**
+	 * Runtime: stop watching a quest tag. If registered, unsubscribes by handle and drops its source-registry
+	 * entry live. No-op for a tag that isn't being watched.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Quest")
+	void RemoveObservedTag(FGameplayTag QuestTag);
+
 	/** DEPRECATED — WatchedStepTags is deprecated and only preserved for backwards compatibility. Prefer UQuestObserverComponent::ObservedTags TMap, using GetObservedTags() */
 	const FGameplayTagContainer& GetWatchedStepTags() const { return WatchedStepTags; }
 	const TMap<FGameplayTag, FObservedQuestEventSettings>& GetObservedTags() const { return ObservedTags; }

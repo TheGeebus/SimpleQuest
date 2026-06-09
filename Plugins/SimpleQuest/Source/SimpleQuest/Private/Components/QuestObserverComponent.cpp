@@ -345,11 +345,16 @@ void UQuestObserverComponent::RegisterQuestObserver()
 		Settings.bObserveGiveBlocked = true;
 	}
 
+	// The deferred registration pass has run — flip the flag BEFORE the empty-set early-out so a component that
+	// starts with no tags (the runtime-AddObservedTag case) still counts as registered. Without this, AddObservedTag's
+	// bRegistered guard never trips and runtime adds silently skip the live subscribe + catch-up.
+	bRegistered = true;
+
 	if (EffectiveObserved.IsEmpty())
 	{
 		if (GetOwner())
 		{
-			UE_LOG(LogSimpleQuestSubscription, Warning, TEXT("UQuestObserverComponent::RegisterQuestObserver : no observed tags resolved. Actor: %s"), *GetOwner()->GetActorNameOrLabel());
+			UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestObserverComponent::RegisterQuestObserver : no observed tags at registration (valid for runtime-driven sets). Actor: %s"), *GetOwner()->GetActorNameOrLabel());
 		}
 		return;
 	}
@@ -360,7 +365,34 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	{
 		RegisterSingleObservedTag(Pair.Key, Pair.Value);
 	}
-	bRegistered = true;
+}
+
+void UQuestObserverComponent::AddObservedTag(FGameplayTag QuestTag, FObservedQuestEventSettings Settings)
+{
+	if (!QuestTag.IsValid()) return;
+
+	ObservedTags.Add(QuestTag, Settings);  // TMap::Add overwrites — updates settings if the tag was already present
+
+	if (bRegistered)
+	{
+		// If this tag is already live, drop its old subscriptions first so we neither double-subscribe nor strand
+		// stale Settings, then (re-)subscribe + catch up with the current settings.
+		if (SubscriptionHandlesByTag.Contains(QuestTag))
+		{
+			UnregisterSingleObservedTag(QuestTag);
+		}
+		RegisterSingleObservedTag(QuestTag, Settings);
+	}
+}
+
+void UQuestObserverComponent::RemoveObservedTag(FGameplayTag QuestTag)
+{
+	ObservedTags.Remove(QuestTag);
+
+	if (bRegistered)
+	{
+		UnregisterSingleObservedTag(QuestTag);
+	}
 }
 
 void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings)
@@ -587,3 +619,4 @@ FGameplayTagContainer UQuestObserverComponent::GetRegisteredWatchedQuestKeys() c
 		FString::Printf(TEXT("UQuestObserverComponent::GetRegisteredWatchedQuestKeys ('%s')"),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown")));
 }
+

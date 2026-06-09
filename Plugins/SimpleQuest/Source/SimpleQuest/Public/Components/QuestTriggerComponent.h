@@ -86,10 +86,36 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
 	virtual void SendTriggerEvent(const FQuestObjectiveTriggerContext& Context = FQuestObjectiveTriggerContext());
+	
+	/**
+	 * Runtime: start watching step tags with the full trigger surface (OnQuestTriggerActivated + SendTriggerEvent
+	 * participation + the inherited observer events). If already registered, subscribes + catches up live. Idempotent per tag.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void AddTagsToTrigger(const FGameplayTagContainer& Tags);
 
+	/**
+	 * Runtime: stop watching step tags — unsubscribes the trigger + observer subscriptions and drops the trigger
+	 * source-registry entries. No-op for tags not currently watched.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest")
+	void RemoveTagsFromTrigger(const FGameplayTagContainer& Tags);
+	
 protected:
 	virtual void PerformDeferredRegistration() override;
+	
+	/**
+	 * Installs the trigger-specific subscriptions + trigger source entry for one Step tag, capturing the handles
+	 * into the base SubscriptionHandlesByTag for selective removal. Shared by registration and AddTagsToTrigger.
+	 */
+	void SubscribeTriggerStep(FGameplayTag StepTag);
 
+	/**
+	 * If StepTag's step is already Live, replays OnTriggerActivated (late-join catch-up). Shared by registration
+	 * and AddTagsToTrigger.
+	 */
+	void TriggerCatchUpForStep(FGameplayTag StepTag);
+	
 	virtual void OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event);
 
 	/**

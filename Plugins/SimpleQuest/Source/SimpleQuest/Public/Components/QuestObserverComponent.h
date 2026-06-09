@@ -321,6 +321,18 @@ protected:
 	 */
 	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
 
+	/**
+	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed
+	 * selectively (RemoveObservedTag / RemoveTagsFromTrigger) without tearing down the whole component.
+	 */
+	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
+	
+	/**
+	 * True once RegisterQuestObserver has run. Gates the live-vs-deferred branch in AddObservedTag/RemoveObservedTag:
+	 * before registration, mutating the container suffices; after, it does live subscribe/unsubscribe work.
+	 */
+	bool bRegistered = false;
+	
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FObservedQuestEventSettings> ObservedTags;
@@ -333,18 +345,6 @@ private:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer CompletedQuestTags;
-
-	/**
-	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed
-	 * selectively (RemoveObservedTag / RemoveTagsFromTrigger) without tearing down the whole component.
-	 */
-	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
-
-	/**
-	 * True once RegisterQuestObserver has run. Gates the live-vs-deferred branch in AddObservedTag/RemoveObservedTag:
-	 * before registration, mutating the container suffices; after, it does live subscribe/unsubscribe work.
-	 */
-	bool bRegistered = false;
 
 public:
 	UFUNCTION(BlueprintCallable)

@@ -34,14 +34,6 @@ void UQuestGiverComponent::PerformDeferredRegistration()
 {
 	Super::PerformDeferredRegistration();
 	RegisterQuestGiver();
-	
-	// Register this component as a Giver source for its QuestTagsToGive set. Observer and Trigger roles register in their
-	// respective Super::PerformDeferredRegistration paths. EndPlay (handled in the Observer base) strips every role
-	// entry pointing at this component.
-	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
-	{
-		StateSubsystem->RegisterGiverSource(this, QuestTagsToGive);
-	}
 }
 
 void UQuestGiverComponent::RegisterQuestGiver()
@@ -49,79 +41,70 @@ void UQuestGiverComponent::RegisterQuestGiver()
 	if (QuestTagsToGive.IsEmpty())
 	{
 		UE_LOG(LogSimpleQuestSubscription, Warning, TEXT("UQuestGiverComponent::RegisterQuestGiver : QuestTagsToGive is empty. Actor: %s"),
-			*GetOwner()->GetActorNameOrLabel());
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"));
 		return;
 	}
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestGiverComponent_RegisterQuestGiver);
-
-	UWorldStateSubsystem* WorldState = GetWorld() && GetWorld()->GetGameInstance()
-		? GetWorld()->GetGameInstance()->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 
 	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
 	const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
 
 	for (const FGameplayTag& QuestTag : QuestTagsToGive)
 	{
-		if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
-		{
-			UE_LOG(LogSimpleQuestSubscription, Warning,
-				TEXT("UQuestGiverComponent::RegisterQuestGiver : '%s' holds stale tag '%s' — skipping subscribe. ")
-				TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
-				*GetOwner()->GetActorNameOrLabel(), *QuestTag.ToString());
-			continue;
-		}
-
-		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Registered giver for tag: %s on actor: %s"),
-			*QuestTag.ToString(), *GetOwner()->GetName());
-
-		if (SignalSubsystem)
-		{
-			SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>  (QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived, FSignalRoutingDefaults::ExactOnly);
-			SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived, FSignalRoutingDefaults::ExactOnly);
-			SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived, FSignalRoutingDefaults::ExactOnly);
-			// FQuestEnabledEvent / FQuestStartedEvent / FQuestEndedEvent state-tracking is folded into
-			// HandleQuestEnabled / HandleQuestStarted / HandleQuestCompleted overrides — the inherited
-			// Observer subscriptions for these events (default-on or force-on via implicit-observed
-			// bridge) already cover QuestTagsToGive, and the overrides run state updates before Super
-			// broadcasts so BP listeners see consistent state when querying from inside the callback.
-			// Activated / Disabled / Deactivated stay on separate subscriptions because Observer doesn't
-			// subscribe to those events by default — see header comment.
-			SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
-		}
-
-		// Catch-up: quest may have already reached PendingGiver state before this component came online.
-		// Reconstruct Activated state, and if prereqs currently satisfy, Enabled state. Late-registering
-		// givers end up in the same state as if they'd been listening when the events fired.
-		if (IsValid(WorldState))
-		{
-			const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(
-				FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
-			if (PendingFact.IsValid() && WorldState->HasFact(PendingFact))
-			{
-				UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestGiverComponent::RegisterQuestGiver : Catch-up — quest already pending giver: %s"),
-					*QuestTag.ToString());
-
-				ActivatedQuestTags.AddTag(QuestTag);
-				FQuestPrereqStatus PrereqStatus;
-				if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
-				{
-					PrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
-				}
-
-				if (PrereqStatus.bSatisfied)
-				{
-					EnabledQuestTags.AddTag(QuestTag);
-				}
-			}
-		}
+		SubscribeGiverQuest(QuestTag);
+		GiverCatchUpForQuest(QuestTag);
 	}
 
-	// Coalesce the per-tag catch-up into a single availability-changed broadcast so UI refreshes
-	// once rather than per tag during the subscription enumeration.
 	if (ActivatedQuestTags.Num() > PriorActivated.Num() || EnabledQuestTags.Num() > PriorEnabled.Num())
 	{
 		BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::InitialCatchUp);
+	}
+}
+
+void UQuestGiverComponent::SubscribeGiverQuest(FGameplayTag QuestTag)
+{
+	if (!SignalSubsystem || !QuestTag.IsValid()) return;
+
+	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
+	{
+		UE_LOG(LogSimpleQuestSubscription, Warning,
+			TEXT("UQuestGiverComponent::SubscribeGiverQuest : '%s' holds stale tag '%s' — skipping subscribe. ")
+			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"), *QuestTag.ToString());
+		return;
+	}
+
+	TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(QuestTag);
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>  (QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived, FSignalRoutingDefaults::ExactOnly));
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived, FSignalRoutingDefaults::ExactOnly));
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived, FSignalRoutingDefaults::ExactOnly));
+
+	SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
+
+	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+	{
+		StateSubsystem->RegisterGiverSource(this, FGameplayTagContainer(QuestTag));  // per-tag, additive
+	}
+}
+
+void UQuestGiverComponent::GiverCatchUpForQuest(FGameplayTag QuestTag)
+{
+	UWorldStateSubsystem* WorldState = GetWorld() && GetWorld()->GetGameInstance() ? GetWorld()->GetGameInstance()->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+	if (!IsValid(WorldState)) return;
+
+	const FGameplayTag PendingFact = UGameplayTagsManager::Get().RequestGameplayTag(FQuestTagComposer::MakeStateFact(QuestTag, EQuestStateLeaf::PendingGiver), false);
+	if (!PendingFact.IsValid() || !WorldState->HasFact(PendingFact)) return;
+
+	ActivatedQuestTags.AddTag(QuestTag);
+	FQuestPrereqStatus PrereqStatus;
+	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+	{
+		PrereqStatus = StateSubsystem->GetQuestPrereqStatus(QuestTag);
+	}
+	if (PrereqStatus.bSatisfied)
+	{
+		EnabledQuestTags.AddTag(QuestTag);
 	}
 }
 
@@ -342,6 +325,68 @@ void UQuestGiverComponent::GiveAllQuests(const FQuestObjectiveActivationContext&
 	}
 }
 
+void UQuestGiverComponent::AddTagsToGive(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		if (!Tag.IsValid() || QuestTagsToGive.HasTagExact(Tag)) continue;
+		QuestTagsToGive.AddTag(Tag);
+
+		if (bRegistered)
+		{
+			const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
+			const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
+
+			// Base observer side — same effective settings the bridge produces for a giver tag (default +
+			// Progress/Blocked/Unblocked + forced Started/GiveBlocked, ExactOnly). Mirrors the overlay in
+			// RegisterQuestObserver; keep in sync if it changes.
+			FObservedQuestEventSettings Settings;
+			Settings.bObserveProgress = true;
+			Settings.bObserveBlocked = true;
+			Settings.bObserveUnblocked = true;
+			Settings.bObserveStarted = true;
+			Settings.bObserveGiveBlocked = true;
+			Settings.Routing = FSignalRoutingDefaults::ExactOnly;
+			RegisterSingleObservedTag(Tag, Settings);
+
+			SubscribeGiverQuest(Tag);
+			GiverCatchUpForQuest(Tag);
+
+			if (ActivatedQuestTags.Num() > PriorActivated.Num() || EnabledQuestTags.Num() > PriorEnabled.Num())
+			{
+				BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::InitialCatchUp);
+			}
+		}
+	}
+}
+
+void UQuestGiverComponent::RemoveTagsFromGive(const FGameplayTagContainer& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		if (!QuestTagsToGive.HasTagExact(Tag)) continue;
+		QuestTagsToGive.RemoveTag(Tag);
+
+		if (bRegistered)
+		{
+			// If the giver is currently offering this quest, fire the availability change (NewlyUnavailable /
+			// NewlyDeactivated) so UI tears down — un-listing mid-availability must balance the pair.
+			// HandleQuestLeftGiverSurface does the state removal + broadcast.
+			if (ActivatedQuestTags.HasTagExact(Tag) || EnabledQuestTags.HasTagExact(Tag))
+			{
+				HandleQuestLeftGiverSurface(Tag);
+			}
+
+			UnregisterSingleObservedTag(Tag);
+
+			if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+			{
+				StateSubsystem->UnregisterGiverSource(this, Tag);
+			}
+		}
+	}
+}
+
 void UQuestGiverComponent::BroadcastAvailabilityChange(const FGameplayTagContainer& PriorActivated, const FGameplayTagContainer& PriorEnabled, EGiveAvailabilityChangeReason Reason)
 {
 	if (!OnGiveAvailabilityChanged.IsBound()) return;
@@ -450,6 +495,18 @@ TArray<FQuestObservedTagSpec> UQuestGiverComponent::GetImplicitlyObservedTags() 
 		Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::ExactOnly});
 	}
 	return Implicit;
+}
+
+void UQuestGiverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState)
+{
+	// The Giver's OnQuestStarted is a give-success surface (Live transition, GiverActor = the giver that gave the
+	// quest), not a general lifecycle signal. The base Started catch-up would replay it for an already-Live tag —
+	// e.g. adding a tag while the quest is already running — firing a spurious "give succeeded" attributed to
+	// whoever last gave it. Suppress just the Started replay; the live give-success still arrives via
+	// HandleQuestStarted (a separate subscription), and giver availability catch-up runs in GiverCatchUpForQuest.
+	FObservedQuestEventSettings NoStartedReplay = Settings;
+	NoStartedReplay.bObserveStarted = false;
+	Super::CatchUpSingleTag(QuestTag, NoStartedReplay, WorldState, QuestState);
 }
 
 void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const

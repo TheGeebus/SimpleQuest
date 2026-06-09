@@ -436,8 +436,7 @@ void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& Ques
 	CatchUpSingleTag(QuestTag, Settings, WorldState, StateSubsystem);
 }
 
-void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings,
-	UWorldStateSubsystem* WorldState, UQuestStateSubsystem* StateSubsystem)
+void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState)
 {
 	if (!WorldState) return;
 
@@ -455,7 +454,7 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 	// happen together in this call, so there's no window where the component is subscribed but not yet caught up —
 	// a live event can't slip in mid-pass and need deduplication. This call is itself deferred one tick past BeginPlay
 	// (PerformDeferredRegistration) so the owning actor initializes first, but subscribe + catch-up stay atomic within it.
-	const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Settings.Routing);
+	const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, QuestState, Settings.Routing);
 
 	for (const FGameplayTag& EachTag : CatchUpTags)
 	{
@@ -465,9 +464,9 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 		// values across catch-up and live deliveries (no need to branch by delivery path).
 		TArray<FGameplayTag> ChannelSet;
 		ChannelSet.Add(EachTag);
-		if (StateSubsystem)
+		if (QuestState)
 		{
-			for (const FGameplayTag& AliasTag : StateSubsystem->GetAssetScopedAliasTagsForCanonical(EachTag))
+			for (const FGameplayTag& AliasTag : QuestState->GetAssetScopedAliasTagsForCanonical(EachTag))
 			{
 				ChannelSet.Add(AliasTag);
 			}
@@ -488,9 +487,9 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 		const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
 
 		FQuestPrereqStatus CachedPrereqStatus;
-		if (bIsPendingGiver && StateSubsystem)
+		if (bIsPendingGiver && QuestState)
 		{
-			CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
+			CachedPrereqStatus = QuestState->GetQuestPrereqStatus(EachTag);
 		}
 
 		if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive))
@@ -510,7 +509,7 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 		if (Settings.bObserveStarted && bIsLive)
 		{
 			ActiveQuestTags.AddTag(EachTag);
-			AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
+			AActor* RecoveredGiver = QuestState ? QuestState->GetLastGiverActor(EachTag) : nullptr;
 			if (OnQuestStarted.IsBound()) OnQuestStarted.Broadcast(EachTag, MatchedChannel, Payload, RecoveredGiver);
 			BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Started, Payload, FGameplayTag(), RecoveredGiver);
 		}
@@ -527,9 +526,9 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 				CompletedQuestTags.AddTag(EachTag);
 
 				FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-				if (StateSubsystem)
+				if (QuestState)
 				{
-					if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(EachTag))
+					if (const FQuestResolutionRecord* Record = QuestState->GetQuestResolution(EachTag))
 					{
 						if (const FQuestResolutionEntry* Latest = Record->GetLatest())
 						{

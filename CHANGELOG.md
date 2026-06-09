@@ -30,8 +30,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.4.1] — In Development — Authoring Primitives + Subscriber Routing
 
 Patch release adding new authoring primitives (the **Prereq Gate**
-utility node plus an **Add / Remove / Clear Facts** node trio for
-direct WorldState participation from questline graphs), giving
+utility node, an **Add / Remove / Clear Facts** node trio for direct
+WorldState participation from questline graphs, and a **Resettable
+Replay** node setting that makes pin-wired prerequisites re-gate when
+replayable content runs again), giving
 subscribers a way to opt out of the bus's hierarchical-delivery
 default, and closing several latent gaps in the quest-resolution
 attribution chain that surfaced once the new primitives were
@@ -70,6 +72,39 @@ under the Flow Control context-menu category.
   dedup state on PIE re-entry.
 - **Per-pin labels + tooltips + node-level tooltip** so the gate's
   three-pin geometry reads cleanly in the graph.
+
+### Resettable Replay — prerequisites that re-gate on replay
+
+Pin-wired prerequisites read a quest's permanent resolution history,
+so once one is satisfied it stays satisfied for the rest of the
+session. That's right for one-way progression, but it makes
+replayable content hollow: replay a chapter and its gates are already
+open, because the upstream steps still count as resolved from the
+first run.
+
+The new **Resettable Replay** setting fixes that without touching the
+historical record. It's a tri-state — **Inherit / On / Off** — on
+every content node and on the questline graph asset itself; the
+default is **Off**, the permanent behavior above, unchanged.
+
+- **Set it On where a gate should reset.** The setting goes on the
+  node being gated *on* — the one whose outcome pin feeds a
+  Prerequisites input — not the node that holds the prerequisite.
+  With that node On, a prerequisite wired from it re-gates whenever
+  the content replays: the moment the node re-activates after
+  completing, its satisfaction resets and the gate is honest again.
+- **The resolution history is never altered.** On adds a clearable
+  per-run view alongside the permanent record; replay clears the
+  view, the record stays intact. "Has this quest ever resolved this
+  way" queries are unaffected — only the gate's per-run state resets.
+- **Inherits down the graph.** Set Resettable Replay = On on the
+  questline asset (or a container node) and the content inside
+  inherits it; override any node back to Off or On individually. Turn
+  a whole chapter replayable from one place, or scope it to a single
+  branch.
+- **Resets automatically, or on demand.** A completed node clears its
+  gate when it re-activates for another run; `Activate Quest` with
+  **Bypass Prerequisites** resets it explicitly.
 
 ### Fact-manipulation utility nodes
 

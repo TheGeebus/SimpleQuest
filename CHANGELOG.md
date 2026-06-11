@@ -41,7 +41,10 @@ exercised against real authoring patterns. It also broadens the
 observer surface — a catch-all `OnAnyQuestEvent` delegate and a new
 run-phase `ProgressRefused` event that completes the refusal-event
 family — and adds a typed `CustomTag` designer channel on the shared
-context base.
+context base. Quest components (observer / trigger / giver) also gain
+runtime add and remove of their watched-tag sets, so a spawned or
+reconfigured actor can join an in-progress quest and catch up on the
+spot.
 
 ### Prereq Gate utility node
 
@@ -235,6 +238,29 @@ authored richer UI metadata schemas. Queryable via
 leaf name when `DisplayName` is unset). Phase 2 — UI display data
 sourced through the adopter-pluggable resolver pattern — lands
 in 0.5.0.
+
+### Runtime watched-tag mutation on quest components
+
+The watched-tag containers on the quest components — `ObservedTags`
+(Observer), `StepTagsToTrigger` (Trigger), `QuestTagsToGive` (Giver) —
+are edit-time configuration, read once when the component registers.
+New BlueprintCallable APIs change what a component watches **at runtime**:
+
+- **Observer** — `AddObservedTag` / `RemoveObservedTag`
+- **Trigger** — `AddTagsToTrigger` / `RemoveTagsFromTrigger`
+- **Giver** — `AddTagsToGive` / `RemoveTagsFromGive`
+
+Add a tag whose quest is already in progress and the component catches
+up on the spot — the observer's lifecycle events replay, a trigger
+activates (and `SendTriggerEvent` begins participating), a giver's
+availability set updates. Remove a tag and it unsubscribes cleanly; if
+the component was mid-activation on that tag, the closing half of the
+pair fires (`OnQuestTriggerDeactivated`, or a giver availability
+change) so bound UI tears down instead of stranding "on".
+
+Enables components whose watched set changes during play — an NPC giver
+whose offered quests shift with world state, or a trigger volume
+re-pointed at different steps without respawning the actor.
 
 ### Source query API
 

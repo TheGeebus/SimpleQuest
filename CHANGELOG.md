@@ -627,6 +627,22 @@ already reconstructed `Activated` from live state (see *Activated event
 broadening* above); the component now matches it, so both observer surfaces
 replay identically on join.
 
+### Deactivation cascades pass through inactive nodes
+
+A node's **Deactivated → Deactivate** wiring now relays the teardown to its
+downstream nodes even when the node the cascade reaches has nothing of its own to
+deactivate — one that's already resolved, or was never activated. Previously the
+cascade halted at the first such node, so a teardown chain routed through a
+completed node never reached anything past it.
+
+An authored deactivation chain now tears down everything downstream regardless of
+which nodes along the way have already finished — useful when the chain runs
+through steps the player may have completed in any order. A node still emits its
+own `Deactivated` event (to the components and observers bound to it) only when it
+genuinely transitioned from active to deactivated, so passing the cascade through
+an already-inactive node never fires a spurious deactivation. Cyclic and fan-in
+teardown wiring is guarded against re-entry.
+
 ### Breaking changes (compiled-data + signatures)
 
 - **`FQuestPathNodeList::ExitedGraphTags`** (and

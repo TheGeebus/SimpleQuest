@@ -477,6 +477,20 @@ private:
 	 */
 	void SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context = FQuestEventPayload());
 
+	/**
+	 * Deactivated → Deactivate wiring, forwarded for every node a deactivation reaches — active or not. Split out of
+	 * HandleNodeDeactivatedEvent so the pass-through path (which publishes no event) still relays the teardown.
+	 */
+	void CascadeDeactivation(FGameplayTag QuestTag, EDeactivationSource Source);
+
+	/**
+	 * Per-cascade guard for the deactivation cascade. Deactivation forwards through inactive nodes, so the old
+	 * "not active" early-out no longer stops a loop-back or fan-in from re-forwarding forever. Visited entries clear
+	 * when the root SetQuestDeactivated call unwinds (depth returns to 0).
+	 */
+	TSet<FGameplayTag> DeactivationCascadeVisited;
+	int32 DeactivationCascadeDepth = 0;
+
 	void RegisterGiversFromAssetRegistry();	
 	
 	/**

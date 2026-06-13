@@ -1667,14 +1667,25 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 {
     if (!QuestTag.IsValid() || !WorldState) return;
 
-    // Inclusive precondition: deactivation only makes sense if there's an active lifecycle to interrupt: Live or
-    // PendingGiver. The prior exclusive "skip if Completed" guard mishandled loopable quests (Any Outcome routing
-    // back to own Activate), where Completed remains asserted across loop iterations alongside a freshly-set
-    // Live fact. Asking "is there an active lifecycle?" answers the actual question; "is it not yet completed?"
-    // produces false negatives on multi-resolution quests.
+    // Cycle/fan-in guard. Now that deactivation passes THROUGH inactive nodes (below), the old "not active → return"
+    // no longer terminates the cascade — cyclic or fan-in Deactivated→Deactivate wiring would re-forward forever.
+    // Visited set is per-cascade; it clears when the root call unwinds (depth back to 0).
+    if (DeactivationCascadeVisited.Contains(QuestTag))
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestDeactivated: '%s' already in this deactivation cascade — skipping"), *QuestTag.ToString());
+        return;
+    }
+    DeactivationCascadeVisited.Add(QuestTag);
+    ++DeactivationCascadeDepth;
+    ON_SCOPE_EXIT { if (--DeactivationCascadeDepth == 0) { DeactivationCascadeVisited.Reset(); } };
+
+    // Pass-through: no Live/PendingGiver lifecycle of our own to interrupt, but still relay the teardown to
+    // wired-downstream nodes. No fact write, no FQuestDeactivatedEvent, no activate-on-deactivation — an inactive
+    // node forwards the cascade without claiming a transition it never made.
     if (!FQuestLifecycleQuery::HasActiveLifecycle(WorldState, QuestTag))
     {
-        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestDeactivated: '%s' skipped - no Live or PendingGiver lifecycle to interrupt"), *QuestTag.ToString());
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestDeactivated: '%s' not active — forwarding deactivate cascade only (pass-through)"), *QuestTag.ToString());
+        CascadeDeactivation(QuestTag, Source);
         return;
     }
 
@@ -1792,6 +1803,25 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
             }
         }
     }
+
+    // Relay the teardown downstream after our own deactivation. Same call the pass-through branch makes, so active
+    // and inactive nodes forward identically — moved off the bus event so the no-publish path still cascades.
+    CascadeDeactivation(QuestTag, Source);
+}
+
+void UQuestManagerSubsystem::CascadeDeactivation(FGameplayTag QuestTag, EDeactivationSource Source)
+{
+    UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName());
+    if (!Node) return;
+
+    // Each compile-time FName is in the source node's compile-context perspective; ResolveToCanonicalTag converts to
+    // the perspective IsDeactivated lookups use. Recurses into SetQuestDeactivated, whose visited guard breaks cycles.
+    for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
+    {
+        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+        if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, Source);
+    }
 }
 
 void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
@@ -1807,22 +1837,13 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
         Node->GetNextNodesOnDeactivation().Num(),
         Node->GetNextNodesToDeactivateOnDeactivation().Num());
     
-    // Activate downstream nodes wired from the Deactivated output to their Activate input.
+    // Activate-on-deactivation only (Deactivated → Activate). This stays event-driven and therefore transition-only:
+    // the FQuestDeactivatedEvent that lands here is published solely for nodes that actually deactivated, so a
+    // pass-through node never fires a spurious handoff-activation. The Deactivated → Deactivate cascade moved to
+    // SetQuestDeactivated (CascadeDeactivation) so it forwards on the pass-through path too.
     for (const FName& Tag : Node->GetNextNodesOnDeactivation())
     {
         ActivateNodeByTag(Tag, EQuestActivationProvenance::ChainCascade);
-    }
-    
-    // Cascade deactivation to nodes wired from the Deactivated output to a Deactivate input. Each compile-time
-    // FName is in the deactivating node's compile-context perspective; under AuthoredGuid-dedup the target's
-    // canonical may sit under a different perspective (whichever asset registered first), making the FName an
-    // alias-key form. ResolveToCanonicalTag converts to the perspective queries alias-walk to so SetQuestDeactivated's
-    // fact write lands where IsDeactivated lookups can find it.
-    for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
-    {
-        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
-        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
-        if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, Event.Source);
     }
 }
 

@@ -89,6 +89,13 @@ public:
 	bool HasResolvedAtPath(FGameplayTag QuestTag, FName PathIdentity) const;
 
 	/**
+	 * Returns the originating event identity recorded when the given path-mirror fact was written, or an invalid
+	 * identity if no such fact is currently set. A node woken by a path-mirror fact uses this to recover the resolution
+	 * identity the WorldState fact event itself cannot carry.
+	 */
+	FOriginatingEventID GetPathFactWriteEventID(FGameplayTag PathFactTag) const;
+
+	/**
 	 * Whether ANY quest has resolved with the specified OutcomeTag (or any descendant via gameplay-tag hierarchy)
 	 * at any point this session. Context-free — no quest-tag scoping. Backs the runtime evaluation of Leaf_Outcome
 	 * prereqs emitted from the declarative PrerequisiteOutcome authoring node. Hierarchy walk via FGameplayTag::
@@ -449,6 +456,12 @@ private:
     	double ResolutionTime,
     	EQuestResolutionSource Source,
     	const FOriginatingEventID& OriginatingEventID = {});
+
+	/** Records the originating event identity for a path-mirror fact as it is written. Paired with ClearPathFactWriteEventID. */
+	void StampPathFactWriteEventID(FGameplayTag PathFactTag, const FOriginatingEventID& EventID);
+
+	/** Drops the recorded identity for a path-mirror fact when that fact is cleared, keeping the map bounded to live facts. */
+	void ClearPathFactWriteEventID(FGameplayTag PathFactTag);
 	
     void UpdateQuestPrereqStatus(FGameplayTag QuestTag, const FQuestPrereqStatus& Status);
     void ClearQuestPrereqStatus(FGameplayTag QuestTag);
@@ -622,4 +635,14 @@ private:
 	 * Order: input first, then canonicals, then aliases. Each entry unique.
 	 */
 	TArray<FGameplayTag> BuildTagSynonymSet(FGameplayTag QueryTag) const;
+
+	/**
+	 * Maps a resettable-replay path-mirror fact tag to the originating event identity of the resolution that wrote it.
+	 * A WorldState fact-added event carries no quest identity, so a node woken by one of these mirror facts cannot tell
+	 * which resolution cascade triggered it. The Prerequisite Gate needs that identity to recognize when one resolution
+	 * has reached it through both its prerequisite and its direct Enter wire, and collapse the two arrivals into a single
+	 * fire. The manager stamps it as each mirror fact is written; a fact-woken node reads it back. Entries are dropped
+	 * when the mirror is cleared, so the map only ever holds currently-set mirror facts.
+	 */
+	TMap<FGameplayTag, FOriginatingEventID> PathFactWriteEventIDs;
 };

@@ -126,6 +126,24 @@ void UQuestNodeBase::OnPrereqFactAdded(FGameplayTag Channel, const FWorldStateFa
     DeferredContextualTag.IsValid() ? *DeferredContextualTag.ToString() : TEXT("(utility)"),
     *Channel.ToString(),
     *Event.StateTag.ToString());
+
+    // A WorldState fact-added event carries no quest event identity, so recover the identity of the resolution that
+    // wrote this prerequisite's mirror fact from the quest state registry. The resolution and entry wake-paths take
+    // this identity directly from their events; the fact wake-path is the only one that must look it up. Without it,
+    // a Prerequisite Gate woken by this fact fires under a stale identity and fails to recognize the same resolution
+    // arriving through its direct Enter wire, resolving its wrapper twice for a single completion.
+    if (CachedGameInstance.IsValid())
+    {
+        if (UQuestStateSubsystem* StateSubsystem = CachedGameInstance->GetSubsystem<UQuestStateSubsystem>())
+        {
+            const FOriginatingEventID FactEventID = StateSubsystem->GetPathFactWriteEventID(Event.StateTag);
+            if (FactEventID.IsValid())
+            {
+                LastIncomingEventID = FactEventID;
+            }
+        }
+    }
+
     TryActivateDeferred();
 }
 

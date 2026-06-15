@@ -226,9 +226,10 @@ private:
 	 * Writes the per-run resettable mirror — the MakeNodePathFact tag pin-wired prereqs carry — across the canonical
 	 * tag and every AssetScopedAlias, matching AddStateFactAcrossPerspectives' multi-perspective fan. Called on
 	 * resolution for resettable-replay-scoped nodes only; the resolution registry stays the permanent record. A
-	 * None PathIdentity is a no-op (non-path resolutions don't project a mirror).
+	 * None PathIdentity is a no-op (non-path resolutions don't project a mirror). The originating event identity is
+	 * recorded against each written mirror tag so a node woken by the fact can recover which resolution wrote it.
 	 */
-	void AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
+	void AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID);
 	
 	/**
 	 * Clears the per-run path mirror (the MakeNodePathFact tag) across the canonical tag and every AssetScopedAlias —

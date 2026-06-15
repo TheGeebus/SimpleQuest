@@ -373,6 +373,24 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	OnAnyRegistryChanged.Broadcast();
 }
 
+FOriginatingEventID UQuestStateSubsystem::GetPathFactWriteEventID(FGameplayTag PathFactTag) const
+{
+	return PathFactWriteEventIDs.FindRef(PathFactTag);
+}
+
+void UQuestStateSubsystem::StampPathFactWriteEventID(FGameplayTag PathFactTag, const FOriginatingEventID& EventID)
+{
+	if (PathFactTag.IsValid() && EventID.IsValid())
+	{
+		PathFactWriteEventIDs.Add(PathFactTag, EventID);
+	}
+}
+
+void UQuestStateSubsystem::ClearPathFactWriteEventID(FGameplayTag PathFactTag)
+{
+	PathFactWriteEventIDs.Remove(PathFactTag);
+}
+
 void UQuestStateSubsystem::RecordEntry(
 	FGameplayTag QuestTag,
 	FGameplayTag SourceQuestTag,

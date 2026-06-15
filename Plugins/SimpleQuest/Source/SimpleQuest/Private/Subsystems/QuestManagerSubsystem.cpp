@@ -526,15 +526,24 @@ void UQuestManagerSubsystem::RemoveStateFactAcrossPerspectives(FGameplayTag Inpu
     }
 }
 
-void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity)
+void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
     if (!WorldState || !InputTag.IsValid() || PathIdentity.IsNone()) return;
 
     const FGameplayTag CanonicalTag = ResolveToCanonicalTag(InputTag);
     if (!CanonicalTag.IsValid()) return;
 
+    // The state registry holds the identity of the resolution that wrote each mirror fact, so a node woken by one
+    // can recover it. Stamp before AddFact: AddFact broadcasts synchronously, so the woken node must be able to read
+    // the identity the instant it fires.
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+
     const FGameplayTag CanonicalFact = FQuestTagComposer::ResolvePathFactTag(CanonicalTag, PathIdentity);
-    if (CanonicalFact.IsValid()) WorldState->AddFact(CanonicalFact);
+    if (CanonicalFact.IsValid())
+    {
+        if (StateSubsystem) StateSubsystem->StampPathFactWriteEventID(CanonicalFact, OriginatingEventID);
+        WorldState->AddFact(CanonicalFact);
+    }
 
     if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName()))
     {
@@ -543,7 +552,11 @@ void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag
             if (AliasTag.IsValid() && AliasTag != CanonicalTag)
             {
                 const FGameplayTag AliasFact = FQuestTagComposer::ResolvePathFactTag(AliasTag, PathIdentity);
-                if (AliasFact.IsValid()) WorldState->AddFact(AliasFact);
+                if (AliasFact.IsValid())
+                {
+                    if (StateSubsystem) StateSubsystem->StampPathFactWriteEventID(AliasFact, OriginatingEventID);
+                    WorldState->AddFact(AliasFact);
+                }
             }
         }
     }
@@ -556,8 +569,15 @@ void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputT
     const FGameplayTag CanonicalTag = ResolveToCanonicalTag(InputTag);
     if (!CanonicalTag.IsValid()) return;
 
+    // Drop the recorded write-identity alongside the fact so the map doesn't retain a stale entry after a reset.
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+
     const FGameplayTag CanonicalFact = FQuestTagComposer::ResolvePathFactTag(CanonicalTag, PathIdentity);
-    if (CanonicalFact.IsValid()) WorldState->ClearFact(CanonicalFact);
+    if (CanonicalFact.IsValid())
+    {
+        if (StateSubsystem) StateSubsystem->ClearPathFactWriteEventID(CanonicalFact);
+        WorldState->ClearFact(CanonicalFact);
+    }
 
     if (UQuestNodeBase* Instance = LoadedNodeInstances.FindRef(CanonicalTag.GetTagName()))
     {
@@ -566,7 +586,11 @@ void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputT
             if (AliasTag.IsValid() && AliasTag != CanonicalTag)
             {
                 const FGameplayTag AliasFact = FQuestTagComposer::ResolvePathFactTag(AliasTag, PathIdentity);
-                if (AliasFact.IsValid()) WorldState->ClearFact(AliasFact);
+                if (AliasFact.IsValid())
+                {
+                    if (StateSubsystem) StateSubsystem->ClearPathFactWriteEventID(AliasFact);
+                    WorldState->ClearFact(AliasFact);
+                }
             }
         }
     }
@@ -2653,7 +2677,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     // touched by a reset; only this projection is. Non-resettable nodes keep the registry-only behavior.
     if (Node && Node->IsResettableReplay() && !PathIdentity.IsNone())
     {
-        AddPathFactAcrossPerspectives(QuestTag, PathIdentity);
+        AddPathFactAcrossPerspectives(QuestTag, PathIdentity, OriginatingEventID);
     }
 
     // Layer 2: rich-record registry. Friend access only; external code can't mutate the registry,

@@ -596,6 +596,40 @@ void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputT
     }
 }
 
+void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
+{
+    if (!QuestTag.IsValid() || !WorldState)
+    {
+        return;
+    }
+
+    // Never wipe an in-flight run's mirrors: a currently-Live quest is mid-progress and its mirrors are load-bearing.
+    const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(QuestTag, EQuestStateLeaf::Live);
+    if (LiveFact.IsValid() && WorldState->HasFact(LiveFact))
+    {
+        return;
+    }
+
+    UGameInstance* GI = GetGameInstance();
+    UQuestStateSubsystem* Registry = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!Registry)
+    {
+        return;
+    }
+
+    // Clear the clearable projection for every distinct path this quest has resolved through. The append-only
+    // resolution registry and the Completed anchor are never touched — only the mirror that resettable gates read.
+    TSet<FName> ClearedPaths;
+    for (const FQuestResolutionEntry& Entry : Registry->GetResolutionHistory(QuestTag))
+    {
+        if (!Entry.PathIdentity.IsNone() && !ClearedPaths.Contains(Entry.PathIdentity))
+        {
+            ClearPathFactAcrossPerspectives(QuestTag, Entry.PathIdentity);
+            ClearedPaths.Add(Entry.PathIdentity);
+        }
+    }
+}
+
 void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
 {
     if (!Existing || !Incoming) return;
@@ -1396,21 +1430,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         const bool bCurrentlyLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
         if (!bCurrentlyLive && (bWasCompleted || bBypassPrerequisites))
         {
-            if (UGameInstance* GI = GetGameInstance())
-            {
-                if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
-                {
-                    TSet<FName> ClearedPaths;
-                    for (const FQuestResolutionEntry& Entry : Registry->GetResolutionHistory(NodeTag))
-                    {
-                        if (!Entry.PathIdentity.IsNone() && !ClearedPaths.Contains(Entry.PathIdentity))
-                        {
-                            ClearPathFactAcrossPerspectives(NodeTag, Entry.PathIdentity);
-                            ClearedPaths.Add(Entry.PathIdentity);
-                        }
-                    }
-                }
-            }
+            ResetQuestRunState(NodeTag);
             UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("[Resettable] reset path mirrors for '%s' (completed=%d bypass=%d)"),
                 *NodeTag.ToString(),
                 bWasCompleted,

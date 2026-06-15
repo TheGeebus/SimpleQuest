@@ -141,6 +141,14 @@ void USimpleQuestBlueprintLibrary::ClearQuestBlocked(const UObject* WorldContext
     }
 }
 
+void USimpleQuestBlueprintLibrary::ResetQuestRunState(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->ResetQuestRunState(QuestTag);
+    }
+}
+
 void USimpleQuestBlueprintLibrary::ResolveQuest(const UObject* WorldContext, FGameplayTag QuestTag, FGameplayTag OutcomeTag, bool bOverrideExisting, const FQuestEventPayload& Payload)
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))

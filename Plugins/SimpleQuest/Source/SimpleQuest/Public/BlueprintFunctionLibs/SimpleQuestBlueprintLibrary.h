@@ -189,6 +189,10 @@ public:
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
         const FQuestEventPayload& Payload = FQuestEventPayload());
 
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext"))
+    static void ResetQuestRunState(const UObject* WorldContext,
+        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag);
+
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
     static void ResolveQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,

@@ -239,6 +239,15 @@ private:
 	void ClearPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
 
 	/**
+	 * Clears a quest's clearable path-mirror facts — the per-run projection that resettable prerequisite leaves read —
+	 * so gates wired from this quest re-gate as if it had not yet resolved. The append-only resolution registry and the
+	 * Completed anchor are left untouched; only the clearable mirror is removed. No-ops while the quest is currently Live,
+	 * so an in-flight run's mirrors are never wiped mid-progress. Re-arms a quest for replay without bringing it active —
+	 * the activation path performs this same clear automatically when a resettable quest re-activates after completing.
+	 */
+	void ResetQuestRunState(FGameplayTag QuestTag);
+
+	/**
 	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
 	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
 	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance

@@ -34,7 +34,8 @@ void UQuestlineNode_ActivationGroupExit::PostLoad()
 
 void UQuestlineNode_ActivationGroupExit::AllocateDefaultPins()
 {
-	// Source node — no input. Activated at graph start, subscribes to WorldState fact.
+	// Source node — no input. Activated at graph start, subscribes to its group tag's
+	// transient signal channel via the SignalSubsystem.
 	CreatePin(EGPD_Output, TEXT("QuestActivation"), TEXT("Exit"));
 }
 

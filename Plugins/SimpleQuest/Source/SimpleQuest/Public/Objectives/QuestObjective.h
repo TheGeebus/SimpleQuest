@@ -7,6 +7,7 @@
 #include "GameplayTagContainer.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestRoleSourceInfo.h"
 #include "QuestObjective.generated.h"
 
 
@@ -54,6 +55,16 @@ public:
 	 * step's lifecycle transitions.
 	 */
 	FOnQuestObjectiveTriggerDeactivation OnQuestObjectiveTriggerDeactivation;
+
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnQuestObjectiveTriggerSatisfied, FQuestObjectiveTriggerContext, Context);
+
+	/**
+	 * Fired by PublishTriggerSatisfied when the Objective marks a specific Trigger Component's actor as having
+	 * been consumed by a multi-target satisfaction list. Step subscribes and forwards to the manager, which
+	 * publishes FQuestTriggerSatisfiedEvent on the step's tag channel. Trigger Components subscribe to that
+	 * event and filter by own-actor to react per-target.
+	 */
+	FOnQuestObjectiveTriggerSatisfied OnQuestObjectiveTriggerSatisfied;
 	
 	/**
 	 * Outcome Tag Discovery																						<br>
@@ -104,12 +115,46 @@ public:
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
 
+	// ── §4.33 Phase 1 — runtime self-introspection ─────────────────────────────────────────────────────────
+	//
+	// Lets an Objective discover its own identity in the framework's address space and find authored actors
+	// targeting its Step. OwningStepTag is cached at activation dispatch (lifetime-stable — the Objective
+	// doesn't migrate between Steps). Alias-tag and trigger / giver lookups chain through the QuestState-
+	// Subsystem's existing query surface; no per-instance caching for the rare-cheap cases.
+
+	/**
+	 * The ContextualTag of the Step that hosts this Objective. Valid from OnObjectiveActivated onward; empty
+	 * after OnObjectiveDeactivated.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	FGameplayTag GetOwningStepTag() const { return OwningStepTag; }
+
+	/**
+	 * Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
+	 * that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
+	 * Uncached — lookup-per-call via QSS's existing alias index.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FGameplayTag> GetOwningStepAliasTags() const;
+
+	/**
+	 * Convenience: every Trigger source currently registered against this Objective's owning Step (canonical
+	 * + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag — closes the "where are
+	 * the actors targeting me?" loop without adopters maintaining a parallel tag → actor registry.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FQuestRoleSourceInfo> GetTriggersTargetingThisStep() const;
+
+	/** Convenience: every Giver source currently registered against this Objective's owning Step. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	TArray<FQuestRoleSourceInfo> GetGiversTargetingThisStep() const;
+
 	/**
 	 * Step-facing entry point for initializing objective target parameters. Thin C++ forwarder to the protected
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
@@ -139,6 +184,13 @@ protected:
 	 *
 	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
+	 *
+	 * UPCOMING CHANGE (0.5.0): the single-parameter signature here is scheduled for restructure into a two-
+	 * parameter shape — (FQuestObjectiveAuthoredConfig& Authored, FQuestObjectiveRuntimeContext& Runtime) —
+	 * pushing the Authored/Runtime split from a nested data shape onto the consumer boundary. Adopter override
+	 * sites will need to update their signature (FunctionRedirects can't auto-fix signature changes). Activation
+	 * payload data remains intact; the structural change is purely how the parts are delivered. Save/load
+	 * benefits from the stable shape, which is why the restructure lands alongside that release.
 	 *
 	 * @param Params a set of specific target actors in the scene
 	 */
@@ -191,8 +243,14 @@ protected:
 	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationContext& InForwardParams = FQuestObjectiveActivationContext());
 	
 	/**
-	 * Fires OnQuestObjectiveProgress. Step forwards to manager, which publishes FQuestProgressEvent on the step tag channel.
-	 * Use this directly for objectives with custom progress logic (multi-counter, phase-based, etc.).
+	 * Broadcasts an objective-progress signal to the framework via OnQuestObjectiveProgress. Progress events
+	 * are PURELY EXPLICIT — the framework never auto-fires Progress as part of completion or any other
+	 * implicit lifecycle path. Objectives that want a "final X/X tick" before completing call ReportProgress
+	 * with the final state, then CompleteObjectiveWithOutcome.
+	 *
+	 * Some objectives have no per-fire progress semantic at all (e.g., a binary "interacted yes/no" objective)
+	 * and never call this method. Listeners receive zero Progress events for those objectives, exactly as
+	 * intended — no event-shape filtering required at the listener side.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);
@@ -225,6 +283,23 @@ protected:
 	 */
 	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "FinalContext"), Category = "Quest|Objectives")
 	void PublishTriggerDeactivation(FGameplayTag OutcomeTag, const FQuestObjectiveTriggerContext& FinalContext);
+
+	/**
+	 * Signals that a specific Trigger Component's actor has been consumed by a multi-target satisfaction list. Step
+	 * forwards to manager, which publishes FQuestTriggerSatisfiedEvent on the step's tag channel with the satisfied
+	 * actor's reference. Trigger Components watching the step filter by SatisfiedActor == GetOwner() and broadcast
+	 * their OnQuestTriggerSatisfied delegate.
+	 *
+	 * Distinct from PublishTriggerDeactivation: that signals the trigger SIDE wrapping for all watching components;
+	 * this signals one specific actor's contribution is consumed while the step continues for other targets. Pair
+	 * with a final CompleteObjectiveWithOutcome call once every target has been satisfied.
+	 *
+	 * Use from a multi-target Objective subclass: in TryCompleteObjective_Implementation, identify the firing actor,
+	 * check it against the still-pending target set, and if matched call this with the context. Echoes the trigger
+	 * context through to the published event so own-fire filtering symmetry holds.
+	 */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "TriggerContext"), Category = "Quest|Objectives")
+	void PublishTriggerSatisfied(const FQuestObjectiveTriggerContext& TriggerContext);
 	
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const;
@@ -266,6 +341,14 @@ private:
 	 */
 	UPROPERTY()
 	FQuestObjectiveActivationContext ForwardActivationParams;
+
+	/**
+	 * Cached identity of the Step that hosts this Objective. Set by UQuestStep::ActivateInternal via
+	 * DispatchOnObjectiveActivated before the BP event fires; cleared in DispatchOnObjectiveDeactivated.
+	 * Owning Step doesn't migrate during the Objective's lifetime — single cache, trivial property getter.
+	 */
+	UPROPERTY(VisibleAnywhere)
+	FGameplayTag OwningStepTag;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;

@@ -10,6 +10,10 @@
 #include "GameplayTagsManager.h"
 #include "GameplayTagsSettings.h"
 #include "MessageLogModule.h"
+#include "Subsystems/AssetEditorSubsystem.h"
+#include "Editor.h"
+#include "Engine/Blueprint.h"
+#include "EdGraph/EdGraph.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "SGraphNodeKnot.h"
 #include "SimpleQuestLog.h"
@@ -56,8 +60,11 @@
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
 #include "FactsPanel/FactsPanelRegistry.h"
+#include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
+#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
+
 
 
 const FName FSimpleQuestEditor::StaleQuestTagsTabId(TEXT("SimpleQuest.StaleQuestTags"));
@@ -181,6 +188,9 @@ void FSimpleQuestEditor::StartupModule()
 	// "PostSerialize transparently healed this field during load." Save All then writes the healed name to disk, so the asset stops
 	// depending on the redirect entry to resolve correctly on future loads.
 	OnAssetLoadedHandle = FCoreUObjectDelegates::OnAssetLoaded.AddRaw(this, &FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad);
+
+	// When changing the filter categories for a tag picker, walks all open blueprints and rebuilds their tag picker trees immediately
+	PickerCategoriesChangedHandle = USimpleQuestSettings::OnPickerCategoriesChanged.AddRaw(this, &FSimpleQuestEditor::HandlePickerCategoriesChanged);
 	
 	// Blueprint compile check requires a fully initialized editor — keep in delegate.
 	FEditorDelegates::OnEditorInitialized.AddLambda([this](double)
@@ -336,8 +346,10 @@ void FSimpleQuestEditor::ShutdownModule()
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnFilesLoaded().RemoveAll(this);
 		FModuleManager::GetModuleChecked<FAssetRegistryModule>("AssetRegistry").Get().OnAssetRemoved().RemoveAll(this);
 	}
-	
+
 	FCoreUObjectDelegates::OnAssetLoaded.Remove(OnAssetLoadedHandle);
+
+	USimpleQuestSettings::OnPickerCategoriesChanged.Remove(PickerCategoriesChangedHandle);
 	
 	if (FSlateApplication::IsInitialized())
 	{
@@ -521,13 +533,21 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 			if (!Graph) { ++FailCount; continue; }
 
 			TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
-			if (Compiler->Compile(Graph))
+			const bool bSuccess = Compiler->Compile(Graph);
+
+			// Capture rename intent regardless of compile success. Renames are detected via the GUID bridge — a
+			// structural property of the graph that's valid whether or not unrelated nodes failed validation in
+			// the same compile. Gating behind success silently drops the rename when ANY error fires elsewhere
+			// in the graph: RegisterCompiledTags still registers the new tag (so the picker updates), but the
+			// OldName → NewName redirect never lands, and loaded actor instances keep their stale tags with
+			// nothing in the redirect map to heal them. Different graphs producing the same (OldName → NewName)
+			// pair (shared LinkedQuestline targets) merge cleanly; TMap::Append's second-wins behavior is a
+			// no-op for identical values.
+			AllRenames.Append(Compiler->GetDetectedRenames());
+
+			if (bSuccess)
 			{
 				++SuccessCount;
-
-				// Accumulate this graph's renames. Different graphs producing the same (OldName -> NewName) pair (shared
-				// LinkedQuestline targets) merge cleanly; TMap::Append's second-wins behavior is a no-op for identical values.
-				AllRenames.Append(Compiler->GetDetectedRenames());
 
 				UPackage* Package = Graph->GetOutermost();
 				Package->MarkPackageDirty();
@@ -1024,6 +1044,43 @@ void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
 				Add(FQuestTagComposer::MakeStateFact(QuestTag, Leaf));
 			}
 		}
+	}
+}
+
+void FSimpleQuestEditor::HandlePickerCategoriesChanged()
+{
+	if (!GEditor) return;
+	UAssetEditorSubsystem* AssetEditorSubsystem = GEditor->GetEditorSubsystem<UAssetEditorSubsystem>();
+	if (!AssetEditorSubsystem) return;
+
+	int32 ReconstructedCount = 0;
+	for (UObject* Asset : AssetEditorSubsystem->GetAllEditedAssets())
+	{
+		UBlueprint* BP = Cast<UBlueprint>(Asset);
+		if (!BP) continue;
+
+		TArray<UEdGraph*> AllGraphs;
+		BP->GetAllGraphs(AllGraphs);
+		for (UEdGraph* Graph : AllGraphs)
+		{
+			if (!Graph) continue;
+			for (UEdGraphNode* Node : Graph->Nodes)
+			{
+				// Only reconstruct nodes whose picker filter we actually source from settings.
+				if (Cast<UK2Node_CompleteObjectiveWithOutcome>(Node) || Cast<UK2Node_ObserveQuestLifecycle>(Node))
+				{
+					Node->ReconstructNode();
+					++ReconstructedCount;
+				}
+			}
+		}
+	}
+
+	if (ReconstructedCount > 0)
+	{
+		UE_LOG(LogSimpleQuest, Verbose,
+			TEXT("FSimpleQuestEditor::HandlePickerCategoriesChanged — refreshed %d K2 node(s) across open Blueprint editors."),
+			ReconstructedCount);
 	}
 }
 

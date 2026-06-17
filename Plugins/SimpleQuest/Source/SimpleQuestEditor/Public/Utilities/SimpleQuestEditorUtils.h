@@ -213,7 +213,7 @@ public:
 	 * (everything past "SimpleQuest.Questline.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
 	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
 	 *
-	 * Outer asset display name sources from the FriendlyName AR tag when present, falling back to the asset short name.
+	 * Outer asset display name sources from the DisplayName AR tag when present, falling back to the asset short name.
 	 * Results sorted by (OuterAssetDisplayName, ActorName) and deduped on that pair.
 	 */
 	static TArray<FQuestContextualActor> FindContextualGiversForNode(const UQuestlineNode_ContentBase* ContentNode);

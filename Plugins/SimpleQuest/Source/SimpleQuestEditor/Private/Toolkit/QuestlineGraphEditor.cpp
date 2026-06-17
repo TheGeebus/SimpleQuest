@@ -141,7 +141,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
     DetailsViewArgs.bAllowSearch = false;
     DetailsView = PropertyModule.CreateDetailView(DetailsViewArgs);
 
-    // Initial target — show the asset itself (QuestlineID, FriendlyName, etc.) until the designer selects a node.
+    // Initial target — show the asset itself (QuestlineID, DisplayName, etc.) until the designer selects a node.
     // Matches UE asset-editor convention where empty selection surfaces the asset's properties.
     if (DetailsView.IsValid() && QuestlineGraph)
     {
@@ -642,10 +642,17 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
         TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
         const bool bSuccess = Compiler->Compile(Graph);
 
+        // Capture rename intent regardless of compile success. Renames are detected via the GUID bridge — a
+        // structural property of the graph that's valid whether or not unrelated nodes failed validation in
+        // the same compile. Gating behind bSuccess silently drops the rename when ANY error fires elsewhere
+        // in the graph: RegisterCompiledTags still registers the new tag (so the picker updates), but the
+        // OldName → NewName redirect never lands, and loaded actor instances keep their stale tags with
+        // nothing in the redirect map to heal them.
+        AllRenames.Append(Compiler->GetDetectedRenames());
+
         if (bSuccess)
         {
             if (!bIsPrimary) ++NeighborSuccessCount;
-            AllRenames.Append(Compiler->GetDetectedRenames());
         }
         else if (!bIsPrimary)
         {
@@ -1006,7 +1013,7 @@ void FQuestlineGraphEditor::OnGraphSelectionChanged(const FGraphPanelSelectionSe
         return;
     }
 
-    // Empty selection — restore the asset view so graph-level metadata (QuestlineID, FriendlyName) stays reachable
+    // Empty selection — restore the asset view so graph-level metadata (QuestlineID, DisplayName) stays reachable
     // without forcing the designer to go through content browser → Properties for every edit.
     if (SelectedNodes.IsEmpty())
     {

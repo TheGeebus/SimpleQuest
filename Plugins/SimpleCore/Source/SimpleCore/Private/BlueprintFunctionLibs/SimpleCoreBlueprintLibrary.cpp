@@ -5,13 +5,12 @@
 
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 
 // ── Signals ────────────────────────────────────────────────────────────────────────────────────────
 
-void USimpleCoreBlueprintLibrary::PublishMessage(UObject* WorldContextObject, FGameplayTag Channel,
-    const FInstancedStruct& Payload)
+void USimpleCoreBlueprintLibrary::PublishMessage(UObject* WorldContextObject, FGameplayTag Channel, const FInstancedStruct& Payload)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
@@ -19,8 +18,7 @@ void USimpleCoreBlueprintLibrary::PublishMessage(UObject* WorldContextObject, FG
     }
 }
 
-void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContextObject,
-    const TArray<FGameplayTag>& Channels, const FInstancedStruct& Payload, bool bAllChannels)
+void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContextObject, const TArray<FGameplayTag>& Channels, const FInstancedStruct& Payload, bool bAllChannels)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
@@ -28,19 +26,19 @@ void USimpleCoreBlueprintLibrary::PublishMessageOnChannels(UObject* WorldContext
     }
 }
 
-void USimpleCoreBlueprintLibrary::SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived)
+void USimpleCoreBlueprintLibrary::SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived, ESignalRoutingMode Routing)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
-        Signals->SubscribeMessageDynamic(Channel, OnSignalReceived);
+        Signals->SubscribeMessageDynamic(Channel, OnSignalReceived, Routing);
     }
 }
 
-void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextObject, FGameplayTag Channel, UScriptStruct* PayloadType, const FOnSignalReceived& OnSignalReceived)
+void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextObject, FGameplayTag Channel, UScriptStruct* PayloadType, const FOnSignalReceived& OnSignalReceived, ESignalRoutingMode Routing)
 {
     if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
     {
-        Signals->SubscribeMessageOfType(Channel, PayloadType, OnSignalReceived);
+        Signals->SubscribeMessageOfType(Channel, PayloadType, OnSignalReceived, Routing);
     }
 }
 
@@ -54,8 +52,7 @@ void USimpleCoreBlueprintLibrary::UnsubscribeListener(UObject* WorldContextObjec
 
 // ── World State ────────────────────────────────────────────────────────────────────────────────────
 
-void USimpleCoreBlueprintLibrary::AddFact(UObject* WorldContextObject, FGameplayTag Tag,
-    EFactBroadcastMode BroadcastMode)
+void USimpleCoreBlueprintLibrary::AddFact(UObject* WorldContextObject, FGameplayTag Tag, EFactBroadcastMode BroadcastMode)
 {
     if (UWorldStateSubsystem* WorldState = GetWorldStateSubsystem(WorldContextObject))
     {
@@ -63,8 +60,7 @@ void USimpleCoreBlueprintLibrary::AddFact(UObject* WorldContextObject, FGameplay
     }
 }
 
-void USimpleCoreBlueprintLibrary::RemoveFact(UObject* WorldContextObject, FGameplayTag Tag,
-    EFactBroadcastMode BroadcastMode)
+void USimpleCoreBlueprintLibrary::RemoveFact(UObject* WorldContextObject, FGameplayTag Tag, EFactBroadcastMode BroadcastMode)
 {
     if (UWorldStateSubsystem* WorldState = GetWorldStateSubsystem(WorldContextObject))
     {
@@ -96,6 +92,13 @@ int32 USimpleCoreBlueprintLibrary::GetFactValue(UObject* WorldContextObject, FGa
         return WorldState->GetFactValue(Tag);
     }
     return 0;
+}
+
+// ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
+
+FGameplayTag USimpleCoreBlueprintLibrary::GetDirectParentTag(FGameplayTag Tag)
+{
+    return Tag.RequestDirectParent();
 }
 
 // ── Resolution helpers ─────────────────────────────────────────────────────────────────────────────

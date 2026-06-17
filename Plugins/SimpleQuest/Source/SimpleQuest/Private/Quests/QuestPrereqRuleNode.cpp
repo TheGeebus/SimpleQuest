@@ -4,7 +4,7 @@
 #include "Quests/QuestPrereqRuleNode.h"
 
 #include "SimpleQuestLog.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Events/QuestEntryRecordedEvent.h"

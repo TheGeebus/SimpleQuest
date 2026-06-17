@@ -44,9 +44,9 @@ void FQuestlineGraphAssetTypeActions::OpenAssetEditor(const TArray<UObject*>& In
 
 FText FQuestlineGraphAssetTypeActions::GetAssetDescription(const FAssetData& AssetData) const
 {
-	// Read the FriendlyName published by UQuestlineGraph::GetAssetRegistryTags — no load needed. When empty,
+	// Read the DisplayName published by UQuestlineGraph::GetAssetRegistryTags — no load needed. When empty,
 	// fall through to default behavior (empty description, which the asset browser handles as "no description").
-	FAssetTagValueRef FriendlyNameTag = AssetData.TagsAndValues.FindTag(TEXT("FriendlyName"));
+	FAssetTagValueRef FriendlyNameTag = AssetData.TagsAndValues.FindTag(TEXT("DisplayName"));
 	if (FriendlyNameTag.IsSet() && !FriendlyNameTag.GetValue().IsEmpty())
 	{
 		return FText::FromString(FriendlyNameTag.GetValue());

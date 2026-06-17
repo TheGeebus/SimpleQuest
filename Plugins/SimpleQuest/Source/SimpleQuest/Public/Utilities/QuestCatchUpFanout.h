@@ -5,6 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 
 
 class UQuestStateSubsystem;
@@ -19,8 +20,8 @@ class UQuestStateSubsystem;
  * descendant events going forward, but the catch-up probe finding nothing for the parent meant zero historical
  * recovery for descendants already in some state at bind time.
  *
- * This namespace centralizes the "what tags should the catch-up loop iterate?" decision so UQuestEventSubscription
- * (the BindToQuestEvent K2 node's runtime) and UQuestObserverComponent share the logic and stay parity-aligned.
+ * This namespace centralizes the "what tags should the catch-up loop iterate?" decision so UQuestLifecycleObserver
+ * (the ObserveQuestLifecycle K2 node's runtime) and UQuestObserverComponent share the logic and stay parity-aligned.
  * Both subscribers call EnumerateTagsForCatchUp and iterate the result, firing per-tag synthetic-context broadcasts.
  *
  * Lives next to FQuestTagComposer (Public/Utilities/) — same module, same architectural tier (consumer-side
@@ -45,5 +46,5 @@ namespace FQuestCatchUpFanout
 	 * Null / invalid inputs return empty without warning — defensive default for early-shutdown / late-construction
 	 * call sites (e.g. catch-up firing during world teardown after the state subsystem has already deinitialized).
 	 */
-	SIMPLEQUEST_API TArray<FGameplayTag> EnumerateTagsForCatchUp(FGameplayTag SubscribedTag, const UQuestStateSubsystem* StateSubsystem);
+	SIMPLEQUEST_API TArray<FGameplayTag> EnumerateTagsForCatchUp(FGameplayTag SubscribedTag, const UQuestStateSubsystem* StateSubsystem, ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 }

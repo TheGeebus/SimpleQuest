@@ -4,7 +4,7 @@
 #include "Engine/World.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "NativeGameplayTags.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(Tag_Bus_Test_Foo, "Test.Bus.Foo");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(Tag_Bus_Test_Bar, "Test.Bus.Bar");

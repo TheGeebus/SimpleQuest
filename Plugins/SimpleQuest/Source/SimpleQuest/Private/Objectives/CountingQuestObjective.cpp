@@ -20,15 +20,13 @@ bool UCountingQuestObjective::AddProgress(const FQuestObjectiveTriggerContext& I
 	FQuestObjectiveTriggerContext OutContext = InContext;
 	OutContext.CurrentCount = CurrentElements;
 	OutContext.RequiredCount = MaxElements;
-
+	ReportProgress(OutContext);
+	
 	if (CurrentElements >= MaxElements)
 	{
-		// Handles final call to ReportProgress internally, so it's always called by every objective's completion
 		CompleteObjectiveWithOutcome(OutcomeTag, NAME_None, OutContext);
 		return true;
 	}
-	
-	ReportProgress(OutContext);
 	return false;
 }
 

@@ -7,6 +7,8 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
+enum class EResettableReplay : uint8;
+struct FQuestGraphResolution;
 struct FQuestBoundaryCompletion;
 struct FIncomingSignalPinSpec;
 struct FQuestEntryRouteList;
@@ -51,12 +53,13 @@ protected:
 	 *
 	 * @param Graph							The questline graph asset to compile.
 	 * @param TagPrefix						Sanitized questline ID used as the tag namespace for this graph's nodes.
-	 * @param AssetScopedAliasPrefixes
+	 * @param AssetScopedAliasPrefixes		
  	 * @param BoundaryCompletionsByPath		Inherited boundary completions keyed by Exit OutcomeTag (NAME_None for Any-Outcome catch-all).
 	 *										Mirrors BoundaryTagsByPath: consumed by ResolvePinToTags when crossing an Exit.
 	 * @param VisitedAssetPaths				Stack of asset paths currently open in the recursion, used for cycle detection.
 	 * @param OutEntryTagsByPath			Tags from input pins connected to optional Outcome graph entry pins on Quest or Linked
-	 *										Questline child graphs 
+	 *										Questline child graphs
+	 * @param bIncomingResettable			
 	 * @return								Returns the tags connected to an Any Outcome graph entry pin
 	 */
 	virtual TArray<FName> CompileGraph(
@@ -65,7 +68,8 @@ protected:
 		const TArray<FString>& AssetScopedAliasPrefixes,
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
-		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr);	
+		TMap<FName, FQuestEntryRouteList>* OutEntryTagsByPath = nullptr,
+		bool bIncomingResettable = false);	
 
 	/**
 	 * Follows an output pin through knots, exit nodes, and linked questline nodes, collecting the gameplay tags of all terminal
@@ -82,7 +86,8 @@ protected:
 	 * @param OutBoundaryCompletions		Out-accumulator for boundary completions picked up as the walk crosses Exits. Caller appends
 	 *										these to the corresponding routing table so ChainToNextNodes can fire them at runtime.
 	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
-	 * @param OutExitedGraphTags
+	 * @param OutResolvedGraphs				Accumulator for graph resolutions as the walk encounters Outcome nodes. Gathers every declared
+	 *										outcome tag from a graph paired with that asset's root ID tag.
 	 */
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
@@ -92,7 +97,7 @@ protected:
 		TArray<FName>& OutTags,
 		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
 		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
-		TArray<FGameplayTag>* OutExitedGraphTags = nullptr);
+		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -290,7 +295,8 @@ private:
 		const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
 		TArray<FString>& VisitedAssetPaths,
 		TArray<UQuestlineNode_ContentBase*>& OutContentNodes,
-		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap);
+		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap,
+		bool bIncomingResettable);
 
 	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */
 	void CompileGroupSetters(
@@ -298,8 +304,12 @@ private:
 		const FString& TagPrefix,
 		TArray<FString>& VisitedAssetPaths);
 
-	/** Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, GroupSignal). */
-	void CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
+	/**
+	 * Pass 1c: create runtime instances for utility nodes (SetBlocked, ClearBlocked, StartQuestline, PrereqGate, ...).
+	 * VisitedAssetPaths is forwarded to CompilePrerequisiteExpression for utility nodes that expose a Prerequisites
+	 * input pin (PrereqGate today; future utility nodes opt in by adding the pin).
+	 */
+	void CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes);
 
 	/** Pass 2: route each content node's output pins into the runtime routing sets. */
 	void CompileOutputWiring(
@@ -394,6 +404,17 @@ private:
 	 * accumulate entries from the entire compile tree.
 	 */
 	void CollectActivationGroupMetadata(UEdGraph* Graph, const FString& TagPrefix);
+
+	/** Resolve a tri-state resettable flag over the value inherited from above: explicit On/Off wins, Inherit defers. */
+	static bool ResolveResettable(EResettableReplay Flag, bool bIncoming);
+	
+	/**
+	 * True if the node compiled under this canonical tag resolved to resettable-replay scope — i.e. its runtime
+	 * instance (registered in Pass 1) was stamped resettable. Read at prereq-compile time to mark Leaf_Path leaves
+	 * that should read the per-run mirror fact. Unknown tags (utility keys, anything not registered) return false,
+	 * so the leaf defaults to registry-read / permanent.
+	 */
+	bool IsNodeTagResettable(FName CanonicalNodeTag) const;
 	
 public:
 	/** Accumulated compiler messages from the most recent Compile() call. */

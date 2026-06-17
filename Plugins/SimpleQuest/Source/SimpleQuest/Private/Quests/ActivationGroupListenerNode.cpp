@@ -5,7 +5,7 @@
 
 #include "SimpleQuestLog.h"
 #include "Events/QuestActivationGroupTriggeredEvent.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 
 void UActivationGroupListenerNode::ActivateInternal(FGameplayTag InContextualTag)

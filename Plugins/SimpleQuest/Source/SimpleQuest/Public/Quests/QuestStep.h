@@ -43,6 +43,14 @@ public:
 	 * FQuestEndedEvent / FQuestDeactivatedEvent). Manager binds and publishes FQuestTriggerDeactivatedEvent(Manual).
 	 */
 	FOnNodeTriggerDeactivation OnNodeTriggerDeactivation;
+
+	DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeTriggerSatisfied, UQuestStep*, Step, FQuestObjectiveTriggerContext, Context);
+
+	/**
+	 * Bound by the manager. Forwards the Objective's per-actor satisfaction signal so the manager publishes
+	 * FQuestTriggerSatisfiedEvent on the step's tag channel for Trigger Components to filter and react to.
+	 */
+	FOnNodeTriggerSatisfied OnNodeTriggerSatisfied;
 	
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
@@ -112,6 +120,11 @@ private:
 
 	UFUNCTION()
 	void OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext);
+
+	UFUNCTION()
+	void OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context);
+
+	static void UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }

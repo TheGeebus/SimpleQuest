@@ -27,6 +27,932 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.1] — 2026-06-17 — Authoring Primitives + Subscriber Routing
+
+Patch release adding new authoring primitives (the **Prereq Gate**
+utility node, an **Add / Remove / Clear Facts** node trio for direct
+WorldState participation from questline graphs, and a **Resettable
+Replay** node setting that makes pin-wired prerequisites re-gate when
+replayable content runs again), giving
+subscribers a way to opt out of the bus's hierarchical-delivery
+default, and closing several latent gaps in the quest-resolution
+attribution chain that surfaced once the new primitives were
+exercised against real authoring patterns. It also broadens the
+observer surface — a catch-all `OnAnyQuestEvent` delegate and a new
+run-phase `ProgressRefused` event that completes the refusal-event
+family — and adds a typed `CustomTag` designer channel on the shared
+context base. Quest components (observer / trigger / giver) also gain
+runtime add and remove of their watched-tag sets, so a spawned or
+reconfigured actor can join an in-progress quest and catch up on the
+spot.
+
+### Prereq Gate utility node
+
+A new graph primitive that gates an activation cascade on a
+prerequisite expression. Wire the **Enter** input from any upstream
+cascade source, the **Prerequisites** input from a prereq expression
+(leaves through AND / OR / NOT combinators), and the **Forward**
+output to whatever should fire once the conditions hold.
+
+The gate handles the "complete these conditions in any order, then
+proceed" pattern as a graph-visible primitive — no more wiring
+phantom downstream Quests just to leverage their built-in prereq
+gating. Sibling to Set Blocked, Clear Blocked, and Start Questline
+under the Flow Control context-menu category.
+
+- **Per-leaf-kind semantics done right.** Fact-keyed prereqs (raw
+  WorldState facts — mutable state) wake on both addition and
+  removal, so `NOT(Fact)` reads naturally. Path-keyed prereqs
+  (quest resolutions, entries, named outcomes — append-only
+  historical record) inherit monotonic behavior automatically.
+  No designer-side toggle — the right semantic drops out of the
+  leaf kind the designer wired.
+- **Deduplicate against duplicate cascade arrival.** When a Step's
+  completion BOTH satisfies the gate's last prereq AND cascades
+  directly into the gate's Enter pin, the gate fires once for that
+  cascade event — not once per arrival path. Achieved by per-
+  cascade-event identity check; ResetTransientState clears the
+  deduplication state on PIE re-entry.
+- **Per-pin labels + tooltips + node-level tooltip** so the gate's
+  three-pin geometry reads cleanly in the graph.
+
+### Resettable Replay — prerequisites that re-gate on replay
+
+Pin-wired prerequisites read a quest's permanent resolution history,
+so once one is satisfied it stays satisfied for the rest of the
+session. That's right for one-way progression, but it makes
+repeatable content hollow: replay a chapter and its gates are already
+open, because the upstream steps still count as resolved from the
+first run.
+
+The new **Resettable Replay** setting fixes that without touching the
+historical record. It's a tri-state — **Inherit / On / Off** — on
+every content node and on the questline graph asset itself. The
+default is **Off**, the permanent behavior above, unchanged.
+
+- **Set it On where a gate should reset.** The setting goes on the
+  node being gated *on* — the one whose outcome pin feeds a
+  Prerequisites input — not the node that holds the prerequisite.
+  With that node On, a prerequisite wired from it re-gates whenever
+  the content replays: the moment the node re-activates after
+  completing, its satisfaction resets and the gate must be opened again.
+- **The resolution history is never altered.** On adds a clearable
+  per-run view alongside the permanent record. Replay clears the
+  view, but the record stays intact. "Has this quest ever resolved this
+  way" queries are unaffected — only the gate's per-run state resets.
+- **Inherits down the graph.** Set Resettable Replay = On for the
+  questline asset (or a container node) and the content inside
+  inherits it. Override any node back to Off or On individually. Turn
+  a whole chapter replayable from one place, or scope it to a single
+  branch.
+- **Resets automatically, or on demand.** A completed node clears its
+  gate when it re-activates for another run. `Activate Quest` with
+  **Bypass Prerequisites** resets it explicitly. For a reset *without*
+  reactivating, **`Reset Quest Run State`** (SimpleQuest Blueprint
+  library) clears a quest's per-run gate state directly — every
+  resettable path mirror the quest has resolved through is cleared,
+  while the permanent resolution history and the Completed anchor are
+  left intact. It no-ops on a currently-Live quest (an in-flight run's
+  mirrors are load-bearing). Use it to re-arm a set of gates before a
+  manual replay.
+
+### Fact-manipulation utility nodes
+
+Three new utility nodes for direct WorldState fact manipulation from
+the questline graph: **Add Facts**, **Remove Facts**, and **Clear
+Facts**. Sibling to the Prereq Gate, Set Blocked, Clear Blocked, and
+Start Questline entries under the Flow Control context-menu category.
+
+Each node carries a `Facts` tag container (designer authors any
+number of fact tags per node) and forwards activation immediately
+after processing them.
+
+- **Add Facts.** Asserts each tag into the WorldState subsystem,
+  incrementing its ref-count. A `BroadcastMode` property chooses
+  how the per-fact `FWorldStateFactAddedEvent` fires: `BoundaryOnly`
+  (default; fires on the 0→1 transition only), `Always` (fires
+  every call), or `Suppress` (never fires).
+- **Remove Facts.** Decrements the ref-count for each tag. Same
+  `BroadcastMode` semantics for the corresponding
+  `FWorldStateFactRemovedEvent` — `BoundaryOnly` fires on the 1→0
+  transition.
+- **Clear Facts.** Hard-removes each fact regardless of ref-count.
+  A `bSuppressBroadcast` flag chooses whether to fire the removal
+  event (defaults to firing).
+
+Use Add / Remove for tag-counted states that multiple authored
+sources contribute to. Use Clear when authoring a definitive reset
+point. Together with the Prereq Gate, these nodes let questline
+graphs participate fully in the quest-agnostic fact system —
+adopters can publish facts that listeners outside the quest system
+react to, and gate quest activations on those same facts via the
+gate.
+
+### Subscriber-side routing mode
+
+`USignalSubsystem`'s Subscribe API gains a `Routing` parameter that
+lets subscribers pick the directional scope of their subscription.
+The parameter is a plain enum (dropdown in the Details panel and on
+K2 node pins) with four modes: **Exact Match**, **Ancestors**,
+**Descendants**, **Bidirectional**.
+
+- **Exact Match** — receive only direct publishes on the exact
+  subscribed channel.
+- **Ancestors** — also receive publishes on ancestor channels
+  (reserved for future; currently a no-op on the subscribe side until
+  publish-side dispatch lands).
+- **Descendants** (default) — also receive publishes on descendant
+  channels via the bus's hierarchical walk. Preserves prior behavior;
+  every existing call site compiles and behaves unchanged.
+- **Bidirectional** — both Ancestors and Descendants walks active.
+
+Per-subscription narrowing:
+
+- `UQuestGiverComponent` subscribes Exact Match for its
+  `QuestTagsToGive`. An Observer or Giver bound to "Quest X" no
+  longer receives noise from Quest X's inner-Step lifecycle events
+  — handler-side filtering for that case is no longer necessary.
+- `UQuestObserverComponent` author-facing `ObservedTags` entries
+  gain a `Routing` dropdown in the Details panel. Default Descendants;
+  designers can opt individual entries to Exact Match.
+- `Observe Quest Lifecycle` K2 node gains a `Routing` pin. Designer picks
+  per-call scope; default Descendants preserves prior behavior.
+- BP-callable `SubscribeMessage` / `SubscribeMessageOfType` on the
+  SimpleCore Blueprint library gain the same parameter.
+
+### Quest-resolution attribution fixes
+
+Three related framework gaps that the Prereq Gate exercised and
+that this release fixes. All of them previously latent because the
+typical Step's pin name happens to match the downstream Exit's
+`OutcomeTag`; gaps surface when the two intentionally differ.
+
+- **Exit's authored OutcomeTag now drives the questline-level
+  resolution.** When a cascade terminates at an Exit / Outcome
+  terminal at an asset's root scope, the questline resolves with
+  the Exit's `OutcomeTag` — not the upstream Step's pin-name
+  outcome that happened to lead there. The Step's pin name remains
+  the routing-internal path identity; the Exit's tag is the
+  public-facing outcome.
+- **Utility-node Forward outputs participate in questline
+  resolution.** A Prereq Gate (or any future utility node) whose
+  Forward output reaches an Exit / Outcome terminal at the asset
+  root scope correctly resolves the enclosing questline. Previously
+  the cascade dead-ended silently — the resolution attribution
+  was only captured for content-node outcome pins.
+- **Questline-level lifecycle event published on the questline's
+  own tag.** `FQuestEndedEvent` now fires on the questline's tag
+  channel when the questline resolves, in addition to the Step's
+  tag channel. Subscribers bound at the questline tag — including
+  Exact Match subscribers, who otherwise would receive nothing —
+  now receive a direct questline-level lifecycle event.
+
+### Prereq deferral correctness — subscription cleanup
+
+Internal fix to `UQuestNodeBase::DeferActivation`: re-deferring a
+node that's already waiting on prereqs now correctly unsubscribes
+its existing leaf handles before re-subscribing. Previously the
+re-subscribe would orphan the prior handles in the SignalSubsystem
+(still firing, no longer tracked, can't be cleaned up via
+`UnsubscribeAll`), producing spurious wake-up firings on future
+fact events. Affects any node whose Activate is called multiple
+times while still in the deferred state — most visibly the Prereq
+Gate, but content-node prereq deferral inherits the fix too.
+
+### Activate Quest — prerequisite bypass
+
+`Activate Quest` gains an optional **Bypass Prerequisites** input. When
+set, the quest activates immediately: its prerequisite expression is
+skipped, and any prerequisite wait the quest was already holding is
+cancelled. Default off leaves the normal prereq-gated behavior unchanged.
+
+For flows that deliberately start a quest out of its gated order — a
+chapter-select / unlock screen, a debug "jump to here" control, or
+save-restore reconstituting a quest that was already past its gate. The
+wait-cancellation is what makes the unlock case safe: a quest that was
+armed and waiting on a prerequisite won't later re-activate on its own
+once that prerequisite is belatedly satisfied, so jumping ahead and then
+completing the content you skipped doesn't double-fire the quest you
+jumped to.
+
+### UI display data — Phase 1 (preview)
+
+Per-node `DisplayName` and `Description` properties on quest content
+nodes, plus a marker `UQuestDisplayData` base class for adopter-
+authored richer UI metadata schemas. Queryable via
+`UQuestStateSubsystem::GetDisplayName` / `GetDisplayDescription` /
+`GetDisplayData` with derived-fallback defaults (e.g., a formatted
+leaf name when `DisplayName` is unset). Phase 2 — UI display data
+sourced through the adopter-pluggable resolver pattern — lands
+in 0.5.0.
+
+### Runtime watched-tag mutation on quest components
+
+The watched-tag containers on the quest components — `ObservedTags`
+(Observer), `StepTagsToTrigger` (Trigger), `QuestTagsToGive` (Giver) —
+are edit-time configuration, read once when the component registers.
+New BlueprintCallable APIs change what a component watches **at runtime**:
+
+- **Observer** — `AddObservedTag` / `RemoveObservedTag`
+- **Trigger** — `AddTagsToTrigger` / `RemoveTagsFromTrigger`
+- **Giver** — `AddTagsToGive` / `RemoveTagsFromGive`
+
+Add a tag whose quest is already in progress and the component catches
+up on the spot — the observer's lifecycle events replay, a trigger
+activates (and `SendTriggerEvent` begins participating), a giver's
+availability set updates. Remove a tag and it unsubscribes cleanly; if
+the component was mid-activation on that tag, the closing half of the
+pair fires (`OnQuestTriggerDeactivated`, or a giver availability
+change) so bound UI tears down instead of stranding "on".
+
+Enables components whose watched set changes during play — an NPC giver
+whose offered quests shift with world state, or a trigger volume
+re-pointed at different steps without respawning the actor.
+
+### Source query API
+
+A new runtime channel exposing which Trigger / Giver / Observer
+components in the world handle a given quest tag. Closes the
+blocker-introspection loop — adopters with a quest tag in hand (from
+an `FQuestActivationBlocker` payload, a UI list, or anywhere else)
+can ask the framework "which actor offers this quest?" without
+maintaining a parallel tag → actor registry on their side.
+
+- **`Get Active Triggers For Tag`**, **`Get Active Givers For Tag`**,
+  **`Get Active Observers For Tag`** — BP-callable functions on the
+  SimpleQuest Blueprint library, returning an array of
+  `FQuestRoleSourceInfo` entries. Each entry carries the live
+  component reference, the live actor reference, and the tag the
+  query resolved through. Designers drive nav hints, world-map
+  markers, "head to X" arrows, and similar follow-ups directly from
+  these references.
+- **`Get Active Objective For Tag`** — returns the currently-live
+  `UQuestObjective` instance for a given Step tag. Useful for UI that
+  needs to bind directly to the Step's objective during its Live
+  window (progress UI, hint panels, etc.).
+- **Alias-aware queries.** A query against either the standalone
+  form of a LinkedQuestline-inlined Step or the contextual form
+  returns the same result. Designers don't need to know which
+  compile context a Step is currently active under — the answer is
+  consistent across every alias.
+- **Self-registration.** Trigger / Giver / Observer components
+  self-register at `BeginPlay` and unregister at `EndPlay` — no
+  designer wiring required. Stale entries from destroyed actors
+  filter out automatically.
+
+### Objective self-introspection
+
+`UQuestObjective` gains a small set of accessors letting an objective
+discover its own position in the framework's tag address space and
+find the actors targeting its Step — without manual outer-chain walks
+or adopter-side side-registries.
+
+- **`Get Owning Step Tag`** — the contextual tag of the Step that
+  hosts this objective. Valid from `OnObjectiveActivated` onward.
+- **`Get Owning Step Alias Tags`** — every additional perspective
+  tag the framework has registered for the Step (typically empty
+  outside the LinkedQuestline-inlined case).
+- **`Get Triggers Targeting This Step`** / **`Get Givers Targeting
+  This Step`** — convenience accessors chaining the owning-step tag
+  into the source query API above. Lets an objective enumerate the
+  actors authored to target it, e.g. to cache a trigger set at
+  activation and present "X of M complete" UI per-event.
+
+### Multi-target Objective surface
+
+New framework primitive for per-target satisfaction signalling plus a
+turnkey example Objective exercising the surface end-to-end. Closes the
+"interact with all N target actors, disable each as they tick off"
+authoring pattern without requiring adopters to maintain a parallel
+tag → actor registry on their side.
+
+- **`Publish Trigger Satisfied`** — new BP-callable on
+  `UQuestObjective`. Pass an `FQuestObjectiveTriggerContext` whose
+  `TriggeredActor` names the specific actor whose contribution was
+  consumed. The framework publishes `FQuestTriggerSatisfiedEvent` on
+  the step's tag channel (with multi-channel alias fan-out); Trigger
+  Components on the satisfied actor filter by own-actor and react
+  via their `OnQuestTriggerSatisfied` delegate.
+- **`On Quest Trigger Satisfied`** — new multicast delegate on
+  `UQuestTriggerComponent`. Carries `(QuestTag, MatchedChannel,
+  FQuestTriggerSatisfiedEvent)`. Adopters bind to disable trigger
+  visuals / collision / interaction prompts per-target while the
+  step continues for the remaining targets. Own-fire filter
+  (`SatisfiedActor == GetOwner()`) applied internally before broadcast.
+- **`UInteractAllTargetsObjective`** — new example Objective subclass
+  under `Objectives/Examples/`. Discovers its target set at activation
+  via `Get Triggers Targeting This Step` (no authoring on the Step
+  beyond assigning the objective class). Tracks per-actor satisfaction;
+  publishes the new event per-tick; completes with the new outcome
+  `SimpleQuest.Outcome.AllTargetsInteracted` when every target has
+  fired. Designed as a reference shape for adopter multi-target
+  objectives.
+
+Adopter wiring on each target actor:
+1. Add a `UQuestTriggerComponent` with `Step Tags To Trigger`
+   including the Step's tag.
+2. Call `SendTriggerEvent` from interaction code (overlap, interact
+   key, etc.).
+3. Optionally bind `OnQuestTriggerSatisfied` to drive per-target
+   visual disable.
+
+### Lifecycle event coverage — Activated event broadening
+
+`FQuestActivatedEvent` now fires from every content node activation
+path, not just giver-gated quests. Adopters building lifecycle-aware
+UI no longer have to mix-and-match Activated and Started bindings
+to cover both giver and non-giver authoring patterns.
+
+- **Every content node fires Activated when execution reaches it.**
+  Giver-gated, non-giver-gated, and asset-level scope entry all
+  emit `FQuestActivatedEvent` on the node's tag channel.
+- **Asset-level publish.** Starting a questline now publishes
+  `FQuestActivatedEvent` and `FQuestStartedEvent` on the questline's
+  own tag at scope entry, plus writes the asset-level **Live** state
+  fact. Adopters binding `Observe Quest Lifecycle` to the questline tag
+  receive the asset-level activation alongside per-content-node
+  events. The questline's `DisplayName` / `Description` /
+  `DisplayData` are also registered against the questline tag at
+  graph-registration time, so the same subscriber can query authored
+  display content for the asset-level event.
+- **Activated and Started carry distinct semantics now.** Activated
+  fires when execution reaches a node ("show the player what's
+  starting"); Started fires when the node is Live with objectives
+  bound and progress tickable. Both fire for every node; UI elements
+  generally want Activated, gameplay reactors (triggers, completion
+  watchers) generally want Started.
+- **Catch-up reconstruction extended.** Late subscribers binding mid-
+  session via `Observe Quest Lifecycle` now reconstruct `Activated` from
+  either the **Live** or **PendingGiver** state facts. Reconstruction
+  is routing-aware (Exact Match returns only the subscribed tag;
+  Descendants fans out across every known descendant) and parent-
+  first ordered so a subscriber bound on a questline tag receives
+  the asset-level events before per-content-node events — same
+  ordering the live cascade naturally produces.
+- **Symmetric with §4.36 close-out.** The asset-level Live fact +
+  questline-tag publish at activation mirrors the Completed fact +
+  questline-tag publish at resolution that landed in §4.36. Adopters
+  see consistent asset-level lifecycle signal at both ends.
+
+### Lifecycle display data sample — `UQuestLifecycleDisplayData`
+
+A new `UDataAsset` subclass shipping under `Display/Samples/` that
+gives adopters a turnkey shape for per-lifecycle-event narrative
+text. Designers populate beat arrays once on the data asset;
+lifecycle subscribers consume them per event type.
+
+- **Per-event narrative beats.** `Activated Beats`, `Enabled Beats`,
+  `Started Beats`, `Disabled Beats`, `Deactivated Beats`, `Blocked
+  Beats`, `Unblocked Beats`, `Activation Failed Beats`, and `Progress
+  Refused Beats` are each an `FQuestNarrativeBeats` wrapper carrying a
+  `TArray<FText>`. Designer authors any number of beat strings per
+  event; UI iterates them at delivery time. The set now covers every
+  observable lifecycle event, including the offer-phase and run-phase
+  refusals.
+- **Outcome-keyed completion beats.** `Completed Beats By Outcome` is
+  a `TMap<FGameplayTag, FQuestNarrativeBeats>` keyed by outcome tag.
+  Different outcomes can carry different completion text — `Victory`
+  beats vs. `Defeat` beats, etc.
+- **`Get Completed Beats` accessor with fallback chain.** Blueprints
+  access completion beats through `GetCompletedBeats(OutcomeTag)`
+  which returns the exact-outcome entry if present, falls back to a
+  shared all-outcomes entry if authored, returns empty otherwise.
+  The raw map is protected — adopters can't accidentally bypass the
+  fallback by binding the map directly.
+- **Extends `UQuestDisplayData`** — the marker base class introduced
+  in §4.34 Phase 1. Adopter subclasses with different schema shapes
+  (richer text, audio refs, etc.) compose alongside this sample
+  via the same base.
+- **Assignable on every content node.** Pick the data asset in the
+  node's `Display Data` UPROPERTY; queryable at runtime via `Get
+  Display Data` and cast to `UQuestLifecycleDisplayData`.
+
+### SimpleUI — Typewriter Text Block FText migration
+
+The Typewriter Text widget's queue API migrates from `FString` to
+`FText` throughout, removing the `.ToString()` losses adopters were
+hitting when piping localized strings into the widget.
+
+- **All queue API methods take `FText`.** `Queue Text`, `Queue
+  Texts`, `Insert Text At`, `Replace Text At`, `Get Queued Texts`
+  (renamed from `Get Queued Strings`) — every input and the
+  collection getter operate on `FText` directly.
+- **Localization-respecting.** `FText` carries its namespace +
+  source-string-key context through every queue operation;
+  per-language displays update automatically when the project's
+  active culture changes.
+- **Empty-`FText` no-op semantic.** An empty `FText` queued via any
+  entry path silently no-ops — the widget's internal guards check
+  `IsEmpty` (not `IsEmptyOrWhitespace`), so whitespace-only entries
+  are honored as legitimate designer-authored padding beats ("wait
+  two seconds, show nothing, advance").
+- **Per-character internals unchanged.** The internal display state
+  is still `FString` (per-character revealing happens in string
+  space); the `OnCharAdded` delegate still receives `FString`
+  chunks. The migration is at the queue input/output boundary —
+  exactly where adopters interact with the widget.
+
+### Picker categories extensibility
+
+K2 node Outcome and Questline pickers gain a settings-driven
+extensibility point. Projects bridging quest outcomes / identities
+with their own tag trees can now extend the picker filters without
+forking source.
+
+- **`Project Settings → Plugins → Simple Quest → Authoring`** —
+  two new arrays: `Additional Outcome Picker Categories` and
+  `Additional Questline Picker Categories`. Each entry is a tag
+  prefix (e.g., `Game.Outcome`, `MyStudio.Quest`) whose descendants
+  will appear in the picker alongside the framework default.
+- **Affects the K2 node pickers** for the Complete Objective
+  (Outcome) and Observe Quest Lifecycle (Questline) nodes. Designers
+  see their own tag tree alongside `SimpleQuest.Outcome` /
+  `SimpleQuest.Questline` without scrolling through unrelated
+  project tags.
+- **Live refresh.** Settings change refreshes open Blueprints
+  automatically — no close-and-reopen needed to see the new
+  categories in pickers.
+- **UPROPERTY-bound pickers** (Observer's `ObservedTags`, Giver's
+  `QuestTagsToGive`, etc.) still show only the SimpleQuest namespace
+  in their pickers; UPROPERTY meta is compile-time baked. Settings-
+  driven extension of those surfaces is planned for a future
+  release if adopter demand surfaces.
+- **Two compose-time rules enforced** (violations dropped with a
+  warning log):
+  - Entries under the framework-owned SimpleQuest namespace are
+    rejected — extend with your own namespace.
+  - Entries that overlap each other (duplicates, parent/child
+    pairs) are pruned to one — the underlying gameplay-tag picker
+    can't render overlapping namespace roots without crashing.
+
+### Tag picker — click the label to open
+
+The prefix-stripped tag pickers on quest graph nodes (Exit outcome chips,
+Activation Group and Prerequisite Rule tag chips) now open the tag menu
+when you click the tag label itself, not only the small dropdown arrow
+beside it — matching the click behavior of the standard engine tag picker.
+
+### Activation context restructure — deprecation notice (0.5.0)
+
+`UQuestObjective::OnObjectiveActivated`'s single-parameter signature
+is scheduled for restructure in 0.5.0 alongside save/load. The new
+shape splits Authored/Runtime context onto the function signature
+itself (two parameters — `FQuestObjectiveAuthoredConfig& Authored`,
+`FQuestObjectiveRuntimeContext& Runtime`) instead of the current
+nested struct. Adopter override sites will need to update their
+signature when 0.5.0 ships (FunctionRedirects can't auto-fix
+signature changes). Payload data and field semantics remain intact;
+only the delivery container changes.
+
+Doc-comment `UPCOMING CHANGE` blocks have been added to
+`UQuestObjective::OnObjectiveActivated`,
+`FQuestObjectiveActivationContext`, and its `Authored` / `Dynamic`
+sub-struct fields telegraphing the change for adopters reading the
+headers (IDE quick-docs or auto-generated API docs).
+
+### Catch-all lifecycle delegate — `OnAnyQuestEvent`
+
+`UQuestObserverComponent` gains a single catch-all delegate that fires
+for every lifecycle event the observer receives, packaged into one
+`FQuestLifecycleEventReport`. Broad-audience consumers — quest-log
+HUDs, audio routers, telemetry — bind once and branch on event type,
+instead of binding all ten per-type delegates and fanning them into
+the same handler.
+
+- **`FQuestLifecycleEventReport`** carries `QuestTag`, `MatchedChannel`,
+  `EventType`, `Payload`, `OutcomeTag` (populated on Completed), and
+  `GiverActor` (populated on Started, Give Blocked, and Progress
+  Refused). The common fields a broad consumer needs; consumers wanting
+  richer event-specific data (progress counts, blocker arrays) still
+  bind the corresponding narrow delegate.
+- **`EQuestLifecycleEventType`** — a `uint8` `BlueprintType` enum
+  identifying which event arrived (the single-value companion to the
+  multi-select `EQuestEventTypes` exposure bitmask), usable as a
+  Blueprint `Switch` operand in the catch-all handler. Includes a
+  `None` value for configuration use ("no event selected"); runtime
+  dispatch never emits `None`.
+- **Gated by the same per-tag opt-in flags** as the narrow delegates
+  (`FObservedQuestEventSettings`) — events whose per-tag flag is off
+  don't fire the catch-all. Bind `OnAnyQuestEvent` *or* the narrow
+  delegates, not both, unless you want the same event delivered twice
+  (there's no framework-side cross-subscription dedup).
+- **Stays a thin fan-out, not a discriminating firehose** because the
+  bus's subscribe-time filtering (per-tag flags, outcome filter,
+  routing mode) has already narrowed delivery by the time it fires.
+
+### Run-phase refusal event — `FQuestProgressRefusedEvent`
+
+The refusal-event family now spans all three lifecycle phases: offer
+(`FQuestActivationFailedEvent`), give (`FQuestGiveBlockedEvent`), and —
+new — run (`FQuestProgressRefusedEvent`). It fires when an interaction
+(typically a trigger) tries to progress a step that's structurally
+reachable but can't advance: a prerequisite isn't met, or the step is
+Blocked.
+
+- **Observable through the standard surfaces.** New
+  `UQuestObserverComponent::OnQuestProgressRefused` delegate plus a
+  `bObserveProgressRefused` per-tag opt-in flag, and it flows through
+  `OnAnyQuestEvent` automatically. Carries the blocker array and the
+  originating trigger context, so adopter UI can surface contextual
+  "can't do that yet, because X" feedback.
+- **`ProgressRefused`** added to both `EQuestEventTypes` (exposure
+  bitmask) and `EQuestLifecycleEventType` (arrival identifier).
+- The struct is the former `FQuestTriggerBlockedEvent`, renamed and
+  broadened — see Breaking changes for the migration.
+
+### Per-context `CustomTag` — typed single-tag designer channel
+
+`FQuestContextBase` (the shared base for trigger contexts, activation
+contexts, and event payloads) gains a `CustomTag` `FGameplayTag` field
+— a lightweight typed complement to the existing `CustomData`
+(`FInstancedStruct`) for the common case where the game-specific data a
+source carries is just a single tag (outcome routing, category, variant
+selector).
+
+- **No category filter.** Adopter-defined and framework-agnostic,
+  symmetric with `CustomData`'s zero type restriction. The framework
+  never interprets it; consumers read and branch on it.
+- **Flows through the full pipeline.** A trigger's `CustomTag` rides
+  through the trigger → objective boundary (readable in
+  `TryCompleteObjective`) and back out onto completion / progress
+  event payloads, the same as `CustomData`. Lets one trigger among
+  several tell a shared objective which named outcome to resolve,
+  without packing a one-field struct into `CustomData`.
+
+### `Get Direct Parent Tag` — SimpleCore tag helper
+
+A small `BlueprintPure` helper on the SimpleCore Blueprint library
+returning a gameplay tag's direct parent (`X.Y.Z` → `X.Y`; an invalid
+tag when the input is root-level or invalid). Exposes
+`FGameplayTag::RequestDirectParent` to Blueprint graphs that walk tag
+hierarchies — e.g., resolving a parent entry from a child's tag.
+
+### Block now gates trigger progress
+
+A Blocked step now refuses trigger-driven progress, not just gives and
+(re)activation. Previously a manually Blocked step (the **Set Blocked**
+node or `Set Quest Blocked`) would still complete when its trigger fired —
+Block was enforced at the giver and at activation, but the trigger →
+objective path checked only prerequisites, never the Blocked state. Firing
+a trigger against a Blocked step now publishes a progress-refused event
+(with the blocker reason set to **Blocked**, distinct from a prerequisite
+refusal) and the step holds until it's cleared. Block still leaves the
+trigger active and interactable — it refuses progress without disabling the
+target, the same way it leaves a giver visible.
+
+### `Is Quest Blocked` — lifecycle-state query
+
+A `BlueprintPure` **Is Quest Blocked** on the SimpleQuest Blueprint library,
+completing the lifecycle-state set alongside `Is Quest Live`, `Is Quest
+Completed`, and `Is Quest Pending Giver`. Returns whether a quest or step
+currently holds the Blocked state — for driving UI enablement, interactable
+affordances, or any logic that needs to branch on whether a target is
+blocked.
+
+### Components join an in-progress quest cleanly
+
+Quest components (observers, triggers, givers) now finish their registration
+and catch-up one tick after `BeginPlay` instead of during it. A component's
+`BeginPlay` runs before its owning actor's, so a component coming online into
+an already-running quest could previously fire its catch-up — a Started cue,
+an availability change, a trigger's activation — before the actor had finished
+its own setup (built its materials, bound its delegates). Deferring a single
+frame guarantees the actor is fully initialized first: spawn a trigger or
+giver at runtime into a quest that's already live and it now syncs to the
+current state with no setup-order workarounds. A trigger spawned onto an
+already-live step also receives its activation event, which it previously
+missed.
+
+### Observer components replay *Activated* when joining a running quest
+
+An observer component bound to a quest's `Activated` event now receives it
+when the component joins a quest that's already live — including a quest that
+started at game launch. Previously the component's catch-up reconstructed only
+`Started` for a running non-giver quest, so a binding on `Activated` saw
+nothing until the next live event. The `Observe Quest Lifecycle` Blueprint node
+already reconstructed `Activated` from live state (see *Activated event
+broadening* above); the component now matches it, so both observer surfaces
+replay identically on join.
+
+### Deactivation cascades pass through inactive nodes
+
+A node's **Deactivated → Deactivate** wiring now relays the teardown to its
+downstream nodes even when the node the cascade reaches has nothing of its own to
+deactivate — one that's already resolved, or was never activated. Previously the
+cascade halted at the first such node, so a teardown chain routed through a
+completed node never reached anything past it.
+
+An authored deactivation chain now tears down everything downstream regardless of
+which nodes along the way have already finished — useful when the chain runs
+through steps the player may have completed in any order. A node still emits its
+own `Deactivated` event (to the components and observers bound to it) only when it
+genuinely transitioned from active to deactivated, so passing the cascade through
+an already-inactive node never fires a spurious deactivation. Cyclic and fan-in
+teardown wiring is guarded against re-entry.
+
+### Breaking changes (compiled-data + signatures)
+
+- **`FQuestPathNodeList::ExitedGraphTags`** (and
+  `UQuestNodeBase::ExitedGraphTagsOnAnyOutcome`) replaced by
+  `ResolvedGraphs` / `ResolvedGraphsOnAnyOutcome` carrying the new
+  `FQuestGraphResolution { GraphTag, OutcomeTag }` struct. **Recompile
+  every questline asset after upgrade** — older compiled data drops
+  the asset-resolution attribution silently (questline-level
+  resolutions stop firing).
+- **`UQuestObserverComponent::GetImplicitlyObservedTags`** return
+  type changed from `FGameplayTagContainer` to
+  `TArray<FQuestObservedTagSpec>`. Adopters who subclassed Observer
+  with their own bridge override need to update the return type
+  and wrap each tag in `FQuestObservedTagSpec { Tag, Routing }`.
+  Default routing preserves prior hierarchical behavior.
+- **`FQuestResolutionRecordedEvent` and `FQuestEntryRecordedEvent`**
+  gain an `OriginatingEventID` field. New constructor overloads
+  added; existing constructors preserved. Subscribers reading the
+  events are unaffected (the field's just there to read).
+- **`UQuestManagerSubsystem::SetQuestResolved`** /
+  `UQuestStateSubsystem::RecordResolution` / `RecordEntry` gain a
+  trailing optional `FOriginatingEventID` parameter. Existing call
+  sites compile unchanged via the default argument; cascade-driven
+  callers should pass the cascade's `OriginatingEventID` to enable
+  per-event dedup downstream.
+- **`UQuestObjective::DispatchOnObjectiveActivated`** signature
+  widened to take a trailing `FGameplayTag InOwningStepTag`
+  parameter. Only direct C++ caller is `UQuestStep::ActivateInternal`
+  internally — adopter Blueprint objective subclasses and standard
+  C++ overrides of `OnObjectiveActivated_Implementation` are
+  unaffected.
+- **SimpleCore subsystem header paths.** `USignalSubsystem` and
+  `UWorldStateSubsystem` headers moved from `Signals/` and
+  `WorldState/` into a flat `Subsystems/` directory, matching the
+  convention SimpleQuest already uses. Adopter C++ code that
+  `#include`s these directly needs to update the path:
+  - `#include "Signals/SignalSubsystem.h"` → `#include "Subsystems/SignalSubsystem.h"`
+  - `#include "WorldState/WorldStateSubsystem.h"` → `#include "Subsystems/WorldStateSubsystem.h"`
+  No source-level API change; just file location. BP-level usage
+  (Observe Quest Lifecycle, Add/Remove/Clear Fact utility nodes, the
+  SimpleQuest BP library queries) is unaffected.
+- **`UQuestTriggerComponent::SetActivated` and `SetTriggerSatisfied`
+  removed.** Both were `BlueprintNativeEvent`s with no-op default
+  impls. The framework's per-step lifecycle signals are now exclusively
+  the rich delegates `OnQuestTriggerActivated`, `OnQuestTriggerDeactivated`,
+  `OnQuestTriggerSatisfied`, `OnQuestTriggerResponded`, and
+  `OnQuestTriggerBlocked`, each carrying the full event payload.
+  Adopters previously overriding these BlueprintNativeEvents via
+  component subclassing should bind the corresponding delegates
+  instead — the rich delegates fire on the same lifecycle transitions
+  with strictly more information.
+- **`UQuestTriggerComponent::OnQuestTriggerActivated` delegate
+  signature widened.** Previously `(bool bIsActivated)`; now
+  `(FGameplayTag QuestTag, FGameplayTag MatchedChannel,
+  FQuestStartedEvent Event)` matching the rich-payload pattern of
+  the other trigger delegates. Adopter bindings need to update the
+  handler signature; the payload carries the original `Event.QuestTag`
+  identity plus the full started-event context.
+- **`ESignalRoutingFlags` renamed and reshaped to `ESignalRoutingMode`.**
+  The bitmask-style `UENUM(Flags)` is replaced by a plain
+  `UENUM(BlueprintType)` with four discrete modes: `ExactMatch`,
+  `Ancestors`, `Descendants`, `Bidirectional`. Routing pins / fields
+  now render as a dropdown instead of a bitmask checkbox set. C++
+  call sites pass the enum value directly (no `static_cast` from
+  `int32`); UPROPERTY meta `Bitmask` + `BitmaskEnum` annotations
+  removed at every site. A CoreRedirect entry handles the type +
+  value renames for enum-typed properties; Blueprint K2 nodes that
+  manually overrode the previous bitmask `int32` `Routing` pin may
+  reset to the default `Descendants` on first load (re-pick the
+  intended mode if needed). Helpers `FSignalRoutingDefaults::
+  IncludesDescendants` and `IncludesAncestors` replace the prior
+  `EnumHasAnyFlags(...)` checks at dispatch sites.
+- **SimpleUI Typewriter Text Block queue API migrated `FString` →
+  `FText`.** `Queue Text`, `Queue Texts`, `Insert Text At`, `Replace
+  Text At`, and `Get Queued Texts` (renamed from `Get Queued
+  Strings`) now take/return `FText`. Adopters with C++ or BP call
+  sites passing `FString` need to wrap with `FText::FromString(...)`
+  at the call boundary (or migrate the upstream value to `FText`
+  directly to preserve localization context). The per-character
+  internals and `OnCharAdded` delegate still operate in `FString`.
+- **Compiler no longer substitutes `NodeLabel` for empty
+  `DisplayName`.** Content nodes with an empty authored `DisplayName`
+  now produce an empty runtime `DisplayName` (was: silent fallback
+  to the editor-visible `NodeLabel`). Adopters who were relying on
+  the implicit fallback for any content node should either author
+  the desired `DisplayName` explicitly or pipe `NodeLabel` through
+  themselves at the consumer.
+- **`Bind To Quest Event` renamed to `Observe Quest Lifecycle`.** The
+  K2 async-action node, its underlying class, and the BP library
+  factory function all rename for naming honesty — the node is a
+  latent observer of lifecycle state, not an explicit
+  delegate-binding operation, and the new name reflects the
+  designer-facing role rather than the subscription mechanism
+  underneath. CoreRedirects (`ClassRedirect` for the async-action
+  class, `ClassRedirect` for the K2 node class, `FunctionRedirect`
+  for the factory function) auto-migrate saved Blueprint graphs and
+  any C++ code referencing the names by reflected path. Specifics
+  for adopters touching these directly:
+  - K2 node display name `Bind To Quest Event` → `Observe Quest
+    Lifecycle`.
+  - Async-action class `UQuestEventSubscription` →
+    `UQuestLifecycleObserver`.
+  - K2 node class `UK2Node_BindToQuestEvent` →
+    `UK2Node_ObserveQuestLifecycle`.
+  - BP library factory `USimpleQuestBlueprintLibrary::BindToQuestEvent`
+    → `USimpleQuestBlueprintLibrary::ObserveQuestLifecycle`.
+  - The `ExposedAsyncProxy` reference output on the K2 node renames
+    from `Subscription` to `Observer`. Existing graphs auto-update
+    via the class redirect; saved variable pin names in BP graphs
+    that captured the old `Subscription` name will need a one-time
+    re-wire (the var-pin's underlying type updates correctly, only
+    its label is stale until re-touched).
+  - C++ headers move alongside their classes:
+    `BlueprintAsync/QuestEventSubscription.h` →
+    `BlueprintAsync/QuestLifecycleObserver.h`, and
+    `K2Nodes/K2Node_BindToQuestEvent.h` →
+    `K2Nodes/K2Node_ObserveQuestLifecycle.h`. Adopter C++ code
+    `#include`ing these directly updates the path. C++ adopter code
+    referencing the class name itself auto-resolves via the
+    reflection redirect; direct C++ symbol references update at
+    next recompile.
+
+- **`FQuestTriggerBlockedEvent` renamed to `FQuestProgressRefusedEvent`.**
+  The struct was always semantically a "progress refused" signal; the
+  rename aligns the name with the meaning and broadens it onto the
+  lifecycle observation surface (the new `OnQuestProgressRefused`
+  delegate, `bObserveProgressRefused` flag, and `OnAnyQuestEvent`
+  coverage — see *Run-phase refusal event* above). `UQuestTrigger-
+  Component`'s own `OnQuestTriggerBlocked` delegate keeps its name for
+  now and references the renamed struct. A `CoreRedirect` (`Struct`
+  rename) auto-migrates saved Blueprint data and reflected C++
+  references; direct C++ `#include` / symbol references update at next
+  recompile.
+
+### Known limitations
+
+- The Prereq Gate's per-cascade dedup covers Path-keyed prereqs
+  (Quest Resolution, Entry, Path, Outcome leaves) but not raw Fact-
+  keyed prereqs — `FWorldStateFactAddedEvent` /
+  `FactRemovedEvent` are SimpleCore primitives and don't carry the
+  SimpleQuest-specific `OriginatingEventID`. A gate whose prereqs
+  include raw Fact leaves can double-fire under the same authoring
+  pattern. Rare in practice; flag if it surfaces.
+
+### Fixed
+
+- **Tag rename propagation no longer suppressed by unrelated compile
+  errors.** Renaming a node while another node in the same compile
+  has an unrelated error (e.g., an unset Objective on a different
+  Step) used to silently drop the rename — the picker would update
+  but the `OldName → NewName` redirect never landed, leaving loaded
+  actor instances stuck on the old tag with nothing in the redirect
+  map to heal them. Both compile entry points (per-graph editor
+  button + Compile All toolbar command) now capture rename intent
+  regardless of compile success; the rename gets propagated even
+  when other errors fire elsewhere in the graph.
+- **Reused-tag rebinding prevention.** Renaming a content node to
+  a label that was previously renamed away from another node is
+  now refused at the rename gate with a helpful error. Previously,
+  the cross-chain redirect surgery during compile would silently
+  free the old label as a fresh target, and unloaded assets
+  (sublevels, data tables, BP CDOs) still referencing the old
+  label would silently re-bind to the new owner on next load.
+  The new check consults the GameplayTag redirect map at rename
+  time and blocks reuse with a message pointing at
+  `Project Settings → GameplayTags → Gameplay Tag Redirects` for
+  the cleanup affordance when the reuse is intentional.
+- **Display data queries now return authored content.** The compiler
+  previously wasn't copying authored `DisplayName` / `Description` /
+  `DisplayData` UPROPERTYs from content nodes onto their runtime
+  instances, so `Get Display Name` / `Get Display Description` /
+  `Get Display Data` on `UQuestStateSubsystem` always saw empty
+  registry records. `Get Display Name` additionally hid the bug by
+  silently falling back to a derived leaf-name reformat of the tag
+  (e.g., `"Mayor.Tea.Time"` → `"Mayor Tea Time"`), making it look
+  like authored content was working. Three-part fix:
+  - **Compiler now copies the UPROPERTYs at compile time** so the
+    runtime registry records carry the authored values.
+  - **`Get Display Name` / `Get Display Description` / `Get Display
+    Data` now return empty / null on missing records and log a
+    `Warning` on `LogSimpleQuestState`.** The previous derived-leaf-
+    name fallback in `Get Display Name` is removed. Loud failure
+    surfaces missing-data bugs (registration gaps, compile drift)
+    where the silent fallback masked them. Adopters who want auto-
+    derived names can call `FQuestTagComposer::FormatTagForDisplay`
+    explicitly; they're not forced into it as the framework default.
+  - **NodeLabel fallback for empty `DisplayName` is removed.** An
+    empty authored `DisplayName` is now treated as the designer's
+    explicit "don't pipeline anything to display" signal — the
+    compiler no longer substitutes the editor-visible `NodeLabel`.
+    Paired with the loud-failure mode above and the Typewriter
+    widget's empty-`FText` no-op (this release), the signal is
+    clean end-to-end: empty author → empty registry → empty query
+    → silent widget. Adopters who want to pipe the node label
+    explicitly can read it via `NodeLabel` and queue it themselves.
+- **`OnQuestObjectiveProgress` no longer auto-fires from inside
+  `CompleteObjectiveWithOutcome`.** Previously, completing an
+  objective implicitly broadcast a final Progress event before the
+  Completion event, regardless of whether the objective had called
+  `ReportProgress` on the same trigger. This caused duplicate
+  Progress events for objectives that called `ReportProgress`
+  themselves before completing, and produced spurious Progress
+  events for objectives that have no per-fire progress semantic
+  at all (e.g., binary "interacted yes/no" objectives). Progress
+  is now purely explicit: the framework never auto-fires Progress.
+  Objectives that want a final X/X tick before completion call
+  `ReportProgress` explicitly first, then `CompleteObjectiveWithOutcome`.
+  `UCountingQuestObjective::AddProgress` was updated cooperatively
+  to preserve its existing observable "final X/X tick before
+  completion" behavior — Counting-objective adopters see no
+  behavior change. Listeners subscribing to Progress no longer
+  receive events from objectives that never call `ReportProgress`,
+  removing the need for defensive event-shape filtering.
+- **`UTypewriterTextBlock::IsIdle` now correctly reports idle from
+  inside `OnFinalDisplayDelayEnd` handlers.** Previously the
+  `NextTextDelay` timer handle was still considered active by UE's
+  TimerManager during the broadcast, so listeners querying
+  `IsIdle()` (e.g., to decide whether to advance a queued display
+  pipeline from a HUD-level joint-idle gate) saw the widget as
+  still-not-idle. Fixed by explicitly clearing `NextTextDelayHandle`
+  before the broadcast. Adopters relying on `IsIdle()` from within
+  `OnFinalDisplayDelayEnd` handlers will now see the expected
+  post-natural-completion state.
+- **Activation Group node tooltips + doc comments corrected to
+  reference SignalSubsystem rather than WorldState.** Three sites
+  carried stale "WorldState" references from an earlier
+  implementation that has since migrated to the transient signal
+  channel approach: the Activation Group Entry node's input pin
+  tooltip (designer-facing), the Activation Group Exit node's pin
+  allocation source comment, and the `UActivationGroupSetterNode`
+  runtime class doc comment (which still described the migration
+  as future-tense after it had completed). Activation Groups
+  publish `FQuestActivationGroupTriggeredEvent` on the GroupTag's
+  SignalSubsystem channel; Listeners subscribe to that channel.
+  Designer-facing tooltip and source documentation now accurately
+  describe the publish mechanism. Adopters reading source for
+  cross-system bridge patterns (any system can publish on a group's
+  tag channel — Setter nodes are one publisher among potentially
+  many) see the correct subsystem reference.
+- **LinkedQuestline node display fields fall back to the linked
+  asset's defaults.** A LinkedQuestline node's `DisplayName` /
+  `Description` / `DisplayData` now fall back per-field to the linked
+  questline asset's own authored class-default values when the outer
+  node leaves them empty. Previously the asset-level defaults were
+  silently dropped on the inline path, surfacing only when the
+  questline was used at root level. Outer-node authoring still
+  overrides per-field where present.
+- **Questline asset-level display registration honors an empty
+  `DisplayName`.** The runtime registry write for a questline's
+  asset-level display data no longer substitutes the asset's short
+  name when the authored `DisplayName` is empty — the "empty means
+  don't surface this in UI" convention now holds at the questline
+  level, matching content nodes. Editor surfaces (outliner, tooltips)
+  still show the asset short name for readability; only the runtime
+  registry write changed, via a new accessor that returns the raw
+  authored field rather than the editor-convenience fallback.
+
+### SimpleUI — Typewriter Text Block expansion
+
+The Typewriter Text widget (introduced in 0.4.0's SimpleUI plugin
+spin-up) gains a full set of designer-facing controls for the
+dialogue-pacing use cases adopters typically need.
+
+- **Skip controls.** `SkipToEndOfCurrentString` reveals the rest of
+  the currently-displaying string immediately and starts the
+  configured between-strings dwell. `SkipToNextString` does the same
+  but also skips the dwell and advances to the next queued string.
+  `SkipAllRemaining` drains the entire queue, firing the Start/End
+  event pairs for every skipped string so adopter-side per-string
+  telemetry or persistence stays consistent.
+- **Pause and resume.** `PauseTypewriter` freezes the typewriter or
+  dwell at its current point, saving the remaining timer duration.
+  `ResumeTypewriter` picks up exactly where it left off. Useful for
+  modal interruptions — open a sub-menu, dialogue pauses; close it,
+  dialogue continues from the same character.
+- **State queries.** `IsDisplaying` / `IsInDwell` / `IsPaused` /
+  `IsIdle` describe the widget's current state for input handlers
+  ("is there something to skip?"). `GetCurrentDisplayProgress`
+  returns a 0–1 progress value over the currently-displaying string,
+  suitable for driving a progress bar or skip-prompt visibility.
+- **Queue manipulation.** `InsertTextAt`, `RemoveTextAt`, and
+  `ReplaceTextAt` give narrative middleware finer control than the
+  existing append / front-of-queue / clear primitives. Index 0
+  (the currently-displaying string) interacts cleanly: replacing it
+  restarts display with the new content; removing it advances to
+  the next queued string.
+- **Live-applied configuration.** `SetDisplayDelayMinMax`,
+  `SetNextStringDelay`, and `SetUseTypewriterEffect` re-schedule the
+  active timer when called mid-display so a designer can speed up,
+  slow down, or skip-to-end via property change during playback —
+  e.g., the player holding a fast-forward button can scale the
+  per-character delay live without waiting for the current
+  character's scheduled tick to complete.
+- **Paused-state-aware integrations.** All skip functions, queue
+  manipulation, and interrupt paths recognize a paused-in-flight
+  string as still-active for event-pairing purposes. Aborting a
+  paused string via `ClearTextQueue(true)` or interrupt fires its
+  pending `OnDisplayStringEnd`; skipping a paused string reveals
+  the remainder and advances normally.
+
+
+---
+
 ## [0.4.0] — 2026-05-20 — Architectural Cohesion + Adopter Ergonomics
 
 Where v0.3 began to reveal the shape of the framework, v0.4 fully describes it.

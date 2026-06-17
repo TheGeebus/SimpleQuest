@@ -9,10 +9,11 @@
 #include "Engine/World.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/PrerequisiteExpression.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Utilities/QuestTagComposer.h"
 
 namespace FPrereqLeafSubscription
 {
@@ -106,6 +107,25 @@ namespace FPrereqLeafSubscription
 					StoreHandles(Channel, Slot);
 					SubscribedFactChannels.Add(Channel);
 				}
+				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Path && Leaf.bResettableRead)
+				{
+					// Resettable path leaf reads its per-run mirror fact, so it must wake on WorldState fact
+					// add/remove — the mirror is written on resolution and CLEARED on replay reset, and the
+					// resolution-registry event never fires on reset, so subscribing there would miss the re-gate.
+					// The mirror channel is the same MakeNodePathFact tag the leaf carries; re-derive it from
+					// (quest, path) via the composer. Joins the Fact-channel dedupe set since it IS a fact channel.
+					const FGameplayTag Channel = FQuestTagComposer::ResolvePathFactTag(Leaf.LeafQuestTag, Leaf.LeafPathIdentity);
+					if (!Channel.IsValid() || SubscribedFactChannels.Contains(Channel)) continue;
+
+					FPrereqLeafHandles Slot;
+					Slot.FactAdded = Signals->template SubscribeMessage<FWorldStateFactAddedEvent>(Channel, Subscriber, FactAddedHandler);
+					if (FactRemovedHandler)
+					{
+						Slot.FactRemoved = Signals->template SubscribeMessage<FWorldStateFactRemovedEvent>(Channel, Subscriber, FactRemovedHandler);
+					}
+					StoreHandles(Channel, Slot);
+					SubscribedFactChannels.Add(Channel);
+				}
 				else if (Leaf.Type == EPrerequisiteExpressionType::Leaf_Resolution
 					  || Leaf.Type == EPrerequisiteExpressionType::Leaf_Path)
 				{
@@ -161,7 +181,7 @@ namespace FPrereqLeafSubscription
 	}
 
 	/**
-	 * Monotonic overload: for sites where leaves only need re-evaluation on Added (no NOT-expression flips that
+	 * One-way overload: for sites where leaves only need re-evaluation on Added (no NOT-expression flips that
 	 * would require symmetric Add/Remove subscription). Used by UQuestNodeBase::DeferActivation,
 	 * UQuestPrereqRuleNode::Activate, and UQuestManagerSubsystem::DeferChainToNextNodes.
 	 *
@@ -189,7 +209,7 @@ namespace FPrereqLeafSubscription
 	}
 
 	/**
-	 * Symmetric overload: for sites where NOT-expressions can flip a satisfied Leaf back to unsatisfied when the
+	 * Bidirectional overload: for sites where NOT-expressions can flip a satisfied Leaf back to unsatisfied when the
 	 * underlying fact is removed. Currently only UQuestManagerSubsystem::RegisterEnablementWatch needs this
 	 * (FQuestEnabledEvent / FQuestDisabledEvent bidirectional UI sync requires it).
 	 *

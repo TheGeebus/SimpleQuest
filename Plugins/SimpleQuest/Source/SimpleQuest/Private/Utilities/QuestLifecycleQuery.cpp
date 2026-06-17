@@ -3,7 +3,7 @@
 
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 namespace FQuestLifecycleQuery

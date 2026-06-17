@@ -5,7 +5,10 @@
 
 #include "CoreMinimal.h"
 #include "QuestlineNodeBase.h"
+#include "Quests/Types/QuestStepEnums.h"
 #include "QuestlineNode_ContentBase.generated.h"
+
+class UQuestDisplayData;
 
 UCLASS(Abstract)
 class SIMPLEQUESTEDITOR_API UQuestlineNode_ContentBase : public UQuestlineNodeBase
@@ -31,6 +34,34 @@ public:
 	// Display name set by the designer in the graph
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	FText NodeLabel;
+
+	/**
+	 * UI-friendly title for this node (quest log entries, HUD labels, journal). Compiler copies this onto the
+	 * corresponding runtime UQuestNodeBase at compile time; runtime queries read it via
+	 * UQuestStateSubsystem::GetDisplayName.
+	 *
+	 * Empty by default. Empty means "don't pipeline anything into the display" — designers who don't want this
+	 * node's tag to surface in UI leave it blank. The editor-visible NodeLabel is NOT substituted; it stays an
+	 * organizational identity (graph editor, outliner, compile logs) separate from UI text.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display")
+	FText DisplayName;
+
+	/**
+	 * Flavor / context blurb for this node. Multi-line. Empty by default. Compiler copies onto the runtime node;
+	 * runtime queries read via UQuestStateSubsystem::GetDisplayDescription.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display", meta = (MultiLine = true))
+	FText Description;
+
+	/**
+	 * Optional reference to a UQuestDisplayData asset for richer UI metadata (icon, hints, callouts, parametrized text,
+	 * etc.). Adopters subclass UQuestDisplayData and instance the .uasset per node that needs more than DisplayName /
+	 * Description. Compiler copies the reference onto the runtime node; UI consumers retrieve via
+	 * UQuestStateSubsystem::GetDisplayData and cast to their expected subclass.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Display")
+	TObjectPtr<UQuestDisplayData> DisplayData;
 	
 	/**
 	 * Returns true if ProposedLabel is available for this node — i.e., no other content node on the same direct graph
@@ -44,6 +75,16 @@ public:
 
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	bool bShowDeactivationPins = false;
+	
+	/**
+	 * Per-run resettability for replayable content. Inherit (default) takes the nearest ancestor container's
+	 * setting (root = permanent); On opts this node and inheriting descendants into per-run resettable gating; Off
+	 * overrides out to permanent. The compiler resolves the effective value through the alias (host-scoped)
+	 * hierarchy and stamps it onto the runtime node. Applies to this node's structural resolution (Path /
+	 * Resolution / Entry); no effect on Outcome or raw Fact gates.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Quest")
+	EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
 	/** Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
 	the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating

@@ -28,6 +28,14 @@ struct SIMPLEQUEST_API FQuestContextBase
 	/** Untyped extension point for game-specific data. Read via CustomData.Get<FYourType>(). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FInstancedStruct CustomData;
+	
+	/**
+	 * Typed single-tag extension point, often an Outcome tag or other simple path identifier. Designer-authored.
+	 * The framework never interprets it; consumers read and branch on it. Use CustomData when you need richer
+	 * or multi-field game data; use CustomTag when one tag is all you need.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FGameplayTag CustomTag;
 
 	/**
 	 * Immediate-origin tag. The giver's authored origin, the upstream step's tag on cascade, the publisher-

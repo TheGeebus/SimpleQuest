@@ -12,8 +12,8 @@ void UQuestlineNode_ActivationGroupEntry::PostLoad()
 {
 	Super::PostLoad();
 
-	// Migration: Wave 3.b renamed the input pin from "Activate" to "Enter" to distinguish utility-node
-	// portal inputs from content-node event-cycle activation. Preserve LinkedTo by mutating the pin in place.
+	// Migration: renamed the input pin from "Activate" to "Enter" to distinguish utility-node portal inputs
+	// from content-node event-cycle activation. Preserve LinkedTo by mutating the pin in place.
 	int32 RenamedCount = 0;
 	for (UEdGraphPin* Pin : Pins)
 	{
@@ -66,9 +66,10 @@ void UQuestlineNode_ActivationGroupEntry::GetPinHoverText(const UEdGraphPin& Pin
 	{
 	case EQuestPinRole::ExecIn:
 		HoverTextOut = TEXT(
-			"Activation signal entering here publishes this Entry's group\n"
-			"tag to WorldState, notifying every Activation Group Exit with\n"
-			"a matching tag anywhere in the project.\n"
+			"Activation signal entering here publishes a transient signal on\n"
+			"this Entry's group tag channel via the SignalSubsystem, notifying\n"
+			"every Activation Group Exit with a matching tag anywhere in the\n"
+			"project.\n"
 			"\n"
 			"The signal also continues locally through the Forward pin.");
 		break;

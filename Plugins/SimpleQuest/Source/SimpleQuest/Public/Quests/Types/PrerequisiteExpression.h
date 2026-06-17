@@ -26,7 +26,7 @@ enum class EPrerequisiteExpressionType : uint8
 	Leaf_Entry,		 // Quest-entry check (queries UQuestStateSubsystem::HasEnteredWith on
 					 // LeafQuestTag and LeafOutcomeTag). Appended at the end so existing
 					 // serialized assets continue to deserialize correctly.
-	Leaf_Path,		 // path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
+	Leaf_Path,		 // Path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
 					 // LeafQuestTag and LeafPathIdentity). Satisfies only when the named quest resolved
 					 // through the specific authored path. This is what pin-wire prereq authoring emits —
 					 // the designer wired a specific output pin into a Prereq input, so only that pin's
@@ -34,7 +34,7 @@ enum class EPrerequisiteExpressionType : uint8
 					 // an outcome tag will satisfy Leaf_Resolution on either path's resolution, but
 					 // Leaf_Path only on the named path's. Appended at the end so existing assets stamped
 					 // with int values 0–6 continue to deserialize correctly.
-	Leaf_Outcome	 // context-free outcome leaf — satisfies when ANY quest has resolved with LeafOutcomeTag
+	Leaf_Outcome	 // Context-free outcome leaf — satisfies when ANY quest has resolved with LeafOutcomeTag
 					 // (or any descendant via gameplay-tag hierarchy). Queries UQuestStateSubsystem::
 					 // HasAnyQuestResolvedWith and subscribes directly on the outcome tag channel (Phase 6a
 					 // outcome-channel publish target). Authored by the declarative PrerequisiteOutcome node;
@@ -70,6 +70,12 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 	/** Path identity for Type=Leaf_Path. Matches the source content node's output pin name (the pin's PathIdentity).
 		Stamped by the compiler from the wired pin. NOT populated for any other leaf type. */
 	UPROPERTY() FName LeafPathIdentity;
+	
+	/** Type=Leaf_Path only: when true this leaf reads its per-run mirror fact (the LeafTag projection in WorldState)
+		instead of the append-only resolution registry, so the gate re-gates after a resettable-scoped node is reset
+		on replay. Stamped by the compiler from the resolved node's effective Resettable Replay setting. Default false
+		— registry-read / permanent — which is also how pre-existing serialized expressions deserialize (back-compat). */
+	UPROPERTY() bool bResettableRead = false;
 
 	UPROPERTY() TArray<int32> ChildIndices;
 };
@@ -147,6 +153,7 @@ struct FPrereqLeafDescriptor
 	FGameplayTag LeafQuestTag;
 	FGameplayTag LeafOutcomeTag;
 	FName LeafPathIdentity;
+	bool bResettableRead = false;		// Leaf_Path only: leaf reads/subscribes the per-run mirror fact, not the registry
 };
 
 USTRUCT(Blueprintable)
@@ -178,7 +185,7 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 	int32 AddAlways();
 	int32 AddFactLeaf(const FGameplayTag& FactTag);
 	int32 AddResolutionLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
-	int32 AddPathLeaf(FName NodeTagName, FName PathIdentity);
+	int32 AddPathLeaf(FName NodeTagName, FName PathIdentity, bool bResettable = false);
 	int32 AddEntryLeaf(FName NodeTagName, const FGameplayTag& OutcomeTag);
 	int32 AddOutcomeLeaf(const FGameplayTag& OutcomeTag);
 	int32 AddCombinator(EPrerequisiteExpressionType Type);  // expects And or Or; child indices wired by caller

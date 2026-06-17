@@ -1,5 +1,6 @@
 ﻿#include "Nodes/QuestlineNode_ContentBase.h"
 
+#include "GameplayTagsSettings.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Quests/QuestlineGraph.h"
@@ -321,6 +322,71 @@ bool UQuestlineNode_ContentBase::IsLabelAvailable(const FString& ProposedLabel, 
 					return false;
 				}
 				break;  // found the matching compiled record; no need to keep scanning for this OtherContent
+			}
+		}
+	}
+
+	// Third check — redirect-source guard. Closes the silent-rebinding leak when a freed tag label is reused.
+	//
+	// Leak trace:
+	//   1. Node X owns tag Foo.Apple. Unloaded asset B (BP CDO, data table row, pinned actor in a sublevel)
+	//      holds Foo.Apple on disk.
+	//   2. Designer renames X → Foo.Cherry. Redirect added: Foo.Apple → Foo.Cherry.
+	//   3. Designer renames a different node Y → Foo.Apple. The cross-chain surgery in WriteGameplayTag-
+	//      Redirects removes the Foo.Apple → Foo.Cherry entry to free Foo.Apple as a fresh target.
+	//   4. Asset B loads later. PostSerialize finds no Foo.Apple redirect → asset stays bound to Foo.Apple →
+	//      Foo.Apple now resolves to Node Y. Silent rebind from X to Y; designer was never warned.
+	//
+	// The redirect map IS the persistent record of "this tag was previously used by another node." Refusing
+	// the rename in step 3 closes the leak.
+	if (OwningAsset)
+	{
+		// Derive the proposed full compiled tag by analogy from any existing compiled node on the same MyGraph
+		// (this node itself if it's been compiled, else any sibling on the same graph — all nodes on one graph
+		// share the same compiled-tag prefix; only the leaf differs). Skip the check if no reference exists
+		// (brand-new graph never compiled) — no prior compile means no redirect activity to worry about.
+		FName ReferenceCompiledTag;
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : OwningAsset->GetCompiledNodes())
+		{
+			if (!Compiled.Value) continue;
+			for (UEdGraphNode* EdNode : MyGraph->Nodes)
+			{
+				const UQuestlineNode_ContentBase* SiblingOrSelf = Cast<UQuestlineNode_ContentBase>(EdNode);
+				if (SiblingOrSelf && SiblingOrSelf->QuestGuid == Compiled.Value->GetQuestGuid())
+				{
+					ReferenceCompiledTag = Compiled.Key;
+					break;
+				}
+			}
+			if (!ReferenceCompiledTag.IsNone()) break;
+		}
+
+		if (!ReferenceCompiledTag.IsNone())
+		{
+			const FString TagStr = ReferenceCompiledTag.ToString();
+			int32 LastDot = INDEX_NONE;
+			if (TagStr.FindLastChar(TEXT('.'), LastDot))
+			{
+				const FString Prefix = TagStr.Left(LastDot);
+				const FName ProposedFullTag(*FString::Printf(TEXT("%s.%s"), *Prefix, *ProposedLabel));
+
+				if (const UGameplayTagsSettings* TagSettings = GetDefault<UGameplayTagsSettings>())
+				{
+					for (const FGameplayTagRedirect& Redirect : TagSettings->GameplayTagRedirects)
+					{
+						if (Redirect.OldTagName == ProposedFullTag)
+						{
+							OutError = FText::Format(NSLOCTEXT("SimpleQuestEditor", "RenameCollision_RedirectSource",
+								"Cannot rename to '{0}' — '{1}' was previously renamed away from another node and may still be "
+								"referenced by unloaded assets (sublevels, data tables, BP CDOs). Reusing the name now risks "
+								"silent rebinding when those assets load. Choose a different name, or remove the redirect entry "
+								"from Project Settings → Project → GameplayTags → Gameplay Tag Redirects once you've confirmed "
+								"no legacy references remain."),
+								FText::FromString(ProposedLabel), FText::FromName(ProposedFullTag));
+							return false;
+						}
+					}
+				}
 			}
 		}
 	}

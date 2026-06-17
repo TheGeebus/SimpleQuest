@@ -8,8 +8,10 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
-#include "Signals/SignalSubsystem.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 
 UQuestTriggerComponent::UQuestTriggerComponent()
@@ -17,33 +19,68 @@ UQuestTriggerComponent::UQuestTriggerComponent()
     PrimaryComponentTick.bCanEverTick = false;
 }
 
-void UQuestTriggerComponent::BeginPlay()
+void UQuestTriggerComponent::PerformDeferredRegistration()
 {
-    Super::BeginPlay();
+    Super::PerformDeferredRegistration();
     if (!SignalSubsystem) return;
 
     for (const FGameplayTag& StepTag : StepTagsToTrigger)
     {
-        if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
-        {
-            UE_LOG(LogSimpleQuestSubscription, Warning,
-                TEXT("UQuestTriggerComponent::BeginPlay : '%s' holds stale step tag '%s' — skipping subscribe. ")
-                TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
-                *GetOwner()->GetActorNameOrLabel(), *StepTag.ToString());
-            continue;
-        }
-        SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated);
-
-        // Trigger-side per-fire + per-lifecycle subscriptions. Lifetime-of-component (vs Live-window-only for the
-        // FQuestEndedEvent / FQuestDeactivatedEvent subs the OnTriggerActivated handler installs) because Blocked can
-        // fire BEFORE the step ever goes Live (PendingGiver-with-structural-blockers case) and Deactivated needs to
-        // catch the end transition regardless of which fire (if any) drove it.
-        SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse);
-        SignalSubsystem->SubscribeMessage<FQuestTriggerBlockedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked);
-        SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated);
-
-        UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::BeginPlay : Watching step tag: %s on actor: %s"), *StepTag.ToString(), *GetOwner()->GetActorNameOrLabel());
+        SubscribeTriggerStep(StepTag);
     }
+    for (const FGameplayTag& StepTag : GetRegisteredStepTagsToTrigger())
+    {
+        TriggerCatchUpForStep(StepTag);
+    }
+}
+
+void UQuestTriggerComponent::SubscribeTriggerStep(FGameplayTag StepTag)
+{
+    if (!SignalSubsystem || !StepTag.IsValid()) return;
+
+    if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
+    {
+        UE_LOG(LogSimpleQuestSubscription, Warning,
+            TEXT("UQuestTriggerComponent::SubscribeTriggerStep : '%s' holds stale step tag '%s' — skipping subscribe. ")
+            TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
+            GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"), *StepTag.ToString());
+        return;
+    }
+
+    // Trigger-side subscriptions, captured into the shared per-tag handle map so RemoveTagsFromTrigger (via the base
+    // UnregisterSingleObservedTag) unsubscribes them selectively. Same five subs the bulk path used.
+    TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(StepTag);
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied));
+
+    if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+        {
+            StateSubsystem->RegisterTriggerSource(this, FGameplayTagContainer(StepTag));  // per-tag, additive
+        }
+    }
+}
+
+void UQuestTriggerComponent::TriggerCatchUpForStep(FGameplayTag StepTag)
+{
+    UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+    UWorldStateSubsystem* WorldState = GI ? GI->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+    UQuestStateSubsystem* StateSubsystem = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!WorldState) return;
+
+    const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
+    if (!LiveFact.IsValid() || !WorldState->HasFact(LiveFact)) return;
+
+    // Spawned/added into an already-Live step — replay the activation path. OnTriggerActivated's dup-guard keeps it
+    // idempotent against the live path.
+    FQuestEventPayload Payload;
+    Payload.NodeInfo.QuestTag = StepTag;
+    AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(StepTag) : nullptr;
+    OnTriggerActivated(StepTag, FQuestStartedEvent(StepTag, Payload, RecoveredGiver));
 }
 
 void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQuestStartedEvent& Event)
@@ -88,7 +125,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerActivated : Channel: %s, Canonical: %s : Owner: %s"),
         *Channel.ToString(), *CanonicalTag.ToString(), *GetOwner()->GetClass()->GetFName().ToString());
 
-    SetActivated(true);
+    if (OnQuestTriggerActivated.IsBound()) OnQuestTriggerActivated.Broadcast(Event.QuestTag, Channel, Event);
 }
 
 void UQuestTriggerComponent::OnTriggerStepCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
@@ -116,18 +153,11 @@ void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
         ActiveStepEndHandles.Remove(Channel);
         ActiveStepDeactivatedHandles.Remove(Channel);
     }
+    SatisfiedStepChannels.Remove(Channel);
 
     UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestTriggerComponent::OnTriggerStepEnded : Channel: %s : Owner: %s"),
         *Channel.ToString(),
         *GetOwner()->GetClass()->GetFName().ToString());
-
-    // Only visually deactivate when no other watched steps remain active. Both subscription maps are kept in
-    // sync (each (Channel, end-event-type) pair adds and removes together), so either map's emptiness is a
-    // sufficient check — but using ActiveStepEndHandles keeps a single canonical source of truth.
-    if (ActiveStepEndHandles.IsEmpty())
-    {
-        SetActivated(false);
-    }
 }
 
 int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
@@ -149,16 +179,17 @@ int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
     return Count;
 }
 
-FGameplayTagContainer UQuestTriggerComponent::GetImplicitlyObservedTags() const
+TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags() const
 {
-    FGameplayTagContainer Implicit = Super::GetImplicitlyObservedTags();
-    Implicit.AppendTags(StepTagsToTrigger);
+    TArray<FQuestObservedTagSpec> Implicit = Super::GetImplicitlyObservedTags();
+    Implicit.Reserve(Implicit.Num() + StepTagsToTrigger.Num());
+    for (const FGameplayTag& Tag : StepTagsToTrigger)
+    {
+        // Trigger keeps default routing for now — Step tags subscribed hierarchically preserve current
+        // behavior. Audit (TODO §4.38) classifies whether Trigger should narrow to ExactMatch in a future pass.
+        Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::HierarchicalSubscribe});
+    }
     return Implicit;
-}
-
-void UQuestTriggerComponent::SetActivated_Implementation(bool bIsActivated)
-{
-    OnQuestTriggerActivated.Broadcast(bIsActivated);
 }
 
 void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContext& Context)
@@ -227,7 +258,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
 
         if (bIsLive)
         {
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this));
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this, Context.CustomTag));
             continue;
         }
 
@@ -243,7 +274,69 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
             // Canonical identity for the event payload — first channel in the set after resolve, matches
             // FQuestPublish::OnAllNodeTags semantics where Event.QuestTag is set to the canonical ContextualTag.
             const FGameplayTag IdentityTag = Channels[0];
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerBlockedEvent(IdentityTag, StructuralBlockers, EchoContext));
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestProgressRefusedEvent(IdentityTag, StructuralBlockers, EchoContext));
+        }
+    }
+}
+
+void UQuestTriggerComponent::AddTagsToTrigger(const FGameplayTagContainer& Tags)
+{
+    for (const FGameplayTag& Tag : Tags)
+    {
+        if (!Tag.IsValid() || StepTagsToTrigger.HasTagExact(Tag)) continue;  // skip invalid + already-watched (idempotent)
+        StepTagsToTrigger.AddTag(Tag);
+
+        if (bRegistered)
+        {
+            // Base observer side, with the same effective settings GetImplicitlyObservedTags produces for a fresh
+            // trigger tag (default + Progress/Blocked/Unblocked + the forced Started/GiveBlocked pair, hierarchical).
+            // Mirrors the bridge overlay in RegisterQuestObserver — keep in sync if that overlay changes.
+            FObservedQuestEventSettings Settings;
+            Settings.bObserveProgress = true;
+            Settings.bObserveBlocked = true;
+            Settings.bObserveUnblocked = true;
+            Settings.bObserveStarted = true;
+            Settings.bObserveGiveBlocked = true;
+            Settings.Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
+            RegisterSingleObservedTag(Tag, Settings);
+
+            SubscribeTriggerStep(Tag);
+            TriggerCatchUpForStep(Tag);
+        }
+    }
+}
+
+void UQuestTriggerComponent::RemoveTagsFromTrigger(const FGameplayTagContainer& Tags)
+{
+    for (const FGameplayTag& Tag : Tags)
+    {
+        if (!StepTagsToTrigger.HasTagExact(Tag)) continue;
+        StepTagsToTrigger.RemoveTag(Tag);
+
+        if (bRegistered)
+        {
+            // If this trigger is currently active for the step (OnTriggerActivated fired and the step-end tracking is
+            // live), fire the closing half of the pair so adopters bound to OnQuestTriggerDeactivated tear down —
+            // un-watching mid-activation must not strand the trigger visually "on". Manual reason = step lifecycle
+            // untouched, trigger audience only; local broadcast, so other components watching the step are unaffected.
+            if (ActiveStepEndHandles.Contains(Tag) && OnQuestTriggerDeactivated.IsBound())
+            {
+                OnQuestTriggerDeactivated.Broadcast(Tag, Tag,
+                    FQuestTriggerDeactivatedEvent(Tag, EQuestTriggerEndReason::Manual, FGameplayTag(), FQuestObjectiveTriggerContext()));
+            }
+
+            // Base UnregisterSingleObservedTag unsubscribes every handle under this tag (incl. the trigger subs) plus
+            // the observer source + lifecycle bookkeeping.
+            UnregisterSingleObservedTag(Tag);
+
+            if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+            {
+                if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+                {
+                    StateSubsystem->UnregisterTriggerSource(this, Tag);
+                }
+            }
+            OnTriggerStepEnded(Tag);  // clears the live step-end state (keyed by canonical; correct for the common case)
         }
     }
 }
@@ -261,7 +354,7 @@ void UQuestTriggerComponent::HandleQuestTriggerResponse(FGameplayTag Channel, co
     OnQuestTriggerResponded.Broadcast(Event.QuestTag, Channel, Event);
 }
 
-void UQuestTriggerComponent::HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestTriggerBlockedEvent& Event)
+void UQuestTriggerComponent::HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
 {
     if (Event.TriggerContext.OriginatingTriggerComponent.Get() != this) return;
 
@@ -279,6 +372,20 @@ void UQuestTriggerComponent::HandleQuestTriggerDeactivated(FGameplayTag Channel,
         *Event.OutcomeTag.ToString());
 
     OnQuestTriggerDeactivated.Broadcast(Event.QuestTag, Channel, Event);
+}
+
+void UQuestTriggerComponent::HandleQuestTriggerSatisfied(FGameplayTag Channel, const FQuestTriggerSatisfiedEvent& Event)
+{
+    // Own-fire filter — only react when this component's owner is the satisfied actor.
+    if (Event.SatisfiedActor.Get() != GetOwner()) return;
+
+    SatisfiedStepChannels.Add(Channel);
+
+    UE_LOG(LogSimpleQuestSubscription, Verbose,
+        TEXT("UQuestTriggerComponent::HandleQuestTriggerSatisfied : actor='%s' satisfied on channel='%s'"),
+        *GetOwner()->GetActorNameOrLabel(), *Channel.ToString());
+
+    if (OnQuestTriggerSatisfied.IsBound()) OnQuestTriggerSatisfied.Broadcast(Event.GetQuestTag(), Channel, Event);
 }
 
 FGameplayTagContainer UQuestTriggerComponent::GetRegisteredStepTagsToTrigger() const

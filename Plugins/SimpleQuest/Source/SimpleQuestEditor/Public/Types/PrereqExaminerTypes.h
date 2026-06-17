@@ -34,7 +34,7 @@ struct FPrereqExaminerNode
     UPROPERTY() FText DisplayLabel;
 
     /** Leaf-only: content node's display title (row-1 value in the leaf's two-row display). Will transparently pick up
-        a FriendlyName override once that field lands on the content-node display. */
+        a DisplayName override once that field lands on the content-node display. */
     UPROPERTY() FText LeafSourceLabel;
 
     /** Leaf-only: path's tag-picker category prefix for static-OutcomeTag-derived path identities (everything after

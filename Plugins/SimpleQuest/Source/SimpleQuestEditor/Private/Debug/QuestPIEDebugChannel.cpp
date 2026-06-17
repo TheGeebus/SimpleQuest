@@ -13,7 +13,7 @@
 #include "Quests/QuestNodeBase.h"
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestManagerSubsystem.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"

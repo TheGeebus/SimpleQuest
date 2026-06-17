@@ -7,8 +7,8 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "StructUtils/InstancedStruct.h"
-#include "WorldState/WorldStateSubsystem.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "SimpleCoreBlueprintLibrary.generated.h"
 
 class FOnSignalReceived;
@@ -69,9 +69,14 @@ public:
         const FInstancedStruct& Payload, bool bAllChannels = false);
 
     /**
-     * Subscribe to messages published on Channel or any of its descendant tags. The bound handler receives the
-     * original published tag plus the payload as an FInstancedStruct — use UE's "Get FInstancedStruct Value"
-     * or typed-extraction nodes inside the handler to read the concrete payload type.
+     * Subscribe to messages published on Channel. Default Routing receives events on Channel or any of its
+     * descendant tags (the bus's hierarchical-delivery default). Pass ExactOnly (no flags) to receive only
+     * direct publishes on this exact Channel — useful when ancestor-walk delivery would be noise (e.g., a
+     * receptionist watching Quest X that doesn't care about Quest X's inner-Step publishes).
+     *
+     * The bound handler receives the original published tag plus the payload as an FInstancedStruct — use
+     * UE's "Get FInstancedStruct Value" or typed-extraction nodes inside the handler to read the concrete
+     * payload type.
      *
      * Listener identity comes from the bound delegate's UObject (typically the calling Blueprint actor or
      * component). For cleanup, call UnsubscribeListener(self) from your EndPlay or BeginDestroy — it clears
@@ -80,7 +85,11 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
-    static void SubscribeMessage(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnSignalReceived);
+    static void SubscribeMessage(
+        UObject* WorldContextObject,
+        FGameplayTag Channel,
+        const FOnSignalReceived& OnSignalReceived,
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
      * Typed-filter variant of SubscribeMessage. Same delivery shape — handler receives the matched channel
@@ -92,7 +101,8 @@ public:
      * base for events flowing through the signal bus. SimpleQuest's FQuestEventBase and its lifecycle
      * subclasses (FQuestStartedEvent, FQuestEndedEvent, FQuestResolutionRecordedEvent, …) all qualify,
      * as does any adopter-authored event struct that derives from FSignalEventBase. Listener identity,
-     * cleanup semantics, and channel-hierarchy delivery match the untyped SubscribeMessage variant.
+     * cleanup semantics, and channel-hierarchy delivery match the untyped SubscribeMessage variant; see its
+     * Routing parameter doc for narrowing options.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject", AutoCreateRefTerm = "OnSignalReceived"))
@@ -100,7 +110,8 @@ public:
         UObject* WorldContextObject,
         FGameplayTag Channel,
         UPARAM(meta = (MetaStruct = "/Script/SimpleCore.SignalEventBase")) UScriptStruct* PayloadType,
-        const FOnSignalReceived& OnSignalReceived);
+        const FOnSignalReceived& OnSignalReceived,
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /
@@ -159,12 +170,27 @@ public:
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static int32 GetFactValue(UObject* WorldContextObject, FGameplayTag Tag);
 
+    // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Returns the direct parent of the given gameplay tag (e.g., "X.Y.Z" → "X.Y"). Returns an invalid
+     * (empty) tag if the input has no parent (root-level tag) or is itself invalid. Wraps the C++-only
+     * FGameplayTag::RequestDirectParent() so BP code can walk tag hierarchies — used by patterns like
+     * sidebar parent-resolution walks where each step of the walk checks the next-up ancestor.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleCore|Tags")
+    static FGameplayTag GetDirectParentTag(FGameplayTag Tag);
+
 private:
-    /** Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null
-     *  on any resolution failure (callers no-op silently — same pattern as USimpleQuestBlueprintLibrary). */
+    /**
+     * Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null
+     * on any resolution failure (callers no-op silently — same pattern as USimpleQuestBlueprintLibrary).
+     */
     static USignalSubsystem* GetSignalSubsystem(const UObject* WorldContextObject);
 
-    /** Resolves the WorldStateSubsystem from a WorldContext via the same chain. Same null-on-failure
-     *  contract as GetSignalSubsystem. */
+    /**
+     * Resolves the WorldStateSubsystem from a WorldContext via the same chain. Same null-on-failure
+     * contract as GetSignalSubsystem.
+     */
     static UWorldStateSubsystem* GetWorldStateSubsystem(const UObject* WorldContextObject);
 };

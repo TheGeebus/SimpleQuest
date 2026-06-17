@@ -5,7 +5,7 @@
 
 #include "SimpleQuestLog.h"
 #include "Events/QuestClearBlockRequestEvent.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 void UClearBlockedNode::ActivateInternal(FGameplayTag InContextualTag)
 {

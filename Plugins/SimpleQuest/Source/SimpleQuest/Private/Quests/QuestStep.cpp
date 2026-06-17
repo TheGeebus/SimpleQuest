@@ -3,10 +3,9 @@
 
 #include "Quests/QuestStep.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
-#include "SimpleQuestLog.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/QuestStateSubsystem.h"
 
 void UQuestStep::Activate(FGameplayTag InContextualTag)
 {
@@ -67,11 +66,29 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);
 	LiveObjective->OnQuestObjectiveTriggerDeactivation.AddDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+	LiveObjective->OnQuestObjectiveTriggerSatisfied.AddDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
+	
+	// Register the live Objective with QSS under every perspective tag (canonical + aliases) so
+	// USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag can resolve regardless of which perspective the
+	// caller passes. Symmetric unregister in DeactivateInternal + ResetTransientState + OnObjectiveComplete.
+	if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+	{
+		if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+		{
+			TArray<FGameplayTag> ObjectiveKeys;
+			ObjectiveKeys.Add(InContextualTag);
+			for (const FGameplayTag& Alias : AssetScopedAliasTags)
+			{
+				if (Alias.IsValid()) ObjectiveKeys.AddUnique(Alias);
+			}
+			StateSubsystem->RegisterActiveObjective(LiveObjective, ObjectiveKeys);
+		}
+	}
 
 	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
 	PendingActivationContext = FQuestObjectiveActivationContext{};
 
-	LiveObjective->DispatchOnObjectiveActivated(Context);
+	LiveObjective->DispatchOnObjectiveActivated(Context, InContextualTag);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
@@ -82,10 +99,12 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		// so subclass overrides (universal-adapter pattern: subscribed to game-system events in OnObjective-
 		// Activated) can still inspect targets / objective state and explicitly unsubscribe.
 		LiveObjective->DispatchOnObjectiveDeactivated();
+		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
 		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 		LiveObjective = nullptr;
 	}
 	ReceivedActivationContext = FQuestObjectiveActivationContext{};
@@ -96,8 +115,11 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 void UQuestStep::ResetTransientState()
 {
 	Super::ResetTransientState();
+	
 	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
-	// drop the reference. CompletionContext + Piece D params are pure value types; reset to empty.
+	// drop the reference. CompletionContext + params are pure value types; reset to empty. QSS unregister:
+	// ActiveObjectivesByTag uses TWeakObjectPtr — stale entries become invalid on dereference and queries skip them.
+	// Explicit cleanup belongs in the manager's PIE-reset path if/when needed.
 	LiveObjective = nullptr;
 	CompletionContext = FQuestObjectiveTriggerContext{};
 	ReceivedActivationContext = FQuestObjectiveActivationContext{};
@@ -113,12 +135,14 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 		// Params if it needs them. The objective is still live (we're inside its OnQuestObjectiveComplete
 		// broadcast); ConditionalBeginDestroy hasn't fired yet.
 		LiveObjective->DispatchOnObjectiveDeactivated();
+		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
 		CompletionContext = LiveObjective->TakeCompletionContext();
 		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
 		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
 		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 		LiveObjective = nullptr;
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
@@ -137,4 +161,21 @@ void UQuestStep::OnObjectiveRefused(FGameplayTag RefusalReason, FQuestObjectiveT
 void UQuestStep::OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestObjectiveTriggerContext FinalContext)
 {
 	OnNodeTriggerDeactivation.ExecuteIfBound(this, OutcomeTag, FinalContext);
+}
+
+void UQuestStep::OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context)
+{
+	OnNodeTriggerSatisfied.ExecuteIfBound(this, Context);
+}
+
+void UQuestStep::UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World)
+{
+	if (!Objective || !World) return;
+	if (const UGameInstance* GI = World->GetGameInstance())
+	{
+		if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+		{
+			StateSubsystem->UnregisterActiveObjective(Objective);
+		}
+	}
 }

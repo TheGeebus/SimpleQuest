@@ -3,10 +3,10 @@
 
 
 #include "Objectives/QuestObjective.h"
-
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Subsystems/QuestStateSubsystem.h"
 
 
 void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext)
@@ -32,8 +32,9 @@ void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveA
 	TargetClasses = Params.Authored.TargetClasses;
 }
 
-void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params)
+void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag)
 {
+	OwningStepTag = InOwningStepTag;
 	OnObjectiveActivated(Params);
 }
 
@@ -46,9 +47,10 @@ void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveTriggerC
 FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQuestObjectiveTriggerContext& AdopterContext) const
 {
 	FQuestObjectiveTriggerContext Out = AdopterContext;
-	if (!Out.TriggeredActor)         Out.TriggeredActor = LastTriggerContext.TriggeredActor;
-	if (!Out.Instigator.IsValid())   Out.Instigator    = LastTriggerContext.Instigator;
-	if (!Out.CustomData.IsValid())   Out.CustomData    = LastTriggerContext.CustomData;
+	if (!Out.TriggeredActor) Out.TriggeredActor = LastTriggerContext.TriggeredActor;
+	if (!Out.Instigator.IsValid()) Out.Instigator = LastTriggerContext.Instigator;
+	if (!Out.CustomData.IsValid()) Out.CustomData = LastTriggerContext.CustomData;
+	if (!Out.CustomTag.IsValid()) Out.CustomTag = LastTriggerContext.CustomTag;
 	Out.OriginatingTriggerComponent = LastTriggerContext.OriginatingTriggerComponent;
 	return Out;
 }
@@ -56,6 +58,10 @@ FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQues
 void UQuestObjective::DispatchOnObjectiveDeactivated()
 {
 	OnObjectiveDeactivated();
+	// Clear cached identity after the subclass override has had its last chance to read it — keeps GetOwningStepTag()
+	// honest after the Step releases this Objective. The Step also calls UnregisterActiveObjective on the QSS
+	// (see UQuestStep::DeactivateInternal / OnObjectiveComplete) so the live-objective registry stays in sync.
+	OwningStepTag = FGameplayTag();
 }
 
 void UQuestObjective::OnObjectiveDeactivated_Implementation()
@@ -74,11 +80,6 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(InCompletionContext);
 	CompletionContext = Effective;
 	ForwardActivationParams = InForwardParams;
-
-	// Emit a final progress tick before completing so consumers driving a progress bar see the "full"
-	// state before the completion delegate takes over. The CompletionContext typically already has
-	// CurrentCount == RequiredCount at this point.
-	OnQuestObjectiveProgress.Broadcast(Effective);
 	
 	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
 	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements supply an
@@ -114,6 +115,15 @@ void UQuestObjective::PublishTriggerDeactivation(FGameplayTag OutcomeTag, const 
 	OnQuestObjectiveTriggerDeactivation.Broadcast(OutcomeTag, Effective);
 }
 
+void UQuestObjective::PublishTriggerSatisfied(const FQuestObjectiveTriggerContext& TriggerContext)
+{
+	const FQuestObjectiveTriggerContext Effective = ResolveTriggerContext(TriggerContext);
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::PublishTriggerSatisfied : actor=%s — %s"),
+		Effective.TriggeredActor ? *Effective.TriggeredActor->GetName() : TEXT("null"),
+		*GetFullName());
+	OnQuestObjectiveTriggerSatisfied.Broadcast(Effective);
+}
+
 void UQuestObjective::EnableTargetObject(UObject* Target, bool bIsTargetEnabled) const
 {
 	OnEnableTarget.Broadcast(Target, bIsTargetEnabled);
@@ -141,5 +151,39 @@ void UQuestObjective::EnableQuestTargetClasses(bool bIsTargetEnabled) const
 			OnEnableTarget.Broadcast(Loaded, bIsTargetEnabled);
 		}
 	}
+}
+
+TArray<FGameplayTag> UQuestObjective::GetOwningStepAliasTags() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	if (!QSS) return {};
+	return QSS->GetAssetScopedAliasTagsForCanonical(OwningStepTag);
+}
+
+TArray<FQuestRoleSourceInfo> UQuestObjective::GetTriggersTargetingThisStep() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	return QSS ? QSS->GetActiveTriggersForTag(OwningStepTag) : TArray<FQuestRoleSourceInfo>{};
+}
+
+TArray<FQuestRoleSourceInfo> UQuestObjective::GetGiversTargetingThisStep() const
+{
+	if (!OwningStepTag.IsValid()) return {};
+	const UWorld* World = GetWorld();
+	if (!World) return {};
+	const UGameInstance* GI = World->GetGameInstance();
+	if (!GI) return {};
+	const UQuestStateSubsystem* QSS = GI->GetSubsystem<UQuestStateSubsystem>();
+	return QSS ? QSS->GetActiveGiversForTag(OwningStepTag) : TArray<FQuestRoleSourceInfo>{};
 }
 

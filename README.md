@@ -46,7 +46,7 @@ Quest and narrative system. Runtime + editor modules, with an optional Electroni
 
 - Tag-addressed runtime. Every compiled quest node is a `UObject` addressed by a `FGameplayTag`. The manager subsystem, components, and event bus all route by tag.
 - Pull-based prerequisite activation. Quest nodes waiting on prerequisites subscribe to the relevant World State fact tags. When all conditions are met the node activates — no polling, no ticking.
-- Hierarchical catch-up for late subscribers. Givers, observers, and `Bind To Quest Event` Blueprint nodes that register after a quest event has already fired receive the recorded state immediately — original outcome, prerequisite snapshot, blocker information, the giver actor that initiated activation, the activation source (giver / cascade / external API / initial entry), and the merged-final activation parameters. Subscriptions bound on a parent tag (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind, mirroring the live bus's hierarchical delivery for catch-up.
+- Hierarchical catch-up for late subscribers. Givers, observers, and `Observe Quest Lifecycle` Blueprint nodes that register after a quest event has already fired receive the recorded state immediately — original outcome, prerequisite snapshot, blocker information, the giver actor that initiated activation, the activation source (giver / cascade / external API / initial entry), and the merged-final activation parameters. Subscriptions bound on a parent tag (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind, mirroring the live bus's hierarchical delivery for catch-up.
 - Two-layer state architecture. World State answers "did it happen?" with boolean fact storage. `UQuestStateSubsystem` answers "what's the structured detail?" with rich event records — the same data the save/load system uses to reconstruct a session. The manager subsystem owns all writes; `UQuestStateSubsystem` is the public read surface. Future suite plugins will follow the same `...StateSubsystem` convention for their domain.
 - Outcome-filtered observers. An observer component can filter which outcomes it responds to; empty filter means all outcomes.
 
@@ -90,6 +90,8 @@ Useful constructs as your graph grows:
 - **Prerequisite Rule Entry / Exit** — define a named rule once; reference it from multiple content nodes without duplication.
 - **Prerequisite Fact Tag** — gate on any World State fact tag. Decoupled from graph topology, so you can compose with any UE gameplay system that tracks tag-keyed state (faction reputation, inventory, system flags).
 - **Prerequisite Outcome** — gate on a context-free outcome tag. Satisfied when any quest resolves with the picked outcome, regardless of which quest produced it.
+- **Prereq Gate** — gate an activation cascade on a prerequisite expression as a standalone, graph-visible primitive. Handles "satisfy these conditions in any order, then proceed" without wiring a phantom downstream quest just to borrow its prereq gating.
+- **Add / Remove / Clear Facts** — write World State facts directly from the questline graph, so a graph both reacts to and produces the shared tag-keyed state any other system (or another questline) can gate on.
 - **Activation Group Entry / Exit** — many-to-many node activation topology without per-wire bookkeeping.
 - **LinkedQuestline** — reference another questline asset inline; the compiler expands it with full outcome pin synchronization.
 
@@ -202,7 +204,9 @@ protected:
     {
         if (/* your completion condition */)
         {
-            CompleteObjectiveWithOutcome(MyOutcomeTag, Context);
+            // The trigger context from the inbound fire (TriggeredActor, Instigator,
+            // CustomData) auto-forwards onto the completion event when omitted here.
+            CompleteObjectiveWithOutcome(MyOutcomeTag);
         }
     }
 };
@@ -216,7 +220,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 ### Reacting to Quest Events
 
-**Blueprint** — drop the **Bind To Quest Event** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The subscription stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. subscribe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Subscription` reference when you're done, or let the GameInstance tear it down.
+**Blueprint** — drop the **Observe Quest Lifecycle** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The observation stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. observe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Observer` reference when you're done, or let the GameInstance tear it down.
 
 **C++** — use the library template for direct handle-based subscriptions:
 
@@ -274,6 +278,7 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026 | Stale Quest Tags Tier 2 — project-wide stale-tag scanning (Actor Blueprint defaults + unloaded levels including World Partition; editor panel Full Project Scan + headless commandlet with CI-friendly exit codes) | **Shipped** (v0.3.4) |
 | Q2 2026 | Stale Quest Tags polish + design captures (multi-row mass-clear with confirmation + atomic undo, sortable Level column, sub-millisecond per-actor PostUndo rescan, designer-facing log clarity pass; rewards-design + scope-tag system docs) | **Shipped** (v0.3.5) |
 | Q2 2026 | Architectural cohesion + adopter ergonomics — distinct lifecycle events for offer-availability, accept-readiness, give-refusal, and activation failure; trigger response surface (per-fire response, structural-block, and per-lifecycle feedback delegates on the Trigger Component); rich payload propagation across all activation entry points; `SimpleQuest.*` namespace finalization with transparent migration redirects; tag rename resilience across Blueprints, components, and data assets; pin-wired prereq Path/Outcome separation with new Prerequisite Fact Tag and Prerequisite Outcome authoring nodes; outcome-channel event publishing for cross-quest subscribers; Blueprint-callable signal bus subscriptions plus `FSignalEventBase` marker for picker filtering; component model unification (single Giver component replaces stacked components); per-channel log verbosity; Electronic Nodes integration rewritten against the stock marketplace plugin on 5.7+ (no fork dependency); UE 5.7 compatibility verified | **Shipped** (v0.4.0) |
+| Q2 2026 | Authoring primitives + subscriber routing — Prereq Gate utility node; Add / Remove / Clear Facts nodes (questline graphs as first-class World State publishers); Resettable Replay prerequisite setting for honest re-gating on replayable content; subscriber-side hierarchical-vs-exact routing control; observer surface broadening (catch-all `OnAnyQuestEvent`, run-phase `ProgressRefused`); runtime add/remove of component watched-tag sets for dynamic-spawn join-in-progress; quest-resolution attribution fixes | **Shipped** (v0.4.1) |
 | Q3 2026 | Save/Load system — `USaveGame` integration with mid-step state handling | Planned (v0.5.0) |
 | Q4 2026 | Rewards system — designer-authored reward bundles wired to outcome resolution | Planned (v0.6.0) |
 | Q1 2027 | Expanded objective library — timed, escort, collection, and conversation objectives | Planned (v0.7.0) |

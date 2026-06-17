@@ -182,6 +182,21 @@ public:
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
 	void GiveAllQuests(const FQuestObjectiveActivationContext& Context = FQuestObjectiveActivationContext());
 
+	/**
+	 * Runtime: start offering quest tags. If already registered, subscribes + catches up (PendingGiver state) and
+	 * fires the availability change. Idempotent per tag.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	void AddTagsToGive(const FGameplayTagContainer& Tags);
+
+	/**
+	 * Runtime: stop offering quest tags — fires the availability change for any currently-offered tag, then
+	 * unsubscribes and drops the giver source-registry entries.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
+	void RemoveTagsFromGive(const FGameplayTagContainer& Tags);
+
+	
 	// ── State queries ────────────────────────────────────────────
 
 	/**
@@ -232,7 +247,7 @@ public:
 	FGameplayTagContainer GetRegisteredQuestTagsToGive() const;
 
 protected:
-	virtual void BeginPlay() override;
+	virtual void PerformDeferredRegistration() override;
 
 	/** Quest tags this giver offers. Designer-authored on the placed component instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline"))
@@ -254,7 +269,9 @@ protected:
 
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const override;
+	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
+
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState) override;
 	
 	/**
 	 * The three overrides below all interleave Giver-specific state tracking with the inherited Observer
@@ -282,6 +299,19 @@ private:
 	void OnQuestGiveBlockedEventReceived (FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
 
 	void RegisterQuestGiver();
+	
+	/**
+	 * Installs the giver-specific subscriptions (Activated/Disabled/Deactivated, ExactOnly) + the giver source
+	 * entry for one quest, capturing the handles into the base SubscriptionHandlesByTag. Shared by registration
+	 * and AddTagsToGive.
+	 */
+	void SubscribeGiverQuest(FGameplayTag QuestTag);
+
+	/**
+	 * Reconstructs Activated/Enabled state for a quest already pending-giver. Caller snapshots prior state and
+	 * broadcasts. Shared by registration and AddTagsToGive.
+	 */
+	void GiverCatchUpForQuest(FGameplayTag QuestTag);
 
 	/** Shared cleanup body for the deactivation and end-event paths. */
 	void HandleQuestLeftGiverSurface(FGameplayTag Channel);

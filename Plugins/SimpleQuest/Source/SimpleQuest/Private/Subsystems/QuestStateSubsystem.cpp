@@ -10,19 +10,24 @@
 #include "SimpleQuestLog.h"
 #include "Events/QuestEntryRecordedEvent.h"
 #include "Events/QuestResolutionRecordedEvent.h"
-#include "Signals/SignalSubsystem.h"
+#include "Quests/QuestNodeBase.h"
+#include "Quests/Types/QuestDisplayDataRecord.h"
+#include "Objectives/QuestObjective.h"
+#include "Display/QuestDisplayData.h"
+#include "Quests/Types/QuestRoleSourceInfo.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
-#include "WorldState/WorldStateSubsystem.h"
+#include "Subsystems/WorldStateSubsystem.h"
 
 
 namespace
 {
 	/**
-	 * State-side multi-channel publish helper. Builds the channel set as canonical + each registered alias from
-	 * the reverse-alias map and forwards to the bus's multi-channel publish primitive (Phase F.2). Treats the call
+	 * State-side multichannel publish helper. Builds the channel set as canonical + each registered alias from
+	 * the reverse-alias map and forwards to the bus's multichannel publish primitive. Treats the call
 	 * as one event instance addressable under all channels — subscribers bound to any perspective receive once
-	 * (default dedup-on), with matched-channel attribution in the callback's first arg per the channels-route /
+	 * (default deduplication-on), with matched-channel attribution in the callback's first arg per the channels-route /
 	 * payloads-decide contract. Event.QuestTag (set canonically by the caller's event constructor) stays invariant
 	 * across deliveries; payload identity vs delivery metadata are kept distinct.
 	 *
@@ -303,14 +308,14 @@ FQuestPrereqStatus UQuestStateSubsystem::GetQuestPrereqStatus(FGameplayTag Quest
 	return FQuestPrereqStatus();
 }
 
-void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source)
+void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag OutcomeTag, FName PathIdentity, double ResolutionTime, EQuestResolutionSource Source, const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
 	// Multi-perspective registry write: append the resolution entry at the canonical AND every AssetScopedAlias.
-	// Symmetric with WorldState's multi-perspective fact write and the bus's multi-channel publish — registry
+	// Symmetric with WorldState's multi-perspective fact write and the bus's multichannel publish — registry
 	// iterators (QSV, future telemetry) see the resolution at every perspective without per-row alias-walking.
-	// F.3's event-keyed dedup gate in the cascade ensures one logical RecordResolution call per logical event;
+	// F.3's event-keyed deduplication gate in the cascade ensures one logical RecordResolution call per logical event;
 	// the splay across perspectives is a single write fanned out, not multiple cascade-driven calls.
 	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
@@ -356,16 +361,34 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	// Outcome-channel publish lets subscribers bind on a specific outcome tag (or a parent outcome tag for
 	// hierarchical fan-in) without needing to subscribe per-quest and filter payloads. Reputation systems,
 	// achievement trackers, telemetry, and audio cue layers benefit from binding by outcome directly.
-	// Bus dedup means subscribers on both the quest channel and the outcome channel receive one callback.
+	// Bus deduplication means subscribers on both the quest channel and the outcome channel receive one callback.
 	const TArray<FGameplayTag> OutcomeChannels = { OutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
 		QuestTag,
 		AssetScopedAliasTagsByContextualTag,
-		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source),
+		FQuestResolutionRecordedEvent(QuestTag, OutcomeTag, PathIdentity, ResolutionTime, Source, OriginatingEventID),
 		OutcomeChannels);
 
 	OnAnyRegistryChanged.Broadcast();
+}
+
+FOriginatingEventID UQuestStateSubsystem::GetPathFactWriteEventID(FGameplayTag PathFactTag) const
+{
+	return PathFactWriteEventIDs.FindRef(PathFactTag);
+}
+
+void UQuestStateSubsystem::StampPathFactWriteEventID(FGameplayTag PathFactTag, const FOriginatingEventID& EventID)
+{
+	if (PathFactTag.IsValid() && EventID.IsValid())
+	{
+		PathFactWriteEventIDs.Add(PathFactTag, EventID);
+	}
+}
+
+void UQuestStateSubsystem::ClearPathFactWriteEventID(FGameplayTag PathFactTag)
+{
+	PathFactWriteEventIDs.Remove(PathFactTag);
 }
 
 void UQuestStateSubsystem::RecordEntry(
@@ -375,7 +398,7 @@ void UQuestStateSubsystem::RecordEntry(
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
 	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
-	FName PathIdentity)
+	FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -418,7 +441,7 @@ void UQuestStateSubsystem::RecordEntry(
 	// is entered via a specific outcome route (matched at the outcome-tag channel). The event's payload
 	// preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime) shape — subscribers
 	// wanting the new provenance / snapshot fields read the latest entry from the registry on receipt.
-	// Bus dedup collapses delivery to one callback per subscriber across the channel set.
+	// Bus deduplication collapses delivery to one callback per subscriber across the channel set.
 	const TArray<FGameplayTag> IncomingOutcomeChannels = { IncomingOutcomeTag };
 	PublishWithAliases(
 		ResolveSignalSubsystem(),
@@ -632,8 +655,16 @@ void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayT
 
 	UE_LOG(LogSimpleQuestState, Verbose,
 		TEXT("UQuestStateSubsystem::RegisterAlias : '%s' → '%s' (forward index %d alias(es), reverse index %d contextual(s))"),
-		*AssetScopedTag.ToString(), *ContextualTag.ToString(),
-		ContextualTagsByAssetScopedTag.Num(), AssetScopedAliasTagsByContextualTag.Num());
+		*AssetScopedTag.ToString(),
+		*ContextualTag.ToString(),
+		ContextualTagsByAssetScopedTag.Num(),
+		AssetScopedAliasTagsByContextualTag.Num());
+	
+	// An alias IS a perspective tag in its own right — every alias must also appear in KnownQuests so any-perspective
+	// queries resolve uniformly. Folded in here so the invariant is enforced at the API boundary rather than relying on
+	// every caller to remember the pairing. RegisterQuestTag is idempotent (Contains guard); calling it on an already-
+	// known alias is a no-op.
+	RegisterQuestTag(AssetScopedTag);
 }
 
 TArray<FGameplayTag> UQuestStateSubsystem::ResolveCanonicalTags(FGameplayTag InputTag) const
@@ -669,5 +700,261 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetAssetScopedAliasTagsForCanonical(F
 		return *Aliases;
 	}
 	return {};
+}
+
+FText UQuestStateSubsystem::GetDisplayName(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid()) return FText::GetEmpty();
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		return Record->DisplayName;
+	}
+	UE_LOG(LogSimpleQuestState, Warning,
+		TEXT("UQuestStateSubsystem::GetDisplayName : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning empty."),
+		*Tag.ToString());
+	return FText::GetEmpty();
+}
+
+FText UQuestStateSubsystem::GetDisplayDescription(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid()) return FText::GetEmpty();
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		return Record->Description;
+	}
+	UE_LOG(LogSimpleQuestState, Warning,
+		TEXT("UQuestStateSubsystem::GetDisplayDescription : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning empty."),
+		*Tag.ToString());
+	return FText::GetEmpty();
+}
+
+UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
+{
+	if (!Tag.IsValid()) return nullptr;
+	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
+	{
+		return Record->DisplayData;
+	}
+	UE_LOG(LogSimpleQuestState, Warning,
+		TEXT("UQuestStateSubsystem::GetDisplayData : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning null."),
+		*Tag.ToString());
+	return nullptr;
+}
+
+void UQuestStateSubsystem::RegisterDisplayData(FGameplayTag Tag, const FText& InDisplayName, const FText& InDescription, UQuestDisplayData* InDisplayData)
+{
+	if (!Tag.IsValid())
+	{
+		return;
+	}
+	FQuestDisplayDataRecord& Record = DisplayDataByTag.FindOrAdd(Tag);
+	Record.DisplayName = InDisplayName;
+	Record.Description = InDescription;
+	Record.DisplayData = InDisplayData;
+}
+
+void UQuestStateSubsystem::UnregisterDisplayDataForTags(const TArray<FGameplayTag>& Tags)
+{
+	for (const FGameplayTag& Tag : Tags)
+	{
+		DisplayDataByTag.Remove(Tag);
+	}
+}
+
+void UQuestStateSubsystem::ClearDisplayDataRegistry()
+{
+	DisplayDataByTag.Empty();
+}
+
+// ── Source registry — query ────────────────────────────────────────────────────────────────────────────────
+
+TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::GetActiveTriggersForTag(FGameplayTag QueryTag) const
+{
+	return QueryRoleSources(QueryTag, TriggerSourcesByTag);
+}
+
+TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::GetActiveGiversForTag(FGameplayTag QueryTag) const
+{
+	return QueryRoleSources(QueryTag, GiverSourcesByTag);
+}
+
+TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::GetActiveObserversForTag(FGameplayTag QueryTag) const
+{
+	return QueryRoleSources(QueryTag, ObserverSourcesByTag);
+}
+
+UQuestObjective* UQuestStateSubsystem::GetActiveObjectiveForTag(FGameplayTag QueryTag) const
+{
+	for (const FGameplayTag& Key : BuildTagSynonymSet(QueryTag))
+	{
+		if (const TWeakObjectPtr<UQuestObjective>* Found = ActiveObjectivesByTag.Find(Key))
+		{
+			if (UQuestObjective* Live = Found->Get()) return Live;
+		}
+	}
+	return nullptr;
+}
+
+// ── Source registry — write ────────────────────────────────────────────────────────────────────────────────
+
+void UQuestStateSubsystem::RegisterTriggerSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags)
+{
+	RegisterRoleSource(Component, AuthoredTags, TriggerSourcesByTag);
+}
+
+void UQuestStateSubsystem::RegisterGiverSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags)
+{
+	RegisterRoleSource(Component, AuthoredTags, GiverSourcesByTag);
+}
+
+void UQuestStateSubsystem::RegisterObserverSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags)
+{
+	RegisterRoleSource(Component, AuthoredTags, ObserverSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterTriggerSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, TriggerSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterGiverSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, GiverSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterObserverSource(UActorComponent* Component, FGameplayTag Tag)
+{
+	UnregisterRoleSource(Component, Tag, ObserverSourcesByTag);
+}
+
+void UQuestStateSubsystem::UnregisterAllRoleSources(UActorComponent* Component)
+{
+	if (!Component) return;
+
+	auto StripFrom = [Component](TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& Map)
+	{
+		for (auto It = Map.CreateIterator(); It; ++It)
+		{
+			It.Value().RemoveAll([Component](const TWeakObjectPtr<UActorComponent>& Weak)
+				{ return !Weak.IsValid() || Weak.Get() == Component; });
+			if (It.Value().IsEmpty()) It.RemoveCurrent();
+		}
+	};
+	StripFrom(TriggerSourcesByTag);
+	StripFrom(GiverSourcesByTag);
+	StripFrom(ObserverSourcesByTag);
+}
+
+void UQuestStateSubsystem::RegisterActiveObjective(UQuestObjective* Objective, const TArray<FGameplayTag>& TagSet)
+{
+	if (!Objective) return;
+	for (const FGameplayTag& Tag : TagSet)
+	{
+		if (!Tag.IsValid()) continue;
+		ActiveObjectivesByTag.Add(Tag, Objective);
+	}
+}
+
+void UQuestStateSubsystem::UnregisterActiveObjective(UQuestObjective* Objective)
+{
+	if (!Objective) return;
+	for (auto It = ActiveObjectivesByTag.CreateIterator(); It; ++It)
+	{
+		const TWeakObjectPtr<UQuestObjective>& Weak = It.Value();
+		if (!Weak.IsValid() || Weak.Get() == Objective) It.RemoveCurrent();
+	}
+}
+
+// ── Source registry — shared helpers ──────────────────────────────────────────────────────────────────────
+
+TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::QueryRoleSources(
+	FGameplayTag QueryTag,
+	const TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap) const
+{
+	TArray<FQuestRoleSourceInfo> Results;
+	if (!QueryTag.IsValid()) return Results;
+
+	// Walk every synonym of QueryTag — canonical-or-alias, in either direction. Component registration at
+	// BeginPlay can race ahead of the manager's lazy graph registration (WarmReachableGraphs cascade), leaving
+	// the role-source registry holding only the authored form. Bidirectional walk at query time catches the
+	// registered key regardless of which form the designer authored against.
+	const TArray<FGameplayTag> KeysToCheck = BuildTagSynonymSet(QueryTag);
+
+	TSet<TWeakObjectPtr<UActorComponent>> SeenComponents;
+	for (const FGameplayTag& Key : KeysToCheck)
+	{
+		const TArray<TWeakObjectPtr<UActorComponent>>* Bucket = SourceMap.Find(Key);
+		if (!Bucket) continue;
+		for (const TWeakObjectPtr<UActorComponent>& Weak : *Bucket)
+		{
+			if (!Weak.IsValid()) continue;
+			if (SeenComponents.Contains(Weak)) continue;
+			SeenComponents.Add(Weak);
+
+			FQuestRoleSourceInfo Info;
+			Info.LiveComponent = Weak;
+			Info.LiveActor = Weak->GetOwner();
+			Info.MatchedVia = Key;
+			Results.Add(MoveTemp(Info));
+		}
+	}
+	return Results;
+}
+
+void UQuestStateSubsystem::RegisterRoleSource(
+	UActorComponent* Component,
+	const FGameplayTagContainer& AuthoredTags,
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap)
+{
+	if (!Component || AuthoredTags.IsEmpty()) return;
+
+	// Register only under the authored tag form. Bidirectional synonym walks at query time
+	// (BuildTagSynonymSet) resolve the registered key regardless of which form the caller passes — keeping
+	// registration uncoupled from manager graph-registration timing (which is lazy via WarmReachableGraphs and
+	// may not have populated the alias index by the component's BeginPlay).
+	const TWeakObjectPtr<UActorComponent> WeakComp(Component);
+	for (const FGameplayTag& Authored : AuthoredTags)
+	{
+		if (!Authored.IsValid()) continue;
+		TArray<TWeakObjectPtr<UActorComponent>>& Bucket = SourceMap.FindOrAdd(Authored);
+		// Idempotent: replace any prior entry for the same component (re-register pattern preserves uniqueness).
+		Bucket.RemoveAll([Component](const TWeakObjectPtr<UActorComponent>& Existing)
+		{
+			return !Existing.IsValid() || Existing.Get() == Component;
+		});
+		Bucket.Add(WeakComp);
+	}
+}
+
+void UQuestStateSubsystem::UnregisterRoleSource(
+	UActorComponent* Component,
+	FGameplayTag Tag,
+	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>>& SourceMap)
+{
+	if (!Component || !Tag.IsValid()) return;
+
+	// Registration keys under the authored tag form only (see RegisterRoleSource), so remove by that same form.
+	if (TArray<TWeakObjectPtr<UActorComponent>>* Bucket = SourceMap.Find(Tag))
+	{
+		Bucket->RemoveAll([Component](const TWeakObjectPtr<UActorComponent>& Weak)
+			{ return !Weak.IsValid() || Weak.Get() == Component; });
+		if (Bucket->IsEmpty()) SourceMap.Remove(Tag);
+	}
+}
+
+TArray<FGameplayTag> UQuestStateSubsystem::BuildTagSynonymSet(FGameplayTag QueryTag) const
+{
+	TArray<FGameplayTag> Out;
+	if (!QueryTag.IsValid()) return Out;
+	Out.Add(QueryTag);
+	for (const FGameplayTag& Canonical : ResolveCanonicalTags(QueryTag))
+	{
+		Out.AddUnique(Canonical);
+		for (const FGameplayTag& AliasTag : GetAssetScopedAliasTagsForCanonical(Canonical))
+		{
+			Out.AddUnique(AliasTag);
+		}
+	}
+	return Out;
 }
 

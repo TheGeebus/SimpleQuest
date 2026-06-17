@@ -260,7 +260,7 @@ void SGraphNode_LinkedQuestline::OnAssetChanged(const FAssetData& NewAsset)
 	LinkedNode->RebuildOutcomePinsFromLinkedGraph();
 
 	// NotifyGraphChanged drives SNodeTitle to re-query GetNodeTitle, so "Linked Questline - <name>" reflects the
-	// new asset's FriendlyName immediately.
+	// new asset's DisplayName immediately.
 	if (UEdGraph* Graph = LinkedNode->GetGraph())
 	{
 		Graph->NotifyGraphChanged();

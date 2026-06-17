@@ -7,9 +7,11 @@
 #include "EdGraphSchema_K2.h"
 #include "K2Node_CallFunction.h"
 #include "KismetCompiler.h"
+#include "SimpleQuestLog.h"
 #include "K2Nodes/Slate/SGraphNode_CompleteObjective.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Objectives/QuestObjective.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -359,10 +361,22 @@ void UK2Node_CompleteObjectiveWithOutcome::ValidateNodeDuringCompilation(FCompil
 	Super::ValidateNodeDuringCompilation(MessageLog);
 
 	const UEdGraphPin* OutcomeTagPin = FindPin(TEXT("OutcomeTag"));
-	const bool bOutcomeTagWired = OutcomeTagPin && OutcomeTagPin->LinkedTo.Num() > 0;
 	const bool bHasStaticTag = OutcomeTagPin && !OutcomeTagPin->DefaultValue.IsEmpty();
 
-	if (!bOutcomeTagWired && !bHasStaticTag)
+	if (bHasStaticTag) return;  // picker resolves it, nothing to check
+
+	// LinkedTo is unreliable here — UE's compile pipeline runs validation on a transient graph copy
+	// that preserves DefaultValue but strips pin connections. Use the input exec pin as a canary: a
+	// real K2 node in an execution flow has its exec input connected. If it's empty, we're in the
+	// stripped-state copy and wire-presence checks would produce false positives. Defer to ExpandNode
+	// (which runs on the populated source graph) — it produces a hard Error if neither wire nor
+	// picker resolves at code-gen time, so real misconfigurations still surface.
+	const UEdGraphPin* ExecInPin = FindPin(UEdGraphSchema_K2::PN_Execute);
+	const bool bGraphStateIsReliable = ExecInPin && ExecInPin->LinkedTo.Num() > 0;
+	if (!bGraphStateIsReliable) return;
+
+	const bool bOutcomeTagWired = OutcomeTagPin && OutcomeTagPin->LinkedTo.Num() > 0;
+	if (!bOutcomeTagWired)
 	{
 		MessageLog.Warning(*LOCTEXT("Warn_NoTag", "@@: No outcome tag set on Complete Objective node (and no wired override).").ToString(), this);
 	}
@@ -419,9 +433,12 @@ bool UK2Node_CompleteObjectiveWithOutcome::IsCompatibleWithGraph(const UEdGraph*
 FString UK2Node_CompleteObjectiveWithOutcome::GetPinMetaData(FName InPinName, FName InKey)
 {
 	// FGameplayTag struct-pin customization reads "Categories" key to filter the picker namespace.
+	// Composes the default SimpleQuest.Outcome namespace with adopter-configured additional namespaces
+	// from USimpleQuestSettings — lets adopters bridge their own outcome tag trees into quest pickers
+	// without forking source.
 	if (InPinName == TEXT("OutcomeTag") && InKey == TEXT("Categories"))
 	{
-		return TEXT("SimpleQuest.Outcome");
+		return GetDefault<USimpleQuestSettings>()->ComposeOutcomePickerCategories();
 	}
 	return Super::GetPinMetaData(InPinName, InKey);
 }

@@ -8,19 +8,16 @@
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "GameplayTagContainer.h"
 
-class SMenuAnchor;
 class SWidget;
+class SComboButton;
 
 /**
- * Inline tag-picker widget for K2 graph nodes. Drop-in alternative to SGameplayTagCombo at SimpleQuest call
- * sites that want short-form chip display without the surrounding combo-button frame. Wraps SGameplayTagChip
- * + SGameplayTagPicker via an SMenuAnchor (no button-frame intermediary), so the rendered footprint is
- * exactly chip-width — no padding gutters between the chip and a wrapping field. Chip text routes through
- * FQuestTagComposer::FormatTagForDisplay so it paints the post-PluginPrefix form rather than the full
- * ToString(). The underlying FGameplayTag is unchanged; only display rendering shortens.
- *
- * SGameplayTagCombo stays in use elsewhere (Details-panel customization, etc.) — this widget is specifically
- * for the inline-on-node case where width and click semantics matter.
+ * Inline tag-picker widget for K2 graph nodes. Drop-in wrapper around SGameplayTagChip + SGameplayTagPicker
+ * inside a standard SComboButton, with the chip's text routed through FQuestTagComposer::FormatTagForDisplay
+ * so it paints the post-PluginPrefix form (e.g. "Questline.MyLine.Step1") rather than the full ToString()
+ * ("SimpleQuest.Questline.MyLine.Step1"). Visual / behavioral parity with standard SGameplayTagCombo otherwise
+ * — same chrome, same dropdown semantics, same right-click context menu via FMenuStack registration. The
+ * underlying FGameplayTag value is unchanged; only chip-face display rendering shortens.
  */
 class SIMPLEQUESTEDITOR_API SQuestTagPicker : public SCompoundWidget
 {
@@ -49,15 +46,14 @@ public:
 private:
 	FText GetDisplayText() const;
 	FText GetTooltipText() const;
-	FReply OnChipPressed();
 	FReply OnClearPressed();
+	FReply OnChipPressed();
 	TSharedRef<SWidget> OnGetMenuContent();
 	void OnPickerTagSelected(const TArray<FGameplayTagContainer>& TagContainers);
 
+	TSharedPtr<SComboButton> ComboButton;
 	TAttribute<FGameplayTag> TagAttribute;
 	FOnTagChanged OnTagChangedDelegate;
 	FString Filter;
 	bool bReadOnly = false;
-
-	TSharedPtr<SMenuAnchor> MenuAnchor;
 };

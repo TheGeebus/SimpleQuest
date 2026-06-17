@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Types/QuestStepEnums.h"
 #include "UObject/Object.h"
 #include "QuestlineGraph.generated.h"
 
@@ -11,6 +12,7 @@
 class FNativeGameplayTag;
 #endif
 
+class UQuestDisplayData;
 struct FGameplayTag;
 class UQuestNodeBase;
 class UEdGraph;
@@ -134,7 +136,32 @@ private:
      * is purely presentational — changing it never affects compiled tag identity, so designers can rename freely.
      */
     UPROPERTY(EditAnywhere)
-    FText FriendlyName;
+    FText DisplayName;
+    
+    /**
+     * Flavor / context blurb for the questline as a whole. Shown alongside DisplayName in quest log overview, journal
+     * entries, and asset tooltips. Empty by default. Multi-line authoring.
+     */
+    UPROPERTY(EditAnywhere, meta = (MultiLine = true))
+    FText Description;
+
+    /**
+     * Optional richer UI metadata for the questline (overview icon, hero image, chapter art, etc.). Adopter UI casts to
+     * its expected UQuestDisplayData subclass at consumption time. Queried at runtime via UQuestStateSubsystem::
+     * GetDisplayData using a questline-level tag.
+     */
+    UPROPERTY(EditAnywhere)
+    TObjectPtr<UQuestDisplayData> DisplayData;
+    
+    /**
+     * Asset-level default for per-run resettability — the root rung of this questline's inherit walk. Inherit
+     * (default) defers to the nearest ancestor: the host LinkedQuestline node when this graph is embedded, otherwise
+     * Off (permanent) at the top level. On / Off overrides that, opting the whole questline's content in / out.
+     * Content nodes and inner containers override this further (nearest wins). The compiler folds it into the
+     * per-node effective bResettableReplay it stamps onto the runtime instances.
+     */
+    UPROPERTY(EditAnywhere)
+    EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
     virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 
@@ -151,12 +178,24 @@ public:
     const FString& GetQuestlineID() const { return QuestlineID; }
     const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
     void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
+    const FText& GetDescription() const { return Description; }
+    UQuestDisplayData* GetDisplayData() const { return DisplayData; }
+    EResettableReplay GetResettableReplay() const { return ResettableReplay; }
 
     /**
-     * FriendlyName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
-     * label for this questline — avoids scattered "is FriendlyName empty?" checks.
+     * DisplayName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
+     * label for this questline — avoids scattered "is DisplayName empty?" checks.
      */
     FText GetDisplayName() const;
+
+    /**
+     * Returns the raw authored DisplayName field WITHOUT the asset-short-name fallback. Use when empty
+     * carries semantic meaning — e.g., runtime registry writes where adopter sidebars rely on "empty
+     * means drop this entry from the UI." GetDisplayName() above is for editor surfaces (outliner,
+     * tooltips, asset chips) that always want a renderable label and don't carry the empty-as-meaningful
+     * convention.
+     */
+    const FText& GetAuthoredDisplayName() const { return DisplayName; }
 
     // Editor-only: the actual UEdGraph object is only needed in the editor. The data it represents is compiled in-editor for use at runtime
 #if WITH_EDITORONLY_DATA

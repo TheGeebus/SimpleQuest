@@ -10,6 +10,9 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
+#include "Quests/Types/QuestEventTypes.h"
+#include "Quests/Types/QuestObservedTagSpec.h"
+#include "Signals/Types/SignalRoutingFlags.h"
 #include "QuestObserverComponent.generated.h"
 
 
@@ -24,11 +27,15 @@ struct FQuestEndedEvent;
 struct FQuestDeactivatedEvent;
 struct FQuestBlockedEvent;
 struct FQuestUnblockedEvent;
+struct FQuestProgressRefusedEvent;
+
+class UWorldStateSubsystem;
+class UQuestStateSubsystem;
 
 
 /**
  * Per-observed-quest flags controlling which lifecycle events this observer subscribes to. Mirrors the
- * BindToQuestEvent K2 node's per-event exposure mask but flagged per-quest-tag for finer authoring control.
+ * ObserveQuestLifecycle K2 node's per-event exposure mask but flagged per-quest-tag for finer authoring control.
  * Each flag gates its corresponding subscription in RegisterQuestObserver; unticked flags incur zero
  * subscription cost and skip catch-up for that event.
  *
@@ -71,7 +78,16 @@ struct FObservedQuestEventSettings
 	/** Per-step progress tick during Live phase. Transient; no catch-up. Opt-in (can be noisy). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveProgress = false;
-
+	
+	/**
+	 * A progress attempt against this quest was refused — typically a trigger fire on a step whose Progress
+	 * gate isn't open (prereq unsatisfied, Blocked state, etc.). Carries the FQuestActivationBlocker array
+	 * plus the originating TriggerContext. Transient; no catch-up — refusals are interaction events, not
+	 * recoverable state.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bObserveProgressRefused = false;
+	
 	/** Quest resolved with an outcome. OutcomeFilter (below) further narrows broadcast to specific outcomes. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bObserveCompleted = true;
@@ -96,6 +112,15 @@ struct FObservedQuestEventSettings
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "SimpleQuest.Outcome", EditCondition = "bObserveCompleted"))
 	FGameplayTagContainer OutcomeFilter;
+	
+	/**
+	 * Routing scope for subscriptions made from this observed-tag entry. Default ExactMatch | Descendants
+	 * matches the bus's hierarchical-delivery behavior — events on this tag OR any descendant fire the
+	 * observer. Set to ExactMatch alone when descendant events would be noise (e.g., observing a Quest
+	 * tag where inner-Step events shouldn't trigger this binding).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
 };
 
 
@@ -104,7 +129,7 @@ struct FObservedQuestEventSettings
  * specific quest state changes — UI receptionists, level-bound gameplay objects, world services. Each watched
  * tag's FObservedQuestEventSettings controls which of the 10 lifecycle events broadcast.
  *
- * Surface mirrors the BindToQuestEvent K2 node's per-event delegates: same events, same payload shapes,
+ * Surface mirrors the ObserveQuestLifecycle K2 node's per-event delegates: same events, same payload shapes,
  * same catch-up semantics. The observer is the curated component-form alternative for designers who want
  * config-authored per-quest observation rather than ad-hoc K2 subscription.
  */
@@ -137,7 +162,7 @@ public:
 	// under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
 	// observers, MatchedChannel reflects each observer's own perspective. Branch on QuestTag for "what quest
 	// instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
-	// Mirrors UQuestEventSubscription's K2-node delegate contract; same shape, same semantics.
+	// Mirrors UQuestLifecycleObserver's K2-node delegate contract; same shape, same semantics.
 	//
 	// ── Offer phase ──────────────────────────────────────────────────────────────────────────────
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestActivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload, FQuestPrereqStatus, PrereqStatus);
@@ -155,7 +180,11 @@ public:
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestDeactivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestUnblocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Payload);
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams (FOnQuestProgressRefused, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, const FQuestObjectiveTriggerContext&, TriggerContext);
 
+	// ── Catch-all (any event) ────────────────────────────────────────────────────────────────────
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnAnyQuestEvent, FQuestLifecycleEventReport, Report);
+	
 	/** Fires when execution reaches a giver-gated quest. PrereqStatus describes whether prereqs are currently satisfied. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestActivated OnQuestActivated;
@@ -203,10 +232,42 @@ public:
 	/** Fires when the quest's Blocked state fact transitions from present to absent. Symmetric partner to OnQuestBlocked. */
 	UPROPERTY(BlueprintAssignable, BlueprintCallable)
 	FOnQuestUnblocked OnQuestUnblocked;
+	
+	/**
+	 * Fires when a progress attempt against this quest is refused — typically a trigger fire on a step whose
+	 * Progress gate isn't open (prereq unsatisfied, Blocked state, etc.). Mirrors OnQuestGiveBlocked's shape
+	 * but for the run phase. Carries the blocker array + originating TriggerContext.
+	 */
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnQuestProgressRefused OnQuestProgressRefused;
+	
+	/**
+	 * Catch-all delegate that fires for every lifecycle event this observer receives, packaged into a single
+	 * FQuestLifecycleEventReport payload. Convenient for broad-audience consumers (UI sidebars, audio routers,
+	 * telemetry pipelines) that would otherwise bind every per-type delegate just to route on EventType.
+	 *
+	 * Gated by the same per-tag opt-in flags in FObservedQuestEventSettings — events with their per-tag flag
+	 * off don't fire the catch-all (they never enter the observer's pipeline). Set the bObserveX flags
+	 * accordingly when configuring ObservedTags.
+	 *
+	 * Bind this OR the narrow delegates, not both unless you want the same event delivered twice — there is no
+	 * framework-side cross-subscription deduplication. ActivationFailed stays on its narrow delegate only (outside
+	 * the lifecycle enum's scope; debug-leaning audience).
+	 */
+	UPROPERTY(BlueprintAssignable, BlueprintCallable)
+	FOnAnyQuestEvent OnAnyQuestEvent;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	
+	/**
+	 * Registration and catch-up, deferred to the tick after BeginPlay so the owning actor finishes its own
+	 * initialization (its Event BeginPlay — created state, bound delegates) before any event reaches this
+	 * component. Component BeginPlay runs ahead of the actor's, so firing here directly hits a half-built owner.
+	 * Virtual so Trigger / Giver chain their role-specific registration via Super.
+	 */
+	virtual void PerformDeferredRegistration();
 
 	/**
 	 * Derived components may expose a set of tags to be implicitly observed alongside the
@@ -217,7 +278,7 @@ protected:
 	 * Use to bridge tags managed by a derived component (e.g., Giver's QuestTagsToGive) onto the
 	 * Observer's broadcast surface without requiring designers to maintain a parallel ObservedTags entry.
 	 */
-	virtual FGameplayTagContainer GetImplicitlyObservedTags() const { return FGameplayTagContainer(); }
+	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const { return {}; }
 
 	virtual void HandleQuestActivated			(FGameplayTag Channel, const FQuestActivatedEvent& Event);
 	virtual void HandleQuestActivationFailed	(FGameplayTag Channel, const FQuestActivationFailedEvent& Event);
@@ -230,6 +291,14 @@ protected:
 	virtual void HandleQuestDeactivated			(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	virtual void HandleQuestBlocked				(FGameplayTag Channel, const FQuestBlockedEvent& Event);
 	virtual void HandleQuestUnblocked			(FGameplayTag Channel, const FQuestUnblockedEvent& Event);
+	virtual void HandleQuestProgressRefused		(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
+	
+	/**
+	 * Packs the supplied identity and event-specific fields into a FQuestLifecycleEventReport and broadcasts
+	 * on OnAnyQuestEvent. Called from every per-event Handle* site (and from each catch-up branch) after
+	 * the corresponding narrow delegate broadcasts. No-op if OnAnyQuestEvent has no listeners.
+	 */
+	void BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGameplayTag MatchedChannel, EQuestLifecycleEventType EventType, const FQuestEventPayload& Payload, FGameplayTag OutcomeTag = FGameplayTag(), AActor* GiverActor = nullptr);
 
 	virtual int32 ApplyTagRenames(const TMap<FName, FName>& Renames) override;
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
@@ -237,6 +306,33 @@ protected:
 	UFUNCTION(BlueprintCallable)
 	void RegisterQuestObserver();
 
+	/**
+	 * Subscribe + source-register + catch up ONE tag. Shared by RegisterQuestObserver's loop and the runtime
+	 * AddObservedTag path; captures the bus handles into SubscriptionHandlesByTag.
+	 */
+	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings);
+
+	/** Unsubscribe (by stored handle) + source-unregister + clear bookkeeping for ONE tag. */
+	void UnregisterSingleObservedTag(const FGameplayTag& QuestTag);
+
+	/**
+	 * Per-tag catch-up: replays current state for QuestTag as synthetic events. Virtual so Trigger/Giver layer
+	 * their role catch-up (OnQuestTriggerActivated replay, giver availability) on top via Super.
+	 */
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
+
+	/**
+	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed
+	 * selectively (RemoveObservedTag / RemoveTagsFromTrigger) without tearing down the whole component.
+	 */
+	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
+	
+	/**
+	 * True once RegisterQuestObserver has run. Gates the live-vs-deferred branch in AddObservedTag/RemoveObservedTag:
+	 * before registration, mutating the container suffices; after, it does live subscribe/unsubscribe work.
+	 */
+	bool bRegistered = false;
+	
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FObservedQuestEventSettings> ObservedTags;
@@ -256,6 +352,21 @@ public:
 
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetRegisteredWatchedQuestKeys() const;
+
+	/**
+	 * Runtime: start watching a quest tag (or update an already-watched tag's settings). If the component has
+	 * already registered, it subscribes + catches up the tag immediately; otherwise the tag is picked up by the
+	 * deferred registration. Safe to call repeatedly for the same tag — it refreshes rather than double-subscribes.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Quest")
+	void AddObservedTag(FGameplayTag QuestTag, FObservedQuestEventSettings Settings);
+
+	/**
+	 * Runtime: stop watching a quest tag. If registered, unsubscribes by handle and drops its source-registry
+	 * entry live. No-op for a tag that isn't being watched.
+	 */
+	UFUNCTION(BlueprintCallable, Category="Quest")
+	void RemoveObservedTag(FGameplayTag QuestTag);
 
 	/** DEPRECATED — WatchedStepTags is deprecated and only preserved for backwards compatibility. Prefer UQuestObserverComponent::ObservedTags TMap, using GetObservedTags() */
 	const FGameplayTagContainer& GetWatchedStepTags() const { return WatchedStepTags; }

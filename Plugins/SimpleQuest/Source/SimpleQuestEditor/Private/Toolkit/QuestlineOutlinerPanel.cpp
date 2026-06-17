@@ -140,7 +140,7 @@ void SQuestlineOutlinerPanel::RebuildTree()
 
     auto RootItem = MakeShared<FQuestlineOutlinerItem>();
     RootItem->Tag = FName(*QuestlineID);
-    // Display label — prefer FriendlyName via the canonical accessor, falls back to the asset short name when empty.
+    // Display label — prefer DisplayName via the canonical accessor, falls back to the asset short name when empty.
     RootItem->DisplayName = QuestlineGraph->GetDisplayName().ToString();
     RootItem->ItemType = EOutlinerItemType::Root;
 

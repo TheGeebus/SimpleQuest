@@ -5,7 +5,7 @@
 #include "Components/QuestComponentBase.h"
 
 #include "SimpleQuestLog.h"
-#include "Signals/SignalSubsystem.h"
+#include "Subsystems/SignalSubsystem.h"
 
 
 UQuestComponentBase::UQuestComponentBase()

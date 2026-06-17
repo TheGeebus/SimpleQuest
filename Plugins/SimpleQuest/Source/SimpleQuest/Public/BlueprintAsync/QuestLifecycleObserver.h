@@ -65,8 +65,10 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelega
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionCompletedDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Context);
 
-/** Activated variant — adds the PrereqStatus payload so designers don't need to query separately. See the
- *  lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract. */
+/**
+ * Activated variant — adds the PrereqStatus payload so designers don't need to query separately. See the
+ * lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract.
+ */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionActivatedDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, FQuestPrereqStatus, PrereqStatus);
 

@@ -27,8 +27,9 @@ UCLASS()
 class SIMPLEQUEST_API USimpleQuestBlueprintLibrary : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
-
+    
 public:
+    
     /**
      * Subscribe to a quest's lifecycle events. Configure which exec pins to expose via the checkboxes in
      * the Details panel — defaults to On Enabled / On Started / On Completed; opt in to others as needed.

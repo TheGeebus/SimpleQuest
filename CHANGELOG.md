@@ -27,7 +27,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.4.1] — In Development — Authoring Primitives + Subscriber Routing
+## [0.4.1] — 2026-06-17 — Authoring Primitives + Subscriber Routing
 
 Patch release adding new authoring primitives (the **Prereq Gate**
 utility node, an **Add / Remove / Clear Facts** node trio for direct
@@ -67,12 +67,12 @@ under the Flow Control context-menu category.
   historical record) inherit monotonic behavior automatically.
   No designer-side toggle — the right semantic drops out of the
   leaf kind the designer wired.
-- **Dedup against duplicate cascade arrival.** When a Step's
+- **Deduplicate against duplicate cascade arrival.** When a Step's
   completion BOTH satisfies the gate's last prereq AND cascades
   directly into the gate's Enter pin, the gate fires once for that
   cascade event — not once per arrival path. Achieved by per-
   cascade-event identity check; ResetTransientState clears the
-  dedup state on PIE re-entry.
+  deduplication state on PIE re-entry.
 - **Per-pin labels + tooltips + node-level tooltip** so the gate's
   three-pin geometry reads cleanly in the graph.
 
@@ -81,13 +81,13 @@ under the Flow Control context-menu category.
 Pin-wired prerequisites read a quest's permanent resolution history,
 so once one is satisfied it stays satisfied for the rest of the
 session. That's right for one-way progression, but it makes
-replayable content hollow: replay a chapter and its gates are already
+repeatable content hollow: replay a chapter and its gates are already
 open, because the upstream steps still count as resolved from the
 first run.
 
 The new **Resettable Replay** setting fixes that without touching the
 historical record. It's a tri-state — **Inherit / On / Off** — on
-every content node and on the questline graph asset itself; the
+every content node and on the questline graph asset itself. The
 default is **Off**, the permanent behavior above, unchanged.
 
 - **Set it On where a gate should reset.** The setting goes on the
@@ -95,19 +95,26 @@ default is **Off**, the permanent behavior above, unchanged.
   Prerequisites input — not the node that holds the prerequisite.
   With that node On, a prerequisite wired from it re-gates whenever
   the content replays: the moment the node re-activates after
-  completing, its satisfaction resets and the gate is honest again.
+  completing, its satisfaction resets and the gate must be opened again.
 - **The resolution history is never altered.** On adds a clearable
-  per-run view alongside the permanent record; replay clears the
-  view, the record stays intact. "Has this quest ever resolved this
+  per-run view alongside the permanent record. Replay clears the
+  view, but the record stays intact. "Has this quest ever resolved this
   way" queries are unaffected — only the gate's per-run state resets.
-- **Inherits down the graph.** Set Resettable Replay = On on the
+- **Inherits down the graph.** Set Resettable Replay = On for the
   questline asset (or a container node) and the content inside
-  inherits it; override any node back to Off or On individually. Turn
+  inherits it. Override any node back to Off or On individually. Turn
   a whole chapter replayable from one place, or scope it to a single
   branch.
 - **Resets automatically, or on demand.** A completed node clears its
-  gate when it re-activates for another run; `Activate Quest` with
-  **Bypass Prerequisites** resets it explicitly.
+  gate when it re-activates for another run. `Activate Quest` with
+  **Bypass Prerequisites** resets it explicitly. For a reset *without*
+  reactivating, **`Reset Quest Run State`** (SimpleQuest Blueprint
+  library) clears a quest's per-run gate state directly — every
+  resettable path mirror the quest has resolved through is cleared,
+  while the permanent resolution history and the Completed anchor are
+  left intact. It no-ops on a currently-Live quest (an in-flight run's
+  mirrors are load-bearing). Use it to re-arm a set of gates before a
+  manual replay.
 
 ### Fact-manipulation utility nodes
 
@@ -133,7 +140,7 @@ after processing them.
   A `bSuppressBroadcast` flag chooses whether to fire the removal
   event (defaults to firing).
 
-Use Add / Remove for ref-counted state that multiple authored
+Use Add / Remove for tag-counted states that multiple authored
 sources contribute to. Use Clear when authoring a definitive reset
 point. Together with the Prereq Gate, these nodes let questline
 graphs participate fully in the quest-agnostic fact system —

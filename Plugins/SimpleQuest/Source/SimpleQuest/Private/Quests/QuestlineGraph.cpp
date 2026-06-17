@@ -4,6 +4,7 @@
 #include "Quests/QuestlineGraph.h"
 
 #include "GameplayTagContainer.h"
+#include "Quests/QuestNodeBase.h"
 #include "UObject/AssetRegistryTagsContext.h"
 
 #if !WITH_EDITOR
@@ -46,6 +47,27 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 			PairStrings.Add(FString::Printf(TEXT("%s=%s"), *Pair.ContextualFName.ToString(), *Pair.AliasFName.ToString()));
 		}
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledNodeAliases"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
+
+	// CompiledDisplayNames — newline-separated "ContextualTag=DisplayName" records for container-level nodes
+	// (questline-level + LinkedQuestline placements). Lets the runtime register questline/chapter titles from the
+	// Asset Registry at startup — no asset load, no activation — so UI that queries a display name before the
+	// questline activates (e.g. a world nameplate at BeginPlay) resolves on a cold first run. Records are newline-
+	// separated (titles are single-line); each splits on its first '=' (a tag contains neither '=' nor a newline).
+	{
+		TArray<FString> DisplayPairs;
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : CompiledNodes)
+		{
+			const UQuestNodeBase* Node = Pair.Value;
+			if (!Node || !Node->IsContainerNode()) continue;
+			const FGameplayTag NodeTag = Node->GetContextualTag();
+			if (!NodeTag.IsValid() || Node->GetDisplayName().IsEmpty()) continue;
+			DisplayPairs.Add(FString::Printf(TEXT("%s=%s"), *NodeTag.ToString(), *Node->GetDisplayName().ToString()));
+		}
+		if (!DisplayPairs.IsEmpty())
+		{
+			Context.AddTag(FAssetRegistryTag(TEXT("CompiledDisplayNames"), FString::Join(DisplayPairs, TEXT("\n")), FAssetRegistryTag::TT_Hidden));
+		}
 	}
 
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));

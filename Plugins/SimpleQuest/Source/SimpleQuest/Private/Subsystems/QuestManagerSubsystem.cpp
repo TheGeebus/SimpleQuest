@@ -2311,10 +2311,60 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
     TArray<FAssetData> Assets;
     AR.GetAssets(Filter, Assets);
 
+    // The registry we write display data into. Fetched once for the eager-display pass below.
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+
     int32 IndexedAssetCount = 0;
     int32 IndexedTagCount = 0;
+    int32 EagerDisplayCount = 0;
     for (const FAssetData& Asset : Assets)
     {
+        // Eager display-data registration. DisplayName is published to the Asset Registry by
+        // UQuestlineGraph::GetAssetRegistryTags, so we register it against the questline's identity tag here at
+        // Initialize — no asset load, no activation needed. Without this, anything that queries the display name
+        // before the questline activates (e.g. a world nameplate at BeginPlay) gets an empty record on a cold first
+        // run. Activation-time RegisterQuestlineGraph later re-registers the full FText DisplayName + Description +
+        // DisplayData (idempotent overwrite). Runs for every questline asset, ahead of the listener-tag filter below.
+        if (StateSubsystem)
+        {
+            FString EffectiveID;
+            if (Asset.GetTagValue(TEXT("QuestlineEffectiveID"), EffectiveID) && !EffectiveID.IsEmpty())
+            {
+                const FGameplayTag QuestlineTag =
+                    UGameplayTagsManager::Get().RequestGameplayTag(FName(*(FQuestTagComposer::IdentityNamespace + EffectiveID)), false);
+                if (QuestlineTag.IsValid())
+                {
+                    FString DisplayNameStr;
+                    Asset.GetTagValue(TEXT("DisplayName"), DisplayNameStr);
+                    StateSubsystem->RegisterQuestTag(QuestlineTag);
+                    StateSubsystem->RegisterDisplayData(QuestlineTag, FText::FromString(DisplayNameStr), FText::GetEmpty(), nullptr);
+                    ++EagerDisplayCount;
+                }
+            }
+        }
+
+        // Eager-register the embedded/contextual display names the graph published (its container-level nodes:
+        // questline-level + LinkedQuestline placements). These are the forms UI usually queries — a nameplate showing
+        // a chapter title binds e.g. SimpleQuest.Questline.QuickStart.Chapter_6, which exists only in the QuickStart
+        // master's compile, not in any single chapter asset's own identity. Without this those titles aren't available
+        // until the questline activates.
+        FString DisplayNamesValue;
+        if (StateSubsystem && Asset.GetTagValue(TEXT("CompiledDisplayNames"), DisplayNamesValue) && !DisplayNamesValue.IsEmpty())
+        {
+            TArray<FString> Records;
+            DisplayNamesValue.ParseIntoArray(Records, TEXT("\n"), true);
+            for (const FString& Record : Records)
+            {
+                FString TagPart, NamePart;
+                if (!Record.Split(TEXT("="), &TagPart, &NamePart)) continue;   // splits on the first '='
+                const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagPart), false);
+                if (!NodeTag.IsValid()) continue;
+                StateSubsystem->RegisterQuestTag(NodeTag);
+                StateSubsystem->RegisterDisplayData(NodeTag, FText::FromString(NamePart), FText::GetEmpty(), nullptr);
+                ++EagerDisplayCount;
+            }
+        }
+
         FString TagValue;
         if (!Asset.GetTagValue(TEXT("ListenerGroupTags"), TagValue) || TagValue.IsEmpty()) continue;
 
@@ -2333,6 +2383,9 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
         }
         ++IndexedAssetCount;
     }
+
+    UE_LOG(LogSimpleQuestActivation, Verbose,
+        TEXT("BuildListenerGroupIndex: eager-registered %d questline display name(s) from the Asset Registry"), EagerDisplayCount);
 
     UE_LOG(LogSimpleQuestActivation, Log,
         TEXT("BuildListenerGroupIndex: scanned %d UQuestlineGraph asset(s); indexed %d listener-bearing graph(s) under %d (GroupTag, graph) entries"),

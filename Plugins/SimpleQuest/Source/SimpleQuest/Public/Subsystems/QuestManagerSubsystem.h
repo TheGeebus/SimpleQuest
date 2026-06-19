@@ -170,21 +170,6 @@ private:
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
-	
-	/**
-	 * Parallel index: AuthoredNodeGuid → the FName key used in LoadedNodeInstances. Enforces a "one instance per
-	 * authored node" invariant at registration time. The same authored node can be compiled into multiple questline
-	 * assets (standalone compile of an asset + inlined compile when the asset is a LinkedQuestline target inside
-	 * another asset). Both compiles produce separate UQuestNodeBase instances under different FName keys (different
-	 * ContextualTag perspectives). Without deduplication, both instances register, both have their delegates bound, and
-	 * every event fires twice — manifests as observer duplication, giver missed-add on loop, and other multi-tag
-	 * delivery anomalies that look like broadcast bugs but root at duplicate registration.
-	 *
-	 * Excluded from this deduplication: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
-	 * different cascade behavior per perspective) and prereq rule monitors (already deduplicated via shared FName key
-	 * in LoadedNodeInstances; see the comment on the FName-key deduplication loop in RegisterQuestlineGraph).
-	 */
-	TMap<FGuid, FName> LoadedInstancesByAuthoredNodeGuid;
 
 	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
@@ -248,46 +233,29 @@ private:
 	void ResetQuestRunState(FGameplayTag QuestTag);
 
 	/**
-	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
-	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
-	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance
-	 * carries every perspective the deduplicated instance would have had — events publish on all forms, alias-walks
-	 * find the canonical from any form, state subsystem queries resolve through cross-asset perspectives.
-	 *
-	 * Also populates LoadedNodeInstances under each merged alias key (same pointer, additional keys) so every
-	 * existing direct-lookup site (Find / FindRef / Contains) resolves transparently from any perspective. No
-	 * per-call-site alias-walk needed — iteration sites don't exist (verified) so duplicate visits aren't a
-	 * concern.
-	 */
-	void MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming);
-
-	/**
-	 * Idempotent registration of an Instance pointer in LoadedNodeInstances. Centralizes the alias-aware Add so
-	 * the invariant "all alias keys for a given Instance map to the same pointer" lives in one place. Handle-
-	 * ActivationRequest / HandleGiveQuestEvent rely on this invariant for their dedup-by-Instance-pointer loops;
-	 * any future caller comparing FindRef results across alias forms gets the same guarantee.
+	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds
+	 * one entry per placement — a node's ContextualTag resolves to exactly one runtime instance (strict 1:1).
+	 * Centralizing the Add keeps that invariant in one place; lookup and dedup-by-pointer sites rely on it.
 	 *
 	 * Behavior:
 	 *   - Key unmapped: stores Instance under Key.
-	 *   - Key already mapped to the SAME Instance: no-op (idempotent re-registration is benign — happens during
-	 *     MergePerspectiveTagsInto's union pass and on cross-session registration for instances that persist on
-	 *     the asset across PIE).
-	 *   - Key already mapped to a DIFFERENT Instance: logs Warning and SKIPS the write. A collision here
-	 *     indicates a broken design invariant — alias keys are constructed at compile-time to be unique per
-	 *     Instance via the multi-tag stack; surfacing the violation is preferable to silent overwrite.
+	 *   - Key already mapped to the SAME Instance: no-op — a benign idempotent re-register.
+	 *   - Key already mapped to a DIFFERENT Instance: logs Warning and SKIPS the write. A collision here indicates
+	 *     a broken invariant — ContextualTags are constructed at compile time to be unique per placement, so
+	 *     surfacing the violation is preferable to a silent overwrite.
 	 */
 	void RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance);
 		
 	/**
-	 * Pushes all per-perspective state-subsystem registrations for a freshly-registered or freshly-merged node
-	 * instance — canonical + every AssetScopedAliasTag. Per perspective: KnownQuests, alias mapping (when not the
-	 * canonical), container classification, display data. Centralizes the registration bundle so the invariant
+	 * Pushes all per-perspective state-subsystem registrations for a freshly-registered node instance — its
+	 * canonical ContextualTag plus every AssetScopedAliasTag. Per perspective: KnownQuests, alias mapping (when not
+	 * the canonical), container classification, display data. Centralizes the registration bundle so the invariant
 	 * "every perspective gets the full bookkeeping" lives in one place.
 	 *
-	 * Called by RegisterQuestlineGraph (fresh instance registration) and MergePerspectiveTagsInto (merging a duplicate
-	 * compile's perspective set into the existing canonical). Idempotent across the underlying registrations — re-
-	 * registering an already-known tag/alias/container/display-data record is a no-op or harmless overwrite, so the
-	 * merge case safely re-iterates the canonical and existing aliases alongside the new ones.
+	 * Called by RegisterQuestlineGraph during instance registration. Idempotent across the underlying registrations:
+	 * multiple placements of the same sub-questline share a class-channel AssetScopedAliasTag, so each placement
+	 * registers it — re-registering an already-known tag / alias mapping / container classification / display-data
+	 * record is a no-op or harmless overwrite.
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 

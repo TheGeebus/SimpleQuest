@@ -306,9 +306,18 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
 
+    // Build a contextual-FName to alias-FNames lookup from the graph's persisted alias pairs, so each instance can
+    // resolve its own AssetScopedAliasTags at registration (the class-channel perspectives it publishes on). This
+    // makes explicit the alias resolution the old AuthoredNodeGuid merge performed as a side effect — each placement
+    // now resolves its aliases independently, with no dependence on a duplicate registration to merge against.
+    TMap<FName, TArray<FName>> AliasFNamesByContextual;
+    for (const FQuestCompiledNodeAlias& Alias : Graph->GetCompiledNodeAliases())
+    {
+        AliasFNamesByContextual.FindOrAdd(Alias.ContextualFName).Add(Alias.AliasFName);
+    }
+
     int32 NewlyRegistered = 0;
     int32 SkippedAlreadyRegistered = 0;
-    int32 SkippedDuplicateAuthoredGuid = 0;
     for (const auto& Pair : Graph->GetCompiledNodes())
     {
         if (UQuestNodeBase* Instance = Pair.Value)
@@ -325,37 +334,13 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
                 continue;
             }
 
-            // Per-AuthoredNodeGuid singleton enforcement + perspective merge. The same authored node compiled
-            // into multiple assets (standalone compile + inlined-by-LinkedQuestline compile) produces separate
-            // UQuestNodeBase instances under different FName keys (different ContextualTag perspectives).
-            // Without dedup, both bind their delegates and every event fires twice. With dedup-and-skip alone,
-            // the second instance's perspectives are lost — subscribers / cascades bound to those forms have
-            // no runtime. With dedup-and-merge, the deduped instance's perspectives are folded onto the
-            // existing canonical's alias set, and LoadedNodeInstances gains entries under each merged alias
-            // pointing at the canonical so lookups by any perspective resolve transparently. Excluded:
-            // Util_ keys (per-context utility instances are intentional) and instances whose AuthoredNodeGuid
-            // is invalid (synthetic or legacy nodes without a stable identity).
+            // Per-placement registration: every compiled placement is its own runtime instance, keyed in
+            // LoadedNodeInstances by its ContextualTag alone. The same authored sub-questline placed N times (or
+            // compiled standalone and inlined elsewhere) yields N independent instances with independent progress —
+            // they do not merge. Cross-asset observers reach all placements of a class through the shared
+            // AssetScopedAliasTag at publish time (see GetAssetScopedAliasTags and the multi-channel publish), not
+            // through merged LoadedNodeInstances keys. Util_ keys remain per-context by design.
             const bool bIsUtilityKey = Pair.Key.ToString().StartsWith(TEXT("Util_"));
-            const FGuid InstanceAuthoredGuid = Instance->GetAuthoredNodeGuid();
-            if (!bIsUtilityKey && InstanceAuthoredGuid.IsValid())
-            {
-                if (const FName* ExistingKey = LoadedInstancesByAuthoredNodeGuid.Find(InstanceAuthoredGuid))
-                {
-                    if (UQuestNodeBase* Existing = LoadedNodeInstances.FindRef(*ExistingKey))
-                    {
-                        UE_LOG(LogSimpleQuestActivation, Verbose,
-                            TEXT("RegisterQuestlineGraph: '%s' — merging perspectives from '%s' into '%s' (AuthoredNodeGuid %s)"),
-                            *Graph->GetName(),
-                            *Pair.Key.ToString(),
-                            *ExistingKey->ToString(),
-                            *InstanceAuthoredGuid.ToString(EGuidFormats::Short));
-                        
-                        MergePerspectiveTagsInto(Existing, *ExistingKey, Instance);
-                    }
-                    ++SkippedDuplicateAuthoredGuid;
-                    continue;
-                }
-            }
 
             // Compiled node instances live on the UQuestlineGraph asset and persist across PIE sessions. Wipe any
             // state the prior session left on them — subscription handles to a dead SignalSubsystem, deferred
@@ -365,23 +350,12 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             if (!bIsUtilityKey)
             {
                 Instance->ResolveContextualTag(Pair.Key);
-            }
-            RegisterLoadedNodeInstance(Pair.Key, Instance);
-            if (!bIsUtilityKey && InstanceAuthoredGuid.IsValid())
-            {
-                LoadedInstancesByAuthoredNodeGuid.Add(InstanceAuthoredGuid, Pair.Key);
-            }
-            // Also populate LoadedNodeInstances under each alias FName so any-perspective lookups resolve to
-            // this canonical instance. The same Instance pointer lives under its ContextualTag key (Pair.Key)
-            // AND under each AssetScopedAliasTag's name. Direct-lookup sites (ActivateNodeByTag,
-            // FireWrapperBoundaryCompletion, etc.) work transparently with this — no alias-walk helper needed.
-            for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
-            {
-                if (AliasTag.IsValid())
+                if (const TArray<FName>* Aliases = AliasFNamesByContextual.Find(Pair.Key))
                 {
-                    RegisterLoadedNodeInstance(AliasTag.GetTagName(), Instance);
+                    Instance->ResolveAssetScopedAliasTags(*Aliases);
                 }
             }
+            RegisterLoadedNodeInstance(Pair.Key, Instance);
             Instance->RegisterWithGameInstance(GetGameInstance());
             Instance->OnRegisteredWithManager();
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
@@ -453,11 +427,10 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         }
     }
     
-    UE_LOG(LogSimpleQuestActivation, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName), %d duplicate authored-guid"),
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("RegisterQuestlineGraph: '%s' — registered %d new node instance(s); skipped %d already registered (FName)"),
         *Graph->GetName(),
         NewlyRegistered,
-        SkippedAlreadyRegistered,
-        SkippedDuplicateAuthoredGuid);
+        SkippedAlreadyRegistered);
 
     // Reachability walk: identify listener-graphs reachable from this graph's outward setters and async-load them.
     // Cascade-naturally: each newly-loaded graph's RegisterQuestlineGraph triggers its own WarmReachableGraphs, fan-
@@ -628,95 +601,6 @@ void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
             ClearedPaths.Add(Entry.PathIdentity);
         }
     }
-}
-
-void UQuestManagerSubsystem::MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming)
-{
-    if (!Existing || !Incoming) return;
-
-    // Collect every FName the merged instance should carry as an alias: the existing instance's current aliases,
-    // plus the incoming instance's ContextualTag, plus the incoming instance's own aliases. Exclude the existing
-    // canonical name itself — that stays the canonical, not an alias of itself.
-    TSet<FName> MergedAliasSet;
-    for (const FGameplayTag& T : Existing->GetAssetScopedAliasTags())
-    {
-        if (T.IsValid()) MergedAliasSet.Add(T.GetTagName());
-    }
-    const FGameplayTag IncomingContextual = Incoming->GetContextualTag();
-    if (IncomingContextual.IsValid() && IncomingContextual.GetTagName() != ExistingCanonicalName)
-    {
-        MergedAliasSet.Add(IncomingContextual.GetTagName());
-    }
-    for (const FGameplayTag& T : Incoming->GetAssetScopedAliasTags())
-    {
-        if (T.IsValid() && T.GetTagName() != ExistingCanonicalName)
-        {
-            MergedAliasSet.Add(T.GetTagName());
-        }
-    }
-
-    // Rebuild the existing instance's AssetScopedAliasTags from the merged set. ResolveAssetScopedAliasTags
-    // resets the array each call and re-resolves FName → FGameplayTag, so this is a clean replace with the
-    // union semantics we want.
-    Existing->ResolveAssetScopedAliasTags(MergedAliasSet.Array());
-
-    // Populate LoadedNodeInstances under every merged alias key so any-perspective direct lookups resolve to
-    // the existing canonical instance.
-    for (const FName& AliasName : MergedAliasSet)
-    {
-        RegisterLoadedNodeInstance(AliasName, Existing);
-    }
-
-    // Existing has already had ResolveAssetScopedAliasTags(MergedAliasSet.Array()) called above, so its
-    // AssetScopedAliasTags now contains the merged set. The helper iterates canonical + every alias to register all
-    // perspectives with the state subsystem — KnownQuests, alias mapping, container classification, display data.
-    // Idempotent across the underlying calls, so re-registering the existing canonical + pre-merge aliases alongside
-    // the new ones is harmless. Closes the prior display-data gap where merged alias perspectives weren't getting
-    // DisplayData records.
-    RegisterAllNodePerspectives(Existing);
-
-    // Structural cascade data merge. The deduped instance's compile context (e.g. the outer asset inlining this
-    // node via a LinkedQuestline) carries BoundaryCompletions and ResolvedGraphs pointing at wrappers and asset
-    // roots that don't exist in the canonical's own compile. Without folding these in, the cascade from the
-    // canonical Step's completion never fires the foreign-perspective wrapper's BC — Main.Prologue (or nested
-    // equivalents) stays un-resolved and any post-LinkedQuestline content un-activated. Destination FName lists
-    // (NodeTags / NextNodesOnAnyOutcome / NextNodesOnDeactivation) are intentionally NOT merged — Layer 2's
-    // alias-key population in LoadedNodeInstances already routes the canonical's NextNodes* entries through
-    // their alias forms, so merging would double-Activate the same Instance. BCs and ResolvedGraphs are
-    // wrapper-side / asset-side; F.3's event-keyed dedup gate in FireWrapperBoundaryCompletion catches
-    // duplicate cascade arrivals at the same canonical wrapper, and PublishGraphResolutions's per-entry
-    // OutcomeTag attribution makes the asset-resolution publish stable across perspectives.
-    for (const TPair<FName, FQuestPathNodeList>& IncomingPair : Incoming->NextNodesByPath)
-    {
-        FQuestPathNodeList* ExistingPath = Existing->NextNodesByPath.Find(IncomingPair.Key);
-        if (!ExistingPath) continue;  // path skew between compiles is unexpected for the same authored node; defensive skip
-
-        for (const FQuestBoundaryCompletion& BC : IncomingPair.Value.BoundaryCompletions)
-        {
-            ExistingPath->BoundaryCompletions.AddUnique(BC);
-        }
-        for (const FQuestGraphResolution& Resolution : IncomingPair.Value.ResolvedGraphs)
-        {
-            if (Resolution.GraphTag.IsValid()) ExistingPath->ResolvedGraphs.AddUnique(Resolution);
-        }
-    }
-
-    for (const FQuestBoundaryCompletion& BC : Incoming->BoundaryCompletionsOnAnyOutcome)
-    {
-        Existing->BoundaryCompletionsOnAnyOutcome.AddUnique(BC);
-    }
-    for (const FQuestGraphResolution& Resolution : Incoming->ResolvedGraphsOnAnyOutcome)
-    {
-        if (Resolution.GraphTag.IsValid()) Existing->ResolvedGraphsOnAnyOutcome.AddUnique(Resolution);
-    }
-
-    UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("MergePerspectiveTagsInto: '%s' — merged structural cascade data from '%s' (paths=%d, AnyOutcome BCs=%d, AnyOutcome ResolvedGraphs=%d)"),
-        *ExistingCanonicalName.ToString(),
-        *Incoming->GetContextualTag().ToString(),
-        Existing->NextNodesByPath.Num(),
-        Existing->BoundaryCompletionsOnAnyOutcome.Num(),
-        Existing->ResolvedGraphsOnAnyOutcome.Num());
 }
 
 void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance)

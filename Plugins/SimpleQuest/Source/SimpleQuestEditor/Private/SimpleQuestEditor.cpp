@@ -66,28 +66,27 @@
 #include "Widgets/SStaleQuestTagsPanel.h"
 
 
-
 const FName FSimpleQuestEditor::StaleQuestTagsTabId(TEXT("SimpleQuest.StaleQuestTags"));
 
 namespace
 {
-	/** ViewID for the Quest State view in the generic FactsPanelRegistry. Stable string used as the dropdown
-	 *  selection key inside SFactsPanel. File-scope since no other translation unit needs to reference it. */
-	const FName QuestStateViewId(TEXT("SimpleQuest.Questline.tate"));
+	/**
+	 * ViewID for the Quest State view in the generic FactsPanelRegistry. Stable string used as the dropdown
+	 * selection key inside SFactsPanel. File-scope since no other translation unit needs to reference it.
+	 */
+	const FName QuestStateViewId(TEXT("SimpleQuest.Questline.State"));
 }
 
 IMPLEMENT_MODULE(FSimpleQuestEditor, SimpleQuestEditor);
 
 FString FSimpleQuestEditor::GetCompiledTagsIniPath()
 {
-	// Plugin-local Config/Tags/ destination travels with the plugin folder, so adopters inherit the compiled
-	// tags by copying the plugin. The runtime module registers this directory with UGameplayTagsManager via
-	// AddTagIniSearchPath (UE only auto-scans the PROJECT's Config/Tags/, not plugin directories).
-	// Replaces the prior <Project>/Config/SimpleQuest/CompiledTags.ini target which didn't travel.
-	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SimpleQuest"));
-	return Plugin.IsValid()
-		? FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Config/Tags/SimpleQuestCompiledTags.ini"))
-		: FString();
+	// Generated, per-project data, so it lives with the consuming project instead of the plugin folder. An engine-installed
+	// plugin sits under the shared, potentially read-only engine directory, where writing may fail and the file could neither
+	// travel with nor stay isolated to a single project. A dedicated subfolder (not Config/Tags/) keeps this auto-generated,
+	// compile-overwritten file out of the Gameplay Tag editor's save-picker. StartupModule registers this directory as a
+	// gameplay-tag search path, which the manager re-applies on every tag-tree rebuild.
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/SimpleQuestCompiledTags.ini"));
 }
 
 class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
@@ -166,10 +165,15 @@ void FSimpleQuestEditor::StartupModule()
 		.SetMenuType(ETabSpawnerMenuType::Enabled);
 #undef LOCTEXT_NAMESPACE
 	
-	// ── Early tag registration from compiled INI ──────────────────────
-	// Creates native tags BEFORE the Asset Registry finishes loading, ensuring quest tags are available for asset deserialization.
-	// The INI lives outside Config/Tags/ so the Gameplay Tag editor's save picker never sees it.
-	LoadCompiledTagsFromIni();
+	// ── Tag registration from the compiled INI ────────────────────────
+	// Register the compiled-tags directory as a gameplay-tag search path. The manager scans it immediately and, on
+	// every tag-tree rebuild, re-applies it (ConstructGameplayTagTree re-adds registered search paths) — so the
+	// compiled quest tags survive PIE / Live-Coding tree reconstructions instead of dropping out. Runs before the
+	// Asset Registry finishes loading, so the tags are present for asset deserialization.
+	const FString CompiledTagsDir = FPaths::GetPath(GetCompiledTagsIniPath());
+	UGameplayTagsManager::Get().AddTagIniSearchPath(CompiledTagsDir);
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Registered compiled-tags search path: %s"), *CompiledTagsDir);
+
 	MigrateLegacyTagsIni();
 	
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
@@ -728,49 +732,20 @@ void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TAr
     }
 }
 
-void FSimpleQuestEditor::LoadCompiledTagsFromIni()
-{
-	const FString IniPath = GetCompiledTagsIniPath();
-	FString Content;
-	if (!FFileHelper::LoadFileToString(Content, *IniPath))
-	{
-		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("LoadCompiledTagsFromIni — no INI found (first run or not yet compiled)"));
-		return;
-	}
-
-	TArray<FString> Lines;
-	Content.ParseIntoArrayLines(Lines);
-	for (const FString& Line : Lines)
-	{
-		const int32 TagStart = Line.Find(TEXT("Tag=\""));
-		if (TagStart == INDEX_NONE) continue;
-		const int32 ValueStart = TagStart + 5;
-		const int32 ValueEnd = Line.Find(TEXT("\""), ESearchCase::IgnoreCase,	ESearchDir::FromStart, ValueStart);
-		if (ValueEnd != INDEX_NONE)
-		{
-			const FName TagName(*Line.Mid(ValueStart, ValueEnd - ValueStart));
-			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
-				TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
-		}
-	}
-
-	if (CompiledNativeTags.Num() > 0)
-	{
-		UGameplayTagsManager::Get().ConstructGameplayTagTree();
-	}
-
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("LoadCompiledTagsFromIni — registered %d native tag(s)"), CompiledNativeTags.Num());
-}
-
 void FSimpleQuestEditor::MigrateLegacyTagsIni()
 {
-	// Two prior locations to clean up on upgrade — both written by older versions of this module before the current
+	// Two prior locations to clean up on upgrade, both written by older versions of this module before the current
 	// plugin-local destination was adopted. Either being present at startup indicates the project hasn't been
 	// recompiled since the upgrade; the next Compile All Questlines pass writes to the new plugin location.
-	const TArray<FString> LegacyPaths = {
+	const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("SimpleQuest"));
+	TArray<FString> LegacyPaths = {
 		FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("Tags/SimpleQuestCompiledTags.ini")),
 		FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/CompiledTags.ini")),
 	};
+	if (Plugin.IsValid())   // the previous plugin-local destination, superseded by the project-local path
+	{
+		LegacyPaths.Add(FPaths::ConvertRelativePathToFull(Plugin->GetBaseDir() / TEXT("Config/Tags/SimpleQuestCompiledTags.ini")));
+	}
 
 	for (const FString& LegacyPath : LegacyPaths)
 	{

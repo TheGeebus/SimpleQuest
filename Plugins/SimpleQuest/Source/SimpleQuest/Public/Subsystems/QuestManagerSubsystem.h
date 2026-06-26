@@ -189,6 +189,14 @@ private:
 	FGameplayTag ResolveToCanonicalTag(FGameplayTag InputTag) const;
 
 	/**
+	 * Resolves an adopter-supplied tag to the single canonical instance a mutation should target. Mutations are
+	 * instance-specific: a contextual tag (or a class-channel alias with a single placement) resolves to that one
+	 * instance; an alias shared by multiple placements is ambiguous — which instance? — and is refused with a
+	 * Warning. Returns an invalid tag on refusal so callers fall through their existing invalid-tag guard.
+	 */
+	FGameplayTag ResolveSingleCanonicalForMutation(FGameplayTag InputTag) const;
+
+	/**
 	 * Adds (or removes) a state-leaf fact at the canonical perspective AND every AssetScopedAliasTag the
 	 * instance carries, so direct WorldState->HasFact queries from any perspective find the fact. Mirrors
 	 * the multichannel publish model the bus uses for events — facts and events both ride every

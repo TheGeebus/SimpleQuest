@@ -165,6 +165,18 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
     }
 }
 
+void USimpleQuestBlueprintLibrary::LogSimpleQuestMessage(const FString& Message, EQuestLogLevel Level)
+{
+    switch (Level)
+    {
+    case EQuestLogLevel::Error:   UE_LOG(LogSimpleQuest, Error,   TEXT("%s"), *Message); break;
+    case EQuestLogLevel::Display: UE_LOG(LogSimpleQuest, Display, TEXT("%s"), *Message); break;
+    case EQuestLogLevel::Verbose: UE_LOG(LogSimpleQuest, Verbose, TEXT("%s"), *Message); break;
+    case EQuestLogLevel::Warning:
+    default:                      UE_LOG(LogSimpleQuest, Warning, TEXT("%s"), *Message); break;
+    }
+}
+
 
 // -------------------------------------------------------------------------
 // Observe Quest Lifecycle

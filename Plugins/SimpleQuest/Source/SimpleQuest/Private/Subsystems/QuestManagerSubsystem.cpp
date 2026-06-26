@@ -453,6 +453,21 @@ FGameplayTag UQuestManagerSubsystem::ResolveToCanonicalTag(FGameplayTag InputTag
     return InputTag;
 }
 
+FGameplayTag UQuestManagerSubsystem::ResolveSingleCanonicalForMutation(FGameplayTag InputTag) const
+{
+    if (!InputTag.IsValid() || !QuestStateSubsystem) return FGameplayTag();
+
+    const TArray<FGameplayTag> Canonicals = QuestStateSubsystem->ResolveCanonicalTags(InputTag);
+    if (Canonicals.Num() == 1) return Canonicals[0];
+
+    UE_LOG(LogSimpleQuestActivation, Warning,
+        TEXT("Mutation request on '%s' resolves to %d placements — class-channel mutations are instance-specific; "
+             "address a single placement by its contextual tag. Request ignored."),
+        *InputTag.ToString(),
+        Canonicals.Num());
+    return FGameplayTag();
+}
+
 void UQuestManagerSubsystem::AddStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf)
 {
     if (!WorldState || !InputTag.IsValid()) return;
@@ -1981,7 +1996,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
     // Resolve input to canonical so the Blocked fact is written at the perspective queries alias-walk to find.
     // Without this, an alias-form input writes State.<alias>.Blocked which no query touches, and the quest
     // appears unblocked everywhere despite the request succeeding.
-    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
+    const FGameplayTag QuestTag = ResolveSingleCanonicalForMutation(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     // Block-side: idempotency guard at canonical perspective. Symmetric with the already-deactivated guard in
@@ -2018,7 +2033,7 @@ void UQuestManagerSubsystem::HandleBlockRequest(FGameplayTag Channel, const FQue
 void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const FQuestClearBlockRequestEvent& Event)
 {
     // Resolve input to canonical so the Blocked-fact clear lands at the perspective the write went to.
-    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
+    const FGameplayTag QuestTag = ResolveSingleCanonicalForMutation(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     // Symmetric with the already-blocked guard in HandleBlockRequest. Also gates FQuestUnblockedEvent broadcast
@@ -2046,7 +2061,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 void UQuestManagerSubsystem::HandleResolveRequest(FGameplayTag Channel, const FQuestResolveRequestEvent& Event)
 {
     // Resolve input to canonical so IsTerminal and SetQuestResolved target the perspective state facts live at.
-    const FGameplayTag QuestTag = ResolveToCanonicalTag(Event.GetQuestTag());
+    const FGameplayTag QuestTag = ResolveSingleCanonicalForMutation(Event.GetQuestTag());
     if (!QuestTag.IsValid() || !WorldState) return;
 
     // Override guard — skip if already in a terminal state unless designer explicitly opts in. Default-false
@@ -2447,7 +2462,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivationRequest(FGameplayTag Channel,
     // Resolve input to canonical so SetQuestDeactivated's IsActiveLifecycle / fact-write paths target the
     // perspective state facts were actually written under. BP callers (DeactivateQuest helper) may pass any
     // perspective form; state lives at the canonical ContextualTag of the underlying instance.
-    const FGameplayTag CanonicalTag = ResolveToCanonicalTag(Event.GetQuestTag());
+    const FGameplayTag CanonicalTag = ResolveSingleCanonicalForMutation(Event.GetQuestTag());
     if (CanonicalTag.IsValid()) SetQuestDeactivated(CanonicalTag, Event.Source, Event.Context);
 }
 

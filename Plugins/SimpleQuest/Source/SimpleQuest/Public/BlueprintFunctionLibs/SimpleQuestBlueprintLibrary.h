@@ -12,6 +12,7 @@
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 class UQuestDisplayData;
@@ -22,6 +23,19 @@ class UQuestlineGraph;
 class UQuestManagerSubsystem;
 class UWorldStateSubsystem;
 
+/**
+ * Severity for LogSimpleQuestMessage — the levels a Blueprint actually wants to emit at. A deliberately small subset
+ * of ELogVerbosity: no Off (a non-logging "log" call is meaningless) and no Fatal (a Blueprint shouldn't be able to
+ * assert the game down). For configuring per-category log thresholds, see EQuestLogVerbosity in SimpleQuestSettings.
+ */
+UENUM(BlueprintType)
+enum class EQuestLogLevel : uint8
+{
+    Error   UMETA(DisplayName = "Error"),
+    Warning UMETA(DisplayName = "Warning"),
+    Display UMETA(DisplayName = "Display"),
+    Verbose UMETA(DisplayName = "Verbose"),
+};
 
 UCLASS()
 class SIMPLEQUEST_API USimpleQuestBlueprintLibrary : public UBlueprintFunctionLibrary
@@ -204,6 +218,15 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph,
         const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+
+    // -------------------------------------------------------------------------------------------------------------
+    // Logging — write into SimpleQuest's "Module" log category from Blueprints at a chosen verbosity. Print String is
+    // fixed at Display; this lets BP diagnostics surface as Warning/Error and honor the per-category verbosity set in
+    // Project Settings → Simple Quest → Logging.
+    // -------------------------------------------------------------------------------------------------------------
+
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Debug", meta = (DisplayName = "Log Simple Quest Message"))
+    static void LogSimpleQuestMessage(const FString& Message, EQuestLogLevel Level = EQuestLogLevel::Warning);
 
 private:
     static UWorldStateSubsystem* GetWorldStateSubsystem(const UObject* WorldContext);

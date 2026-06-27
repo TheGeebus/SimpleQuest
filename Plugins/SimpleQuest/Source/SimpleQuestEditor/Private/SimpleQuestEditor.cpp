@@ -504,8 +504,6 @@ void FSimpleQuestEditor::BeginCompileBatch()
 	check(!bBatchActive);
 	bBatchActive = true;
 	bBatchHasStaleTags = false;
-	NumSkippedAlreadyRegistered = 0;  // TEMP
-	NumConstructedFresh = 0;          // TEMP
 }
 
 void FSimpleQuestEditor::EndCompileBatch()
@@ -515,9 +513,6 @@ void FSimpleQuestEditor::EndCompileBatch()
 
 	WriteCompiledTagsIni();
 	FlushCompiledDisplayIni();
-
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("EndCompileBatch: %d tags skipped (already registered), %d constructed fresh"),
-		NumSkippedAlreadyRegistered, NumConstructedFresh);  // TEMP
 
 	// Tree rebuild path — full reset+refresh if stale tags appeared anywhere in the batch (need to
 	// prune the tree); otherwise just finalize the tree additively (incremental adds during the batch

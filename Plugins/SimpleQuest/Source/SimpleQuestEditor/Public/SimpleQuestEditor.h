@@ -52,8 +52,7 @@ private:
 	TArray<TUniquePtr<FNativeGameplayTag>> CompiledNativeTags;
 
 	TUniquePtr<FQuestPIEDebugChannel> PIEDebugChannel;
-
-	void LoadCompiledTagsFromIni();
+	
 	void MigrateLegacyTagsIni();
 	static FString GetCompiledTagsIniPath();
 	
@@ -110,8 +109,6 @@ private:
 	 * state-fact expansion logic stays in one place.
 	 */
 	void AddNativeTagsForGraph(const TArray<FName>& TagNames);
-	int32 NumSkippedAlreadyRegistered = 0;  // TEMP
-	int32 NumConstructedFresh = 0;          // TEMP
 	
 	/**
 	 * Parallel index for AddNativeTagsForGraph's O(1) "already registered?" check. Stays in sync

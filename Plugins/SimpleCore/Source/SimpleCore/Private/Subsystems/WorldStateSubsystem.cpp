@@ -84,3 +84,9 @@ int32 UWorldStateSubsystem::GetFactValue(const FGameplayTag Tag) const
 	const int32* Count = WorldFacts.Find(Tag);
 	return Count ? *Count : 0;
 }
+
+void UWorldStateSubsystem::RestoreFacts(const TMap<FGameplayTag, int32>& InFacts)
+{
+	WorldFacts = InFacts;
+	OnAnyFactChanged.Broadcast();
+}

@@ -16,6 +16,7 @@
 #include "Quests/Types/QuestDisplayDataRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
+struct FQuestRoleSourceInfo;
 class UQuestDisplayData;
 class UQuestObjective;
 class UActorComponent;
@@ -403,6 +404,22 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	UQuestDisplayData* GetDisplayData(FGameplayTag Tag) const;
 
+	// ── Snapshot ─────────────────────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Captures all SimpleQuest runtime state into a serializable snapshot (WorldState facts + the resolution/entry
+	 * registries). Pure read. The consumer embeds the result in their own USaveGame and writes it (sync or async).
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|SaveLoad")
+	FSimpleQuestSaveSnapshot CaptureSnapshot() const;
+
+	/**
+	 * Restores state from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the parallel
+	 * indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|SaveLoad")
+	bool ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot);
+
 private:
     friend class UQuestManagerSubsystem;
 
@@ -645,4 +662,10 @@ private:
 	 * when the mirror is cleared, so the map only ever holds currently-set mirror facts.
 	 */
 	TMap<FGameplayTag, FOriginatingEventID> PathFactWriteEventIDs;
+
+	/**
+	 * Rebuilds ResolvedOutcomesByQuest / ResolvedPathsByQuest / ResolvedOutcomes / EnteredOutcomesByQuest from
+	 * the restored histories — mirrors RecordResolution / RecordEntry's per-perspective index maintenance.
+	 */
+	void RebuildRegistryIndices();
 };

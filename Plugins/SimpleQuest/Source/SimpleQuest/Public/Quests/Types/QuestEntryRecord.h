@@ -28,19 +28,19 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	GENERATED_BODY()
 
 	/** The upstream quest tag that triggered this entry: the source whose resolution outcome routed into this destination. Invalid for non-cascade starts (giver / external / initial-entry). */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FGameplayTag SourceQuestTag;
 
 	/** The outcome route that fired: the OutcomeTag on the upstream source's resolution that activated this destination. Invalid for non-cascade starts. */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FGameplayTag IncomingOutcomeTag;
 
 	/** World time at this specific entry (GetTimeSeconds on the manager's world). */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	double EntryTime = 0.0;
 
 	/** How this start was initiated. Stamped explicitly at every start site so the registry doesn't infer from sibling-field validity. */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
 	/**
@@ -55,7 +55,7 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	 * Per-source routing identity: the IncomingSourceTag arg threaded through ActivateNodeByTag for duplicate-path disambiguation
 	 * on Quest entry filtering. NAME_None for entry-tag fires and any start that didn't carry per-source routing.
 	 */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FName PathIdentity = NAME_None;
 };
 
@@ -73,7 +73,7 @@ struct SIMPLEQUEST_API FQuestEntryRecord
 {
 	GENERATED_BODY()
 
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	TArray<FQuestEntryArrival> History;
 
 	int32 GetCount() const { return History.Num(); }

@@ -47,6 +47,7 @@
 #include "Utilities/QuestTagComposer.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Display/QuestDisplayData.h"
 #include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestPublish.h"
@@ -175,6 +176,10 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     }
 
     RegisterGiversFromAssetRegistry();
+    
+    // Display index from the compiled ini — file read + small asset loads, no AR wait, so display names/DisplayData
+    // resolve for cold BeginPlay queries (nameplates, sidebars) before anything activates.
+    LoadCompiledDisplayIni();
     
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("UQuestManagerSubsystem::Initialize : Initializing: %s"), *GetFullName());
 
@@ -1482,6 +1487,57 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         *IncomingOutcomeTag.ToString());
 }
 
+void UQuestManagerSubsystem::LoadCompiledDisplayIni() const
+{
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!StateSubsystem) return;
+
+    // Path mirrors FSimpleQuestEditor::GetCompiledDisplayIniPath — worth factoring to a shared constant so write + read can't drift.
+    const FString IniPath = FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/SimpleQuestCompiledDisplay.ini"));
+    FString Content;
+    if (!FFileHelper::LoadFileToString(Content, *IniPath))
+    {
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("LoadCompiledDisplayIni: none at %s (first run / not yet compiled)"), *IniPath);
+        return;
+    }
+
+    int32 Registered = 0, Loaded = 0;
+    TArray<FString> Lines;
+    Content.ParseIntoArrayLines(Lines);
+    for (const FString& Line : Lines)
+    {
+        if (Line.IsEmpty() || Line[0] == TEXT(';') || Line[0] == TEXT('[')) continue;   // comment / section header
+
+        int32 EqualsIdx;
+        if (!Line.FindChar(TEXT('='), EqualsIdx)) continue;
+        const FGameplayTag Tag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*Line.Left(EqualsIdx)), false);
+        if (!Tag.IsValid()) continue;
+
+        // ReadFromBuffer consumes one whole FText literal (quoted or NSLOCTEXT — even if its source contains '|'),
+        // returning the cursor just past it. Fields are pipe-separated; the remainder is the DisplayData soft path.
+        const TCHAR* Cursor = *Line + EqualsIdx + 1;
+        FText DisplayName, Description;
+        Cursor = FTextStringHelper::ReadFromBuffer(Cursor, DisplayName, nullptr, /*PackageNamespace*/ nullptr, /*bRequiresQuotes*/ true);
+        if (!Cursor || *Cursor != TEXT('|')) continue;
+        Cursor = FTextStringHelper::ReadFromBuffer(Cursor + 1, Description, nullptr, nullptr, /*bRequiresQuotes*/ true);
+        if (!Cursor || *Cursor != TEXT('|')) continue;
+        const FString DataPath(Cursor + 1);   // remainder (may be empty)
+
+        UQuestDisplayData* DisplayData = nullptr;
+        if (!DataPath.IsEmpty())
+        {
+            DisplayData = Cast<UQuestDisplayData>(FSoftObjectPath(DataPath).TryLoad());   // eager sync; assets are small index leaves
+            if (DisplayData) ++Loaded;
+        }
+
+        StateSubsystem->RegisterQuestTag(Tag);
+        StateSubsystem->RegisterDisplayData(Tag, DisplayName, Description, DisplayData);
+        ++Registered;
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("LoadCompiledDisplayIni: %d record(s), %d DisplayData asset(s) from %s"), Registered, Loaded, *IniPath);
+}
+
 void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
     if (!Node) return;
@@ -2210,60 +2266,10 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
     TArray<FAssetData> Assets;
     AR.GetAssets(Filter, Assets);
 
-    // The registry we write display data into. Fetched once for the eager-display pass below.
-    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
-
     int32 IndexedAssetCount = 0;
     int32 IndexedTagCount = 0;
-    int32 EagerDisplayCount = 0;
     for (const FAssetData& Asset : Assets)
     {
-        // Eager display-data registration. DisplayName is published to the Asset Registry by
-        // UQuestlineGraph::GetAssetRegistryTags, so we register it against the questline's identity tag here at
-        // Initialize — no asset load, no activation needed. Without this, anything that queries the display name
-        // before the questline activates (e.g. a world nameplate at BeginPlay) gets an empty record on a cold first
-        // run. Activation-time RegisterQuestlineGraph later re-registers the full FText DisplayName + Description +
-        // DisplayData (idempotent overwrite). Runs for every questline asset, ahead of the listener-tag filter below.
-        if (StateSubsystem)
-        {
-            FString EffectiveID;
-            if (Asset.GetTagValue(TEXT("QuestlineEffectiveID"), EffectiveID) && !EffectiveID.IsEmpty())
-            {
-                const FGameplayTag QuestlineTag =
-                    UGameplayTagsManager::Get().RequestGameplayTag(FName(*(FQuestTagComposer::IdentityNamespace + EffectiveID)), false);
-                if (QuestlineTag.IsValid())
-                {
-                    FString DisplayNameStr;
-                    Asset.GetTagValue(TEXT("DisplayName"), DisplayNameStr);
-                    StateSubsystem->RegisterQuestTag(QuestlineTag);
-                    StateSubsystem->RegisterDisplayData(QuestlineTag, FText::FromString(DisplayNameStr), FText::GetEmpty(), nullptr);
-                    ++EagerDisplayCount;
-                }
-            }
-        }
-
-        // Eager-register the embedded/contextual display names the graph published (its container-level nodes:
-        // questline-level + LinkedQuestline placements). These are the forms UI usually queries — a nameplate showing
-        // a chapter title binds e.g. SimpleQuest.Questline.QuickStart.Chapter_6, which exists only in the QuickStart
-        // master's compile, not in any single chapter asset's own identity. Without this those titles aren't available
-        // until the questline activates.
-        FString DisplayNamesValue;
-        if (StateSubsystem && Asset.GetTagValue(TEXT("CompiledDisplayNames"), DisplayNamesValue) && !DisplayNamesValue.IsEmpty())
-        {
-            TArray<FString> Records;
-            DisplayNamesValue.ParseIntoArray(Records, TEXT("\n"), true);
-            for (const FString& Record : Records)
-            {
-                FString TagPart, NamePart;
-                if (!Record.Split(TEXT("="), &TagPart, &NamePart)) continue;   // splits on the first '='
-                const FGameplayTag NodeTag = UGameplayTagsManager::Get().RequestGameplayTag(FName(*TagPart), false);
-                if (!NodeTag.IsValid()) continue;
-                StateSubsystem->RegisterQuestTag(NodeTag);
-                StateSubsystem->RegisterDisplayData(NodeTag, FText::FromString(NamePart), FText::GetEmpty(), nullptr);
-                ++EagerDisplayCount;
-            }
-        }
-
         FString TagValue;
         if (!Asset.GetTagValue(TEXT("ListenerGroupTags"), TagValue) || TagValue.IsEmpty()) continue;
 
@@ -2282,9 +2288,6 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
         }
         ++IndexedAssetCount;
     }
-
-    UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("BuildListenerGroupIndex: eager-registered %d questline display name(s) from the Asset Registry"), EagerDisplayCount);
 
     UE_LOG(LogSimpleQuestActivation, Log,
         TEXT("BuildListenerGroupIndex: scanned %d UQuestlineGraph asset(s); indexed %d listener-bearing graph(s) under %d (GroupTag, graph) entries"),

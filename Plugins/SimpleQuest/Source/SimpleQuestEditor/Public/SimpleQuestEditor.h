@@ -60,6 +60,10 @@ private:
 	void RegisterTagsFromAssetRegistry();
 	void OnAssetRemoved(const FAssetData& AssetData);
 	void WriteCompiledTagsIni() const;
+	static FString GetCompiledDisplayIniPath();
+	virtual void AccumulateCompiledDisplay(const UQuestlineGraph* Graph) override;   // per-graph, in-memory
+	void FlushCompiledDisplayIni();                                                  // one read-modify-write per batch
+	void RemoveCompiledDisplaySection(const FString& EffectiveID) const;             // immediate (asset removal)
 	void RebuildNativeTags(bool bRefreshTree = false);
 	
 	/**
@@ -108,11 +112,18 @@ private:
 	void AddNativeTagsForGraph(const TArray<FName>& TagNames);
 	int32 NumSkippedAlreadyRegistered = 0;  // TEMP
 	int32 NumConstructedFresh = 0;          // TEMP
+	
 	/**
 	 * Parallel index for AddNativeTagsForGraph's O(1) "already registered?" check. Stays in sync
 	 * with CompiledNativeTags. Reset() in lockstep with the array.
 	 */
 	TSet<FName> CompiledNativeTagNames;
+
+	/**
+	 * Display records accumulated during a compile (keyed by EffectiveID), coalesced to one ini write in
+	 * EndCompileBatch — mirrors how CompiledTagRegistry defers WriteCompiledTagsIni.
+	 */
+	TMap<FString, TArray<FString>> PendingDisplaySections;
 
 	bool bBatchActive = false;
 	bool bBatchHasStaleTags = false;

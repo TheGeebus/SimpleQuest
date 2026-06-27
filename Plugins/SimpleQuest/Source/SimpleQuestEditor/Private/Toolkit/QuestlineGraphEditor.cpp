@@ -652,6 +652,7 @@ void FQuestlineGraphEditor::CompileQuestlineGraph()
 
         if (bSuccess)
         {
+            ISimpleQuestEditorModule::Get().AccumulateCompiledDisplay(Graph);
             if (!bIsPrimary) ++NeighborSuccessCount;
         }
         else if (!bIsPrimary)

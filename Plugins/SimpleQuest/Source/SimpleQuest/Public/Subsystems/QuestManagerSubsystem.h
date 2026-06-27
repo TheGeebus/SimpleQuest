@@ -162,7 +162,9 @@ protected:
 		bool bBypassGiverGate = false,
 		bool bBypassPrerequisites = false);
 
-private:		
+private:
+	void LoadCompiledDisplayIni() const;
+	
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;

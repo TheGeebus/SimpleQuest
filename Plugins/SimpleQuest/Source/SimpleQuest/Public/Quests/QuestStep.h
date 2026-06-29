@@ -11,6 +11,7 @@
 #include "QuestStep.generated.h"
 
 class UQuestObjective;
+class UQuestObjectiveConfig;
 
 /**
  * Concrete leaf node. Hosts a single UQuestObjective and the target data required to fulfil it. Replaces FQuestStep
@@ -74,6 +75,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 	int32 NumberOfElements = 0;
 
+	/**
+	 * Designer-attached "blank slate" config for this Step's objective — the authored-side analog of the runtime
+	 * CustomData instanced struct. Point it at a UQuestObjectiveConfig subclass asset holding whatever typed
+	 * configuration the objective wants; the objective casts it on read. The picker filters to UQuestObjectiveConfig
+	 * and its descendants.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	TSoftObjectPtr<UQuestObjectiveConfig> ConfigAsset;
+
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
 
@@ -88,12 +98,14 @@ protected:
 	
 public:
 	/**
-	 * Snapshot of the final composed params delivered to the objective at activation. Retained for Piece D chain
-	 * propagation — ChainToNextNodes reads OriginChain to build the forwarded chain for downstream steps. Populated
-	 * in ActivateInternal; cleared in DeactivateInternal.
+	 * The runtime half of the activation context handed to the objective — the caller's IncomingContext plus the
+	 * framework-stamped Provenance and IncomingOutcomeTag. Set in ActivateInternal before OnNodeStarted fires, so
+	 * HandleOnNodeStarted's RecordEntry captures a populated snapshot for the registry's start record. Also drives
+	 * chain propagation: ChainToNextNodes reads IncomingContext.OriginChain to extend the forwarded chain for
+	 * downstream steps. Cleared in DeactivateInternal.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationContext ReceivedActivationContext;
+	FQuestObjectiveRuntimeContext ReceivedActivationContext;
 
 	/**
 	 * Populated from the objective's forward-params at completion. Read by ChainToNextNodes to pre-stamp
@@ -131,10 +143,11 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
+	FORCEINLINE TSoftObjectPtr<UQuestObjectiveConfig> GetConfigAsset() const { return ConfigAsset; }
 	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveTriggerContext& GetCompletionContext() const { return CompletionContext; }
-	FORCEINLINE const FQuestObjectiveActivationContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
+	FORCEINLINE const FQuestObjectiveRuntimeContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
 	FORCEINLINE const FQuestObjectiveActivationContext& GetCompletionForwardParams() const { return CompletionForwardParams; }
 	FORCEINLINE const TArray<FGameplayTag>& GetAncestorContainerTags() const { return AncestorContainerTags; }
 };

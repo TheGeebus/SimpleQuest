@@ -5,6 +5,7 @@
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveAuthoredConfig.h"
 #include "Subsystems/QuestStateSubsystem.h"
 
 void UQuestStep::Activate(FGameplayTag InContextualTag)
@@ -22,37 +23,19 @@ void UQuestStep::Activate(FGameplayTag InContextualTag)
 
 void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Compose activation params FIRST, before Super::ActivateInternal fires OnNodeStarted. The base-class Activate-
-	// Internal's OnNodeStarted broadcast routes to UQuestManagerSubsystem::HandleOnNodeStarted, whose Step-side
-	// RecordEntry call reads GetReceivedActivationParams() for the registry snapshot. Populating ReceivedActivation-
-	// Params before Super means the snapshot captures the merged final params (Instigator, Provenance, the full
-	// FQuestObjectiveActivationContext shape) rather than the default-constructed empty struct.
-	//
-	// Composition rules: additive for compound fields (sets union, counts sum); Instigator + CustomData come
-	// straight from external since Step has no equivalents. Position data (if any) goes through CustomData. Provenance
-	// + IncomingOutcomeTag propagate so the registry's per-start record knows how this start was initiated and which
-	// outcome (if any) drove it.
-	FQuestObjectiveActivationContext Context;
+	// Pack the authored config from this Step's UPROPERTYs and take the caller's input verbatim as the runtime context —
+	// no merge. The objective composes the two however it wants (see UQuestObjective::OnObjectiveActivated), with full
+	// provenance over which values are authored vs caller-supplied. ReceivedActivationContext (the runtime half) is set
+	// BEFORE Super::ActivateInternal so OnNodeStarted's handler reads a populated snapshot for the registry's start record.
+	FQuestObjectiveAuthoredConfig Authored;
+	Authored.TargetClasses = TargetClasses;
+	Authored.TargetActors = TargetActors;
+	Authored.NumElementsRequired = NumberOfElements;
+	Authored.ConfigAsset = ConfigAsset;
 
-	// Designer-authored from this Step's UPROPERTYs (TargetActors here is the Step's authored set;
-	// PendingActivationParams.Dynamic.TargetActors is the runtime-supplied appendage):
-	Context.Authored.TargetClasses = TargetClasses;
-	Context.Authored.NumElementsRequired = NumberOfElements + PendingActivationContext.Authored.NumElementsRequired;
+	const FQuestObjectiveRuntimeContext Runtime = PendingActivationContext;   // caller input + framework-stamped provenance/outcome
 
-	// Runtime-dynamic merge — append incoming runtime contributions onto this Step's runtime set:
-	Context.Dynamic.TargetActors = TargetActors;
-	Context.Dynamic.TargetActors.Append(PendingActivationContext.Dynamic.TargetActors);
-	Context.Dynamic.Instigator = PendingActivationContext.Dynamic.Instigator;
-	Context.Dynamic.CustomData = PendingActivationContext.Dynamic.CustomData;
-	Context.Dynamic.OriginTag = PendingActivationContext.Dynamic.OriginTag;
-	Context.Dynamic.OriginChain = PendingActivationContext.Dynamic.OriginChain;
-	Context.Dynamic.Provenance = PendingActivationContext.Dynamic.Provenance;
-	Context.Dynamic.IncomingOutcomeTag = PendingActivationContext.Dynamic.IncomingOutcomeTag;
-
-	// Snapshot the composed params before Super so OnNodeStarted's handler reads a populated struct. Also serves
-	// Piece D chain propagation — ChainToNextNodes reads OriginChain to extend the forwarded chain when the chain
-	// reaches a downstream step.
-	ReceivedActivationContext = Context;
+	ReceivedActivationContext = Runtime;
 
 	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
 	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above.
@@ -67,10 +50,7 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);
 	LiveObjective->OnQuestObjectiveTriggerDeactivation.AddDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
 	LiveObjective->OnQuestObjectiveTriggerSatisfied.AddDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
-	
-	// Register the live Objective with QSS under every perspective tag (canonical + aliases) so
-	// USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag can resolve regardless of which perspective the
-	// caller passes. Symmetric unregister in DeactivateInternal + ResetTransientState + OnObjectiveComplete.
+
 	if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
 	{
 		if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
@@ -85,10 +65,8 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 		}
 	}
 
-	// Consume and clear so subsequent activations don't accidentally reuse stale external params.
-	PendingActivationContext = FQuestObjectiveActivationContext{};
-
-	LiveObjective->DispatchOnObjectiveActivated(Context, InContextualTag);
+	PendingActivationContext = FQuestObjectiveRuntimeContext{};   // consume + clear
+	LiveObjective->DispatchOnObjectiveActivated(Authored, Runtime, InContextualTag);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
@@ -107,7 +85,7 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
 		LiveObjective = nullptr;
 	}
-	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	ReceivedActivationContext = FQuestObjectiveRuntimeContext{};
 	CompletionForwardParams = FQuestObjectiveActivationContext{};
 	Super::DeactivateInternal(InContextualTag);
 }
@@ -122,7 +100,7 @@ void UQuestStep::ResetTransientState()
 	// Explicit cleanup belongs in the manager's PIE-reset path if/when needed.
 	LiveObjective = nullptr;
 	CompletionContext = FQuestObjectiveTriggerContext{};
-	ReceivedActivationContext = FQuestObjectiveActivationContext{};
+	ReceivedActivationContext = FQuestObjectiveRuntimeContext{};
 	CompletionForwardParams = FQuestObjectiveActivationContext{};
 }
 

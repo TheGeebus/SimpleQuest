@@ -716,8 +716,8 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
         {
             FQuestEventPayload Payload;
             Payload.NodeInfo.QuestTag = QuestlineTag;
-            Payload.Instigator = Params.Dynamic.Instigator;
-            Payload.CustomData = Params.Dynamic.CustomData;
+            Payload.Instigator = Params.Instigator;
+            Payload.CustomData = Params.CustomData;
             QuestSignalSubsystem->PublishMessage<FQuestActivatedEvent>(
                 QuestlineTag,
                 FQuestActivatedEvent(QuestlineTag, Payload, FQuestPrereqStatus{}));
@@ -749,8 +749,8 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateQuestlineGraph: '%s' — firing %d entry tag(s) (CustomData %s, Instigator %s)"),
         *Graph->GetName(), Graph->GetEntryNodeTags().Num(),
-        Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
-        Params.Dynamic.Instigator.IsValid() ? *Params.Dynamic.Instigator->GetName() : TEXT("null"));
+        Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
+        Params.Instigator.IsValid() ? *Params.Instigator->GetName() : TEXT("null"));
 
     for (const FName& EntryTagName : Graph->GetEntryNodeTags())
     {
@@ -763,7 +763,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
         {
             if (UQuestStep* Step = Cast<UQuestStep>(Instance))
             {
-                Step->PendingActivationContext = Params;
+                Step->PendingActivationContext.IncomingContext = Params;
             }
         }
 
@@ -793,21 +793,19 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
         // — Pending isn't cleared until the tail of ActivateInternal, after Super returns). Post-Started events
         // (Progress / Completed / Deactivated) fire after Pending has been cleared, so Received is the surviving
         // source. PendingActivationContext is protected; the manager has friend access.
-        const FQuestObjectiveActivationContext& Pending = Step->PendingActivationContext;
-        const bool bPendingHasData = Pending.Dynamic.Instigator.IsValid()
-            || Pending.Dynamic.CustomData.IsValid()
-            || Pending.Dynamic.OriginTag.IsValid()
-            || !Pending.Dynamic.OriginChain.IsEmpty();
+        const FQuestObjectiveRuntimeContext& Pending = Step->PendingActivationContext;
+        const bool bPendingHasData = Pending.IncomingContext.Instigator.IsValid()
+            || Pending.IncomingContext.CustomData.IsValid()
+            || Pending.IncomingContext.OriginTag.IsValid()
+            || !Pending.IncomingContext.OriginChain.IsEmpty();
 
-        const FQuestObjectiveActivationContext& Source = bPendingHasData
-            ? Pending
-            : Step->GetReceivedActivationParams();
+        const FQuestObjectiveRuntimeContext& Source = bPendingHasData ? Pending : Step->GetReceivedActivationParams();
 
-        Context.Instigator = Source.Dynamic.Instigator;
-        Context.CustomData = Source.Dynamic.CustomData;
-        Context.OriginTag = Source.Dynamic.OriginTag;
-        Context.OriginChain = Source.Dynamic.OriginChain;
-        Context.OriginatingEventID = Source.Dynamic.OriginatingEventID;
+        Context.Instigator = Source.IncomingContext.Instigator;
+        Context.CustomData = Source.IncomingContext.CustomData;
+        Context.OriginTag = Source.IncomingContext.OriginTag;
+        Context.OriginChain = Source.IncomingContext.OriginChain;
+        Context.OriginatingEventID = Source.IncomingContext.OriginatingEventID;
     }
 
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
@@ -1014,21 +1012,21 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // per-source routing.
             if (QuestStateSubsystem && Node->GetContextualTag().IsValid())
             {
-                const FQuestObjectiveActivationContext& Snapshot = Step->GetReceivedActivationParams();
+                const FQuestObjectiveRuntimeContext& Snapshot = Step->GetReceivedActivationParams();
                 const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
                 QuestStateSubsystem->RecordEntry(
                     Node->GetContextualTag(),
-                    Snapshot.Dynamic.OriginTag,
-                    Snapshot.Dynamic.IncomingOutcomeTag,
+                    Snapshot.IncomingContext.OriginTag,
+                    Snapshot.IncomingOutcomeTag,
                     Now,
-                    Snapshot.Dynamic.Provenance,
-                    Snapshot,
+                    Snapshot.Provenance,
+                    Snapshot.IncomingContext,
                     NAME_None,
-                    Snapshot.Dynamic.OriginatingEventID);
+                    Snapshot.IncomingContext.OriginatingEventID);
                 UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded Step entry for '%s' provenance=%s giver='%s'"),
                     *Node->GetContextualTag().ToString(),
-                    *UEnum::GetValueAsString(Snapshot.Dynamic.Provenance),
-                    Snapshot.Dynamic.Instigator.IsValid() ? *Snapshot.Dynamic.Instigator->GetName() : TEXT("null"));
+                    *UEnum::GetValueAsString(Snapshot.Provenance),
+                    Snapshot.IncomingContext.Instigator.IsValid() ? *Snapshot.IncomingContext.Instigator->GetName() : TEXT("null"));
             }
         }
     }
@@ -1043,35 +1041,35 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         // one entry (the cascade that just fired this OnNodeStarted). For the deferred case, the queue may hold
         // multiple — every cascade that arrived during the deferral window stamped its own snapshot. All entries
         // fire here so fan-in convergence patterns route correctly.
-        TArray<FQuestObjectiveActivationContext> DrainedCascades;
+        TArray<FQuestObjectiveRuntimeContext> DrainedCascades;
         Swap(DrainedCascades, QuestNode->PendingEntryActivations);
-        QuestNode->PendingActivationContext = FQuestObjectiveActivationContext{};
+        QuestNode->PendingActivationContext = FQuestObjectiveRuntimeContext{};
 
         // Defensive synthesis for paths that fire OnNodeStarted without going through ActivateNodeByTag's queue
         // append (e.g., direct Activate calls). Synthesizes one empty cascade so Any-Outcome entries still fire.
         if (DrainedCascades.IsEmpty())
         {
-            DrainedCascades.Add(FQuestObjectiveActivationContext{});
+            DrainedCascades.Add(FQuestObjectiveRuntimeContext{});
         }
 
         // Use the first cascade's params for Any-Outcome entries (these fire ONCE per OnNodeStarted, not per
         // cascade — they're unconditional "Quest started" entries). Matches pre-queue behavior where the first
         // cascade's stamping won via diamond convergence on subsequent calls.
-        const FQuestObjectiveActivationContext& FirstCascade = DrainedCascades[0];
-        TArray<FGameplayTag> AnyOutcomeChain = FirstCascade.Dynamic.OriginChain;
+        const FQuestObjectiveRuntimeContext& FirstCascade = DrainedCascades[0];
+        TArray<FGameplayTag> AnyOutcomeChain = FirstCascade.IncomingContext.OriginChain;
         if (QuestNode->GetContextualTag().IsValid())
         {
             AnyOutcomeChain.Add(QuestNode->GetContextualTag());
         }
 
         auto StampWithParams = [this, &QuestNode](const FName& DestTagName,
-            const FQuestObjectiveActivationContext& Params, const TArray<FGameplayTag>& Chain)
+            const FQuestObjectiveRuntimeContext& Params, const TArray<FGameplayTag>& Chain)
         {
             if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
             {
                 DestInstance->PendingActivationContext = Params;
-                DestInstance->PendingActivationContext.Dynamic.OriginTag = QuestNode->GetContextualTag();
-                DestInstance->PendingActivationContext.Dynamic.OriginChain = Chain;
+                DestInstance->PendingActivationContext.IncomingContext.OriginTag = QuestNode->GetContextualTag();
+                DestInstance->PendingActivationContext.IncomingContext.OriginChain = Chain;
             }
         };
 
@@ -1085,10 +1083,10 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         // Per-cascade outcome-specific routing. Each queued cascade fires its own entry routes — this is the
         // path that fan-in convergence patterns rely on (Q1's Victory and Q2's Defeat both routing into separate
         // inner steps when the Quest's prereq finally satisfies).
-        for (const FQuestObjectiveActivationContext& CascadeContext : DrainedCascades)
+        for (const FQuestObjectiveRuntimeContext& CascadeContext : DrainedCascades)
         {
-            const FGameplayTag IncomingOutcomeTag = CascadeContext.Dynamic.IncomingOutcomeTag;
-            const FName IncomingSourceTag = CascadeContext.Dynamic.OriginTag.IsValid() ? CascadeContext.Dynamic.OriginTag.GetTagName() : NAME_None;
+            const FGameplayTag IncomingOutcomeTag = CascadeContext.IncomingOutcomeTag;
+            const FName IncomingSourceTag = CascadeContext.IncomingContext.OriginTag.IsValid() ? CascadeContext.IncomingContext.OriginTag.GetTagName() : NAME_None;
 
             // Record this cascade's per-source entry into the QuestStateSubsystem entry registry. Parallel to
             // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
@@ -1099,23 +1097,23 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                 const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
                 QuestStateSubsystem->RecordEntry(
                     QuestNode->GetContextualTag(),
-                    CascadeContext.Dynamic.OriginTag,
+                    CascadeContext.IncomingContext.OriginTag,
                     IncomingOutcomeTag,
                     Now,
-                    CascadeContext.Dynamic.Provenance,
-                    CascadeContext,
+                    CascadeContext.Provenance,
+                    CascadeContext.IncomingContext,
                     IncomingSourceTag,
-                    CascadeContext.Dynamic.OriginatingEventID);
+                    CascadeContext.IncomingContext.OriginatingEventID);
                 UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeStarted: recorded entry for '%s' source='%s' outcome='%s' provenance=%s path='%s'"),
                     *QuestNode->GetContextualTag().ToString(),
-                    *CascadeContext.Dynamic.OriginTag.ToString(),
+                    *CascadeContext.IncomingContext.OriginTag.ToString(),
                     *IncomingOutcomeTag.ToString(),
-                    *UEnum::GetValueAsString(CascadeContext.Dynamic.Provenance),
+                    *UEnum::GetValueAsString(CascadeContext.Provenance),
                     *IncomingSourceTag.ToString());
             }
 
             // Build chain for this cascade.
-            TArray<FGameplayTag> InnerForwardChain = CascadeContext.Dynamic.OriginChain;
+            TArray<FGameplayTag> InnerForwardChain = CascadeContext.IncomingContext.OriginChain;
             if (QuestNode->GetContextualTag().IsValid())
             {
                 InnerForwardChain.Add(QuestNode->GetContextualTag());
@@ -1173,7 +1171,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // event that drove the upstream cascade — pass it to FireWrapperBoundaryCompletion so the wrapper gate
     // sees the same identity that already-cascade-bearing destinations would. The wholesale
     // PendingActivationContext copy below carries OriginatingEventID onto downstream destinations naturally.
-    const FOriginatingEventID& InheritedEventID = Node->PendingActivationContext.Dynamic.OriginatingEventID;
+    const FOriginatingEventID& InheritedEventID = Node->PendingActivationContext.IncomingContext.OriginatingEventID;
 
     // Fire questline-asset resolutions for any Exit/Outcome terminals the utility's Forward output reaches at
     // asset root scope. Done before boundary completions + downstream chaining so the asset's resolution
@@ -1232,7 +1230,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // ReceivedActivationContext, and HandleOnNodeStarted's Step-side RecordEntry reads the snapshot's Provenance into
     // FQuestEntryArrival. Stamped after lookup, before the rest of ActivateNodeByTag's flow touches PendingActivation-
     // Params, so this value rides through the merge regardless of whether the caller pre-stamped other fields on the struct.
-    Instance->PendingActivationContext.Dynamic.Provenance = Provenance;
+    Instance->PendingActivationContext.Provenance = Provenance;
     
     // One-shot prereq-bypass directive for this activation, consumed in UQuestNodeBase::Activate. Re-stamped on every
     // ActivateNodeByTag call (organic cascade activations pass false), so a true value can't leak into a later call.
@@ -1452,13 +1450,13 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // ChainToNextNodes isn't stomped with a double-append.
     if (IncomingSourceTag != NAME_None)
     {
-        if (Instance->PendingActivationContext.Dynamic.OriginChain.Num() == 0)
+        if (Instance->PendingActivationContext.IncomingContext.OriginChain.Num() == 0)
         {
             const FGameplayTag SourceTag = UGameplayTagsManager::Get().RequestGameplayTag(IncomingSourceTag, false);
             if (SourceTag.IsValid())
             {
-                Instance->PendingActivationContext.Dynamic.OriginTag = SourceTag;
-                Instance->PendingActivationContext.Dynamic.OriginChain.Add(SourceTag);
+                Instance->PendingActivationContext.IncomingContext.OriginTag = SourceTag;
+                Instance->PendingActivationContext.IncomingContext.OriginChain.Add(SourceTag);
             }
         }
     }
@@ -1468,7 +1466,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // bypassing UQuestNodeBase::Activate's deferred-prereq path. Routing it through HandleOnNodeStarted ensures
     // inner entries activate only after ActivateInternal actually fires - synchronously when prereqs are satisfied
     // immediately, or later via TryActivateDeferred when a leaf fact arrives.
-    Instance->PendingActivationContext.Dynamic.IncomingOutcomeTag = IncomingOutcomeTag;
+    Instance->PendingActivationContext.IncomingOutcomeTag = IncomingOutcomeTag;
 
     // For UQuest containers, snapshot this cascade's params into the per-cascade queue. HandleOnNodeStarted drains the
     // queue and fires entry routes for each cascade - necessary so fan-in convergence patterns (multiple upstream
@@ -1610,7 +1608,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     if (const UQuestStep* CompletingStep = Cast<UQuestStep>(Node))
     {
         ForwardPayload = CompletingStep->GetCompletionForwardParams();
-        ForwardChain = CompletingStep->GetReceivedActivationParams().Dynamic.OriginChain;
+        ForwardChain = CompletingStep->GetReceivedActivationParams().IncomingContext.OriginChain;
     }
     if (Node->GetContextualTag().IsValid())
     {
@@ -1621,10 +1619,10 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     {
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
         {
-            DestInstance->PendingActivationContext = ForwardPayload;
-            DestInstance->PendingActivationContext.Dynamic.OriginTag = Node->GetContextualTag();
-            DestInstance->PendingActivationContext.Dynamic.OriginChain = ForwardChain;
-            DestInstance->PendingActivationContext.Dynamic.OriginatingEventID = OriginatingEventID;
+            DestInstance->PendingActivationContext.IncomingContext = ForwardPayload;
+            DestInstance->PendingActivationContext.IncomingContext.OriginTag = Node->GetContextualTag();
+            DestInstance->PendingActivationContext.IncomingContext.OriginChain = ForwardChain;
+            DestInstance->PendingActivationContext.IncomingContext.OriginatingEventID = OriginatingEventID;
         }
         ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
     };
@@ -1885,7 +1883,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     }
     if (!Blockers.IsEmpty())
     {
-        FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.Dynamic.Instigator.Get()));
+        FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestGiveBlockedEvent(QuestTag, Blockers, Event.Params.Instigator.Get()));
 
         // Build the debug warning message, showing each blocker in a bulleted list, with sub-bullets for specific unmet prereq leaves
         FString Message = FString::Printf(TEXT("HandleGiveQuestEvent: '%s' refused — %d blocker%s:"),
@@ -1928,8 +1926,8 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleGiveQuestEvent: '%s' — clearing PendingGiver, activating %d placement(s) (CustomData %s, Instigator %s)"),
         *QuestTag.ToString(),
         CanonicalTags.Num(),
-        Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
-        Event.Params.Dynamic.Instigator.IsValid() ? *Event.Params.Dynamic.Instigator->GetName() : TEXT("null"));
+        Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
+        Event.Params.Instigator.IsValid() ? *Event.Params.Instigator->GetName() : TEXT("null"));
 
     // Deduplication by Instance pointer — same rationale as HandleActivationRequest's loop. ResolveCanonicalTags returns
     // multiple entries when input is an alias; for multi-alias-of-single-Instance scenarios all entries resolve
@@ -1947,7 +1945,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
         if (SeenInstances.Contains(Instance)) continue;
         SeenInstances.Add(Instance);
 
-        if (Event.Params.Dynamic.Instigator.IsValid())
+        if (Event.Params.Instigator.IsValid())
         {
             // Multi-perspective attribution: a give issued against one perspective tag must attribute the
             // GiverActor regardless of which perspective HandleOnNodeStarted later sees as Node->GetContextual-
@@ -1955,18 +1953,18 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
             // others; ResolveCanonicalTags returns the perspective the give was authored against, which isn't
             // necessarily the Instance's own ContextualTag. Write the giver to every tag the Instance is known
             // by so the lookup hits regardless of which perspective surfaces at the FQuestStartedEvent publish.
-            RecentGiverActors.Add(CanonicalTag, Event.Params.Dynamic.Instigator);
+            RecentGiverActors.Add(CanonicalTag, Event.Params.Instigator);
 
             const FGameplayTag InstanceContextualTag = Instance->GetContextualTag();
             if (InstanceContextualTag.IsValid() && InstanceContextualTag != CanonicalTag)
             {
-                RecentGiverActors.Add(InstanceContextualTag, Event.Params.Dynamic.Instigator);
+                RecentGiverActors.Add(InstanceContextualTag, Event.Params.Instigator);
             }
             for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
             {
                 if (AliasTag.IsValid() && AliasTag != CanonicalTag && AliasTag != InstanceContextualTag)
                 {
-                    RecentGiverActors.Add(AliasTag, Event.Params.Dynamic.Instigator);
+                    RecentGiverActors.Add(AliasTag, Event.Params.Instigator);
                 }
             }
         }
@@ -1979,7 +1977,7 @@ void UQuestManagerSubsystem::HandleGiveQuestEvent(FGameplayTag Channel, const FQ
         // step's defaults in that case.
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {
-            Step->PendingActivationContext = Event.Params;
+            Step->PendingActivationContext.IncomingContext = Event.Params;
         }
 
         ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::GiverGate, FGameplayTag(), NAME_None, true);
@@ -2001,7 +1999,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleActivationRequest: '%s' — resolved to %d canonical(s) to try (CustomData %s)"),
         *QuestTag.ToString(),
         CanonicalTags.Num(),
-        Event.Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+        Event.Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     // Deduplication by Instance pointer. ResolveCanonicalTags returns multiple entries when the input tag is registered
     // as an alias (input + every canonical the alias represents). For multi-PLACEMENT scenarios (standalone +
@@ -2023,7 +2021,7 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
 
         if (UQuestStep* Step = Cast<UQuestStep>(Instance))
         {
-            Step->PendingActivationContext = Event.Params;
+            Step->PendingActivationContext.IncomingContext = Event.Params;
         }
 
         ActivateNodeByTag(CanonicalTag.GetTagName(), EQuestActivationProvenance::ExternalAPI, FGameplayTag(), NAME_None, false, Event.bBypassPrerequisites);
@@ -2036,11 +2034,11 @@ void UQuestManagerSubsystem::HandleActivationRequest(FGameplayTag Channel, const
             *QuestTag.ToString(), CanonicalTags.Num());
 
         FQuestEventPayload Payload;
-        Payload.Instigator = Event.Params.Dynamic.Instigator;
-        Payload.CustomData = Event.Params.Dynamic.CustomData;
-        Payload.OriginTag = Event.Params.Dynamic.OriginTag;
-        Payload.OriginChain = Event.Params.Dynamic.OriginChain;
-        Payload.OriginatingEventID = Event.Params.Dynamic.OriginatingEventID;
+        Payload.Instigator = Event.Params.Instigator;
+        Payload.CustomData = Event.Params.CustomData;
+        Payload.OriginTag = Event.Params.OriginTag;
+        Payload.OriginChain = Event.Params.OriginChain;
+        Payload.OriginatingEventID = Event.Params.OriginatingEventID;
         // Payload.NodeInfo stays default (no node identity to forward for UnknownQuest).
 
         PublishUnknownQuestFailure(QuestSignalSubsystem, LoadedNodeInstances, QuestTag.GetTagName(), Payload);

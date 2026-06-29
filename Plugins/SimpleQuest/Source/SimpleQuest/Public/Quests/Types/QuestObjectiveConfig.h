@@ -17,7 +17,7 @@
  *   1. Define USomeGameObjectiveConfig : UQuestObjectiveConfig with typed UPROPERTYs.
  *   2. Create DA_ConfigSetA.uasset, DA_ConfigSetB.uasset, etc. as asset instances with different values.
  *   3. Step nodes pick one instance per Step via the ConfigAsset UPROPERTY.
- *   4. Objective consumes via Cast<USomeGameObjectiveConfig>(Context.Authored.ConfigAsset.LoadSynchronous()).
+ *   4. Objective consumes via Cast<USomeGameObjectiveConfig>(Authored.ConfigAsset.LoadSynchronous()).
  *
  * Abstract so the marker base never becomes a usable asset itself — must subclass to add fields.
  */

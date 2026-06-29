@@ -291,14 +291,13 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 	// Default the Instigator to this giver's owner if the caller didn't set one. Objectives commonly
 	// need a "who activated me" reference; cheap default saves designers from remembering to set it.
 	FQuestObjectiveActivationContext OutgoingContext = Context;
-	if (!OutgoingContext.Dynamic.Instigator.IsValid())
+	if (!OutgoingContext.Instigator.IsValid())
 	{
-		OutgoingContext.Dynamic.Instigator = GetOwner();
+		OutgoingContext.Instigator = GetOwner();
 	}
-	// Seed OriginChain from OriginTag if a tag was supplied but the chain is empty.
-	if (OutgoingContext.Dynamic.OriginTag.IsValid() && OutgoingContext.Dynamic.OriginChain.Num() == 0)
+	if (OutgoingContext.OriginTag.IsValid() && OutgoingContext.OriginChain.Num() == 0)
 	{
-		OutgoingContext.Dynamic.OriginChain.Add(OutgoingContext.Dynamic.OriginTag);
+		OutgoingContext.OriginChain.Add(OutgoingContext.OriginTag);
 	}
 
 	SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingContext));

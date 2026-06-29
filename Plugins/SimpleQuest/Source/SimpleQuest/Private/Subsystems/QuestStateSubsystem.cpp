@@ -421,7 +421,7 @@ void UQuestStateSubsystem::RecordEntry(
 		}
 	});
 
-	const AActor* GiverActor = ActivationParamsSnapshot.Dynamic.Instigator.Get();
+	const AActor* GiverActor = ActivationParamsSnapshot.Instigator.Get();
 	UE_LOG(LogSimpleQuestState, Log,
 		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
@@ -430,9 +430,9 @@ void UQuestStateSubsystem::RecordEntry(
 		*UEnum::GetValueAsString(Provenance),
 		GiverActor ? *GiverActor->GetName() : TEXT("null"),
 		*PathIdentity.ToString(),
-		ActivationParamsSnapshot.Dynamic.TargetActors.Num(),
-		ActivationParamsSnapshot.Authored.TargetClasses.Num(),
-		ActivationParamsSnapshot.Authored.NumElementsRequired,
+		ActivationParamsSnapshot.Config.TargetActors.Num(),
+		ActivationParamsSnapshot.Config.TargetClasses.Num(),
+		ActivationParamsSnapshot.Config.NumElementsRequired,
 		QuestEntries.FindOrAdd(QuestTag).History.Num(),
 		EntryTime);
 
@@ -515,7 +515,7 @@ AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationContextSnapshot.Dynamic.Instigator.Get();
+			return Latest->ActivationContextSnapshot.Instigator.Get();
 		}
 	}
 	return nullptr;

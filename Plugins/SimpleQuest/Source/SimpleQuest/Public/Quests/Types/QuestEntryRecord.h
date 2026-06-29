@@ -13,14 +13,14 @@
  * Single entry event in a quest's start history. One entry appended per RecordEntry call. Append-only;
  * never modified after creation. Designers walking the History array see the full chronological story of
  * every start into this quest — cascade-driven (SourceQuestTag valid), giver-driven (Provenance=GiverGate
- * with ActivationContextSnapshot.Dynamic.Instigator populated), external-API-driven, or initial-entry-fired.
+ * with ActivationContextSnapshot.Instigator populated), external-API-driven, or initial-entry-fired.
  *
- * The ActivationContextSnapshot field is a by-value copy of the merged final FQuestObjectiveActivationContext
- * delivered to the objective at activation (UQuestStep::ReceivedActivationContext). Capturing it here means
- * the registry holds enough data to reconstitute the live questline state from a save: target actors / classes,
- * required count, activation source actor, origin chain, custom data, incoming outcome — all preserved by-value
- * so the entry stays valid even after the live UQuestStep has been deactivated and ReceivedActivationContext cleared.
- * Empty default-constructed snapshot for non-Step starts (containers have no objective; nothing to snapshot).
+ * The ActivationContextSnapshot field is a by-value copy of the caller's runtime input to the activation —
+ * UQuestStep::ReceivedActivationContext.IncomingContext: instigator, custom data, lineage (origin tag / chain /
+ * event ID), and any config the caller contributed (target classes / actors, required count, config asset). The
+ * Step's own authored config is NOT snapshotted — it re-derives from the Step on replay. Preserved by-value so the
+ * entry stays valid after the live UQuestStep is deactivated and ReceivedActivationContext is cleared. Empty
+ * default-constructed for non-Step starts (containers have no objective; nothing to snapshot).
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestEntryArrival
@@ -44,9 +44,10 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
 	/**
-	 * By-value snapshot of the final composed params delivered to the objective at activation (UQuestStep::ReceivedActivationContext).
-	 * Captures the full merged input set: authored Step defaults + give-supplied params + cascade origin chain. Empty default-
-	 * constructed for non-Step starts (containers have no objective). Used by save/load to fully reconstitute live questline state.
+	 * By-value snapshot of the caller's runtime input to this start — UQuestStep::ReceivedActivationContext.IncomingContext:
+	 * instigator, custom data, lineage, and any config the caller contributed. The Step's authored config is not captured
+	 * (it re-derives from the Step). Empty default-constructed for non-Step starts. Consumed by save/load to reconstitute
+	 * the runtime half of live questline state.
 	 */
 	UPROPERTY(BlueprintReadOnly)
 	FQuestObjectiveActivationContext ActivationContextSnapshot;
@@ -61,8 +62,8 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 
 /**
  * Rich-record layer for "what starts have entered this quest, and how." Per-start identity is preserved:
- * cascade source tags, giver actor (via ActivationContextSnapshot.Dynamic.Instigator), provenance, and the
- * full merged params delivered to the objective. Save/load (0.5.0) consumes this directly to reconstitute
+ * cascade source tags, giver actor (via ActivationContextSnapshot.Instigator), provenance, and the caller's
+ * runtime input delivered to the objective. Save/load (0.5.0) consumes this directly to reconstitute
  * live questline state.
  *
  * Owned by UQuestStateSubsystem as a TMap<FGameplayTag, FQuestEntryRecord> keyed by destination quest

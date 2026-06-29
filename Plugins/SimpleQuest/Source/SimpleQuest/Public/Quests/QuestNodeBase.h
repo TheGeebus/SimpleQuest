@@ -5,11 +5,11 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Quests/Types/PrerequisiteExpression.h"
-#include "Quests/Types/PrereqLeafSubscription.h"
-#include "Quests/Types/QuestNodeInfo.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
-#include "Quests/Types/OriginatingEventID.h"
+#include "Types/PrerequisiteExpression.h"
+#include "Types/PrereqLeafSubscription.h"
+#include "Types/QuestNodeInfo.h"
+#include "Types/QuestObjectiveRuntimeContext.h"
+#include "Types/OriginatingEventID.h"
 #include "Types/QuestGraphResolution.h"
 #include "QuestNodeBase.generated.h"
 
@@ -67,8 +67,10 @@ struct FQuestBoundaryCompletion
 {
     GENERATED_BODY()
 
-    /** The LinkedQuestline wrapper's compiled quest tag (boundary's outer-side identity). FName form for
-     *  compile-time storage; ChainToNextNodes resolves to FGameplayTag at runtime. */
+    /**
+     * The LinkedQuestline wrapper's compiled quest tag (boundary's outer-side identity). FName form for
+     * compile-time storage; ChainToNextNodes resolves to FGameplayTag at runtime.
+     */
     UPROPERTY(VisibleDefaultsOnly)
     FName WrapperTagName;
 
@@ -284,14 +286,14 @@ protected:
     TArray<FGameplayTag> AssetScopedAliasTags;
     
     /**
-     * Transient scratch slot for activation-time params stamped by the manager before Activate runs. Populated by
+     * Transient scratch slot for activation-time context stamped by the manager before Activate runs. Populated by
      * ChainToNextNodes (cascade pre-stamp), HandleGiveQuestEvent, HandleActivationRequest, and ActivateNodeByTag's
-     * Quest-boundary forwarder. Consumed and cleared by the concrete subclass during its activation (UQuestStep merges
-     * additively with authored defaults; UQuest forwards to inner entries). Not serialized — save/load restoration
-     * republishes the activation event rather than persisting this stash.
+     * Quest-boundary forwarder. Consumed and cleared by the concrete subclass during its activation (UQuestStep packs
+     * it as the runtime half handed to the objective; UQuest forwards to inner entries). Not serialized — save/load
+     * restoration republishes the activation event rather than persisting this stash.
      */
     UPROPERTY(Transient)
-    FQuestObjectiveActivationContext PendingActivationContext;
+    FQuestObjectiveRuntimeContext PendingActivationContext;
 
     /**
      * Routing table keyed by completion path identity. For static K2 placements PathIdentity equals the outcome
@@ -418,15 +420,15 @@ protected:
     TObjectPtr<UQuestDisplayData> DisplayData;
 
 private:
-    // Stores the contextual tag while waiting for prerequisites to clear
+    /** Stores the contextual tag while waiting for prerequisites to clear */
     FGameplayTag DeferredContextualTag;
 
-    // Per-leaf-channel subscription handles; cleared when prerequisites are satisfied
+    /** Per-leaf-channel subscription handles; cleared when prerequisites are satisfied */
     TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> PrereqSubscriptionHandles;
 
     /**
      * Cascade event ID associated with the most recent wake-up of this node — either a cascade arrival
-     * (stamped via PendingActivationContext.Dynamic.OriginatingEventID) or a prereq-subscription wake-up
+     * (stamped via PendingActivationContext.IncomingContext.OriginatingEventID) or a prereq-subscription wake-up
      * (from the triggering FQuestResolutionRecordedEvent / FQuestEntryRecordedEvent payload).
      * Read by subclasses with per-event-ID deduplication logic (UPrereqGateNode); invalid when the wake-up was
      * not cascade-driven (raw Fact event with no OriginatingEventID plumbed).

@@ -10,9 +10,10 @@ class AActor;
 class UQuestObjectiveConfig;
 
 /**
- * Design-time configuration for an objective activation. The Authored layer of FQuestObjectiveActivationContext.
- * Composed from the destination Step node's UPROPERTYs at compile time. Immutable per activation — runtime
- * contributions (Forward Parameters, giver, publishers, external BP) go to the Dynamic layer instead.
+ * The objective-config shape: target classes, target actors, required element count, and a typed ConfigAsset blank
+ * slate. Used two ways — packed from the destination Step's UPROPERTYs as the authored config handed to the objective,
+ * and carried on FQuestObjectiveActivationContext::Config when a runtime caller (giver, forward params, external BP)
+ * contributes one. The objective composes the Step's authored config with the caller's (see OnObjectiveActivated).
  */
 USTRUCT(BlueprintType)
 struct SIMPLEQUEST_API FQuestObjectiveAuthoredConfig
@@ -22,6 +23,10 @@ struct SIMPLEQUEST_API FQuestObjectiveAuthoredConfig
 	/** Actor classes the objective targets (for kill/pickup-class objectives). Designer-set on the Step. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TSet<TSoftClassPtr<AActor>> TargetClasses;
+	
+	/** Specific scene actors pinned on the Step. The objective composes these with the caller's TargetActors. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TSet<TSoftObjectPtr<AActor>> TargetActors;
 
 	/** Element count required to complete (for counting objectives). Designer-set on the Step. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

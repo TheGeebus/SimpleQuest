@@ -23,7 +23,7 @@ public:
 	
 protected:
 	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext) override;
-	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override;
+	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime) override;
 
 private:
 	UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))

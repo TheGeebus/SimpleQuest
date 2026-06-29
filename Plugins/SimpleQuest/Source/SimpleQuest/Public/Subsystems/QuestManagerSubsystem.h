@@ -137,7 +137,7 @@ protected:
 	 *                            outcome / forward / deactivation routing from another node; ExternalAPI for
 	 *                            FQuestActivationRequestEvent and programmatic / procedural / save-rehydration paths.
 	 * @param IncomingOutcomeTag  Outcome from the parent node for per-path entry routing in UQuest container nodes.
-	 *                            Stamped onto PendingActivationContext.Dynamic.IncomingOutcomeTag and consumed by the wrapper's
+     *                            Stamped onto PendingActivationContext.IncomingOutcomeTag and consumed by the wrapper's
 	 *                            inner-entry routing. Invalid (default) for non-cascade activations.
 	 * @param IncomingSourceTag   FName of the specific parent source whose outcome fired. UQuest entry routing filters
 	 *                            source-qualified entries against this tag so only the matching spec's entry step

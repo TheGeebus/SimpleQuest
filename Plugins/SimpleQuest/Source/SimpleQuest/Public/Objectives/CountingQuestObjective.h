@@ -9,7 +9,7 @@
 
 /**
  * Objective subclass that provides a built-in counter (CurrentElements / MaxElements). Initializes MaxElements from
- * the NumElementsRequired parameter in OnObjectiveActivated.
+ * the Step's authored NumElementsRequired plus any the caller contributes at activation.
  *
  * Designers have two paths:
  *   - AddProgress: one-call convenience — increments, checks threshold, fires progress or completion.
@@ -24,7 +24,7 @@ class SIMPLEQUEST_API UCountingQuestObjective : public UQuestObjective
     GENERATED_BODY()
 
 protected:
-    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override;
+    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime) override;
 
     /**
      * Increments CurrentElements by Amount, then either completes (if threshold met) or reports progress. Fires exactly

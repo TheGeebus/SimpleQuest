@@ -49,8 +49,17 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	 * (it re-derives from the Step). Empty default-constructed for non-Step starts. Consumed by save/load to reconstitute
 	 * the runtime half of live questline state.
 	 */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FQuestObjectiveActivationContext ActivationContextSnapshot;
+
+	/**
+	 * Save-stable attribution: the actor credited with this start, as a soft reference. Captured at RecordEntry from the
+	 * snapshot's live (weak) Instigator and resolved lazily on read, so it survives a save/load where the actor streams in
+	 * after the snapshot is applied. GetLastGiverActor reads this. Unset when the start had no instigator. A runtime-spawned
+	 * instigator with no stable path resolves in-session but not across a save — that's UE's actor model, not a quest caveat.
+	 */
+	UPROPERTY(BlueprintReadOnly, SaveGame)
+	TSoftObjectPtr<AActor> InstigatorRef;
 
 	/**
 	 * Per-source routing identity: the IncomingSourceTag arg threaded through ActivateNodeByTag for duplicate-path disambiguation

@@ -248,6 +248,20 @@ public:
 protected:
 	virtual void PerformDeferredRegistration() override;
 
+	virtual void InitializeComponent() override;
+
+	/**
+	 * Publishes this giver's QuestTagsToGive at InitializeComponent — before any BeginPlay — so the structural
+	 * "this quest has a giver" set is populated before the questline's entry activation runs.
+	 */
+	void DeclareGiverQuests();
+
+	/**
+	 * Publishes one FQuestGiverRegisteredEvent, resolving the signal subsystem whether or not it's cached yet
+	 * (the InitializeComponent declaration runs before BeginPlay caches it).
+	 */
+	void PublishGiverRegistration(FGameplayTag QuestTag);
+
 	/** Quest tags this giver offers. Designer-authored on the placed component instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline"))
 	FGameplayTagContainer QuestTagsToGive;

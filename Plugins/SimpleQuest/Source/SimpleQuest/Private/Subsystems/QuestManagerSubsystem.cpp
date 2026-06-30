@@ -2453,7 +2453,7 @@ void UQuestManagerSubsystem::HandleGiverRegisteredEvent(FGameplayTag Channel, co
     if (FQuestLifecycleQuery::IsLive(WorldState, QuestTag))
     {
         UE_LOG(LogSimpleQuestActivation, Warning,
-            TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' came online after the quest already activated — gate was missed. Save the giver Blueprint to fix this for streaming scenarios."),
+            TEXT("UQuestManagerSubsystem::HandleGiverRegisteredEvent : giver for '%s' registered after the quest was already Live — gate not applied. Placed givers gate correctly via their InitializeComponent declaration; this is a runtime-spawned or late-streamed giver, which can't be gated retroactively."),
             *QuestTag.ToString());
     }
 }

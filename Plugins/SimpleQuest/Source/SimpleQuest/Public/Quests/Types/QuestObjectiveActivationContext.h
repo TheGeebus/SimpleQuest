@@ -18,6 +18,6 @@ struct SIMPLEQUEST_API FQuestObjectiveActivationContext : public FQuestContextBa
 	 * Objective config the caller contributes at runtime — the same shape the Step authors. The objective composes
 	 * this incoming Config with the Step's authored Config (see UQuestObjective::OnObjectiveActivated).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FQuestObjectiveAuthoredConfig Config;
 };

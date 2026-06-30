@@ -21,12 +21,16 @@ struct SIMPLEQUEST_API FQuestContextBase
 {
 	GENERATED_BODY()
 
-	/** Actor that caused this event/activation. */
+	/**
+	 * Actor that caused this event/activation. Live weak reference — deliberately NOT SaveGame-flagged: a weak pointer
+	 * resolves eagerly on load and nulls when the actor hasn't streamed in yet. The save-stable form is captured as a
+	 * lazily-resolving soft reference at the save boundary (see FQuestEntryArrival::InstigatorRef).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TWeakObjectPtr<AActor> Instigator;
 
 	/** Untyped extension point for game-specific data. Read via CustomData.Get<FYourType>(). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FInstancedStruct CustomData;
 	
 	/**
@@ -34,7 +38,7 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * The framework never interprets it; consumers read and branch on it. Use CustomData when you need richer
 	 * or multi-field game data; use CustomTag when one tag is all you need.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FGameplayTag CustomTag;
 
 	/**
@@ -42,7 +46,7 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * supplied tag on external API. Designer escape hatch for "who activated me?" branching in BP. Equivalent
 	 * to OriginChain.Last() when the chain is non-empty. Invalid when there's no meaningful source.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FGameplayTag OriginTag;
 
 	/**
@@ -51,7 +55,7 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * ("did this chain pass through step X?") read this instead of OriginTag. Empty when no origin information
 	 * exists. Ordered list (not a tag container) — order is semantically meaningful.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	TArray<FGameplayTag> OriginChain;
 
 	/**
@@ -60,6 +64,6 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * Read by FireWrapperBoundaryCompletion's event-keyed deduplication gate. Default-constructed (invalid) for
 	 * contexts that don't originate from a Step resolution (top-level entries, direct external API requests).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FOriginatingEventID OriginatingEventID;
 };

@@ -399,7 +399,8 @@ void UQuestStateSubsystem::RecordEntry(
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
 	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
-	FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
+	FName PathIdentity,
+	const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -413,6 +414,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.EntryTime = EntryTime;
 		Entry.Provenance = Provenance;
 		Entry.ActivationContextSnapshot = ActivationParamsSnapshot;
+		Entry.InstigatorRef = ActivationParamsSnapshot.Instigator.Get();   // save-stable soft form of the live giver/instigator
 		Entry.PathIdentity = PathIdentity;
 
 		if (IncomingOutcomeTag.IsValid())
@@ -515,7 +517,7 @@ AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationContextSnapshot.Instigator.Get();
+			return Latest->InstigatorRef.Get();
 		}
 	}
 	return nullptr;

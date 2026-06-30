@@ -30,11 +30,11 @@ struct SIMPLEQUEST_API FOriginatingEventID
     GENERATED_BODY()
 
     /** Authored identity of the originating node — UQuestlineNodeBase::QuestGuid before placement-chain combination. */
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, SaveGame)
     FGuid AuthoredNodeGuid;
 
     /** World seconds at the originating SetQuestResolved call. Per-tick stable; distinguishes re-firings across ticks. */
-    UPROPERTY(BlueprintReadOnly)
+    UPROPERTY(BlueprintReadOnly, SaveGame)
     double ResolutionTimestamp = 0.0;
 
     bool operator==(const FOriginatingEventID& Other) const

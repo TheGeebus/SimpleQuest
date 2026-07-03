@@ -17,14 +17,14 @@ struct SIMPLEQUEST_API FQuestObjectiveRuntimeContext
 	GENERATED_BODY()
 
 	/** The caller's raw activation input, verbatim — Instigator, CustomData, lineage, target sets, authored overrides. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FQuestObjectiveActivationContext IncomingContext;
 
 	/** How this activation was initiated. Framework-stamped. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
 	/** The outcome route that drove this activation, if any. Framework-stamped. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
 	FGameplayTag IncomingOutcomeTag;
 };

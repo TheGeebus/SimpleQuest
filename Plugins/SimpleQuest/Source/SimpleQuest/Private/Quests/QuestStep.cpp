@@ -27,20 +27,33 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 	// no merge. The objective composes the two however it wants (see UQuestObjective::OnObjectiveActivated), with full
 	// provenance over which values are authored vs caller-supplied. ReceivedActivationContext (the runtime half) is set
 	// BEFORE Super::ActivateInternal so OnNodeStarted's handler reads a populated snapshot for the registry's start record.
-	FQuestObjectiveAuthoredConfig Authored;
-	Authored.TargetClasses = TargetClasses;
-	Authored.TargetActors = TargetActors;
-	Authored.NumElementsRequired = NumberOfElements;
-	Authored.ConfigAsset = ConfigAsset;
-
+	const FQuestObjectiveAuthoredConfig Authored = BuildAuthoredConfig();
 	const FQuestObjectiveRuntimeContext Runtime = PendingActivationContext;   // caller input + framework-stamped provenance/outcome
 
 	ReceivedActivationContext = Runtime;
 
 	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
-	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above.
+	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above. AssembleEventContext reads
+	// PendingActivationContext during that call, so clear it only after Super returns.
 	Super::ActivateInternal(InContextualTag);
 
+	PendingActivationContext = FQuestObjectiveRuntimeContext{};   // consume + clear (already copied into Runtime above)
+
+	InstantiateLiveObjective(Authored, Runtime, InContextualTag);
+}
+
+FQuestObjectiveAuthoredConfig UQuestStep::BuildAuthoredConfig() const
+{
+	FQuestObjectiveAuthoredConfig Authored;
+	Authored.TargetClasses = TargetClasses;
+	Authored.TargetActors = TargetActors;
+	Authored.NumElementsRequired = NumberOfElements;
+	Authored.ConfigAsset = ConfigAsset;
+	return Authored;
+}
+
+void UQuestStep::InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InContextualTag)
+{
 	UClass* ObjClass = QuestObjective.LoadSynchronous();
 	if (!ObjClass) return;
 
@@ -65,8 +78,23 @@ void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 		}
 	}
 
-	PendingActivationContext = FQuestObjectiveRuntimeContext{};   // consume + clear
 	LiveObjective->DispatchOnObjectiveActivated(Authored, Runtime, InContextualTag);
+}
+
+void UQuestStep::RestoreObjective(const FQuestObjectiveActivationContext& IncomingContext, FGameplayTag InContextualTag)
+{
+	// Rebuild the runtime context from the saved snapshot: the caller's incoming half, plus a Restored provenance stamp
+	// so the objective can suppress first-activation side effects. The authored half re-derives from this Step.
+	FQuestObjectiveRuntimeContext Runtime;
+	Runtime.IncomingContext = IncomingContext;
+	Runtime.Provenance = EQuestActivationProvenance::Restored;
+
+	// Mirror onto the Step so post-restore reads (completion chaining, AssembleEventContext) see the context a live
+	// activation would have left behind. No Super::ActivateInternal here — SetQuestLive / lifecycle events / the entry
+	// record all fired at the original start and were restored in bulk; re-firing them would double-count.
+	ReceivedActivationContext = Runtime;
+
+	InstantiateLiveObjective(BuildAuthoredConfig(), Runtime, InContextualTag);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)

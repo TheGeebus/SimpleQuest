@@ -475,16 +475,23 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 
 		FQuestEventPayload Payload;
 		Payload.NodeInfo.QuestTag = EachTag;
+		Payload.Delivery = EQuestEventDelivery::CatchUp;   // every broadcast below is a reconstruction, not a live transition
 
-		// Activated reconstructs from EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope)
-		// OR the Live fact (a non-giver path — including asset/container-level activations — went straight to
-		// Live, which implies it transitioned through Activated to get there). Enabled stays PendingGiver-only.
-		// Matches UQuestLifecycleObserver's catch-up so the component and the K2 node replay identically.
+		// Activated / Started reconstruct from any fact that proves the quest ENTERED SCOPE — PendingGiver (giver-gated
+		// path), Live (non-giver path went straight to Live), OR the append-only Completed anchor (a finished quest
+		// necessarily activated and went live to reach a resolved state; Live/PendingGiver are transient and already
+		// cleared). Without the Completed branch a finished quest replays only its Completed event, so presentation
+		// keyed on Activated/Started — a door that opens when its chapter is reached — never reconstructs for completed
+		// content. Enabled stays PendingGiver-only. Matches UQuestLifecycleObserver's catch-up so the component and the
+		// K2 node replay identically.
 		const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
 		const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
 
 		const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
 		const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
+
+		const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
+		const bool bIsCompleted = CompletedFact.IsValid() && WorldState->HasFact(CompletedFact);
 
 		FQuestPrereqStatus CachedPrereqStatus;
 		if (bIsPendingGiver && QuestState)
@@ -492,7 +499,7 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 			CachedPrereqStatus = QuestState->GetQuestPrereqStatus(EachTag);
 		}
 
-		if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive))
+		if (Settings.bObserveActivated && (bIsPendingGiver || bIsLive || bIsCompleted))
 		{
 			ActiveQuestTags.AddTag(EachTag);
 			if (OnQuestActivated.IsBound()) OnQuestActivated.Broadcast(EachTag, MatchedChannel, Payload, CachedPrereqStatus);
@@ -506,7 +513,7 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 			BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Enabled, Payload);
 		}
 
-		if (Settings.bObserveStarted && bIsLive)
+		if (Settings.bObserveStarted && (bIsLive || bIsCompleted))
 		{
 			ActiveQuestTags.AddTag(EachTag);
 			AActor* RecoveredGiver = QuestState ? QuestState->GetLastGiverActor(EachTag) : nullptr;
@@ -517,38 +524,34 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 		// Disabled / GiveBlocked / Progress / Unblocked / ProgressRefused have no catch-up — transient or
 		// one-shot events without recoverable state.
 
-		if (Settings.bObserveCompleted)
+		if (Settings.bObserveCompleted && bIsCompleted)
 		{
-			const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
-			if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
-			{
-				ActiveQuestTags.RemoveTag(EachTag);
-				CompletedQuestTags.AddTag(EachTag);
+			ActiveQuestTags.RemoveTag(EachTag);
+			CompletedQuestTags.AddTag(EachTag);
 
-				FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-				if (QuestState)
+			FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
+			if (QuestState)
+			{
+				if (const FQuestResolutionRecord* Record = QuestState->GetQuestResolution(EachTag))
 				{
-					if (const FQuestResolutionRecord* Record = QuestState->GetQuestResolution(EachTag))
+					if (const FQuestResolutionEntry* Latest = Record->GetLatest())
 					{
-						if (const FQuestResolutionEntry* Latest = Record->GetLatest())
-						{
-							RecoveredOutcome = Latest->OutcomeTag;
-						}
+						RecoveredOutcome = Latest->OutcomeTag;
 					}
 				}
+			}
 				
-				if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
-				{
-					UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
-						*EachTag.ToString(), *RecoveredOutcome.ToString());
-				}
-				else
-				{
-					UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
-						*EachTag.ToString(), *RecoveredOutcome.ToString());
-					if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
-					BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Completed, Payload, RecoveredOutcome);
-				}
+			if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(RecoveredOutcome))
+			{
+				UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
+					*EachTag.ToString(), *RecoveredOutcome.ToString());
+			}
+			else
+			{
+				UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
+					*EachTag.ToString(), *RecoveredOutcome.ToString());
+				if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, Payload);
+				BroadcastAnyQuestEvent(EachTag, MatchedChannel, EQuestLifecycleEventType::Completed, Payload, RecoveredOutcome);
 			}
 		}
 

@@ -56,6 +56,16 @@ public:
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
 	virtual bool IsStepNode() const override { return true; }
+	
+	/**
+	 * Save-restore replay. Rebuilds the live objective from a saved activation snapshot WITHOUT firing the lifecycle
+	 * (no OnNodeStarted, so no SetQuestLive / lifecycle events / entry record — those fired at the original start and
+	 * were restored in bulk). Stamps EQuestActivationProvenance::Restored on the runtime context so the objective can
+	 * distinguish a load from a fresh start. Called by UQuestManagerSubsystem::RestoreQuestlineGraph for each Step the
+	 * restored WorldState marks Live. IncomingContext is the caller's saved runtime input (FQuestEntryArrival::
+	 * ActivationContextSnapshot); the Step's authored config re-derives here from its own UPROPERTYs.
+	 */
+	void RestoreObjective(const FQuestObjectiveActivationContext& IncomingContext, FGameplayTag InContextualTag);
 
 protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
@@ -137,6 +147,16 @@ private:
 	void OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context);
 
 	static void UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World);
+	
+	/** Packs this Step's authored UPROPERTYs into the objective's authored-config half. Identical for fresh activation and save restore. */
+	FQuestObjectiveAuthoredConfig BuildAuthoredConfig() const;
+
+	/**
+	 * Instantiates LiveObjective, wires its delegates, registers it with the state subsystem, and dispatches
+	 * OnObjectiveActivated. The instantiation half of activation with no lifecycle side effects — shared by the normal
+	 * ActivateInternal path and the save-restore RestoreObjective path.
+	 */
+	void InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InContextualTag);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }

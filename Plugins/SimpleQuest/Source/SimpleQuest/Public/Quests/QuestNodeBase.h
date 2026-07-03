@@ -320,9 +320,6 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TArray<FQuestGraphResolution> ResolvedGraphsOnAnyOutcome;
-
-    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnAbandon;       // DEPRECATED — remove after compiler migration
     
     /** Nodes to activate normally when this node deactivates (Deactivated output to Activate input). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
@@ -462,7 +459,6 @@ public:
     FORCEINLINE const TArray<FGameplayTag>& GetAssetScopedAliasTags() const { return AssetScopedAliasTags; }
     const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
-    FORCEINLINE const TSet<FName>& GetNextNodesOnAbandon() const { return NextNodesOnAbandon; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }

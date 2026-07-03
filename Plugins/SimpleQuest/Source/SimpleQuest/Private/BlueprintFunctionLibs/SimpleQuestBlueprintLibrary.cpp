@@ -53,6 +53,14 @@ UQuestManagerSubsystem* USimpleQuestBlueprintLibrary::GetQuestManagerSubsystem(c
     return GI ? GI->GetSubsystem<UQuestManagerSubsystem>() : nullptr;
 }
 
+UQuestStateSubsystem* USimpleQuestBlueprintLibrary::GetQuestStateSubsystem(const UObject* WorldContext)
+{
+    if (!WorldContext) return nullptr;
+    const UWorld* World = WorldContext->GetWorld();
+    if (!World) return nullptr;
+    UGameInstance* GI = World->GetGameInstance();
+    return GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+}
 
 // -------------------------------------------------------------------------
 // Quest state queries
@@ -165,6 +173,82 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
     }
 }
 
+void USimpleQuestBlueprintLibrary::RestoreQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph)
+{
+    if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
+    {
+        SS->PublishMessage(Tag_Channel_QuestlineStartRequest, FQuestlineStartRequestEvent(QuestlineGraph, true));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot)
+{
+    UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+    if (!QSS)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("ApplyQuestSnapshot: no QuestStateSubsystem for the given world context; nothing applied."));
+        return;
+    }
+
+    QSS->ApplySnapshot(Snapshot);   // restore facts + registries (synchronous)
+
+    // Stash "what to restore" for RestoreQuestGraphs. Held on the manager (GameInstance-persistent) so it survives the
+    // OpenLevel between applying the data here and rebuilding the graphs once the target level is up.
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->StashPendingRestore(Snapshot.ActiveGraphs, Snapshot.DeferredActivations);
+    }
+}
+
+void USimpleQuestBlueprintLibrary::RestoreQuestGraphs(const UObject* WorldContext)
+{
+    UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    if (!Manager)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreQuestGraphs: no QuestManagerSubsystem for the given world context; nothing restored."));
+        return;
+    }
+
+    const TArray<FSoftObjectPath> Graphs = Manager->ConsumePendingRestoreGraphs();
+    UE_LOG(LogSimpleQuest, Log, TEXT("RestoreQuestGraphs: restoring %d stashed graph(s)."), Graphs.Num());
+    for (const FSoftObjectPath& GraphPath : Graphs)
+    {
+        RestoreQuestline(WorldContext, TSoftObjectPtr<UQuestlineGraph>(GraphPath));
+    }
+}
+
+FSimpleQuestSaveSnapshot USimpleQuestBlueprintLibrary::CaptureQuestState(const UObject* WorldContext)
+{
+    FSimpleQuestSaveSnapshot Snapshot{};
+
+    UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+    if (!QSS)
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("CaptureQuestState: no QuestStateSubsystem for the given world context; returning empty snapshot."));
+        return Snapshot;
+    }
+
+    Snapshot = QSS->CaptureSnapshot();
+
+    // Record which graphs are in play + which nodes are armed-and-waiting on a prereq, so restore is fully self-driving:
+    // the save carries both "which graphs to rebuild" and "which deferred activations to re-arm."
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Snapshot.ActiveGraphs = Manager->GetKnownLoadedGraphPaths().Array();
+        Snapshot.DeferredActivations = Manager->CaptureDeferredActivations();
+    }
+
+    return Snapshot;
+}
+
+void USimpleQuestBlueprintLibrary::RestoreQuestState(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot)
+{
+    // In-place one-shot: apply the data (+ stash) then immediately rebuild the graphs, all in the current level. For a
+    // level-transition load, call ApplyQuestSnapshot BEFORE OpenLevel and RestoreQuestGraphs in the target level instead.
+    ApplyQuestSnapshot(WorldContext, Snapshot);
+    RestoreQuestGraphs(WorldContext);
+}
+
 void USimpleQuestBlueprintLibrary::LogSimpleQuestMessage(const FString& Message, EQuestLogLevel Level)
 {
     switch (Level)
@@ -260,14 +344,5 @@ UQuestDisplayData* USimpleQuestBlueprintLibrary::GetQuestDisplayDataAsset(const 
         return QSS->GetDisplayData(QueryTag);
     }
     return nullptr;
-}
-
-UQuestStateSubsystem* USimpleQuestBlueprintLibrary::GetQuestStateSubsystem(const UObject* WorldContext)
-{
-    if (!WorldContext) return nullptr;
-    const UWorld* World = WorldContext->GetWorld();
-    if (!World) return nullptr;
-    UGameInstance* GI = World->GetGameInstance();
-    return GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 }
 

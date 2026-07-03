@@ -11,6 +11,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "SimpleQuestLog.h"
+#include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 
 namespace
 {
@@ -31,45 +32,53 @@ namespace
 		}
 	}
 
-	void SaveLoadRoundTrip(UWorld* World)
-	{
-		UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
-		UQuestStateSubsystem* QSS = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
-		if (!QSS)
-		{
-			UE_LOG(LogSimpleQuestState, Warning, TEXT("SaveLoadRoundTrip: no QuestStateSubsystem (run this in PIE)."));
-			return;
-		}
+	const FString GTestSlot = TEXT("SimpleQuestSaveLoadTest");
 
+	// Run while a quest is mid-progress (its step Live). Captures state (incl. active graphs) to the disk slot.
+	void SaveState(UWorld* World)
+	{
 		USimpleQuestSaveLoadTestSave* SaveObj = Cast<USimpleQuestSaveLoadTestSave>(
 			UGameplayStatics::CreateSaveGameObject(USimpleQuestSaveLoadTestSave::StaticClass()));
-		SaveObj->Snapshot = QSS->CaptureSnapshot();
-		LogSnapshotEntries(TEXT("CAPTURED"), SaveObj->Snapshot);
+		SaveObj->Snapshot = USimpleQuestBlueprintLibrary::CaptureQuestState(World);
+		LogSnapshotEntries(TEXT("SAVED"), SaveObj->Snapshot);
 
-		const FString Slot = TEXT("SimpleQuestSaveLoadTest");
-		if (!UGameplayStatics::SaveGameToSlot(SaveObj, Slot, 0))
+		if (UGameplayStatics::SaveGameToSlot(SaveObj, GTestSlot, 0))
 		{
-			UE_LOG(LogSimpleQuestState, Warning, TEXT("SaveLoadRoundTrip: SaveGameToSlot failed."));
-			return;
+			UE_LOG(LogSimpleQuestState, Log,
+				TEXT("SaveState: wrote %d fact(s) / %d entry key(s) / %d graph(s) to slot '%s'. STOP + restart PIE, then run SimpleQuest.RestoreState."),
+				SaveObj->Snapshot.WorldFacts.Num(), SaveObj->Snapshot.Entries.Num(), SaveObj->Snapshot.ActiveGraphs.Num(), *GTestSlot);
 		}
+		else
+		{
+			UE_LOG(LogSimpleQuestState, Warning, TEXT("SaveState: SaveGameToSlot failed."));
+		}
+	}
 
+	// Run AFTER a cold PIE restart (with the questline left dormant). Restores data + every recorded graph — no path arg.
+	void RestoreState(UWorld* World)
+	{
 		USimpleQuestSaveLoadTestSave* Loaded = Cast<USimpleQuestSaveLoadTestSave>(
-			UGameplayStatics::LoadGameFromSlot(Slot, 0));
+			UGameplayStatics::LoadGameFromSlot(GTestSlot, 0));
 		if (!Loaded)
 		{
-			UE_LOG(LogSimpleQuestState, Warning, TEXT("SaveLoadRoundTrip: LoadGameFromSlot failed."));
+			UE_LOG(LogSimpleQuestState, Warning, TEXT("RestoreState: LoadGameFromSlot('%s') failed — run SaveState first."), *GTestSlot);
 			return;
 		}
 		LogSnapshotEntries(TEXT("LOADED"), Loaded->Snapshot);
 
-		QSS->ApplySnapshot(Loaded->Snapshot);
+		USimpleQuestBlueprintLibrary::RestoreQuestState(World, Loaded->Snapshot);
 		UE_LOG(LogSimpleQuestState, Log,
-			TEXT("SaveLoadRoundTrip: applied loaded snapshot. Compare CAPTURED vs LOADED above — Config fields and the "
-			     "instigator path should match; a mismatch means a SaveGame flag isn't taking."));
+			TEXT("RestoreState: restored from slot '%s' (%d graph(s)). Watch LogSimpleQuestActivation for 'restored live objective'."),
+			*GTestSlot, Loaded->Snapshot.ActiveGraphs.Num());
 	}
 }
 
-static FAutoConsoleCommandWithWorld GSimpleQuestSaveLoadRoundTripCmd(
-	TEXT("SimpleQuest.SaveLoadRoundTrip"),
-	TEXT("Capture quest state, round-trip it through a save slot, apply it, and log CAPTURED vs LOADED (Slice 1 verification)."),
-	FConsoleCommandWithWorldDelegate::CreateStatic(&SaveLoadRoundTrip));
+static FAutoConsoleCommandWithWorld GSimpleQuestSaveStateCmd(
+	TEXT("SimpleQuest.SaveState"),
+	TEXT("Capture quest state (facts + history + active graphs) to the test save slot."),
+	FConsoleCommandWithWorldDelegate::CreateStatic(&SaveState));
+
+static FAutoConsoleCommandWithWorld GSimpleQuestRestoreStateCmd(
+	TEXT("SimpleQuest.RestoreState"),
+	TEXT("Load the test save and restore all recorded graphs. Run after a cold PIE restart."),
+	FConsoleCommandWithWorldDelegate::CreateStatic(&RestoreState));

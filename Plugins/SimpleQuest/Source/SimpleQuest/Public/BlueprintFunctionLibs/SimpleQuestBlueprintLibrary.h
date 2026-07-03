@@ -10,6 +10,7 @@
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
+#include "Quests/Types/SimpleQuestSaveSnapshot.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Settings/SimpleQuestSettings.h"
@@ -218,6 +219,48 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph,
         const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+    
+    /**
+     * Restore a questline from a loaded save. Call AFTER Apply Snapshot (on the Quest State subsystem) has restored the
+     * quest facts and history — this rebuilds the objectives the save recorded as in-progress, without re-running the
+     * questline from its start. Safe to call on every questline graph in your game on load; graphs that weren't in
+     * progress simply stay dormant. The load-time counterpart to Start Questline.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext"))
+    static void RestoreQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph);
+
+    /**
+     * Capture all SimpleQuest runtime state into a snapshot ready to embed in your save. Records the quest facts,
+     * history, AND which questline graphs are in play — so Restore Quest State can rebuild everything without you
+     * listing assets. Embed the returned struct in your USaveGame and write it with Save Game to Slot.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
+    static FSimpleQuestSaveSnapshot CaptureQuestState(const UObject* WorldContext);
+
+    /**
+     * Restore SimpleQuest from a snapshot loaded out of your save. Applies the saved facts + history, then rebuilds the
+     * in-progress objectives for every questline graph the snapshot recorded — no need to know which assets were active.
+     * Call on load (after Load Game from Slot); it replaces starting your questlines fresh.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
+    static void RestoreQuestState(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot);
+
+    /**
+     * Restore the quest DATA from a snapshot (facts + history) and remember which graphs to rebuild — WITHOUT rebuilding
+     * them yet. Call this on load BEFORE you open your gameplay level, so the level's actors register against restored
+     * data and re-sync for free. Then call Restore Quest Graphs once the level is up. (For an in-place quick-load with no
+     * level change, use Restore Quest State instead, which does both at once.)
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
+    static void ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot);
+
+    /**
+     * Rebuild the in-progress questlines remembered by the most recent Apply Quest Snapshot — call this in your gameplay
+     * level's startup, in the same place a new game would start its questlines. Takes no arguments: the save already
+     * recorded which graphs were active, so you never enumerate them.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
+    static void RestoreQuestGraphs(const UObject* WorldContext);
 
     // -------------------------------------------------------------------------------------------------------------
     // Logging — write into SimpleQuest's "Module" log category from Blueprints at a chosen verbosity. Print String is

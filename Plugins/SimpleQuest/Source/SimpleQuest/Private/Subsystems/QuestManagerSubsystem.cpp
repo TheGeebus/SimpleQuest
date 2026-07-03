@@ -771,6 +771,95 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
     }
 }
 
+void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
+{
+    if (!Graph) return;
+
+    // Register instances (idempotent per-instance). Unlike ActivateQuestlineGraph we do NOT fire entry tags or publish
+    // asset-level lifecycle events: a loaded game reconstitutes the state the restored facts describe rather than
+    // re-running the graph from its entries. Late subscribers still catch up off the restored facts on registration.
+    RegisterQuestlineGraph(Graph);
+
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+
+    int32 RestoredCount = 0;
+    int32 RearmedCount = 0;
+    for (const auto& Pair : Graph->GetCompiledNodes())
+    {
+        UQuestNodeBase* Node = Pair.Value;
+        if (!Node) continue;
+
+        const FGameplayTag NodeTag = Node->GetContextualTag();
+        if (!NodeTag.IsValid()) continue;
+
+        // Re-arm a prereq-deferred activation (any node type — chapters/containers included). The "waiting" state is
+        // transient (DeferredContextualTag + the armed prereq subscription) and RegisterQuestlineGraph's ResetTransient-
+        // State just wiped it, so replay it: restore the pending context, then route back through Activate. Activate
+        // re-evaluates the prereq against the RESTORED facts and re-defers (the normal case — no events) or activates
+        // outright if the prereq is already satisfied. Consume the entry so no other graph re-processes it.
+        if (const FQuestObjectiveRuntimeContext* DeferredCtx = PendingDeferredActivations.Find(NodeTag))
+        {
+            Node->PendingActivationContext = *DeferredCtx;
+            PendingDeferredActivations.Remove(NodeTag);
+            Node->Activate(NodeTag);
+            ++RearmedCount;
+            UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — re-armed deferred activation for '%s'"),
+                *Graph->GetName(), *NodeTag.ToString());
+            continue;   // a deferred node is not Live; skip the objective-rebuild path
+        }
+
+        // Rebuild the live objective on Steps the restored WorldState marks Live.
+        UQuestStep* Step = Cast<UQuestStep>(Node);
+        if (!Step) continue;   // Only Steps own a live objective; container Live derives from inner Step state.
+
+        const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live);
+        if (!LiveFact.IsValid() || !WorldState || !WorldState->HasFact(LiveFact)) continue;
+
+        if (Step->GetLiveObjective())
+        {
+            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("RestoreQuestlineGraph: '%s' — Step '%s' already has a live objective; skipping"),
+                *Graph->GetName(), *NodeTag.ToString());
+            continue;
+        }
+
+        FQuestObjectiveActivationContext IncomingContext;
+        if (StateSubsystem)
+        {
+            IncomingContext = StateSubsystem->GetLatestEntry(NodeTag).ActivationContextSnapshot;
+        }
+
+        Step->RestoreObjective(IncomingContext, NodeTag);
+        WireStepTriggerSubscriptions(Step);   // re-establish the trigger->objective bridge the normal start path wires
+        ++RestoredCount;
+
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — restored live objective for Step '%s'"),
+            *Graph->GetName(), *NodeTag.ToString());
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — reconstituted %d live objective(s), re-armed %d deferred activation(s)"),
+        *Graph->GetName(), RestoredCount, RearmedCount);
+}
+
+TMap<FGameplayTag, FQuestObjectiveRuntimeContext> UQuestManagerSubsystem::CaptureDeferredActivations() const
+{
+    TMap<FGameplayTag, FQuestObjectiveRuntimeContext> Out;
+    TSet<const UQuestNodeBase*> Seen;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        UQuestNodeBase* Node = Pair.Value;
+        if (!Node || Seen.Contains(Node)) continue;   // LoadedNodeInstances has alias-duplicate keys; visit each node once
+        Seen.Add(Node);
+
+        if (!Node->DeferredContextualTag.IsValid()) continue;   // only nodes armed + waiting on a prereq
+
+        const FGameplayTag NodeTag = Node->GetContextualTag();
+        if (!NodeTag.IsValid()) continue;   // content nodes; util nodes without a contextual tag aren't captured
+
+        Out.FindOrAdd(NodeTag) = Node->PendingActivationContext;
+    }
+    return Out;
+}
+
 FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveTriggerContext& InCompletionTrigger) const
 {
     FQuestEventPayload Context;
@@ -910,6 +999,46 @@ void UQuestManagerSubsystem::HandleOnNodeTriggerSatisfied(UQuestStep* Step, FQue
     FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestTriggerSatisfiedEvent(Step->GetContextualTag(), Context.TriggeredActor.Get(), Context));
 }
 
+void UQuestManagerSubsystem::WireStepTriggerSubscriptions(UQuestStep* Step)
+{
+    if (!Step || !QuestSignalSubsystem) return;
+
+    const FGameplayTag StepTag = Step->GetContextualTag();
+    if (!StepTag.IsValid()) return;
+
+    FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(StepTag, this, &UQuestManagerSubsystem::CheckQuestObjectives);
+    LiveStepTriggerHandles.Add(StepTag, Handle);
+
+    if (!Step->GetTargetClasses().IsEmpty())
+    {
+        for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
+        {
+            // Hot path: target class was pre-warmed at RegisterQuestlineGraph time via AsyncLoadAndActivateClass, so
+            // .Get() typically returns the loaded class without stalling the frame. Cold fallback covers the edge case
+            // where the step activates before the pre-warm completes; verbose log makes pre-warm gaps visible in traces.
+            UClass* Loaded = SoftClass.Get();
+            if (!Loaded)
+            {
+                UE_LOG(LogSimpleQuestActivation, Verbose,
+                    TEXT("WireStepTriggerSubscriptions: '%s' target class '%s' not pre-warmed; falling back to LoadSynchronous"),
+                    *StepTag.ToString(),
+                    *SoftClass.ToSoftObjectPath().ToString());
+                Loaded = SoftClass.LoadSynchronous();
+            }
+            if (Loaded)
+            {
+                ClassFilteredSteps.Add(StepTag, Loaded);
+            }
+        }
+
+        // Subscribe once to the global trigger channel if this is the first class-filtered step.
+        if (!ClassBridgeHandle.IsValid())
+        {
+            ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Tag_Channel_QuestTrigger, this, &UQuestManagerSubsystem::CheckClassObjectives);
+        }
+    }
+}
+
 void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestManagerSubsystem_HandleOnNodeStarted);
@@ -971,38 +1100,9 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
         
         if (UQuestStep* Step = Cast<UQuestStep>(Node))
         {
-            FDelegateHandle Handle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Node->GetContextualTag(), this, &UQuestManagerSubsystem::CheckQuestObjectives);
-            LiveStepTriggerHandles.Add(Node->GetContextualTag(), Handle);
-            if (!Step->GetTargetClasses().IsEmpty())
-            {
-                for (const TSoftClassPtr<AActor>& SoftClass : Step->GetTargetClasses())
-                {
-                    // Hot path: target class was pre-warmed at RegisterQuestlineGraph time via
-                    // AsyncLoadAndActivateClass, so .Get() typically returns the loaded class without
-                    // stalling the activation frame. Cold fallback covers the edge case where the step
-                    // activates before the pre-warm completes; verbose log makes pre-warm gaps visible
-                    // in traces so they can be addressed at the registration site if they recur.
-                    UClass* Loaded = SoftClass.Get();
-                    if (!Loaded)
-                    {
-                        UE_LOG(LogSimpleQuestActivation, Verbose,
-                            TEXT("HandleOnNodeStarted: '%s' target class '%s' not pre-warmed; falling back to LoadSynchronous"),
-                            *Node->GetContextualTag().ToString(),
-                            *SoftClass.ToSoftObjectPath().ToString());
-                        Loaded = SoftClass.LoadSynchronous();
-                    }
-                    if (Loaded)
-                    {
-                        ClassFilteredSteps.Add(Node->GetContextualTag(), Loaded);
-                    }
-                }
-
-                // Subscribe once to global channel if this is the first class-filtered step.
-                if (!ClassBridgeHandle.IsValid())
-                {
-                    ClassBridgeHandle = QuestSignalSubsystem->SubscribeRawMessage<FQuestTriggerFiredEvent>(Tag_Channel_QuestTrigger, this, &UQuestManagerSubsystem::CheckClassObjectives);
-                }
-            }
+            // Wire the trigger→objective bridge (step-tag + class-filtered target subscriptions). Factored so save
+            // restore re-establishes the identical wiring for a rebuilt objective (see WireStepTriggerSubscriptions).
+            WireStepTriggerSubscriptions(Step);
 
             // Step-side entry record. Captures every Step start with the merged final params snapshot delivered to the
             // live objective (Step->ReceivedActivationContext). Mirrors the wrapper-side per-cascade RecordEntry in the
@@ -2175,19 +2275,26 @@ void UQuestManagerSubsystem::HandleQuestlineStartRequest(FGameplayTag Channel, c
         return;
     }
 
-    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and activate"), *Event.Graph.ToString());
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: '%s' — load and %s"),
+        *Event.Graph.ToString(), Event.bRestoreFromSave ? TEXT("restore") : TEXT("activate"));
 
     AsyncLoadAndActivate<UQuestlineGraph>(this, Event.Graph,
-        [this, Params = Event.Params](UQuestlineGraph* Graph)
+        [this, Params = Event.Params, bRestore = Event.bRestoreFromSave](UQuestlineGraph* Graph)
         {
-            if (Graph)
+            if (!Graph)
             {
-                UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
-                ActivateQuestlineGraph(Graph, Params);
+                UE_LOG(LogSimpleQuestActivation, Warning, TEXT("HandleQuestlineStartRequest: load completed but graph still null"));
+                return;
+            }
+            if (bRestore)
+            {
+                UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: restoring '%s'"), *Graph->GetName());
+                RestoreQuestlineGraph(Graph);
             }
             else
             {
-                UE_LOG(LogSimpleQuestActivation, Warning, TEXT("HandleQuestlineStartRequest: load completed but graph still null"));
+                UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleQuestlineStartRequest: activating '%s'"), *Graph->GetName());
+                ActivateQuestlineGraph(Graph, Params);
             }
         });
 }

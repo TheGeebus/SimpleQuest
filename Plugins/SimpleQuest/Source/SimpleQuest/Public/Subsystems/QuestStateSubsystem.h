@@ -16,6 +16,7 @@
 #include "Quests/Types/QuestDisplayDataRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
+struct FSimpleQuestSaveSnapshot;
 struct FQuestRoleSourceInfo;
 class UQuestDisplayData;
 class UQuestObjective;
@@ -407,17 +408,20 @@ public:
 	// ── Snapshot ─────────────────────────────────────────────────────────────────────────────────────────
 
 	/**
-	 * Captures all SimpleQuest runtime state into a serializable snapshot (WorldState facts + the resolution/entry
-	 * registries). Pure read. The consumer embeds the result in their own USaveGame and writes it (sync or async).
+	 * Captures the two data layers — WorldState facts + the resolution/entry registries — into a serializable snapshot.
+	 * Pure read. Lower-level C++ primitive: the Blueprint entry point is USimpleQuestBlueprintLibrary::CaptureQuestState,
+	 * which pairs this with the active-graph list + deferred-activation set that restore needs. Native callers composing
+	 * their own save flow may still call this directly.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Quest|SaveLoad")
 	FSimpleQuestSaveSnapshot CaptureSnapshot() const;
 
 	/**
-	 * Restores state from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the parallel
-	 * indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
+	 * Restores the two data layers from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the
+	 * parallel indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
+	 * Restores DATA only — it does not rebuild live objectives or re-arm deferred activations. Lower-level C++ primitive:
+	 * the Blueprint entry point is USimpleQuestBlueprintLibrary::ApplyQuestSnapshot, which pairs this with the stash the
+	 * per-graph restore consumes. Native callers composing their own load flow may still call this directly.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Quest|SaveLoad")
 	bool ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot);
 
 private:

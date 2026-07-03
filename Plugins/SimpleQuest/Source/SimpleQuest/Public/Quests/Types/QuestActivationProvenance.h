@@ -28,4 +28,12 @@ enum class EQuestActivationProvenance : uint8
 
 	/** Activated by an entry-tag fire at graph activation time (via ActivateQuestlineGraph). */
 	InitialEntry,
+	
+	/**
+	 * Re-instantiated from a save on load (via RestoreQuestlineGraph), not a fresh gameplay start. Objectives read this
+	 * in OnObjectiveActivated to suppress first-activation side effects — actor spawns, one-shot audio, "quest started"
+	 * UI — that already fired before the game was saved. The objective is rebuilt and its progress re-applied; from the
+	 * player's perspective nothing "started."
+	 */
+	Restored,
 };

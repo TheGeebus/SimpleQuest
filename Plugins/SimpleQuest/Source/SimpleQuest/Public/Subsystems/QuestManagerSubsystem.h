@@ -12,6 +12,7 @@
 #include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "QuestManagerSubsystem.generated.h"
@@ -120,6 +121,17 @@ protected:
 	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
 	/**
+	 * Load-time counterpart to ActivateQuestlineGraph. Registers the graph's compiled instances, then — instead of
+	 * firing entry nodes — reconstitutes the live objective on every Step the restored WorldState marks Live, replaying
+	 * it from the saved entry snapshot with EQuestActivationProvenance::Restored. No lifecycle events, no entry records,
+	 * no forward cascades: a loaded game rebuilds the exact Live set the save described rather than re-running the graph
+	 * from its entries. Call after UQuestStateSubsystem::ApplySnapshot has restored facts + registries. Safe to call on
+	 * every questline graph — graphs the save left dormant simply register and instantiate nothing. Designer-facing
+	 * counterpart: USimpleQuestBlueprintLibrary::RestoreQuestline.
+	 */
+	virtual void RestoreQuestlineGraph(UQuestlineGraph* Graph);
+
+	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
 	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
@@ -168,6 +180,26 @@ private:
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+		
+	/**
+	 * The questline graphs the manager has registered or reachability-warmed this session, by soft path. Captured into
+	 * the save snapshot (CaptureQuestState) so RestoreQuestState can drive graph restore off the save itself rather than
+	 * a caller-maintained asset list. A superset of the graphs with live state — dormant entries restore to a no-op.
+	 */
+	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
+	
+	/** Stashes the snapshot's active-graph list + deferred-activation set for a level-transition restore (survives OpenLevel). */
+	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGameplayTag, FQuestObjectiveRuntimeContext>& Deferred)
+	{
+		PendingRestoreGraphs = Graphs;
+		PendingDeferredActivations = Deferred;
+	}
+
+	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
+	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
+
+	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
+	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
 	
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
@@ -382,6 +414,14 @@ private:
 	 */
 	FQuestEventPayload AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveTriggerContext& InCompletionTrigger) const;
 	
+	/**
+	 * Wires the framework trigger→objective bridge for a live Step: subscribes the Step's tag to FQuestTriggerFiredEvent
+	 * (routing to CheckQuestObjectives) and registers any target-class filters against the global trigger channel. Shared
+	 * by the normal start path (HandleOnNodeStarted) and save restore (RestoreQuestlineGraph), so a restored objective
+	 * receives trigger fires exactly as a freshly-started one does.
+	 */
+	void WireStepTriggerSubscriptions(UQuestStep* Step);
+	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity);
 	UFUNCTION()
@@ -396,7 +436,7 @@ private:
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
-
+	
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
 	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
 	void HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event);
@@ -508,6 +548,15 @@ private:
 	 * scheduled, not just when it finishes — prevents N parallel async-loads for the same target during a fan-in.
 	 */
 	TSet<FSoftObjectPath> KnownLoadedGraphPaths;
+
+	/**
+	 * Pending-restore stash for a level-transition load: set by USimpleQuestBlueprintLibrary::ApplyQuestSnapshot before
+	 * OpenLevel, consumed after the target level is up — RestoreQuestGraphs drains the graph list, and each
+	 * RestoreQuestlineGraph drains the deferred-activation entries for its own nodes. GameInstance-persistent, so it
+	 * survives the transition between applying the data and rebuilding the graphs.
+	 */
+	TArray<FSoftObjectPath> PendingRestoreGraphs;
+	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> PendingDeferredActivations;
 
 	/**
 	 * Scans the asset registry for UQuestlineGraph assets and builds GraphsByListenerGroupTag from each asset's

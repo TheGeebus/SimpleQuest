@@ -17,6 +17,6 @@ class USimpleQuestSaveLoadTestSave : public USaveGame
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(SaveGame)
+	UPROPERTY(BlueprintReadWrite, SaveGame)
 	FSimpleQuestSaveSnapshot Snapshot;
 };

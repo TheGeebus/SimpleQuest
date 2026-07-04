@@ -452,12 +452,21 @@ private:
     bool bBypassPrerequisitesOnce = false;
 
 public:
+    /**
+     * True while this node is prereq-deferred — armed on its prerequisite leaves, waiting to activate. Reliable across
+     * content AND utility nodes: a Prereq Gate defers with an invalid contextual tag, so this — not DeferredContextualTag —
+     * is the signal save/load uses to detect a node that must be re-armed on load.
+     */
+    bool IsAwaitingPrerequisite() const { return PrereqSubscriptionHandles.Num() > 0; }
+    const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
+
+    void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
+    
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
     FORCEINLINE FGuid GetAuthoredNodeGuid() const { return AuthoredNodeGuid; }
     FORCEINLINE bool IsLinkedQuestlinePlacement() const { return bIsLinkedQuestlinePlacement; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE const TArray<FGameplayTag>& GetAssetScopedAliasTags() const { return AssetScopedAliasTags; }
-    const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
     FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
@@ -465,7 +474,6 @@ public:
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsResettableReplay() const { return bResettableReplay; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
-    void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
     FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }

@@ -203,7 +203,7 @@ private:
 	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
 	
 	/** Stashes the snapshot's active-graph list + deferred-activation set + objective states for a level-transition restore. */
-	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGameplayTag, FQuestObjectiveRuntimeContext>& Deferred,
+	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
 		const TMap<FGuid, FSimpleQuestObjectiveSaveState>& ObjectiveStates)
 	{
 		PendingRestoreGraphs = Graphs;
@@ -215,7 +215,7 @@ private:
 	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
 
 	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
-	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
+	TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
 
 	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
 	TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
@@ -582,7 +582,7 @@ private:
 	 * survives the transition between applying the data and rebuilding the graphs.
 	 */
 	TArray<FSoftObjectPath> PendingRestoreGraphs;
-	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> PendingDeferredActivations;
+	TMap<FGuid, FQuestObjectiveRuntimeContext> PendingDeferredActivations;
 	TMap<FGuid, FSimpleQuestObjectiveSaveState> PendingObjectiveStates;
 
 	/**

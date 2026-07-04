@@ -776,9 +776,6 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
 
-    // Register instances (idempotent per-instance). Unlike ActivateQuestlineGraph we do NOT fire entry tags or publish
-    // asset-level lifecycle events: a loaded game reconstitutes the state the restored facts describe rather than
-    // re-running the graph from its entries. Late subscribers still catch up off the restored facts on registration.
     RegisterQuestlineGraph(Graph);
 
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
@@ -790,28 +787,32 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
         UQuestNodeBase* Node = Pair.Value;
         if (!Node) continue;
 
-        const FGameplayTag NodeTag = Node->GetContextualTag();
-        if (!NodeTag.IsValid()) continue;
-
-        // Re-arm a prereq-deferred activation (any node type — chapters/containers included). The "waiting" state is
-        // transient (DeferredContextualTag + the armed prereq subscription) and RegisterQuestlineGraph's ResetTransient-
-        // State just wiped it, so replay it: restore the pending context, then route back through Activate. Activate
-        // re-evaluates the prereq against the RESTORED facts and re-defers (the normal case — no events) or activates
-        // outright if the prereq is already satisfied. Consume the entry so no other graph re-processes it.
-        if (const FQuestObjectiveRuntimeContext* DeferredCtx = PendingDeferredActivations.Find(NodeTag))
+        // Re-arm a prereq-deferred activation — keyed by QuestContentGuid so it covers TAG-LESS utility nodes (a Prereq
+        // Gate defers with an invalid contextual tag) as well as content nodes. Restore the pending context, then replay
+        // Activate: it re-evaluates the prereq against the restored facts and re-defers (or fires if already satisfied).
+        // Activate takes the node's contextual tag — valid for content, invalid-but-harmless for a gate (it just forwards).
+        const FGuid NodeGuid = Node->GetQuestGuid();
+        if (NodeGuid.IsValid())
         {
-            Node->PendingActivationContext = *DeferredCtx;
-            PendingDeferredActivations.Remove(NodeTag);
-            Node->Activate(NodeTag);
-            ++RearmedCount;
-            UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — re-armed deferred activation for '%s'"),
-                *Graph->GetName(), *NodeTag.ToString());
-            continue;   // a deferred node is not Live; skip the objective-rebuild path
+            if (const FQuestObjectiveRuntimeContext* DeferredCtx = PendingDeferredActivations.Find(NodeGuid))
+            {
+                Node->PendingActivationContext = *DeferredCtx;
+                PendingDeferredActivations.Remove(NodeGuid);
+                Node->Activate(Node->GetContextualTag());
+                ++RearmedCount;
+                UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — re-armed deferred activation for '%s'"),
+                    *Graph->GetName(),
+                    Node->GetContextualTag().IsValid() ? *Node->GetContextualTag().ToString() : *NodeGuid.ToString(EGuidFormats::Short));
+                continue;
+            }
         }
 
         // Rebuild the live objective on Steps the restored WorldState marks Live.
         UQuestStep* Step = Cast<UQuestStep>(Node);
         if (!Step) continue;   // Only Steps own a live objective; container Live derives from inner Step state.
+
+        const FGameplayTag NodeTag = Node->GetContextualTag();
+        if (!NodeTag.IsValid()) continue;
 
         const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Live);
         if (!LiveFact.IsValid() || !WorldState || !WorldState->HasFact(LiveFact)) continue;
@@ -831,8 +832,6 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
 
         Step->RestoreObjective(IncomingContext, NodeTag);
 
-        // Re-apply the objective's saved per-instance progress — RestoreObjective just rebuilt it, which reset any
-        // accumulator to 0. Keyed by the Step's stable per-placement QuestContentGuid.
         if (const FSimpleQuestObjectiveSaveState* ObjState = PendingObjectiveStates.Find(Step->GetQuestGuid()))
         {
             if (UQuestObjective* Objective = Step->GetLiveObjective())
@@ -842,7 +841,7 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
             PendingObjectiveStates.Remove(Step->GetQuestGuid());
         }
 
-        WireStepTriggerSubscriptions(Step);   // re-establish the trigger->objective bridge the normal start path wires
+        WireStepTriggerSubscriptions(Step);
         ++RestoredCount;
 
         UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — restored live objective for Step '%s'"),
@@ -914,22 +913,23 @@ void UQuestManagerSubsystem::HandleWorldInitForRestore(UWorld* World, const UWor
         [this](float) { RestorePendingGraphs(); return false; }));
 }
 
-TMap<FGameplayTag, FQuestObjectiveRuntimeContext> UQuestManagerSubsystem::CaptureDeferredActivations() const
+TMap<FGuid, FQuestObjectiveRuntimeContext> UQuestManagerSubsystem::CaptureDeferredActivations() const
 {
-    TMap<FGameplayTag, FQuestObjectiveRuntimeContext> Out;
+    TMap<FGuid, FQuestObjectiveRuntimeContext> Out;
     TSet<const UQuestNodeBase*> Seen;
     for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
     {
         UQuestNodeBase* Node = Pair.Value;
-        if (!Node || Seen.Contains(Node)) continue;   // LoadedNodeInstances has alias-duplicate keys; visit each node once
+        if (!Node || Seen.Contains(Node)) continue;   // alias-duplicate keys; visit each node once
         Seen.Add(Node);
 
-        if (!Node->DeferredContextualTag.IsValid()) continue;   // only nodes armed + waiting on a prereq
+        // Armed-and-waiting on a prereq — the reliable signal for BOTH content and tag-less utility nodes (a Prereq Gate
+        // defers with an invalid DeferredContextualTag, which the old tag check missed).
+        if (!Node->IsAwaitingPrerequisite()) continue;
 
-        const FGameplayTag NodeTag = Node->GetContextualTag();
-        if (!NodeTag.IsValid()) continue;   // content nodes; util nodes without a contextual tag aren't captured
-
-        Out.FindOrAdd(NodeTag) = Node->PendingActivationContext;
+        const FGuid NodeGuid = Node->GetQuestGuid();
+        if (!NodeGuid.IsValid()) continue;   // stable per-placement save key (now set on util nodes too)
+        Out.FindOrAdd(NodeGuid) = Node->PendingActivationContext;
     }
     return Out;
 }

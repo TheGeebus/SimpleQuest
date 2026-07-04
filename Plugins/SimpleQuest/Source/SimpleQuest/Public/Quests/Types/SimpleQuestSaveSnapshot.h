@@ -57,13 +57,14 @@ struct SIMPLEQUEST_API FSimpleQuestSaveSnapshot
 	
 	/**
 	 * Nodes that were armed and WAITING on a prerequisite at capture time — a prereq-deferred activation that hasn't
-	 * fired yet (a chapter gated on the previous one completing, etc.). Keyed by contextual tag → the runtime context to
-	 * activate with. This "waiting" state is transient runtime state, not a fact, so without it a deferred node never
-	 * wakes on restore even when its prereq later satisfies. RestoreQuestlineGraph replays Activate for each entry,
-	 * which re-defers (or fires if the prereq is already met).
+	 * fired yet (a chapter gated on the previous one, a standalone Prereq Gate, etc.). Keyed by QuestContentGuid — the
+	 * stable per-placement identity, valid for content nodes AND tag-less utility nodes alike — mapping to the runtime
+	 * context to activate with. This "waiting" state is transient runtime state, not a fact, so without it a deferred
+	 * node never wakes on restore even when its prereq later satisfies. RestoreQuestlineGraph replays Activate for each
+	 * entry, which re-defers (or fires if the prereq is already met).
 	 */
 	UPROPERTY(SaveGame)
-	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> DeferredActivations;
+	TMap<FGuid, FQuestObjectiveRuntimeContext> DeferredActivations;
 	
 	/**
 	 * Per-instance objective progress (e.g. a counting objective's CurrentElements), keyed by the owning Step's

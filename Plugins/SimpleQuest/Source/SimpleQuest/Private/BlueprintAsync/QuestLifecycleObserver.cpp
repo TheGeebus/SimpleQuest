@@ -275,12 +275,12 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
         SyntheticPayload.NodeInfo.QuestTag = EachTag;
         SyntheticPayload.Delivery = EQuestEventDelivery::CatchUp;   // reconstruction, not a live transition
 
-        // Activated / Started reconstruct from any fact proving the quest ENTERED SCOPE — PendingGiver, Live, OR the
-        // append-only Completed anchor (a finished quest necessarily activated and went live to reach a resolved
-        // state; Live/PendingGiver are transient and already cleared). Without the Completed branch a finished quest
-        // replays only its Completed event, so presentation keyed on Activated/Started never reconstructs for completed
-        // content. Enabled stays PendingGiver-only. Mirrors UQuestObserverComponent's catch-up so the K2 node and the
-        // component replay identically.
+        // Activated / Started reconstruct from any fact that proves the quest ENTERED SCOPE — PendingGiver (giver-gated
+        // path), Live (currently active), the append-only Completed anchor (a finished quest necessarily went live),
+        // OR the append-only Started anchor. Started is what closes the gap the transient facts leave: a container that
+        // was reached, had an inner child complete, and is now neither live nor itself resolved holds none of Pending/
+        // Live/Completed, yet it WAS reached — Started proves it and survives the derivation and the save. Enabled stays
+        // PendingGiver-only. Mirrors UQuestObserverComponent's catch-up so the K2 node and the component replay identically.
         const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
         const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
 
@@ -290,13 +290,18 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
         const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
         const bool bIsCompleted = CompletedFact.IsValid() && WorldState->HasFact(CompletedFact);
 
+        // Append-only "went live at least once" anchor — see UQuestObserverComponent::CatchUpSingleTag. Covers the
+        // reached-but-neither-live-nor-completed limbo the transient facts can't.
+        const FGameplayTag StartedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Started);
+        const bool bWasStarted = StartedFact.IsValid() && WorldState->HasFact(StartedFact);
+
         FQuestPrereqStatus CachedPrereqStatus;
         if (bIsPendingGiver && StateSubsystem)
         {
             CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
         }
 
-        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && (bIsPendingGiver || bIsLive || bIsCompleted))
+        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && (bIsPendingGiver || bIsLive || bIsCompleted || bWasStarted))
         {
             if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, MatchedChannel, SyntheticPayload, CachedPrereqStatus);
         }
@@ -308,7 +313,7 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
         if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
         {
-            if (bIsLive || bIsCompleted)
+            if (bIsLive || bIsCompleted || bWasStarted)
             {
                 AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
                 if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, MatchedChannel, SyntheticPayload, RecoveredGiver);

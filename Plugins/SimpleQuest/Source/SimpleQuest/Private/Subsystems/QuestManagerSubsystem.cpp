@@ -520,6 +520,24 @@ void UQuestManagerSubsystem::RemoveStateFactAcrossPerspectives(FGameplayTag Inpu
     }
 }
 
+void UQuestManagerSubsystem::MarkQuestStarted(FGameplayTag QuestTag)
+{
+    if (!WorldState || !QuestTag.IsValid()) return;
+
+    // Append-only "has gone Live at least once" anchor — the past-tense sibling of the transient Live fact. Live is
+    // re-derived away when a container's last active child finishes; Started is never removed, so catch-up can still
+    // reconstruct this node's Started/Activated after a save taken in that limbo. Guarded to a boolean anchor: added
+    // once so repeat live transitions don't inflate the ref-count (unlike Completed, whose count is meaningful). The
+    // perspectives move in lockstep, so a canonical-presence check gates the whole multi-perspective write.
+    const FGameplayTag CanonicalTag = ResolveToCanonicalTag(QuestTag);
+    if (!CanonicalTag.IsValid()) return;
+
+    const FGameplayTag StartedFact = FQuestTagComposer::ResolveStateFactTag(CanonicalTag, EQuestStateLeaf::Started);
+    if (StartedFact.IsValid() && WorldState->HasFact(StartedFact)) return;   // already anchored — keep it boolean
+
+    AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Started);
+}
+
 void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
 {
     if (!WorldState || !InputTag.IsValid() || PathIdentity.IsNone()) return;
@@ -737,6 +755,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
             // (matching the close-out pattern) to handle alias forms; for top-level asset tags this is
             // effectively a single-tag write.
             AddStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Live);
+            MarkQuestStarted(QuestlineTag);
         }
         else
         {
@@ -2699,6 +2718,7 @@ void UQuestManagerSubsystem::SetQuestLive(FGameplayTag QuestTag)
 
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("SetQuestLive: '%s'"), *QuestTag.ToString());
     AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Live);
+    MarkQuestStarted(QuestTag);
 
     // Ancestor walk for Steps. Containers' Live state is derived from inner Step state, so a Step
     // transitioning to Live propagates upward: each ancestor container re-derives its Live fact based on whether
@@ -2751,6 +2771,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     if (bAnyInnerLive && !bCurrentlyLive)
     {
         WorldState->AddFact(ContainerLiveFact);
+        MarkQuestStarted(ContainerTag);
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("DeriveContainerLive: '%s' → Live (inner Step now active)"), *ContainerTag.ToString());
     }
     else if (!bAnyInnerLive && bCurrentlyLive)

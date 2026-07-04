@@ -24,10 +24,17 @@ enum class EQuestTagKind : uint8
 /**
  * Per-quest lifecycle leaf, written under SimpleQuest.State.<Path>.<Leaf>. Replaces the prior FString-keyed
  * Leaf_X constants: typo-proof, switch-exhaustive, iterates cleanly via FQuestTagComposer::AllStateLeaves.
+ *
+ * Live and Started are a present/past pair on one axis. Live is the "on-air light" — set while the node (or, for
+ * a container, an inner child) is currently active, and re-derived away the moment it isn't. Started is the
+ * immutable record that it went live at least once: append-only, never removed. That tense is the contract —
+ * it lets catch-up reconstruct a Started/Activated event after a save taken while Live has cleared but the node
+ * never itself resolved (a container reached, one child finished, neither live nor complete).
  */
 enum class EQuestStateLeaf : uint8
 {
 	Live,
+	Started,
 	Completed,
 	PendingGiver,
 	Deactivated,
@@ -96,7 +103,7 @@ public:
 	
 	/** Iteration helper for "expand state facts on every identity tag" loops. */
 	inline static constexpr EQuestStateLeaf AllStateLeaves[] = {
-		EQuestStateLeaf::Live, EQuestStateLeaf::Completed, EQuestStateLeaf::PendingGiver,
+		EQuestStateLeaf::Live, EQuestStateLeaf::Started, EQuestStateLeaf::Completed, EQuestStateLeaf::PendingGiver,
 		EQuestStateLeaf::Deactivated, EQuestStateLeaf::Blocked,
 	};
 

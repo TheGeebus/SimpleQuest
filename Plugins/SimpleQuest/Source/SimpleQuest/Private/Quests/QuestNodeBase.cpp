@@ -46,6 +46,13 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
         ActivateInternal(InContextualTag);
         return;
     }
+    
+    // Reached ONLY when a non-Always PrerequisiteExpression currently evaluates false — the sole reason an
+    // activation defers rather than going Live. Named at Verbose so a "nothing happened on activate" symptom
+    // (with no authored prereq in view — e.g. a compiler-injected chapter-chain gate) surfaces the responsible node.
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::Activate : '%s' deferring — prerequisite unsatisfied (bBypassPrerequisites would force it Live)"),
+        *InContextualTag.ToString());
+    
     DeferActivation(InContextualTag);
 }
 

@@ -276,6 +276,14 @@ private:
 	void RemoveStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
 	
 	/**
+	 * Sets the append-only Started anchor for a node the first time it goes Live. Unlike the transient Live fact
+	 * (re-derived away when a container's last active child finishes), this is never removed — it is the past-tense
+	 * record catch-up reconstructs a node's Started/Activated from once Live has cleared and the node never itself
+	 * resolved. Idempotent: written once, so the ref-count stays boolean. Called from every Live-add site.
+	 */
+	void MarkQuestStarted(FGameplayTag QuestTag);
+	
+	/**
 	 * Writes the per-run resettable mirror — the MakeNodePathFact tag pin-wired prereqs carry — across the canonical
 	 * tag and every AssetScopedAlias, matching AddStateFactAcrossPerspectives' multi-perspective fan. Called on
 	 * resolution for resettable-replay-scoped nodes only; the resolution registry stays the permanent record. A

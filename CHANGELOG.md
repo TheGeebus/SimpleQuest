@@ -35,6 +35,19 @@ hitch.
   entries) re-derive on load; a quest still waiting on a prerequisite
   keeps waiting and fires when the prerequisite is finally met; a
   counting objective comes back at its exact count.
+- **Resolution history persists, not just current state.** The full
+  record of what every quest and step resolved through — each outcome
+  and authored path, and each time it was entered — is captured and
+  restored, so history and outcome queries return the complete pre-save
+  story on load, and prerequisite gates that read that history stay
+  satisfied exactly as they were.
+- **A reached container reconstructs even when it's between states.** A
+  container quest — a chapter or a linked questline — that was entered
+  and had a step finish, but hasn't itself completed and has nothing
+  currently running, still replays its reached state on load. Anything
+  keyed on the chapter being reached — an opened gate, a revealed marker,
+  a quest-log entry — comes back correctly instead of staying dark until
+  the next live event.
 - **Objectives persist their own progress.** A custom objective type
   opts in by overriding a capture / restore pair; the framework keys each
   objective's saved state to its stable placement identity and re-applies
@@ -50,14 +63,13 @@ hitch.
   — load the save, apply the snapshot, then open your gameplay level —
   restores the data before the level's actors register, so givers,
   triggers, and HUD catch up to the restored state as they spawn, with no
-  per-level wiring.
+  per-level wiring. Pass *Restore On Next Level Load* to *Apply Quest
+  Snapshot* and the questline graphs rebuild themselves the moment your
+  gameplay level opens — the whole load becomes apply-then-open with no
+  second call in the destination level.
 
 ### Upcoming
 
-- **Step-level history records.** The per-quest registry pattern
-  that landed in 0.4.0 will extend to step-level resolutions,
-  giving adopters per-step "what happened" detail in addition to
-  per-quest. Direct groundwork for save/load.
 - **Quest rewards.** Runtime and editor framework for creating 
   and delivering rewards. A standalone questline graph node allows 
   rewards to be issued under any circumstance. By following the

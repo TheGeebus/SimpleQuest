@@ -181,7 +181,7 @@ void USimpleQuestBlueprintLibrary::RestoreQuestline(const UObject* WorldContext,
     }
 }
 
-void USimpleQuestBlueprintLibrary::ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot)
+void USimpleQuestBlueprintLibrary::ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot, bool bRestoreOnNextLevelLoad)
 {
     UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
     if (!QSS)
@@ -192,28 +192,25 @@ void USimpleQuestBlueprintLibrary::ApplyQuestSnapshot(const UObject* WorldContex
 
     QSS->ApplySnapshot(Snapshot);   // restore facts + registries (synchronous)
 
-    // Stash "what to restore" for RestoreQuestGraphs. Held on the manager (GameInstance-persistent) so it survives the
-    // OpenLevel between applying the data here and rebuilding the graphs once the target level is up.
     if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
     {
-        Manager->StashPendingRestore(Snapshot.ActiveGraphs, Snapshot.DeferredActivations);
+        Manager->StashPendingRestore(Snapshot.ActiveGraphs, Snapshot.DeferredActivations, Snapshot.ObjectiveStates);
+        if (bRestoreOnNextLevelLoad)
+        {
+            Manager->ArmRestoreOnNextLevelLoad();
+        }
     }
 }
 
 void USimpleQuestBlueprintLibrary::RestoreQuestGraphs(const UObject* WorldContext)
 {
-    UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
-    if (!Manager)
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->RestorePendingGraphs();
+    }
+    else
     {
         UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreQuestGraphs: no QuestManagerSubsystem for the given world context; nothing restored."));
-        return;
-    }
-
-    const TArray<FSoftObjectPath> Graphs = Manager->ConsumePendingRestoreGraphs();
-    UE_LOG(LogSimpleQuest, Log, TEXT("RestoreQuestGraphs: restoring %d stashed graph(s)."), Graphs.Num());
-    for (const FSoftObjectPath& GraphPath : Graphs)
-    {
-        RestoreQuestline(WorldContext, TSoftObjectPtr<UQuestlineGraph>(GraphPath));
     }
 }
 
@@ -236,6 +233,7 @@ FSimpleQuestSaveSnapshot USimpleQuestBlueprintLibrary::CaptureQuestState(const U
     {
         Snapshot.ActiveGraphs = Manager->GetKnownLoadedGraphPaths().Array();
         Snapshot.DeferredActivations = Manager->CaptureDeferredActivations();
+        Snapshot.ObjectiveStates = Manager->CaptureObjectiveStates();
     }
 
     return Snapshot;

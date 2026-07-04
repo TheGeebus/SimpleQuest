@@ -248,6 +248,7 @@ void UQuestManagerSubsystem::Deinitialize()
         EnablementWatches.Reset();
         RecentGiverActors.Reset();
     }
+    DisarmRestoreOnNextLevelLoad();
     Super::Deinitialize();
 }
 
@@ -829,6 +830,18 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
         }
 
         Step->RestoreObjective(IncomingContext, NodeTag);
+
+        // Re-apply the objective's saved per-instance progress — RestoreObjective just rebuilt it, which reset any
+        // accumulator to 0. Keyed by the Step's stable per-placement QuestContentGuid.
+        if (const FSimpleQuestObjectiveSaveState* ObjState = PendingObjectiveStates.Find(Step->GetQuestGuid()))
+        {
+            if (UQuestObjective* Objective = Step->GetLiveObjective())
+            {
+                Objective->RestoreObjectiveState(*ObjState);
+            }
+            PendingObjectiveStates.Remove(Step->GetQuestGuid());
+        }
+
         WireStepTriggerSubscriptions(Step);   // re-establish the trigger->objective bridge the normal start path wires
         ++RestoredCount;
 
@@ -838,6 +851,67 @@ void UQuestManagerSubsystem::RestoreQuestlineGraph(UQuestlineGraph* Graph)
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestoreQuestlineGraph: '%s' — reconstituted %d live objective(s), re-armed %d deferred activation(s)"),
         *Graph->GetName(), RestoredCount, RearmedCount);
+}
+
+void UQuestManagerSubsystem::RestorePendingGraphs()
+{
+    const TArray<FSoftObjectPath> Graphs = ConsumePendingRestoreGraphs();
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("RestorePendingGraphs: restoring %d stashed graph(s)."), Graphs.Num());
+    for (const FSoftObjectPath& Path : Graphs)
+    {
+        AsyncLoadAndActivate<UQuestlineGraph>(this, TSoftObjectPtr<UQuestlineGraph>(Path),
+            [this](UQuestlineGraph* Graph)
+            {
+                if (Graph)
+                {
+                    RestoreQuestlineGraph(Graph);
+                }
+                else
+                {
+                    UE_LOG(LogSimpleQuestActivation, Warning, TEXT("RestorePendingGraphs: a stashed graph failed to load; skipped."));
+                }
+            });
+    }
+}
+
+void UQuestManagerSubsystem::ArmRestoreOnNextLevelLoad()
+{
+    if (bRestoreArmed) return;   // idempotent — a second Apply(true) before a load re-uses the existing arm
+    bRestoreArmed = true;
+    ArmedFromWorld = GetGameInstance() ? GetGameInstance()->GetWorld() : nullptr;
+    PostWorldInitHandle = FWorldDelegates::OnPostWorldInitialization.AddUObject(this, &UQuestManagerSubsystem::HandleWorldInitForRestore);
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("ArmRestoreOnNextLevelLoad: armed — pending restore flushes when the next game world initializes."));
+}
+
+void UQuestManagerSubsystem::DisarmRestoreOnNextLevelLoad()
+{
+    if (PostWorldInitHandle.IsValid())
+    {
+        FWorldDelegates::OnPostWorldInitialization.Remove(PostWorldInitHandle);
+        PostWorldInitHandle.Reset();
+    }
+    bRestoreArmed = false;
+    ArmedFromWorld = nullptr;
+}
+
+void UQuestManagerSubsystem::HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS)
+{
+    if (!bRestoreArmed || !World) return;
+
+    // Target the GAME/PIE world only (skip editor/preview/inactive), and skip the world we armed IN — its init already
+    // fired before we armed, so the next fresh game-world init is the OpenLevel target.
+    if (World->WorldType != EWorldType::Game && World->WorldType != EWorldType::PIE) return;
+    if (World == ArmedFromWorld.Get()) return;
+
+    UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleWorldInitForRestore: target world '%s' initialized — flushing pending restore next tick."),
+        *World->GetName());
+
+    DisarmRestoreOnNextLevelLoad();   // one-shot
+
+    // Defer one tick so the loaded world is fully current before objectives rebuild in it — a hot-loaded graph would
+    // otherwise restore synchronously during world init, before the game instance's world pointer settles.
+    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateWeakLambda(this,
+        [this](float) { RestorePendingGraphs(); return false; }));
 }
 
 TMap<FGameplayTag, FQuestObjectiveRuntimeContext> UQuestManagerSubsystem::CaptureDeferredActivations() const
@@ -856,6 +930,28 @@ TMap<FGameplayTag, FQuestObjectiveRuntimeContext> UQuestManagerSubsystem::Captur
         if (!NodeTag.IsValid()) continue;   // content nodes; util nodes without a contextual tag aren't captured
 
         Out.FindOrAdd(NodeTag) = Node->PendingActivationContext;
+    }
+    return Out;
+}
+
+TMap<FGuid, FSimpleQuestObjectiveSaveState> UQuestManagerSubsystem::CaptureObjectiveStates() const
+{
+    TMap<FGuid, FSimpleQuestObjectiveSaveState> Out;
+    TSet<const UQuestNodeBase*> Seen;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        UQuestStep* Step = Cast<UQuestStep>(Pair.Value);
+        if (!Step || Seen.Contains(Step)) continue;   // alias-duplicate keys; visit each Step once
+        Seen.Add(Step);
+
+        UQuestObjective* Objective = Step->GetLiveObjective();
+        if (!Objective) continue;
+
+        const FSimpleQuestObjectiveSaveState State = Objective->CaptureObjectiveState();
+        if (State.bHasState && Step->GetQuestGuid().IsValid())
+        {
+            Out.Add(Step->GetQuestGuid(), State);
+        }
     }
     return Out;
 }

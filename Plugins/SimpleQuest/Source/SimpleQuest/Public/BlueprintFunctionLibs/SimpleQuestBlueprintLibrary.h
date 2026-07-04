@@ -246,13 +246,18 @@ public:
     static void RestoreQuestState(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot);
 
     /**
-     * Restore the quest DATA from a snapshot (facts + history) and remember which graphs to rebuild — WITHOUT rebuilding
-     * them yet. Call this on load BEFORE you open your gameplay level, so the level's actors register against restored
-     * data and re-sync for free. Then call Restore Quest Graphs once the level is up. (For an in-place quick-load with no
-     * level change, use Restore Quest State instead, which does both at once.)
+     * Restore the quest DATA from a snapshot (facts + history) and remember which graphs to rebuild. Call on load BEFORE
+     * you open your gameplay level, so the level's actors register against restored data and re-sync for free. Then either
+     * let bRestoreOnNextLevelLoad rebuild the questlines automatically when your level opens, or call Restore Quest Graphs
+     * yourself once it's up. (For an in-place quick-load with no level change, use Restore Quest State instead.)
+     *
+     * @param Snapshot                  The data to apply to the World State and Quest State Subsystems: typically an
+     *                                  FSimpleQuestSaveSnapshot struct embedded in a custom save game object.
+     * @param bRestoreOnNextLevelLoad   When true, the questlines rebuild automatically the moment your next level finishes
+     *                                  loading — no Restore Quest Graphs node needed anywhere. Leave false to drive it yourself.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Save Load", meta = (WorldContext = "WorldContext"))
-    static void ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot);
+    static void ApplyQuestSnapshot(const UObject* WorldContext, const FSimpleQuestSaveSnapshot& Snapshot, bool bRestoreOnNextLevelLoad = false);
 
     /**
      * Rebuild the in-progress questlines remembered by the most recent Apply Quest Snapshot — call this in your gameplay

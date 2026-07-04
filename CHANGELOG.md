@@ -7,13 +7,53 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Save / Load
+
+Persistent quest progression across play sessions. SimpleQuest captures
+the full state of your quests — everything running, completed, blocked,
+and waiting on a prerequisite, plus each objective's in-progress detail —
+into a single serializable snapshot you embed in your own save game, and
+reconstitutes it on load exactly where the player left off.
+
+The integration is struct-only: the plugin ships no `USaveGame` subclass
+to fight your own. Capture the snapshot, drop it into your monolithic
+save alongside the rest of your game's data, and write it however you
+like. The snapshot is a plain value copy with no live object references,
+so it hands cleanly to a background (async) save with no game-thread
+hitch.
+
+- **Two nodes to save, two to load.** *Capture Quest State* returns the
+  snapshot to embed in your save object. On load, *Apply Quest Snapshot*
+  restores the data and *Restore Quest Graphs* rebuilds the live
+  questlines — and you never enumerate which questlines were active,
+  because the save records that itself. A single *Restore Quest State*
+  does both halves at once for an in-place quick-load with no level
+  change.
+- **State resumes, not just "which quests are open."** A quest caught
+  mid-objective returns mid-objective; a completed quest stays completed
+  and its fact-driven consequences (opened doors, unlocks, journal
+  entries) re-derive on load; a quest still waiting on a prerequisite
+  keeps waiting and fires when the prerequisite is finally met; a
+  counting objective comes back at its exact count.
+- **Objectives persist their own progress.** A custom objective type
+  opts in by overriding a capture / restore pair; the framework keys each
+  objective's saved state to its stable placement identity and re-applies
+  it after the objective rebuilds on load. The built-in counting
+  objective already does this, and your own objectives carry whatever
+  state they define.
+- **Replayed events are marked as such.** The events that reconstruct
+  quest state on load arrive flagged as catch-up rather than live, so an
+  actor or UI that would normally play a transition — a patrol, an
+  animation, a sound — can recognize the replay and jump straight to the
+  settled state instead of acting out history.
+- **The load flow is level-transition-shaped.** The recommended sequence
+  — load the save, apply the snapshot, then open your gameplay level —
+  restores the data before the level's actors register, so givers,
+  triggers, and HUD catch up to the restored state as they spawn, with no
+  per-level wiring.
+
 ### Upcoming
 
-- **Save/load system (0.5.0).** Persistent player progression
-  across sessions. The `SimpleQuest.*` namespace consolidation and
-  the quest history registry shipped in 0.4.0 are the pre-flight
-  for this — tag strings are now stable and quest state has the
-  structured records save/load needs to reconstitute live state.
 - **Step-level history records.** The per-quest registry pattern
   that landed in 0.4.0 will extend to step-level resolutions,
   giving adopters per-step "what happened" detail in addition to

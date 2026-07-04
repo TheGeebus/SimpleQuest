@@ -15,6 +15,7 @@
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
+#include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestManagerSubsystem.generated.h"
 
 
@@ -132,6 +133,19 @@ protected:
 	virtual void RestoreQuestlineGraph(UQuestlineGraph* Graph);
 
 	/**
+	 * Restores every graph in the pending-restore stash (set by ApplyQuestSnapshot): async-loads each and rebuilds its
+	 * live / deferred / accumulator state. Drives both the manual RestoreQuestGraphs BP node and the auto-consume flush.
+	 */
+	void RestorePendingGraphs();
+
+	/**
+	 * Arms a one-shot auto-restore: the pending stash flushes automatically when the next game world initializes (i.e.
+	 * after the consumer's OpenLevel), so the load path is just ApplyQuestSnapshot -> OpenLevel with no per-level node.
+	 * Set by ApplyQuestSnapshot's bRestoreOnNextLevelLoad. Idempotent; cleared on flush or Deinitialize.
+	 */
+	void ArmRestoreOnNextLevelLoad();
+
+	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
 	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
@@ -188,11 +202,13 @@ private:
 	 */
 	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
 	
-	/** Stashes the snapshot's active-graph list + deferred-activation set for a level-transition restore (survives OpenLevel). */
-	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGameplayTag, FQuestObjectiveRuntimeContext>& Deferred)
+	/** Stashes the snapshot's active-graph list + deferred-activation set + objective states for a level-transition restore. */
+	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGameplayTag, FQuestObjectiveRuntimeContext>& Deferred,
+		const TMap<FGuid, FSimpleQuestObjectiveSaveState>& ObjectiveStates)
 	{
 		PendingRestoreGraphs = Graphs;
 		PendingDeferredActivations = Deferred;
+		PendingObjectiveStates = ObjectiveStates;
 	}
 
 	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
@@ -200,6 +216,16 @@ private:
 
 	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
 	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
+
+	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
+	TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	void HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS);
+	void DisarmRestoreOnNextLevelLoad();
+
+	bool bRestoreArmed = false;
+	FDelegateHandle PostWorldInitHandle;
+	TWeakObjectPtr<UWorld> ArmedFromWorld;
 	
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
@@ -557,6 +583,7 @@ private:
 	 */
 	TArray<FSoftObjectPath> PendingRestoreGraphs;
 	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> PendingDeferredActivations;
+	TMap<FGuid, FSimpleQuestObjectiveSaveState> PendingObjectiveStates;
 
 	/**
 	 * Scans the asset registry for UQuestlineGraph assets and builds GraphsByListenerGroupTag from each asset's

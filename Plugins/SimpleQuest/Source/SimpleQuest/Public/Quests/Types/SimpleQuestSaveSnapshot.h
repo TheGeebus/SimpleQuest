@@ -8,6 +8,7 @@
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/QuestEntryRecord.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
+#include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "SimpleQuestSaveSnapshot.generated.h"
 
 /**
@@ -63,4 +64,12 @@ struct SIMPLEQUEST_API FSimpleQuestSaveSnapshot
 	 */
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, FQuestObjectiveRuntimeContext> DeferredActivations;
+	
+	/**
+	 * Per-instance objective progress (e.g. a counting objective's CurrentElements), keyed by the owning Step's
+	 * QuestContentGuid — the stable per-placement save key. Captured from each live objective's CaptureObjectiveState;
+	 * re-applied after the objective is rebuilt on load. Only objectives that contributed state appear here.
+	 */
+	UPROPERTY(SaveGame)
+	TMap<FGuid, FSimpleQuestObjectiveSaveState> ObjectiveStates;
 };

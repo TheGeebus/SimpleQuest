@@ -9,6 +9,7 @@
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
+#include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestObjective.generated.h"
 
 
@@ -174,6 +175,20 @@ public:
 	 * equivalent standard UE patterns.
 	 */
 	void DispatchOnObjectiveDeactivated();
+	
+	// ── Save/load — per-instance state hook ───────────────────────────────────────────────────────────────
+	//
+	// Objectives that carry durable per-instance progress (e.g. a running count) override these so save/load can
+	// persist and re-apply it. Base returns empty / no-op — a stateless objective needs nothing. Capture runs at save;
+	// Restore runs AFTER the objective is rebuilt on load (which has already reset it), so the override re-applies the
+	// saved values. Plain C++ virtual for now; promote to BlueprintNativeEvent (override becomes _Implementation) when a
+	// Blueprint objective needs to persist its own state.
+
+	/** Capture this objective's durable progress into a save-state struct. Base returns empty (nothing to persist). */
+	virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const { return FSimpleQuestObjectiveSaveState{}; }
+
+	/** Re-apply progress from a save-state struct after the objective has been rebuilt on load. Base is a no-op. */
+	virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) {}
 	
 protected:
 	/**

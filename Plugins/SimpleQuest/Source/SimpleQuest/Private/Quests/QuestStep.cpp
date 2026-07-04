@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "Quests/QuestStep.h"
+
+#include "SimpleQuestLog.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
@@ -58,6 +60,7 @@ void UQuestStep::InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& A
 	if (!ObjClass) return;
 
 	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
+
 	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
 	LiveObjective->OnQuestObjectiveProgress.AddDynamic(this, &UQuestStep::OnObjectiveProgress);
 	LiveObjective->OnQuestObjectiveRefused.AddDynamic(this, &UQuestStep::OnObjectiveRefused);

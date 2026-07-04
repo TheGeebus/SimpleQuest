@@ -23,6 +23,15 @@ class SIMPLEQUEST_API UCountingQuestObjective : public UQuestObjective
 {
     GENERATED_BODY()
 
+public:
+    
+    /** Calls ReportProgress when the value changes. */
+    UFUNCTION(BlueprintCallable)
+    void SetCurrentElements(const int32 NewAmount);
+    
+    virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const override;
+    virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) override;
+    
 protected:
     virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime) override;
 
@@ -43,8 +52,4 @@ private:
 public:
     FORCEINLINE int32 GetMaxElements() const { return MaxElements; }
     FORCEINLINE int32 GetCurrentElements() const { return CurrentElements; }
-
-    /** Calls ReportProgress when the value changes. */
-    UFUNCTION(BlueprintCallable)
-    void SetCurrentElements(const int32 NewAmount);
 };

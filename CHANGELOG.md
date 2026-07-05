@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.5.0] — 2026-07-05 — Persistence & Reusable Questlines
+## [0.5.0] — 2026-07-04 — Persistence & Reusable Questlines
 
 The persistence release: your quests now survive save/load in full — every
 running, completed, blocked, and prerequisite-waiting state restores exactly

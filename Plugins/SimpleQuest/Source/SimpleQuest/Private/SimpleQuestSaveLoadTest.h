@@ -20,3 +20,16 @@ public:
 	UPROPERTY(BlueprintReadWrite, SaveGame)
 	FSimpleQuestSaveSnapshot Snapshot;
 };
+
+/** Throwaway CustomData payload: a fingerprint (Marker=4242) to prove the FInstancedStruct survives save -> load -> catch-up. */
+USTRUCT()
+struct FSimpleQuestSaveLoadTestData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(SaveGame)
+	int32 Marker = 0;
+
+	UPROPERTY(SaveGame)
+	FString Note;
+};

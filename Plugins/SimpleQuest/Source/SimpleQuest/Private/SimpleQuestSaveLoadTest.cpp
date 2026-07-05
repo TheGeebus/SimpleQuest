@@ -14,6 +14,11 @@
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "Objectives/CountingQuestObjective.h"
 #include "Quests/QuestStep.h"
+#include "Utilities/QuestCatchUpFanout.h"
+#include "Subsystems/WorldStateSubsystem.h"
+#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "StructUtils/InstancedStruct.h"
+
 
 namespace
 {
@@ -130,6 +135,77 @@ namespace
 		UE_LOG(LogSimpleQuestState, Log, TEXT("SetCount: '%s' -> %d / %d"),
 			*Tag.ToString(), Counting->GetCurrentElements(), Counting->GetMaxElements());
 	}
+		UWorldStateSubsystem* GetWorldState(UWorld* World)
+	{
+		const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+		return GI ? GI->GetSubsystem<UWorldStateSubsystem>() : nullptr;
+	}
+	UQuestStateSubsystem* GetQuestState(UWorld* World)
+	{
+		const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
+		return GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+	}
+
+	// Activates a step with a fully-populated FQuestContextBase (instigator + a fingerprinted CustomData struct + custom /
+	// origin tags), prereqs bypassed, so the entry snapshot has rich data to recover. Usage: SimpleQuest.ActivateRich <StepTag>
+	void ActivateRich(const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1) { UE_LOG(LogSimpleQuestState, Warning, TEXT("ActivateRich: usage 'SimpleQuest.ActivateRich <StepTag>'.")); return; }
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Args[0]), false);
+		if (!Tag.IsValid()) { UE_LOG(LogSimpleQuestState, Warning, TEXT("ActivateRich: '%s' isn't a registered tag."), *Args[0]); return; }
+
+		FSimpleQuestSaveLoadTestData TestData;
+		TestData.Marker = 4242;
+		TestData.Note = TEXT("payload-recovery");
+
+		FQuestObjectiveActivationContext Params;
+		Params.Instigator  = UGameplayStatics::GetPlayerPawn(World, 0);
+		Params.CustomTag   = Tag;               // any valid registered tag — reused here as a simple fingerprint
+		Params.OriginTag   = Tag;
+		Params.OriginChain = { Tag };
+		Params.CustomData  = FInstancedStruct::Make(TestData);
+
+		USimpleQuestBlueprintLibrary::ActivateQuest(World, Tag, Params, /*bBypassPrerequisites*/ true);
+		UE_LOG(LogSimpleQuestState, Log, TEXT("ActivateRich: '%s' activated (instigator=%s, CustomData{Marker=4242}). Now: DumpCatchUp -> SaveState -> cold restart -> RestoreState -> DumpCatchUp."),
+			*Tag.ToString(), Params.Instigator.IsValid() ? *Params.Instigator->GetName() : TEXT("null"));
+	}
+
+	// Dumps the SHARED catch-up reconstruction (FQuestCatchUpFanout::ReconstructTag — the exact code the observer
+	// component and the Observe-Quest-Lifecycle K2 node both run) for a tag. Run before save (live baseline) and after
+	// RestoreState (post-load): the CustomData.Marker surviving proves the recovery + the FInstancedStruct round-trip.
+	// Usage: SimpleQuest.DumpCatchUp <Tag>
+	void DumpCatchUp(const TArray<FString>& Args, UWorld* World)
+	{
+		if (Args.Num() < 1) { UE_LOG(LogSimpleQuestState, Warning, TEXT("DumpCatchUp: usage 'SimpleQuest.DumpCatchUp <Tag>'.")); return; }
+		const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Args[0]), false);
+		if (!Tag.IsValid()) { UE_LOG(LogSimpleQuestState, Warning, TEXT("DumpCatchUp: '%s' isn't a registered tag."), *Args[0]); return; }
+
+		const FQuestCatchUpFanout::FTagReconstruction R =
+			FQuestCatchUpFanout::ReconstructTag(Tag, Tag, GetWorldState(World), GetQuestState(World));
+
+		UE_LOG(LogSimpleQuestState, Log, TEXT("DumpCatchUp '%s': channel='%s' events=%d | DisplayName='%s' Instigator=%s CustomTag='%s' OriginTag='%s' OriginChain=%d"),
+			*Tag.ToString(), *R.MatchedChannel.ToString(), R.Events.Num(),
+			*R.Payload.NodeInfo.DisplayName.ToString(),
+			R.Payload.Instigator.IsValid() ? *R.Payload.Instigator.Get()->GetName() : TEXT("null"),
+			*R.Payload.CustomTag.ToString(), *R.Payload.OriginTag.ToString(), R.Payload.OriginChain.Num());
+
+		if (const FSimpleQuestSaveLoadTestData* Data = R.Payload.CustomData.GetPtr<FSimpleQuestSaveLoadTestData>())
+		{
+			UE_LOG(LogSimpleQuestState, Log, TEXT("DumpCatchUp   CustomData ROUND-TRIP OK: Marker=%d Note='%s'"), Data->Marker, *Data->Note);
+		}
+		else
+		{
+			UE_LOG(LogSimpleQuestState, Warning, TEXT("DumpCatchUp   CustomData=%s — expected FSimpleQuestSaveLoadTestData{Marker=4242}"),
+				R.Payload.CustomData.IsValid() ? *R.Payload.CustomData.GetScriptStruct()->GetName() : TEXT("empty"));
+		}
+
+		for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
+		{
+			UE_LOG(LogSimpleQuestState, Log, TEXT("DumpCatchUp   event=%s outcome='%s' giver=%s"),
+				*UEnum::GetValueAsString(Event.EventType), *Event.OutcomeTag.ToString(),
+				Event.RecoveredGiver ? *Event.RecoveredGiver->GetName() : TEXT("null"));
+		}
+	}
 }
 
 static FAutoConsoleCommandWithWorld GSimpleQuestSaveStateCmd(
@@ -151,4 +227,14 @@ static FAutoConsoleCommandWithWorldAndArgs GSimpleQuestSetCountCmd(
 	TEXT("SimpleQuest.SetCount"),
 	TEXT("Set a live counting objective's progress: SimpleQuest.SetCount <StepTag> <N>."),
 	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&SetCount));
+
+static FAutoConsoleCommandWithWorldAndArgs GSimpleQuestActivateRichCmd(
+	TEXT("SimpleQuest.ActivateRich"),
+	TEXT("Activate a step with a populated context (instigator + fingerprinted CustomData): SimpleQuest.ActivateRich <StepTag>."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&ActivateRich));
+
+static FAutoConsoleCommandWithWorldAndArgs GSimpleQuestDumpCatchUpCmd(
+	TEXT("SimpleQuest.DumpCatchUp"),
+	TEXT("Dump the shared catch-up reconstruction (ReconstructTag) payload for a tag: SimpleQuest.DumpCatchUp <Tag>."),
+	FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(&DumpCatchUp));
 

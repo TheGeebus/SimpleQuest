@@ -254,101 +254,52 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem();
     const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Routing);
 
-    for (const FGameplayTag& EachTag : CatchUpTags)
-    {
-        // EachTag is the canonical for this catch-up entry (post-GetQuestTagsUnderPrefix's alias-resolution).
-        // Build the channel set [canonical, ...aliases] and pick the best match for this subscription's bound
-        // tag — same selection the live bus dispatcher uses, so subscribers see consistent MatchedChannel
-        // values across catch-up and live deliveries (no need to branch by delivery path).
-        TArray<FGameplayTag> ChannelSet;
-        ChannelSet.Add(EachTag);
-        if (StateSubsystem)
-        {
-            for (const FGameplayTag& AliasTag : StateSubsystem->GetAssetScopedAliasTagsForCanonical(EachTag))
-            {
-                ChannelSet.Add(AliasTag);
-            }
-        }
-        const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, QuestTag);
+	for (const FGameplayTag& EachTag : CatchUpTags)
+	{
+		const FQuestCatchUpFanout::FTagReconstruction R =
+			FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, StateSubsystem);
 
-        FQuestEventPayload SyntheticPayload;
-        SyntheticPayload.NodeInfo.QuestTag = EachTag;
+		// Emission + gating stay here: the exposure mask + the per-tag TagsWith*Seen live-dedup (which the component
+		// deliberately lacks) are this node's own. Event eligibility + rehydrated payload are shared via ReconstructTag.
+		for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
+		{
+			switch (Event.EventType)
+			{
+			case EQuestLifecycleEventType::Activated:
+				if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag))
+					if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, R.MatchedChannel, R.Payload, R.PrereqStatus);
+				break;
 
-        // PendingGiver gates Enabled catch-up (Enabled requires the quest to be in giver state with prereqs
-        // satisfied). Activated has a broader semantic — "the quest entered its scope" — and reconstructs from
-        // EITHER the PendingGiver fact (giver-gated path entered PendingGiver scope) OR the Live fact
-        // (non-giver-gated path went straight to Live, which implies it must have transitioned through
-        // Activated to get there). Asset-level activations are always non-giver-gated and reach catch-up via
-        // the Live fact branch.
-        const FGameplayTag PendingFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::PendingGiver);
-        const bool bIsPendingGiver = PendingFact.IsValid() && WorldState->HasFact(PendingFact);
+			case EQuestLifecycleEventType::Enabled:
+				if (IsExposed(EQuestEventTypes::Enabled) && !TagsWithLiveEnabledSeen.Contains(EachTag))
+					if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				break;
 
-        const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Live);
-        const bool bIsLive = LiveFact.IsValid() && WorldState->HasFact(LiveFact);
+			case EQuestLifecycleEventType::Started:
+				if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
+					if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, R.MatchedChannel, R.Payload, Event.RecoveredGiver);
+				break;
 
-        FQuestPrereqStatus CachedPrereqStatus;
-        if (bIsPendingGiver && StateSubsystem)
-        {
-            CachedPrereqStatus = StateSubsystem->GetQuestPrereqStatus(EachTag);
-        }
+			case EQuestLifecycleEventType::Completed:
+				if (IsExposed(EQuestEventTypes::Completed) && !TagsWithLiveCompletedSeen.Contains(EachTag))
+					if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, R.MatchedChannel, Event.OutcomeTag, R.Payload);
+				break;
 
-        if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag) && (bIsPendingGiver || bIsLive))
-        {
-            if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, MatchedChannel, SyntheticPayload, CachedPrereqStatus);
-        }
+			case EQuestLifecycleEventType::Deactivated:
+				if (IsExposed(EQuestEventTypes::Deactivated) && !TagsWithLiveDeactivatedSeen.Contains(EachTag))
+					if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				break;
 
-        if (IsExposed(EQuestEventTypes::Enabled) && !TagsWithLiveEnabledSeen.Contains(EachTag) && bIsPendingGiver && CachedPrereqStatus.bSatisfied)
-        {
-            if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, MatchedChannel, SyntheticPayload);
-        }
+			case EQuestLifecycleEventType::Blocked:
+				if (IsExposed(EQuestEventTypes::Blocked) && !TagsWithLiveBlockedSeen.Contains(EachTag))
+					if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				break;
 
-        if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
-        {
-            if (bIsLive)
-            {
-                AActor* RecoveredGiver = StateSubsystem ? StateSubsystem->GetLastGiverActor(EachTag) : nullptr;
-                if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, MatchedChannel, SyntheticPayload, RecoveredGiver);
-            }
-        }
-
-        if (IsExposed(EQuestEventTypes::Completed) && !TagsWithLiveCompletedSeen.Contains(EachTag))
-        {
-            const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Completed);
-            if (CompletedFact.IsValid() && WorldState->HasFact(CompletedFact))
-            {
-                FGameplayTag RecoveredOutcome = FGameplayTag::EmptyTag;
-                if (StateSubsystem)
-                {
-                    if (const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(EachTag))
-                    {
-                        if (const FQuestResolutionEntry* Latest = Record->GetLatest())
-                        {
-                            RecoveredOutcome = Latest->OutcomeTag;
-                        }
-                    }
-                }
-                if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, MatchedChannel, RecoveredOutcome, SyntheticPayload);
-            }
-        }
-
-        if (IsExposed(EQuestEventTypes::Deactivated) && !TagsWithLiveDeactivatedSeen.Contains(EachTag))
-        {
-            const FGameplayTag DeactivatedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Deactivated);
-            if (DeactivatedFact.IsValid() && WorldState->HasFact(DeactivatedFact))
-            {
-                if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, MatchedChannel, SyntheticPayload);
-            }
-        }
-
-        if (IsExposed(EQuestEventTypes::Blocked) && !TagsWithLiveBlockedSeen.Contains(EachTag))
-        {
-            const FGameplayTag BlockedFact = FQuestTagComposer::ResolveStateFactTag(EachTag, EQuestStateLeaf::Blocked);
-            if (BlockedFact.IsValid() && WorldState->HasFact(BlockedFact))
-            {
-                if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, MatchedChannel, SyntheticPayload);
-            }
-        }
-    }
+			default:
+				break;
+			}
+		}
+	}
 }
 
 USignalSubsystem* UQuestLifecycleObserver::ResolveSignalSubsystem() const

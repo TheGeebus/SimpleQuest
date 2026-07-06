@@ -17,8 +17,8 @@ void UGoToQuestObjective::TryCompleteObjective_Implementation(const FQuestObject
 	CompleteObjectiveWithOutcome(ReachedOutcomeTag, NAME_None, InContext);
 }
 
-void UGoToQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
+void UGoToQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime)
 {
-	Super::OnObjectiveActivated_Implementation(Params);
+	Super::OnObjectiveActivated_Implementation(Authored, Runtime);
 	EnableQuestTargetActors(true);
 }

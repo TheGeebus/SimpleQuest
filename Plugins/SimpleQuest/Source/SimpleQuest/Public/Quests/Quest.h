@@ -65,7 +65,7 @@ protected:
 	 * survives when the prereq satisfies and earlier cascades' entry routes are silently dropped.
 	 */
 	UPROPERTY(Transient)
-	TArray<FQuestObjectiveActivationContext> PendingEntryActivations;
+	TArray<FQuestObjectiveRuntimeContext> PendingEntryActivations;
 	
 	/**
 	 * Set of cascade event IDs that have already resolved this wrapper in the current tick. Populated by

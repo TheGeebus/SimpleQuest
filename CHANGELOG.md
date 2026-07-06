@@ -5,19 +5,162 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.5.0] — 2026-07-06 — Persistence & Reusable Questlines
+
+The persistence release: your quests now survive save/load in full. Every
+running, completed, blocked, and prerequisite-waiting state restores exactly
+where the player left off. And reusable questlines now run as independent
+instances per placement, so the same authored questline embedded in several
+contexts progresses on its own in each.
+
+### Save / Load
+
+Full quest progression saves and restores with one call each way, dropped
+into whatever save game your project already uses. The plugin ships no
+`USaveGame` of its own to adopt. SimpleQuest packs the complete state of
+your quests — everything running, completed, blocked, and waiting on a
+prerequisite, plus each objective's in-progress detail — into a single
+serializable snapshot you embed in your own save, and reconstitutes it on
+load exactly where the player left off.
+
+The integration is struct-only. Capture the snapshot, drop it into your
+monolithic save alongside the rest of your game's data, and write it
+however you like. The snapshot is a plain value copy with no live object
+references, so it hands cleanly to a background (async) save with no
+game-thread hitch.
+
+- **One call to save, one to load.** *Capture Quest State* returns the
+  snapshot to embed in your save object. On load, a single *Restore Quest
+  State* takes it back and reconstitutes everything: running quests,
+  completed ones, in-flight objectives — and you never enumerate which
+  questlines were active, because the save records that itself. The apply and
+  graph-rebuild steps are also exposed separately (*Apply Quest Snapshot* /
+  *Restore Quest Graphs*) for when you want to split them across a level
+  transition — see the load flow below.
+- **State resumes, not just "which quests are open."** A quest caught
+  mid-objective returns mid-objective. A completed quest stays completed
+  and its fact-driven consequences (opened doors, unlocks, journal
+  entries) re-derive on load. A quest still waiting on a prerequisite
+  keeps waiting and fires when the prerequisite is finally met. A
+  counting objective comes back at its exact count. 
+- **Resolution history persists, not just current state.** The full
+  record of how every quest and step resolved — each outcome and authored 
+  path, and each time it was entered — is captured and restored, so history 
+  and outcome queries return the complete pre-save story on load, and 
+  prerequisite gates that read that history stay satisfied exactly as 
+  they were.
+- **Objectives persist their own progress.** A custom objective type
+  opts in by overriding a capture / restore pair, and the framework keys each
+  objective's saved state to its stable identity and re-applies
+  it after the objective rebuilds on load. The built-in counting
+  objective already does this, and your own objectives carry whatever
+  state they define.
+- **Replayed events are marked as such.** The events that reconstruct
+  quest state on load arrive flagged as catch-up rather than live, so an
+  actor or UI that would normally play a transition — a patrol, an
+  animation, a sound — can recognize the replay and jump straight to the
+  settled state instead of acting out history.
+- **Reconstructed events carry the full payload.** Before, a save/load
+  restore — or any observer that binds after a quest is already running —
+  delivered its catch-up events with only the quest tag filled in. Now the
+  rich context rides along: the display name, the instigating actor, your
+  `CustomData`, and the origin lineage, all rehydrated from the persisted
+  registries. An actor or UI that reads those fields on live events sees
+  the same data on the first post-load event volley, not a stub.
+- **The load flow is level-transition-shaped.** The recommended sequence
+  — load the save, apply the snapshot, then open your gameplay level —
+  restores the data before the level's actors register, so givers,
+  triggers, and HUD catch up to the restored state as they spawn, with no
+  per-level wiring. Pass *Restore On Next Level Load* to *Apply Quest
+  Snapshot* and the questline graphs rebuild themselves the moment your
+  gameplay level opens. The whole load becomes apply-then-open with no
+  second call in the destination level.
+- **Starting a questline is idempotent.** Calling *Start Questline* on a
+  questline that's already running — or one just restored from a save — does
+  nothing, so you can fire it unconditionally from a level, GameMode, or
+  PlayerController `BeginPlay` without a fresh start racing or overwriting a
+  loaded game. A new game starts it once; a loaded game lets the restore
+  reconstruct it.
+
+### Reusable questlines run as independent instances
+
+A questline embedded in another graph (a LinkedQuestline node) now runs as
+its own independent progression *per placement*, instead of every embedding
+of the same sub-questline collapsing into one shared run. Reuse a generic
+"escort" or "delivery" questline in three places and you get three
+independent runs, each with its own state.
+
+- **Two addresses per instance.** Every instance publishes on its specific
+  contextual tag (*this* placement) and on the sub-questline's class tag
+  (*any* instance of the template). An observer binds "this escort" or "every
+  escort" by choosing which tag it watches; activation always targets a
+  specific instance.
+- **Behavioral change.** Multi-embedding previously shared a single runtime
+  progression. If you were relying on that convergence, make it explicit —
+  funnel the placements together with an Activation Group (the signal portal)
+  rather than depending on an implicit merge.
+
+### Quest display data available from the first frame
+
+A quest's authored display data — `DisplayName`, `Description`, and its
+`DisplayData` asset — is now queryable by tag from game startup, without the
+questline having to be active first. The compiler writes a compiled display
+index alongside the tag data; the subsystem parses it at initialization and
+eager-loads the referenced display assets, so `Get Display Name` /
+`Get Display Description` / `Get Display Data` return authored content on
+frame one.
+
+- A nameplate, world-map marker, or chapter-select screen can show a quest's
+  title before the player has reached it — no activation, no tick-delay
+  workaround. The prior "query returns empty until the questline starts" race
+  is gone.
+- Generated per-project data (this index and the compiled tags) now lives in
+  your project's `Config/`, not inside the plugin — so it survives PIE / Live
+  Coding tag-tree rebuilds, and an engine-installed (read-only) plugin copy
+  works.
+
+### Blueprint log helper
+
+- **`Log SimpleQuest Message`** — a BlueprintCallable on the SimpleQuest
+  Blueprint library that writes to the `LogSimpleQuest` category at a chosen
+  verbosity (`Error` / `Warning` / `Display` / `Verbose`). Blueprint-only
+  projects can emit into the framework's log channel without a C++ shim.
+
+### Breaking changes
+
+- **`UQuestObjective::OnObjectiveActivated` is now a two-parameter event.**
+  The single nested `FQuestObjectiveActivationContext` parameter is replaced
+  by two: `const FQuestObjectiveAuthoredConfig& Authored` (the objective's
+  authored configuration) and `const FQuestObjectiveRuntimeContext& Runtime`
+  (the caller's runtime input — instigator, custom data, origin lineage). The
+  0.4.1 deprecation notice telegraphed this; it has now landed.
+  - **Adopter action:** any objective subclass overriding `OnObjectiveActivated`
+    (a C++ `_Implementation` or a Blueprint override) must update its signature
+    to the two parameters. Field semantics are unchanged — data that was on the
+    nested context now reads from `Authored` (config) or `Runtime` (instigator /
+    `CustomData` / origin); only the delivery shape changed. Signature changes
+    can't be auto-redirected, so there's no CoreRedirect for this — update the
+    override by hand.
+  - The C++ dispatch entry point `DispatchOnObjectiveActivated` widened to match
+    (`Authored`, `Runtime`, `FGameplayTag InOwningStepTag`).
+
+### Fixed
+
+- **Placed quest givers gate deterministically at startup.** A giver-gated
+  quest activated at game start could skip its gate and go straight to Live
+  instead of waiting in the giver's offer state. The gate check reads the
+  "this quest has a giver" set, but a placed giver only populated that set at
+  its deferred (next-tick) registration — which raced the synchronous startup
+  activation (a placed actor's `QuestTagsToGive` is per-instance level config,
+  invisible to the asset-registry scan, so only runtime registration saw it).
+  Givers now *declare* themselves synchronously at component initialization —
+  before any `BeginPlay` starts a questline — while keeping their live-state
+  catch-up on the deferred tick. Placed givers gate reliably with no manual
+  ordering, per-instance authoring intact. (A runtime-spawned or late-streamed
+  giver still needs its retroactive re-gate — tracked separately.)
 
 ### Upcoming
 
-- **Save/load system (0.5.0).** Persistent player progression
-  across sessions. The `SimpleQuest.*` namespace consolidation and
-  the quest history registry shipped in 0.4.0 are the pre-flight
-  for this — tag strings are now stable and quest state has the
-  structured records save/load needs to reconstitute live state.
-- **Step-level history records.** The per-quest registry pattern
-  that landed in 0.4.0 will extend to step-level resolutions,
-  giving adopters per-step "what happened" detail in addition to
-  per-quest. Direct groundwork for save/load.
 - **Quest rewards.** Runtime and editor framework for creating 
   and delivering rewards. A standalone questline graph node allows 
   rewards to be issued under any circumstance. By following the

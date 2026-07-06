@@ -1395,6 +1395,10 @@ FLinearColor UQuestlineGraphSchema::GetPinTypeColor(const FEdGraphPinType& PinTy
 	{
 		return SQ_ED_WIRE_OUTCOME;
 	}
+	if (PinType.PinCategory == TEXT("QuestPrerequisite"))
+	{
+		return SQ_ED_WIRE_PREREQUISITE;
+	}
 	if (PinType.PinCategory == TEXT("QuestDeactivated") || PinType.PinCategory == TEXT("QuestDeactivate"))
 	{
 		return SQ_ED_WIRE_DEACTIVATION;

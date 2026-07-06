@@ -4,12 +4,12 @@
 #include "Quests/QuestlineGraph.h"
 
 #include "GameplayTagContainer.h"
+#include "Display/QuestDisplayData.h"
 #include "Quests/QuestNodeBase.h"
 #include "UObject/AssetRegistryTagsContext.h"
-
+#include "Utilities/QuestTagComposer.h"
 #if !WITH_EDITOR
 #include "NativeGameplayTags.h"
-#include "Utilities/QuestTagComposer.h"
 #include "SimpleQuestLog.h"
 #endif
 
@@ -18,7 +18,7 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 {
 	UObject::GetAssetRegistryTags(Context);
 
-	const FString EffectiveID = QuestlineID.IsEmpty() ? GetName() : QuestlineID;
+	const FString EffectiveID = GetEffectiveID();
 	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"), EffectiveID, FAssetRegistryTag::TT_Alphabetical));
 
 	// Publish DisplayName so content-browser tooltips and similar surfaces can show it without loading the asset.
@@ -49,27 +49,6 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledNodeAliases"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
 	}
 
-	// CompiledDisplayNames — newline-separated "ContextualTag=DisplayName" records for container-level nodes
-	// (questline-level + LinkedQuestline placements). Lets the runtime register questline/chapter titles from the
-	// Asset Registry at startup — no asset load, no activation — so UI that queries a display name before the
-	// questline activates (e.g. a world nameplate at BeginPlay) resolves on a cold first run. Records are newline-
-	// separated (titles are single-line); each splits on its first '=' (a tag contains neither '=' nor a newline).
-	{
-		TArray<FString> DisplayPairs;
-		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : CompiledNodes)
-		{
-			const UQuestNodeBase* Node = Pair.Value;
-			if (!Node || !Node->IsContainerNode()) continue;
-			const FGameplayTag NodeTag = Node->GetContextualTag();
-			if (!NodeTag.IsValid() || Node->GetDisplayName().IsEmpty()) continue;
-			DisplayPairs.Add(FString::Printf(TEXT("%s=%s"), *NodeTag.ToString(), *Node->GetDisplayName().ToString()));
-		}
-		if (!DisplayPairs.IsEmpty())
-		{
-			Context.AddTag(FAssetRegistryTag(TEXT("CompiledDisplayNames"), FString::Join(DisplayPairs, TEXT("\n")), FAssetRegistryTag::TT_Hidden));
-		}
-	}
-
 	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
 
 	// ListenerGroupTags + OutwardSetterGroupTags drive the manager's reachability-walked async-load. Manager builds
@@ -98,6 +77,47 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 		Context.AddTag(FAssetRegistryTag(TEXT("OutwardSetterGroupTags"), FString::Join(TagStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
 	}
 }
+
+#if WITH_EDITOR
+TArray<FString> UQuestlineGraph::GetCompiledDisplayRecords() const
+{
+	auto HasPayload = [](const FText& Name, const FText& Desc, const UQuestDisplayData* Data)
+	{ return !Name.IsEmpty() || !Desc.IsEmpty() || Data != nullptr; };
+
+	auto FormatRecord = [](const FString& TagString, const FText& Name, const FText& Desc, const UQuestDisplayData* Data)
+	{
+		// FText export keeps the package namespace (bStripPackageNamespace = false), so it round-trips losslessly and
+		// stays the single point to revisit if cooked-style namespace stripping is ever needed for localized builds.
+		// The reader parses whatever form is written here, so this one setting governs the whole round-trip.
+		FString NameExport, DescExport;
+		FTextStringHelper::WriteToBuffer(NameExport, Name, true, false);
+		FTextStringHelper::WriteToBuffer(DescExport, Desc, true, false);
+        const FString DataPath = Data ? Data->GetPathName() : FString();
+		return FString::Printf(TEXT("%s=%s|%s|%s"), *TagString, *NameExport, *DescExport, *DataPath);
+	};
+
+	TArray<FString> Records;
+
+	// Questline-self: the standalone identity tag carries the graph's own title/blurb/art. RAW authored name — empty
+	// means "no title," which the UI honors — not the asset-name fallback GetDisplayName() applies.
+	if (HasPayload(GetAuthoredDisplayName(), Description, DisplayData))
+	{
+		Records.Add(FormatRecord(FQuestTagComposer::IdentityNamespace + GetEffectiveID(), GetAuthoredDisplayName(), Description, DisplayData));
+	}
+
+	// Every compiled node with a display payload, under its contextual tag (all nodes, not just containers).
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : CompiledNodes)
+	{
+		const UQuestNodeBase* Node = Pair.Value;
+		if (!Node || !Node->GetContextualTag().IsValid()) continue;
+		if (!HasPayload(Node->GetDisplayName(), Node->GetDescription(), Node->GetDisplayData())) continue;
+		Records.Add(FormatRecord(Node->GetContextualTag().ToString(), Node->GetDisplayName(), Node->GetDescription(), Node->GetDisplayData()));
+	}
+
+	Records.Sort();   // deterministic line order → stable, scoped diffs
+	return Records;
+}
+#endif
 
 FText UQuestlineGraph::GetDisplayName() const
 {

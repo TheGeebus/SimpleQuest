@@ -6,12 +6,11 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
+#include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestObjective.generated.h"
-
-
-struct FQuestObjectiveActivationContext;
 
 
 /**
@@ -154,7 +153,7 @@ public:
 	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
-	void DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag);
+	void DispatchOnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InOwningStepTag);
 
 	/**
 	 * Manager-facing entry point for triggering objective evaluation. Thin C++ forwarder to the protected
@@ -177,6 +176,20 @@ public:
 	 */
 	void DispatchOnObjectiveDeactivated();
 	
+	// ── Save/load — per-instance state hook ───────────────────────────────────────────────────────────────
+	//
+	// Objectives that carry durable per-instance progress (e.g. a running count) override these so save/load can
+	// persist and re-apply it. Base returns empty / no-op — a stateless objective needs nothing. Capture runs at save;
+	// Restore runs AFTER the objective is rebuilt on load (which has already reset it), so the override re-applies the
+	// saved values. Plain C++ virtual for now; promote to BlueprintNativeEvent (override becomes _Implementation) when a
+	// Blueprint objective needs to persist its own state.
+
+	/** Capture this objective's durable progress into a save-state struct. Base returns empty (nothing to persist). */
+	virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const { return FSimpleQuestObjectiveSaveState{}; }
+
+	/** Re-apply progress from a save-state struct after the objective has been rebuilt on load. Base is a no-op. */
+	virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) {}
+	
 protected:
 	/**
 	 * Set the initial conditions for the quest step. This event may be overridden to provide a convenient place
@@ -185,17 +198,15 @@ protected:
 	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
 	 *
-	 * UPCOMING CHANGE (0.5.0): the single-parameter signature here is scheduled for restructure into a two-
-	 * parameter shape — (FQuestObjectiveAuthoredConfig& Authored, FQuestObjectiveRuntimeContext& Runtime) —
-	 * pushing the Authored/Runtime split from a nested data shape onto the consumer boundary. Adopter override
-	 * sites will need to update their signature (FunctionRedirects can't auto-fix signature changes). Activation
-	 * payload data remains intact; the structural change is purely how the parts are delivered. Save/load
-	 * benefits from the stable shape, which is why the restructure lands alongside that release.
+ 	 * Delivered as two parts: Authored (this Step's design-time config) and Runtime (the caller's incoming context plus
+	 * framework-stamped provenance/outcome). The framework does NOT merge them — the objective composes whatever it needs,
+	 * with full provenance over which values are authored vs caller-supplied.
 	 *
-	 * @param Params a set of specific target actors in the scene
+	 * @param Authored design-time config packed from the Step's UPROPERTYs (target classes/actors, element count, config asset)
+	 * @param Runtime  the caller's IncomingContext (instigator, custom data, lineage, target overrides) + Provenance + IncomingOutcomeTag
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
-	void OnObjectiveActivated(const FQuestObjectiveActivationContext& Params);
+	void OnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime);
 
 	/**
 	 * Symmetric partner to OnObjectiveActivated. Fires whenever the owning step is releasing the

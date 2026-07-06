@@ -12,6 +12,7 @@
 const FString& FQuestTagComposer::LeafToString(EQuestStateLeaf Leaf)
 {
 	static const FString S_Live         = TEXT("Live");
+	static const FString S_Started      = TEXT("Started");
 	static const FString S_Completed    = TEXT("Completed");
 	static const FString S_PendingGiver = TEXT("PendingGiver");
 	static const FString S_Deactivated  = TEXT("Deactivated");
@@ -21,6 +22,7 @@ const FString& FQuestTagComposer::LeafToString(EQuestStateLeaf Leaf)
 	switch (Leaf)
 	{
 	case EQuestStateLeaf::Live:         return S_Live;
+	case EQuestStateLeaf::Started:      return S_Started;
 	case EQuestStateLeaf::Completed:    return S_Completed;
 	case EQuestStateLeaf::PendingGiver: return S_PendingGiver;
 	case EQuestStateLeaf::Deactivated:  return S_Deactivated;

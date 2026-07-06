@@ -12,8 +12,10 @@
 #include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
+#include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestManagerSubsystem.generated.h"
 
 
@@ -120,6 +122,30 @@ protected:
 	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
 
 	/**
+	 * Load-time counterpart to ActivateQuestlineGraph. Registers the graph's compiled instances, then — instead of
+	 * firing entry nodes — reconstitutes the live objective on every Step the restored WorldState marks Live, replaying
+	 * it from the saved entry snapshot with EQuestActivationProvenance::Restored. No lifecycle events, no entry records,
+	 * no forward cascades: a loaded game rebuilds the exact Live set the save described rather than re-running the graph
+	 * from its entries. Call after UQuestStateSubsystem::ApplySnapshot has restored facts + registries. Safe to call on
+	 * every questline graph — graphs the save left dormant simply register and instantiate nothing. Designer-facing
+	 * counterpart: USimpleQuestBlueprintLibrary::RestoreQuestline.
+	 */
+	virtual void RestoreQuestlineGraph(UQuestlineGraph* Graph);
+
+	/**
+	 * Restores every graph in the pending-restore stash (set by ApplyQuestSnapshot): async-loads each and rebuilds its
+	 * live / deferred / accumulator state. Drives both the manual RestoreQuestGraphs BP node and the auto-consume flush.
+	 */
+	void RestorePendingGraphs();
+
+	/**
+	 * Arms a one-shot auto-restore: the pending stash flushes automatically when the next game world initializes (i.e.
+	 * after the consumer's OpenLevel), so the load path is just ApplyQuestSnapshot -> OpenLevel with no per-level node.
+	 * Set by ApplyQuestSnapshot's bRestoreOnNextLevelLoad. Idempotent; cleared on flush or Deinitialize.
+	 */
+	void ArmRestoreOnNextLevelLoad();
+
+	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
 	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
@@ -137,7 +163,7 @@ protected:
 	 *                            outcome / forward / deactivation routing from another node; ExternalAPI for
 	 *                            FQuestActivationRequestEvent and programmatic / procedural / save-rehydration paths.
 	 * @param IncomingOutcomeTag  Outcome from the parent node for per-path entry routing in UQuest container nodes.
-	 *                            Stamped onto PendingActivationContext.Dynamic.IncomingOutcomeTag and consumed by the wrapper's
+     *                            Stamped onto PendingActivationContext.IncomingOutcomeTag and consumed by the wrapper's
 	 *                            inner-entry routing. Invalid (default) for non-cascade activations.
 	 * @param IncomingSourceTag   FName of the specific parent source whose outcome fired. UQuest entry routing filters
 	 *                            source-qualified entries against this tag so only the matching spec's entry step
@@ -162,29 +188,48 @@ protected:
 		bool bBypassGiverGate = false,
 		bool bBypassPrerequisites = false);
 
-private:		
+private:
+	void LoadCompiledDisplayIni() const;
+	
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+		
+	/**
+	 * The questline graphs the manager has registered or reachability-warmed this session, by soft path. Captured into
+	 * the save snapshot (CaptureQuestState) so RestoreQuestState can drive graph restore off the save itself rather than
+	 * a caller-maintained asset list. A superset of the graphs with live state — dormant entries restore to a no-op.
+	 */
+	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
+	
+	/** Stashes the snapshot's active-graph list + deferred-activation set + objective states for a level-transition restore. */
+	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
+		const TMap<FGuid, FSimpleQuestObjectiveSaveState>& ObjectiveStates)
+	{
+		PendingRestoreGraphs = Graphs;
+		PendingDeferredActivations = Deferred;
+		PendingObjectiveStates = ObjectiveStates;
+	}
+
+	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
+	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
+
+	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
+	TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
+
+	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
+	TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	void HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS);
+	void DisarmRestoreOnNextLevelLoad();
+
+	bool bRestoreArmed = false;
+	FDelegateHandle PostWorldInitHandle;
+	TWeakObjectPtr<UWorld> ArmedFromWorld;
 	
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
-	
-	/**
-	 * Parallel index: AuthoredNodeGuid → the FName key used in LoadedNodeInstances. Enforces a "one instance per
-	 * authored node" invariant at registration time. The same authored node can be compiled into multiple questline
-	 * assets (standalone compile of an asset + inlined compile when the asset is a LinkedQuestline target inside
-	 * another asset). Both compiles produce separate UQuestNodeBase instances under different FName keys (different
-	 * ContextualTag perspectives). Without deduplication, both instances register, both have their delegates bound, and
-	 * every event fires twice — manifests as observer duplication, giver missed-add on loop, and other multi-tag
-	 * delivery anomalies that look like broadcast bugs but root at duplicate registration.
-	 *
-	 * Excluded from this deduplication: utility node keys ("Util_<guid>" prefix — per-context instances are intentional;
-	 * different cascade behavior per perspective) and prereq rule monitors (already deduplicated via shared FName key
-	 * in LoadedNodeInstances; see the comment on the FName-key deduplication loop in RegisterQuestlineGraph).
-	 */
-	TMap<FGuid, FName> LoadedInstancesByAuthoredNodeGuid;
 
 	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
@@ -204,6 +249,14 @@ private:
 	FGameplayTag ResolveToCanonicalTag(FGameplayTag InputTag) const;
 
 	/**
+	 * Resolves an adopter-supplied tag to the single canonical instance a mutation should target. Mutations are
+	 * instance-specific: a contextual tag (or a class-channel alias with a single placement) resolves to that one
+	 * instance; an alias shared by multiple placements is ambiguous — which instance? — and is refused with a
+	 * Warning. Returns an invalid tag on refusal so callers fall through their existing invalid-tag guard.
+	 */
+	FGameplayTag ResolveSingleCanonicalForMutation(FGameplayTag InputTag) const;
+
+	/**
 	 * Adds (or removes) a state-leaf fact at the canonical perspective AND every AssetScopedAliasTag the
 	 * instance carries, so direct WorldState->HasFact queries from any perspective find the fact. Mirrors
 	 * the multichannel publish model the bus uses for events — facts and events both ride every
@@ -221,6 +274,14 @@ private:
 	 */
 	void AddStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
 	void RemoveStateFactAcrossPerspectives(FGameplayTag InputTag, EQuestStateLeaf Leaf);
+	
+	/**
+	 * Sets the append-only Started anchor for a node the first time it goes Live. Unlike the transient Live fact
+	 * (re-derived away when a container's last active child finishes), this is never removed — it is the past-tense
+	 * record catch-up reconstructs a node's Started/Activated from once Live has cleared and the node never itself
+	 * resolved. Idempotent: written once, so the ref-count stays boolean. Called from every Live-add site.
+	 */
+	void MarkQuestStarted(FGameplayTag QuestTag);
 	
 	/**
 	 * Writes the per-run resettable mirror — the MakeNodePathFact tag pin-wired prereqs carry — across the canonical
@@ -248,46 +309,29 @@ private:
 	void ResetQuestRunState(FGameplayTag QuestTag);
 
 	/**
-	 * Folds a deduplicated (lost-on-AuthoredGuid-collision) instance's perspective tags into the existing canonical
-	 * instance's alias set. Without this, the second-registered instance is dropped entirely and any cascade /
-	 * subscriber bound to its perspective form has no runtime to resolve. After the merge, the canonical instance
-	 * carries every perspective the deduplicated instance would have had — events publish on all forms, alias-walks
-	 * find the canonical from any form, state subsystem queries resolve through cross-asset perspectives.
-	 *
-	 * Also populates LoadedNodeInstances under each merged alias key (same pointer, additional keys) so every
-	 * existing direct-lookup site (Find / FindRef / Contains) resolves transparently from any perspective. No
-	 * per-call-site alias-walk needed — iteration sites don't exist (verified) so duplicate visits aren't a
-	 * concern.
-	 */
-	void MergePerspectiveTagsInto(UQuestNodeBase* Existing, FName ExistingCanonicalName, UQuestNodeBase* Incoming);
-
-	/**
-	 * Idempotent registration of an Instance pointer in LoadedNodeInstances. Centralizes the alias-aware Add so
-	 * the invariant "all alias keys for a given Instance map to the same pointer" lives in one place. Handle-
-	 * ActivationRequest / HandleGiveQuestEvent rely on this invariant for their dedup-by-Instance-pointer loops;
-	 * any future caller comparing FindRef results across alias forms gets the same guarantee.
+	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds
+	 * one entry per placement — a node's ContextualTag resolves to exactly one runtime instance (strict 1:1).
+	 * Centralizing the Add keeps that invariant in one place; lookup and dedup-by-pointer sites rely on it.
 	 *
 	 * Behavior:
 	 *   - Key unmapped: stores Instance under Key.
-	 *   - Key already mapped to the SAME Instance: no-op (idempotent re-registration is benign — happens during
-	 *     MergePerspectiveTagsInto's union pass and on cross-session registration for instances that persist on
-	 *     the asset across PIE).
-	 *   - Key already mapped to a DIFFERENT Instance: logs Warning and SKIPS the write. A collision here
-	 *     indicates a broken design invariant — alias keys are constructed at compile-time to be unique per
-	 *     Instance via the multi-tag stack; surfacing the violation is preferable to silent overwrite.
+	 *   - Key already mapped to the SAME Instance: no-op — a benign idempotent re-register.
+	 *   - Key already mapped to a DIFFERENT Instance: logs Warning and SKIPS the write. A collision here indicates
+	 *     a broken invariant — ContextualTags are constructed at compile time to be unique per placement, so
+	 *     surfacing the violation is preferable to a silent overwrite.
 	 */
 	void RegisterLoadedNodeInstance(FName Key, UQuestNodeBase* Instance);
 		
 	/**
-	 * Pushes all per-perspective state-subsystem registrations for a freshly-registered or freshly-merged node
-	 * instance — canonical + every AssetScopedAliasTag. Per perspective: KnownQuests, alias mapping (when not the
-	 * canonical), container classification, display data. Centralizes the registration bundle so the invariant
+	 * Pushes all per-perspective state-subsystem registrations for a freshly-registered node instance — its
+	 * canonical ContextualTag plus every AssetScopedAliasTag. Per perspective: KnownQuests, alias mapping (when not
+	 * the canonical), container classification, display data. Centralizes the registration bundle so the invariant
 	 * "every perspective gets the full bookkeeping" lives in one place.
 	 *
-	 * Called by RegisterQuestlineGraph (fresh instance registration) and MergePerspectiveTagsInto (merging a duplicate
-	 * compile's perspective set into the existing canonical). Idempotent across the underlying registrations — re-
-	 * registering an already-known tag/alias/container/display-data record is a no-op or harmless overwrite, so the
-	 * merge case safely re-iterates the canonical and existing aliases alongside the new ones.
+	 * Called by RegisterQuestlineGraph during instance registration. Idempotent across the underlying registrations:
+	 * multiple placements of the same sub-questline share a class-channel AssetScopedAliasTag, so each placement
+	 * registers it — re-registering an already-known tag / alias mapping / container classification / display-data
+	 * record is a no-op or harmless overwrite.
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 
@@ -404,6 +448,14 @@ private:
 	 */
 	FQuestEventPayload AssembleEventContext(const UQuestNodeBase* Node, const FQuestObjectiveTriggerContext& InCompletionTrigger) const;
 	
+	/**
+	 * Wires the framework trigger→objective bridge for a live Step: subscribes the Step's tag to FQuestTriggerFiredEvent
+	 * (routing to CheckQuestObjectives) and registers any target-class filters against the global trigger channel. Shared
+	 * by the normal start path (HandleOnNodeStarted) and save restore (RestoreQuestlineGraph), so a restored objective
+	 * receives trigger fires exactly as a freshly-started one does.
+	 */
+	void WireStepTriggerSubscriptions(UQuestStep* Step);
+	
 	UFUNCTION()
 	void HandleOnNodeCompleted(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity);
 	UFUNCTION()
@@ -418,7 +470,7 @@ private:
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
-
+	
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
 	void HandleGiverRegisteredEvent(FGameplayTag Channel, const FQuestGiverRegisteredEvent& Event);
 	void HandleNodeDeactivationRequest(FGameplayTag Channel, const FQuestDeactivateRequestEvent& Event);
@@ -530,6 +582,16 @@ private:
 	 * scheduled, not just when it finishes — prevents N parallel async-loads for the same target during a fan-in.
 	 */
 	TSet<FSoftObjectPath> KnownLoadedGraphPaths;
+
+	/**
+	 * Pending-restore stash for a level-transition load: set by USimpleQuestBlueprintLibrary::ApplyQuestSnapshot before
+	 * OpenLevel, consumed after the target level is up — RestoreQuestGraphs drains the graph list, and each
+	 * RestoreQuestlineGraph drains the deferred-activation entries for its own nodes. GameInstance-persistent, so it
+	 * survives the transition between applying the data and rebuilding the graphs.
+	 */
+	TArray<FSoftObjectPath> PendingRestoreGraphs;
+	TMap<FGuid, FQuestObjectiveRuntimeContext> PendingDeferredActivations;
+	TMap<FGuid, FSimpleQuestObjectiveSaveState> PendingObjectiveStates;
 
 	/**
 	 * Scans the asset registry for UQuestlineGraph assets and builds GraphsByListenerGroupTag from each asset's

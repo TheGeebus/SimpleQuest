@@ -41,7 +41,7 @@ public:
 	UInteractAllTargetsObjective();
 
 protected:
-	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override;
+	virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime) override;
 	virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext) override;
 
 	/**

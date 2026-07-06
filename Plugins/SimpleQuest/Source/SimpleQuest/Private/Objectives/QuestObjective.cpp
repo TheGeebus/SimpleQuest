@@ -25,17 +25,19 @@ void UQuestObjective::TryCompleteObjective_Implementation(const FQuestObjectiveT
 	UE_LOG(LogSimpleQuestActivation, Warning, TEXT("Called parent UQuestObjective::TryCompleteObjective. Override this event to provide quest completion logic."));
 }
 
-void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
+void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime)
 {
-	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::OnObjectiveActivated_Implementation — storing base target fields from activation params."));
-	TargetActors = Params.Dynamic.TargetActors;
-	TargetClasses = Params.Authored.TargetClasses;
+	// Default composition: authored target classes; authored actors unioned with the caller's runtime actors.
+	// Subclasses override to compose differently — they have both halves with full provenance.
+	TargetClasses = Authored.TargetClasses;
+	TargetActors = Authored.TargetActors;
+	TargetActors.Append(Runtime.IncomingContext.Config.TargetActors);
 }
 
-void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveActivationContext& Params, FGameplayTag InOwningStepTag)
+void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InOwningStepTag)
 {
 	OwningStepTag = InOwningStepTag;
-	OnObjectiveActivated(Params);
+	OnObjectiveActivated(Authored, Runtime);
 }
 
 void UQuestObjective::DispatchTryCompleteObjective(const FQuestObjectiveTriggerContext& InContext)

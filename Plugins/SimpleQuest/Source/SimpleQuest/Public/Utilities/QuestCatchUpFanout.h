@@ -5,11 +5,15 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/PrerequisiteExpression.h"
 #include "Signals/Types/SignalRoutingFlags.h"
+#include "Quests/Types/QuestEventPayload.h"
+#include "Quests/Types/QuestEventTypes.h"
 
 
+class AActor;
 class UQuestStateSubsystem;
-
+class UWorldStateSubsystem;
 
 /**
  * Helper for subscribers' catch-up paths. When a subscriber binds to a quest event channel mid-session, it needs
@@ -47,4 +51,40 @@ namespace FQuestCatchUpFanout
 	 * call sites (e.g. catch-up firing during world teardown after the state subsystem has already deinitialized).
 	 */
 	SIMPLEQUEST_API TArray<FGameplayTag> EnumerateTagsForCatchUp(FGameplayTag SubscribedTag, const UQuestStateSubsystem* StateSubsystem, ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
+
+	
+	/**
+	 * One reconstructable lifecycle event for a caught-up tag, plus the extras recovered from the registries. Plain
+	 * (non-reflected) — consumed only by the C++ catch-up call sites, never crosses a BP boundary.
+	 */
+	struct FReconstructedEvent
+	{
+		EQuestLifecycleEventType EventType = EQuestLifecycleEventType::None;
+		FGameplayTag OutcomeTag;            // Completed only — recovered from the resolution registry
+		AActor* RecoveredGiver = nullptr;   // Started only — recovered last-giver actor
+	};
+
+	/**
+	 * Everything a subscriber needs to REPLAY one fanned-out tag from persisted state — the parity-critical half:
+	 * matched channel, rehydrated payload, prereq status, and which lifecycle events the state supports, in canonical
+	 * fire order. Pure data, no delegate knowledge: emission and per-subscriber gating (exposure flags, outcome
+	 * filter, live-dedup, bookkeeping) stay at the call site.
+	 */
+	struct FTagReconstruction
+	{
+		FGameplayTag MatchedChannel;
+		FQuestEventPayload Payload;          // fully rehydrated, Delivery = CatchUp
+		FQuestPrereqStatus PrereqStatus;     // for the Activated / Enabled delegate args
+		TArray<FReconstructedEvent> Events;  // state-eligible events, canonical fire order
+	};
+
+	/**
+	 * Builds the shared reconstruction for one canonical tag: matched channel, payload rehydrated from the persisted
+	 * entry snapshot + display registry, prereq status, and the ordered lifecycle events the current state supports
+	 * replaying (each with its recovered outcome / giver). THE single source of truth both catch-up subscribers share
+	 * — every future catch-up rule (a new state anchor, another recovered payload field) lands here once, not mirrored.
+	 * Returns an empty reconstruction for null WorldState / invalid tag.
+	 */
+	SIMPLEQUEST_API FTagReconstruction ReconstructTag(const FGameplayTag& CanonicalTag, const FGameplayTag& SubscribedTag,
+		UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
 }

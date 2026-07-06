@@ -948,6 +948,10 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
 
         if (!Instance) continue;
 
+    	// Give utility nodes the same stable per-placement save identity content nodes get, so save/load can key their
+    	// state — a prereq-deferred Prereq Gate has no contextual tag, so QuestContentGuid is its only handle.
+    	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, Instance->AuthoredNodeGuid);
+    	
         // Utility nodes with a Prerequisites input pin get the same prereq expression compilation as content nodes.
         // PrereqGate is the first user; future utility nodes opt in by exposing a QuestPrerequisite-category PrereqIn pin.
         if (UEdGraphPin* PrereqPin = UtilEdNode->GetPinByRole(EQuestPinRole::PrereqIn))

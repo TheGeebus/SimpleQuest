@@ -15,6 +15,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Display/QuestDisplayData.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
+#include "Quests/Types/SimpleQuestSaveSnapshot.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
@@ -398,7 +399,8 @@ void UQuestStateSubsystem::RecordEntry(
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
 	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
-	FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
+	FName PathIdentity,
+	const FOriginatingEventID& OriginatingEventID)
 {
 	if (!QuestTag.IsValid()) return;
 
@@ -412,6 +414,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.EntryTime = EntryTime;
 		Entry.Provenance = Provenance;
 		Entry.ActivationContextSnapshot = ActivationParamsSnapshot;
+		Entry.InstigatorRef = ActivationParamsSnapshot.Instigator.Get();   // save-stable soft form of the live giver/instigator
 		Entry.PathIdentity = PathIdentity;
 
 		if (IncomingOutcomeTag.IsValid())
@@ -420,7 +423,7 @@ void UQuestStateSubsystem::RecordEntry(
 		}
 	});
 
-	const AActor* GiverActor = ActivationParamsSnapshot.Dynamic.Instigator.Get();
+	const AActor* GiverActor = ActivationParamsSnapshot.Instigator.Get();
 	UE_LOG(LogSimpleQuestState, Log,
 		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
 		*QuestTag.ToString(),
@@ -429,9 +432,9 @@ void UQuestStateSubsystem::RecordEntry(
 		*UEnum::GetValueAsString(Provenance),
 		GiverActor ? *GiverActor->GetName() : TEXT("null"),
 		*PathIdentity.ToString(),
-		ActivationParamsSnapshot.Dynamic.TargetActors.Num(),
-		ActivationParamsSnapshot.Authored.TargetClasses.Num(),
-		ActivationParamsSnapshot.Authored.NumElementsRequired,
+		ActivationParamsSnapshot.Config.TargetActors.Num(),
+		ActivationParamsSnapshot.Config.TargetClasses.Num(),
+		ActivationParamsSnapshot.Config.NumElementsRequired,
 		QuestEntries.FindOrAdd(QuestTag).History.Num(),
 		EntryTime);
 
@@ -514,7 +517,7 @@ AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationContextSnapshot.Dynamic.Instigator.Get();
+			return Latest->InstigatorRef.Get();
 		}
 	}
 	return nullptr;
@@ -739,6 +742,84 @@ UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
 		TEXT("UQuestStateSubsystem::GetDisplayData : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning null."),
 		*Tag.ToString());
 	return nullptr;
+}
+
+FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
+{
+	FSimpleQuestSaveSnapshot Snapshot;
+	Snapshot.Version = FSimpleQuestSaveSnapshot::CurrentVersion;
+
+	if (const UGameInstance* GI = GetGameInstance())
+	{
+		if (const UWorldStateSubsystem* WorldState = GI->GetSubsystem<UWorldStateSubsystem>())
+		{
+			Snapshot.WorldFacts = WorldState->GetAllFacts();
+		}
+	}
+	Snapshot.Resolutions = QuestResolutions;   // ActivationContextSnapshot copies in-memory but won't serialize (un-flagged)
+	Snapshot.Entries = QuestEntries;
+	return Snapshot;
+}
+
+bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot)
+{
+	if (Snapshot.Version != FSimpleQuestSaveSnapshot::CurrentVersion)
+	{
+		// Session A is single-version; future versions migrate here. Best-effort restore for now.
+		UE_LOG(LogSimpleQuestState, Warning, TEXT("ApplySnapshot: snapshot version %d != current %d — restoring best-effort"),
+			Snapshot.Version, FSimpleQuestSaveSnapshot::CurrentVersion);
+	}
+
+	if (UGameInstance* GI = GetGameInstance())
+	{
+		if (UWorldStateSubsystem* WorldState = GI->GetSubsystem<UWorldStateSubsystem>())
+		{
+			WorldState->RestoreFacts(Snapshot.WorldFacts);   // Layer 1 — fires OnAnyFactChanged
+		}
+	}
+
+	QuestResolutions = Snapshot.Resolutions;   // Layer 2 — direct overwrite of the histories
+	QuestEntries = Snapshot.Entries;
+	RebuildRegistryIndices();
+
+	OnAnyRegistryChanged.Broadcast();           // the "registry mutated, refresh" signal
+	UE_LOG(LogSimpleQuestState, Log, TEXT("ApplySnapshot: restored %d fact(s), %d resolution key(s), %d entry key(s)"),
+		Snapshot.WorldFacts.Num(), Snapshot.Resolutions.Num(), Snapshot.Entries.Num());
+	return true;
+}
+
+void UQuestStateSubsystem::RebuildRegistryIndices()
+{
+	ResolvedOutcomesByQuest.Reset();
+	ResolvedPathsByQuest.Reset();
+	ResolvedOutcomes.Reset();
+	for (const TPair<FGameplayTag, FQuestResolutionRecord>& Pair : QuestResolutions)
+	{
+		for (const FQuestResolutionEntry& Entry : Pair.Value.History)
+		{
+			if (Entry.OutcomeTag.IsValid())
+			{
+				ResolvedOutcomesByQuest.FindOrAdd(Pair.Key).Add(Entry.OutcomeTag);
+				ResolvedOutcomes.Add(Entry.OutcomeTag);
+			}
+			if (!Entry.PathIdentity.IsNone())
+			{
+				ResolvedPathsByQuest.FindOrAdd(Pair.Key).Add(Entry.PathIdentity);
+			}
+		}
+	}
+
+	EnteredOutcomesByQuest.Reset();
+	for (const TPair<FGameplayTag, FQuestEntryRecord>& Pair : QuestEntries)
+	{
+		for (const FQuestEntryArrival& Arrival : Pair.Value.History)
+		{
+			if (Arrival.IncomingOutcomeTag.IsValid())
+			{
+				EnteredOutcomesByQuest.FindOrAdd(Pair.Key).Add(Arrival.IncomingOutcomeTag);
+			}
+		}
+	}
 }
 
 void UQuestStateSubsystem::RegisterDisplayData(FGameplayTag Tag, const FText& InDisplayName, const FText& InDescription, UQuestDisplayData* InDisplayData)

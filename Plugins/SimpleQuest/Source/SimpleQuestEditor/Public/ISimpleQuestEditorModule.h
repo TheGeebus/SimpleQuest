@@ -91,6 +91,12 @@ public:
     virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const = 0;
     
     virtual void CompileAllQuestlineGraphs() = 0;
+    
+    /**
+     * Record this graph's freshly compiled display data for the deferred display-ini write. Cheap + in-memory — the
+     * file write is coalesced to once per batch in EndCompileBatch, the same way RegisterCompiledTags defers WriteCompiledTagsIni.
+     */
+    virtual void AccumulateCompiledDisplay(const UQuestlineGraph* Graph) = 0;
 
     virtual FOnQuestlineCompiled& OnQuestlineCompiled() = 0;
 };

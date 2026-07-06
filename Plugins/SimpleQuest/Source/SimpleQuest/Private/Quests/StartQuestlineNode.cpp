@@ -23,7 +23,7 @@ void UStartQuestlineNode::ActivateInternal(FGameplayTag InContextualTag)
 
 				UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UStartQuestlineNode: published QuestlineStartRequest for '%s' (CustomData %s)"),
 					*Graph.ToString(),
-					Params.Dynamic.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+					Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 			}
 		}
 	}

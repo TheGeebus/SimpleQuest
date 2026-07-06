@@ -164,8 +164,7 @@ public:
 	 * state, stamps Context onto the target step, and routes into the normal activation pipeline.
 	 * The outcome surfaces asynchronously via the inherited OnQuestStarted (success) or
 	 * OnQuestGiveBlocked (refusal) delegates; filter by GiverActor == GetOwner() to scope to this
-	 * giver's attempts. If Context.Dynamic.Instigator is unset, it defaults to this giver's
-	 * owning actor.
+	 * giver's attempts. If Context.Instigator is unset, it defaults to this giver's owning actor.
 	 *
 	 * @param QuestTag   The quest to give. Must be registered in the runtime tag manager.
 	 * @param Context    Per-call activation context. Empty default carries no extra data.
@@ -248,6 +247,20 @@ public:
 
 protected:
 	virtual void PerformDeferredRegistration() override;
+
+	virtual void InitializeComponent() override;
+
+	/**
+	 * Publishes this giver's QuestTagsToGive at InitializeComponent — before any BeginPlay — so the structural
+	 * "this quest has a giver" set is populated before the questline's entry activation runs.
+	 */
+	void DeclareGiverQuests();
+
+	/**
+	 * Publishes one FQuestGiverRegisteredEvent, resolving the signal subsystem whether or not it's cached yet
+	 * (the InitializeComponent declaration runs before BeginPlay caches it).
+	 */
+	void PublishGiverRegistration(FGameplayTag QuestTag);
 
 	/** Quest tags this giver offers. Designer-authored on the placed component instance. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline"))

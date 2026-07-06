@@ -104,6 +104,14 @@ public:
      */
     const TMap<FGameplayTag, int32>& GetAllFacts() const { return WorldFacts; }
 
+    /**
+     * Bulk-overwrites the entire fact map — the save-restore counterpart to GetAllFacts. Replaces all current
+     * facts in one shot and fires OnAnyFactChanged once; per-tag FWorldStateFactAdded/RemovedEvents are NOT
+     * published, since restore is a bulk state swap, not a sequence of gameplay transitions (post-load
+     * subscribers re-read via the late-registration catch-up).
+     */
+    void RestoreFacts(const TMap<FGameplayTag, int32>& InFacts);
+
     /** Multicast fired after any mutation to WorldFacts (AddFact, RemoveFact, or ClearFact), regardless of the
      *  per-call broadcast mode. Distinct from the per-tag FWorldStateFactAdded/RemovedEvent publishes — this
      *  is a "registry mutated, refresh if you care about the whole map" signal for inspection surfaces (Facts

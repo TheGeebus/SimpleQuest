@@ -20,7 +20,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
     // Stash the cascade's event ID so subclasses (UPrereqGateNode) can read it during ActivateInternal for
     // per-event-ID dedup. PendingActivationContext was populated by the manager before Activate runs.
-    LastIncomingEventID = PendingActivationContext.Dynamic.OriginatingEventID;
+    LastIncomingEventID = PendingActivationContext.IncomingContext.OriginatingEventID;
     
     // Prerequisite bypass — a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
     // Consume the one-shot flag and, crucially, cancel any deferral this instance is still holding from an earlier
@@ -46,6 +46,13 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
         ActivateInternal(InContextualTag);
         return;
     }
+    
+    // Reached ONLY when a non-Always PrerequisiteExpression currently evaluates false — the sole reason an
+    // activation defers rather than going Live. Named at Verbose so a "nothing happened on activate" symptom
+    // (with no authored prereq in view — e.g. a compiler-injected chapter-chain gate) surfaces the responsible node.
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::Activate : '%s' deferring — prerequisite unsatisfied (bBypassPrerequisites would force it Live)"),
+        *InContextualTag.ToString());
+    
     DeferActivation(InContextualTag);
 }
 
@@ -78,7 +85,7 @@ void UQuestNodeBase::ResetTransientState()
     DeferredContextualTag = FGameplayTag::EmptyTag;
     bWasGiverGated = false;
     bBypassPrerequisitesOnce = false;
-    PendingActivationContext = FQuestObjectiveActivationContext{};
+    PendingActivationContext = FQuestObjectiveRuntimeContext{};
     LastIncomingEventID = FOriginatingEventID{};
 }
 

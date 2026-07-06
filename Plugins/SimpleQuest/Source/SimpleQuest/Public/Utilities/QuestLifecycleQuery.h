@@ -29,6 +29,13 @@ namespace FQuestLifecycleQuery
     /** True if QuestState.<Tag>.Live is asserted in WS. */
     SIMPLEQUEST_API bool IsLive(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
+    /**
+	 * True if QuestState.<Tag>.Started is asserted in WS. The append-only "has gone Live at least once" anchor —
+	 * unlike Live it is never cleared, so it stays true across inner-node limbo and completion, and is restored
+	 * from a save. Answers "has this quest ever begun in the current session?" independent of whether it's still running.
+	 */
+    SIMPLEQUEST_API bool IsStarted(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
+
     /** True if QuestState.<Tag>.Completed is asserted in WS. Survives across loop iterations on re-resolvable quests. */
     SIMPLEQUEST_API bool IsCompleted(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 

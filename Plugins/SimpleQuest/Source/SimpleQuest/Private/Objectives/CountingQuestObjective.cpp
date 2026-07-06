@@ -6,10 +6,10 @@
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 
 
-void UCountingQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
+void UCountingQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime)
 {
-	Super::OnObjectiveActivated_Implementation(Params);
-	MaxElements = Params.Authored.NumElementsRequired;
+	Super::OnObjectiveActivated_Implementation(Authored, Runtime);
+	MaxElements = Authored.NumElementsRequired + Runtime.IncomingContext.Config.NumElementsRequired;
 	CurrentElements = 0;
 }
 
@@ -40,4 +40,21 @@ void UCountingQuestObjective::SetCurrentElements(const int32 NewAmount)
 		ProgressContext.RequiredCount = MaxElements;
 		ReportProgress(ProgressContext);
 	}
+}
+
+FSimpleQuestObjectiveSaveState UCountingQuestObjective::CaptureObjectiveState() const
+{
+	FSimpleQuestObjectiveSaveState State;
+	State.bHasState = true;
+	State.CurrentElements = CurrentElements;
+	State.MaxElements = MaxElements;
+	return State;
+}
+
+void UCountingQuestObjective::RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State)
+{
+	// Re-apply saved progress DIRECTLY (not via SetCurrentElements) so restore stays silent — no ReportProgress fires on
+	// load. MaxElements was already re-derived by OnObjectiveActivated during the rebuild; clamp against the current
+	// value so a graph edit that lowered the threshold since save can't leave CurrentElements above Max.
+	CurrentElements = FMath::Clamp(State.CurrentElements, 0, MaxElements);
 }

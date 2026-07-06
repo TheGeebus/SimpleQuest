@@ -13,9 +13,10 @@ class FNativeGameplayTag;
 #endif
 
 class UQuestDisplayData;
-struct FGameplayTag;
 class UQuestNodeBase;
 class UEdGraph;
+
+struct FGameplayTag;
 
 USTRUCT()
 struct FQuestTagRename
@@ -181,6 +182,18 @@ public:
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }
+    
+    /** Identity used as both the QuestlineEffectiveID AR tag and this graph's section key in the compiled display ini. */
+    FString GetEffectiveID() const { return QuestlineID.IsEmpty() ? GetName() : QuestlineID; }
+
+#if WITH_EDITOR
+    /**
+     * "Tag=Name|Description|DisplayDataPath" records for the questline-self identity plus every compiled node carrying
+     * a display payload, sorted by tag. Name/Description use the loc-preserving, quote-wrapped FText export form so they
+     * survive a delimited round-trip. Accumulated by the editor's AccumulateCompiledDisplay, coalesced to the ini in EndCompileBatch.
+     */
+    TArray<FString> GetCompiledDisplayRecords() const;
+#endif
 
     /**
      * DisplayName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable

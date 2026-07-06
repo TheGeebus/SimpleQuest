@@ -11,6 +11,7 @@
 #include "QuestStep.generated.h"
 
 class UQuestObjective;
+class UQuestObjectiveConfig;
 
 /**
  * Concrete leaf node. Hosts a single UQuestObjective and the target data required to fulfil it. Replaces FQuestStep
@@ -55,6 +56,16 @@ public:
 	virtual void Activate(FGameplayTag InContextualTag) override;
 
 	virtual bool IsStepNode() const override { return true; }
+	
+	/**
+	 * Save-restore replay. Rebuilds the live objective from a saved activation snapshot WITHOUT firing the lifecycle
+	 * (no OnNodeStarted, so no SetQuestLive / lifecycle events / entry record — those fired at the original start and
+	 * were restored in bulk). Stamps EQuestActivationProvenance::Restored on the runtime context so the objective can
+	 * distinguish a load from a fresh start. Called by UQuestManagerSubsystem::RestoreQuestlineGraph for each Step the
+	 * restored WorldState marks Live. IncomingContext is the caller's saved runtime input (FQuestEntryArrival::
+	 * ActivationContextSnapshot); the Step's authored config re-derives here from its own UPROPERTYs.
+	 */
+	void RestoreObjective(const FQuestObjectiveActivationContext& IncomingContext, FGameplayTag InContextualTag);
 
 protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
@@ -74,6 +85,15 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
 	int32 NumberOfElements = 0;
 
+	/**
+	 * Designer-attached "blank slate" config for this Step's objective — the authored-side analog of the runtime
+	 * CustomData instanced struct. Point it at a UQuestObjectiveConfig subclass asset holding whatever typed
+	 * configuration the objective wants; the objective casts it on read. The picker filters to UQuestObjectiveConfig
+	 * and its descendants.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite)
+	TSoftObjectPtr<UQuestObjectiveConfig> ConfigAsset;
+
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	EPrerequisiteGateMode PrerequisiteGateMode = EPrerequisiteGateMode::GatesProgression;
 
@@ -88,12 +108,14 @@ protected:
 	
 public:
 	/**
-	 * Snapshot of the final composed params delivered to the objective at activation. Retained for Piece D chain
-	 * propagation — ChainToNextNodes reads OriginChain to build the forwarded chain for downstream steps. Populated
-	 * in ActivateInternal; cleared in DeactivateInternal.
+	 * The runtime half of the activation context handed to the objective — the caller's IncomingContext plus the
+	 * framework-stamped Provenance and IncomingOutcomeTag. Set in ActivateInternal before OnNodeStarted fires, so
+	 * HandleOnNodeStarted's RecordEntry captures a populated snapshot for the registry's start record. Also drives
+	 * chain propagation: ChainToNextNodes reads IncomingContext.OriginChain to extend the forwarded chain for
+	 * downstream steps. Cleared in DeactivateInternal.
 	 */
 	UPROPERTY(Transient)
-	FQuestObjectiveActivationContext ReceivedActivationContext;
+	FQuestObjectiveRuntimeContext ReceivedActivationContext;
 
 	/**
 	 * Populated from the objective's forward-params at completion. Read by ChainToNextNodes to pre-stamp
@@ -125,16 +147,27 @@ private:
 	void OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context);
 
 	static void UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World);
+	
+	/** Packs this Step's authored UPROPERTYs into the objective's authored-config half. Identical for fresh activation and save restore. */
+	FQuestObjectiveAuthoredConfig BuildAuthoredConfig() const;
+
+	/**
+	 * Instantiates LiveObjective, wires its delegates, registers it with the state subsystem, and dispatches
+	 * OnObjectiveActivated. The instantiation half of activation with no lifecycle side effects — shared by the normal
+	 * ActivateInternal path and the save-restore RestoreObjective path.
+	 */
+	void InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InContextualTag);
 
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FORCEINLINE int32 GetNumberOfElements() const { return NumberOfElements; }
+	FORCEINLINE TSoftObjectPtr<UQuestObjectiveConfig> GetConfigAsset() const { return ConfigAsset; }
 	FORCEINLINE UQuestObjective* GetLiveObjective() const { return LiveObjective; }
 	FORCEINLINE EPrerequisiteGateMode GetPrerequisiteGateMode() const { return PrerequisiteGateMode; }
 	FORCEINLINE const FQuestObjectiveTriggerContext& GetCompletionContext() const { return CompletionContext; }
-	FORCEINLINE const FQuestObjectiveActivationContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
+	FORCEINLINE const FQuestObjectiveRuntimeContext& GetReceivedActivationParams() const { return ReceivedActivationContext; }
 	FORCEINLINE const FQuestObjectiveActivationContext& GetCompletionForwardParams() const { return CompletionForwardParams; }
 	FORCEINLINE const TArray<FGameplayTag>& GetAncestorContainerTags() const { return AncestorContainerTags; }
 };

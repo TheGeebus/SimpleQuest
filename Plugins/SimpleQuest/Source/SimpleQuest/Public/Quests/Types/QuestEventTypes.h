@@ -134,8 +134,9 @@ struct FQuestLifecycleEventReport
     /**
      * Per-event payload — NodeInfo, CompletionTrigger, plus inherited FQuestContextBase fields (Instigator,
      * CustomData, OriginTag, OriginChain). Common across all lifecycle events; carries the same data the
-     * narrow delegates' Payload parameter does. On catch-up, only NodeInfo.QuestTag is populated — full
-     * payload isn't recoverable from state alone (matches the narrow delegates' catch-up contract).
+     * narrow delegates' Payload parameter does. On catch-up the payload is rehydrated from the persisted
+     * entry snapshot, so the rich context (instigator, CustomData, origin lineage) rides along just as it
+     * does on live events; it falls back to NodeInfo.QuestTag alone only when no such record was captured.
      */
     UPROPERTY(BlueprintReadOnly)
     FQuestEventPayload Payload;

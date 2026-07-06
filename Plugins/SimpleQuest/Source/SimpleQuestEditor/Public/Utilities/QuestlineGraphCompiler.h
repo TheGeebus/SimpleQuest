@@ -8,10 +8,12 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 
 enum class EResettableReplay : uint8;
+
 struct FQuestGraphResolution;
 struct FQuestBoundaryCompletion;
 struct FIncomingSignalPinSpec;
 struct FQuestEntryRouteList;
+
 class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
 class UQuestlineNode_UtilityBase;

@@ -16,6 +16,8 @@
 #include "Quests/Types/QuestDisplayDataRecord.h"
 #include "QuestStateSubsystem.generated.h"
 
+struct FSimpleQuestSaveSnapshot;
+struct FQuestRoleSourceInfo;
 class UQuestDisplayData;
 class UQuestObjective;
 class UActorComponent;
@@ -403,6 +405,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	UQuestDisplayData* GetDisplayData(FGameplayTag Tag) const;
 
+	// ── Snapshot ─────────────────────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Captures the two data layers — WorldState facts + the resolution/entry registries — into a serializable snapshot.
+	 * Pure read. Lower-level C++ primitive: the Blueprint entry point is USimpleQuestBlueprintLibrary::CaptureQuestState,
+	 * which pairs this with the active-graph list + deferred-activation set that restore needs. Native callers composing
+	 * their own save flow may still call this directly.
+	 */
+	FSimpleQuestSaveSnapshot CaptureSnapshot() const;
+
+	/**
+	 * Restores the two data layers from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the
+	 * parallel indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
+	 * Restores DATA only — it does not rebuild live objectives or re-arm deferred activations. Lower-level C++ primitive:
+	 * the Blueprint entry point is USimpleQuestBlueprintLibrary::ApplyQuestSnapshot, which pairs this with the stash the
+	 * per-graph restore consumes. Native callers composing their own load flow may still call this directly.
+	 */
+	bool ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot);
+
 private:
     friend class UQuestManagerSubsystem;
 
@@ -645,4 +666,10 @@ private:
 	 * when the mirror is cleared, so the map only ever holds currently-set mirror facts.
 	 */
 	TMap<FGameplayTag, FOriginatingEventID> PathFactWriteEventIDs;
+
+	/**
+	 * Rebuilds ResolvedOutcomesByQuest / ResolvedPathsByQuest / ResolvedOutcomes / EnteredOutcomesByQuest from
+	 * the restored histories — mirrors RecordResolution / RecordEntry's per-perspective index maintenance.
+	 */
+	void RebuildRegistryIndices();
 };

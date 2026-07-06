@@ -37,6 +37,8 @@ struct SIMPLEQUEST_API FQuestlineStartRequestEvent
 	explicit FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph) : Graph(InGraph) {}
 	FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph, const FQuestObjectiveActivationContext& InParams)
 		: Graph(InGraph), Params(InParams) {}
+	FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph, bool bInRestoreFromSave)
+		: Graph(InGraph), bRestoreFromSave(bInRestoreFromSave) {}
 
 	UPROPERTY(BlueprintReadWrite)
 	TSoftObjectPtr<UQuestlineGraph> Graph;
@@ -44,4 +46,12 @@ struct SIMPLEQUEST_API FQuestlineStartRequestEvent
 	/** Optional activation context stamped onto the graph's entry activation. Empty default = no additional context. */
 	UPROPERTY(BlueprintReadWrite)
 	FQuestObjectiveActivationContext Params;
+
+	/**
+	 * When true the manager RESTORES the graph from an already-applied save (rebuilds the live objectives the restored
+	 * WorldState marks Live) instead of activating it fresh from its entry nodes. Params is ignored in restore mode; the
+	 * runtime context comes from the saved entry snapshot. Set this via USimpleQuestBlueprintLibrary::RestoreQuestline.
+	 */
+	UPROPERTY(BlueprintReadWrite)
+	bool bRestoreFromSave = false;
 };

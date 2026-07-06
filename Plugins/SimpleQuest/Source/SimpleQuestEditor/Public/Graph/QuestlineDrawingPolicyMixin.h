@@ -35,8 +35,16 @@ public:
 			(OutputPin && OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite")) ||
 			(InputPin  && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
 
-		if (bIsPrerequisiteWire)
+		bool bPrereqPath = bIsPrerequisiteWire;
+		if (!bPrereqPath && InputPin)
 		{
+			TSet<const UEdGraphNode*> Visited;
+			bPrereqPath = LeadsOnlyToPrereqInputs(InputPin, Visited);
+		}
+		if (bPrereqPath)
+		{
+			const bool bStale = (OutputPin && OutputPin->bOrphanedPin) || (InputPin && InputPin->bOrphanedPin);
+			if (!bStale) Params.WireColor = SQ_ED_WIRE_PREREQUISITE;
 			Params.bUserFlag1 = true;
 		}
 		else if (InputPin)

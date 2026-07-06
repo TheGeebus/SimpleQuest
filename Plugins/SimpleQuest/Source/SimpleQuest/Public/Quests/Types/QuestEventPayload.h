@@ -7,6 +7,7 @@
 #include "Quests/Types/QuestContextBase.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestNodeInfo.h"
+#include "Quests/Types/QuestEventDelivery.h"
 #include "QuestEventPayload.generated.h"
 
 /**
@@ -32,4 +33,12 @@ struct SIMPLEQUEST_API FQuestEventPayload : public FQuestContextBase
 	 */
 	UPROPERTY(BlueprintReadOnly)
 	FQuestObjectiveTriggerContext CompletionTrigger;
+	
+	/**
+	 * Whether this event is a live transition or a catch-up reconstruction. Defaults to Live, so every real-time
+	 * publish site carries it for free; the catch-up paths stamp CatchUp. Subscribers branch on it to preempt visible
+	 * transition behavior on reconstructed events (see EQuestEventDelivery).
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	EQuestEventDelivery Delivery = EQuestEventDelivery::Live;
 };

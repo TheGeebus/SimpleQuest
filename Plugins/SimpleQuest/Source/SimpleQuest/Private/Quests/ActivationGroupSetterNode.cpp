@@ -27,20 +27,20 @@ void UActivationGroupSetterNode::ActivateInternal(FGameplayTag InContextualTag)
     // outside a cascade); pass it through so the wrapper-completion gate downstream sees the right identity.
     if (USignalSubsystem* Signals = GI->GetSubsystem<USignalSubsystem>())
     {
-        const FName ProvenanceSource = PendingActivationContext.Dynamic.OriginChain.Num() > 0
-            ? PendingActivationContext.Dynamic.OriginChain.Last().GetTagName()
+        const FName ProvenanceSource = PendingActivationContext.IncomingContext.OriginChain.Num() > 0
+            ? PendingActivationContext.IncomingContext.OriginChain.Last().GetTagName()
             : NAME_None;
 
-        FQuestActivationGroupTriggeredEvent Event(GroupTag, PendingActivationContext, ProvenanceSource,
-            PendingActivationContext.Dynamic.OriginChain, PendingActivationContext.Dynamic.OriginatingEventID);
+        FQuestActivationGroupTriggeredEvent Event(GroupTag, PendingActivationContext.IncomingContext, ProvenanceSource,
+            PendingActivationContext.IncomingContext.OriginChain, PendingActivationContext.IncomingContext.OriginatingEventID);
         Signals->PublishMessage(GroupTag, Event);
 
         UE_LOG(LogSimpleQuestActivation, Verbose,
             TEXT("ActivationGroupSetter '%s' published transient signal — source='%s' chain-depth=%d eventGuid=%s"),
             *GroupTag.ToString(),
             *ProvenanceSource.ToString(),
-            PendingActivationContext.Dynamic.OriginChain.Num(),
-            *PendingActivationContext.Dynamic.OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
+            PendingActivationContext.IncomingContext.OriginChain.Num(),
+            *PendingActivationContext.IncomingContext.OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
     }
 
     ForwardActivation();

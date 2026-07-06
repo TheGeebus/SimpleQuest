@@ -34,7 +34,7 @@ struct SIMPLEQUEST_API FQuestResolutionEntry
 	 * The outcome the quest resolved with on this specific occurrence. May be invalid for "resolve without
 	 * specifying an outcome" calls via the BP ResolveQuest helper.
 	 */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FGameplayTag OutcomeTag;
 
 	/**
@@ -42,15 +42,15 @@ struct SIMPLEQUEST_API FQuestResolutionEntry
 	 * (the pin's PathIdentity). Used for path-keyed prereq queries via UQuestStateSubsystem::HasResolvedAtPath.
 	 * NAME_None for "resolve without specifying a path" calls (typically external API rehydration).
 	 */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FName PathIdentity = NAME_None;
 
 	/** World time at this specific resolution (GetTimeSeconds on the manager's world). */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	double ResolutionTime = 0.0;
 
 	/** Whether this resolution was fired through the graph or via an external call. */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	EQuestResolutionSource Source = EQuestResolutionSource::Graph;
 };
 
@@ -72,7 +72,7 @@ struct SIMPLEQUEST_API FQuestResolutionRecord
 	 * Full chronological history of every resolution this quest fired. Append-only; one entry per
 	 * RecordResolution call. Designers walking this array see the complete story across the session.
 	 */
-	UPROPERTY(BlueprintReadOnly)
+	UPROPERTY(BlueprintReadOnly, SaveGame)
 	TArray<FQuestResolutionEntry> History;
 
 	/** Convenience: count of total resolutions across the session. Equivalent to History.Num(). */

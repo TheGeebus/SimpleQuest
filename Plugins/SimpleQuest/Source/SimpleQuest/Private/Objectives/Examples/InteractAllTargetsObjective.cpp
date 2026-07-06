@@ -14,9 +14,9 @@ UInteractAllTargetsObjective::UInteractAllTargetsObjective()
 	AllTargetsInteractedOutcomeTag = Tag_Outcome_AllTargetsInteracted;
 }
 
-void UInteractAllTargetsObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params)
+void UInteractAllTargetsObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime)
 {
-	Super::OnObjectiveActivated_Implementation(Params);
+	Super::OnObjectiveActivated_Implementation(Authored, Runtime);
 
 	// Discover the target set via QSS — every Trigger Component currently registered against this Step's tag
 	// (canonical + alias forms, via the bidirectional synonym walk in §4.33 Phase 1).

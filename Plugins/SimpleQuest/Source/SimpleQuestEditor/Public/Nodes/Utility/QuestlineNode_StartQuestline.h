@@ -33,9 +33,9 @@ public:
 	TSoftObjectPtr<UQuestlineGraph> Graph;
 
 	/**
-	 * Optional activation context applied to the questline's entry. Empty default activates with no extra
-	 * context; populated Dynamic fields (Instigator, CustomData, lineage) layer onto the entry Step's
-	 * authored defaults during activation.
+	 * Optional activation context applied to the questline's entry. Empty default activates with no extra context;
+	 * a populated context (Instigator, CustomData, lineage, and any Config the caller contributes) is composed with
+	 * the entry Step's authored config during activation.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Start Questline")
 	FQuestObjectiveActivationContext Params;

@@ -28,12 +28,45 @@
 UQuestGiverComponent::UQuestGiverComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	bWantsInitializeComponent = true;
 }
 
 void UQuestGiverComponent::PerformDeferredRegistration()
 {
 	Super::PerformDeferredRegistration();
 	RegisterQuestGiver();
+}
+
+void UQuestGiverComponent::InitializeComponent()
+{
+	Super::InitializeComponent();
+	DeclareGiverQuests();
+}
+
+void UQuestGiverComponent::DeclareGiverQuests()
+{
+	// Declaration only — no owner/world state read, so it's safe before BeginPlay. For placed actors this runs during
+	// level load, ahead of every BeginPlay (where consumers fire questline-start), so the gate decision sees the giver.
+	// The deferred catch-up (GiverCatchUpForQuest) still waits a tick for the owner to finish initializing.
+	for (const FGameplayTag& QuestTag : QuestTagsToGive)
+	{
+		PublishGiverRegistration(QuestTag);
+	}
+}
+
+void UQuestGiverComponent::PublishGiverRegistration(FGameplayTag QuestTag)
+{
+	if (!QuestTag.IsValid()) return;
+	USignalSubsystem* Signals = SignalSubsystem;   // cached at BeginPlay; null on the early InitializeComponent path
+	if (!Signals)
+	{
+		const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr;
+		Signals = GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;
+	}
+	if (Signals)
+	{
+		Signals->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
+	}
 }
 
 void UQuestGiverComponent::RegisterQuestGiver()
@@ -80,7 +113,7 @@ void UQuestGiverComponent::SubscribeGiverQuest(FGameplayTag QuestTag)
 	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived, FSignalRoutingDefaults::ExactOnly));
 	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived, FSignalRoutingDefaults::ExactOnly));
 
-	SignalSubsystem->PublishMessage(Tag_Channel_QuestGiverRegistered, FQuestGiverRegisteredEvent(QuestTag));
+	PublishGiverRegistration(QuestTag);
 
 	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
 	{
@@ -291,14 +324,13 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 	// Default the Instigator to this giver's owner if the caller didn't set one. Objectives commonly
 	// need a "who activated me" reference; cheap default saves designers from remembering to set it.
 	FQuestObjectiveActivationContext OutgoingContext = Context;
-	if (!OutgoingContext.Dynamic.Instigator.IsValid())
+	if (!OutgoingContext.Instigator.IsValid())
 	{
-		OutgoingContext.Dynamic.Instigator = GetOwner();
+		OutgoingContext.Instigator = GetOwner();
 	}
-	// Seed OriginChain from OriginTag if a tag was supplied but the chain is empty.
-	if (OutgoingContext.Dynamic.OriginTag.IsValid() && OutgoingContext.Dynamic.OriginChain.Num() == 0)
+	if (OutgoingContext.OriginTag.IsValid() && OutgoingContext.OriginChain.Num() == 0)
 	{
-		OutgoingContext.Dynamic.OriginChain.Add(OutgoingContext.Dynamic.OriginTag);
+		OutgoingContext.OriginChain.Add(OutgoingContext.OriginTag);
 	}
 
 	SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingContext));

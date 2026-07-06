@@ -35,9 +35,14 @@ public:
 			(OutputPin && OutputPin->PinType.PinCategory == TEXT("QuestPrerequisite")) ||
 			(InputPin  && InputPin->PinType.PinCategory  == TEXT("QuestPrerequisite"));
 
-		if (bIsPrerequisiteWire)
+		bool bPrereqPath = bIsPrerequisiteWire;
+		if (!bPrereqPath && InputPin)
 		{
-			// Prereq wires get their own color, not just the dash — but a stale wire keeps the red set above.
+			TSet<const UEdGraphNode*> Visited;
+			bPrereqPath = LeadsOnlyToPrereqInputs(InputPin, Visited);
+		}
+		if (bPrereqPath)
+		{
 			const bool bStale = (OutputPin && OutputPin->bOrphanedPin) || (InputPin && InputPin->bOrphanedPin);
 			if (!bStale) Params.WireColor = SQ_ED_WIRE_PREREQUISITE;
 			Params.bUserFlag1 = true;

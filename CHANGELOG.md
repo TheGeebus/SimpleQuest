@@ -5,58 +5,53 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.5.0] — 2026-07-05 — Persistence & Reusable Questlines
+## [0.5.0] — 2026-07-04 — Persistence & Reusable Questlines
 
-The persistence release: your quests now survive save/load in full — every
+The persistence release: your quests now survive save/load in full. Every
 running, completed, blocked, and prerequisite-waiting state restores exactly
-where the player left off — and reusable questlines now run as independent
+where the player left off. And reusable questlines now run as independent
 instances per placement, so the same authored questline embedded in several
 contexts progresses on its own in each.
 
 ### Save / Load
 
-Persistent quest progression across play sessions. SimpleQuest captures
-the full state of your quests — everything running, completed, blocked,
-and waiting on a prerequisite, plus each objective's in-progress detail —
-into a single serializable snapshot you embed in your own save game, and
-reconstitutes it on load exactly where the player left off.
+Full quest progression saves and restores with one call each way, dropped
+into whatever save game your project already uses. The plugin ships no
+`USaveGame` of its own to adopt. SimpleQuest packs the complete state of
+your quests — everything running, completed, blocked, and waiting on a
+prerequisite, plus each objective's in-progress detail — into a single
+serializable snapshot you embed in your own save, and reconstitutes it on
+load exactly where the player left off.
 
-The integration is struct-only: the plugin ships no `USaveGame` subclass
-to fight your own. Capture the snapshot, drop it into your monolithic
-save alongside the rest of your game's data, and write it however you
-like. The snapshot is a plain value copy with no live object references,
-so it hands cleanly to a background (async) save with no game-thread
-hitch.
+The integration is struct-only. Capture the snapshot, drop it into your
+monolithic save alongside the rest of your game's data, and write it
+however you like. The snapshot is a plain value copy with no live object
+references, so it hands cleanly to a background (async) save with no
+game-thread hitch.
 
-- **Two nodes to save, two to load.** *Capture Quest State* returns the
-  snapshot to embed in your save object. On load, *Apply Quest Snapshot*
-  restores the data and *Restore Quest Graphs* rebuilds the live
-  questlines — and you never enumerate which questlines were active,
-  because the save records that itself. A single *Restore Quest State*
-  does both halves at once for an in-place quick-load with no level
-  change.
+- **One call to save, one to load.** *Capture Quest State* returns the
+  snapshot to embed in your save object. On load, a single *Restore Quest
+  State* takes it back and reconstitutes everything: running quests,
+  completed ones, in-flight objectives — and you never enumerate which
+  questlines were active, because the save records that itself. The apply and
+  graph-rebuild steps are also exposed separately (*Apply Quest Snapshot* /
+  *Restore Quest Graphs*) for when you want to split them across a level
+  transition — see the load flow below.
 - **State resumes, not just "which quests are open."** A quest caught
-  mid-objective returns mid-objective; a completed quest stays completed
+  mid-objective returns mid-objective. A completed quest stays completed
   and its fact-driven consequences (opened doors, unlocks, journal
-  entries) re-derive on load; a quest still waiting on a prerequisite
-  keeps waiting and fires when the prerequisite is finally met; a
-  counting objective comes back at its exact count.
+  entries) re-derive on load. A quest still waiting on a prerequisite
+  keeps waiting and fires when the prerequisite is finally met. A
+  counting objective comes back at its exact count. 
 - **Resolution history persists, not just current state.** The full
-  record of what every quest and step resolved through — each outcome
-  and authored path, and each time it was entered — is captured and
-  restored, so history and outcome queries return the complete pre-save
-  story on load, and prerequisite gates that read that history stay
-  satisfied exactly as they were.
-- **A reached container reconstructs even when it's between states.** A
-  container quest — a chapter or a linked questline — that was entered
-  and had a step finish, but hasn't itself completed and has nothing
-  currently running, still replays its reached state on load. Anything
-  keyed on the chapter being reached — an opened gate, a revealed marker,
-  a quest-log entry — comes back correctly instead of staying dark until
-  the next live event.
+  record of how every quest and step resolved — each outcome and authored 
+  path, and each time it was entered — is captured and restored, so history 
+  and outcome queries return the complete pre-save story on load, and 
+  prerequisite gates that read that history stay satisfied exactly as 
+  they were.
 - **Objectives persist their own progress.** A custom objective type
-  opts in by overriding a capture / restore pair; the framework keys each
-  objective's saved state to its stable placement identity and re-applies
+  opts in by overriding a capture / restore pair, and the framework keys each
+  objective's saved state to its stable identity and re-applies
   it after the objective rebuilds on load. The built-in counting
   objective already does this, and your own objectives carry whatever
   state they define.
@@ -78,7 +73,7 @@ hitch.
   triggers, and HUD catch up to the restored state as they spawn, with no
   per-level wiring. Pass *Restore On Next Level Load* to *Apply Quest
   Snapshot* and the questline graphs rebuild themselves the moment your
-  gameplay level opens — the whole load becomes apply-then-open with no
+  gameplay level opens. The whole load becomes apply-then-open with no
   second call in the destination level.
 
 ### Reusable questlines run as independent instances

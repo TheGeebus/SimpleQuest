@@ -37,6 +37,9 @@ public:
 
 		if (bIsPrerequisiteWire)
 		{
+			// Prereq wires get their own color, not just the dash — but a stale wire keeps the red set above.
+			const bool bStale = (OutputPin && OutputPin->bOrphanedPin) || (InputPin && InputPin->bOrphanedPin);
+			if (!bStale) Params.WireColor = SQ_ED_WIRE_PREREQUISITE;
 			Params.bUserFlag1 = true;
 		}
 		else if (InputPin)

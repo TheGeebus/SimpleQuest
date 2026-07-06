@@ -1,11 +1,9 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-// THROWAWAY verification harness for save/load Slice 1. Console command "SimpleQuest.SaveLoadRoundTrip" captures quest
-// state, round-trips it through a save slot, applies it, and logs CAPTURED vs LOADED so the SaveGame field flags can be
-// eyeballed. Delete this file and its header once Slice 1 is verified.
 
 #include "SimpleQuestSaveLoadTest.h"
+#include "QuickStartSaveGame.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
@@ -44,8 +42,7 @@ namespace
 	// Run while a quest is mid-progress (its step Live). Captures state (incl. active graphs) to the disk slot.
 	void SaveState(UWorld* World)
 	{
-		USimpleQuestSaveLoadTestSave* SaveObj = Cast<USimpleQuestSaveLoadTestSave>(
-			UGameplayStatics::CreateSaveGameObject(USimpleQuestSaveLoadTestSave::StaticClass()));
+		UQuickStartSaveGame* SaveObj = Cast<UQuickStartSaveGame>(UGameplayStatics::CreateSaveGameObject(UQuickStartSaveGame::StaticClass()));
 		SaveObj->Snapshot = USimpleQuestBlueprintLibrary::CaptureQuestState(World);
 		LogSnapshotEntries(TEXT("SAVED"), SaveObj->Snapshot);
 
@@ -64,7 +61,7 @@ namespace
 	// Run AFTER a cold PIE restart (with the questline left dormant). Restores data + every recorded graph — no path arg.
 	void RestoreState(UWorld* World)
 	{
-		USimpleQuestSaveLoadTestSave* Loaded = Cast<USimpleQuestSaveLoadTestSave>(
+		UQuickStartSaveGame* Loaded = Cast<UQuickStartSaveGame>(
 			UGameplayStatics::LoadGameFromSlot(GTestSlot, 0));
 		if (!Loaded)
 		{

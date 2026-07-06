@@ -702,10 +702,44 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 {
     if (!Graph) return;
 
+    // Resolve the questline's own identity tag up front — used by the idempotency gate here and the asset-level
+    // lifecycle publish further down.
+    const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
+    const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
+
+    // Idempotent start — a fresh activation on a questline that has already begun in this session would clobber it,
+    // whether it's still running or was restored from a save. The append-only Started anchor is the signal: written on
+    // first activation, never cleared (so it survives inner-node limbo and completion), and restored by ApplyQuestSnapshot
+    // BEFORE the level reloads — so it reads true whether Start Questline fires at level BeginPlay (before the restore
+    // flush) or later from a debug key / interaction (after it). A new game leaves it unset, so the first start proceeds.
+    // Net effect: Start Questline is safe to call unconditionally; it starts a questline once and won't fight a load.
+    if (QuestlineTag.IsValid() && FQuestLifecycleQuery::IsStarted(WorldState, QuestlineTag))
+    {
+        UE_LOG(LogSimpleQuestActivation, Log,
+            TEXT("ActivateQuestlineGraph: '%s' already started (running or restored from a save) — skipping fresh activation."),
+            *Graph->GetName());
+        return;
+    }
+
+    const FSoftObjectPath GraphPath(Graph);
+
+    // Restore deferral — if a save restore is going to reconstruct this graph on the current level load, skip the fresh
+    // activation so it can't race (and clobber) the restore. ApplyQuestSnapshot stashes PendingRestoreGraphs BEFORE
+    // OpenLevel; RestorePendingGraphs consumes it a tick AFTER the reloaded world's BeginPlay — so a StartQuestline call
+    // in a pawn/level BeginPlay fires inside that window, sees the graph still pending here, and yields. New game (no
+    // snapshot applied) leaves the set empty, so activation proceeds normally. Net effect: StartQuestline is safe to call
+    // unconditionally on level start — it either starts fresh or defers to the restore, with no branching at the caller.
+    if (PendingRestoreGraphs.Contains(GraphPath))
+    {
+        UE_LOG(LogSimpleQuestActivation, Log,
+            TEXT("ActivateQuestlineGraph: '%s' is pending a save restore this level load — skipping fresh activation; the restore reconstructs it."),
+            *Graph->GetName());
+        return;
+    }
+    
     // Cycle break — if this graph is already inside an in-flight activation cascade, skip to prevent the loop.
     // Catches both direct self-reference (Start Questline node in graph X targeting X) and indirect cycles
     // (A → B → A or longer). The set is keyed by soft path so it stays valid across async-load boundaries.
-    const FSoftObjectPath GraphPath(Graph);
     if (ActivatingGraphPaths.Contains(GraphPath))
     {
         UE_LOG(LogSimpleQuestActivation, Warning,
@@ -721,16 +755,11 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
     RegisterQuestlineGraph(Graph);
 
     // Asset-level activation publish on the questline's own tag channel. Symmetric with PublishGraphResolutions's
-    // close-out publish (§4.36) — adopters subscribed at the questline tag with ExactMatch routing previously
-    // received nothing at start because every Activated/Started publish lived on descendant content-node tags.
-    // This publish closes that gap with a direct asset-level signal. Payload carries the questline's identity +
-    // forwards Instigator / CustomData from the caller's activation params so adopters can attribute "who started
-    // this questline." PrereqStatus is default-constructed: asset-level activation doesn't have a prereq concept
-    // (gating lives on individual content nodes inside the graph).
+    // close-out publish. Payload carries the questline's identity + forwards Instigator / CustomData from the caller's
+    // activation params so adopters can attribute "who started this questline." PrereqStatus is default-constructed:
+    // asset-level activation doesn't have a prereq concept (gating lives on individual content nodes inside the graph).
     if (QuestSignalSubsystem)
     {
-        const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
-        const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
         if (QuestlineTag.IsValid())
         {
             FQuestEventPayload Payload;

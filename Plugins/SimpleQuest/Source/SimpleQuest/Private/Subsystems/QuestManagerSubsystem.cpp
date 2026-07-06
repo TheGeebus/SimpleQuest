@@ -1234,6 +1234,11 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
                 FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestActivatedEvent(Node->GetContextualTag(), Context, FQuestPrereqStatus{}));
             }
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Node, FQuestStartedEvent(Node->GetContextualTag(), Context, GiverActor));
+            
+            // Durable Started anchor on scope entry. Writing the anchor here — where the Started event already fires —
+            // lets catch-up (which keys Activated/Started replay on Started) reconstruct an entered-but-never-Live
+            // container. Idempotent: SetQuestLive's later call no-ops on it.
+            MarkQuestStarted(Node->GetContextualTag());
         }
         else
         {

@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.5.0] — 2026-07-04 — Persistence & Reusable Questlines
+## [0.5.0] — 2026-07-06 — Persistence & Reusable Questlines
 
 The persistence release: your quests now survive save/load in full. Every
 running, completed, blocked, and prerequisite-waiting state restores exactly
@@ -75,6 +75,12 @@ game-thread hitch.
   Snapshot* and the questline graphs rebuild themselves the moment your
   gameplay level opens. The whole load becomes apply-then-open with no
   second call in the destination level.
+- **Starting a questline is idempotent.** Calling *Start Questline* on a
+  questline that's already running — or one just restored from a save — does
+  nothing, so you can fire it unconditionally from a level, GameMode, or
+  PlayerController `BeginPlay` without a fresh start racing or overwriting a
+  loaded game. A new game starts it once; a loaded game lets the restore
+  reconstruct it.
 
 ### Reusable questlines run as independent instances
 

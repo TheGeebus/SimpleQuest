@@ -6,10 +6,40 @@
 #include "GameplayTagsManager.h"
 #include "ISimpleQuestEditorModule.h"
 #include "SimpleQuestLog.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphPin.h"
+#include "Nodes/QuestlineNode_ContentBase.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Nodes/QuestlineNode_Knot.h"
+#include "Nodes/QuestlineNode_Entry.h"
+#include "Nodes/QuestlineNode_Exit.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
+#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
+#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
+#include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
+#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
+#include "Nodes/Utility/QuestlineNode_AddFact.h"
+#include "Nodes/Utility/QuestlineNode_ClearFact.h"
+#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
+#include "Objectives/QuestObjective.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestStep.h"
 #include "Quests/Quest.h"
+#include "Quests/QuestRewardNode.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
@@ -18,42 +48,15 @@
 #include "Quests/PrereqGateNode.h"
 #include "Quests/ActivationGroupListenerNode.h"
 #include "Quests/ActivationGroupSetterNode.h"
-#include "Nodes/QuestlineNode_ContentBase.h"
-#include "Nodes/QuestlineNode_Quest.h"
-#include "Nodes/QuestlineNode_Step.h"
-#include "Nodes/QuestlineNode_LinkedQuestline.h"
-#include "Nodes/QuestlineNode_Knot.h"
-#include "Nodes/QuestlineNode_Entry.h"
-#include "Nodes/QuestlineNode_Exit.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
-#include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
-#include "Nodes/Utility/QuestlineNode_SetBlocked.h"
-#include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
-#include "Nodes/Utility/QuestlineNode_StartQuestline.h"
-#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
-#include "Utilities/QuestlineGraphTraversalPolicy.h"
-#include "EdGraph/EdGraph.h"
-#include "EdGraph/EdGraphPin.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
-#include "Nodes/Utility/QuestlineNode_AddFact.h"
-#include "Nodes/Utility/QuestlineNode_ClearFact.h"
-#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
-#include "Objectives/QuestObjective.h"
-#include "Toolkit/QuestlineGraphEditor.h"
-#include "Types/QuestPinRole.h"
-#include "Utilities/SimpleQuestEditorUtils.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Quests/AddFactNode.h"
 #include "Quests/ClearFactNode.h"
 #include "Quests/RemoveFactNode.h"
+#include "Rewards/QuestReward.h"
+#include "Toolkit/QuestlineGraphEditor.h"
+#include "Types/QuestPinRole.h"
+#include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/QuestTagComposer.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 
 namespace
@@ -942,6 +945,21 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
         	Inst->Facts = ClearFactNode->Facts;
         	Inst->bSuppressBroadcast = ClearFactNode->bSuppressBroadcast;
         	Inst->AuthoredNodeGuid = ClearFactNode->QuestGuid;
+        	Instance = Inst;
+        }
+
+        else if (UQuestlineNode_Reward* RewardEdNode = Cast<UQuestlineNode_Reward>(UtilEdNode))
+        {
+        	UQuestRewardNode* Inst = NewObject<UQuestRewardNode>(RootGraph);
+        	// Deep-copy each authored reward as a sub-object of the runtime node so every placement gets its own
+        	// instances (per-placement isolation for future escrow state). A shallow assign would share the editor
+        	// node's sub-objects. Null array slots are preserved as null and skipped at runtime.
+        	Inst->Rewards.Reserve(RewardEdNode->Rewards.Num());
+        	for (const TObjectPtr<UQuestReward>& Authored : RewardEdNode->Rewards)
+        	{
+        		Inst->Rewards.Add(Authored ? DuplicateObject<UQuestReward>(Authored, Inst) : nullptr);
+        	}
+        	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;
         }
 

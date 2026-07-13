@@ -6,6 +6,7 @@
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
 #include "Nodes/Utility/QuestlineNode_PrereqGate.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Quests/QuestlineGraph.h"
 #include "SGraphPin.h"
@@ -158,7 +159,7 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 		.AutoHeight()
 		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
-			Cast<UQuestlineNode_PrereqGate>(UtilityNode) ? SNullWidget::NullWidget
+			(Cast<UQuestlineNode_PrereqGate>(UtilityNode) || Cast<UQuestlineNode_Reward>(UtilityNode)) ? SNullWidget::NullWidget
 				: (UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget())
 		]
 

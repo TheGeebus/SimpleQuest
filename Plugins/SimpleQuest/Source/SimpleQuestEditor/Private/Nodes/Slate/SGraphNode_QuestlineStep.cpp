@@ -527,30 +527,6 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 				[this]() { return StepNode && StepNode->bTargetClassesExpanded; },
 				[this]() { if (StepNode) StepNode->bTargetClassesExpanded = !StepNode->bTargetClassesExpanded; })
 		]
-		
-		// Reward class
-		+ SVerticalBox::Slot()
-		.AutoHeight()
-		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
-		[
-			SNew(STextBlock)
-			.Text_Lambda([this]()
-			{
-				if (!StepNode || StepNode->RewardClass.IsNull()) return FText::GetEmpty();
-				// GetAssetName returns the short class name without loading the reward asset — safe for display.
-				FString Name = StepNode->RewardClass.GetAssetName();
-				Name.RemoveFromEnd(TEXT("_C"));
-				return FText::Format(LOCTEXT("RewardFmt", "Reward: {0}"),
-					FText::FromString(Name));
-			})
-			.Visibility_Lambda([this]()
-			{
-				return (StepNode && !StepNode->RewardClass.IsNull())
-					? EVisibility::Visible : EVisibility::Collapsed;
-			})
-			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
-			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
-		]
 
 		// Prerequisite gate mode
 		+ SVerticalBox::Slot()

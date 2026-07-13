@@ -1,6 +1,34 @@
 // Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-
 #include "Rewards/QuestReward.h"
 
+#include "SimpleQuestLog.h"
+
+void UQuestReward::DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming)
+{
+	// Route through the UFunction thunk so Blueprint overrides of the BlueprintNativeEvent fire.
+	TryGrantReward(Incoming);
+}
+
+void UQuestReward::TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming)
+{
+	// Base: deliver the configured RewardType + Payload once. Subclasses override to compute.
+	if (RewardType.IsValid())
+	{
+		DeliverReward(RewardType, Payload);
+	}
+}
+
+void UQuestReward::DeliverReward(FGameplayTag InRewardType, const FInstancedStruct& InPayload, AActor* Recipient)
+{
+	FQuestRewardContext Grant;
+	Grant.RewardType = InRewardType;
+	Grant.CustomData = InPayload;
+	Grant.Recipient  = Recipient;   // may be null: the reward node defaults it to the activation Instigator
+
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestReward::DeliverReward queued grant '%s' (explicit recipient: %s)"),
+		*InRewardType.ToString(), Recipient ? TEXT("yes") : TEXT("no — defaults to instigator"));
+
+	PendingGrants.Add(MoveTemp(Grant));
+}

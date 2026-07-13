@@ -481,7 +481,6 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
             }
             UQuestStep* StepInstance = NewObject<UQuestStep>(RootGraph);
             StepInstance->QuestObjective = StepNode->ObjectiveClass;
-            StepInstance->Reward = StepNode->RewardClass;
             StepInstance->TargetClasses = StepNode->TargetClasses;
             StepInstance->NumberOfElements = StepNode->NumberOfElements;
             StepInstance->TargetActors.Append(StepNode->TargetActors);

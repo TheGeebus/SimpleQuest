@@ -19,7 +19,6 @@ struct FWorldStateFactRemovedEvent;
 struct FQuestResolutionRecordedEvent;
 struct FQuestEntryRecordedEvent;
 
-class UQuestReward;
 class UQuestDisplayData;
 
 
@@ -368,11 +367,7 @@ protected:
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     bool bResettableReplay = false;
-
-    /** Reward granted on completion of this node. */
-    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
-    TSoftClassPtr<UQuestReward> Reward;
-
+    
     /**
      * Whether completing this node should also complete the parent graph. Replaces bCompletesQuestline; works at any
      * graph depth.

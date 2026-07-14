@@ -13,13 +13,14 @@
 /**
  * Base class for a reward — the adapter between "quest flow reached this point" and "apply this effect to a recipient."
  * The framework doesn't define what a reward IS: subclass (C++ or Blueprint) and override TryGrantReward to compute
- * loot / XP / currency / anything, pack it into a payload struct, and call DeliverReward. The base auto-delivers its
- * configured RewardType + Payload, so a trivial no-subclass reward needs no override — just configure the UPROPERTYs.
+ * loot / XP / currency / anything, pack it into a payload struct, and call DeliverReward. Abstract — the base carries
+ * no authoring surface of its own; every reward is a concrete subclass. For the no-code path (configure a type + a raw
+ * payload struct, no subclass), use UGenericReward.
  *
  * EditInlineNew + Blueprintable: rewards are authored inline as an Instanced array on a reward node (each entry a
  * configured instance), and a designer can subclass in Blueprint to add typed fields + logic with no C++.
  */
-UCLASS(Blueprintable, EditInlineNew)
+UCLASS(Abstract, Blueprintable, EditInlineNew)
 class SIMPLEQUEST_API UQuestReward : public UObject
 {
 	GENERATED_BODY()
@@ -37,25 +38,10 @@ public:
 
 protected:
 	/**
-	 * The reward kind this instance emits — the publish channel + the recipient's branch key. A fixed-type subclass
-	 * defaults it; a computed subclass ignores it and passes a type to DeliverReward at runtime. Parameterized subclasses
-	 * (e.g. Currency) typically add their OWN constrained tag field rather than narrowing this one.
-	 */
-	UPROPERTY(EditAnywhere, meta = (Categories = "SimpleQuest.Reward"), Category = "Reward")
-	FGameplayTag RewardType;
-
-	/**
-	 * The payload the recipient reads via CustomData.Get<FYourType>(). For a no-subclass reward, set it here via the
-	 * struct picker; typed subclasses usually pack their own fields into a payload struct inside TryGrantReward instead.
-	 */
-	UPROPERTY(EditAnywhere, Category = "Reward")
-	FInstancedStruct Payload;
-
-	/**
-	 * Compute + deliver the grant(s). Fires when the reward node activates. Base implementation delivers the configured
-	 * RewardType + Payload once. Override to read Incoming ("how the flow reached me"), compute (roll loot, scale by
-	 * context), and call DeliverReward — once, or multiple times for a multi-part grant. Declining (delivering nothing)
-	 * is legal and never affects graph flow.
+	 * Compute + deliver the grant(s). Fires when the reward node activates. Read Incoming ("how the flow reached me"),
+	 * compute (roll loot, scale by context), and call DeliverReward — once, or multiple times for a multi-part grant.
+	 * Declining (delivering nothing) is legal and never affects graph flow. The base is a no-op; every concrete reward
+	 * overrides this (or uses UGenericReward's configured auto-deliver).
 	 *
 	 * BlueprintProtected: call via the public DispatchTryGrantReward from C++; subclass BPs override normally.
 	 */
@@ -67,7 +53,7 @@ protected:
 	 * and publish on the InRewardType channel. Call from within TryGrantReward. void — a grant's result never gates graph
 	 * flow, and pub/sub means the publisher can't know its recipients.
 	 *
-	 * @param InRewardType  the kind granted (defaults the channel; e.g. SimpleQuest.Reward.Currency.Gold)
+	 * @param InRewardType  the kind granted (the publish channel; e.g. SimpleQuest.Reward.Currency.Gold)
 	 * @param InPayload     the recipient-facing payload struct (rides FQuestRewardContext::CustomData)
 	 * @param Recipient     optional explicit target; leave null to default to the activation Instigator
 	 */

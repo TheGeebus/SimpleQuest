@@ -13,11 +13,8 @@ void UQuestReward::DispatchTryGrantReward(const FQuestRewardActivationContext& I
 
 void UQuestReward::TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming)
 {
-	// Base: deliver the configured RewardType + Payload once. Subclasses override to compute.
-	if (RewardType.IsValid())
-	{
-		DeliverReward(RewardType, Payload);
-	}
+	// Pure adapter: the base grants nothing. Concrete subclasses override this; UGenericReward delivers its configured
+	// RewardType + Payload. A Blueprint reward that doesn't implement TryGrantReward simply grants nothing.
 }
 
 void UQuestReward::DeliverReward(FGameplayTag InRewardType, const FInstancedStruct& InPayload, AActor* Recipient)

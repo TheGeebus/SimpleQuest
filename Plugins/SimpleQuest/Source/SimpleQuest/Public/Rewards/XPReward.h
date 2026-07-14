@@ -8,17 +8,14 @@
 #include "XPReward.generated.h"
 
 /**
- * Reference reward: grants a fixed amount of experience. A FIXED-TYPE reward — RewardType is defaulted to
- * SimpleQuest.Reward.Experience in the constructor and not meant to change. Shows the minimal typed-subclass pattern:
- * add a typed field (Amount), override TryGrantReward to pack it into a payload struct, and call DeliverReward.
+ * Reference reward: grants a fixed amount of experience. A FIXED-TYPE reward — it always grants
+ * SimpleQuest.Reward.Experience (no type field to set). Shows the minimal typed-subclass pattern: add a typed field
+ * (Amount), override TryGrantReward to pack it into a payload struct, and call DeliverReward.
  */
 UCLASS(meta = (DisplayName = "XP Reward"))
 class SIMPLEQUEST_API UXPReward : public UQuestReward
 {
 	GENERATED_BODY()
-
-public:
-	UXPReward();
 
 protected:
 	/** Experience points granted. */

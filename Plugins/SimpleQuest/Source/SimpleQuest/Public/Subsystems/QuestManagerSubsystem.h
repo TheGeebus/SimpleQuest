@@ -343,7 +343,7 @@ private:
 		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
 		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
 
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload()) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationContext& CompleterContext = FQuestObjectiveActivationContext()) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;

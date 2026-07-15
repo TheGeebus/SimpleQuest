@@ -1041,6 +1041,19 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
         Context.OriginatingEventID = Source.IncomingContext.OriginatingEventID;
     }
 
+    // Completion / progress events attribute to whoever completed or advanced the node (the trigger), not who activated
+    // it. Only those events pass a populated CompletionTrigger; activation-side events pass an empty one and keep the
+    // activation attribution above. Lineage (Origin*) stays activation-sourced.
+    if (Context.CompletionTrigger.TriggeredActor
+        || Context.CompletionTrigger.Instigator.IsValid()
+        || Context.CompletionTrigger.CustomData.IsValid()
+        || Context.CompletionTrigger.CustomTag.IsValid())
+    {
+        Context.Instigator = Context.CompletionTrigger.Instigator;
+        Context.CustomData = Context.CompletionTrigger.CustomData;
+        Context.CustomTag  = Context.CompletionTrigger.CustomTag;
+    }
+    
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
         *Context.NodeInfo.QuestTag.ToString(),
         *Context.NodeInfo.DisplayName.ToString(),
@@ -1842,7 +1855,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         }
     }
 
-    PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph);
+    PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph, FQuestEventPayload(), InheritedForward);
 
     /**
      * Thread this node's compiled ContextualTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
@@ -2096,7 +2109,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     }
 }
 
-void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext) const
+void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext, const FQuestObjectiveActivationContext& CompleterContext) const
 {
     if (!QuestSignalSubsystem || !Node->GetContextualTag().IsValid()) return;
 
@@ -2104,6 +2117,14 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
     if (const UQuestStep* Step = Cast<UQuestStep>(Node))
     {
         CompletionCtx = Step->GetCompletionContext();
+    }
+    else
+    {
+        // Container end: no step-side completion context. Copy the attribution the ended event reads, from the completer
+        // threaded across the boundary. TriggeredActor has no single-actor analog for a container, so it stays empty.
+        CompletionCtx.Instigator = CompleterContext.Instigator;
+        CompletionCtx.CustomData = CompleterContext.CustomData;
+        CompletionCtx.CustomTag  = CompleterContext.CustomTag;
     }
 
     FQuestEventPayload Context = OverlayCallerContext(AssembleEventContext(Node, CompletionCtx), ExternalContext);

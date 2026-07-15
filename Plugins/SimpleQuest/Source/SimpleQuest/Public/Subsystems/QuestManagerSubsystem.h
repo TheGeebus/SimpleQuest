@@ -340,7 +340,8 @@ private:
 		UQuestNodeBase* CompletedNode,
 		FGameplayTag OutcomeTag,
 		FName PathIdentity,
-		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
+		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
+		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
 
 	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload()) const;
 
@@ -692,7 +693,7 @@ private:
 	 * OriginatingEventID is inherited from the cascade and threaded through the recursive
 	 * ChainToNextNodes call.
 	 */
-	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
 
 	/**
 	 * Per-questline-asset resolution registry write + bus publish. Each FQuestGraphResolution entry carries the

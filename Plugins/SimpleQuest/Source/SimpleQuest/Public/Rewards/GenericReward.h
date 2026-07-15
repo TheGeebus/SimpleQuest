@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "StructUtils/InstancedStruct.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "GenericReward.generated.h"
 
 /**
@@ -17,7 +17,7 @@
  * start some scripted event.
  */
 UCLASS(meta = (DisplayName = "Generic Reward"))
-class SIMPLEQUEST_API UGenericReward : public UQuestReward
+class SIMPLEQUEST_API UGenericReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
 

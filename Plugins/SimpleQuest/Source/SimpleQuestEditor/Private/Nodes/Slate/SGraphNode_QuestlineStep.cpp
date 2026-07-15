@@ -12,7 +12,7 @@
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
 #include "TutorialMetaData.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"

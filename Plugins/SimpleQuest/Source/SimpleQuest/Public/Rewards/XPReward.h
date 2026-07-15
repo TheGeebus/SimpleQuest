@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "XPReward.generated.h"
 
 /**
@@ -13,7 +13,7 @@
  * (Amount), override TryGrantReward to pack it into a payload struct, and call DeliverReward.
  */
 UCLASS(meta = (DisplayName = "XP Reward"))
-class SIMPLEQUEST_API UXPReward : public UQuestReward
+class SIMPLEQUEST_API UXPReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
 

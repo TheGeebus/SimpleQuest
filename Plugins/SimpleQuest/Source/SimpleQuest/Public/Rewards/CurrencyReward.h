@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "CurrencyReward.generated.h"
 
 /**
@@ -15,7 +15,7 @@
  * tags under SimpleQuest.Reward.Currency.
  */
 UCLASS(meta = (DisplayName = "Currency Reward"))
-class SIMPLEQUEST_API UCurrencyReward : public UQuestReward
+class SIMPLEQUEST_API UCurrencyReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
 

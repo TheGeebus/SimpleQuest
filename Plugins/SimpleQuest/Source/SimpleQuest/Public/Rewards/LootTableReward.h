@@ -4,7 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "LootTableReward.generated.h"
 
 class UQuestLootTable;
@@ -17,7 +17,7 @@ class UQuestLootTable;
  * currency handle loot drops with no extra code.
  */
 UCLASS(meta = (DisplayName = "Loot Table Reward"))
-class SIMPLEQUEST_API ULootTableReward : public UQuestReward
+class SIMPLEQUEST_API ULootTableReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
 

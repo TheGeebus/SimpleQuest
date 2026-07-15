@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "ScaledAmountReward.generated.h"
 
 /**
@@ -19,7 +19,7 @@
  * it to other game systems.
  */
 UCLASS(meta = (DisplayName = "Scaled Amount Reward"))
-class SIMPLEQUEST_API UScaledAmountReward : public UQuestReward
+class SIMPLEQUEST_API UScaledAmountReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
 

@@ -51,7 +51,7 @@
 #include "Quests/AddFactNode.h"
 #include "Quests/ClearFactNode.h"
 #include "Quests/RemoveFactNode.h"
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
@@ -955,9 +955,9 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
         	// instances (per-placement isolation for future escrow state). A shallow assign would share the editor
         	// node's sub-objects. Null array slots are preserved as null and skipped at runtime.
         	Inst->Rewards.Reserve(RewardEdNode->Rewards.Num());
-        	for (const TObjectPtr<UQuestReward>& Authored : RewardEdNode->Rewards)
+        	for (const TObjectPtr<UQuestRewardBase>& Authored : RewardEdNode->Rewards)
         	{
-        		Inst->Rewards.Add(Authored ? DuplicateObject<UQuestReward>(Authored, Inst) : nullptr);
+        		Inst->Rewards.Add(Authored ? DuplicateObject<UQuestRewardBase>(Authored, Inst) : nullptr);
         	}
         	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;

@@ -3,7 +3,7 @@
 
 #include "Quests/QuestRewardNode.h"
 
-#include "Rewards/QuestReward.h"
+#include "Rewards/QuestRewardBase.h"
 #include "Events/QuestRewardGrantedEvent.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
@@ -18,7 +18,7 @@ void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 	Incoming.Provenance							= PendingActivationContext.Provenance;
 	Incoming.IncomingOutcomeTag					= PendingActivationContext.IncomingOutcomeTag;
 
-	for (UQuestReward* Reward : Rewards)
+	for (UQuestRewardBase* Reward : Rewards)
 	{
 		if (!Reward) continue;
 

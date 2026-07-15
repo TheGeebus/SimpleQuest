@@ -7,11 +7,11 @@
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
 #include "QuestlineNode_Reward.generated.h"
 
-class UQuestReward;
+class UQuestRewardBase;
 
 /**
  * Editor graph node that grants one or more rewards when activated, then forwards. Holds an Instanced array of
- * self-configuring UQuestReward adapters, edited inline in the Details panel. Compiles to UQuestRewardNode via
+ * self-configuring UQuestRewardBase adapters, edited inline in the Details panel. Compiles to UQuestRewardNode via
  * FQuestlineGraphCompiler::CompileUtilityNodes — a tagless, fire-when-reached effect node (Enter → grant → Forward).
  */
 UCLASS()
@@ -26,9 +26,9 @@ public:
 	}
 
 	/**
-	 * Rewards granted when this node activates, in order. Each entry is a configured UQuestReward instance — pick a
+	 * Rewards granted when this node activates, in order. Each entry is a configured UQuestRewardBase instance — pick a
 	 * class (C++ or Blueprint subclass, or the base) and set its fields inline. Multiple rewards fire together.
 	 */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Reward")
-	TArray<TObjectPtr<UQuestReward>> Rewards;
+	TArray<TObjectPtr<UQuestRewardBase>> Rewards;
 };

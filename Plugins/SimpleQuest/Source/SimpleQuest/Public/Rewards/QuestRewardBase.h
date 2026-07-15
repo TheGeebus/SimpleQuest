@@ -8,7 +8,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "Quests/Types/QuestRewardActivationContext.h"
 #include "Quests/Types/QuestRewardContext.h"
-#include "QuestReward.generated.h"
+#include "QuestRewardBase.generated.h"
 
 /**
  * Base class for a reward — the adapter between "quest flow reached this point" and "apply this effect to a recipient."
@@ -21,7 +21,7 @@
  * configured instance), and a designer can subclass in Blueprint to add typed fields + logic with no C++.
  */
 UCLASS(Abstract, Blueprintable, EditInlineNew)
-class SIMPLEQUEST_API UQuestReward : public UObject
+class SIMPLEQUEST_API UQuestRewardBase : public UObject
 {
 	GENERATED_BODY()
 

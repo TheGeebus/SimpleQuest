@@ -83,6 +83,14 @@ void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FNam
 	CompletionContext = Effective;
 	ForwardActivationParams = InForwardParams;
 	
+	// Auto-forward the completer's instigator downstream when the caller didn't supply one, so rewards (and any
+	// downstream node) can attribute to "who finished this." The completion context already resolves it via
+	// ResolveTriggerContext; mirror that onto the forward payload.
+	if (!ForwardActivationParams.Instigator.IsValid())
+	{
+		ForwardActivationParams.Instigator = Effective.Instigator;
+	}
+	
 	// Auto-derive PathIdentity from OutcomeTag.GetTagName() when caller didn't supply one explicitly. Static K2
 	// placements supply NAME_None and depend on this fallback for back-compat; dynamic K2 placements supply an
 	// explicit PathIdentity from the node's authored PathName.

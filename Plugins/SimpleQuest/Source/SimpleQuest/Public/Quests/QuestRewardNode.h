@@ -8,13 +8,13 @@
 #include "Quests/QuestNodeBase.h"
 #include "QuestRewardNode.generated.h"
 
-class UQuestReward;
+class UQuestRewardBase;
 struct FQuestRewardContext;
 struct FQuestRewardActivationContext;
 
 /**
  * Utility node that grants one or more rewards when activated, then forwards activation. Holds an Instanced array of
- * self-configuring UQuestReward adapters; on activation it dispatches each (TryGrantReward), finalizes every queued
+ * self-configuring UQuestRewardBase adapters; on activation it dispatches each (TryGrantReward), finalizes every queued
  * grant with the activation lineage, and publishes it as an FQuestRewardGrantedEvent on the grant's RewardType channel.
  *
  * Tagless + fire-when-reached (no Live / Started / Completed) — grant-once across save is free because restore never
@@ -31,7 +31,7 @@ class SIMPLEQUEST_API UQuestRewardNode : public UQuestNodeBase
 protected:
 	/** The rewards granted when this node activates, in order. Each computes + delivers independently. */
 	UPROPERTY(Instanced)
-	TArray<TObjectPtr<UQuestReward>> Rewards;
+	TArray<TObjectPtr<UQuestRewardBase>> Rewards;
 
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 

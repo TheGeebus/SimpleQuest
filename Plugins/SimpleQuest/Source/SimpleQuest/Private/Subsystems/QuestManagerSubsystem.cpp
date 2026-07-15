@@ -1443,7 +1443,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
             *BC.OutcomeTag.ToString(),
             *Node->GetContextualTag().ToString());
 
-        FireWrapperBoundaryCompletion(BC, InheritedEventID);
+        FireWrapperBoundaryCompletion(BC, InheritedEventID, Node->PendingActivationContext.IncomingContext);
     }
 
     // Thread the source utility node's PendingActivationContext onto each downstream destination so any payload
@@ -1785,7 +1785,7 @@ void UQuestManagerSubsystem::LoadCompiledDisplayIni() const
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("LoadCompiledDisplayIni: %d record(s), %d DisplayData asset(s) from %s"), Registered, Loaded, *IniPath);
 }
 
-void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID, const FQuestObjectiveActivationContext& InheritedForward)
 {
     if (!Node) return;
 
@@ -1852,8 +1852,11 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     // Gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
     // and build the OriginChain extension (received chain + this step's tag) so downstream steps see the full history.
-    FQuestObjectiveActivationContext ForwardPayload;
+    // Seed forward parameters (activation context) from the inherited payload instead of default-constructing.
+    FQuestObjectiveActivationContext ForwardPayload = InheritedForward;
     TArray<FGameplayTag> ForwardChain;
+    
+    // A step still overrides with its own params.
     if (const UQuestStep* CompletingStep = Cast<UQuestStep>(Node))
     {
         ForwardPayload = CompletingStep->GetCompletionForwardParams();
@@ -1889,7 +1892,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph);
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
-            FireWrapperBoundaryCompletion(BC, OriginatingEventID);
+            FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
         }
         for (const FName& Tag : PathList->NodeTags)
         {
@@ -1901,7 +1904,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph);
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
-        FireWrapperBoundaryCompletion(BC, OriginatingEventID);
+        FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
@@ -2970,8 +2973,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     }
 }
 
-void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC,
-    const FOriginatingEventID& OriginatingEventID)
+void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID, const FQuestObjectiveActivationContext& InheritedForward)
 {
     const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
     if (!WrapperTag.IsValid()) return;
@@ -3020,7 +3022,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
             TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes (eventGuid=%s)"),
             *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
             *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
-        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName(), OriginatingEventID);
+        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName(), OriginatingEventID, InheritedForward);
     }
     else
     {

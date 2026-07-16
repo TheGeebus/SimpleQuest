@@ -11,3 +11,13 @@ void UGenericReward::TryGrantReward_Implementation(const FQuestRewardActivationC
 		DeliverReward(RewardType, Payload);
 	}
 }
+
+TArray<FQuestRewardPreview> UGenericReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+{
+	if (!RewardType.IsValid()) return {};
+	FQuestRewardPreview P;
+	P.RewardType  = RewardType;
+	P.PreviewData = Payload;
+	return { P };
+}
+

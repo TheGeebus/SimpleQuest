@@ -124,6 +124,25 @@ struct FQuestReachableSteps
     TArray<FGameplayTag> StepTags;
 };
 
+/**
+ * A completion path's advertised rewards — the reward-node keys reachable from one of this node's outcome routes,
+ * plus a display label for that path. Compile-time populated (mirrors ReachableStepsByActivatePin). Keyed by
+ * PathIdentity in the owning node's map: NAME_None is the any-outcome route; other keys match NextNodesByPath.
+ */
+USTRUCT()
+struct FQuestReachableRewards
+{
+    GENERATED_BODY()
+
+    /** Human-readable path name for a preview UI: the outcome tag's leaf, the dynamic PathName, or "On completion". */
+    UPROPERTY(VisibleDefaultsOnly, Category = "Quest|Rewards")
+    FText PathLabel;
+
+    /** Keys of the reward nodes reachable down this path (resolve via the graph's CompiledNodes). */
+    UPROPERTY(VisibleDefaultsOnly, Category = "Quest|Rewards")
+    TArray<FName> RewardNodeKeys;
+};
+
 UCLASS(Abstract, Blueprintable)
 class SIMPLEQUEST_API UQuestNodeBase : public UObject
 {
@@ -306,6 +325,14 @@ protected:
     TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
 
     /**
+     * Rewards advertised per completion path, for "do this task, get this reward" UI. Compile-time populated by the
+     * reward-manifest pass for any node that completes (Steps and containers); empty for everything else. NAME_None is
+     * the any-outcome bucket; other keys match NextNodesByPath. Merge NAME_None with a specific path at the query.
+     */
+    UPROPERTY(VisibleDefaultsOnly, Category = "Quest|Rewards")
+    TMap<FName, FQuestReachableRewards> ReachableRewardsByPath;
+
+    /**
      * Boundary completions for the Any-Outcome path. Same semantic as FQuestPathNodeList::BoundaryCompletions.
      * Fires when the completed node's outcome doesn't match a named path and routing falls through to
      * Any-Outcome, with one or more LinkedQuestline boundary crossings along the way.
@@ -471,6 +498,8 @@ public:
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }
     FORCEINLINE const FQuestNodeInfo& GetNodeInfo() const { return NodeInfo; }
     FORCEINLINE const TMap<FName, FQuestPathNodeList>& GetNextNodesByPath() const { return NextNodesByPath; }
+    /** Compile-time reward manifest: what each completion path of this node advertises. See ReachableRewardsByPath. */
+    FORCEINLINE const TMap<FName, FQuestReachableRewards>& GetReachableRewardsByPath() const { return ReachableRewardsByPath; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnAnyOutcome() const { return BoundaryCompletionsOnAnyOutcome; }
     FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnAnyOutcome() const { return ResolvedGraphsOnAnyOutcome; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }

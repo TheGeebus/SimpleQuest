@@ -31,4 +31,5 @@ protected:
 	int32 RollCount = 1;
 
 	virtual void TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming) override;
+	virtual TArray<FQuestRewardPreview> DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const override;
 };

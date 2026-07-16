@@ -22,3 +22,12 @@ void UCurrencyReward::TryGrantReward_Implementation(const FQuestRewardActivation
 	}
 	DeliverReward(Currency, FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount }));
 }
+
+TArray<FQuestRewardPreview> UCurrencyReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+{
+	if (Amount <= 0 || !Currency.IsValid()) return {};
+	FQuestRewardPreview P;
+	P.RewardType  = Currency;
+	P.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount });
+	return { P };
+}

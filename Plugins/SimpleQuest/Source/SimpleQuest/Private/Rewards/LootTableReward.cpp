@@ -58,3 +58,19 @@ void ULootTableReward::TryGrantReward_Implementation(const FQuestRewardActivatio
 		DeliverReward(Chosen->RewardType, FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount }));
 	}
 }
+
+TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+{
+	TArray<FQuestRewardPreview> Out;
+	if (!LootTable) return Out;
+	for (const FQuestLootEntry& E : LootTable->Entries)
+	{
+		if (E.Weight <= 0.f) continue;
+		FQuestRewardPreview P;
+		P.RewardType  = E.RewardType;
+		P.PreviewData = FInstancedStruct::Make<FQuestRewardAmountRange>(
+			FQuestRewardAmountRange{ FMath::Min(E.MinAmount, E.MaxAmount), FMath::Max(E.MinAmount, E.MaxAmount) });
+		Out.Add(P);
+	}
+	return Out;
+}

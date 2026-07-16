@@ -8,6 +8,7 @@
 #include "StructUtils/InstancedStruct.h"
 #include "Quests/Types/QuestRewardActivationContext.h"
 #include "Quests/Types/QuestRewardContext.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "QuestRewardBase.generated.h"
 
 /**
@@ -32,6 +33,9 @@ public:
 	 * the queued deliveries via TakePendingGrants.
 	 */
 	void DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming);
+	
+	/** Public C++ forwarder (thunk-routes to the BP-native event so subclass overrides fire). Mirrors DispatchTryGrantReward. */
+	TArray<FQuestRewardPreview> DispatchDescribeReward(const FQuestRewardPreviewContext& Context) const;
 
 	/** Drains the grants queued by DeliverReward during the last TryGrantReward. The reward node finalizes + publishes each. */
 	TArray<FQuestRewardContext> TakePendingGrants() { return MoveTemp(PendingGrants); }
@@ -48,6 +52,17 @@ protected:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
 	void TryGrantReward(const FQuestRewardActivationContext& Incoming);
 
+	/**
+	 * Preview hook — the reward's second verb, beside TryGrantReward. Returns display lines describing what this reward
+	 * WOULD grant, WITHOUT granting: pure, no event, no chain. For "do this task, get this reward" UI. Return an EMPTY
+	 * array to opt out of advertisement (a delivered-but-hidden reward). Association is compile-time; DESCRIPTION is
+	 * query-time — read Context.Viewer to compute a live value. Base returns nothing; concrete rewards override.
+	 *
+	 * BlueprintProtected: call via the public DispatchDescribeReward from C++; subclass BPs override normally.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
+	TArray<FQuestRewardPreview> DescribeReward(const FQuestRewardPreviewContext& Context) const;
+	
 	/**
 	 * Emit one grant — "send the struct out." Queues it for the reward node to finalize (fill lineage, default Recipient)
 	 * and publish on the InRewardType channel. Call from within TryGrantReward. void — a grant's result never gates graph

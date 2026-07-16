@@ -16,3 +16,12 @@ void UXPReward::TryGrantReward_Implementation(const FQuestRewardActivationContex
 	DeliverReward(TAG_Reward_Experience, FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount }));
 }
 
+TArray<FQuestRewardPreview> UXPReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+{
+	if (Amount <= 0) return {};
+	FQuestRewardPreview P;
+	P.RewardType  = TAG_Reward_Experience;
+	P.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount });
+	return { P };
+}
+

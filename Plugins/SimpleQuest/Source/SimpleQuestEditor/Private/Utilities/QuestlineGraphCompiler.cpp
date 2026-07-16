@@ -258,6 +258,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// lifecycle methods (SetQuestLive auto-propagation, path-aware giver gate, etc.) can branch on
 	// structural containment rather than re-deriving it at runtime.
 	ComputeContainerReachability(InGraph);
+	BuildRewardManifest(InGraph);
 	
     UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
         *InGraph->GetName(),
@@ -2520,5 +2521,93 @@ void FQuestlineGraphCompiler::ComputeContainerReachability(UQuestlineGraph* InGr
                 *Pair.Key.ToString(), *AncestorList);
         }
     }
+}
+
+void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
+{
+	if (!InGraph) return;
+
+	// Collect reward-node keys reachable from a seed set of route destinations. Reward nodes are collected AND
+	// traversed (chained rewards downstream of a reward still count); other utils pass through; content nodes stop.
+	auto WalkRewards = [InGraph](const TArray<FName>& Seed) -> TArray<FName>
+	{
+		TArray<FName> Result;
+		TArray<FName> Frontier = Seed;
+		TSet<FName>   Visited;
+
+		while (Frontier.Num() > 0)
+		{
+			const FName Key = Frontier.Pop(EAllowShrinking::No);
+			if (Visited.Contains(Key)) continue;
+			Visited.Add(Key);
+
+			UQuestNodeBase* Node = InGraph->CompiledNodes.FindRef(Key).Get();
+			if (!Node) continue;
+
+			if (Cast<UQuestRewardNode>(Node))
+			{
+				Result.AddUnique(Key);
+				Frontier.Append(Node->GetNextNodesOnForward().Array());		// chained rewards + trailing utils
+			}
+			else if (Cast<UQuestStep>(Node) || Cast<UQuest>(Node))
+			{
+				// Next lifecycle unit — its rewards are its own. Stop here.
+			}
+			else
+			{
+				Frontier.Append(Node->GetNextNodesOnForward().Array());		// pass-through util (Add Fact, gate, ...)
+			}
+		}
+		return Result;
+	};
+
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : InGraph->CompiledNodes)
+	{
+		UQuestNodeBase* Node = Pair.Value.Get();
+		if (!Node || !(Cast<UQuestStep>(Node) || Cast<UQuest>(Node))) continue;		// only completing nodes advertise
+
+		Node->ReachableRewardsByPath.Reset();
+
+		// Path labels. A Step's outcome tag may be dynamic (an authored PathName, not a registered tag) — the objective's
+		// bIsRegisteredTag is the authoritative flag. Containers always route on registered outcome tags.
+		TMap<FName, bool> RegisteredTagByPath;
+		if (const UQuestStep* Step = Cast<UQuestStep>(Node))
+		{
+			for (const FObjectivePathDescriptor& Desc : FSimpleQuestEditorUtilities::DiscoverObjectivePaths(Step->GetQuestObjective().LoadSynchronous()))
+			{
+				RegisteredTagByPath.Add(Desc.Identity, Desc.bIsRegisteredTag);
+			}
+		}
+		const bool bIsStepNode = Cast<UQuestStep>(Node) != nullptr;
+
+		auto LabelForPath = [&](FName PathId) -> FText
+		{
+			if (PathId.IsNone()) return NSLOCTEXT("SimpleQuest", "RewardPathOnCompletion", "On completion");
+			const bool bTag = bIsStepNode ? RegisteredTagByPath.FindRef(PathId)
+										  : UGameplayTagsManager::Get().RequestGameplayTag(PathId, false).IsValid();
+			if (!bTag) return FText::FromName(PathId);							// dynamic PathName — show as authored
+			const FString Full = PathId.ToString();								// registered tag — show the leaf
+			int32 Dot; return FText::FromString(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
+		};
+
+		// Any-outcome bucket (NAME_None).
+		if (TArray<FName> AnyRewards = WalkRewards(Node->GetNextNodesOnAnyOutcome().Array()); AnyRewards.Num() > 0)
+		{
+			Node->ReachableRewardsByPath.Add(NAME_None, { LabelForPath(NAME_None), MoveTemp(AnyRewards) });
+		}
+
+		// Per-path buckets — keys mirror NextNodesByPath.
+		for (const TPair<FName, FQuestPathNodeList>& PathPair : Node->GetNextNodesByPath())
+		{
+			if (TArray<FName> PathRewards = WalkRewards(PathPair.Value.NodeTags); PathRewards.Num() > 0)
+			{
+				Node->ReachableRewardsByPath.Add(PathPair.Key, { LabelForPath(PathPair.Key), MoveTemp(PathRewards) });
+			}
+		}
+		
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("BuildRewardManifest: '%s' advertises rewards on %d path(s)"),
+			*Node->GetName(),
+			Node->ReachableRewardsByPath.Num());
+	}
 }
 

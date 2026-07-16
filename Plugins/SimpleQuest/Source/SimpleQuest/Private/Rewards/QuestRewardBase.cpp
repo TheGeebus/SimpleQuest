@@ -17,15 +17,26 @@ void UQuestRewardBase::TryGrantReward_Implementation(const FQuestRewardActivatio
 	// RewardType + Payload. A Blueprint reward that doesn't implement TryGrantReward simply grants nothing.
 }
 
+TArray<FQuestRewardPreview> UQuestRewardBase::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+{
+	return {};						// pure adapter — nothing to advertise; concrete rewards override this
+}
+
+TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(const FQuestRewardPreviewContext& Context) const
+{
+	return DescribeReward(Context);		// routes to BP overrides
+}
+
 void UQuestRewardBase::DeliverReward(FGameplayTag InRewardType, const FInstancedStruct& InPayload, AActor* Recipient)
 {
 	FQuestRewardContext Grant;
 	Grant.RewardType = InRewardType;
 	Grant.CustomData = InPayload;
-	Grant.Recipient  = Recipient;   // may be null: the reward node defaults it to the activation Instigator
+	Grant.Recipient  = Recipient;		// may be null: the reward node defaults it to the activation Instigator
 
 	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestRewardBase::DeliverReward queued grant '%s' (explicit recipient: %s)"),
-		*InRewardType.ToString(), Recipient ? TEXT("yes") : TEXT("no — defaults to instigator"));
+		*InRewardType.ToString(),
+		Recipient ? TEXT("yes") : TEXT("no — defaults to instigator"));
 
 	PendingGrants.Add(MoveTemp(Grant));
 }

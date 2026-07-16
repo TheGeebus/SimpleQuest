@@ -31,4 +31,5 @@ protected:
 	FInstancedStruct Payload;
 
 	virtual void TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming) override;
+	virtual TArray<FQuestRewardPreview> DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const override;
 };

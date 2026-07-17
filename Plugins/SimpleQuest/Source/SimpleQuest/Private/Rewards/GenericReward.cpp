@@ -12,7 +12,7 @@ void UGenericReward::TryGrantReward_Implementation(const FQuestRewardActivationC
 	}
 }
 
-TArray<FQuestRewardPreview> UGenericReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+TArray<FQuestRewardPreview> UGenericReward::DescribeReward_Implementation(AActor* Viewer) const
 {
 	if (!RewardType.IsValid()) return {};
 	FQuestRewardPreview P;

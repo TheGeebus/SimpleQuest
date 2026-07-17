@@ -59,7 +59,7 @@ void ULootTableReward::TryGrantReward_Implementation(const FQuestRewardActivatio
 	}
 }
 
-TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(AActor* Viewer) const
 {
 	TArray<FQuestRewardPreview> Out;
 	if (!LootTable) return Out;

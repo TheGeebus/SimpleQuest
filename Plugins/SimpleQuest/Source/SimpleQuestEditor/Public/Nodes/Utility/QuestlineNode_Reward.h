@@ -31,4 +31,11 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, Instanced, Category = "Reward")
 	TArray<TObjectPtr<UQuestRewardBase>> Rewards;
+	
+	/**
+	 * Persistent expanded/collapsed state for the "Rewards" class list on the node widget. Transient (view state,
+	 * not authored data) — mirrors content nodes' bGiversExpanded.
+	 */
+	UPROPERTY(Transient)
+	bool bRewardsExpanded = false;
 };

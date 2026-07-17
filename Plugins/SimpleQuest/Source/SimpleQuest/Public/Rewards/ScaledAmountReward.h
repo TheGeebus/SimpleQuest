@@ -33,5 +33,5 @@ protected:
 	int32 BaseAmount = 0;
 
 	virtual void TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming) override;
-	virtual TArray<FQuestRewardPreview> DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const override;
+	virtual TArray<FQuestRewardPreview> DescribeReward_Implementation(AActor* Viewer) const override;
 };

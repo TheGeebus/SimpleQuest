@@ -29,16 +29,3 @@ struct FQuestRewardPreview
 	FInstancedStruct PreviewData;
 };
 
-/**
- * Query-time input to DescribeReward. Viewer is the actor the preview is computed for (the player whose journal is open);
- * null = a generic, context-free preview. Static rewards ignore it; dynamic rewards (level-scaled) read it for a live value.
- */
-USTRUCT(BlueprintType)
-struct FQuestRewardPreviewContext
-{
-	GENERATED_BODY()
-
-	UPROPERTY(BlueprintReadOnly, Category = "Reward")
-	TWeakObjectPtr<AActor> Viewer;
-};
-

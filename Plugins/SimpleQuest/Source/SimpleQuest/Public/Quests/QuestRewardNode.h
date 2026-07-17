@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/QuestNodeBase.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "QuestRewardNode.generated.h"
 
 class UQuestRewardBase;
@@ -28,6 +29,14 @@ class SIMPLEQUEST_API UQuestRewardNode : public UQuestNodeBase
 
 	friend class FQuestlineGraphCompiler;
 
+public:
+	/**
+	 * Preview aggregation — ask every reward this node holds what it WOULD grant, without granting. Iterates the
+	 * Instanced Rewards and dispatches DescribeReward on each, concatenating the results. Pure: no delivery, no event,
+	 * no forward. Backs the advertisement query (UQuestStateSubsystem::GetAdvertisedRewards).
+	 */
+	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer) const;
+	
 protected:
 	/** The rewards granted when this node activates, in order. Each computes + delivers independently. */
 	UPROPERTY(Instanced)

@@ -14,6 +14,7 @@
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestManagerSubsystem.generated.h"
@@ -136,14 +137,14 @@ protected:
 	 * Restores every graph in the pending-restore stash (set by ApplyQuestSnapshot): async-loads each and rebuilds its
 	 * live / deferred / accumulator state. Drives both the manual RestoreQuestGraphs BP node and the auto-consume flush.
 	 */
-	void RestorePendingGraphs();
+	virtual void RestorePendingGraphs();
 
 	/**
 	 * Arms a one-shot auto-restore: the pending stash flushes automatically when the next game world initializes (i.e.
 	 * after the consumer's OpenLevel), so the load path is just ApplyQuestSnapshot -> OpenLevel with no per-level node.
 	 * Set by ApplyQuestSnapshot's bRestoreOnNextLevelLoad. Idempotent; cleared on flush or Deinitialize.
 	 */
-	void ArmRestoreOnNextLevelLoad();
+	virtual void ArmRestoreOnNextLevelLoad();
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
@@ -187,6 +188,23 @@ protected:
 		FName IncomingSourceTag = NAME_None,
 		bool bBypassGiverGate = false,
 		bool bBypassPrerequisites = false);
+		
+	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
+	virtual void ChainToNextNodes(
+		UQuestNodeBase* CompletedNode,
+		FGameplayTag OutcomeTag,
+		FName PathIdentity,
+		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
+		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+
+	/**
+	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
+	 * GetAdvertisedRewards). Looks the node up by ContentTag, reads its compile-time ReachableRewardsByPath, resolves
+	 * each reward-node key to its live instance, and aggregates DescribeReward. Pure: no grant, no event. PathIdentity
+	 * is the compile-time path key (a static outcome's tag-name, a dynamic PathName, or NAME_None for any-outcome);
+	 * resolved from the caller's outcome tag by the library.
+	 */
+	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
 private:
 	void LoadCompiledDisplayIni() const;
@@ -334,14 +352,6 @@ private:
 	 * record is a no-op or harmless overwrite.
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
-
-	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
-	virtual void ChainToNextNodes(
-		UQuestNodeBase* CompletedNode,
-		FGameplayTag OutcomeTag,
-		FName PathIdentity,
-		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
-		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
 
 	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationContext& CompleterContext = FQuestObjectiveActivationContext()) const;
 

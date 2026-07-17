@@ -9,11 +9,12 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
-#include "Settings/SimpleQuestSettings.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 class UQuestDisplayData;
@@ -154,7 +155,38 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Source", meta = (WorldContext = "WorldContext"))
     static UQuestObjective* GetActiveObjectiveForTag(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
+    
+    // -------------------------------------------------------------------------------------------------------------
+    // Quest Rewards
+    // -------------------------------------------------------------------------------------------------------------
 
+    /**
+     * The rewards a completing node advertises regardless of how it resolves — the any-outcome bucket only. The giver /
+     * journal case: "complete this, get these." Computes each reward's preview live (pass the viewing actor); querying
+     * never grants.
+     *
+     * Excludes outcome-specific rewards. See also: Get Advertised Rewards For Outcome, for rewards associated with
+     * specific outcomes.
+     *
+     * @param WorldContext        world context for resolving the quest system
+     * @param ContentTag          the Step or container whose advertised rewards you want
+     * @param Viewer              viewing actor for computing live values
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Context"))
+    static TArray<FQuestRewardPreview> GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
+    
+    /**
+     * The rewards a completing node advertises for a specific outcome — the rewards on that outcome's path, plus (unless
+     * bIncludeAnyOutcome is false) the any-outcome rewards, since the any-outcome route fires on every completion.
+     * Computes each preview live; querying never grants.
+     * 
+     * @param WorldContext      world context for resolving the quest system
+     * @param ContentTag        the Step or container whose advertised rewards you want
+     * @param OutcomeTag        the outcome to preview (a registered outcome tag; static-outcome paths only)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TArray<FQuestRewardPreview> GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome = true);
+    
     // -------------------------------------------------------------------------------------------------------------
     // Display data queries — lookup the display data associated with a given quest tag.
     // -------------------------------------------------------------------------------------------------------------

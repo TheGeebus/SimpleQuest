@@ -23,6 +23,7 @@ public:
 
 private:
 	TSharedRef<SWidget> CreateTagPickerWidget();
+	TSharedRef<SWidget> CreateRewardSummaryWidget();
 	TSharedRef<SWidget> CreatePinContentArea();
 	void OnTargetTagsChanged(const FGameplayTagContainer& NewTags);
 

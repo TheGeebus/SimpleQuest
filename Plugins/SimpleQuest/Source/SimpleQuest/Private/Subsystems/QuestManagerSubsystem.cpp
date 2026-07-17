@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "Subsystems/QuestManagerSubsystem.h"
-#include "Quests/QuestlineGraph.h"
-#include "Quests/QuestNodeBase.h"
-#include "Subsystems/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Display/QuestDisplayData.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Events/QuestProgressEvent.h"
@@ -34,20 +34,21 @@
 #include "Events/QuestTriggerResponseEvent.h"
 #include "Events/QuestTriggerSatisfiedEvent.h"
 #include "Objectives/QuestObjective.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Quests/Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Quests/QuestRewardNode.h"
 #include "Quests/QuestStep.h"
-#include "Subsystems/WorldStateSubsystem.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
-#include "Quests/Types/PrereqLeafSubscription.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetRegistry/IAssetRegistry.h"
-#include "Display/QuestDisplayData.h"
 #include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestPublish.h"
@@ -1923,6 +1924,53 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     {
         StampAndActivate(Tag);
     }
+}
+
+TArray<FQuestRewardPreview> UQuestManagerSubsystem::ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const
+{
+    TArray<FQuestRewardPreview> Previews;
+
+    const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(ContentTag.GetTagName());
+    if (!Owner)
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: no loaded node for tag '%s'"), *ContentTag.ToString());
+        return Previews;
+    }
+
+    const TMap<FName, FQuestReachableRewards>& Manifest = Owner->GetReachableRewardsByPath();
+
+    // The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
+    // that sits in both buckets (a reward on Any Outcome AND the named path).
+    TArray<FName> RewardKeys;
+    if (const FQuestReachableRewards* PathBucket = Manifest.Find(PathIdentity))
+    {
+        RewardKeys = PathBucket->RewardNodeKeys;
+    }
+    if (!PathIdentity.IsNone() && bIncludeAnyOutcome)
+    {
+        if (const FQuestReachableRewards* AnyBucket = Manifest.Find(NAME_None))
+        {
+            for (const FName& Key : AnyBucket->RewardNodeKeys) RewardKeys.AddUnique(Key);
+        }
+    }
+
+    for (const FName& Key : RewardKeys)
+    {
+        if (const UQuestRewardNode* RewardNode = Cast<UQuestRewardNode>(LoadedNodeInstances.FindRef(Key)))
+        {
+            Previews.Append(RewardNode->DescribeRewards(Viewer));
+        }
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Verbose,
+        TEXT("ResolveAdvertisedRewards: tag '%s' path '%s' (merge=%d) -> %d node(s), %d preview(s)"),
+        *ContentTag.ToString(),
+        *PathIdentity.ToString(),
+        bIncludeAnyOutcome ? 1 : 0,
+        RewardKeys.Num(),
+        Previews.Num());
+
+    return Previews;
 }
 
 void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context)

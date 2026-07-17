@@ -17,6 +17,7 @@
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
+
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Objectives/QuestObjective.h"
@@ -315,6 +316,21 @@ UQuestObjective* USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag(const UO
         return QSS->GetActiveObjectiveForTag(QueryTag);
     }
     return nullptr;
+}
+
+TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    // Any-outcome bucket: PathIdentity = NAME_None. bIncludeAnyOutcome is moot when the path IS the any-outcome bucket.
+    return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, NAME_None, Viewer, true) : TArray<FQuestRewardPreview>{};
+}
+
+TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    // A static outcome's PathIdentity is its tag-name (the manifest key). Dynamic PathNames aren't reachable from a tag
+    // by design — the any-outcome overload covers that case.
+    return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, OutcomeTag.GetTagName(), Viewer, bIncludeAnyOutcome) : TArray<FQuestRewardPreview>{};
 }
 
 FText USimpleQuestBlueprintLibrary::GetQuestDisplayNameText(const UObject* WorldContext, const FGameplayTag QueryTag)

@@ -43,17 +43,14 @@ void UScaledAmountReward::TryGrantReward_Implementation(const FQuestRewardActiva
 	DeliverReward(RewardType, FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount }));
 }
 
-TArray<FQuestRewardPreview> UScaledAmountReward::DescribeReward_Implementation(const FQuestRewardPreviewContext& Context) const
+TArray<FQuestRewardPreview> UScaledAmountReward::DescribeReward_Implementation(AActor* Viewer) const
 {
 	if (!RewardType.IsValid() || BaseAmount <= 0) return {};
 
 	float Scale = 1.f;
-	if (AActor* Viewer = Context.Viewer.Get())
+	if (IsValid(Viewer) && Viewer->Implements<URewardScalingSource>())
 	{
-		if (Viewer->Implements<URewardScalingSource>())
-		{
-			Scale = IRewardScalingSource::Execute_GetRewardScale(Viewer);
-		}
+		Scale = IRewardScalingSource::Execute_GetRewardScale(Viewer);
 	}
 
 	FQuestRewardPreview P;

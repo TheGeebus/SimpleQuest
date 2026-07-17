@@ -35,7 +35,7 @@ public:
 	void DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming);
 	
 	/** Public C++ forwarder (thunk-routes to the BP-native event so subclass overrides fire). Mirrors DispatchTryGrantReward. */
-	TArray<FQuestRewardPreview> DispatchDescribeReward(const FQuestRewardPreviewContext& Context) const;
+	TArray<FQuestRewardPreview> DispatchDescribeReward(AActor* Viewer) const;
 
 	/** Drains the grants queued by DeliverReward during the last TryGrantReward. The reward node finalizes + publishes each. */
 	TArray<FQuestRewardContext> TakePendingGrants() { return MoveTemp(PendingGrants); }
@@ -56,12 +56,12 @@ protected:
 	 * Preview hook — the reward's second verb, beside TryGrantReward. Returns display lines describing what this reward
 	 * WOULD grant, WITHOUT granting: pure, no event, no chain. For "do this task, get this reward" UI. Return an EMPTY
 	 * array to opt out of advertisement (a delivered-but-hidden reward). Association is compile-time; DESCRIPTION is
-	 * query-time — read Context.Viewer to compute a live value. Base returns nothing; concrete rewards override.
+	 * query-time — read the Viewer to compute a live value. Base returns nothing; concrete rewards override.
 	 *
 	 * BlueprintProtected: call via the public DispatchDescribeReward from C++; subclass BPs override normally.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
-	TArray<FQuestRewardPreview> DescribeReward(const FQuestRewardPreviewContext& Context) const;
+	TArray<FQuestRewardPreview> DescribeReward(AActor* Viewer) const;
 	
 	/**
 	 * Emit one grant — "send the struct out." Queues it for the reward node to finalize (fill lineage, default Recipient)

@@ -8,6 +8,16 @@
 #include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
 
+TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer) const
+{
+	TArray<FQuestRewardPreview> Previews;
+	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
+	{
+		if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer));
+	}
+	return Previews;
+}
+
 void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 {
 	// Intentionally skips Super — utility node, no Live / Started / Completed. Grant-when-reached: dispatch each reward,

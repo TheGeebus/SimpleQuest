@@ -172,7 +172,7 @@ public:
      * @param ContentTag          the Step or container whose advertised rewards you want
      * @param Viewer              viewing actor for computing live values
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Context"))
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
     static TArray<FQuestRewardPreview> GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
     
     /**

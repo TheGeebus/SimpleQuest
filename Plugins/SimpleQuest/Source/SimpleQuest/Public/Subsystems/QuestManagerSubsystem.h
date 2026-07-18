@@ -206,22 +206,23 @@ protected:
 	 */
 	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
-private:
-	void LoadCompiledDisplayIni() const;
-	
-	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
+	// ── Save / load + reset orchestration seam ──────────────────────────────────────────────────────────────────
+	// The library (the manager's one friend + facade) drives these. They're the override points a replacement
+	// orchestrator with different persistence/reset semantics re-implements. Protected virtual, not public — the
+	// black box exposes no public API; only the friend library and subclasses reach them.
 
-	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
-		
+	/** Completion tally for a quest. Backs USimpleQuestBlueprintLibrary::GetQuestCompletionCount. */
+	virtual int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+
 	/**
 	 * The questline graphs the manager has registered or reachability-warmed this session, by soft path. Captured into
 	 * the save snapshot (CaptureQuestState) so RestoreQuestState can drive graph restore off the save itself rather than
 	 * a caller-maintained asset list. A superset of the graphs with live state — dormant entries restore to a no-op.
 	 */
-	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
-	
+	virtual const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
+
 	/** Stashes the snapshot's active-graph list + deferred-activation set + objective states for a level-transition restore. */
-	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
+	virtual void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
 		const TMap<FGuid, FSimpleQuestObjectiveSaveState>& ObjectiveStates)
 	{
 		PendingRestoreGraphs = Graphs;
@@ -229,14 +230,23 @@ private:
 		PendingObjectiveStates = ObjectiveStates;
 	}
 
-	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
-	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
-
 	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
-	TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
+	virtual TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
 
 	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
-	TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+	virtual TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
+	virtual void ResetQuestRunState(FGameplayTag QuestTag);
+
+
+private:
+	void LoadCompiledDisplayIni() const;
+	
+	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
+
+	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
+	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
 
 	void HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS);
 	void DisarmRestoreOnNextLevelLoad();
@@ -316,15 +326,6 @@ private:
 	 * resolution registry is never touched; only this clearable projection.
 	 */
 	void ClearPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
-
-	/**
-	 * Clears a quest's clearable path-mirror facts — the per-run projection that resettable prerequisite leaves read —
-	 * so gates wired from this quest re-gate as if it had not yet resolved. The append-only resolution registry and the
-	 * Completed anchor are left untouched; only the clearable mirror is removed. No-ops while the quest is currently Live,
-	 * so an in-flight run's mirrors are never wiped mid-progress. Re-arms a quest for replay without bringing it active —
-	 * the activation path performs this same clear automatically when a resettable quest re-activates after completing.
-	 */
-	void ResetQuestRunState(FGameplayTag QuestTag);
 
 	/**
 	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds

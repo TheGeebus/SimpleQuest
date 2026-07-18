@@ -439,8 +439,6 @@ void FQuestlineGraphEditor::DeleteSelectedNodes()
         UEdGraphNode* Node = Cast<UEdGraphNode>(Obj);
         if (Node && Node->CanUserDeleteNode())
         {
-            //Node->Modify();
-            //Node->GetSchema()->BreakNodeLinks(*Node);
             CurrentGraph->RemoveNode(Node);
         }
     }
@@ -1116,8 +1114,7 @@ void FQuestlineGraphEditor::ClearNodeHighlight()
 
 // Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
 // OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
-// preserved when descending into an inline Quest's inner graph. See QuestlineGraphCompiler.cpp lines 429-430 for the
-// compiler-side push and line 465 for the assignment to QuestContentGuid that this lookup pairs with.
+// preserved when descending into an inline Quest's inner graph.
 static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
 {
     if (!Graph) return {};

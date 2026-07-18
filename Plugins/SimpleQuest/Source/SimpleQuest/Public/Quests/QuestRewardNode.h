@@ -36,6 +36,20 @@ public:
 	 * no forward. Backs the advertisement query (UQuestStateSubsystem::GetAdvertisedRewards).
 	 */
 	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer) const;
+
+	/**
+	 * Source-agnostic advertised-rewards walk — the shared core of both the live query (manager: nodes from
+	 * LoadedNodeInstances) and the cold query (asset: nodes from CompiledNodes). Given a completing node's manifest and
+	 * the node map to resolve keys against, gathers the requested path's reward-node keys (plus the any-outcome bucket
+	 * when merging), resolves each to a UQuestRewardNode, and aggregates DescribeReward. Pure: no grant, no event.
+	 * PathIdentity NAME_None queries the any-outcome bucket; bIncludeAnyOutcome merges it into a named path.
+	 */
+	static TArray<FQuestRewardPreview> ResolveAdvertisedFromManifest(
+		const TMap<FName, FQuestReachableRewards>& Manifest,
+		const TMap<FName, TObjectPtr<UQuestNodeBase>>& NodeMap,
+		FName PathIdentity,
+		AActor* Viewer,
+		bool bIncludeAnyOutcome);
 	
 protected:
 	/** The rewards granted when this node activates, in order. Each computes + delivers independently. */

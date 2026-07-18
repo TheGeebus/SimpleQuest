@@ -1928,47 +1928,18 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
 TArray<FQuestRewardPreview> UQuestManagerSubsystem::ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const
 {
-    TArray<FQuestRewardPreview> Previews;
-
     const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(ContentTag.GetTagName());
     if (!Owner)
     {
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: no loaded node for tag '%s'"), *ContentTag.ToString());
-        return Previews;
+        return {};
     }
 
-    const TMap<FName, FQuestReachableRewards>& Manifest = Owner->GetReachableRewardsByPath();
+    TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+        Owner->GetReachableRewardsByPath(), LoadedNodeInstances, PathIdentity, Viewer, bIncludeAnyOutcome);
 
-    // The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
-    // that sits in both buckets (a reward on Any Outcome AND the named path).
-    TArray<FName> RewardKeys;
-    if (const FQuestReachableRewards* PathBucket = Manifest.Find(PathIdentity))
-    {
-        RewardKeys = PathBucket->RewardNodeKeys;
-    }
-    if (!PathIdentity.IsNone() && bIncludeAnyOutcome)
-    {
-        if (const FQuestReachableRewards* AnyBucket = Manifest.Find(NAME_None))
-        {
-            for (const FName& Key : AnyBucket->RewardNodeKeys) RewardKeys.AddUnique(Key);
-        }
-    }
-
-    for (const FName& Key : RewardKeys)
-    {
-        if (const UQuestRewardNode* RewardNode = Cast<UQuestRewardNode>(LoadedNodeInstances.FindRef(Key)))
-        {
-            Previews.Append(RewardNode->DescribeRewards(Viewer));
-        }
-    }
-
-    UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("ResolveAdvertisedRewards: tag '%s' path '%s' (merge=%d) -> %d node(s), %d preview(s)"),
-        *ContentTag.ToString(),
-        *PathIdentity.ToString(),
-        bIncludeAnyOutcome ? 1 : 0,
-        RewardKeys.Num(),
-        Previews.Num());
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: tag '%s' path '%s' (merge=%d) -> %d preview(s)"),
+        *ContentTag.ToString(), *PathIdentity.ToString(), bIncludeAnyOutcome ? 1 : 0, Previews.Num());
 
     return Previews;
 }

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
-
 #include "SimpleQuestLog.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/SignalSubsystem.h"
@@ -17,10 +16,12 @@
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestlineStartRequestEvent.h"
 #include "Events/QuestResolveRequestEvent.h"
-
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Objectives/QuestObjective.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Quests/QuestRewardNode.h"
 
 
 // -------------------------------------------------------------------------
@@ -323,6 +324,20 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewards(c
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
     // Any-outcome bucket: PathIdentity = NAME_None. bIncludeAnyOutcome is moot when the path IS the any-outcome bucket.
     return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, NAME_None, Viewer, true) : TArray<FQuestRewardPreview>{};
+}
+
+TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag ContentTag, AActor* Viewer)
+{
+    if (!Questline) return {};
+
+    const TMap<FName, TObjectPtr<UQuestNodeBase>>& Nodes = Questline->GetCompiledNodes();
+    const UQuestNodeBase* Owner = Nodes.FindRef(ContentTag.GetTagName());
+    if (!Owner) return {};
+
+    // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) — matches the live
+    // GetAdvertisedRewards (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
+    // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
+    return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true);
 }
 
 TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome)

@@ -18,6 +18,39 @@ TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer) co
 	return Previews;
 }
 
+TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
+	const TMap<FName, FQuestReachableRewards>& Manifest,
+	const TMap<FName, TObjectPtr<UQuestNodeBase>>& NodeMap,
+	FName PathIdentity,
+	AActor* Viewer,
+	bool bIncludeAnyOutcome)
+{
+	// The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
+	// that sits in both buckets (a reward on Any Outcome AND the named path).
+	TArray<FName> RewardKeys;
+	if (const FQuestReachableRewards* PathBucket = Manifest.Find(PathIdentity))
+	{
+		RewardKeys = PathBucket->RewardNodeKeys;
+	}
+	if (!PathIdentity.IsNone() && bIncludeAnyOutcome)
+	{
+		if (const FQuestReachableRewards* AnyBucket = Manifest.Find(NAME_None))
+		{
+			for (const FName& Key : AnyBucket->RewardNodeKeys) RewardKeys.AddUnique(Key);
+		}
+	}
+
+	TArray<FQuestRewardPreview> Previews;
+	for (const FName& Key : RewardKeys)
+	{
+		if (const UQuestRewardNode* RewardNode = Cast<UQuestRewardNode>(NodeMap.FindRef(Key)))
+		{
+			Previews.Append(RewardNode->DescribeRewards(Viewer));
+		}
+	}
+	return Previews;
+}
+
 void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 {
 	// Intentionally skips Super — utility node, no Live / Started / Completed. Grant-when-reached: dispatch each reward,

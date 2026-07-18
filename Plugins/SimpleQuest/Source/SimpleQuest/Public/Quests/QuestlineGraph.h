@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Types/QuestStepEnums.h"
 #include "UObject/Object.h"
 #include "QuestlineGraph.generated.h"
@@ -12,9 +13,10 @@
 class FNativeGameplayTag;
 #endif
 
+class UEdGraph;
 class UQuestDisplayData;
 class UQuestNodeBase;
-class UEdGraph;
+class UQuestRewardBase;
 
 struct FGameplayTag;
 
@@ -46,6 +48,21 @@ struct FQuestCompiledNodeAlias
 
     UPROPERTY()
     FName AliasFName;
+};
+
+/**
+ * A set of rewards granted together. Exists only because a TArray can't be a TMap value directly — it's the wrapper
+ * that lets questline-level rewards be keyed by outcome tag in a map. Authoring-side twin of the runtime
+ * FQuestReachableRewards; each entry is a configured UQuestRewardBase (C++/Blueprint subclass or Generic), edited inline.
+ */
+USTRUCT(BlueprintType)
+struct FQuestRewardSet
+{
+    GENERATED_BODY()
+
+    /** Rewards granted for this outcome, in order. Same Instanced adapters as a Grant Rewards node's array. */
+    UPROPERTY(EditAnywhere, Instanced, Category = "Reward")
+    TArray<TObjectPtr<UQuestRewardBase>> Rewards;
 };
 
 /**
@@ -182,9 +199,21 @@ public:
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }
+    const TMap<FGameplayTag, FQuestRewardSet>& GetQuestlineRewards() const { return QuestlineRewards; }
     
     /** Identity used as both the QuestlineEffectiveID AR tag and this graph's section key in the compiled display ini. */
     FString GetEffectiveID() const { return QuestlineID.IsEmpty() ? GetName() : QuestlineID; }
+
+    /**
+     * Rewards granted on THIS QUESTLINE's completion, keyed by its top-level Exit outcome tags — first-class "the whole
+     * questline pays this," distinct from a reward node before the final step (that's the final step's reward) and from
+     * rewards wired on a linked-node's pins in a linking asset (that's per-placement as a step in another questline). Fires
+     * on EVERY instantiation, standalone or linked, with no container required. Optional — leave empty for a questline
+     * with no inherent completion reward that is independent of its placement in other graphs. Compiled into the
+     * boundary/manifest mechanism, so delivery and advertisement work with no separate runtime path.
+     */
+    UPROPERTY(EditAnywhere, Category = "Rewards")
+    TMap<FGameplayTag, FQuestRewardSet> QuestlineRewards;
 
 #if WITH_EDITOR
     /**

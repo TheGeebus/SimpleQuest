@@ -208,14 +208,19 @@ void FSimpleQuestEditor::StartupModule()
 		.SetMenuType(ETabSpawnerMenuType::Enabled);
 #undef LOCTEXT_NAMESPACE
 	
-	// ── Tag registration from the compiled INI ────────────────────────
-	// Register the compiled-tags directory as a gameplay-tag search path. The manager scans it immediately and, on
-	// every tag-tree rebuild, re-applies it (ConstructGameplayTagTree re-adds registered search paths) — so the
-	// compiled quest tags survive PIE / Live-Coding tree reconstructions instead of dropping out. Runs before the
-	// Asset Registry finishes loading, so the tags are present for asset deserialization.
+	// ── Tag registration from the compiled INI (deferred past DoneAddingNativeTags) ────────────────────
+	// The .ini search path is the SECONDARY channel; the primary registrar is RegisterTagsFromAssetRegistry ->
+	// RebuildNativeTags (FNativeGameplayTag), fired on OnFilesLoaded below. AddTagIniSearchPath must run AFTER
+	// DoneAddingNativeTags (earlier, HandleGameplayTagTreeChanged no-ops but still marks the path added, fooling the
+	// DoneAddingNativeTags self-check into skipping the finalizing rebuild). CallOrRegister fires immediately if native
+	// tags are already done.
 	const FString CompiledTagsDir = FPaths::GetPath(GetCompiledTagsIniPath());
-	UGameplayTagsManager::Get().AddTagIniSearchPath(CompiledTagsDir);
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Registered compiled-tags search path: %s"), *CompiledTagsDir);
+	UGameplayTagsManager::Get().CallOrRegister_OnDoneAddingNativeTagsDelegate(
+		FSimpleMulticastDelegate::FDelegate::CreateLambda([CompiledTagsDir]()
+		{
+			UGameplayTagsManager::Get().AddTagIniSearchPath(CompiledTagsDir);
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Registered compiled-tags search path: %s"), *CompiledTagsDir);
+		}));
 
 	MigrateLegacyTagsIni();
 	
@@ -360,6 +365,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 		WriteCompiledTagsIni();
 	}
 	RebuildNativeTags();
+
 	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
 }
 

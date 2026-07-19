@@ -51,6 +51,7 @@
 #include "Quests/AddFactNode.h"
 #include "Quests/ClearFactNode.h"
 #include "Quests/RemoveFactNode.h"
+#include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
@@ -173,10 +174,13 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 				if (ExitNode->OutcomeTag.IsValid()) TopLevelExitOutcomes.Add(ExitNode->OutcomeTag);
 			}
 		}
+		// Any-Outcome is a valid key that is NEVER an Exit outcome (it means "on every completion, regardless of
+		// outcome"). Treat it as always-current so it isn't flagged as drift. Matches the details panel's picker + stale check.
+		TopLevelExitOutcomes.Add(TAG_Outcome_AnyOutcome.GetTag());
 
 		for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : InGraph->QuestlineRewards)
 		{
-			if (Pair.Value.Rewards.IsEmpty()) continue;   // an empty entry grants nothing anyway; don't error on a placeholder key
+			if (Pair.Value.Rewards.IsEmpty()) continue;
 			if (!TopLevelExitOutcomes.Contains(Pair.Key))
 			{
 				AddError(FString::Printf(

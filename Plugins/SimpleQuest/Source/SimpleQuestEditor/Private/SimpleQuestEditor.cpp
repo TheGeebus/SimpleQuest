@@ -59,6 +59,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "DetailCustomizations/QuestlineGraphRewardsDetailsCustomization.h"
 #include "FactsPanel/FactsPanelRegistry.h"
 #include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
@@ -191,6 +192,8 @@ void FSimpleQuestEditor::StartupModule()
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	PropertyModule.RegisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineNodeEntryDetailsCustomization::MakeInstance));
 	PropertyModule.NotifyCustomizationModuleChanged();
+
+	PropertyModule.RegisterCustomClassLayout(UQuestlineGraph::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineGraphRewardsDetailsCustomization::MakeInstance));
 
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
@@ -434,6 +437,7 @@ void FSimpleQuestEditor::ShutdownModule()
 	{
 		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
 		PropertyModule.UnregisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName());
+		PropertyModule.UnregisterCustomClassLayout(UQuestlineGraph::StaticClass()->GetFName());
 	}
 	
 	FQuestlineGraphEditorCommands::Unregister();

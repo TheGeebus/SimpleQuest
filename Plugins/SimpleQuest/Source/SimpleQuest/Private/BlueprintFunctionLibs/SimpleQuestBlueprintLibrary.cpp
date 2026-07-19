@@ -374,6 +374,12 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFo
     return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, OutcomeTag.GetTagName(), Viewer, bIncludeAnyOutcome) : TArray<FQuestRewardPreview>{};
 }
 
+TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    return Manager ? Manager->ResolveAllAdvertisedRewardsByOutcome(ContentTag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
+}
+
 FText USimpleQuestBlueprintLibrary::GetQuestDisplayNameText(const UObject* WorldContext, const FGameplayTag QueryTag)
 {
     if (const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext))

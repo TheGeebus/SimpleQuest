@@ -219,6 +219,15 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
     static TArray<FQuestRewardPreview> GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome = true);
+
+    /**
+     * Every outcome of a completing content node and what each pays, as a map — the "whole picture" companion to
+     * GetAdvertisedRewardsForOutcome (which asks one outcome at a time). For a journal/tooltip showing "Success: X,
+     * Failure: Y". Each outcome's list includes the any-outcome rewards (they fire regardless). Static outcomes only;
+     * dynamic paths aren't represented (they have no author-time outcome tag).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
     
     // -------------------------------------------------------------------------------------------------------------
     // Display data queries — lookup the display data associated with a given quest tag.

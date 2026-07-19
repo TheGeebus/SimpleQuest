@@ -213,6 +213,17 @@ protected:
 	 */
 	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
 
+	/**
+	 * Whole-node advertised rewards, grouped by outcome — every static-outcome path of a completing node and what each
+	 * pays, PLUS the any-outcome rewards merged into each (any-outcome fires on every completion, so that's the truthful
+	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome.
+	 *
+	 * BOUNDARY-APPROACH CAVEAT (0.6): the manifest keys on FName PathIdentity; this resolves PathIdentity -> outcome tag
+	 * for STATIC outcomes only (RequestGameplayTag). Dynamic PathNames have no compile-time tag and are DROPPED (consistent
+	 * with the dynamic-paths-not-BP-previewable boundary). The Path/Outcome un-fuse (0.7 opener) makes this exact + simpler.
+	 */
+	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveAllAdvertisedRewardsByOutcome(FGameplayTag ContentTag, AActor* Viewer) const;
+
 	// ── Save / load + reset orchestration seam ──────────────────────────────────────────────────────────────────
 	// The library (the manager's one friend + facade) drives these. They're the override points a replacement
 	// orchestrator with different persistence/reset semantics re-implements. Protected virtual, not public — the

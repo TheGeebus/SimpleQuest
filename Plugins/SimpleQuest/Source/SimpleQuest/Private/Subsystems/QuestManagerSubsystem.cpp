@@ -1975,6 +1975,39 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
     return Out;
 }
 
+TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveAllAdvertisedRewardsByOutcome(FGameplayTag ContentTag, AActor* Viewer) const
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+
+    const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(ContentTag.GetTagName());
+    if (!Owner) return Out;
+
+    UGameplayTagsManager& TagManager = UGameplayTagsManager::Get();
+
+    // One entry per STATIC-outcome path; each gets that path's rewards + the any-outcome bucket merged in (any-outcome
+    // fires on every completion). Dynamic PathNames (PathIdentity not a registered tag) and NAME_None itself are skipped
+    // as map keys — see the boundary-approach caveat on the header.
+    for (const TPair<FName, FQuestReachableRewards>& Pair : Owner->GetReachableRewardsByPath())
+    {
+        if (Pair.Key.IsNone()) continue;   // the any-outcome bucket is merged INTO each outcome below, not a key itself
+
+        const FGameplayTag OutcomeTag = TagManager.RequestGameplayTag(Pair.Key, false);
+        if (!OutcomeTag.IsValid()) continue;   // dynamic PathName — no outcome tag, not BP-previewable (0.7 un-fuse fixes)
+
+        // Same shared walk the point queries use: this outcome's path + the any-outcome bucket (merge=true).
+        TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+            Owner->GetReachableRewardsByPath(), LoadedNodeInstances, Pair.Key, Viewer, /*bIncludeAnyOutcome*/ true);
+
+        if (Previews.Num() > 0)
+        {
+            FQuestRewardPreviewList List;
+            List.Previews = MoveTemp(Previews);
+            Out.Add(OutcomeTag, MoveTemp(List));
+        }
+    }
+    return Out;
+}
+
 void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context)
 {
     if (!QuestTag.IsValid() || !WorldState) return;

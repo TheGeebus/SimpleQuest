@@ -53,6 +53,7 @@
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestPublish.h"
 #include "Misc/ScopeExit.h"
+#include "Quests/Types/QuestRewardActivationContext.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -312,6 +313,15 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
 void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
+
+    // Register this graph under its identity tag so questline-level reward delivery (PublishGraphResolutions) can resolve
+    // a resolution's GraphTag back to the asset and read its QuestlineRewards. Identity = the same composition used by
+    // ActivateQuestlineGraph's idempotency gate.
+    const FString IdentityString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
+    if (const FGameplayTag IdentityTag = FGameplayTag::RequestGameplayTag(FName(*IdentityString), false); IdentityTag.IsValid())
+    {
+        LiveGraphsByIdentity.Add(IdentityTag, Graph);
+    }
 
     // Build a contextual-FName to alias-FNames lookup from the graph's persisted alias pairs, so each instance can
     // resolve its own AssetScopedAliasTags at registration (the class-channel perspectives it publishes on). This
@@ -1441,7 +1451,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // record + bus event land before any cascade off the utility's other forward destinations.
     if (!Node->GetResolvedGraphsOnForward().IsEmpty())
     {
-        PublishGraphResolutions(Node->GetResolvedGraphsOnForward(), EQuestResolutionSource::Graph);
+        PublishGraphResolutions(Node->GetResolvedGraphsOnForward(), EQuestResolutionSource::Graph, Node->PendingActivationContext.IncomingContext);
     }
     
     // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
@@ -1903,7 +1913,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // direct downstream destinations activate last.
     if (const FQuestPathNodeList* PathList = Node->GetNextNodesByPath().Find(ResolvedPath))
     {
-        PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph);
+        PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph, ForwardPayload);
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
             FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
@@ -1915,7 +1925,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     }
 
     // Any-outcome path: same unconditional PublishGraphResolutions as the named-outcome branch.
-    PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph);
+    PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph, ForwardPayload);
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
         FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
@@ -3073,7 +3083,8 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
     }
 }
 
-void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source)
+void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext
+                                                     & CompleterContext)
 {
     if (Resolutions.IsEmpty()) return;
 
@@ -3111,6 +3122,23 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
             QuestSignalSubsystem->PublishMessage<FQuestEndedEvent>(
                 Resolution.GraphTag,
                 FQuestEndedEvent(Resolution.GraphTag, Resolution.OutcomeTag, Source, Payload));
+        }
+        
+        // Questline-level rewards: resolve the questline's identity tag back to its graph and grant its authored rewards
+        // for this outcome, using the completer's forward attribution (same instigator a wired reward node gets). This
+        // is the questline's completion — the one place its whole-questline rewards fire, standalone or linked.
+        if (const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(Resolution.GraphTag))
+        {
+            if (const UQuestlineGraph* ResolvedGraph = GraphPtr->Get())
+            {
+                if (const FQuestRewardSet* Set = ResolvedGraph->GetQuestlineRewards().Find(Resolution.OutcomeTag); Set && !Set->Rewards.IsEmpty())
+                {
+                    FQuestRewardActivationContext RewardIncoming;
+                    static_cast<FQuestContextBase&>(RewardIncoming) = CompleterContext;
+                    RewardIncoming.IncomingOutcomeTag = Resolution.OutcomeTag;
+                    UQuestRewardNode::GrantRewardSet(Set->Rewards, RewardIncoming, QuestSignalSubsystem);
+                }
+            }
         }
     }
 }

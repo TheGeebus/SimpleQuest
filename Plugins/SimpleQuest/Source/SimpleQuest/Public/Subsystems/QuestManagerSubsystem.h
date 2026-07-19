@@ -260,6 +260,14 @@ private:
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
 
 	/**
+	 * Live questlines by their identity tag (SimpleQuest.Questline.<EffectiveID>), populated in RegisterQuestlineGraph.
+	 * The manager otherwise tracks only soft paths (KnownLoadedGraphPaths), not graph pointers — this is the one place
+	 * it holds a graph ref, so questline-level reward delivery can resolve a resolution's GraphTag back to the asset and
+	 * read its QuestlineRewards. Weak so an unloaded graph drops out without dangling.
+	 */
+	TMap<FGameplayTag, TWeakObjectPtr<UQuestlineGraph>> LiveGraphsByIdentity;
+
+	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
 	 * for state facts and registry entries. Layer 2 deduplication populates LoadedNodeInstances under the canonical key
 	 * AND every alias key (all pointing at the same instance), so any-perspective input here resolves the same
@@ -713,7 +721,7 @@ private:
 	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
 	 * questline-level lifecycle event.
 	 */
-	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source);
+	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext& CompleterContext);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

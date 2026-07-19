@@ -29,3 +29,16 @@ struct FQuestRewardPreview
 	FInstancedStruct PreviewData;
 };
 
+/**
+ * Map-legal wrapper for a list of previews — lets advertised rewards be returned keyed by outcome in a TMap (a bare
+ * TArray can't be a TMap value in a BlueprintType/UFUNCTION signature).
+ */
+USTRUCT(BlueprintType)
+struct FQuestRewardPreviewList
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Reward")
+	TArray<FQuestRewardPreview> Previews;
+};
+

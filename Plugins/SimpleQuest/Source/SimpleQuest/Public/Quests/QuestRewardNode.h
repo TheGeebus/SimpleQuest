@@ -50,6 +50,17 @@ public:
 		FName PathIdentity,
 		AActor* Viewer,
 		bool bIncludeAnyOutcome);
+
+	/**
+	 * Grant a reward set — shared core of node grants (ActivateInternal) and questline-level grants (at resolution).
+	 * Dispatches each reward's TryGrantReward against Incoming, finalizes every queued grant with the completion lineage
+	 * (Instigator / Origin*, recipient defaulting to the Instigator), publishes each on its RewardType channel. Signals
+	 * passed explicitly so a non-node caller (the manager) grants without a node's CachedGameInstance.
+	 */
+	static void GrantRewardSet(
+		const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
+		const FQuestRewardActivationContext& Incoming,
+		USignalSubsystem* Signals);
 	
 protected:
 	/** The rewards granted when this node activates, in order. Each computes + delivers independently. */
@@ -57,8 +68,4 @@ protected:
 	TArray<TObjectPtr<UQuestRewardBase>> Rewards;
 
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
-
-private:
-	/** Fill a grant's lineage from the activation context, default its Recipient to the Instigator, and publish it. */
-	void FinalizeAndPublishGrant(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const;
 };

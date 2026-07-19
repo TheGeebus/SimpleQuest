@@ -209,8 +209,9 @@ public:
      * questline pays this," distinct from a reward node before the final step (that's the final step's reward) and from
      * rewards wired on a linked-node's pins in a linking asset (that's per-placement as a step in another questline). Fires
      * on EVERY instantiation, standalone or linked, with no container required. Optional — leave empty for a questline
-     * with no inherent completion reward that is independent of its placement in other graphs. Compiled into the
-     * boundary/manifest mechanism, so delivery and advertisement work with no separate runtime path.
+     * with no inherent completion reward that is independent of its placement in other graphs. This authored map IS the
+     * runtime home — read directly at questline resolution (the manager resolves the questline's identity tag to this
+     * graph and grants these rewards for the resolved outcome). Whole-questline data on the whole-questline object.
      */
     UPROPERTY(EditAnywhere, Category = "Rewards")
     TMap<FGameplayTag, FQuestRewardSet> QuestlineRewards;

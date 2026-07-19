@@ -186,8 +186,19 @@ public:
      * @param Viewer       optional viewing actor for live-computed previews (null = context-free)
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
-    static TArray<FQuestRewardPreview> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline,
-        FGameplayTag ContentTag, AActor* Viewer);
+    static TArray<FQuestRewardPreview> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag ContentTag, AActor* Viewer);
+
+    /**
+     * Cold query for a questline's QUESTLINE-LEVEL rewards — what completing the whole questline pays, per outcome, read
+     * directly off the asset's authored QuestlineRewards map. Manager-free / works pre-activation (the catalog / bounty-
+     * board case). Distinct from GetAdvertisedRewardsFromAsset, which surfaces rewards wired into content NODES; this is
+     * the questline's own completion reward, keyed by its top-level Exit outcome. Each reward is previewed via
+     * DescribeReward (pass the viewing actor for live-computed values).
+     *
+     * @return outcome tag -> the previews that outcome pays. Empty map for a questline with no questline-level rewards.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
     
     /**
      * The rewards a completing node advertises for a specific outcome — the rewards on that outcome's path, plus (unless

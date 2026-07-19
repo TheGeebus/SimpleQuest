@@ -22,6 +22,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestRewardNode.h"
+#include "Rewards/QuestRewardBase.h"
 
 
 // -------------------------------------------------------------------------
@@ -338,6 +339,25 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFr
     // GetAdvertisedRewards (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
     // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
     return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true);
+}
+
+TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer)
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+    if (!Questline) return Out;
+
+    // Read the authored questline-level rewards directly off the asset (this map IS the runtime home) — manager-free,
+    // works cold. Describe each reward for the viewer; group by the outcome that pays it.
+    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Questline->GetQuestlineRewards())
+    {
+        FQuestRewardPreviewList List;
+        for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
+        {
+            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer));
+        }
+        if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
+    }
+    return Out;
 }
 
 TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome)

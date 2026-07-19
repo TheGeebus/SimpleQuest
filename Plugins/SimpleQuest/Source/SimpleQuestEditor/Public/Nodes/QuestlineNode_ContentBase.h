@@ -86,15 +86,23 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Quest")
 	EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
-	/** Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
-	the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating
-	the flag on every subclass that ends up with a giver affordance. */
+	/**
+	 * Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
+	 * the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating
+	 * the flag on every subclass that ends up with a giver affordance.
+	 */
 	UPROPERTY(Transient)
 	bool bGiversExpanded = false;
 
-	/** Set by content-node Slate widgets when the reconstructed tag from current labels diverges from the last
-	compiled tag. Lifts Step's original widget-local flag to the base so every content-node widget can display the
-	same "Recompile to update tags" affordance. Cleared on first matching refresh post-compile. */
+	/** Persistent expanded/collapsed state for the "Grants" list on a linked-questline node's Slate widget. */
+	UPROPERTY(Transient)
+	bool bRewardsExpanded = false;
+
+	/**
+	 * Set by content-node Slate widgets when the reconstructed tag from current labels diverges from the last
+	 * compiled tag. Lifts Step's original widget-local flag to the base so every content-node widget can display the
+	 * same "Recompile to update tags" affordance. Cleared on first matching refresh post-compile.
+	 */
 	UPROPERTY(Transient)
 	bool bTagStale = false;
 

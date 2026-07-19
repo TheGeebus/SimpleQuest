@@ -157,6 +157,37 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
             return false;
         }
     }
+
+	// ── Validate questline-level rewards against the graph's top-level Exit outcomes ──
+	// QuestlineRewards is keyed by outcome tag; each key MUST correspond to a top-level Exit's OutcomeTag on this graph.
+	// A stale key (its Exit was retyped/removed) would silently grant nothing at runtime — refuse it at compile so the
+	// designer fixes the key (re-picking preserves the reward values). Gather this graph's root-scope Exit outcomes once,
+	// then check every authored key against them.
+	if (InGraph->QuestlineRewards.Num() > 0)
+	{
+		TSet<FGameplayTag> TopLevelExitOutcomes;
+		for (UEdGraphNode* Node : InGraph->QuestlineEdGraph->Nodes)
+		{
+			if (const UQuestlineNode_Exit* ExitNode = Cast<UQuestlineNode_Exit>(Node))
+			{
+				if (ExitNode->OutcomeTag.IsValid()) TopLevelExitOutcomes.Add(ExitNode->OutcomeTag);
+			}
+		}
+
+		for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : InGraph->QuestlineRewards)
+		{
+			if (Pair.Value.Rewards.IsEmpty()) continue;   // an empty entry grants nothing anyway; don't error on a placeholder key
+			if (!TopLevelExitOutcomes.Contains(Pair.Key))
+			{
+				AddError(FString::Printf(
+					TEXT("[%s] Questline-level rewards are keyed on outcome '%s', but no top-level Exit node on this questline "
+						 "resolves with that outcome. Re-key the reward entry to a current Exit outcome (its rewards carry over), "
+						 "or remove it."),
+					*TagPrefix, *Pair.Key.ToString()));
+				return false;
+			}
+		}
+	}
     
     UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: starting '%s' (prefix='%s')"),
         *InGraph->GetName(),

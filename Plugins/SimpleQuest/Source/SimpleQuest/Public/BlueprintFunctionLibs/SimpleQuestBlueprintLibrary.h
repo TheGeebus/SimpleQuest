@@ -199,6 +199,14 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
+
+    /**
+     * Live query for a RUNNING questline's questline-level rewards, per outcome — what completing this active questline
+     * will pay. HUD/journal companion to the cold GetQuestlineRewardsFromAsset. Returns empty if the questline isn't
+     * currently loaded (use the cold asset query for pre-activation catalogs).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
     
     /**
      * The rewards a completing node advertises for a specific outcome — the rewards on that outcome's path, plus (unless

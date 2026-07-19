@@ -206,6 +206,13 @@ protected:
 	 */
 	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
+	/**
+	 * Live twin of the cold GetQuestlineRewardsFromAsset — previews a RUNNING questline's questline-level rewards per
+	 * outcome. Resolves the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and
+	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
+	 */
+	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
+
 	// ── Save / load + reset orchestration seam ──────────────────────────────────────────────────────────────────
 	// The library (the manager's one friend + facade) drives these. They're the override points a replacement
 	// orchestrator with different persistence/reset semantics re-implements. Protected virtual, not public — the

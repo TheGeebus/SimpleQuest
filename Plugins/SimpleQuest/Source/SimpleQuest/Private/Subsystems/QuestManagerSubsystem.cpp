@@ -54,6 +54,7 @@
 #include "Utilities/QuestPublish.h"
 #include "Misc/ScopeExit.h"
 #include "Quests/Types/QuestRewardActivationContext.h"
+#include "Rewards/QuestRewardBase.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -1952,6 +1953,26 @@ TArray<FQuestRewardPreview> UQuestManagerSubsystem::ResolveAdvertisedRewards(FGa
         *ContentTag.ToString(), *PathIdentity.ToString(), bIncludeAnyOutcome ? 1 : 0, Previews.Num());
 
     return Previews;
+}
+
+TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+
+    const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(QuestlineTag);
+    const UQuestlineGraph* Graph = GraphPtr ? GraphPtr->Get() : nullptr;
+    if (!Graph) return Out;
+
+    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Graph->GetQuestlineRewards())
+    {
+        FQuestRewardPreviewList List;
+        for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
+        {
+            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer));
+        }
+        if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
+    }
+    return Out;
 }
 
 void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context)

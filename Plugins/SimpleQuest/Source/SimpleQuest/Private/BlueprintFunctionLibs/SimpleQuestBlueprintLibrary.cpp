@@ -360,6 +360,12 @@ TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQue
     return Out;
 }
 
+TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    return Manager ? Manager->ResolveQuestlineRewards(QuestlineTag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
+}
+
 TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome)
 {
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);

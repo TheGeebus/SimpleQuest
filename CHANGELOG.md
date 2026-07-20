@@ -5,6 +5,78 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-07-19 — Rewards
+
+The rewards release: granting rewards is now a first-class part of the graph,
+on equal footing with objectives. Drop a reward node onto any completion path,
+configure what it grants inline, and it fires when the flow reaches it. Rewards
+broadcast to whoever's listening rather than being pushed at a fixed target, so
+any actor can react to the grants it cares about. And you can ask a questline
+what it pays *before* the player commits — the data a "do this task, get this
+reward" screen needs — for a specific outcome, a whole node, or an entire
+questline, live or straight off the asset.
+
+### Reward nodes & adapters
+
+- **Rewards are graph nodes now.** A *Grant Rewards* node wires onto any
+  completion path and fires when activation reaches it. Its output continues
+  the flow, so rewards drop inline anywhere — after a step, on a specific
+  outcome, or on Any Outcome — with no special lifecycle to manage.
+- **Rewards are self-configuring adapters.** Each reward on a node is an
+  instanced object you configure in place. The framework doesn't dictate what
+  a reward *is* — it's the adapter between "the flow reached here" and "apply
+  this effect." Author one in C++ or Blueprint to compute loot, scale a value
+  by player level, roll a table, or hand off to another system, then hand the
+  result out. Reference rewards ship for the common cases (experience,
+  currency, a loot table, a value scaled by the recipient, and a no-subclass
+  generic reward you configure entirely in the details panel).
+- **Rewards compute; they don't just hand out constants.** Because a reward is
+  an adapter, it can read the completion context and look up whatever it needs
+  from your game before granting — the recipient's level, difficulty, a
+  data-driven table — so the granted value reflects live state, not a number
+  frozen at author time.
+- **Grants broadcast to recipients, not a fixed target.** When a reward fires,
+  it publishes on its reward-type channel. Any actor with a *Reward Recipient*
+  component that watches that type receives it and reacts — hierarchically, so
+  a component watching a currency category catches every currency under it. The
+  granting node doesn't need to know who's listening, and a recipient reacts
+  only to the reward types it cares about.
+
+### Advertising rewards ("do this, get this")
+
+- **Ask what a completion pays, before it's earned.** A preview query returns
+  what any content node advertises on a given outcome — the data a quest-giver
+  hub, journal, or bounty board needs to show rewards up front. Ask for one
+  outcome, or get the whole picture as a map of every outcome to its rewards.
+- **Previews are computed live for the viewer.** A reward's advertised value is
+  produced the same way it would be granted, without granting it — so a
+  level-scaled reward previews the amount *this* player would actually receive,
+  and re-querying tracks changes. Querying never grants.
+- **Inspect an unstarted questline cold.** The same reward data is readable
+  straight off a questline asset with no running game, so a catalog can show
+  what a quest pays before the player has taken it.
+
+### Questline-level rewards
+
+- **A questline can pay out on its own completion.** Beyond rewards wired into
+  the graph, a questline carries its own reward map — keyed by its final
+  outcome — for "the whole questline grants this." These fire on every use of
+  the questline, whether it runs on its own or embedded inside another, with no
+  wrapper required. The completing player is credited automatically.
+- **Author them where they belong, safely.** Questline-level rewards live on
+  the questline in a dedicated Details-panel editor: pick an outcome from the
+  ones the questline actually produces (or Any Outcome), and fill in the
+  rewards. Change an outcome's key at any time and the rewards move with it —
+  no re-authoring. If an outcome referenced by a reward ever goes away, the
+  panel flags it and the compiler refuses until it's re-pointed, so a reward
+  can't silently point at nothing.
+- **See a linked questline's payout on the node.** When you place a questline
+  inside another, its own completion rewards show on the node as a *Grants*
+  summary — so a reward that fires on every use isn't hidden away on the other
+  asset.
+
+---
+
 ## [0.5.0] — 2026-07-06 — Persistence & Reusable Questlines
 
 The persistence release: your quests now survive save/load in full. Every

@@ -59,6 +59,7 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "DetailCustomizations/QuestlineGraphRewardsDetailsCustomization.h"
 #include "FactsPanel/FactsPanelRegistry.h"
 #include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
@@ -192,6 +193,8 @@ void FSimpleQuestEditor::StartupModule()
 	PropertyModule.RegisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineNodeEntryDetailsCustomization::MakeInstance));
 	PropertyModule.NotifyCustomizationModuleChanged();
 
+	PropertyModule.RegisterCustomClassLayout(UQuestlineGraph::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FQuestlineGraphRewardsDetailsCustomization::MakeInstance));
+
 	FMessageLogModule& MessageLogModule = FModuleManager::LoadModuleChecked<FMessageLogModule>("MessageLog");
 	MessageLogModule.RegisterLogListing("QuestCompiler", NSLOCTEXT("SimpleQuestEditor", "QuestCompilerLog", "Quest Compiler"));
 	MessageLogModule.RegisterLogListing("QuestValidator", NSLOCTEXT("SimpleQuestEditor", "QuestValidatorLog", "Quest Validator"));
@@ -207,15 +210,30 @@ void FSimpleQuestEditor::StartupModule()
 		.SetGroup(WorkspaceMenu::GetMenuStructure().GetDeveloperToolsDebugCategory())
 		.SetMenuType(ETabSpawnerMenuType::Enabled);
 #undef LOCTEXT_NAMESPACE
+
+	// The compiled questline tags aren't in the tag tree yet when the startup map deserializes (the authoritative
+	// registrar, RegisterTagsFromAssetRegistry, runs later on OnFilesLoaded) — so map/asset load emits a burst of
+	// "Invalid GameplayTag SimpleQuest.Questline.*" warnings that LOOK broken but aren't: the tags register moments
+	// later and everything resolves; nothing consumes them in the interim. Silence LogGameplayTags for the startup
+	// window ONLY, restored in RegisterTagsFromAssetRegistry — so genuine stale-tag warnings still surface afterward.
+	// (Root cause is an unresolved config-load quirk on the compiled-tags .ini; see notes blocker A. Time-boxed, not
+	// a blanket config mute, which would also hide real stale-tag issues.)
+	LogGameplayTags.SetVerbosity(ELogVerbosity::Error);
 	
-	// ── Tag registration from the compiled INI ────────────────────────
-	// Register the compiled-tags directory as a gameplay-tag search path. The manager scans it immediately and, on
-	// every tag-tree rebuild, re-applies it (ConstructGameplayTagTree re-adds registered search paths) — so the
-	// compiled quest tags survive PIE / Live-Coding tree reconstructions instead of dropping out. Runs before the
-	// Asset Registry finishes loading, so the tags are present for asset deserialization.
+	// ── Tag registration from the compiled INI (deferred past DoneAddingNativeTags) ────────────────────
+	// Register the compiled-tags search path after native-tag loading completes (AddTagIniSearchPath must run
+	// post-DoneAddingNativeTags, else HandleGameplayTagTreeChanged no-ops but still marks the path added, and the
+	// DoneAddingNativeTags self-check then skips the finalizing rebuild). NOTE: this .ini channel does NOT currently
+	// materialize tags into the queryable tree at startup — LoadConfig reads zero rows from the compiled .ini for a
+	// reason not yet root-caused (see notes blocker A). The authoritative registrar is RegisterTagsFromAssetRegistry
+	// -> RebuildNativeTags (on OnFilesLoaded); the stale tag warning flood on startup from this gap is suppressed below.
 	const FString CompiledTagsDir = FPaths::GetPath(GetCompiledTagsIniPath());
-	UGameplayTagsManager::Get().AddTagIniSearchPath(CompiledTagsDir);
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Registered compiled-tags search path: %s"), *CompiledTagsDir);
+	UGameplayTagsManager::Get().CallOrRegister_OnDoneAddingNativeTagsDelegate(
+		FSimpleMulticastDelegate::FDelegate::CreateLambda([CompiledTagsDir]()
+		{
+			UGameplayTagsManager::Get().AddTagIniSearchPath(CompiledTagsDir);
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Registered compiled-tags search path: %s"), *CompiledTagsDir);
+		}));
 
 	MigrateLegacyTagsIni();
 	
@@ -360,6 +378,10 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 		WriteCompiledTagsIni();
 	}
 	RebuildNativeTags();
+
+	// Tags are now registered — restore normal gameplay-tag logging (fires on OnFilesLoaded, after the startup map's
+	// benign Invalid-tag burst). Real stale-tag warnings surface normally for the rest of the session. See StartupModule.
+	LogGameplayTags.SetVerbosity(ELogVerbosity::All);
 	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
 }
 
@@ -415,6 +437,7 @@ void FSimpleQuestEditor::ShutdownModule()
 	{
 		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
 		PropertyModule.UnregisterCustomClassLayout(UQuestlineNode_Entry::StaticClass()->GetFName());
+		PropertyModule.UnregisterCustomClassLayout(UQuestlineGraph::StaticClass()->GetFName());
 	}
 	
 	FQuestlineGraphEditorCommands::Unregister();
@@ -861,7 +884,7 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
         IFileManager::Get().MakeDirectory(*IniDir, true);
     }
 
-    if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
+	if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
         UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
     }

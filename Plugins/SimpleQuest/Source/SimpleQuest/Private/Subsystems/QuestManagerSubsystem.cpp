@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "Subsystems/QuestManagerSubsystem.h"
-#include "Quests/QuestlineGraph.h"
-#include "Quests/QuestNodeBase.h"
-#include "Subsystems/SignalSubsystem.h"
 #include "GameplayTagsManager.h"
 #include "SimpleQuestLog.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
+#include "Display/QuestDisplayData.h"
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Events/QuestProgressEvent.h"
@@ -34,24 +34,27 @@
 #include "Events/QuestTriggerResponseEvent.h"
 #include "Events/QuestTriggerSatisfiedEvent.h"
 #include "Objectives/QuestObjective.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Quests/Quest.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Quests/QuestRewardNode.h"
 #include "Quests/QuestStep.h"
-#include "Subsystems/WorldStateSubsystem.h"
+#include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
+#include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
-#include "Quests/Types/PrereqLeafSubscription.h"
+#include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "AssetRegistry/IAssetRegistry.h"
-#include "Display/QuestDisplayData.h"
 #include "Utilities/QuestActivationGuard.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestPublish.h"
 #include "Misc/ScopeExit.h"
+#include "Quests/Types/QuestRewardActivationContext.h"
+#include "Rewards/QuestRewardBase.h"
 #if WITH_EDITOR
 #include "Components/QuestGiverComponent.h"
 #endif
@@ -311,6 +314,15 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
 void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
+
+    // Register this graph under its identity tag so questline-level reward delivery (PublishGraphResolutions) can resolve
+    // a resolution's GraphTag back to the asset and read its QuestlineRewards. Identity = the same composition used by
+    // ActivateQuestlineGraph's idempotency gate.
+    const FString IdentityString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
+    if (const FGameplayTag IdentityTag = FGameplayTag::RequestGameplayTag(FName(*IdentityString), false); IdentityTag.IsValid())
+    {
+        LiveGraphsByIdentity.Add(IdentityTag, Graph);
+    }
 
     // Build a contextual-FName to alias-FNames lookup from the graph's persisted alias pairs, so each instance can
     // resolve its own AssetScopedAliasTags at registration (the class-channel perspectives it publishes on). This
@@ -1041,6 +1053,19 @@ FQuestEventPayload UQuestManagerSubsystem::AssembleEventContext(const UQuestNode
         Context.OriginatingEventID = Source.IncomingContext.OriginatingEventID;
     }
 
+    // Completion / progress events attribute to whoever completed or advanced the node (the trigger), not who activated
+    // it. Only those events pass a populated CompletionTrigger; activation-side events pass an empty one and keep the
+    // activation attribution above. Lineage (Origin*) stays activation-sourced.
+    if (Context.CompletionTrigger.TriggeredActor
+        || Context.CompletionTrigger.Instigator.IsValid()
+        || Context.CompletionTrigger.CustomData.IsValid()
+        || Context.CompletionTrigger.CustomTag.IsValid())
+    {
+        Context.Instigator = Context.CompletionTrigger.Instigator;
+        Context.CustomData = Context.CompletionTrigger.CustomData;
+        Context.CustomTag  = Context.CompletionTrigger.CustomTag;
+    }
+    
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("AssembleEventContext: '%s' DisplayName='%s' CompletionContext=%s Instigator=%s CustomData=%s"),
         *Context.NodeInfo.QuestTag.ToString(),
         *Context.NodeInfo.DisplayName.ToString(),
@@ -1427,7 +1452,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // record + bus event land before any cascade off the utility's other forward destinations.
     if (!Node->GetResolvedGraphsOnForward().IsEmpty())
     {
-        PublishGraphResolutions(Node->GetResolvedGraphsOnForward(), EQuestResolutionSource::Graph);
+        PublishGraphResolutions(Node->GetResolvedGraphsOnForward(), EQuestResolutionSource::Graph, Node->PendingActivationContext.IncomingContext);
     }
     
     // Fire wrapper boundary completions BEFORE chaining downstream. Wrapper Path facts must exist before any
@@ -1443,7 +1468,7 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
             *BC.OutcomeTag.ToString(),
             *Node->GetContextualTag().ToString());
 
-        FireWrapperBoundaryCompletion(BC, InheritedEventID);
+        FireWrapperBoundaryCompletion(BC, InheritedEventID, Node->PendingActivationContext.IncomingContext);
     }
 
     // Thread the source utility node's PendingActivationContext onto each downstream destination so any payload
@@ -1785,7 +1810,7 @@ void UQuestManagerSubsystem::LoadCompiledDisplayIni() const
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("LoadCompiledDisplayIni: %d record(s), %d DisplayData asset(s) from %s"), Registered, Loaded, *IniPath);
 }
 
-void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID)
+void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID, const FQuestObjectiveActivationContext& InheritedForward)
 {
     if (!Node) return;
 
@@ -1842,7 +1867,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         }
     }
 
-    PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph);
+    PublishQuestEndedEvent(Node, OutcomeTag, EQuestResolutionSource::Graph, FQuestEventPayload(), InheritedForward);
 
     /**
      * Thread this node's compiled ContextualTag (as FName) forward as IncomingSourceTag so any Quest destination in the next layer
@@ -1852,8 +1877,11 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
 
     // Gather forward params from the completing step (designer-supplied via CompleteObjectiveWithOutcome)
     // and build the OriginChain extension (received chain + this step's tag) so downstream steps see the full history.
-    FQuestObjectiveActivationContext ForwardPayload;
+    // Seed forward parameters (activation context) from the inherited payload instead of default-constructing.
+    FQuestObjectiveActivationContext ForwardPayload = InheritedForward;
     TArray<FGameplayTag> ForwardChain;
+    
+    // A step still overrides with its own params.
     if (const UQuestStep* CompletingStep = Cast<UQuestStep>(Node))
     {
         ForwardPayload = CompletingStep->GetCompletionForwardParams();
@@ -1886,10 +1914,10 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // direct downstream destinations activate last.
     if (const FQuestPathNodeList* PathList = Node->GetNextNodesByPath().Find(ResolvedPath))
     {
-        PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph);
+        PublishGraphResolutions(PathList->ResolvedGraphs, EQuestResolutionSource::Graph, ForwardPayload);
         for (const FQuestBoundaryCompletion& BC : PathList->BoundaryCompletions)
         {
-            FireWrapperBoundaryCompletion(BC, OriginatingEventID);
+            FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
         }
         for (const FName& Tag : PathList->NodeTags)
         {
@@ -1898,15 +1926,86 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     }
 
     // Any-outcome path: same unconditional PublishGraphResolutions as the named-outcome branch.
-    PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph);
+    PublishGraphResolutions(Node->GetResolvedGraphsOnAnyOutcome(), EQuestResolutionSource::Graph, ForwardPayload);
     for (const FQuestBoundaryCompletion& BC : Node->GetBoundaryCompletionsOnAnyOutcome())
     {
-        FireWrapperBoundaryCompletion(BC, OriginatingEventID);
+        FireWrapperBoundaryCompletion(BC, OriginatingEventID, ForwardPayload);
     }
     for (const FName& Tag : Node->GetNextNodesOnAnyOutcome())
     {
         StampAndActivate(Tag);
     }
+}
+
+TArray<FQuestRewardPreview> UQuestManagerSubsystem::ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const
+{
+    const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(ContentTag.GetTagName());
+    if (!Owner)
+    {
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: no loaded node for tag '%s'"), *ContentTag.ToString());
+        return {};
+    }
+
+    TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+        Owner->GetReachableRewardsByPath(), LoadedNodeInstances, PathIdentity, Viewer, bIncludeAnyOutcome);
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: tag '%s' path '%s' (merge=%d) -> %d preview(s)"),
+        *ContentTag.ToString(), *PathIdentity.ToString(), bIncludeAnyOutcome ? 1 : 0, Previews.Num());
+
+    return Previews;
+}
+
+TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+
+    const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(QuestlineTag);
+    const UQuestlineGraph* Graph = GraphPtr ? GraphPtr->Get() : nullptr;
+    if (!Graph) return Out;
+
+    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Graph->GetQuestlineRewards())
+    {
+        FQuestRewardPreviewList List;
+        for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
+        {
+            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer));
+        }
+        if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
+    }
+    return Out;
+}
+
+TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveAllAdvertisedRewardsByOutcome(FGameplayTag ContentTag, AActor* Viewer) const
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+
+    const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(ContentTag.GetTagName());
+    if (!Owner) return Out;
+
+    UGameplayTagsManager& TagManager = UGameplayTagsManager::Get();
+
+    // One entry per STATIC-outcome path; each gets that path's rewards + the any-outcome bucket merged in (any-outcome
+    // fires on every completion). Dynamic PathNames (PathIdentity not a registered tag) and NAME_None itself are skipped
+    // as map keys — see the boundary-approach caveat on the header.
+    for (const TPair<FName, FQuestReachableRewards>& Pair : Owner->GetReachableRewardsByPath())
+    {
+        if (Pair.Key.IsNone()) continue;   // the any-outcome bucket is merged INTO each outcome below, not a key itself
+
+        const FGameplayTag OutcomeTag = TagManager.RequestGameplayTag(Pair.Key, false);
+        if (!OutcomeTag.IsValid()) continue;   // dynamic PathName — no outcome tag, not BP-previewable (0.7 un-fuse fixes)
+
+        // Same shared walk the point queries use: this outcome's path + the any-outcome bucket (merge=true).
+        TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+            Owner->GetReachableRewardsByPath(), LoadedNodeInstances, Pair.Key, Viewer, /*bIncludeAnyOutcome*/ true);
+
+        if (Previews.Num() > 0)
+        {
+            FQuestRewardPreviewList List;
+            List.Previews = MoveTemp(Previews);
+            Out.Add(OutcomeTag, MoveTemp(List));
+        }
+    }
+    return Out;
 }
 
 void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactivationSource Source, const FQuestEventPayload& Context)
@@ -2093,7 +2192,7 @@ void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, co
     }
 }
 
-void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext) const
+void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext, const FQuestObjectiveActivationContext& CompleterContext) const
 {
     if (!QuestSignalSubsystem || !Node->GetContextualTag().IsValid()) return;
 
@@ -2101,6 +2200,14 @@ void UQuestManagerSubsystem::PublishQuestEndedEvent(const UQuestNodeBase* Node, 
     if (const UQuestStep* Step = Cast<UQuestStep>(Node))
     {
         CompletionCtx = Step->GetCompletionContext();
+    }
+    else
+    {
+        // Container end: no step-side completion context. Copy the attribution the ended event reads, from the completer
+        // threaded across the boundary. TriggeredActor has no single-actor analog for a container, so it stays empty.
+        CompletionCtx.Instigator = CompleterContext.Instigator;
+        CompletionCtx.CustomData = CompleterContext.CustomData;
+        CompletionCtx.CustomTag  = CompleterContext.CustomTag;
     }
 
     FQuestEventPayload Context = OverlayCallerContext(AssembleEventContext(Node, CompletionCtx), ExternalContext);
@@ -2970,8 +3077,7 @@ void UQuestManagerSubsystem::ClearQuestPendingGiver(FGameplayTag QuestTag)
     }
 }
 
-void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC,
-    const FOriginatingEventID& OriginatingEventID)
+void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID, const FQuestObjectiveActivationContext& InheritedForward)
 {
     const FGameplayTag WrapperTag = UGameplayTagsManager::Get().RequestGameplayTag(BC.WrapperTagName, false);
     if (!WrapperTag.IsValid()) return;
@@ -3020,7 +3126,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
             TEXT("FireWrapperBoundaryCompletion: routing '%s' outcome='%s' through wrapper's ChainToNextNodes (eventGuid=%s)"),
             *WrapperTag.ToString(), *BC.OutcomeTag.ToString(),
             *OriginatingEventID.AuthoredNodeGuid.ToString(EGuidFormats::Short));
-        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName(), OriginatingEventID);
+        ChainToNextNodes(WrapperNode, BC.OutcomeTag, BC.OutcomeTag.GetTagName(), OriginatingEventID, InheritedForward);
     }
     else
     {
@@ -3031,7 +3137,8 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
     }
 }
 
-void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source)
+void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext
+                                                     & CompleterContext)
 {
     if (Resolutions.IsEmpty()) return;
 
@@ -3069,6 +3176,23 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
             QuestSignalSubsystem->PublishMessage<FQuestEndedEvent>(
                 Resolution.GraphTag,
                 FQuestEndedEvent(Resolution.GraphTag, Resolution.OutcomeTag, Source, Payload));
+        }
+        
+        // Questline-level rewards: resolve the questline's identity tag back to its graph and grant its authored rewards
+        // for this outcome, using the completer's forward attribution (same instigator a wired reward node gets). This
+        // is the questline's completion — the one place its whole-questline rewards fire, standalone or linked.
+        if (const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(Resolution.GraphTag))
+        {
+            if (const UQuestlineGraph* ResolvedGraph = GraphPtr->Get())
+            {
+                if (const FQuestRewardSet* Set = ResolvedGraph->GetQuestlineRewards().Find(Resolution.OutcomeTag); Set && !Set->Rewards.IsEmpty())
+                {
+                    FQuestRewardActivationContext RewardIncoming;
+                    static_cast<FQuestContextBase&>(RewardIncoming) = CompleterContext;
+                    RewardIncoming.IncomingOutcomeTag = Resolution.OutcomeTag;
+                    UQuestRewardNode::GrantRewardSet(Set->Rewards, RewardIncoming, QuestSignalSubsystem);
+                }
+            }
         }
     }
 }

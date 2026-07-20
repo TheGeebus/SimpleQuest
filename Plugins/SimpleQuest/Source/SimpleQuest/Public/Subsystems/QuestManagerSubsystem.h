@@ -14,6 +14,7 @@
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/SimpleQuestObjectiveSaveState.h"
 #include "QuestManagerSubsystem.generated.h"
@@ -136,14 +137,14 @@ protected:
 	 * Restores every graph in the pending-restore stash (set by ApplyQuestSnapshot): async-loads each and rebuilds its
 	 * live / deferred / accumulator state. Drives both the manual RestoreQuestGraphs BP node and the auto-consume flush.
 	 */
-	void RestorePendingGraphs();
+	virtual void RestorePendingGraphs();
 
 	/**
 	 * Arms a one-shot auto-restore: the pending stash flushes automatically when the next game world initializes (i.e.
 	 * after the consumer's OpenLevel), so the load path is just ApplyQuestSnapshot -> OpenLevel with no per-level node.
 	 * Set by ApplyQuestSnapshot's bRestoreOnNextLevelLoad. Idempotent; cleared on flush or Deinitialize.
 	 */
-	void ArmRestoreOnNextLevelLoad();
+	virtual void ArmRestoreOnNextLevelLoad();
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
@@ -187,23 +188,59 @@ protected:
 		FName IncomingSourceTag = NAME_None,
 		bool bBypassGiverGate = false,
 		bool bBypassPrerequisites = false);
-
-private:
-	void LoadCompiledDisplayIni() const;
-	
-	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
-
-	int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
 		
+	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
+	virtual void ChainToNextNodes(
+		UQuestNodeBase* CompletedNode,
+		FGameplayTag OutcomeTag,
+		FName PathIdentity,
+		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
+		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+
+	/**
+	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
+	 * GetAdvertisedRewards). Looks the node up by ContentTag, reads its compile-time ReachableRewardsByPath, resolves
+	 * each reward-node key to its live instance, and aggregates DescribeReward. Pure: no grant, no event. PathIdentity
+	 * is the compile-time path key (a static outcome's tag-name, a dynamic PathName, or NAME_None for any-outcome);
+	 * resolved from the caller's outcome tag by the library.
+	 */
+	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
+
+	/**
+	 * Live twin of the cold GetQuestlineRewardsFromAsset — previews a RUNNING questline's questline-level rewards per
+	 * outcome. Resolves the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and
+	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
+	 */
+	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
+
+	/**
+	 * Whole-node advertised rewards, grouped by outcome — every static-outcome path of a completing node and what each
+	 * pays, PLUS the any-outcome rewards merged into each (any-outcome fires on every completion, so that's the truthful
+	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome.
+	 *
+	 * BOUNDARY-APPROACH CAVEAT (0.6): the manifest keys on FName PathIdentity; this resolves PathIdentity -> outcome tag
+	 * for STATIC outcomes only (RequestGameplayTag). Dynamic PathNames have no compile-time tag and are DROPPED (consistent
+	 * with the dynamic-paths-not-BP-previewable boundary). The Path/Outcome un-fuse (0.7 opener) makes this exact + simpler.
+	 */
+	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveAllAdvertisedRewardsByOutcome(FGameplayTag ContentTag, AActor* Viewer) const;
+
+	// ── Save / load + reset orchestration seam ──────────────────────────────────────────────────────────────────
+	// The library (the manager's one friend + facade) drives these. They're the override points a replacement
+	// orchestrator with different persistence/reset semantics re-implements. Protected virtual, not public — the
+	// black box exposes no public API; only the friend library and subclasses reach them.
+
+	/** Completion tally for a quest. Backs USimpleQuestBlueprintLibrary::GetQuestCompletionCount. */
+	virtual int32 GetQuestCompletionCount(FGameplayTag QuestTag) const;
+
 	/**
 	 * The questline graphs the manager has registered or reachability-warmed this session, by soft path. Captured into
 	 * the save snapshot (CaptureQuestState) so RestoreQuestState can drive graph restore off the save itself rather than
 	 * a caller-maintained asset list. A superset of the graphs with live state — dormant entries restore to a no-op.
 	 */
-	const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
-	
+	virtual const TSet<FSoftObjectPath>& GetKnownLoadedGraphPaths() const { return KnownLoadedGraphPaths; }
+
 	/** Stashes the snapshot's active-graph list + deferred-activation set + objective states for a level-transition restore. */
-	void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
+	virtual void StashPendingRestore(const TArray<FSoftObjectPath>& Graphs, const TMap<FGuid, FQuestObjectiveRuntimeContext>& Deferred,
 		const TMap<FGuid, FSimpleQuestObjectiveSaveState>& ObjectiveStates)
 	{
 		PendingRestoreGraphs = Graphs;
@@ -211,14 +248,23 @@ private:
 		PendingObjectiveStates = ObjectiveStates;
 	}
 
-	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
-	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
-
 	/** The prereq-deferred activations currently armed on loaded nodes, keyed by contextual tag. Read by snapshot capture. */
-	TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
+	virtual TMap<FGuid, FQuestObjectiveRuntimeContext> CaptureDeferredActivations() const;
 
 	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
-	TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+	virtual TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
+	virtual void ResetQuestRunState(FGameplayTag QuestTag);
+
+
+private:
+	void LoadCompiledDisplayIni() const;
+	
+	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
+
+	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
+	TArray<FSoftObjectPath> ConsumePendingRestoreGraphs() { return MoveTemp(PendingRestoreGraphs); }
 
 	void HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS);
 	void DisarmRestoreOnNextLevelLoad();
@@ -230,6 +276,14 @@ private:
 	/** Node instances from all loaded questline graph assets, keyed by tag. Populated by ActivateQuestlineGraph. */
 	UPROPERTY()
 	TMap<FName, TObjectPtr<UQuestNodeBase>> LoadedNodeInstances;
+
+	/**
+	 * Live questlines by their identity tag (SimpleQuest.Questline.<EffectiveID>), populated in RegisterQuestlineGraph.
+	 * The manager otherwise tracks only soft paths (KnownLoadedGraphPaths), not graph pointers — this is the one place
+	 * it holds a graph ref, so questline-level reward delivery can resolve a resolution's GraphTag back to the asset and
+	 * read its QuestlineRewards. Weak so an unloaded graph drops out without dangling.
+	 */
+	TMap<FGameplayTag, TWeakObjectPtr<UQuestlineGraph>> LiveGraphsByIdentity;
 
 	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses
@@ -300,15 +354,6 @@ private:
 	void ClearPathFactAcrossPerspectives(FGameplayTag InputTag, FName PathIdentity);
 
 	/**
-	 * Clears a quest's clearable path-mirror facts — the per-run projection that resettable prerequisite leaves read —
-	 * so gates wired from this quest re-gate as if it had not yet resolved. The append-only resolution registry and the
-	 * Completed anchor are left untouched; only the clearable mirror is removed. No-ops while the quest is currently Live,
-	 * so an in-flight run's mirrors are never wiped mid-progress. Re-arms a quest for replay without bringing it active —
-	 * the activation path performs this same clear automatically when a resettable quest re-activates after completing.
-	 */
-	void ResetQuestRunState(FGameplayTag QuestTag);
-
-	/**
 	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds
 	 * one entry per placement — a node's ContextualTag resolves to exactly one runtime instance (strict 1:1).
 	 * Centralizing the Add keeps that invariant in one place; lookup and dedup-by-pointer sites rely on it.
@@ -335,14 +380,7 @@ private:
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 
-	/** Chains to next nodes after a node completes, using tag-based routing from NextNodesByPath / NextNodesOnAnyOutcome. */
-	virtual void ChainToNextNodes(
-		UQuestNodeBase* CompletedNode,
-		FGameplayTag OutcomeTag,
-		FName PathIdentity,
-		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
-
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload()) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationContext& CompleterContext = FQuestObjectiveActivationContext()) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -692,7 +730,7 @@ private:
 	 * OriginatingEventID is inherited from the cascade and threaded through the recursive
 	 * ChainToNextNodes call.
 	 */
-	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID());
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
 
 	/**
 	 * Per-questline-asset resolution registry write + bus publish. Each FQuestGraphResolution entry carries the
@@ -701,7 +739,7 @@ private:
 	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
 	 * questline-level lifecycle event.
 	 */
-	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source);
+	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext& CompleterContext);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

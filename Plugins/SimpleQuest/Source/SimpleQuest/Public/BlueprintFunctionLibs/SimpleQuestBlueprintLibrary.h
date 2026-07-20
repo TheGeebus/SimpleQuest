@@ -9,11 +9,12 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
-#include "Settings/SimpleQuestSettings.h"
 #include "SimpleQuestBlueprintLibrary.generated.h"
 
 class UQuestDisplayData;
@@ -154,7 +155,80 @@ public:
 
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Source", meta = (WorldContext = "WorldContext"))
     static UQuestObjective* GetActiveObjectiveForTag(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QueryTag);
+    
+    // -------------------------------------------------------------------------------------------------------------
+    // Quest Rewards
+    // -------------------------------------------------------------------------------------------------------------
 
+    /**
+     * The rewards a completing node advertises regardless of how it resolves — the any-outcome bucket only. The giver /
+     * journal case: "complete this, get these." Computes each reward's preview live (pass the viewing actor); querying
+     * never grants.
+     *
+     * Excludes outcome-specific rewards. See also: Get Advertised Rewards For Outcome, for rewards associated with
+     * specific outcomes.
+     *
+     * @param WorldContext        world context for resolving the quest system
+     * @param ContentTag          the Step or container whose advertised rewards you want
+     * @param Viewer              viewing actor for computing live values
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TArray<FQuestRewardPreview> GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
+
+    /**
+     * Cold advertised-rewards query — reads a questline ASSET's compiled reward manifest directly, with no running game
+     * / no live instance. For catalog UI (quest-giver hub, bounty board) that shows "what does this quest pay" BEFORE
+     * it's activated. Mirrors GetAdvertisedRewards but sources nodes from the asset's CompiledNodes instead of the live
+     * manager. Viewer-dependent rewards (scaled) compute off the compiled template; a cold catalog may pass null Viewer.
+     *
+     * @param Questline    the compiled questline asset to inspect
+     * @param ContentTag   the Step or container whose advertised rewards you want (must be a compiled tag in this asset)
+     * @param Viewer       optional viewing actor for live-computed previews (null = context-free)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
+    static TArray<FQuestRewardPreview> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag ContentTag, AActor* Viewer);
+
+    /**
+     * Cold query for a questline's QUESTLINE-LEVEL rewards — what completing the whole questline pays, per outcome, read
+     * directly off the asset's authored QuestlineRewards map. Manager-free / works pre-activation (the catalog / bounty-
+     * board case). Distinct from GetAdvertisedRewardsFromAsset, which surfaces rewards wired into content NODES; this is
+     * the questline's own completion reward, keyed by its top-level Exit outcome. Each reward is previewed via
+     * DescribeReward (pass the viewing actor for live-computed values).
+     *
+     * @return outcome tag -> the previews that outcome pays. Empty map for a questline with no questline-level rewards.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
+
+    /**
+     * Live query for a RUNNING questline's questline-level rewards, per outcome — what completing this active questline
+     * will pay. HUD/journal companion to the cold GetQuestlineRewardsFromAsset. Returns empty if the questline isn't
+     * currently loaded (use the cold asset query for pre-activation catalogs).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
+    
+    /**
+     * The rewards a completing node advertises for a specific outcome — the rewards on that outcome's path, plus (unless
+     * bIncludeAnyOutcome is false) the any-outcome rewards, since the any-outcome route fires on every completion.
+     * Computes each preview live; querying never grants.
+     * 
+     * @param WorldContext      world context for resolving the quest system
+     * @param ContentTag        the Step or container whose advertised rewards you want
+     * @param OutcomeTag        the outcome to preview (a registered outcome tag; static-outcome paths only)
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TArray<FQuestRewardPreview> GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome = true);
+
+    /**
+     * Every outcome of a completing content node and what each pays, as a map — the "whole picture" companion to
+     * GetAdvertisedRewardsForOutcome (which asks one outcome at a time). For a journal/tooltip showing "Success: X,
+     * Failure: Y". Each outcome's list includes the any-outcome rewards (they fire regardless). Static outcomes only;
+     * dynamic paths aren't represented (they have no author-time outcome tag).
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
+    
     // -------------------------------------------------------------------------------------------------------------
     // Display data queries — lookup the display data associated with a given quest tag.
     // -------------------------------------------------------------------------------------------------------------

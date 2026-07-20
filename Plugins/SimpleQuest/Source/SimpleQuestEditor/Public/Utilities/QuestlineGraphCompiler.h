@@ -171,6 +171,14 @@ private:
 	void ComputeContainerReachability(UQuestlineGraph* InGraph);
 
 	/**
+	 * Resolves each completing node's per-path reward advertisement (ReachableRewardsByPath). Runs AFTER the routing
+	 * tables (NextNodesByPath / NextNodesOnForward / NextNodesOnAnyOutcome) are populated: it walks a node's completion
+	 * routes to the reward nodes downstream, following reward + pass-through util forward chains and stopping at the
+	 * next content node (whose rewards belong to it). Steps AND containers advertise.
+	 */
+	static void BuildRewardManifest(UQuestlineGraph* InGraph);
+
+	/**
 	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
 	 * by compiled tag names (FName) so LinkedQuestline boundary crossings work via the same compiled-tag naming the rest of
 	 * the compiler uses. Cleared at Compile() start.

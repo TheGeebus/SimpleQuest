@@ -18,6 +18,7 @@
 
 struct FSimpleQuestSaveSnapshot;
 struct FQuestRoleSourceInfo;
+
 class UQuestDisplayData;
 class UQuestObjective;
 class UActorComponent;

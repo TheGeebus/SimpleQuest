@@ -7,7 +7,6 @@
 #include "QuestlineNode_Step.generated.h"
 
 class UQuestObjective;
-class UQuestReward;
 
 
 UCLASS()
@@ -27,10 +26,6 @@ public:
 	/** The objective that defines how this step is completed. Required for compilation. */
 	UPROPERTY(EditAnywhere, Category = "Step")
 	TSoftClassPtr<UQuestObjective> ObjectiveClass;
-
-	/** Optional reward granted on step completion. */
-	UPROPERTY(EditAnywhere, Category = "Step")
-	TSoftClassPtr<UQuestReward> RewardClass;
 
 	UPROPERTY(EditAnywhere, Category = "Step")
 	TArray<TSoftObjectPtr<AActor>> TargetActors;

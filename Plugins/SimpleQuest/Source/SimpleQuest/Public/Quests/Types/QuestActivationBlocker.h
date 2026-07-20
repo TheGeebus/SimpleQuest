@@ -47,7 +47,7 @@ enum class EQuestActivationBlocker : uint8
  * UnsatisfiedLeafTags is populated only when Reason == PrereqUnmet; for other reasons the array is empty.
  * Designers consuming this branch on Reason and produce contextual dialogue / UI accordingly.
  */
-USTRUCT(BlueprintType)
+USTRUCT(BlueprintType, meta = (ScriptName = "EQuestActivationBlocker"))
 struct SIMPLEQUEST_API FQuestActivationBlocker
 {
 	GENERATED_BODY()

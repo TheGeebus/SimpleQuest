@@ -1,0 +1,33 @@
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+#include "Rewards/CurrencyReward.h"
+#include "Quests/Types/QuestRewardPayloads.h"
+#include "NativeGameplayTags.h"
+#include "StructUtils/InstancedStruct.h"
+#include "SimpleQuestLog.h"
+
+// The currency category root — registered so the Currency field's picker has a namespace. Adopters define their
+// specific currencies under it (SimpleQuest.Reward.Currency.Gold, .Gems, …); the framework ships no specific currency.
+UE_DEFINE_GAMEPLAY_TAG(TAG_Reward_Currency, "SimpleQuest.Reward.Currency");
+
+void UCurrencyReward::TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming)
+{
+	if (Amount <= 0) return;
+
+	if (!Currency.IsValid())
+	{
+		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("UCurrencyReward: no currency set — nothing granted. Pick a SimpleQuest.Reward.Currency.* tag."));
+		return;
+	}
+	DeliverReward(Currency, FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount }));
+}
+
+TArray<FQuestRewardPreview> UCurrencyReward::DescribeReward_Implementation(AActor* Viewer) const
+{
+	if (Amount <= 0 || !Currency.IsValid()) return {};
+	FQuestRewardPreview P;
+	P.RewardType  = Currency;
+	P.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ Amount });
+	return { P };
+}

@@ -1,0 +1,44 @@
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
+#include "StructUtils/InstancedStruct.h"
+#include "QuestRewardPreview.generated.h"
+
+class AActor;
+
+/**
+ * One display line describing what a reward WOULD grant, for "do this task, get this reward" UI — produced by
+ * UQuestRewardBase::DescribeReward without granting anything. The framework prescribes only RewardType (the reward's kind,
+ * the same channel the grant publishes on, for grouping / icons); everything the UI renders lives in PreviewData, a
+ * designer-defined struct read via PreviewData.Get<T>() (keyed by RewardType by convention). The grant's RewardType +
+ * CustomData contract, on the preview side.
+ */
+USTRUCT(BlueprintType)
+struct FQuestRewardPreview
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Reward")
+	FGameplayTag RewardType;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Reward")
+	FInstancedStruct PreviewData;
+};
+
+/**
+ * Map-legal wrapper for a list of previews — lets advertised rewards be returned keyed by outcome in a TMap (a bare
+ * TArray can't be a TMap value in a BlueprintType/UFUNCTION signature).
+ */
+USTRUCT(BlueprintType)
+struct FQuestRewardPreviewList
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Reward")
+	TArray<FQuestRewardPreview> Previews;
+};
+

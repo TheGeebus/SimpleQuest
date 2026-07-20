@@ -31,6 +31,7 @@
 #include "Nodes/Utility/QuestlineNode_AddFact.h"
 #include "Nodes/Utility/QuestlineNode_ClearFact.h"
 #include "Nodes/Utility/QuestlineNode_RemoveFact.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "Types/QuestPinRole.h"
 
 
@@ -1346,6 +1347,19 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 				"e.g., 'the door is permanently unlocked now, drop the fact whatever its ref-count.'"),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_ClearFact>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Grant Rewards
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddReward", "Grant Rewards"),
+			NSLOCTEXT("SimpleQuestEditor", "AddRewardTooltip",
+				"Grant one or more rewards when this node activates, then forward. Each reward is a configured adapter "
+				"that computes its grant and publishes it on its reward-type channel; recipient components subscribed "
+				"to that type react. Fire-when-reached — the node has no lifecycle of its own."),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_Reward>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 

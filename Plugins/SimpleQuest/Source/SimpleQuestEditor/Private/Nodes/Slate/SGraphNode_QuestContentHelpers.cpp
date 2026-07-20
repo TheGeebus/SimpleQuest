@@ -99,7 +99,7 @@ namespace FQuestNodeSlateHelpers
 			]
 
 			// Items column.
-			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top)
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Top).Padding(0.f, 0.f, 8.f, 0.f)
 			[
 				ItemsColumn
 			];

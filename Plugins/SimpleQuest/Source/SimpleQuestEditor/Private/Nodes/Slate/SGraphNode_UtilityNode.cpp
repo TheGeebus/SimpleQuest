@@ -6,6 +6,7 @@
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
 #include "Nodes/Utility/QuestlineNode_PrereqGate.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Quests/QuestlineGraph.h"
 #include "SGraphPin.h"
@@ -15,6 +16,8 @@
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
 #include "TutorialMetaData.h"
+#include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
+#include "Rewards/QuestRewardBase.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -23,6 +26,9 @@
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SGraphNode_UtilityNode"
+
+// On-node reward summary text/chevron color. Muted so the list reads as secondary info, not authoring.
+static const FLinearColor REWARD_SUMMARY_COLOR = FLinearColor(0.65f, 0.65f, 0.7f, 1.f);
 
 void SGraphNode_UtilityNode::Construct(const FArguments& InArgs, UEdGraphNode* InNode)
 {
@@ -158,7 +164,8 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 		.AutoHeight()
 		.Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
-			Cast<UQuestlineNode_PrereqGate>(UtilityNode) ? SNullWidget::NullWidget
+			Cast<UQuestlineNode_Reward>(UtilityNode)       ? CreateRewardSummaryWidget()
+			: Cast<UQuestlineNode_PrereqGate>(UtilityNode) ? SNullWidget::NullWidget
 				: (UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget())
 		]
 
@@ -350,20 +357,32 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateTagPickerWidget()
 				OnTargetTagsChanged(NewTags);
 			})
 		];
-	/*
-	return SNew(SGameplayTagContainerCombo)
-		.Filter(*FilterString)
-		.TagContainer_Lambda([this]()
-		{
-			if (UtilityNode) return UtilityNode->GetTargetQuestTags();
-			static const FGameplayTagContainer Empty;
-			return Empty;
-		})
-		.OnTagContainerChanged_Lambda([this](const FGameplayTagContainer& NewTags)
-		{
-			OnTargetTagsChanged(NewTags);
-		});
-		*/
+}
+
+TSharedRef<SWidget> SGraphNode_UtilityNode::CreateRewardSummaryWidget()
+{
+	UQuestlineNode_Reward* RewardNode = Cast<UQuestlineNode_Reward>(UtilityNode);
+	if (!RewardNode) return SNullWidget::NullWidget;
+
+	// Each entry's class display name — the same label the details-panel class picker shows ("XP Reward",
+	// "Loot Table Reward", a BP subclass by its asset name). A null entry (class not yet chosen) reads as "(empty)"
+	// so a half-filled array still counts honestly. No config surfaced — just what's placed.
+	TArray<FString> RewardClassNames;
+	RewardClassNames.Reserve(RewardNode->Rewards.Num());
+	for (const TObjectPtr<UQuestRewardBase>& Reward : RewardNode->Rewards)
+	{
+		RewardClassNames.Add(Reward ? Reward->GetClass()->GetDisplayNameText().ToString()
+									: LOCTEXT("RewardEntryEmpty", "(empty)").ToString());
+	}
+
+	// Consistent with every other expandable node (Givers/Targets/Classes): "▸ Rewards: <first>", chevron reveals the
+	// rest. Empty array collapses the whole row (helper returns a collapsed SBox), same as an empty giver list.
+	return FQuestNodeSlateHelpers::BuildLabeledExpandableList(
+		LOCTEXT("RewardsLabel", "Rewards"),
+		RewardClassNames,
+		REWARD_SUMMARY_COLOR,
+		[RewardNode]() { return RewardNode->bRewardsExpanded; },
+		[RewardNode]() { RewardNode->bRewardsExpanded = !RewardNode->bRewardsExpanded; });
 }
 
 void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& NewTags)

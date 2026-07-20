@@ -4,16 +4,19 @@
 #include "Nodes/Slate/SGraphNode_LinkedQuestline.h"
 #include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
 #include "GameplayTagContainer.h"
-#include "Nodes/QuestlineNode_LinkedQuestline.h"
-#include "Quests/QuestlineGraph.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
 #include "ScopedTransaction.h"
 #include "TutorialMetaData.h"
 #include "PropertyCustomizationHelpers.h"
-#include "SimpleQuestLog.h"
+#include "Nodes/QuestlineNode_LinkedQuestline.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/Types/QuestOutcomeTags.h"
+#include "Quests/Types/QuestRewardPreview.h"
+#include "Rewards/QuestRewardBase.h"
 #include "Styling/AppStyle.h"
+#include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
@@ -22,7 +25,38 @@
 
 #define LOCTEXT_NAMESPACE "SGraphNode_LinkedQuestline"
 
-#define LINKED_GIVER_COLOR FLinearColor(0.75f, 0.4f, 1.f)
+//#define LINKED_GIVER_COLOR FLinearColor(0.75f, 0.4f, 1.f)
+static const FLinearColor LINKED_GIVER_COLOR(0.75f, 0.4f, 1.f);
+static const FLinearColor LINKED_REWARD_COLOR(0.85f, 0.70f, 0.25f);
+
+// "Outcome: TypeA, TypeB" lines for a linked questline's QuestlineRewards — surfaces what the linked questline grants on
+// completion (authored on the OTHER asset) so it isn't invisible where the questline is USED. Viewer-free (editor context).
+static TArray<FString> BuildLinkedRewardSummaryLines(const UQuestlineGraph* LinkedGraph)
+{
+	TArray<FString> Lines;
+	if (!LinkedGraph) return Lines;
+
+	for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : LinkedGraph->GetQuestlineRewards())
+	{
+		if (Pair.Value.Rewards.IsEmpty()) continue;
+
+		const FString OutcomeLabel = (!Pair.Key.IsValid() || Pair.Key == TAG_Outcome_AnyOutcome.GetTag())
+			? TEXT("Any")
+			: FQuestTagComposer::GetLeafSegment(Pair.Key.GetTagName());
+
+		TArray<FString> Types;
+		for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
+		{
+			if (!Reward) continue;
+			for (const FQuestRewardPreview& P : Reward->DispatchDescribeReward(nullptr))
+			{
+				Types.AddUnique(FQuestTagComposer::GetLeafSegment(P.RewardType.GetTagName()));
+			}
+		}
+		Lines.Add(FString::Printf(TEXT("%s: %s"), *OutcomeLabel, Types.Num() ? *FString::Join(Types, TEXT(", ")) : TEXT("(unset)")));
+	}
+	return Lines;
+}
 
 void SGraphNode_LinkedQuestline::Construct(const FArguments& InArgs, UQuestlineNode_LinkedQuestline* InNode)
 {
@@ -161,6 +195,25 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 				[this]() { if (LinkedNode) LinkedNode->bGiversExpanded = !LinkedNode->bGiversExpanded; })
 		];
 
+	// Linked questline's own completion rewards ("Grants") — surfaced here so a reward that fires on every use of the
+	// linked questline (but is authored on THAT asset) is visible where it's placed. Same expandable idiom as Givers.
+	{
+		const UQuestlineGraph* LinkedGraph = LinkedNode ? LinkedNode->LinkedGraph.LoadSynchronous() : nullptr;
+		const TArray<FString> RewardLines = BuildLinkedRewardSummaryLines(LinkedGraph);
+		if (RewardLines.Num() > 0)
+		{
+			InnerVerticalBox->AddSlot().AutoHeight().Padding(FMargin(14.f, 2.f, 10.f, 10.f))
+			[
+				FQuestNodeSlateHelpers::BuildLabeledExpandableList(
+					LOCTEXT("LinkedGrantsLabel", "Grants"),
+					RewardLines,
+					LINKED_REWARD_COLOR,
+					[this]() { return LinkedNode && LinkedNode->bRewardsExpanded; },
+					[this]() { if (LinkedNode) LinkedNode->bRewardsExpanded = !LinkedNode->bRewardsExpanded; })
+			];
+		}
+	}
+	
 	TSharedPtr<SWidget> EnabledStateWidget = GetEnabledStateWidget();
 	if (EnabledStateWidget.IsValid())
 	{

@@ -66,6 +66,24 @@ struct FQuestRewardSet
 };
 
 /**
+ * A questline's own reward sets, compiled to a form the runtime can read without loading the source asset. A linked
+ * questline is erased at compile time — its nodes are inlined into the enclosing graph and its own UQuestlineGraph is
+ * never loaded at runtime — so its authored QuestlineRewards (which live only on that asset) would otherwise be
+ * unreachable when it completes while embedded. The compiler duplicates each reward onto the owning (enclosing) graph
+ * and records it here, keyed by outcome, so completion delivery and advertisement queries resolve rewards uniformly
+ * whether the questline runs standalone or embedded.
+ */
+USTRUCT()
+struct FQuestCompiledQuestlineRewards
+{
+    GENERATED_BODY()
+
+    /** Reward sets by the outcome the questline resolves with, matched against a resolution's OutcomeTag at delivery. */
+    UPROPERTY()
+    TMap<FGameplayTag , FQuestRewardSet> RewardsByOutcome;
+};
+
+/**
  * Authoring container for a questline, a directed graph of quest and step nodes. Owns a UEdGraph (QuestlineEdGraph) containing
  * the visual layout, and holds the compiler output used at runtime: entry node tags and the full node tag-to-class registry
  * (including nodes from linked questline assets inlined at compile time). This is the asset type the designer creates and
@@ -117,6 +135,17 @@ private:
      */
     UPROPERTY()
     TMap<FName, TObjectPtr<UQuestNodeBase>> CompiledNodes;
+
+    /**
+     * Questline-level rewards compiled to a runtime-reachable form, keyed by questline-asset identity tag name.
+     * Populated by the compiler: one entry for this graph's own QuestlineRewards, plus one for each linked questline
+     * inlined into it (whose source asset is never loaded at runtime). The manager flattens these into its own
+     * by-identity lookup at registration; delivery and reward queries read that lookup by a resolution's GraphTag
+     * rather than the live asset, so an embedded questline's rewards resolve the same as a standalone one's. Keyed by
+     * FName for the same reason CompiledNodes is: this is built at compile time, where FGameplayTag is unreliable.
+     */
+    UPROPERTY()
+    TMap<FName, FQuestCompiledQuestlineRewards> CompiledQuestlineRewards;
     
     /**
      * GroupTags this graph's UActivationGroupListenerNode instances subscribe to. Stamped by the compiler after

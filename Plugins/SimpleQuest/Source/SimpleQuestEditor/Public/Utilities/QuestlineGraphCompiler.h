@@ -39,6 +39,8 @@ class FQuestlineGraphTraversalPolicy;
 class SIMPLEQUESTEDITOR_API FQuestlineGraphCompiler
 {
 public:
+	static void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph,
+	                                    FName IdentityName);
 	FQuestlineGraphCompiler();
 	virtual ~FQuestlineGraphCompiler();
 

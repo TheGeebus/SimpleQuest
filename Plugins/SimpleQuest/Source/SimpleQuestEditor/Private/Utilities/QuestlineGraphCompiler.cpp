@@ -681,6 +681,10 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 				AllCompiledQuestTags.AddUnique(LinkedAssetIdentityName);
 				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(LinkedAssetIdentityName, false);
 
+				// Bridge the placement to its inner asset identity: the same tag HarvestQuestlineRewards files the inner
+				// questline's rewards under (below), so a query resolving this wrapper by its contextual tag can reach them.
+				QuestInstance->LinkedInnerIdentityTag = CurrentAssetIdentityTag;
+
 				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath, ResolveResettable(LinkedGraph->GetResettableReplay(), bNodeResettable));
 
 				// Harvest the linked questline's own questline-level rewards onto the root graph under the linked asset's

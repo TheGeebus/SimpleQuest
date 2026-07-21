@@ -274,10 +274,22 @@ protected:
     bool bIsLinkedQuestlinePlacement = false;
 
     /**
+     * For a LinkedQuestline placement wrapper (bIsLinkedQuestlinePlacement == true), the identity tag of the inner
+     * questline asset this wrapper instantiates — SimpleQuest.Questline.<InnerQuestlineID>, with no node-label leaf.
+     * Empty for inline placements and for a wrapper whose linked asset failed to resolve. This is the runtime bridge
+     * from a placement's ContextualTag to the inner asset's own identity: the inner asset is never loaded at runtime
+     * (its nodes are inlined here), so its identity-keyed data — e.g. questline-level rewards in
+     * LiveQuestlineRewardsByIdentity — is otherwise unreachable from the placement. Matches the identity the compiler
+     * harvests the inner questline's rewards under.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    FGameplayTag LinkedInnerIdentityTag;
+
+    /**
      * Parent-context routing tag for this node. Compiler-stamped from the parent compile-context's TagPrefix + node
      * label, so nodes inside a LinkedQuestline placement carry the parent asset's prefix. Used for all event bus
-     * routing on the contextualized channel; will pair with StandaloneTag (Phase A of §1.4 dual-tag finalization)
-     * for cross-asset subscriber compatibility.
+     * routing on the contextualized channel. Cross-asset subscriber compatibility is provided by AssetScopedAliasTags
+     * (the per-enclosing-asset perspectives) rather than a single standalone tag.
      *
      * Format: SimpleQuest.Questline.<ParentPath>.<...>.<SanitizedNodeLabel>
      */

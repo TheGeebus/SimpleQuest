@@ -8,6 +8,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Engine/AssetManager.h"
+#include "Quests/QuestlineGraph.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
@@ -199,10 +200,10 @@ protected:
 
 	/**
 	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
-	 * GetAdvertisedRewards). Looks the node up by ContentTag, reads its compile-time ReachableRewardsByPath, resolves
-	 * each reward-node key to its live instance, and aggregates DescribeReward. Pure: no grant, no event. PathIdentity
-	 * is the compile-time path key (a static outcome's tag-name, a dynamic PathName, or NAME_None for any-outcome);
-	 * resolved from the caller's outcome tag by the library.
+	 * GetAdvertisedRewardsForAnyOutcome and ...ForOutcome). Looks the node up by ContentTag, reads its compile-time
+	 * ReachableRewardsByPath, resolves each reward-node key to its live instance, and aggregates DescribeReward. Pure:
+	 * no grant, no event. PathIdentity is the compile-time path key (a static outcome's tag-name, a dynamic PathName,
+	 * or NAME_None for any-outcome); resolved from the caller's outcome tag by the library.
 	 */
 	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
@@ -284,6 +285,15 @@ private:
 	 * read its QuestlineRewards. Weak so an unloaded graph drops out without dangling.
 	 */
 	TMap<FGameplayTag, TWeakObjectPtr<UQuestlineGraph>> LiveGraphsByIdentity;
+
+	/**
+	 * Questline-level rewards by questline-asset identity tag name, flattened from every registered graph's
+	 * CompiledQuestlineRewards (a graph contributes its own identity plus each linked questline inlined into it).
+	 * Delivery (PublishGraphResolutions) and the reward queries read this by a resolution's GraphTag, so an embedded
+	 * questline's rewards resolve without its source asset — which is never loaded at runtime. Populated in
+	 * RegisterQuestlineGraph alongside LiveGraphsByIdentity.
+	 */
+	TMap<FName, FQuestCompiledQuestlineRewards> LiveQuestlineRewardsByIdentity;
 
 	/**
 	 * Resolves a perspective-form FGameplayTag to the canonical (Instance->GetContextualTag()) the runtime uses

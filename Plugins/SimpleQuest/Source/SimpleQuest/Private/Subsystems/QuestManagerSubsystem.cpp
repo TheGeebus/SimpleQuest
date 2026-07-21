@@ -43,6 +43,7 @@
 #include "Quests/Types/PrereqLeafSubscription.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
+#include "Quests/Types/QuestOutcomeTags.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Subsystems/SignalSubsystem.h"
@@ -322,6 +323,18 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
     if (const FGameplayTag IdentityTag = FGameplayTag::RequestGameplayTag(FName(*IdentityString), false); IdentityTag.IsValid())
     {
         LiveGraphsByIdentity.Add(IdentityTag, Graph);
+    }
+
+    // Flatten this graph's compiled questline-level rewards (its own + any linked questlines inlined into it) into the
+    // by-identity lookup, so delivery and reward queries resolve an embedded questline's rewards without its source
+    // asset (which is never loaded at runtime). Keyed by the same identity tag name the compiler attributes resolutions to.
+    for (const TPair<FName, FQuestCompiledQuestlineRewards>& Entry : Graph->CompiledQuestlineRewards)
+    {
+        LiveQuestlineRewardsByIdentity.Add(Entry.Key, Entry.Value);
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("RegisterQuestlineGraph: '%s' — compiled questline rewards for identity '%s' (%d outcome set(s))"),
+            *Graph->GetName(),
+            *Entry.Key.ToString(),
+            Entry.Value.RewardsByOutcome.Num());
     }
 
     // Build a contextual-FName to alias-FNames lookup from the graph's persisted alias pairs, so each instance can
@@ -1959,11 +1972,14 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
 {
     TMap<FGameplayTag, FQuestRewardPreviewList> Out;
 
-    const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(QuestlineTag);
-    const UQuestlineGraph* Graph = GraphPtr ? GraphPtr->Get() : nullptr;
-    if (!Graph) return Out;
+    // Read the compiled reward map by identity FName rather than the live UQuestlineGraph, so a query for an EMBEDDED
+    // questline's identity resolves — its source asset is never loaded at runtime, so it's absent from LiveGraphsByIdentity,
+    // but its rewards were flattened into LiveQuestlineRewardsByIdentity at the enclosing graph's registration. Same
+    // per-questline, per-outcome shape as before; just reachable for embedded identities (the live twin of delivery).
+    const FQuestCompiledQuestlineRewards* Compiled = LiveQuestlineRewardsByIdentity.Find(QuestlineTag.GetTagName());
+    if (!Compiled) return Out;
 
-    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Graph->GetQuestlineRewards())
+    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Compiled->RewardsByOutcome)
     {
         FQuestRewardPreviewList List;
         for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
@@ -3178,20 +3194,26 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
                 FQuestEndedEvent(Resolution.GraphTag, Resolution.OutcomeTag, Source, Payload));
         }
         
-        // Questline-level rewards: resolve the questline's identity tag back to its graph and grant its authored rewards
-        // for this outcome, using the completer's forward attribution (same instigator a wired reward node gets). This
-        // is the questline's completion — the one place its whole-questline rewards fire, standalone or linked.
-        if (const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(Resolution.GraphTag))
+        // Questline-level rewards: read the questline's compiled reward map by its identity tag and grant, for this
+        // completion, BOTH the set keyed to the resolved outcome AND the Any-Outcome set (which fires regardless of
+        // which outcome resolved — the resolution never carries the Any-Outcome tag itself, so it must be consulted
+        // explicitly, mirroring how a Grant Rewards node on the Any-Outcome pin fires on every path). Completer forward
+        // attribution matches a wired reward node's. The map is keyed by identity FName and flattened from every
+        // registered graph's CompiledQuestlineRewards, so a linked questline's rewards resolve here without its source
+        // asset (never loaded at runtime) — the one place a questline's whole-questline rewards fire, standalone or embedded.
+        if (const FQuestCompiledQuestlineRewards* Compiled = LiveQuestlineRewardsByIdentity.Find(Resolution.GraphTag.GetTagName()))
         {
-            if (const UQuestlineGraph* ResolvedGraph = GraphPtr->Get())
+            FQuestRewardActivationContext RewardIncoming;
+            static_cast<FQuestContextBase&>(RewardIncoming) = CompleterContext;
+            RewardIncoming.IncomingOutcomeTag = Resolution.OutcomeTag;
+
+            if (const FQuestRewardSet* Set = Compiled->RewardsByOutcome.Find(Resolution.OutcomeTag); Set && !Set->Rewards.IsEmpty())
             {
-                if (const FQuestRewardSet* Set = ResolvedGraph->GetQuestlineRewards().Find(Resolution.OutcomeTag); Set && !Set->Rewards.IsEmpty())
-                {
-                    FQuestRewardActivationContext RewardIncoming;
-                    static_cast<FQuestContextBase&>(RewardIncoming) = CompleterContext;
-                    RewardIncoming.IncomingOutcomeTag = Resolution.OutcomeTag;
-                    UQuestRewardNode::GrantRewardSet(Set->Rewards, RewardIncoming, QuestSignalSubsystem);
-                }
+                UQuestRewardNode::GrantRewardSet(Set->Rewards, RewardIncoming, QuestSignalSubsystem);
+            }
+            if (const FQuestRewardSet* AnySet = Compiled->RewardsByOutcome.Find(TAG_Outcome_AnyOutcome.GetTag()); AnySet && !AnySet->Rewards.IsEmpty())
+            {
+                UQuestRewardNode::GrantRewardSet(AnySet->Rewards, RewardIncoming, QuestSignalSubsystem);
             }
         }
     }

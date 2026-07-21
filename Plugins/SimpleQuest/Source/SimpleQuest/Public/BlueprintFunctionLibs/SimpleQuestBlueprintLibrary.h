@@ -173,12 +173,12 @@ public:
      * @param Viewer              viewing actor for computing live values
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
-    static TArray<FQuestRewardPreview> GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
+    static TArray<FQuestRewardPreview> GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
 
     /**
      * Cold advertised-rewards query — reads a questline ASSET's compiled reward manifest directly, with no running game
      * / no live instance. For catalog UI (quest-giver hub, bounty board) that shows "what does this quest pay" BEFORE
-     * it's activated. Mirrors GetAdvertisedRewards but sources nodes from the asset's CompiledNodes instead of the live
+     * it's activated. Mirrors GetAdvertisedRewardsForAnyOutcome but sources nodes from the asset's CompiledNodes instead of the live
      * manager. Viewer-dependent rewards (scaled) compute off the compiled template; a cold catalog may pass null Viewer.
      *
      * @param Questline    the compiled questline asset to inspect

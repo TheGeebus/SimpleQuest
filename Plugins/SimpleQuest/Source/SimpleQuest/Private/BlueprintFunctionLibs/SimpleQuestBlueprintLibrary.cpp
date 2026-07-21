@@ -320,7 +320,7 @@ UQuestObjective* USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag(const UO
     return nullptr;
 }
 
-TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
+TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
 {
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
     // Any-outcome bucket: PathIdentity = NAME_None. bIncludeAnyOutcome is moot when the path IS the any-outcome bucket.
@@ -336,7 +336,7 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFr
     if (!Owner) return {};
 
     // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) — matches the live
-    // GetAdvertisedRewards (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
+    // GetAdvertisedRewardsForAnyOutcome (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
     // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
     return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true);
 }

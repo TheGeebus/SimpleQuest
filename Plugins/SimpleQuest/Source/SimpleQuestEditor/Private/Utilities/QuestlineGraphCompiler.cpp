@@ -60,51 +60,80 @@
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 
-namespace
+/**
+ * Walks upstream from Pin through any chain of UQuestlineNode_Knot reroute nodes. Returns true if any
+ * upstream path eventually lands on a UQuestlineNode_Entry by passing only through Knot nodes; false
+ * otherwise. VisitedKnots guards against pathological knot-cycle authoring (shouldn't happen but cheap).
+ */
+static bool DoesPinReachEntryThroughKnots(const UEdGraphPin* Pin, TSet<const UEdGraphNode*>& VisitedKnots)
 {
-	/**
-	 * Walks upstream from Pin through any chain of UQuestlineNode_Knot reroute nodes. Returns true if any
-	 * upstream path eventually lands on a UQuestlineNode_Entry by passing only through Knot nodes; false
-	 * otherwise. VisitedKnots guards against pathological knot-cycle authoring (shouldn't happen but cheap).
-	 */
-	bool DoesPinReachEntryThroughKnots(const UEdGraphPin* Pin, TSet<const UEdGraphNode*>& VisitedKnots)
+	if (!Pin) return false;
+
+	for (const UEdGraphPin* UpstreamPin : Pin->LinkedTo)
 	{
-		if (!Pin) return false;
+		if (!UpstreamPin) continue;
+		const UEdGraphNode* UpstreamNode = UpstreamPin->GetOwningNode();
+		if (!UpstreamNode) continue;
 
-		for (const UEdGraphPin* UpstreamPin : Pin->LinkedTo)
+		if (Cast<UQuestlineNode_Entry>(UpstreamNode))
 		{
-			if (!UpstreamPin) continue;
-			const UEdGraphNode* UpstreamNode = UpstreamPin->GetOwningNode();
-			if (!UpstreamNode) continue;
+			return true;
+		}
 
-			if (Cast<UQuestlineNode_Entry>(UpstreamNode))
+		if (const UQuestlineNode_Knot* KnotNode = Cast<UQuestlineNode_Knot>(UpstreamNode))
+		{
+			if (VisitedKnots.Contains(KnotNode)) continue;
+			VisitedKnots.Add(KnotNode);
+
+			for (const UEdGraphPin* KnotInputPin : KnotNode->Pins)
 			{
-				return true;
-			}
-
-			if (const UQuestlineNode_Knot* KnotNode = Cast<UQuestlineNode_Knot>(UpstreamNode))
-			{
-				if (VisitedKnots.Contains(KnotNode)) continue;
-				VisitedKnots.Add(KnotNode);
-
-				for (const UEdGraphPin* KnotInputPin : KnotNode->Pins)
+				if (KnotInputPin && KnotInputPin->Direction == EGPD_Input)
 				{
-					if (KnotInputPin && KnotInputPin->Direction == EGPD_Input)
+					if (DoesPinReachEntryThroughKnots(KnotInputPin, VisitedKnots))
 					{
-						if (DoesPinReachEntryThroughKnots(KnotInputPin, VisitedKnots))
-						{
-							return true;
-						}
+						return true;
 					}
 				}
 			}
-			// Any non-Entry, non-Knot upstream node halts this path — the cycle would be broken by
-			// whatever lifecycle guard that node enforces on the second activation pass.
 		}
-		return false;
+		// Any non-Entry, non-Knot upstream node halts this path — the cycle would be broken by
+		// whatever lifecycle guard that node enforces on the second activation pass.
 	}
+	return false;
 }
 
+/**
+ * Duplicate a questline's authored QuestlineRewards onto OwnerGraph (the enclosing/root graph that owns all compiled
+ * instances) and record them under IdentityName in OwnerGraph->CompiledQuestlineRewards, so the runtime can deliver and
+ * advertise them without loading SourceGraph — which, for a linked questline, is never loaded at runtime. Mirrors the
+ * per-node reward duplication the reward-node compile path uses (DuplicateObject with the owning graph as outer).
+ */
+void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName)
+{
+	if (!SourceGraph || !OwnerGraph || IdentityName.IsNone()) return;
+
+	const TMap<FGameplayTag, FQuestRewardSet>& Authored = SourceGraph->GetQuestlineRewards();
+	if (Authored.IsEmpty()) return;
+
+	FQuestCompiledQuestlineRewards Compiled;
+	for (const TPair<FGameplayTag, FQuestRewardSet>& OutcomePair : Authored)
+	{
+		if (!OutcomePair.Key.IsValid() || OutcomePair.Value.Rewards.IsEmpty()) continue;
+
+		FQuestRewardSet DuplicatedSet;
+		DuplicatedSet.Rewards.Reserve(OutcomePair.Value.Rewards.Num());
+		for (const TObjectPtr<UQuestRewardBase>& Authored_Reward : OutcomePair.Value.Rewards)
+		{
+			DuplicatedSet.Rewards.Add(Authored_Reward ? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph) : nullptr);
+		}
+		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
+	}
+
+	if (Compiled.RewardsByOutcome.Num() > 0)
+	{
+		OwnerGraph->CompiledQuestlineRewards.Add(IdentityName, MoveTemp(Compiled));
+	}
+}
 
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
@@ -222,6 +251,7 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	
 	InGraph->Modify();
 	InGraph->CompiledNodes.Empty(); 
+	InGraph->CompiledQuestlineRewards.Empty();
 	InGraph->EntryNodeTags.Empty();
 	InGraph->CompiledQuestTags.Empty();
 	InGraph->CompiledNodeAliases.Empty();
@@ -268,6 +298,10 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
+	
+	// This graph's own questline-level rewards, harvested under its root identity (linked children are harvested
+	// separately inside the LinkedQuestline recursion below, each under its own inner identity).
+	HarvestQuestlineRewards(InGraph, InGraph, RootAssetIdentityName);
 
 	// Flatten contextual→alias map into the persisted pairs array. One entry per (Contextual, Alias) pair so a node with
 	// N aliases produces N entries; nodes without aliases (top-level, no LinkedQuestline ancestors) produce none.
@@ -648,6 +682,10 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(LinkedAssetIdentityName, false);
 
 				QuestInstance->EntryStepTags = CompileGraph(LinkedGraph->QuestlineEdGraph, InnerPrefix, InnerAliasPrefixes, LinkedBoundaryCompletionsByPath, VisitedAssetPaths, &InnerEntryByPath, ResolveResettable(LinkedGraph->GetResettableReplay(), bNodeResettable));
+
+				// Harvest the linked questline's own questline-level rewards onto the root graph under the linked asset's
+				// identity, so they deliver/advertise at runtime even though the linked asset is never loaded then.
+				HarvestQuestlineRewards(LinkedGraph, RootGraph, LinkedAssetIdentityName);
 
 				CurrentAssetIdentityTag = PreviousAssetIdentity;
 				CurrentInnerContainerTag = PreviousContainer;

@@ -5,6 +5,35 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.1] — 2026-07-21 — Embedded Questline Rewards Fix
+
+A fix release for questline-level rewards. In 0.6.0, a questline's own
+completion rewards fired correctly when the questline ran on its own, but
+were silently skipped when that questline was embedded inside another as a
+linked node — the exact "fires on every use, standalone or embedded" case
+the rewards release promised. Embedded questlines now deliver their own
+completion rewards, so a reusable questline dropped into several parent
+questlines pays out its authored rewards in every one.
+
+### Fixes
+
+- **A linked questline now grants its own completion rewards.** When a
+  questline is embedded inside another and completes, the rewards authored on
+  *that* questline (its whole-questline reward sets, keyed by outcome) now
+  fire, crediting the completing player — matching how they already fired for
+  a standalone questline. Rewards authored under a specific outcome and under
+  Any Outcome both deliver.
+- **Live reward queries reach embedded questlines.** Asking what a questline
+  pays now returns results for a questline embedded inside another, not only
+  for one running standalone.
+
+### API
+
+- **`Get Advertised Rewards` is renamed to `Get Advertised Rewards For Any
+  Outcome`**, so it reads as the clear counterpart to `Get Advertised Rewards
+  For Outcome`. The old name is redirected, so existing Blueprints retarget
+  automatically with no action needed.
+
 ## [0.6.0] — 2026-07-19 — Rewards
 
 The rewards release: granting rewards is now a first-class part of the graph,

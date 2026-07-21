@@ -228,11 +228,11 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 			Graph->GetNodesOfClass(Nodes);
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				bool bIsRegisteredTag = false;
-				const FName ResolvedPath = Node->ResolvePathIdentity(&bIsRegisteredTag);
+				FGameplayTag Outcome;
+				const FName ResolvedPath = Node->ResolvePathIdentity(&Outcome);
 				if (!ResolvedPath.IsNone())
 				{
-					AllPaths.AddUnique({ ResolvedPath, bIsRegisteredTag });
+					AllPaths.AddUnique({ ResolvedPath, Outcome });
 				}
 				// Else: misconfigured placement (no PathName, no OutcomeTag default, no wire). Discovery
 				// silently skips; ValidateNodeDuringCompilation flags it as a Warning at compile time.
@@ -241,7 +241,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 	}
 
 	// ── Source 2: UPROPERTY reflection scan (ObjectiveOutcome meta) ──
-	// Always a registered FGameplayTag — bIsRegisteredTag = true.
+	// Always carries a valid Outcome tag
 	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
 	{
 		for (TFieldIterator<FStructProperty> PropIt(ObjectiveClass); PropIt; ++PropIt)
@@ -252,18 +252,18 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllPaths.AddUnique({ Tag->GetTagName(), true });
+					AllPaths.AddUnique({ Tag->GetTagName(), *Tag });
 				}
 			}
 		}
 
 		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
-		// Returns FGameplayTags; always registered tags — bIsRegisteredTag = true.
+		// Returns FGameplayTags; always carries a valid Outcome tag
 		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
 			if (Tag.IsValid())
 			{
-				AllPaths.AddUnique({ Tag.GetTagName(), true });
+				AllPaths.AddUnique({ Tag.GetTagName(), Tag });
 			}
 		}
 	}

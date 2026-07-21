@@ -52,17 +52,24 @@ struct FPrereqExaminerTree;
 
 
 /**
- * Output of DiscoverObjectivePaths: pairs the path identity FName with its provenance. bIsRegisteredTag
- * is true when Identity came from a registered FGameplayTag source (the OutcomeTag pin DefaultValue parsed
- * as a tag, an ObjectiveOutcome UPROPERTY meta scan, or GetPossibleOutcomes); false when Identity is a bare
- * designer-authored or auto-numbered K2 placement string (PathName / "Dynamic N"). The compiler uses this
- * to register only known-registered-tag identities at the gameplay tag manager root, capturing provenance
- * at the source instead of inferring it later from string structure (which a dotted PathName could defeat).
+ * Output of DiscoverObjectivePaths: a completion path's two orthogonal axes, carried separately.
+ *
+ * Identity is the ROUTING id — which output branch of the node this is. Always present, always the routing key
+ * (NextNodesByPath etc.). For a static placement it is the outcome tag's full name; for a dynamic placement it is
+ * the authored PathName or an auto-numbered "Dynamic N".
+ *
+ * Outcome is the OUTCOME — the gameplay result the branch represents — as a real FGameplayTag, valid ONLY when the
+ * path is statically named by a registered tag. Invalid for dynamic placements (the runtime outcome isn't known at
+ * author time) and for the any-outcome route (there is no outcome). So Outcome.IsValid() answers "is this a
+ * registered-tag path" directly.
  */
 struct FObjectivePathDescriptor
 {
 	FName Identity;
-	bool bIsRegisteredTag = false;
+	FGameplayTag Outcome;
+
+	/** Convenience: a path is a registered-tag path exactly when it carries a valid outcome tag. */
+	bool IsRegisteredTag() const { return Outcome.IsValid(); }
 
 	bool operator==(const FObjectivePathDescriptor& Other) const { return Identity == Other.Identity; }
 };

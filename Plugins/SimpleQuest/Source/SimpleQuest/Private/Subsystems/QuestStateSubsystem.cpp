@@ -756,7 +756,11 @@ FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
 			Snapshot.WorldFacts = WorldState->GetAllFacts();
 		}
 	}
-	Snapshot.Resolutions = QuestResolutions;   // ActivationContextSnapshot copies in-memory but won't serialize (un-flagged)
+	Snapshot.Resolutions = QuestResolutions;
+	// Entries carry FQuestEntryArrival::ActivationContextSnapshot, which IS SaveGame-flagged and persists across the
+	// disk round-trip (only its Instigator weak-ptr is un-flagged; actor attribution rides InstigatorRef instead). The
+	// restore path relies on this — RestoreQuestlineGraph re-derives an objective's IncomingContext from the persisted
+	// snapshot — so do not un-flag it or stop capturing it here.
 	Snapshot.Entries = QuestEntries;
 	return Snapshot;
 }

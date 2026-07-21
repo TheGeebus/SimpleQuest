@@ -760,7 +760,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     				// where the INI write would auto-decorate them with state-fact suffixes (Live, Completed,
     				// etc.). Provenance is captured at the source by DiscoverObjectivePaths via the K2 node's
     				// ResolvePathIdentity out-param, so a designer typing a dotted PathName cannot defeat it.
-    				if (Desc.bIsRegisteredTag)
+    				if (Desc.IsRegisteredTag())
     				{
     					AllCompiledQuestTags.AddUnique(Desc.Identity);
     				}
@@ -2645,14 +2645,14 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 
 		Node->ReachableRewardsByPath.Reset();
 
-		// Path labels. A Step's outcome tag may be dynamic (an authored PathName, not a registered tag) — the objective's
-		// bIsRegisteredTag is the authoritative flag. Containers always route on registered outcome tags.
-		TMap<FName, bool> RegisteredTagByPath;
+		// Map each Step path to its registered outcome tag (invalid for dynamic paths). Containers always route on
+		// registered outcome tags, so their path key IS the tag name — no descriptor lookup needed.
+		TMap<FName, FGameplayTag> OutcomeByPath;
 		if (const UQuestStep* Step = Cast<UQuestStep>(Node))
 		{
 			for (const FObjectivePathDescriptor& Desc : FSimpleQuestEditorUtilities::DiscoverObjectivePaths(Step->GetQuestObjective().LoadSynchronous()))
 			{
-				RegisteredTagByPath.Add(Desc.Identity, Desc.bIsRegisteredTag);
+				OutcomeByPath.Add(Desc.Identity, Desc.Outcome);
 			}
 		}
 		const bool bIsStepNode = Cast<UQuestStep>(Node) != nullptr;
@@ -2660,10 +2660,11 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 		auto LabelForPath = [&](FName PathId) -> FText
 		{
 			if (PathId.IsNone()) return NSLOCTEXT("SimpleQuest", "RewardPathOnCompletion", "On completion");
-			const bool bTag = bIsStepNode ? RegisteredTagByPath.FindRef(PathId)
-										  : UGameplayTagsManager::Get().RequestGameplayTag(PathId, false).IsValid();
-			if (!bTag) return FText::FromName(PathId);							// dynamic PathName — show as authored
-			const FString Full = PathId.ToString();								// registered tag — show the leaf
+			// The outcome tag: for a Step, from the descriptor; for a container, the path key is itself a registered tag.
+			const FGameplayTag Outcome = bIsStepNode ? OutcomeByPath.FindRef(PathId)
+													 : UGameplayTagsManager::Get().RequestGameplayTag(PathId, false);
+			if (!Outcome.IsValid()) return FText::FromName(PathId);				// dynamic PathName — show as authored
+			const FString Full = Outcome.ToString();							// registered tag — show the leaf
 			int32 Dot; return FText::FromString(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
 		};
 

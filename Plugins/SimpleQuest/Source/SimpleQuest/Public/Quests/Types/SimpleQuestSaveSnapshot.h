@@ -57,19 +57,21 @@ struct SIMPLEQUEST_API FSimpleQuestSaveSnapshot
 	
 	/**
 	 * Nodes that were armed and WAITING on a prerequisite at capture time — a prereq-deferred activation that hasn't
-	 * fired yet (a chapter gated on the previous one, a standalone Prereq Gate, etc.). Keyed by QuestContentGuid — the
-	 * stable per-placement identity, valid for content nodes AND tag-less utility nodes alike — mapping to the runtime
-	 * context to activate with. This "waiting" state is transient runtime state, not a fact, so without it a deferred
-	 * node never wakes on restore even when its prereq later satisfies. RestoreQuestlineGraph replays Activate for each
-	 * entry, which re-defers (or fires if the prereq is already met).
+	 * fired yet (a chapter gated on the previous one, a standalone Prereq Gate, etc.). Keyed by QuestContentGuid (the
+	 * per-placement save key — see its contract on UQuestNodeBase; resolved to nodes via the compiled graph, not by
+	 * inverting the GUID), valid for content nodes AND tag-less utility nodes alike, mapping to the runtime context to
+	 * activate with. This "waiting" state is transient runtime state, not a fact, so without it a deferred node never
+	 * wakes on restore even when its prereq later satisfies. RestoreQuestlineGraph replays Activate for each entry,
+	 * which re-defers (or fires if the prereq is already met).
 	 */
 	UPROPERTY(SaveGame)
 	TMap<FGuid, FQuestObjectiveRuntimeContext> DeferredActivations;
 	
 	/**
 	 * Per-instance objective progress (e.g. a counting objective's CurrentElements), keyed by the owning Step's
-	 * QuestContentGuid — the stable per-placement save key. Captured from each live objective's CaptureObjectiveState;
-	 * re-applied after the objective is rebuilt on load. Only objectives that contributed state appear here.
+	 * QuestContentGuid (the per-placement save key — see its contract on UQuestNodeBase; resolved via the compiled
+	 * graph, not by inverting the GUID). Captured from each live objective's CaptureObjectiveState; re-applied after
+	 * the objective is rebuilt on load. Only objectives that contributed state appear here.
 	 */
 	UPROPERTY(SaveGame)
 	TMap<FGuid, FSimpleQuestObjectiveSaveState> ObjectiveStates;

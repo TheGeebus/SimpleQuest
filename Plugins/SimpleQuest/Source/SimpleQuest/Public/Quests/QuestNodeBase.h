@@ -250,8 +250,18 @@ protected:
     virtual void ResetTransientState();
     
     /**
-     * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID
-     * chain for save data keying in linked graphs.
+     * Stable per-placement save key. Composed at compile time as CombineGuids(outer-placement-chain, AuthoredNodeGuid),
+     * so the same authored node placed in N linked contexts yields N distinct keys — each placement is its own saved
+     * instance. Never hand-edited.
+     *
+     * Save-key contract (for save-state tooling and data pipelines): this GUID is a one-way composition — you CANNOT
+     * recover "which node, which placement" from the value alone. Save-state maps keyed by it (DeferredActivations,
+     * ObjectiveStates) are therefore resolved to their nodes by looking the GUID up against the compiled node set
+     * (the running game, or a resolver that holds the compiled graph, provides that forward map) — not by inverting the
+     * key. AuthoredNodeGuid is the placement-independent component: two instances of the same authored node share it,
+     * so it is the handle for "this node regardless of where it's placed." Runtime save STATE is thus addressed through
+     * the compiled graph, not as free-standing human-readable rows — by design: a readable companion identity on save
+     * rows was considered and deferred until a concrete consumer needs it.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FGuid QuestContentGuid;

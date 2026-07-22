@@ -42,6 +42,49 @@ enum class EPrerequisiteExpressionType : uint8
 					 // Appended at the end so existing assets stamped with int values 0–7 continue to deserialize.
 };
 
+/**
+ * The role a given FPrerequisiteExpressionNode field plays FOR A SPECIFIC Type. A leaf node is a tagged union — the
+ * same physical field means different things (or nothing) depending on Type, and one field's meaning can even depend
+ * on a sibling (LeafTag is a live mirror fact only for Leaf_Path + bResettableRead). This enum names each role so a
+ * consumer — the data-table schema generator, a bulk-editor, a translator, or validation — knows what a field VALUE
+ * means for a row of a given type, not merely that it is set.
+ */
+enum class EPrereqLeafFieldRole : uint8
+{
+	Unused,                   // not read for this Type
+	FactChannel,              // LeafTag: a live WorldState fact channel the runtime queries (Leaf)
+	BridgeDisplayOnly,        // LeafTag: editor-side Prereq-Examiner bridge tag; runtime IGNORES it
+	MirrorFact,               // LeafTag: per-run mirror fact the runtime reads (Leaf_Path + bResettableRead only)
+	QuestScope,               // LeafQuestTag: the source quest the check is scoped to
+	OutcomeMatch,             // LeafOutcomeTag: a quest-scoped match criterion
+	OutcomeMatchAndChannel,   // LeafOutcomeTag: match criterion AND subscribe channel, context-free (Leaf_Outcome)
+	PathMatch,                // LeafPathIdentity: the specific authored path the resolution must match
+	ResettableSelect,         // bResettableRead: selects mirror-fact vs registry read (Leaf_Path)
+	Children,                 // ChildIndices: combinator operands
+};
+
+/**
+ * Per-Type field-role map for FPrerequisiteExpressionNode — the ONE authoritative statement of which fields a leaf of
+ * a given Type populates and what each means. This is the machine-readable form of the per-Type field-presence that
+ * the evaluator enforces (by guarding every read) and the builders enforce (by setting only the right fields). Adding
+ * a leaf Type means adding one row here; every consumer (schema generation, validation, docs) then picks it up.
+ */
+struct FPrereqLeafFieldContract
+{
+	EPrereqLeafFieldRole LeafTag          = EPrereqLeafFieldRole::Unused;
+	EPrereqLeafFieldRole LeafQuestTag     = EPrereqLeafFieldRole::Unused;
+	EPrereqLeafFieldRole LeafOutcomeTag   = EPrereqLeafFieldRole::Unused;
+	EPrereqLeafFieldRole LeafPathIdentity = EPrereqLeafFieldRole::Unused;
+	EPrereqLeafFieldRole ResettableRead   = EPrereqLeafFieldRole::Unused;
+	EPrereqLeafFieldRole ChildIndices     = EPrereqLeafFieldRole::Unused;
+};
+
+/**
+ * Returns the authoritative field-role contract for a given leaf/combinator Type. Single source of truth for the
+ * per-Type field-presence matrix — consumed by the Phase-2 table schema, validation, and docs.
+ */
+SIMPLEQUEST_API FPrereqLeafFieldContract GetPrereqFieldContract(EPrerequisiteExpressionType Type);
+
 USTRUCT(Blueprintable)
 struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 {
@@ -49,11 +92,11 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 
 	UPROPERTY() EPrerequisiteExpressionType Type = EPrerequisiteExpressionType::Always;
 
-	/** Meaningful for Type=Leaf (the WorldState fact tag). Also populated for Type=Leaf_Resolution and Type=Leaf_Path
-		as a bridge path-fact tag matching the runtime's MakeNodePathFact output for Prereq Examiner display
-		compatibility: runtime evaluation reads via UQuestStateSubsystem rather than WorldState; the bridge tag is
-		editor-side only. NOT populated for Type=Leaf_Entry. Entry leaves render via LeafQuestTag / LeafOutcomeTag
-		directly. */
+	/**
+	 * Per-Type role varies — see GetPrereqFieldContract(Type). Live WorldState fact for Leaf; editor-only bridge tag
+	 * for Leaf_Resolution/Leaf_Path (runtime ignores it); the per-run mirror fact the runtime reads for Leaf_Path when
+	 * bResettableRead.
+	 */
 	UPROPERTY() FGameplayTag LeafTag;
 
 	/** Source quest tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Path. The runtime evaluator

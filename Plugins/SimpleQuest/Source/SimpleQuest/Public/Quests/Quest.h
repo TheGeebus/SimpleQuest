@@ -33,7 +33,10 @@ protected:
 	 * Per-path, source-filtered entry routing. When this quest is entered via a specific completion path identity from a
 	 * specific source, each FQuestEntryDestination in the matching list fires only if its SourceFilter matches the
 	 * IncomingSourceTag passed by the activating parent. Compiler-written from the inner Entry node's exposed specs: one
-	 * entry per spec; spec.Outcome.GetTagName() is the path identity for static placements.
+	 * entry per spec; spec.Outcome.GetTagName() is the path identity for static placements. A NAME_None key is the
+	 * any-outcome-from-a-specific-source case (an any-outcome spec): it means "any outcome," while the source is never
+	 * lost because it rides each destination's SourceFilter, not the key — distinct from the source-agnostic any-outcome
+	 * route, which lives in the separate NextNodesOnAnyOutcome collection.
 	 */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
 	TMap<FName, FQuestEntryRouteList> EntryStepTagsByPath;

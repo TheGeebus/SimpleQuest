@@ -10,6 +10,66 @@
 #include "Utilities/QuestTagComposer.h"
 
 
+FPrereqLeafFieldContract GetPrereqFieldContract(EPrerequisiteExpressionType Type)
+{
+	using R = EPrereqLeafFieldRole;
+	FPrereqLeafFieldContract C;
+	switch (Type)
+	{
+	case EPrerequisiteExpressionType::Always:
+		break;                                                            // no fields
+	case EPrerequisiteExpressionType::Leaf:
+		C.LeafTag = R::FactChannel;                                       // live WorldState fact
+		break;
+	case EPrerequisiteExpressionType::Leaf_Resolution:                   // legacy (no live authoring path)
+		C.LeafTag = R::BridgeDisplayOnly;
+		C.LeafQuestTag = R::QuestScope;
+		C.LeafOutcomeTag = R::OutcomeMatch;
+		break;
+	case EPrerequisiteExpressionType::Leaf_Entry:
+		C.LeafQuestTag = R::QuestScope;
+		C.LeafOutcomeTag = R::OutcomeMatch;                              // LeafTag NOT populated for Entry
+		break;
+	case EPrerequisiteExpressionType::Leaf_Path:
+		C.LeafTag = R::MirrorFact;                                        // read ONLY when ResettableRead selects it
+		C.LeafQuestTag = R::QuestScope;
+		C.LeafPathIdentity = R::PathMatch;
+		C.ResettableRead = R::ResettableSelect;
+		break;
+	case EPrerequisiteExpressionType::Leaf_Outcome:
+		C.LeafOutcomeTag = R::OutcomeMatchAndChannel;                    // context-free: no QuestScope
+		break;
+	case EPrerequisiteExpressionType::And:
+	case EPrerequisiteExpressionType::Or:
+	case EPrerequisiteExpressionType::Not:
+		C.ChildIndices = R::Children;
+		break;
+	}
+	return C;
+}
+
+#if !UE_BUILD_SHIPPING
+// Verifies a freshly-built node populates exactly the load-bearing fields its contract declares, catching drift if a
+// leaf Type or its builder changes without updating GetPrereqFieldContract. Display-only mirror fields (e.g.
+// Leaf_Outcome's LeafTag) are allowed to be set even when the contract marks them Unused — the contract states RUNTIME
+// role, and a set-but-runtime-unused field is honest (the check only flags a field REQUIRED by contract but left empty).
+static void ValidatePrereqNodeAgainstContract(const FPrerequisiteExpressionNode& Node)
+{
+	const FPrereqLeafFieldContract C = GetPrereqFieldContract(Node.Type);
+	auto RequiresTag = [](EPrereqLeafFieldRole Role) { return Role != EPrereqLeafFieldRole::Unused
+		&& Role != EPrereqLeafFieldRole::BridgeDisplayOnly && Role != EPrereqLeafFieldRole::MirrorFact; };
+	// A contract-required tag field must be valid. (Bridge/Mirror are conditional/editor — not required to be set.)
+	ensureMsgf(!RequiresTag(C.LeafQuestTag)   || Node.LeafQuestTag.IsValid(),
+		TEXT("Prereq node Type=%d requires LeafQuestTag but it is invalid"), (int32)Node.Type);
+	ensureMsgf(!RequiresTag(C.LeafOutcomeTag) || Node.LeafOutcomeTag.IsValid(),
+		TEXT("Prereq node Type=%d requires LeafOutcomeTag but it is invalid"), (int32)Node.Type);
+	ensureMsgf(C.LeafPathIdentity == EPrereqLeafFieldRole::Unused || !Node.LeafPathIdentity.IsNone(),
+		TEXT("Prereq node Type=%d requires LeafPathIdentity but it is None"), (int32)Node.Type);
+	ensureMsgf(C.LeafTag != EPrereqLeafFieldRole::FactChannel || Node.LeafTag.IsValid(),
+		TEXT("Prereq node Type=%d requires LeafTag (fact channel) but it is invalid"), (int32)Node.Type);
+}
+#endif
+
 bool FPrerequisiteExpression::Evaluate(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const
 {
 	if (Nodes.IsEmpty()) return true;
@@ -339,6 +399,9 @@ int32 FPrerequisiteExpression::AddFactLeaf(const FGameplayTag& FactTag)
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf;
 	Node.LeafTag = FactTag;
+#if !UE_BUILD_SHIPPING
+	ValidatePrereqNodeAgainstContract(Node);
+#endif
 	return Nodes.Add(Node);
 }
 
@@ -351,6 +414,9 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 		FQuestTagComposer::MakeNodePathFact(NodeTagName, OutcomeTag.GetTagName()), false);
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafOutcomeTag = OutcomeTag;
+#if !UE_BUILD_SHIPPING
+	ValidatePrereqNodeAgainstContract(Node);
+#endif
 	return Nodes.Add(Node);
 }
 
@@ -369,6 +435,9 @@ int32 FPrerequisiteExpression::AddPathLeaf(FName NodeTagName, FName PathIdentity
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafPathIdentity = PathIdentity;
 	Node.bResettableRead = bResettable;
+#if !UE_BUILD_SHIPPING
+	ValidatePrereqNodeAgainstContract(Node);
+#endif
 	return Nodes.Add(Node);
 }
 
@@ -380,6 +449,9 @@ int32 FPrerequisiteExpression::AddEntryLeaf(FName NodeTagName, const FGameplayTa
 	Node.Type = EPrerequisiteExpressionType::Leaf_Entry;
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafOutcomeTag = OutcomeTag;
+#if !UE_BUILD_SHIPPING
+	ValidatePrereqNodeAgainstContract(Node);
+#endif
 	return Nodes.Add(Node);
 }
 
@@ -393,6 +465,9 @@ int32 FPrerequisiteExpression::AddOutcomeLeaf(const FGameplayTag& OutcomeTag)
 	Node.Type = EPrerequisiteExpressionType::Leaf_Outcome;
 	Node.LeafTag = OutcomeTag;
 	Node.LeafOutcomeTag = OutcomeTag;
+#if !UE_BUILD_SHIPPING
+	ValidatePrereqNodeAgainstContract(Node);
+#endif
 	return Nodes.Add(Node);
 }
 

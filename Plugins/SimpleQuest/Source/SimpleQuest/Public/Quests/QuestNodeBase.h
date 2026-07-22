@@ -526,6 +526,7 @@ public:
     FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnAnyOutcome() const { return ResolvedGraphsOnAnyOutcome; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }
     FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnForward() const { return ResolvedGraphsOnForward; }
+    FORCEINLINE const FPrerequisiteExpression& GetPrerequisiteExpression() const { return PrerequisiteExpression; }
     FORCEINLINE const FText& GetDisplayName() const { return DisplayName; }
     FORCEINLINE const FText& GetDescription() const { return Description; }
     FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }

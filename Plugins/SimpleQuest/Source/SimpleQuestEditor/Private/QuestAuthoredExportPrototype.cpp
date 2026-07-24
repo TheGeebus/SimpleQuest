@@ -124,17 +124,38 @@ namespace
 		return false;
 	}
 
+	// True when Prop counts as authored config for the export: designer-editable (CPF_Edit) OR explicitly opted in via
+	// meta=(QuestExport) — the marker for authored state mutated through custom actions rather than the Details panel
+	// (e.g. combinator ConditionPinCount). EditConst (VisibleAnywhere) and Transient are never authored config.
+	bool IsAuthoredConfig(const FProperty* Prop)
+	{
+#if WITH_EDITOR
+		const bool bOptedIn = Prop->HasMetaData(TEXT("QuestExport"));
+#else
+		const bool bOptedIn = false;
+#endif
+		if (!Prop->HasAnyPropertyFlags(CPF_Edit) && !bOptedIn) return false;
+		return !Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst);
+	}
+
 	// Serialize one non-instanced property value to a cell string. FText routes through FTextStringHelper (loc-preserving,
 	// quote-wrapped — the same convention as the compiled display ini, so one FText form governs every file we write);
 	// everything else through ExportTextItem (T3D's conversion, round-trip-faithful via ImportText).
 	FString SerializeCell(const FProperty* Prop, const void* ValuePtr)
 	{
-		FString Out;
 		if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
 		{
-			FTextStringHelper::WriteToBuffer(Out, TextProp->GetPropertyValue(ValuePtr), /*bRequiresQuotes*/ true, /*bStripPackageNamespace*/ false);
+			// An empty FText exports as a truly EMPTY cell, not the quoted-empty "" that WriteToBuffer would emit —
+			// so the import's empty-cell skip leaves it at its default empty FText and the round-trip is symmetric.
+			// (Serializing "" instead would round-trip into an FText literally containing two quote chars, then
+			// re-export as NSLOCTEXT("","hash","\"\"") — the asymmetry the oracle caught.)
+			const FText Value = TextProp->GetPropertyValue(ValuePtr);
+			if (Value.IsEmpty()) return FString();
+			FString Out;
+			FTextStringHelper::WriteToBuffer(Out, Value, /*bRequiresQuotes*/ true, /*bStripPackageNamespace*/ false);
 			return Out;
 		}
+		FString Out;
 		Prop->ExportTextItem_Direct(Out, ValuePtr, /*Default*/ nullptr, /*Parent*/ nullptr, PPF_None);
 		return Out;
 	}
@@ -216,9 +237,7 @@ namespace
 			}
 			for (TFieldIterator<FProperty> It(Class); It; ++It)
 			{
-				// CPF_EditConst excludes VisibleAnywhere properties (inspectable, not authorable — e.g. QuestGuid,
-				// which is already the row key). The authored-config line is "designer can EDIT it".
-				if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst) || IsInstancedBearing(*It))
+				if (!IsAuthoredConfig(*It) || IsInstancedBearing(*It))
 				{
 					continue;
 				}
@@ -233,7 +252,7 @@ namespace
 		for (TFieldIterator<FProperty> It(Class); It; ++It)
 		{
 			const FProperty* Prop = *It;
-			if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst))
+			if (!IsAuthoredConfig(Prop))
 			{
 				continue;
 			}

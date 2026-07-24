@@ -63,6 +63,13 @@ void UQuestlineNode_PrerequisiteOr::AddConditionPin()
     SyncPinsByCategory(EGPD_Input, TEXT("QuestPrerequisite"), DesiredNames);
 }
 
+void UQuestlineNode_PrerequisiteOr::SyncConditionPins()
+{
+    TArray<FName> DesiredNames;
+    for (int32 i = 0; i < ConditionPinCount; ++i) DesiredNames.Add(*FString::Printf(TEXT("Condition_%d"), i));
+    SyncPinsByCategory(EGPD_Input, TEXT("QuestPrerequisite"), DesiredNames);
+}
+
 void UQuestlineNode_PrerequisiteOr::RemoveConditionPin(UEdGraphPin* PinToRemove)
 {
     if (ConditionPinCount <= 2 || !PinToRemove) return;

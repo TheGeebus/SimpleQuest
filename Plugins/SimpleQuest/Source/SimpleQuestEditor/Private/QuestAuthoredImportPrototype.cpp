@@ -98,23 +98,112 @@ namespace
 		return true;
 	}
 
-	// Restore one property on Target from a cell string — inverse of the export's SerializeCell. FText via
-	// FTextStringHelper::ReadFromBuffer (the loc-preserving form the export wrote); everything else ImportText.
-	// Instanced-bearing and Transient/EditConst columns never appear in the tables, so this only sees flat authored cells.
-	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FString& CellText)
+	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
+
+	// Restore a Kind=Array cell into the destination container. The Kind erases container type (TArray vs TSet), so branch
+	// on the destination Prop. Each element recurses through RestoreCell by ITS own Kind. NOTE: this path is exercised only
+	// by a STRUCTURED provider (JSON); TSV delivers arrays as a single Kind=Scalar cell (the "(a,b)" literal -> ImportText),
+	// so TSV never reaches here — no regression risk. FGameplayTagContainer arriving as an Array (a JSON tag list) is also
+	// handled: a TagContainer destination isn't an FArray/FSetProperty, so it falls to the ImportText fallback on the
+	// element-joined literal — but in practice JSON emits FGameplayTagContainer as Kind=TagContainer, not Array.
+	void RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 	{
-		if (CellText.IsEmpty()) return;   // empty cell = leave at default (lean A symmetry)
-		if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+		if (const FArrayProperty* ArrProp = CastField<FArrayProperty>(Prop))
 		{
-			FText Parsed;
-			const TCHAR* Buffer = *CellText;
-			if (FTextStringHelper::ReadFromBuffer(Buffer, Parsed))
+			FScriptArrayHelper Helper(ArrProp, ValuePtr);
+			Helper.EmptyValues();
+			for (const FQuestDataValue& Elem : Value.Elements)
 			{
-				TextProp->SetPropertyValue(ValuePtr, Parsed);
+				const int32 Idx = Helper.AddValue();
+				RestoreCell(ArrProp->Inner, Helper.GetRawPtr(Idx), Elem);
 			}
 			return;
 		}
-		Prop->ImportText_Direct(*CellText, ValuePtr, /*OwnerObject*/ nullptr, PPF_None);
+		if (const FSetProperty* SetProp = CastField<FSetProperty>(Prop))
+		{
+			FScriptSetHelper Helper(SetProp, ValuePtr);
+			Helper.EmptyElements();
+			for (const FQuestDataValue& Elem : Value.Elements)
+			{
+				const int32 Idx = Helper.AddDefaultValue_Invalid_NeedsRehash();
+				RestoreCell(SetProp->ElementProp, Helper.GetElementPtr(Idx), Elem);
+			}
+			Helper.Rehash();
+			return;
+		}
+		// Unexpected destination for an Array Kind — leave default (defensive; a structured provider shouldn't emit this).
+	}
+
+	// Restore one property from a structured cell value. switch(Kind): a STRUCTURED provider (JSON) delivers typed Kinds
+	// (Tag/Text/Bool/Array) that write directly to the property from the typed field; the string-carrying Kinds (Scalar/
+	// Enum/Reference/StructLiteral) go through ImportText from Value.Scalar. The TSV provider produces Kind=Scalar for
+	// EVERY cell (including FText cells, which arrive as a Scalar holding the NSLOCTEXT string), so the Scalar arm MUST
+	// preserve the property-type FText branch (ReadFromBuffer) that the pre-Stage-3 code used — otherwise TSV FText cells
+	// regress from ReadFromBuffer to ImportText. This keeps the refactor byte-identical for TSV (the B2 no-regression gate).
+	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
+	{
+		switch (Value.Kind)
+		{
+		case EQuestDataValueKind::Empty:
+			return;   // leave the constructed default (Q6 symmetry — replaces the old CellText.IsEmpty() skip)
+
+		case EQuestDataValueKind::Tag:
+			if (CastField<FStructProperty>(Prop))
+			{
+				*static_cast<FGameplayTag*>(ValuePtr) = Value.Tag;   // typed; inverse of the export reinterpret read
+			}
+			return;
+
+		case EQuestDataValueKind::TagContainer:
+			if (CastField<FStructProperty>(Prop))
+			{
+				*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
+			}
+			return;
+
+		case EQuestDataValueKind::Text:
+			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+			{
+				TextProp->SetPropertyValue(ValuePtr, Value.Text);   // typed — carries loc ns/key, no buffer round-trip
+			}
+			return;
+
+		case EQuestDataValueKind::Bool:
+			if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
+			{
+				BoolProp->SetPropertyValue(ValuePtr, Value.bBool);
+			}
+			return;
+
+		case EQuestDataValueKind::Array:
+			RestoreArrayCell(Prop, ValuePtr, Value);   // container-type branch handled inside (array/set); recurses
+			return;
+
+		case EQuestDataValueKind::Scalar:
+		case EQuestDataValueKind::Enum:
+		case EQuestDataValueKind::Reference:
+		case EQuestDataValueKind::StructLiteral:
+		default:
+		{
+			// String-carrying Kinds. Value.Scalar holds the cell string (== today's CellText for the TSV path). The FText
+			// special-case is PRESERVED here because TSV delivers FText cells as Kind=Scalar (a Scalar holding NSLOCTEXT);
+			// routing them to ImportText instead of ReadFromBuffer would regress TSV. JSON never lands here for FText (it
+			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar — exactly the old behavior.
+			if (Value.Scalar.IsEmpty()) return;
+			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+			{
+				FText Parsed;
+				const TCHAR* Buffer = *Value.Scalar;
+				if (FTextStringHelper::ReadFromBuffer(Buffer, Parsed))
+				{
+					TextProp->SetPropertyValue(ValuePtr, Parsed);
+				}
+				return;
+			}
+			Prop->ImportText_Direct(*Value.Scalar, ValuePtr, /*OwnerObject*/ nullptr, PPF_None);
+			return;
+		}
+		}
 	}
 
 	// Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns (key/class/graph)
@@ -129,7 +218,7 @@ namespace
 			if (!Prop) continue;
 			// RestoreCell types the string against the property (blind-parse contract §1); the value's CanonicalText is
 			// exactly the cell string the format produced, so this is byte-identical to the pre-Stage-2 string path.
-			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value.CanonicalText);
+			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
 		}
 	}
 

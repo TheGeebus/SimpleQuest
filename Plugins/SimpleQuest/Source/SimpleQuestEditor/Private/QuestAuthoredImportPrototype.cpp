@@ -35,6 +35,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "ISimpleQuestEditorModule.h"
+#include "Resolver/JsonQuestDataFormat.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -98,6 +99,21 @@ namespace
 		return true;
 	}
 
+	// Pick the format provider from an optional "--format=<name>" console arg (default TSV). The arg is what the ORACLE
+	// needs to pin a format deterministically; a project setting/registry is the later human-facing selection seam.
+	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
+	{
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--format=")))
+			{
+				const FString Name = Arg.RightChop(9);
+				if (Name.Equals(TEXT("json"), ESearchCase::IgnoreCase)) return MakeUnique<FJsonQuestDataFormat>();
+			}
+		}
+		return MakeUnique<FTsvQuestDataFormat>();   // default
+	}
+
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
 
 	// Restore a Kind=Array cell into the destination container. The Kind erases container type (TArray vs TSet), so branch
@@ -108,6 +124,23 @@ namespace
 	// element-joined literal — but in practice JSON emits FGameplayTagContainer as Kind=TagContainer, not Array.
 	void RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 	{
+		// A structured provider (JSON) delivers an FGameplayTagContainer as a Kind=Array of tag-string elements. The
+		// destination property's type decides: a container gets the elements requested as tags + assigned directly (the
+		// wrapped "(GameplayTags=..)" ImportText form can't be reconstructed from bare tag strings, so type it here).
+		if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+		{
+			if (StructProp->Struct == TBaseStructure<FGameplayTagContainer>::Get())
+			{
+				FGameplayTagContainer Container;
+				for (const FQuestDataValue& Elem : Value.Elements)
+				{
+					const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Elem.Scalar), false);
+					if (Tag.IsValid()) Container.AddTag(Tag);
+				}
+				*static_cast<FGameplayTagContainer*>(ValuePtr) = Container;
+				return;
+			}
+		}
 		if (const FArrayProperty* ArrProp = CastField<FArrayProperty>(Prop))
 		{
 			FScriptArrayHelper Helper(ArrProp, ValuePtr);
@@ -656,28 +689,35 @@ namespace
 
 	void ImportQuestlineCmd(const TArray<FString>& Args)
 	{
-		if (Args.Num() < 2)
+		// Separate the optional "--format=<name>" arg from the positional path args BEFORE rejoining (it must not get
+		// swept into the space-rejoined folder path). PathArgs = every arg that isn't a --flag.
+		TArray<FString> PathArgs;
+		for (const FString& Arg : Args)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath>'."));
+			if (!Arg.StartsWith(TEXT("--"))) PathArgs.Add(Arg);
+		}
+		if (PathArgs.Num() < 2)
+		{
+			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json]'."));
 			return;
 		}
 		// Console arg tokenization splits on whitespace and does NOT honor quotes, so a folder path containing spaces
-		// (e.g. "E:/Unreal Projects/...") arrives as multiple Args. The dest package path is the LAST arg (never has
+		// (e.g. "E:/Unreal Projects/...") arrives as multiple Args. The dest package path is the LAST path arg (never has
 		// spaces — it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces.
-		const FString DestPackagePath = Args.Last();
-		TArray<FString> FolderParts = Args;
+		const FString DestPackagePath = PathArgs.Last();
+		TArray<FString> FolderParts = PathArgs;
 		FolderParts.Pop();                                    // drop the dest path
 		FString FolderPath = FString::Join(FolderParts, TEXT(" "));
 		FolderPath = FolderPath.TrimQuotes();                 // tolerate quotes if the caller added them
 
-		// P0 — read the folder via the format provider, then validate the neutral bundle structurally, before creating
-		// anything. Provider reads files -> bundle; ValidateBundle checks the bundle (provider-agnostic). Stage 2:
-		// hardcoded TSV provider; Stage 3 makes it selectable.
-		FTsvQuestDataFormat Format;
+		// P0 — read the folder via the format provider (picked from --format, default TSV), then validate the neutral
+		// bundle structurally, before creating anything. Provider reads files -> bundle; ValidateBundle checks the bundle
+		// (provider-agnostic). MakeQuestDataFormat scans the ORIGINAL Args for --format (present or not among PathArgs).
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
 		FQuestDataBundle Bundle;
-		if (!Format.ReadBundle(FolderPath, Bundle))
+		if (!Format->ReadBundle(FolderPath, Bundle))
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: could not read '%s' as %s. No asset created."), *FolderPath, *Format.FormatName());
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: could not read '%s' as %s. No asset created."), *FolderPath, *Format->FormatName());
 			return;
 		}
 		TMap<FString, const FQuestDataRow*> NodeRowsByKey;

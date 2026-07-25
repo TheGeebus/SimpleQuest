@@ -362,6 +362,16 @@ namespace
 		const FString AssetPath = Args[0];
 		const FString DestPackagePath = Args[1];
 
+		// Forward an optional "--format=<name>" to the export/import sub-commands so the whole round-trip uses the chosen
+		// provider (default TSV). Without this the harness would silently run TSV even when --format=json was requested.
+		// DumpCompiled needs no format (it reads the compiled asset, not a file). NOTE: Args[0]/[1] are positional; a
+		// --format arg would be Args[2], so it doesn't disturb the positional reads above.
+		FString FormatArg;
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--format="))) { FormatArg = FString(TEXT(" ")) + Arg; break; }
+		}
+
 		const UQuestlineGraph* Src = LoadObject<UQuestlineGraph>(nullptr, *AssetPath);
 		if (!Src) { UE_LOG(LogSimpleQuest, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
 		const FString OriginalID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Src->GetEffectiveID());
@@ -379,16 +389,16 @@ namespace
 		};
 
 		// 1. Export the source (authored folder + we'll dump its compiled form too).
-		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s"), *AssetPath));
+		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *AssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *AssetPath));
 
 		// 2. Import from the source folder -> creates <ID>_RT in DestPackagePath.
-		Exec(FString::Printf(TEXT("SimpleQuest.ImportQuestline %s %s"), *SrcFolder, *DestPackagePath));
+		Exec(FString::Printf(TEXT("SimpleQuest.ImportQuestline %s %s%s"), *SrcFolder, *DestPackagePath, *FormatArg));
 
 		// 3. Export + dump the imported asset. Its object path: <DestPackagePath>/<ID>_RT.<ID>_RT
 		const FString RtAssetPath = FString::Printf(TEXT("%s/%s%s.%s%s"),
 			*DestPackagePath, *OriginalID, RT_SUFFIX, *OriginalID, RT_SUFFIX);
-		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s"), *RtAssetPath));
+		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *RtAssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
 
 		// 4. Compare, normalized.

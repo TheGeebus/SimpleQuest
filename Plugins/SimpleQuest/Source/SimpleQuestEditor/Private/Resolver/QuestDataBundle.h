@@ -21,10 +21,14 @@ struct FQuestDataRow
 	FString Key;
 	TMap<FString, FQuestDataValue> Cells;
 
+	// Structural-column string accessor (class / graph / QuestlineID — always plain-string cells). Reads Scalar, which
+	// BOTH providers populate (TSV mirrors it into CanonicalText too; JSON sets only Scalar). Reading Scalar rather than
+	// CanonicalText keeps this working for structured providers and aligns with the Stage-4 direction (CanonicalText, the
+	// TSV-only crutch, is going away — Scalar is the durable string field).
 	FString Get(const FString& Col) const
 	{
 		const FQuestDataValue* V = Cells.Find(Col);
-		return V ? V->CanonicalText : FString();
+		return V ? V->Scalar : FString();
 	}
 };
 

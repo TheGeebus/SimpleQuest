@@ -24,6 +24,7 @@
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/TsvQuestDataFormat.h"
+#include "Resolver/JsonQuestDataFormat.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -32,6 +33,21 @@ namespace
 	// The export walk (ExportRouting) builds the shared, format-free FQuestDataBundle directly — the local FExport*
 	// bundle structs and the TSV framing (cell escaping + file layout in WriteBundle) moved to the TSV provider
 	// (Resolver/TsvQuestDataFormat) in Stage 2. The walk speaks ONLY the neutral bundle; the provider owns file/format.
+
+	// Pick the format provider from an optional "--format=<name>" console arg (default TSV). The arg is what the ORACLE
+	// needs to pin a format deterministically; a project setting/registry is the later human-facing selection seam.
+	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
+	{
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--format=")))
+			{
+				const FString Name = Arg.RightChop(9);
+				if (Name.Equals(TEXT("json"), ESearchCase::IgnoreCase)) return MakeUnique<FJsonQuestDataFormat>();
+			}
+		}
+		return MakeUnique<FTsvQuestDataFormat>();   // default
+	}
 
 	// Make an exported map-key safe to embed inside a neutral ROW KEY (e.g. "QuestlineRewards[<key>].Rewards"): a key
 	// with an embedded tab/newline would corrupt the path segment the import later splits on. This is a KEY-well-formed-
@@ -505,8 +521,8 @@ namespace
 
 		// Hand the neutral bundle to the format provider (Stage 2: hardcoded TSV; Stage 3 makes this selectable). The
 		// walk above never touched a file — all framing/IO lives in the provider now.
-		FTsvQuestDataFormat Format;
-		if (Format.WriteBundle(Bundle, OutDir))
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
+		if (Format->WriteBundle(Bundle, OutDir))
 		{
 			int32 RowTotal = 0;
 			for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)

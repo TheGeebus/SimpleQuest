@@ -16,9 +16,9 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphNode_Comment.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "HAL/FileManager.h"
+#include "Resolver/QuestDataBundle.h"
+#include "Resolver/TsvQuestDataFormat.h"
 #include "UObject/UnrealType.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
@@ -40,122 +40,33 @@
 
 namespace
 {
-	// Reverse of the export's Sanitize — restore escaped whitespace in a cell.
-	FString Unsanitize(const FString& In)
+	// The import routing core speaks the shared, format-free FQuestDataBundle (Resolver/QuestDataBundle.h). The local
+	// FImport* bundle structs + the TSV parsing (Unsanitize / ParseTable / ParseEdges) moved to the TSV provider
+	// (Resolver/TsvQuestDataFormat::ReadBundle) in Stage 2 — the routing core never touches a file or format. What was
+	// ReadAndValidate splits: the provider reads the folder into a bundle; ValidateBundle (below) does the structural
+	// checks on that already-parsed bundle.
+
+	// P0 (routing half) — structural validation of an ALREADY-READ bundle. File reading (folder discovery + TSV parse)
+	// is the provider's job (ReadBundle); this does ONLY the structural checks and builds the two lookup indices the
+	// later phases need. Refuse (return false) on any inconsistency so no partial asset is ever created (validate-
+	// upfront). Provider-agnostic: a malformed bundle from ANY format provider is refused here identically.
+	bool ValidateBundle(const FQuestDataBundle& Bundle,
+	                    TMap<FString, const FQuestDataRow*>& NodeRowsByKey,   // node/self key -> row (excludes child rows)
+	                    TSet<FString>& AllRowKeys,                            // every key incl. instanced child keys
+	                    FString& OutError)
 	{
-		return In.Replace(TEXT("\\n"), TEXT("\n")).Replace(TEXT("\\t"), TEXT("\t"));
-	}
-
-	// One parsed entity row: its key + cells by column name. Mirrors the export's FExportRow, read side.
-	struct FImportRow
-	{
-		FString Key;
-		TMap<FString, FString> Cells;
-		FString Get(const FString& Col) const { const FString* V = Cells.Find(Col); return V ? *V : FString(); }
-	};
-
-	// One parsed table: the file stem (== the type, snake_cased) + rows.
-	struct FImportTable
-	{
-		FString Stem;
-		TArray<FString> Columns;
-		TArray<FImportRow> Rows;
-	};
-
-	struct FImportEdge { FString From; FString Type; FString To; };
-
-	// The whole parsed folder.
-	struct FImportBundle
-	{
-		TArray<FImportTable> Tables;      // every <stem>.tsv except edges.tsv
-		TArray<FImportEdge> Edges;
-		FImportTable* Questline = nullptr; // the questline_graph.tsv table (one row); pointer into Tables
-	};
-
-	// Parse one .tsv into columns + rows (first line is the header; column 0 is always "key").
-	bool ParseTable(const FString& Path, FImportTable& Out)
-	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
-		TArray<FString> Lines;
-		Text.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
-		if (Lines.Num() == 0) return false;
-
-		Lines[0].ParseIntoArray(Out.Columns, TEXT("\t"), /*CullEmpty*/ false);
-		for (int32 i = 1; i < Lines.Num(); ++i)
-		{
-			if (Lines[i].IsEmpty()) continue;
-			TArray<FString> Fields;
-			Lines[i].ParseIntoArray(Fields, TEXT("\t"), /*CullEmpty*/ false);
-			FImportRow Row;
-			Row.Key = Fields.IsValidIndex(0) ? Fields[0] : FString();
-			// Header col 0 is "key"; map cells for cols 1..N (missing trailing cells = empty, lean-A symmetry).
-			for (int32 c = 1; c < Out.Columns.Num(); ++c)
-			{
-				Row.Cells.Add(Out.Columns[c], Fields.IsValidIndex(c) ? Unsanitize(Fields[c]) : FString());
-			}
-			Out.Rows.Add(MoveTemp(Row));
-		}
-		return true;
-	}
-
-	bool ParseEdges(const FString& Path, TArray<FImportEdge>& Out)
-	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
-		TArray<FString> Lines;
-		Text.ParseIntoArrayLines(Lines, false);
-		for (int32 i = 1; i < Lines.Num(); ++i)   // skip "from\ttype\tto"
-		{
-			if (Lines[i].IsEmpty()) continue;
-			TArray<FString> F;
-			Lines[i].ParseIntoArray(F, TEXT("\t"), false);
-			if (F.Num() >= 3) Out.Add({ F[0], F[1], F[2] });
-		}
-		return true;
-	}
-
-		// P0 — parse the folder and validate structurally. Refuse (return false) on any inconsistency so no partial asset
-	// is ever created (validate-upfront). Populates Bundle and the two lookup indices the later phases need.
-	bool ReadAndValidate(const FString& FolderPath, FImportBundle& Bundle,
-	                     TMap<FString, const FImportRow*>& NodeRowsByKey,   // node/self key -> row (excludes child rows)
-	                     TSet<FString>& AllRowKeys,                          // every key incl. instanced child keys
-	                     FString& OutError)
-	{
-		if (!FPaths::DirectoryExists(FolderPath)) { OutError = FString::Printf(TEXT("folder not found: %s"), *FolderPath); return false; }
-
-		TArray<FString> TsvFiles;
-		IFileManager::Get().FindFiles(TsvFiles, *(FolderPath / TEXT("*.tsv")), /*Files*/ true, /*Dirs*/ false);
-		if (TsvFiles.Num() == 0) { OutError = TEXT("no .tsv files in folder"); return false; }
-
-		for (const FString& File : TsvFiles)
-		{
-			if (File == TEXT("edges.tsv"))
-			{
-				if (!ParseEdges(FolderPath / File, Bundle.Edges)) { OutError = TEXT("failed to parse edges.tsv"); return false; }
-				continue;
-			}
-			FImportTable Table;
-			Table.Stem = FPaths::GetBaseFilename(File);
-			if (!ParseTable(FolderPath / File, Table)) { OutError = FString::Printf(TEXT("failed to parse %s"), *File); return false; }
-			Bundle.Tables.Add(MoveTemp(Table));
-		}
-
-		// Locate the questline-self table (stem "questline_graph") — required, exactly one row.
-		for (FImportTable& T : Bundle.Tables)
-		{
-			if (T.Stem == TEXT("questline_graph")) { Bundle.Questline = &T; break; }
-		}
-		if (!Bundle.Questline) { OutError = TEXT("no questline_graph.tsv (the self row)"); return false; }
-		if (Bundle.Questline->Rows.Num() != 1) { OutError = TEXT("questline_graph.tsv must have exactly one row"); return false; }
+		// The questline-self table is keyed "questline_graph" — required, exactly one row.
+		const FQuestDataTable* Questline = Bundle.TablesByType.Find(TEXT("questline_graph"));
+		if (!Questline) { OutError = TEXT("no questline_graph table (the self row)"); return false; }
+		if (Questline->Rows.Num() != 1) { OutError = TEXT("questline_graph table must have exactly one row"); return false; }
 
 		// Index every row key. Node/self rows are keyed by GUID digits or the EffectiveID; instanced child rows carry
 		// a '/' path segment. Only NODE rows spawn editor nodes, so split the two — but track ALL keys so edge
-		// endpoints that legitimately reference child rows (contains edges) validate.
-		for (const FImportTable& T : Bundle.Tables)
+		// endpoints that legitimately reference child rows (contains edges) validate. Self = the questline_graph table.
+		for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 		{
-			const bool bIsSelf = (&T == Bundle.Questline);
-			for (const FImportRow& R : T.Rows)
+			const bool bIsSelf = (TablePair.Key == TEXT("questline_graph"));
+			for (const FQuestDataRow& R : TablePair.Value.Rows)
 			{
 				AllRowKeys.Add(R.Key);
 				const bool bIsChild = R.Key.Contains(TEXT("/"));
@@ -164,7 +75,7 @@ namespace
 		}
 
 		// Validate every edge endpoint resolves to a known key (node, self, or child).
-		for (const FImportEdge& E : Bundle.Edges)
+		for (const FQuestDataEdge& E : Bundle.Edges)
 		{
 			if (!AllRowKeys.Contains(E.From)) { OutError = FString::Printf(TEXT("edge 'from' references unknown key: %s"), *E.From); return false; }
 			if (!AllRowKeys.Contains(E.To))   { OutError = FString::Printf(TEXT("edge 'to' references unknown key: %s"), *E.To); return false; }
@@ -172,15 +83,15 @@ namespace
 
 		// Validate exactly one Entry row per graph cell (each graph level has one Entry — the import adopts it).
 		TMap<FString, int32> EntryCountByGraph;
-		for (const auto& Pair : NodeRowsByKey)
+		for (const TPair<FString, const FQuestDataRow*>& Pair : NodeRowsByKey)
 		{
-			const FImportRow* R = Pair.Value;
+			const FQuestDataRow* R = Pair.Value;
 			if (R->Get(TEXT("class")) == TEXT("QuestlineNode_Entry"))
 			{
 				EntryCountByGraph.FindOrAdd(R->Get(TEXT("graph")))++;
 			}
 		}
-		for (const auto& Pair : EntryCountByGraph)
+		for (const TPair<FString, int32>& Pair : EntryCountByGraph)
 		{
 			if (Pair.Value != 1) { OutError = FString::Printf(TEXT("graph '%s' has %d Entry rows (expected 1)"), *Pair.Key, Pair.Value); return false; }
 		}
@@ -208,25 +119,25 @@ namespace
 
 	// Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns (key/class/graph)
 	// and any column with no matching property (defensive — a stale table column shouldn't abort the import).
-	void RestoreRowProperties(UObject* Target, const FImportRow& Row)
+	void RestoreRowProperties(UObject* Target, const FQuestDataRow& Row)
 	{
-		for (const TPair<FString, FString>& Cell : Row.Cells)
+		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 		{
 			const FString& Col = Cell.Key;
 			if (Col == TEXT("class") || Col == TEXT("graph")) continue;
 			FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*Col));
 			if (!Prop) continue;
-			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
+			// RestoreCell types the string against the property (blind-parse contract §1); the value's CanonicalText is
+			// exactly the cell string the format produced, so this is byte-identical to the pre-Stage-2 string path.
+			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value.CanonicalText);
 		}
 	}
 
-	// Find the child-row table + row for an instanced sub-object key (e.g. "<owner>/Rewards[0]"). Returns the row's
-	// class name (for NewObject) via OutClass and the row pointer. Null if absent.
-	const FImportRow* FindChildRow(const FImportBundle& Bundle, const FString& ChildKey, FString& OutClass)
+	const FQuestDataRow* FindChildRow(const FQuestDataBundle& Bundle, const FString& ChildKey, FString& OutClass)
 	{
-		for (const FImportTable& T : Bundle.Tables)
+		for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 		{
-			for (const FImportRow& R : T.Rows)
+			for (const FQuestDataRow& R : TablePair.Value.Rows)
 			{
 				if (R.Key == ChildKey) { OutClass = R.Get(TEXT("class")); return &R; }
 			}
@@ -234,22 +145,22 @@ namespace
 		return nullptr;
 	}
 
-		// The one reattach primitive, used by both the self row (QuestlineRewards) and per-node rows (Rewards).
+	// The one reattach primitive, used by both the self row (QuestlineRewards) and per-node rows (Rewards).
 	// PROPERTY-DRIVEN (D2): walk Owner's instanced-bearing properties, rebuild each child from its child row (matched
 	// by key), in array/map order. The child KEY carries the position (Owner already knows the property + container
 	// type from reflection), so the only parse is extracting the trailing [index] / [mapkey] segment. Records every
 	// child key it consumed into OutConsumed so P-final can cross-check against the contains edges (D1's completeness
 	// property, kept as a tripwire rather than the reconstruction path).
-	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FImportBundle& Bundle,
-	                       TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
+	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
+						   TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
 
 	// Rebuild one instanced child object from its row: NewObject<class> under Owner, restore its cells, recurse its
 	// own instanced properties. Returns the constructed object (or null if the row/class is missing).
-	UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const FImportBundle& Bundle,
-	                          TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+	UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const FQuestDataBundle& Bundle,
+							  TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
 	{
 		FString ClassName;
-		const FImportRow* Row = FindChildRow(Bundle, ChildKey, ClassName);
+		const FQuestDataRow* Row = FindChildRow(Bundle, ChildKey, ClassName);
 		if (!Row) { OutWarnings.Add(FString::Printf(TEXT("child row missing for key '%s'"), *ChildKey)); return nullptr; }
 
 		UClass* Class = UClass::TryFindTypeSlow<UClass>(ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
@@ -285,8 +196,8 @@ namespace
 		return true;
 	}
 
-	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FImportBundle& Bundle,
-	                       TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
+						   TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
 	{
 		for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
 		{
@@ -304,8 +215,8 @@ namespace
 
 				// Gather this property's child keys, ordered by numeric index.
 				TArray<TPair<int32, FString>> Indexed;
-				for (const FImportTable& T : Bundle.Tables)
-					for (const FImportRow& R : T.Rows)
+				for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+					for (const FQuestDataRow& R : TablePair.Value.Rows)
 						if (R.Key.StartsWith(PropPrefix + TEXT("[")))
 						{
 							FString Tok; SplitLeafSegment(R.Key, Tok);
@@ -331,8 +242,8 @@ namespace
 				// Child keys look like "<owner>/QuestlineRewards[<mapkey>].Rewards[i]". Group by the <mapkey> segment.
 				TSet<FString> MapKeyTokens;
 				const FString MapOpen = PropPrefix + TEXT("[");
-				for (const FImportTable& T : Bundle.Tables)
-					for (const FImportRow& R : T.Rows)
+				for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+					for (const FQuestDataRow& R : TablePair.Value.Rows)
 						if (R.Key.StartsWith(MapOpen))
 						{
 							// extract the FIRST bracket token (the map key), which the export wrote as ExportTextItem(key).
@@ -364,8 +275,8 @@ namespace
 
 								const FString ArrPrefix = FString::Printf(TEXT("%s.%s"), *ValueOwnerKey, *SIt->GetName());
 								TArray<TPair<int32, FString>> Indexed;
-								for (const FImportTable& T : Bundle.Tables)
-									for (const FImportRow& R : T.Rows)
+								for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+									for (const FQuestDataRow& R : TablePair.Value.Rows)
 										if (R.Key.StartsWith(ArrPrefix + TEXT("[")))
 										{ FString Tok; SplitLeafSegment(R.Key, Tok); Indexed.Add({ FCString::Atoi(*Tok), R.Key }); }
 								Indexed.Sort([](const auto& A, const auto& B){ return A.Key < B.Key; });
@@ -391,7 +302,7 @@ namespace
 	// Spawn one editor node of the row's class into TargetGraph, adopt the exported identity, restore properties +
 	// instanced children. GUID preservation = assignment order (Finalize regenerates; we overwrite after). Returns the
 	// node, and maps its exported key -> the live node so P3/P4 can resolve edges + do the pin pass.
-	UEdGraphNode* SpawnNodeFromRow(UEdGraph* TargetGraph, const FImportRow& Row, const FImportBundle& Bundle,
+	UEdGraphNode* SpawnNodeFromRow(UEdGraph* TargetGraph, const FQuestDataRow& Row, const FQuestDataBundle& Bundle,
 	                               TMap<FString, UEdGraphNode*>& NodeByKey, TSet<FString>& Consumed, TArray<FString>& Warnings)
 	{
 		const FString ClassName = Row.Get(TEXT("class"));
@@ -407,11 +318,25 @@ namespace
 		Node->PostPlacedNewNode();
 		Node->AllocateDefaultPins();
 
-		// Adopt exported identity AFTER the placement hooks (which regenerate GUID + sweep the label).
+		// Adopt identity AFTER the placement hooks (which regenerate GUID + sweep the label). Dual-key contract: a row
+		// key that parses as a GUID is one of OUR exports — preserve it verbatim (round-trip identity). A key that does
+		// NOT parse is a fresh-authoring semantic id (a studio's "kill_boss") — mint a DETERMINISTIC GUID from it so the
+		// identity is stable across re-imports (save data + cross-asset refs + in-place round-trip don't churn).
+		// NewDeterministicGuid is a pure name-based hash (no process/build state), so the same id always mints the same
+		// GUID. Edge wiring is unaffected: NodeByKey is keyed by the row-key STRING, never this GUID.
 		if (UQuestlineNodeBase* QNode = Cast<UQuestlineNodeBase>(Node))
 		{
 			FGuid ParsedGuid;
-			if (FGuid::Parse(Row.Key, ParsedGuid)) QNode->QuestGuid = ParsedGuid;
+			if (FGuid::Parse(Row.Key, ParsedGuid))
+			{
+				QNode->QuestGuid = ParsedGuid;   // round-trip: preserve our exported GUID verbatim
+			}
+			else
+			{
+				// Fresh authoring: mint a stable GUID from the semantic key, namespaced so it can't collide with a
+				// different consumer's deterministic GUIDs.
+				QNode->QuestGuid = FGuid::NewDeterministicGuid(FString(TEXT("SimpleQuest.Import.")) + Row.Key);
+			}
 		}
 		RestoreRowProperties(Node, Row);
 
@@ -440,15 +365,15 @@ namespace
 	// Import every node row belonging to one graph level (graph cell). Quest containers, once spawned + Finalized,
 	// have auto-created inner graphs whose auto-Entry we adopt by GUID-overwrite from that inner graph's Entry row —
 	// then recurse into the inner level. GraphCell is "root" for the top graph, else the container node's key.
-	void ImportGraphLevel(UEdGraph* TargetGraph, const FString& GraphCell, const FImportBundle& Bundle,
-						  const TMap<FString, const FImportRow*>& NodeRowsByKey,
+	void ImportGraphLevel(UEdGraph* TargetGraph, const FString& GraphCell, const FQuestDataBundle& Bundle,
+						  const TMap<FString, const FQuestDataRow*>& NodeRowsByKey,
 						  TMap<FString, UEdGraphNode*>& NodeByKey, TSet<FString>& Consumed, TArray<FString>& Warnings)
 	{
 		ClearDefaultNodes(TargetGraph);   // populate entirely from rows (incl. the exported Entry) — no double-Entry
 
 		for (const auto& Pair : NodeRowsByKey)
 		{
-			const FImportRow* Row = Pair.Value;
+			const FQuestDataRow* Row = Pair.Value;
 			if (Row->Get(TEXT("graph")) != GraphCell) continue;
 
 			UEdGraphNode* Node = SpawnNodeFromRow(TargetGraph, *Row, Bundle, NodeByKey, Consumed, Warnings);
@@ -468,21 +393,21 @@ namespace
 	// be refreshed before their containers. We achieve innermost-first by processing nodes in descending graph DEPTH
 	// (depth = how many container-key hops from root). LinkedQuestline derives from the on-disk linked asset (order-
 	// independent). Step/Entry derive from their own restored properties (order-independent).
-	int32 GraphDepthOf(const FImportRow* Row, const TMap<FString, const FImportRow*>& NodeRowsByKey)
+	int32 GraphDepthOf(const FQuestDataRow* Row, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey)
 	{
 		int32 Depth = 0;
 		FString Cell = Row->Get(TEXT("graph"));
 		while (Cell != TEXT("root") && !Cell.IsEmpty())
 		{
 			++Depth;
-			const FImportRow* const* Parent = NodeRowsByKey.Find(Cell);
+			const FQuestDataRow* const* Parent = NodeRowsByKey.Find(Cell);
 			if (!Parent) break;
 			Cell = (*Parent)->Get(TEXT("graph"));
 		}
 		return Depth;
 	}
 
-	void RefreshPinsPass(const FImportBundle& Bundle, const TMap<FString, const FImportRow*>& NodeRowsByKey,
+	void RefreshPinsPass(const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey,
 	                     const TMap<FString, UEdGraphNode*>& NodeByKey, TArray<FString>& Warnings)
 	{
 		// Order node keys by descending depth (innermost graphs first).
@@ -490,8 +415,8 @@ namespace
 		NodeByKey.GetKeys(Keys);
 		Keys.Sort([&](const FString& A, const FString& B)
 		{
-			const FImportRow* const* RA = NodeRowsByKey.Find(A);
-			const FImportRow* const* RB = NodeRowsByKey.Find(B);
+			const FQuestDataRow* const* RA = NodeRowsByKey.Find(A);
+			const FQuestDataRow* const* RB = NodeRowsByKey.Find(B);
 			const int32 DA = RA ? GraphDepthOf(*RA, NodeRowsByKey) : 0;
 			const int32 DB = RB ? GraphDepthOf(*RB, NodeRowsByKey) : 0;
 			return DA > DB;   // deeper first
@@ -601,10 +526,10 @@ namespace
 		return nullptr;
 	}
 
-	void WireEdges(const FImportBundle& Bundle, const TMap<FString, UEdGraphNode*>& NodeByKey,
+	void WireEdges(const FQuestDataBundle& Bundle, const TMap<FString, UEdGraphNode*>& NodeByKey,
 	               const TSet<FString>& ConsumedChildKeys, TArray<FString>& Warnings)
 	{
-		for (const FImportEdge& E : Bundle.Edges)
+		for (const FQuestDataEdge& E : Bundle.Edges)
 		{
 			// contains edges are NOT wiring — they're the instanced-reattach record. Cross-check (D1's completeness
 			// property, kept as a tripwire): every contains edge's child must have been consumed by the property walk.
@@ -640,7 +565,7 @@ namespace
 		}
 	}
 
-		void ImportQuestlineCmd(const TArray<FString>& Args)
+	void ImportQuestlineCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 2)
 		{
@@ -656,12 +581,20 @@ namespace
 		FString FolderPath = FString::Join(FolderParts, TEXT(" "));
 		FolderPath = FolderPath.TrimQuotes();                 // tolerate quotes if the caller added them
 
-		// P0 — read + validate the whole folder before creating anything.
-		FImportBundle Bundle;
-		TMap<FString, const FImportRow*> NodeRowsByKey;
+		// P0 — read the folder via the format provider, then validate the neutral bundle structurally, before creating
+		// anything. Provider reads files -> bundle; ValidateBundle checks the bundle (provider-agnostic). Stage 2:
+		// hardcoded TSV provider; Stage 3 makes it selectable.
+		FTsvQuestDataFormat Format;
+		FQuestDataBundle Bundle;
+		if (!Format.ReadBundle(FolderPath, Bundle))
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: could not read '%s' as %s. No asset created."), *FolderPath, *Format.FormatName());
+			return;
+		}
+		TMap<FString, const FQuestDataRow*> NodeRowsByKey;
 		TSet<FString> AllRowKeys;
 		FString Error;
-		if (!ReadAndValidate(FolderPath, Bundle, NodeRowsByKey, AllRowKeys, Error))
+		if (!ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, Error))
 		{
 			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: validation failed — %s. No asset created."), *Error);
 			return;
@@ -672,7 +605,7 @@ namespace
 		// QuestlineID FIELD (raw, whatever the designer typed, spaces and all — the compiler sanitizes it only when
 		// building tags, never mutating the field). The asset NAME rides the sanitized key (a package name can't hold
 		// spaces); the QuestlineID FIELD must preserve the raw authored value so the round-trip doesn't alter it.
-		const FImportRow& SelfRow = Bundle.Questline->Rows[0];
+		const FQuestDataRow& SelfRow = Bundle.TablesByType[TEXT("questline_graph")].Rows[0];
 		const FString OriginalKey = SelfRow.Key;                          // sanitized — folder/tag identity
 		const FString RawQuestlineID = SelfRow.Get(TEXT("QuestlineID"));  // raw authored field (may be empty)
 		const FString AssetName = OriginalKey + TEXT("_RT");              // _RT so the compiled tag namespace doesn't collide.

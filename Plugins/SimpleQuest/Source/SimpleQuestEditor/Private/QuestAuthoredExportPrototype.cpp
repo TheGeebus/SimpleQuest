@@ -14,9 +14,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
-#include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
-#include "HAL/FileManager.h"
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "SimpleQuestLog.h"
@@ -24,50 +22,25 @@
 #include "Quests/QuestlineGraph.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Resolver/QuestDataBundle.h"
+#include "Resolver/TsvQuestDataFormat.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
-	// Escape tabs/newlines in a serialized property value so a value with embedded whitespace can't break the TSV row.
-	FString Sanitize(const FString& In)
+	// The export walk (ExportRouting) builds the shared, format-free FQuestDataBundle directly — the local FExport*
+	// bundle structs and the TSV framing (cell escaping + file layout in WriteBundle) moved to the TSV provider
+	// (Resolver/TsvQuestDataFormat) in Stage 2. The walk speaks ONLY the neutral bundle; the provider owns file/format.
+
+	// Make an exported map-key safe to embed inside a neutral ROW KEY (e.g. "QuestlineRewards[<key>].Rewards"): a key
+	// with an embedded tab/newline would corrupt the path segment the import later splits on. This is a KEY-well-formed-
+	// ness concern of the neutral bundle, NOT format escaping — it stays in the routing core regardless of provider.
+	// (Distinct from the provider's own cell-escaping, which happens to use the same three replacements today.)
+	FString SanitizeKeySegment(const FString& In)
 	{
 		return In.Replace(TEXT("\t"), TEXT("\\t")).Replace(TEXT("\r"), TEXT("")).Replace(TEXT("\n"), TEXT("\\n"));
 	}
-
-	// ---- Bundle shapes: accumulate the whole export, then write, so determinism lives in one place and a failed walk writes nothing.
-
-	// One entity row destined for a per-type table: the row key + serialized property cells keyed by column name.
-	// Cells are keyed (not positional) at collect time; WriteBundle lays them out against the type's column list.
-	struct FExportRow
-	{
-		FString Key;
-		TMap<FString, FQuestDataValue> Cells;   // structured values; WriteBundle emits each value's CanonicalText
-	};
-
-	// One per-type entity table: ordered column names (captured once per class from reflection, so every row of a type
-	// shares the identical column set) + accumulated rows.
-	struct FExportTable
-	{
-		TArray<FString> Columns;
-		TArray<FExportRow> Rows;
-	};
-
-	// One typed edge in the unified relationship table. Type carries the parenthesized qualifier (pin name / property path).
-	struct FExportEdge
-	{
-		FString From;
-		FString Type;
-		FString To;
-	};
-
-	// Everything one export run accumulates before any file is written.
-	struct FExportBundle
-	{
-		TMap<FString, FExportTable> TablesByType;    // key = table file stem (snake_cased short type name)
-		TArray<FExportEdge> Edges;
-		int32 KnotsCollapsed = 0;                    // knot NODES suppressed — logging signal that collapse ran
-	};
 
 	// Table file stem for a class: strip the QuestlineNode_ prefix, snake_case the remainder. Underscores insert only on a
 	// lower→upper boundary so acronym runs stay together. Derived display, not identity — collisions can't occur because
@@ -285,12 +258,12 @@ namespace
 		return V;
 	}
 
-	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FExportBundle& Bundle);
+	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FQuestDataBundle& Bundle);
 
 	// Emit child rows + contains edges for every instanced object reachable from Prop on the entity keyed OwnerKey.
 	// PathPrefix is the property path so far relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards");
 	// it becomes both the contains-edge qualifier and the child row's synthetic key suffix, so edge and key corroborate.
-	void RecurseInstanced(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, FExportBundle& Bundle)
+	void RecurseInstanced(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, FQuestDataBundle& Bundle)
 	{
 		// Direct instanced object: one child row. Null slot = no row, no edge — absence is the honest representation.
 		if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
@@ -321,7 +294,7 @@ namespace
 			{
 				FString KeyExport;
 				Map->KeyProp->ExportTextItem_Direct(KeyExport, Helper.GetKeyPtr(It), nullptr, nullptr, PPF_None);
-				RecurseInstanced(Map->ValueProp, Helper.GetValuePtr(It), OwnerKey, FString::Printf(TEXT("%s[%s]"), *PathPrefix, *Sanitize(KeyExport)), Bundle);
+				RecurseInstanced(Map->ValueProp, Helper.GetValuePtr(It), OwnerKey, FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeKeySegment(KeyExport)), Bundle);
 			}
 			return;
 		}
@@ -345,10 +318,10 @@ namespace
 	// only the key differs. ExtraCells injects structural columns (e.g. "graph") that aren't reflected properties; per-class
 	// column consistency holds because node rows always pass the same shape, sub-object rows always pass none, and no class
 	// appears as both.
-	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FExportBundle& Bundle)
+	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FQuestDataBundle& Bundle)
 	{
 		const UClass* Class = Entity->GetClass();
-		FExportTable& Table = Bundle.TablesByType.FindOrAdd(TypeStem(Class));
+		FQuestDataTable& Table = Bundle.TablesByType.FindOrAdd(TypeStem(Class));
 
 		// First row of this type: capture columns from class reflection — "class" leads (a row stays self-describing when
 		// copied out of its file), then injected structural columns, then EditAnywhere non-Transient properties in
@@ -375,7 +348,7 @@ namespace
 		// FProperty::Identical treat every struct prop as different).
 		const UObject* DefaultObject = Class->GetDefaultObject(/*bCreateIfNeeded*/ true);
 
-		FExportRow Row;
+		FQuestDataRow Row;
 		Row.Key = Key;
 		{
 			FQuestDataValue ClassCell;
@@ -427,7 +400,7 @@ namespace
 	// Emit knot-collapsed wire edges for one node: every output pin's terminals via the traversal policy's forward walk
 	// (works for any output pin — the zero-knot case degenerates to the direct link). Fresh Visited per source pin: the
 	// walker's visited set is node-granular, so sharing one across pins would suppress legitimate edges from later pins.
-	void CollectEdgesForNode(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, FExportBundle& Bundle)
+	void CollectEdgesForNode(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle)
 	{
 		const FString FromKey = NodeKeyOf(Node);
 		for (const UEdGraphPin* Pin : Node->Pins)
@@ -456,7 +429,7 @@ namespace
 	// portal, prereq alike), contains edges + recursion for Quest inner graphs. Knots get no rows and no outgoing edges —
 	// they're collapsed into the wire walk. LinkedQuestline placements are NOT recursed: the LinkedGraph soft-path column
 	// on their own row is the cross-folder FK. GraphCell = "root" at top level, else the owning Quest container's key.
-	void CollectGraph(const UEdGraph* Graph, const FString& GraphCell, const FQuestlineGraphTraversalPolicy& Policy, FExportBundle& Bundle)
+	void CollectGraph(const UEdGraph* Graph, const FString& GraphCell, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle)
 	{
 		if (!Graph)
 		{
@@ -502,76 +475,6 @@ namespace
 		}
 	}
 
-	// Deterministic serialization: per-type files (sorted stems), rows sorted by key, header row = "key" + the type's
-	// columns; edges sorted (from, type, to). Two exports of an unchanged asset are byte-identical. Returns false on any
-	// file-write failure. Duplicate edge rows (two real parallel wires to one destination) are written as-is — honest topology.
-	bool WriteBundle(FExportBundle& Bundle, const FString& OutDir, int32& OutRowTotal)
-	{
-		IFileManager::Get().MakeDirectory(*OutDir, /*Tree*/ true);
-		OutRowTotal = 0;
-
-		TArray<FString> Stems;
-		Bundle.TablesByType.GetKeys(Stems);
-		Stems.Sort();
-		for (const FString& Stem : Stems)
-		{
-			FExportTable& Table = Bundle.TablesByType[Stem];
-			Table.Rows.Sort([](const FExportRow& A, const FExportRow& B) { return A.Key < B.Key; });
-
-			TArray<FString> Lines;
-			Lines.Add(FString::Printf(TEXT("key\t%s"), *FString::Join(Table.Columns, TEXT("\t"))));
-			for (const FExportRow& Row : Table.Rows)
-			{
-				TArray<FString> Cells;
-				Cells.Add(Row.Key);
-				for (const FString& Col : Table.Columns)
-				{
-					const FQuestDataValue* Cell = Row.Cells.Find(Col);
-					Cells.Add(Cell ? Sanitize(Cell->CanonicalText) : FString());
-				}
-#if !UE_BUILD_SHIPPING
-				// Drift guard: a cell not in Columns means per-class column capture diverged from a row's actual cells.
-				for (const TPair<FString, FQuestDataValue>& CellPair : Row.Cells)
-				{
-					ensureMsgf(Table.Columns.Contains(CellPair.Key),
-						TEXT("ExportQuestline: row '%s' carries cell '%s' absent from '%s' columns."), *Row.Key, *CellPair.Key, *Stem);
-				}
-#endif
-				Lines.Add(FString::Join(Cells, TEXT("\t")));
-			}
-			OutRowTotal += Table.Rows.Num();
-
-			const FString Path = OutDir / (Stem + TEXT(".tsv"));
-			if (!FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *Path))
-			{
-				UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: failed to write '%s'."), *Path);
-				return false;
-			}
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ExportQuestline: wrote '%s' (%d row(s))."), *Path, Table.Rows.Num());
-		}
-
-		Bundle.Edges.Sort([](const FExportEdge& A, const FExportEdge& B)
-		{
-			if (A.From != B.From) return A.From < B.From;
-			if (A.Type != B.Type) return A.Type < B.Type;
-			return A.To < B.To;
-		});
-		TArray<FString> EdgeLines;
-		EdgeLines.Add(TEXT("from\ttype\tto"));
-		for (const FExportEdge& E : Bundle.Edges)
-		{
-			EdgeLines.Add(FString::Printf(TEXT("%s\t%s\t%s"), *E.From, *E.Type, *E.To));
-		}
-		const FString EdgePath = OutDir / TEXT("edges.tsv");
-		if (!FFileHelper::SaveStringToFile(FString::Join(EdgeLines, TEXT("\n")), *EdgePath))
-		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: failed to write '%s'."), *EdgePath);
-			return false;
-		}
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("ExportQuestline: wrote '%s' (%d edge(s))."), *EdgePath, Bundle.Edges.Num());
-		return true;
-	}
-
 	void ExportQuestlineCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)
@@ -586,7 +489,7 @@ namespace
 			return;
 		}
 
-		FExportBundle Bundle;
+		FQuestDataBundle Bundle;
 		const TUniquePtr<FQuestlineGraphTraversalPolicy> Policy = MakeUnique<FQuestlineGraphTraversalPolicy>();
 
 		// Questline-self row: the asset's own authored fields (QuestlineID / DisplayName / Description / DisplayData /
@@ -599,9 +502,17 @@ namespace
 		CollectGraph(Graph->QuestlineEdGraph, TEXT("root"), *Policy, Bundle);
 
 		const FString OutDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport") / SelfKey);
-		int32 RowTotal = 0;
-		if (WriteBundle(Bundle, OutDir, RowTotal))
+
+		// Hand the neutral bundle to the format provider (Stage 2: hardcoded TSV; Stage 3 makes this selectable). The
+		// walk above never touched a file — all framing/IO lives in the provider now.
+		FTsvQuestDataFormat Format;
+		if (Format.WriteBundle(Bundle, OutDir))
 		{
+			int32 RowTotal = 0;
+			for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+			{
+				RowTotal += TablePair.Value.Rows.Num();
+			}
 			UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) collapsed. Wrote '%s'."),
 				*SelfKey, RowTotal, Bundle.TablesByType.Num(), Bundle.Edges.Num(), Bundle.KnotsCollapsed, *OutDir);
 		}

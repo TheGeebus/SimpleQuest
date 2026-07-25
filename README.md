@@ -1,7 +1,9 @@
 # SimpleQuest
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6%20%7C%205.7-dea309?style=flat&logo=unrealengine)
 
-MIT licensed, source-available Unreal Engine plugin for graph-authored, non-linear quest systems. Designers compose questlines visually — nesting prerequisite expressions, naming outcomes, routing through activation groups and reusable rules — and the authored graph compiles into runtime quest data.
+**A game progression framework for Unreal Engine, authored in a visual graph.** Free and MIT licensed.
+
+SimpleQuest started as an answer to a targeted question, *how do you make a single quest genuinely non-linear?* Working through that meant building primitives for branching outcomes, prerequisite composition, and lifecycle events - the infrastructure any gameplay progression needs. By the time those primitives were serious, they'd stopped being about quests specifically. What emerged is a framework that treats quests as one instance of a broader class: any progression you can express as branching content, prerequisite logic, and named outcomes.
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
 This version targets Unreal Engine 5.6 and is verified compatible with 5.7; the Electronic Nodes visual integration activates automatically on 5.7+ when EN is installed.

@@ -22,9 +22,12 @@ class SIMPLEQUEST_API ULootTableReward : public UQuestRewardBase
 	GENERATED_BODY()
 
 protected:
-	/** Table of weighted drops to roll on. */
+	/**
+	 * Table of weighted drops to roll on. Soft ref — resolved (sync-loaded) at grant/describe time, so a questline
+	 * carrying a loot reward doesn't force-load its table (and the table's transitive refs) as a hard dependency.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Reward")
-	TObjectPtr<UQuestLootTable> LootTable;
+	TSoftObjectPtr<UQuestLootTable> LootTable;
 
 	/** Number of independent rolls (with replacement — the same row can drop more than once). */
 	UPROPERTY(EditAnywhere, meta = (ClampMin = "1"), Category = "Reward")

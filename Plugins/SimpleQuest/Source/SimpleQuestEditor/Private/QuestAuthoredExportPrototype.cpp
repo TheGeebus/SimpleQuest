@@ -20,6 +20,7 @@
 #include "UObject/UnrealType.h"
 #include "UObject/UObjectGlobals.h"
 #include "SimpleQuestLog.h"
+#include "QuestDataValue.h"
 #include "Quests/QuestlineGraph.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
@@ -41,7 +42,7 @@ namespace
 	struct FExportRow
 	{
 		FString Key;
-		TMap<FString, FString> Cells;
+		TMap<FString, FQuestDataValue> Cells;   // structured values; WriteBundle emits each value's CanonicalText
 	};
 
 	// One per-type entity table: ordered column names (captured once per class from reflection, so every row of a type
@@ -138,17 +139,16 @@ namespace
 		return !Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst);
 	}
 
-	// Serialize one non-instanced property value to a cell string. FText routes through FTextStringHelper (loc-preserving,
-	// quote-wrapped — the same convention as the compiled display ini, so one FText form governs every file we write);
-	// everything else through ExportTextItem (T3D's conversion, round-trip-faithful via ImportText).
-	FString SerializeCell(const FProperty* Prop, const void* ValuePtr)
+	// The canonical default-TSV string for a value (the exact form the pre-Stage-1 SerializeCell produced): FText via
+	// FTextStringHelper (loc-preserving, quote-wrapped — the compiled-display-ini convention); everything else via
+	// ExportTextItem (T3D, round-trip-faithful via ImportText). Captured at build time so the TSV round-trip is
+	// byte-identical without reconstructing the string from the structured fields.
+	FString CanonicalTextFor(const FProperty* Prop, const void* ValuePtr)
 	{
 		if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
 		{
-			// An empty FText exports as a truly EMPTY cell, not the quoted-empty "" that WriteToBuffer would emit —
-			// so the import's empty-cell skip leaves it at its default empty FText and the round-trip is symmetric.
-			// (Serializing "" instead would round-trip into an FText literally containing two quote chars, then
-			// re-export as NSLOCTEXT("","hash","\"\"") — the asymmetry the oracle caught.)
+			// Empty FText -> truly empty cell (never the quoted-empty "" WriteToBuffer would emit); the import's
+			// empty-cell skip then leaves the default, keeping the round-trip symmetric.
 			const FText Value = TextProp->GetPropertyValue(ValuePtr);
 			if (Value.IsEmpty()) return FString();
 			FString Out;
@@ -158,6 +158,131 @@ namespace
 		FString Out;
 		Prop->ExportTextItem_Direct(Out, ValuePtr, /*Default*/ nullptr, /*Parent*/ nullptr, PPF_None);
 		return Out;
+	}
+
+	// Build the structured neutral cell for one non-instanced property value. The type-dispatch that used to live in
+	// SerializeCell moves here; the STRING form is captured verbatim into CanonicalText via CanonicalTextFor. DefaultPtr is
+	// the same property on the class CDO — when the live value equals it (FProperty::Identical), the cell is Empty (Q6:
+	// import skips, leaving the constructed default). Cast-ladder order is load-bearing where noted. Container elements
+	// recurse with a null default (no per-slot CDO — presence is the authored fact).
+	FQuestDataValue BuildValue(const FProperty* Prop, const void* ValuePtr, const void* DefaultPtr)
+	{
+		if (!Prop || !ValuePtr)
+		{
+			return FQuestDataValue::MakeEmpty();
+		}
+
+		// Q6 — Empty iff live value == CDO-constructed default. DefaultPtr MUST be non-null (a null default makes
+		// Identical treat every struct prop as different). Applies to leaves and containers alike.
+		if (DefaultPtr && Prop->Identical(ValuePtr, DefaultPtr, PPF_None))
+		{
+			return FQuestDataValue::MakeEmpty();
+		}
+
+		FQuestDataValue V;
+		V.CanonicalText = CanonicalTextFor(Prop, ValuePtr);
+
+		// Enum BEFORE numeric/byte. SimpleQuest's UENUM(uint8) enum-class props are FEnumProperty; the FByteProperty-
+		// with-Enum branch only fires for TEnumAsByte / old namespaced enums. Both precede Scalar.
+		if (const FEnumProperty* EnumProp = CastField<FEnumProperty>(Prop))
+		{
+			const FNumericProperty* Under = EnumProp->GetUnderlyingProperty();
+			V.EnumValue = Under->GetSignedIntPropertyValue(ValuePtr);
+			V.Kind = EQuestDataValueKind::Enum;
+			V.Scalar = EnumProp->GetEnum()->GetNameStringByValue(V.EnumValue);
+			return V;
+		}
+		if (const FByteProperty* ByteEnum = CastField<FByteProperty>(Prop); ByteEnum && ByteEnum->Enum)
+		{
+			V.EnumValue = ByteEnum->GetPropertyValue(ValuePtr);
+			V.Kind = EQuestDataValueKind::Enum;
+			V.Scalar = ByteEnum->Enum->GetNameStringByValue(V.EnumValue);
+			return V;
+		}
+
+		if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
+		{
+			V.Kind = EQuestDataValueKind::Bool;
+			V.bBool = BoolProp->GetPropertyValue(ValuePtr);
+			return V;
+		}
+
+		if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+		{
+			V.Kind = EQuestDataValueKind::Text;
+			V.Text = TextProp->GetPropertyValue(ValuePtr);   // a real FText (loc namespace/key preserved)
+			return V;
+		}
+
+		// Struct sub-cases BEFORE the generic FStructProperty -> StructLiteral fallback.
+		if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+		{
+			if (StructProp->Struct == TBaseStructure<FGameplayTag>::Get())
+			{
+				V.Kind = EQuestDataValueKind::Tag;
+				V.Tag = *static_cast<const FGameplayTag*>(ValuePtr);
+				return V;
+			}
+			if (StructProp->Struct == TBaseStructure<FGameplayTagContainer>::Get())
+			{
+				V.Kind = EQuestDataValueKind::TagContainer;
+				V.TagContainer = *static_cast<const FGameplayTagContainer*>(ValuePtr);
+				return V;
+			}
+			// Any other struct (incl. FInstancedStruct) -> opaque typed literal (CanonicalText holds it). Guard-LOG (not
+			// STOP): surface the opacity once per (struct,prop) so a new adopter struct / bare-struct field is VISIBLE,
+			// not silently opaque. Round-trips today via ImportText.
+			static TSet<FString> GLoggedStructFallbacks;
+			const FString StructKey = FString::Printf(TEXT("%s::%s"), *StructProp->Struct->GetName(), *Prop->GetName());
+			if (!GLoggedStructFallbacks.Contains(StructKey))
+			{
+				GLoggedStructFallbacks.Add(StructKey);
+				UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: StructLiteral fallback for %s (struct '%s') — opaque "
+					"to structured providers; structure-me-later candidate."), *StructKey, *StructProp->Struct->GetName());
+			}
+			V.Kind = EQuestDataValueKind::StructLiteral;
+			V.Scalar = V.CanonicalText;   // the literal IS the canonical string
+			return V;
+		}
+
+		// Soft object OR soft class (FSoftClassProperty : FSoftObjectProperty — the base cast covers both).
+		if (const FSoftObjectProperty* SoftProp = CastField<FSoftObjectProperty>(Prop))
+		{
+			V.Kind = EQuestDataValueKind::Reference;
+			V.Scalar = static_cast<const FSoftObjectPtr*>(ValuePtr)->ToString();
+			return V;
+		}
+
+		// Array of the above.
+		if (const FArrayProperty* ArrayProp = CastField<FArrayProperty>(Prop))
+		{
+			V.Kind = EQuestDataValueKind::Array;
+			FScriptArrayHelper Helper(ArrayProp, ValuePtr);
+			for (int32 i = 0; i < Helper.Num(); ++i)
+			{
+				V.Elements.Add(BuildValue(ArrayProp->Inner, Helper.GetRawPtr(i), nullptr));
+			}
+			return V;
+		}
+
+		// Set of the above (sparse storage — skip invalid indices, stop once Num() live elements seen).
+		if (const FSetProperty* SetProp = CastField<FSetProperty>(Prop))
+		{
+			V.Kind = EQuestDataValueKind::Array;
+			FScriptSetHelper Helper(SetProp, ValuePtr);
+			for (int32 i = 0, Seen = 0; Seen < Helper.Num(); ++i)
+			{
+				if (!Helper.IsValidIndex(i)) continue;
+				++Seen;
+				V.Elements.Add(BuildValue(SetProp->ElementProp, Helper.GetElementPtr(i), nullptr));
+			}
+			return V;
+		}
+
+		// Scalar leaves: numeric / name / string / raw byte (byte-with-enum already handled).
+		V.Kind = EQuestDataValueKind::Scalar;
+		V.Scalar = V.CanonicalText;
+		return V;
 	}
 
 	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FExportBundle& Bundle);
@@ -174,7 +299,7 @@ namespace
 			{
 				const FString ChildKey = FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix);
 				Bundle.Edges.Add({ OwnerKey, FString::Printf(TEXT("contains(%s)"), *PathPrefix), ChildKey });
-				CollectEntityRow(Sub, ChildKey, /*ExtraCells*/ {}, Bundle);
+				CollectEntityRow(Sub, ChildKey, {}, Bundle);
 			}
 			return;
 		}
@@ -245,10 +370,28 @@ namespace
 			}
 		}
 
+		// CDO of the entity's class — the per-property default the Q6 rule compares against (BuildValue emits Empty when
+		// the live value equals it). GetDefaultObject(true) guarantees a non-null CDO (a null default would make
+		// FProperty::Identical treat every struct prop as different).
+		const UObject* DefaultObject = Class->GetDefaultObject(/*bCreateIfNeeded*/ true);
+
 		FExportRow Row;
 		Row.Key = Key;
-		Row.Cells.Add(TEXT("class"), Class->GetName());
-		Row.Cells.Append(ExtraCells);
+		{
+			FQuestDataValue ClassCell;
+			ClassCell.Kind = EQuestDataValueKind::Scalar;
+			ClassCell.Scalar = Class->GetName();
+			ClassCell.CanonicalText = ClassCell.Scalar;
+			Row.Cells.Add(TEXT("class"), ClassCell);
+		}
+		for (const TPair<FString, FString>& Extra : ExtraCells)
+		{
+			FQuestDataValue ExtraCell;
+			ExtraCell.Kind = EQuestDataValueKind::Scalar;
+			ExtraCell.Scalar = Extra.Value;
+			ExtraCell.CanonicalText = Extra.Value;
+			Row.Cells.Add(Extra.Key, ExtraCell);
+		}
 		for (TFieldIterator<FProperty> It(Class); It; ++It)
 		{
 			const FProperty* Prop = *It;
@@ -262,7 +405,8 @@ namespace
 				RecurseInstanced(Prop, ValuePtr, Key, Prop->GetName(), Bundle);
 				continue;
 			}
-			Row.Cells.Add(Prop->GetName(), Sanitize(SerializeCell(Prop, ValuePtr)));
+			const void* DefaultPtr = DefaultObject ? Prop->ContainerPtrToValuePtr<void>(DefaultObject) : nullptr;
+			Row.Cells.Add(Prop->GetName(), BuildValue(Prop, ValuePtr, DefaultPtr));
 		}
 		Table.Rows.Add(MoveTemp(Row));
 	}
@@ -382,12 +526,12 @@ namespace
 				Cells.Add(Row.Key);
 				for (const FString& Col : Table.Columns)
 				{
-					const FString* Cell = Row.Cells.Find(Col);
-					Cells.Add(Cell ? *Cell : FString());
+					const FQuestDataValue* Cell = Row.Cells.Find(Col);
+					Cells.Add(Cell ? Sanitize(Cell->CanonicalText) : FString());
 				}
 #if !UE_BUILD_SHIPPING
 				// Drift guard: a cell not in Columns means per-class column capture diverged from a row's actual cells.
-				for (const TPair<FString, FString>& CellPair : Row.Cells)
+				for (const TPair<FString, FQuestDataValue>& CellPair : Row.Cells)
 				{
 					ensureMsgf(Table.Columns.Contains(CellPair.Key),
 						TEXT("ExportQuestline: row '%s' carries cell '%s' absent from '%s' columns."), *Row.Key, *CellPair.Key, *Stem);

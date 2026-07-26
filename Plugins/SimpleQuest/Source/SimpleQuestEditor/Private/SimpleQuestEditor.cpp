@@ -390,11 +390,14 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 	if (AssetData.AssetClassPath != UQuestlineGraph::StaticClass()->GetClassPathName()) return;
 
 	const FString RemovedPath = AssetData.PackageName.ToString();
-	if (CompiledTagRegistry.Remove(RemovedPath) > 0)
+	TArray<FName> RemovedTags;
+	if (CompiledTagRegistry.RemoveAndCopyValue(RemovedPath, RemovedTags))
 	{
 		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved — removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
 		WriteCompiledTagsIni();
-		RebuildNativeTags(true);
+		// Surgical: unregister only this graph's now-orphaned tags. RemoveAndCopyValue already dropped it from the
+		// registry, so the "still claimed by another" check sees the correct remaining set.
+		RemoveNativeTagsForGraph(RemovedTags);
 	}
 	RemoveCompiledDisplaySection(AssetData.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID")));
 }
@@ -488,7 +491,9 @@ TUniquePtr<FQuestlineGraphCompiler> FSimpleQuestEditor::CreateCompiler() const
 
 void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TArray<FName>& TagNames)
 {
-	bool bHasStaleTags = false;
+	// Collect the names this recompile DROPPED (present in the old registration, absent from the new) so removal can be
+	// surgical instead of a full teardown.
+	TArray<FName> StaleNames;
 	if (const TArray<FName>* OldTags = CompiledTagRegistry.Find(GraphPath))
 	{
 		TSet<FName> NewTagSet(TagNames);
@@ -496,11 +501,12 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 		{
 			if (!NewTagSet.Contains(OldTag))
 			{
-				bHasStaleTags = true;
+				StaleNames.Add(OldTag);
 				UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  Stale tag removed: %s"), *OldTag.ToString());
 			}
 		}
 	}
+	const bool bHasStaleTags = StaleNames.Num() > 0;
 
 	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s%s)"),
 		*GraphPath, TagNames.Num(),
@@ -511,15 +517,24 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 
 	if (bBatchActive)
 	{
-		// Incrementally register new natives so mid-batch RequestGameplayTag lookups succeed for fresh
-		// cross-graph references. Skip the tree rebuild + INI write — both deferred to EndCompileBatch.
-		if (bHasStaleTags) bBatchHasStaleTags = true;
+		// Register new natives incrementally so mid-batch RequestGameplayTag lookups succeed; accumulate stale names for
+		// ONE surgical removal at EndCompileBatch (a name stale-from-graph-A but re-added-by-graph-B nets out correctly
+		// there, because RemoveNativeTagsForGraph checks the batch-final registry).
+		BatchStaleNames.Append(StaleNames);
 		AddNativeTagsForGraph(TagNames);
 		return;
 	}
 
 	WriteCompiledTagsIni();
-	RebuildNativeTags(bHasStaleTags);
+	AddNativeTagsForGraph(TagNames);        // register new/kept natives (skips already-registered)
+	if (bHasStaleTags)
+	{
+		RemoveNativeTagsForGraph(StaleNames);   // prunes orphans + refreshes the tree
+	}
+	else
+	{
+		UGameplayTagsManager::Get().ConstructGameplayTagTree();   // adds-only: fold new natives into the tree
+	}
 }
 
 void FSimpleQuestEditor::BeginCompileBatch()
@@ -528,6 +543,7 @@ void FSimpleQuestEditor::BeginCompileBatch()
 	bBatchActive = true;
 	bBatchHasStaleTags = false;
 	bBatchAddedNewTag = false;
+	BatchStaleNames.Reset();
 }
 
 void FSimpleQuestEditor::EndCompileBatch()
@@ -544,9 +560,17 @@ void FSimpleQuestEditor::EndCompileBatch()
 	//   - NOTHING changed (no new, no stale — e.g. a re-import/recompile of already-registered content) -> SKIP the
 	//     tree rebuild entirely. The tree already contains exactly these tags; rebuilding pure redundant work.
 	//     This is the common case for the round-trip harness + any recompile of unchanged content.
-	if (bBatchHasStaleTags)
+	if (BatchStaleNames.Num() > 0)
 	{
-		RebuildNativeTags(true);
+		// Surgical prune of the batch's orphaned tags (checks the batch-FINAL registry, so a name dropped by one graph
+		// but re-added by another nets to "kept"). RemoveNativeTagsForGraph does the one tree refresh. If it finds no
+		// true orphans but new tags were added, still need to fold those in.
+		const TArray<FName> StaleArray = BatchStaleNames.Array();
+		RemoveNativeTagsForGraph(StaleArray);
+		if (bBatchAddedNewTag)
+		{
+			UGameplayTagsManager::Get().ConstructGameplayTagTree();   // ensure adds are folded in even if remove was a no-op
+		}
 	}
 	else if (bBatchAddedNewTag)
 	{
@@ -556,6 +580,7 @@ void FSimpleQuestEditor::EndCompileBatch()
 
 	bBatchHasStaleTags = false;
 	bBatchAddedNewTag = false;
+	BatchStaleNames.Reset();
 }
 
 void FSimpleQuestEditor::CompileAllQuestlineGraphs()
@@ -1136,6 +1161,70 @@ void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
 			}
 		}
 	}
+}
+
+// Surgically unregister native tags a removed/recompiled graph no longer owns — but ONLY those no OTHER still-registered
+// graph claims (shared tags like SimpleQuest.Outcome.Reached are registered by many graphs; unregistering one on a single
+// removal would silently break every other graph resolving against it). Destroys just the orphaned FNativeGameplayTags +
+// one tree refresh — O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
+// Registry must ALREADY reflect the post-change state (removed graph gone / recompiled graph's new tags in), so the
+// "still claimed by another" check sees the correct remaining set.
+void FSimpleQuestEditor::RemoveNativeTagsForGraph(const TArray<FName>& RemovedTagNames)
+{
+	if (RemovedTagNames.IsEmpty()) return;
+
+	// Set of names STILL claimed by any remaining registered graph (incl. each identity tag's state-fact leaves, mirroring
+	// AddNativeTagsForGraph's expansion — a still-used identity tag keeps its derived state facts alive).
+	TSet<FName> StillClaimed;
+	for (const TPair<FString, TArray<FName>>& Pair : CompiledTagRegistry)
+	{
+		for (const FName& Tag : Pair.Value)
+		{
+			StillClaimed.Add(Tag);
+			if (FQuestTagComposer::IsIdentityTag(Tag))
+			{
+				for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+				{
+					StillClaimed.Add(FQuestTagComposer::MakeStateFact(Tag, Leaf));
+				}
+			}
+		}
+	}
+
+	// Orphans = everything the removed set owned (incl. state-fact leaves) that no remaining graph still claims.
+	TSet<FName> Orphaned;
+	auto ConsiderOrphan = [&](FName Tag)
+	{
+		if (!Tag.IsNone() && !StillClaimed.Contains(Tag)) Orphaned.Add(Tag);
+	};
+	for (const FName& Tag : RemovedTagNames)
+	{
+		ConsiderOrphan(Tag);
+		if (FQuestTagComposer::IsIdentityTag(Tag))
+		{
+			for (EQuestStateLeaf Leaf : FQuestTagComposer::AllStateLeaves)
+			{
+				ConsiderOrphan(FQuestTagComposer::MakeStateFact(Tag, Leaf));
+			}
+		}
+	}
+
+	if (Orphaned.IsEmpty()) return;   // all still claimed elsewhere — tree unchanged, nothing to do.
+
+	// Destroy just the orphaned natives (destructor unregisters from the manager) + drop from the lockstep name set.
+	CompiledNativeTags.RemoveAll([&](const TUniquePtr<FNativeGameplayTag>& Native)
+	{
+		return Native.IsValid() && Orphaned.Contains(Native->GetTag().GetTagName());
+	});
+	for (const FName& Orphan : Orphaned)
+	{
+		CompiledNativeTagNames.Remove(Orphan);
+	}
+
+	UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
+
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RemoveNativeTagsForGraph — unregistered %d orphaned tag(s), %d native(s) remain (tree refreshed)"),
+		Orphaned.Num(), CompiledNativeTags.Num());
 }
 
 void FSimpleQuestEditor::HandlePickerCategoriesChanged()

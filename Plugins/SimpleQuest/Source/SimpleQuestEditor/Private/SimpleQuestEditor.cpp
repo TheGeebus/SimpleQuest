@@ -527,6 +527,7 @@ void FSimpleQuestEditor::BeginCompileBatch()
 	check(!bBatchActive);
 	bBatchActive = true;
 	bBatchHasStaleTags = false;
+	bBatchAddedNewTag = false;
 }
 
 void FSimpleQuestEditor::EndCompileBatch()
@@ -537,19 +538,24 @@ void FSimpleQuestEditor::EndCompileBatch()
 	WriteCompiledTagsIni();
 	FlushCompiledDisplayIni();
 
-	// Tree rebuild path — full reset+refresh if stale tags appeared anywhere in the batch (need to
-	// prune the tree); otherwise just finalize the tree additively (incremental adds during the batch
-	// left the manager's tag set in good shape, just missing the tree structure).
+	// Tree rebuild path. Three cases, cheapest-first:
+	//   - Stale tags removed -> full reset+refresh (must PRUNE the removed tags from the tree).
+	//   - New tags added (no stale) -> ConstructGameplayTagTree to fold the incrementally-added natives into the tree.
+	//   - NOTHING changed (no new, no stale — e.g. a re-import/recompile of already-registered content) -> SKIP the
+	//     tree rebuild entirely. The tree already contains exactly these tags; rebuilding pure redundant work.
+	//     This is the common case for the round-trip harness + any recompile of unchanged content.
 	if (bBatchHasStaleTags)
 	{
 		RebuildNativeTags(true);
 	}
-	else
+	else if (bBatchAddedNewTag)
 	{
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
+	// else: tag set unchanged -> tree already correct -> no rebuild.
 
 	bBatchHasStaleTags = false;
+	bBatchAddedNewTag = false;
 }
 
 void FSimpleQuestEditor::CompileAllQuestlineGraphs()
@@ -1118,6 +1124,7 @@ void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
 			CompiledNativeTagNames.Add(TagName);
 			CompiledNativeTags.Add(MakeUnique<FNativeGameplayTag>(FName("SimpleQuest"), FName("SimpleQuest"),
 				TagName, TEXT(""), ENativeGameplayTagToken::PRIVATE_USE_MACRO_INSTEAD));
+			bBatchAddedNewTag = true;   // a genuinely-new tag entered the tree -> a tree rebuild is warranted this batch
 		};
 		Add(QuestTag);
 

@@ -134,7 +134,7 @@ namespace
 				FGameplayTagContainer Container;
 				for (const FQuestDataValue& Elem : Value.Elements)
 				{
-					const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Elem.Scalar), false);
+					const FGameplayTag Tag = FGameplayTag::RequestGameplayTag(FName(*Elem.StringForm), false);
 					if (Tag.IsValid()) Container.AddTag(Tag);
 				}
 				*static_cast<FGameplayTagContainer*>(ValuePtr) = Container;
@@ -169,7 +169,7 @@ namespace
 
 	// Restore one property from a structured cell value. switch(Kind): a STRUCTURED provider (JSON) delivers typed Kinds
 	// (Tag/Text/Bool/Array) that write directly to the property from the typed field; the string-carrying Kinds (Scalar/
-	// Enum/Reference/StructLiteral) go through ImportText from Value.Scalar. The TSV provider produces Kind=Scalar for
+	// Enum/Reference/StructLiteral) go through ImportText from Value.StringForm. The TSV provider produces Kind=Scalar for
 	// EVERY cell (including FText cells, which arrive as a Scalar holding the NSLOCTEXT string), so the Scalar arm MUST
 	// preserve the property-type FText branch (ReadFromBuffer) that the pre-Stage-3 code used — otherwise TSV FText cells
 	// regress from ReadFromBuffer to ImportText. This keeps the refactor byte-identical for TSV (the B2 no-regression gate).
@@ -212,28 +212,31 @@ namespace
 			RestoreArrayCell(Prop, ValuePtr, Value);   // container-type branch handled inside (array/set); recurses
 			return;
 
-		case EQuestDataValueKind::Scalar:
+		case EQuestDataValueKind::Number:
+		case EQuestDataValueKind::String:
 		case EQuestDataValueKind::Enum:
 		case EQuestDataValueKind::Reference:
 		case EQuestDataValueKind::StructLiteral:
 		default:
-		{
-			// String-carrying Kinds. Value.Scalar holds the cell string (== today's CellText for the TSV path). The FText
+			{
+			// String-carrying Kinds — all route through StringForm -> ImportText, which types against the property (a
+			// numeric property parses "3" fine; the Number/String distinction is a provider-render concern, not a
+			// restore concern). Value.StringForm holds the cell string (== today's CellText for the TSV path). The FText
 			// special-case is PRESERVED here because TSV delivers FText cells as Kind=Scalar (a Scalar holding NSLOCTEXT);
 			// routing them to ImportText instead of ReadFromBuffer would regress TSV. JSON never lands here for FText (it
 			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar — exactly the old behavior.
-			if (Value.Scalar.IsEmpty()) return;
+			if (Value.StringForm.IsEmpty()) return;
 			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
 			{
 				FText Parsed;
-				const TCHAR* Buffer = *Value.Scalar;
+				const TCHAR* Buffer = *Value.StringForm;
 				if (FTextStringHelper::ReadFromBuffer(Buffer, Parsed))
 				{
 					TextProp->SetPropertyValue(ValuePtr, Parsed);
 				}
 				return;
 			}
-			Prop->ImportText_Direct(*Value.Scalar, ValuePtr, /*OwnerObject*/ nullptr, PPF_None);
+			Prop->ImportText_Direct(*Value.StringForm, ValuePtr, /*OwnerObject*/ nullptr, PPF_None);
 			return;
 		}
 		}
@@ -249,8 +252,8 @@ namespace
 			if (Col == TEXT("class") || Col == TEXT("graph")) continue;
 			FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*Col));
 			if (!Prop) continue;
-			// RestoreCell types the string against the property (blind-parse contract §1); the value's CanonicalText is
-			// exactly the cell string the format produced, so this is byte-identical to the pre-Stage-2 string path.
+			// RestoreCell types the value against the property (structured providers write typed fields directly; string-
+			// carrying Kinds route through ImportText on Scalar) — see the switch(Kind) in RestoreCell.
 			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
 		}
 	}
@@ -786,15 +789,15 @@ namespace
 		// P4 — wire edges + contains-edge cross-check.
 		WireEdges(Bundle, NodeByKey, Consumed, Warnings);
 
-		// P5 — compile + save. A brand-new asset needs TWO compile passes to reach steady state, exactly as it would
-		// through normal authoring (create -> compile registers the asset's identity + state tags -> recompile sees
-		// them valid). The compiler captures CurrentAssetIdentityTag via RequestGameplayTag(..., ErrorIfNotFound=false)
-		// at the top of Compile(), so on the FIRST compile of a never-registered identity that tag is invalid and the
-		// asset-root-scope graph-resolution record (NextNodesByPath for terminating outcomes) is skipped. The first
-		// pass registers the tags; the second sees a valid identity and produces the complete compiled model.
+		// Wrap the double-compile in a compile batch so the gameplay-tag-tree rebuild coalesces to ONCE (at EndCompileBatch)
+		// instead of once PER compile pass. The batch's incremental AddNativeTagsForGraph keeps pass 2's RequestGameplayTag
+		// lookups valid against pass 1's registrations (that's exactly what the first-compile-identity double-compile needs),
+		// while the expensive tree rebuild + INI write defer to batch end. Same mechanism CompileAllQuestlineGraphs uses.
+		ISimpleQuestEditorModule::Get().BeginCompileBatch();
 		TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
 		Compiler->Compile(Graph);                          // pass 1: registers the identity + state tags
 		const bool bCompiled = Compiler->Compile(Graph);   // pass 2: identity now valid -> complete resolution records
+		ISimpleQuestEditorModule::Get().EndCompileBatch();
 
 		UPackage* Package = Graph->GetPackage();
 		Package->MarkPackageDirty();

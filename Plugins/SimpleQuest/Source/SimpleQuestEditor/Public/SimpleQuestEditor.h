@@ -124,4 +124,5 @@ private:
 
 	bool bBatchActive = false;
 	bool bBatchHasStaleTags = false;
+	bool bBatchAddedNewTag = false;
 };

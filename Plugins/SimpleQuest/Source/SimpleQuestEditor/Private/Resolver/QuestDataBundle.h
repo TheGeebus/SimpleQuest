@@ -13,22 +13,19 @@
 #include "QuestDataValue.h"
 
 // One entity row: its key + structured cells by column name. A column may be ABSENT (== Kind::Empty / a value left at
-// its CDO default); consumers treat absent and present-Empty identically. Get() returns the cell's default-format string
-// (CanonicalText) — the convenience import uses for structural columns (class / graph / QuestlineID), which are always
-// Kind::Scalar and read as plain strings.
+// its CDO default); consumers treat absent and present-Empty identically. Get() returns a cell's plain-string value —
+// the convenience the routing core uses for structural columns (class / graph / QuestlineID), which are always string cells.
 struct FQuestDataRow
 {
 	FString Key;
 	TMap<FString, FQuestDataValue> Cells;
 
-	// Structural-column string accessor (class / graph / QuestlineID — always plain-string cells). Reads Scalar, which
-	// BOTH providers populate (TSV mirrors it into CanonicalText too; JSON sets only Scalar). Reading Scalar rather than
-	// CanonicalText keeps this working for structured providers and aligns with the Stage-4 direction (CanonicalText, the
-	// TSV-only crutch, is going away — Scalar is the durable string field).
+	// Structural-column string accessor (class / graph / QuestlineID — always plain-string cells). Reads Scalar, the
+	// string field every provider populates for a string-valued cell.
 	FString Get(const FString& Col) const
 	{
 		const FQuestDataValue* V = Cells.Find(Col);
-		return V ? V->Scalar : FString();
+		return V ? V->StringForm : FString();
 	}
 };
 

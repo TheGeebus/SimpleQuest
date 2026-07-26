@@ -67,15 +67,18 @@ namespace
 			return MakeShared<FJsonValueArray>(Elems);
 		}
 
-		case EQuestDataValueKind::Scalar:
+		case EQuestDataValueKind::Number:
+			// Native JSON number (unquoted), but BYTE-PRESERVING: FJsonValueNumberString is typed EJson::Number yet
+			// serializes its stored string verbatim (PreferStringRepresentation -> WriteRawJSONValue), so we never round-
+			// trip through a lossy double. "42" -> 42, "42.5" -> 42.5, exact. StringForm holds the numeric text.
+			return MakeShared<FJsonValueNumberString>(V.StringForm);
+
+		case EQuestDataValueKind::String:
 		case EQuestDataValueKind::Enum:
 		case EQuestDataValueKind::Reference:
 		case EQuestDataValueKind::StructLiteral:
 		default:
-			// String-carrying Kinds. Scalar always-string (ImportText types it against the property; sniffing numeric
-			// risks "007" QuestlineID). Enum = token; Reference = soft path; StructLiteral = the opaque literal (the one
-			// UE-text blob that stays a blob in JSON — JSON can't structure an arbitrary FInstancedStruct).
-			return MakeShared<FJsonValueString>(V.Scalar);
+			return MakeShared<FJsonValueString>(V.StringForm);
 		}
 	}
 
@@ -186,16 +189,23 @@ namespace
 			}
 			return V;
 		}
-		case EJson::String:
 		case EJson::Number:
-		{
-			// Bare string/number -> Kind=Scalar (holds the string form). The property types it: tags (bare dotted form),
-			// soft-refs, enum tokens, scalars, struct-literals all ImportText fine. (We render Scalar as a string on write,
-			// but tolerate a JSON number here defensively -> AsString stringifies it.)
-			V.Kind = EQuestDataValueKind::Scalar;
-			V.Scalar = Json->AsString();
-			return V;
-		}
+			{
+				// A native JSON number -> Kind::Number, carrying its EXACT digits as the string form (TryGetString on a
+				// number value returns the source text; AsString does the same). We do NOT read AsNumber() -> that would
+				// force a double and risk precision loss. The property types it on import via ImportText, same as String.
+				V.Kind = EQuestDataValueKind::Number;
+				Json->TryGetString(V.StringForm);
+				return V;
+			}
+		case EJson::String:
+			{
+				// Bare string -> Kind::String. The property types it: tags (bare dotted form), soft-refs, enum tokens, plain
+				// strings, struct-literals all ImportText fine.
+				V.Kind = EQuestDataValueKind::String;
+				V.StringForm = Json->AsString();
+				return V;
+			}
 		default:
 			return V;   // Kind::Empty (Null/None/unrecognized)
 		}

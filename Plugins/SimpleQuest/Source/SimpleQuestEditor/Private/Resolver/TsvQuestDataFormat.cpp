@@ -23,9 +23,74 @@ namespace
 	{
 		return In.Replace(TEXT("\\n"), TEXT("\n")).Replace(TEXT("\\t"), TEXT("\t"));
 	}
+	
+	// Render a structured FQuestDataValue to its TSV cell string — from the TYPED FIELDS the inverse of ParseTsvTable).
+	// Kinds whose value already IS the string (Scalar/Enum/Reference/StructLiteral) return V.StringForm directly; the
+	// structured Kinds (Tag/TagContainer/Text/Bool/Array) re-serialize via ExportText / FTextStringHelper::WriteToBuffer —
+	// the same engine calls the reflection walk uses, so the on-disk form matches the on-disk form is byte-identical to
+	// pre-Stage-4 TSV output.
+	FString RenderValueToTsv(const FQuestDataValue& V)
+	{
+		switch (V.Kind)
+		{
+		case EQuestDataValueKind::Empty:
+			return FString();
+
+		case EQuestDataValueKind::Bool:
+			return V.bBool ? TEXT("True") : TEXT("False");
+
+		case EQuestDataValueKind::Text:
+		{
+			// Empty FText -> empty cell (import's empty-cell skip then leaves the default, keeping the round-trip symmetric).
+			if (V.Text.IsEmpty()) return FString();
+			FString Out;
+			FTextStringHelper::WriteToBuffer(Out, V.Text, /*bRequiresQuotes*/ true, /*bStripPackageNamespace*/ false);
+			return Out;
+		}
+
+		case EQuestDataValueKind::Tag:
+		{
+			FString Out;
+			FGameplayTag Tmp = V.Tag;   // ExportText takes a mutable value ptr
+			TBaseStructure<FGameplayTag>::Get()->ExportText(Out, &Tmp, /*Default*/ nullptr, /*Owner*/ nullptr, PPF_None, /*RootScope*/ nullptr);
+			return Out;
+		}
+
+		case EQuestDataValueKind::TagContainer:
+		{
+			FString Out;
+			FGameplayTagContainer Tmp = V.TagContainer;
+			TBaseStructure<FGameplayTagContainer>::Get()->ExportText(Out, &Tmp, nullptr, nullptr, PPF_None, nullptr);
+			return Out;
+		}
+
+		case EQuestDataValueKind::Array:
+		{
+			// ExportTextItem's array form: "(elem,elem,...)" — recurse per element, comma-join, wrap in parens.
+			TArray<FString> Parts;
+			Parts.Reserve(V.Elements.Num());
+			for (const FQuestDataValue& Elem : V.Elements)
+			{
+				Parts.Add(RenderValueToTsv(Elem));
+			}
+			return FString::Printf(TEXT("(%s)"), *FString::Join(Parts, TEXT(",")));
+		}
+
+		case EQuestDataValueKind::Number:
+		case EQuestDataValueKind::String:
+		case EQuestDataValueKind::Enum:
+		case EQuestDataValueKind::Reference:
+		case EQuestDataValueKind::StructLiteral:
+		default:
+			// The value already IS the string form (numeric text / plain string / enum token / soft path / opaque
+			// literal). TSV is all-text, so Number and String render identically here — the split matters only to a
+			// structured provider (like JSON). The property types it on import.
+			return V.StringForm;
+		}
+	}
 
 	// Parse one .tsv into a table (first line is the header; column 0 is always "key"). Cells become string-bearing
-	// FQuestDataValues: CanonicalText = the unsanitized cell, Kind generic (the routing core types each against the
+	// FQuestDataValues: Scalar = the unsanitized cell, Kind generic (the routing core types each against the
 	// destination property — see spec §1). An empty/absent trailing field maps to no cell (== Kind::Empty downstream).
 	bool ParseTsvTable(const FString& Path, FQuestDataTable& OutTable, TArray<FQuestDataRow>& OutRows)
 	{
@@ -61,9 +126,8 @@ namespace
 					continue;   // absent/empty cell == Kind::Empty (routing core leaves the property at its default)
 				}
 				FQuestDataValue V;
-				V.Kind = EQuestDataValueKind::Scalar;   // generic string-bearing; the property types it downstream
-				V.Scalar = Cell;
-				V.CanonicalText = Cell;
+				V.Kind = EQuestDataValueKind::String;   // TSV is all-text: produce generic String; the property types it downstream
+				V.StringForm = Cell;
 				Row.Cells.Add(OutTable.Columns[c], V);
 			}
 			OutRows.Add(MoveTemp(Row));
@@ -113,7 +177,7 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 			for (const FString& Col : Table.Columns)
 			{
 				const FQuestDataValue* Cell = Row.Cells.Find(Col);
-				Cells.Add(Cell ? Sanitize(Cell->CanonicalText) : FString());
+				Cells.Add(Cell ? Sanitize(RenderValueToTsv(*Cell)) : FString());
 			}
 #if !UE_BUILD_SHIPPING
 			// Drift guard: a cell not in Columns means per-class column capture diverged from a row's actual cells.

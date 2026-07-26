@@ -31,8 +31,8 @@ enum class EQuestDataValueKind : uint8
 };
 
 // A single leaf cell value. Kind discriminates which structured field is meaningful (Tag / TagContainer / Text / bBool /
-// EnumValue+token / Scalar-string / Elements). Scalar holds the string form for the string-carrying Kinds (Scalar leaf,
-// Enum token, Reference path, StructLiteral literal); the other Kinds carry a typed field a provider renders from.
+// EnumValue+token / StringForm / Elements). StringForm holds the string form for the string-carrying Kinds (String,
+// Number, Enum token, Reference path, StructLiteral literal); the other Kinds carry a typed field a provider renders from.
 struct FQuestDataValue
 {
 	EQuestDataValueKind Kind = EQuestDataValueKind::Empty;
@@ -40,10 +40,15 @@ struct FQuestDataValue
 	FGameplayTag           Tag;             // Kind==Tag
 	FGameplayTagContainer  TagContainer;    // Kind==TagContainer
 	FText                  Text;            // Kind==Text (a real FText — carries loc namespace/key)
-	FString                StringForm;      // Kind==Scalar; also the Reference path / Enum token / StructLiteral literal
+	FString                StringForm;      // Kind==String/Number; also the Reference path / Enum token / StructLiteral literal
 	bool                   bBool = false;   // Kind==Bool
-	int64                  EnumValue = 0;   // Kind==Enum numeric (paired with Scalar = the enum token string)
+	int64                  EnumValue = 0;   // Kind==Enum numeric (paired with StringForm = the enum token string)
 	TArray<FQuestDataValue> Elements;       // Kind==Array
 
 	static FQuestDataValue MakeEmpty() { return FQuestDataValue{}; }
+
+	// Convenience constructors for the string-carrying Kinds — the routing core synthesizes cells (flow conventions)
+	// and providers build them inline; both want the Kind + StringForm set in one expression.
+	static FQuestDataValue MakeString(const FString& In) { FQuestDataValue V; V.Kind = EQuestDataValueKind::String; V.StringForm = In; return V; }
+	static FQuestDataValue MakeNumber(const FString& In) { FQuestDataValue V; V.Kind = EQuestDataValueKind::Number; V.StringForm = In; return V; }
 };

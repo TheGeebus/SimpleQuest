@@ -99,6 +99,123 @@ namespace
 		return true;
 	}
 
+		// ---- FLOW CONVENTIONS (prereq-from-table) ---------------------------------------------------------------------
+	// Write-in authoring sugar: a flat source (no edge/flow notion) declares a prereq as a COLUMN of operand row-keys
+	// (e.g. unlock_after:(step_a,step_b)) instead of hand-wiring a combinator. We SYNTHESIZE the exact structural form
+	// the graph would have — a combinator row + operand edges in + a feeds-prereq edge out — into the neutral bundle,
+	// then the ordinary P0-P5 pipeline compiles it (no new compiler path; combinators store NO operands, the wiring is
+	// emergent from edges — same shape Ch6 round-trips green). Routing-core + format-agnostic: identical for TSV/JSON.
+	// The convention is a WRITE-IN only; export always emits the explicit structural form (so "graph is sugar" the
+	// reverse way — a re-export of an unlock_after import shows prerequisite_and rows, never unlock_after).
+	struct FFlowConvention
+	{
+		const TCHAR* Column;           // authored column name a designer writes
+		const TCHAR* CombinatorClass; // node class to synthesize
+		const TCHAR* TableStem;       // == TypeStem(class); the TablesByType key the combinator row lands in
+		const TCHAR* OutEdgeType;     // the combinator output pin, as a feeds-prereq verb (AND/OR="Out", NOT="PrereqOut")
+	};
+
+	// Vocab. unlock_after (AND) ships first; unlock_any (OR) and a NOT form are added here as the arc closes — each is
+	// the SAME synthesis with a different combinator class, so extending the vocab is data, not new control flow.
+	static const FFlowConvention GFlowConventions[] =
+	{
+		{ TEXT("unlock_after"), TEXT("QuestlineNode_PrerequisiteAnd"), TEXT("prerequisite_and"), TEXT("feeds-prereq(Out)") },
+	};
+
+	// Parse an operand-key list from a convention cell. A structured provider (JSON) delivers Kind::Array (use the
+	// elements); TSV delivers the "(a,b,c)" paren-list literal as one string cell (strip parens, split on comma). Empty
+	// entries are dropped; the caller warns on a wholly-empty list.
+	TArray<FString> ParseFlowKeyList(const FQuestDataValue& Cell)
+	{
+		TArray<FString> Keys;
+		if (Cell.Kind == EQuestDataValueKind::Array)
+		{
+			for (const FQuestDataValue& Elem : Cell.Elements)
+			{
+				const FString K = Elem.StringForm.TrimStartAndEnd();
+				if (!K.IsEmpty()) Keys.Add(K);
+			}
+			return Keys;
+		}
+		FString Raw = Cell.StringForm.TrimStartAndEnd();
+		Raw.RemoveFromStart(TEXT("("));
+		Raw.RemoveFromEnd(TEXT(")"));
+		TArray<FString> Parts;
+		Raw.ParseIntoArray(Parts, TEXT(","), /*CullEmpty*/ true);
+		for (FString& P : Parts) { const FString K = P.TrimStartAndEnd(); if (!K.IsEmpty()) Keys.Add(K); }
+		return Keys;
+	}
+
+	// Synthesize the structural prereq form for every convention cell found on any node row, then strip the cell so it
+	// never reaches RestoreCell as a bogus property. Runs on the bundle AFTER ReadBundle and BEFORE ValidateBundle, so
+	// the synthesized edges' endpoints are checked by the ordinary endpoint guard (a typo'd operand key is refused with
+	// no half-built asset). PrerequisiteAnd has a floor of 2 condition pins, so ConditionPinCount = max(N, 2) — a
+	// single operand wires one pin and leaves one free (legal; ResolveDestPin only fills FREE condition pins).
+	void ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings)
+	{
+		// Synthesized rows/edges are STAGED into locals and applied AFTER the scan — never insert into Bundle.TablesByType
+		// while iterating it (FindOrAdd can rehash + invalidate the outer iterator when the combinator table doesn't yet
+		// exist, which is the common case). Stage per-stem so a single new table absorbs every gate of that kind.
+		TMap<FString, TArray<FQuestDataRow>> RowsToAddByStem;
+		TArray<FQuestDataEdge> EdgesToAdd;
+		int32 Synthesized = 0;
+
+		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+		{
+			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row can't be gated
+			for (FQuestDataRow& Row : TablePair.Value.Rows)
+			{
+				for (const FFlowConvention& Conv : GFlowConventions)
+				{
+					const FQuestDataValue* Cell = Row.Cells.Find(Conv.Column);
+					if (!Cell) continue;
+
+					const TArray<FString> Operands = ParseFlowKeyList(*Cell);
+					Row.Cells.Remove(Conv.Column);   // strip regardless — a declared-but-empty gate is still not a property
+					if (Operands.Num() == 0)
+					{
+						Warnings.Add(FString::Printf(TEXT("%s on '%s' listed no operands — no prerequisite synthesized"), Conv.Column, *Row.Key));
+						continue;
+					}
+
+					// Combinator key: derived from the GATED row + column so re-imports are stable and two gates never
+					// collide. Needn't be a GUID — SpawnNodeFromRow mints a deterministic FGuid from any non-GUID key.
+					const FString CombKey = Row.Key + TEXT("__") + FString(Conv.Column);
+					const FString GraphCell = Row.Get(TEXT("graph"));   // same graph level as the gated node
+
+					FQuestDataRow CombRow;
+					CombRow.Key = CombKey;
+					CombRow.Cells.Add(TEXT("class"),  FQuestDataValue::MakeString(Conv.CombinatorClass));
+					CombRow.Cells.Add(TEXT("graph"),  FQuestDataValue::MakeString(GraphCell));
+					CombRow.Cells.Add(TEXT("ConditionPinCount"), FQuestDataValue::MakeNumber(FString::FromInt(FMath::Max(Operands.Num(), 2))));
+					RowsToAddByStem.FindOrAdd(Conv.TableStem).Add(MoveTemp(CombRow));
+
+					for (const FString& OpKey : Operands)
+						EdgesToAdd.Add({ OpKey, TEXT("activates(Any Outcome)"), CombKey });
+					EdgesToAdd.Add({ CombKey, FString(Conv.OutEdgeType), Row.Key });
+
+					++Synthesized;
+					UE_LOG(LogSimpleQuest, Verbose, TEXT("ImportQuestline: flow-convention %s on '%s' -> %s '%s' gating via %d operand(s)"),
+						Conv.Column, *Row.Key, Conv.CombinatorClass, *CombKey, Operands.Num());
+				}
+			}
+		}
+
+		// Apply the staged synthesis now that the scan is complete (safe to insert into TablesByType).
+		for (TPair<FString, TArray<FQuestDataRow>>& StemPair : RowsToAddByStem)
+		{
+			FQuestDataTable& CombTable = Bundle.TablesByType.FindOrAdd(StemPair.Key);
+			if (CombTable.Columns.Num() == 0)
+				CombTable.Columns = { TEXT("class"), TEXT("graph"), TEXT("ConditionPinCount") };   // value cols only — WriteBundle prepends "key"
+			for (FQuestDataRow& R : StemPair.Value) CombTable.Rows.Add(MoveTemp(R));
+		}
+		Bundle.Edges.Append(MoveTemp(EdgesToAdd));
+
+		if (Synthesized > 0)
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d prerequisite combinator(s) from flow conventions."), Synthesized);
+	}
+	// --------------------------------------------------------------------------------------------------------------
+
 	// Pick the format provider from an optional "--format=<name>" console arg (default TSV). The arg is what the ORACLE
 	// needs to pin a format deterministically; a project setting/registry is the later human-facing selection seam.
 	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
@@ -723,6 +840,10 @@ namespace
 			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: could not read '%s' as %s. No asset created."), *FolderPath, *Format->FormatName());
 			return;
 		}
+
+		TArray<FString> Warnings;
+		ApplyFlowConventions(Bundle, Warnings);
+
 		TMap<FString, const FQuestDataRow*> NodeRowsByKey;
 		TSet<FString> AllRowKeys;
 		FString Error;
@@ -751,8 +872,7 @@ namespace
 			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: asset creation failed at '%s/%s'."), *DestPackagePath, *AssetName);
 			return;
 		}
-
-		TArray<FString> Warnings;
+		
 		TSet<FString> Consumed;
 
 		// Self-row properties onto the graph object (QuestlineID gets _RT; instanced QuestlineRewards rebuilt).

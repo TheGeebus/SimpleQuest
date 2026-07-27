@@ -308,10 +308,10 @@ Call `CompleteObjectiveWithOutcome(OutcomeTag)` from `TryCompleteObjective` (or 
 ### Save/load hooks
 
 Objectives that carry durable per-instance progress (a counter, a phase index, a partial state) override two virtuals:
-
+```c++
     virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const override;
     virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) override;
-
+```
 Base returns empty / no-op because a stateless Objective needs nothing. Capture runs at save. Restore runs *after* the Objective has been rebuilt on load (which resets it), so the override re-applies the saved values. `UCountingQuestObjective` overrides these to persist its counter as a reference example.
 
 ### When to write a custom Objective vs use a reference
@@ -357,7 +357,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 **C++** — use the library template for direct handle-based subscriptions:
 
-```cpp
+```c++
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
 #include "Events/QuestStartedEvent.h"
 

@@ -28,7 +28,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Highlights
 
-- **Objective-based progression** — the atomic unit of the framework. A stateful observer subscribes to gameplay events, decides when it's complete, and emits a named outcome tag. Subclass `UQuestObjective`, override two methods, integrate any UE event source (signals, GAS abilities, inventory changes, dialogue beats). Activation delivers typed context with target actors, custom payload, and an origin chain across LinkedQuestline boundaries.
+- **Objective-based progression** — the atomic unit of the framework. A stateful observer subscribes to gameplay events, decides when it's complete, and emits a named outcome tag. Subclass `UQuestObjective`, override a couple of methods, integrate any UE event source (signals, GAS abilities, inventory changes, dialogue beats). Activation delivers typed context with target actors, custom payload, and an origin chain across LinkedQuestline boundaries.
 - **Decoupled event bus** — systems publish tagged events, and objectives observe them. No direct references between publisher and observer. Combat doesn't know it's completing a quest step; the quest step doesn't know what fired the event. Routing is SimpleCore's job, and both sides stay independently testable.
 - **Named outcomes** — objectives resolve with designer-authored outcome tags rather than binary success/failure. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream logic routes each outcome independently through the graph.
 - **Prerequisite composition** — AND / OR / NOT combinators plus reusable Prerequisite Rules gate activation, progression, or completion on arbitrarily deep boolean expressions. Rules are named and referenced from multiple content nodes without duplication.
@@ -39,6 +39,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A searchable World State Facts panel lists every asserted fact. No log-diving to understand runtime state.
 - **Authoring diagnostics** — the Prereq Tag Validator runs a project-wide scan for broken cross-graph references. The Stale Quest Tags panel covers loaded levels, Actor Blueprint defaults, and unloaded levels (including World Partition), with per-row navigation, atomic multi-select clear, and a headless commandlet variant for CI gating.
 - **Two-plugin architecture** — SimpleQuest is built on **SimpleCore**, a standalone coordination layer (a hierarchical tag-routed event bus and a persistent fact store) that any UE plugin or system can consume independently.
+
 ![SimpleQuestDemo-slate-node-preview-v2](https://github.com/user-attachments/assets/9cc8e4f9-ee60-46fc-881a-5c45e38ff9d4)
 
 ---
@@ -52,14 +53,14 @@ SimpleQuest is built on SimpleCore. SimpleCore has zero knowledge of quests - it
 Foundational coordination layer. Runtime and editor modules.
 
 - **`USignalSubsystem`** — gameplay-tag-routed event bus. Publishers send events on a tag, and the bus delivers them to subscribers bound on that tag or any ancestor tag in the hierarchy. Each callback receives the original published tag, so a subscriber on a parent tag knows which descendant fired. When the same logical event publishes under multiple tags simultaneously (a common case with linked questlines, where one node carries both its standalone tag and inlining-context aliases), the bus collapses delivery so each subscriber gets exactly one callback, not one per matching tag. Compared to Unreal's built-in `GameplayMessageRouter`: both handle hierarchical tag-keyed routing, and `USignalSubsystem` adds multi-branch publish with cross-branch deduplication for the case where a single logical event carries multiple tags simultaneously.
-- **`UWorldStateSubsystem`** — queryable, gameplay-tag-keyed fact store with integer reference counts. Add a fact, query whether it's present, remove it. Transition events fire when a fact appears (count goes 0→1) or disappears (1→0), so subscribers can react to state changes without polling. Components that register late read current truth directly - safe for streaming, dynamic spawn, multiplayer join-in-progress, and save game restoration.
+- **`UWorldStateSubsystem`** — queryable, gameplay-tag-keyed fact store with integer reference counts. Add a fact, query whether it's present, remove it. Transition events fire when a fact appears (count goes 0→1) or disappears (1→0), so subscribers can react to state changes without polling. Components that register late read current truth directly - safe for streaming, dynamic spawn, join-in-progress, and save game restoration.
 - **`SimpleCoreEditor`** — editor module. Provides the World State Facts inspector panel and PIE debug channel. Usable without SimpleQuest.
 
 ### SimpleQuest
 
 Game progression framework. Runtime and editor modules, with an optional Electronic Nodes integration module (not affiliated).
 
-- **Tag-addressed runtime** — Every compiled quest node is a `UObject` addressed by a `FGameplayTag`. The manager subsystem, components, and event bus all route by tag. Tags are automatically generated and registered on graph compilation. Write the progression, compile, and the tags appear in UE's Gameplay Tag Manager. 
+- **Tag-addressed runtime** — Every compiled quest node is a `UObject` addressed by a `FGameplayTag`. The manager subsystem, components, and event bus all route by tag. Tags are automatically generated and registered on graph compilation. Write the progression, compile, and the tags appear in UE's Gameplay Tag Manager.
 - **Pull-based prerequisite activation** — Quest nodes waiting on prerequisites subscribe to the relevant World State fact tags. When all conditions are met, the node activates. No polling, no ticking.
 - **Hierarchical catch-up for late subscribers** — Givers, observers, and `Observe Quest Lifecycle` Blueprint nodes that register after a quest event has already fired receive the recorded state immediately: original outcome, prerequisite snapshot, blocker information, the giver actor that initiated activation, the activation source (giver / cascade / external API / initial entry), and any activation parameters. Subscriptions bound on a parent tag (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind, mirroring the live bus's hierarchical delivery for catch-up.
 - **Two-layer state architecture** — World State answers "did it happen?" with boolean fact storage. `UQuestStateSubsystem` answers "what's the structured detail?" with rich event records, the same data the save/load system uses to reconstruct a session. The manager subsystem owns all writes. `UQuestStateSubsystem` is the public read surface.
@@ -337,11 +338,11 @@ Three tiers of extensibility, matched to the scope of the change:
 
 ### Tier 1 — Self-describing node types (subclass + override)
 
-Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals — no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
+Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals - no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
 
 ### Tier 2 — Replaceable policies (subclass + register)
 
-`FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide — useful for projects with bespoke node-type behavior that differs from the defaults.
+`FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide. Useful for projects with bespoke node-type behavior that differs from the defaults.
 
 ### Tier 3 — Factory-registered algorithms (subclass + register factory)
 
@@ -353,7 +354,7 @@ Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configure
 
 ### Reacting to Quest Events
 
-**Blueprint** — drop the **Observe Quest Lifecycle** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The observation stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. observe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` — `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` — plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Observer` reference when you're done, or let the GameInstance tear it down.
+**Blueprint** — drop the **Observe Quest Lifecycle** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The observation stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. observe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` - `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` - plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Observer` reference when you're done, or let the GameInstance tear it down.
 
 **C++** — use the library template for direct handle-based subscriptions:
 
@@ -382,21 +383,21 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 
 **Log verbosity** — SimpleQuest's logging is split into five channels for independent dial control:
 
-| Channel | Coverage |
-|---|---|
+| Channel | Coverage                                                                                         |
+|---|--------------------------------------------------------------------------------------------------|
 | `LogSimpleQuest` | Module startup, settings, debug overlay, and anything not covered by a specialized channel below |
-| `LogSimpleQuestActivation` | Quest activation flow — starts, chain advancement, deactivation |
-| `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery |
-| `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation |
-| `LogSimpleQuestState` | Quest history recording — resolutions, entries, tag registrations |
+| `LogSimpleQuestActivation` | Quest activation flow - starts, chain advancement, deactivation                                  |
+| `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery                                   |
+| `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation                            |
+| `LogSimpleQuestState` | Quest history recording - resolutions, entries, tag registrations                                |
 
-SimpleCore logs under `LogSimpleCore`. Set verbosity per channel via the Project Settings pages above — changes apply live without editor restart. The `[Core.Log]` section in `DefaultEngine.ini` still works as a fallback for non-editor builds.
+SimpleCore logs under `LogSimpleCore`. Set verbosity per channel via the Project Settings pages above - changes apply live without editor restart. The `[Core.Log]` section in `DefaultEngine.ini` still works as a fallback for non-editor builds.
 
 Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
 **Compiled tags INI** — the compiler persists registered Gameplay Tags to `Plugins/SimpleQuest/Config/Tags/SimpleQuestCompiledTags.ini` for startup availability before the Asset Registry finishes loading. This file is auto-generated; manual edits are overwritten on each compile. It lives in the plugin folder so adopters inherit the demo's compiled tags by copying the plugin in, zero-config.
 
-**Authored tags INI** — the plugin ships a default tag set in `Plugins/SimpleQuest/Config/Tags/SimpleQuestAuthoredTags.ini` (the example activation groups, prereq rule groups, and named outcomes the demo content references). Your project's own gameplay tags should go in `<YourProject>/Config/Tags/*.ini` per standard UE convention — Unreal auto-scans the project's tag config directory. Edit the plugin's authored-tags file only if you're contributing to SimpleQuest itself; project-level edits won't be clobbered on plugin upgrade.
+**Authored tags INI** — the plugin ships a default tag set in `Plugins/SimpleQuest/Config/Tags/SimpleQuestAuthoredTags.ini` (the example activation groups, prereq rule groups, and named outcomes the demo content references). Your project's own gameplay tags should go in `<YourProject>/Config/Tags/*.ini` per standard UE convention - Unreal auto-scans the project's tag config directory. Edit the plugin's authored-tags file only if you're contributing to SimpleQuest itself; project-level edits won't be clobbered on plugin upgrade.
 
 ---
 

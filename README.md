@@ -30,10 +30,10 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 - **Objective-based progression** — the atomic unit of the framework. A stateful observer subscribes to gameplay events, decides when it's complete, and emits a named outcome tag. Subclass `UQuestObjective`, override two methods, integrate any UE event source (signals, GAS abilities, inventory changes, dialogue beats). Activation delivers typed context with target actors, custom payload, and an origin chain across LinkedQuestline boundaries.
 - **Decoupled event bus** — systems publish tagged events, and objectives observe them. No direct references between publisher and observer. Combat doesn't know it's completing a quest step; the quest step doesn't know what fired the event. Routing is SimpleCore's job, and both sides stay independently testable.
-- **Named outcomes** — objectives resolve with designer-authored outcome tags rather than binary success/failure. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`; downstream logic routes each outcome independently through the graph.
+- **Named outcomes** — objectives resolve with designer-authored outcome tags rather than binary success/failure. A combat step can complete with `Victory`, `Retreat`, or `Negotiated`, and downstream logic routes each outcome independently through the graph.
 - **Prerequisite composition** — AND / OR / NOT combinators plus reusable Prerequisite Rules gate activation, progression, or completion on arbitrarily deep boolean expressions. Rules are named and referenced from multiple content nodes without duplication.
 - **Rewards as adapters** — self-configuring reward types read completion context and broadcast to any actor whose Reward Recipient component watches that reward type. The granting node never needs to know who's listening. A preview query returns what a completion advertises *before* it's earned: the "do this, get this" data a quest-giver hub or bounty board needs.
-- **Visual graph authoring** — compose progressions in a node graph with designer-friendly widgets, inline tag pickers, and in-editor compile with clickable diagnostics that navigate straight to the offending node. The graph is the authoring surface on the framework; the framework works without opening a graph editor.
+- **Visual graph authoring** — compose progressions in a node graph with designer-friendly widgets, inline tag pickers, and in-editor compile with clickable diagnostics that navigate straight to the offending node. The graph is the authoring surface on the framework, but the framework works without opening a graph editor.
 - **Save/load** — full progression state packs into a single serializable snapshot you embed in whatever save game your project already uses. Plain value copy, safe to hand off to an async save. Restored actors see events flagged as catch-up so they can jump straight to settled state rather than replaying transitions.
 - **Late-registration catch-up** — components that register after an event has fired receive the recorded state immediately on bind. Streaming levels, dynamically spawned actors, late-joining players, and save-game restoration all work without special-casing.
 - **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A searchable World State Facts panel lists every asserted fact. No log-diving to understand runtime state.
@@ -59,12 +59,12 @@ Foundational coordination layer. Runtime and editor modules.
 
 Game progression framework. Runtime and editor modules, with an optional Electronic Nodes integration module (not affiliated).
 
-- Tag-addressed runtime. Every compiled quest node is a `UObject` addressed by a `FGameplayTag`. The manager subsystem, components, and event bus all route by tag.
-- Pull-based prerequisite activation. Quest nodes waiting on prerequisites subscribe to the relevant World State fact tags. When all conditions are met the node activates. No polling, no ticking.
-- Hierarchical catch-up for late subscribers. Givers, observers, and `Observe Quest Lifecycle` Blueprint nodes that register after a quest event has already fired receive the recorded state immediately: original outcome, prerequisite snapshot, blocker information, the giver actor that initiated activation, the activation source (giver / cascade / external API / initial entry), and any activation parameters. Subscriptions bound on a parent tag (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind, mirroring the live bus's hierarchical delivery for catch-up.
-- Two-layer state architecture. World State answers "did it happen?" with boolean fact storage. `UQuestStateSubsystem` answers "what's the structured detail?" with rich event records, the same data the save/load system uses to reconstruct a session. The manager subsystem owns all writes. `UQuestStateSubsystem` is the public read surface.
-- Outcome-filtered observers. An observer component can filter which outcomes it responds to. An empty filter means all outcomes.
-- Adapter-based rewards. A reward is a `UQuestRewardBase` subclass that computes a grant from the completion context and hands it out - the framework doesn't dictate what a reward *is*. Grants publish on a reward-type channel, and a `UQuestRewardRecipientComponent` receives the types it watches, hierarchically. Advertised-reward queries surface what a completion (or a whole questline) pays without granting it, live or straight off an unstarted asset. Reference rewards ship for the common cases (experience, currency, loot table, recipient-scaled value).
+- **Tag-addressed runtime** — Every compiled quest node is a `UObject` addressed by a `FGameplayTag`. The manager subsystem, components, and event bus all route by tag. Tags are automatically generated and registered on graph compilation. Write the progression, compile, and the tags appear in UE's Gameplay Tag Manager. 
+- **Pull-based prerequisite activation** — Quest nodes waiting on prerequisites subscribe to the relevant World State fact tags. When all conditions are met, the node activates. No polling, no ticking.
+- **Hierarchical catch-up for late subscribers** — Givers, observers, and `Observe Quest Lifecycle` Blueprint nodes that register after a quest event has already fired receive the recorded state immediately: original outcome, prerequisite snapshot, blocker information, the giver actor that initiated activation, the activation source (giver / cascade / external API / initial entry), and any activation parameters. Subscriptions bound on a parent tag (e.g. `SimpleQuest.Questline.MyArc`) fan out to every known descendant on bind, mirroring the live bus's hierarchical delivery for catch-up.
+- **Two-layer state architecture** — World State answers "did it happen?" with boolean fact storage. `UQuestStateSubsystem` answers "what's the structured detail?" with rich event records, the same data the save/load system uses to reconstruct a session. The manager subsystem owns all writes. `UQuestStateSubsystem` is the public read surface.
+- **Outcome-filtered observers** — An observer component can filter which outcomes it responds to. An empty filter means all outcomes.
+- **Adapter-based rewards** — A reward is a `UQuestRewardBase` subclass that computes a grant from the completion context and hands it out - the framework doesn't dictate what a reward *is*. Grants publish on a reward-type channel, and a `UQuestRewardRecipientComponent` receives the types it watches, hierarchically. Advertised-reward queries surface what a completion (or a whole questline) pays without granting it, live or straight off an unstarted asset. Reference rewards ship for the common cases (experience, currency, loot table, recipient-scaled value).
 
 ---
 
@@ -72,17 +72,19 @@ Game progression framework. Runtime and editor modules, with an optional Electro
 
 - Unreal Engine 5.6 or 5.7
 - Visual Studio 2022 (Windows) or Xcode (Mac) with C++20 support enabled
-- [Git LFS](https://git-lfs.com/) installed locally (required for cloning — see below)
+- [Git LFS](https://git-lfs.com/) installed locally (required for cloning - see below)
 
 ---
 
 ## Installation
 
-> **Important — do not use GitHub's "Code → Download ZIP" button.** This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a Release artifact instead.
+> **Important -- do not use GitHub's "Code > Download ZIP" button.** 
+>
+>This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a .zip from the [Releases](https://github.com/TheGeebus/SimpleQuest/releases) page instead.
 
 1. Install [Git LFS](https://git-lfs.com/) and run `git lfs install` once.
-2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuestDemo.git` — LFS pointers resolve automatically during clone.
-3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config — compiled tags, designer-authored tags, and demo content all travel with the plugin folders.
+2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuestDemo.git` - LFS pointers resolve automatically during clone.
+3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config. Compiled tags, designer-authored tags, and demo content all travel with the plugin folders.
 4. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
 5. Open the solution and build the **Development Editor** target.
 6. Enable both plugins in **Edit > Plugins** if they are not already active.
@@ -95,13 +97,18 @@ To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"`
 
 ### 1. Create a Questline Graph asset
 
-Right-click in the Content Browser and select **Quest > Questline Graph**. This creates a `UQuestlineGraph` asset containing an empty editor graph with only an Entry node and a default Outcome terminal.
+Right-click in the Content Browser and select **Gameplay > Questline Graph**. This creates a `UQuestlineGraph` asset containing an empty editor graph with only an Entry node. The "Entered" pin will pass an activation signal to any connected nodes when this Questline activates.
 
 ### 2. Author the graph
 
-Open the asset to launch the graph editor. From Entry, drag off a wire and place a **Quest** node. Quests are composed of ordered **Step** nodes with inline objective class pickers — drop the objective type from the Step widget, assign targets and parameters, and wire outcomes to downstream paths.
+Open the asset to launch the graph editor. From Entry, drag off a wire and place a **Step** node. Questlines are composed of ordered Step nodes with inline objective class pickers. Drop the objective type from the Step widget, assign targets and parameters, and wire completion paths to downstream paths.
+
+Completion Path pins (or simply "Path" pins, which are always an output) connected to Activation pins (always an input) automatically create Activation wires (solid), indicating the connection represents the flow of execution and dictates the order and timing of node activations. Connections between Path output pins and Prerequisite input pins automatically create Prerequisite wires (dashed), indicating activation is contingent on a given completion path.
+
+When a content node receives an activation signal, it checks satisfaction of any attached prerequisite expression. If the prerequisite is satisfied - or if there is no connected prerequisite wire - the node activates. If a connected prerequisite remains unsatisfied, further progress is deferred until that prerequisite is satisfied. A node that has been activated but deferred proceeds automatically when the prerequisite gating it is fulfilled, no additional signalling is needed.
 
 Useful constructs as your graph grows:
+- **Quest** — a node that contains another graph with its own nodes and that has its own independent tag address, which nests in the parent questline - much like animation state machines that can nest within each other. Double-click to open the contained graph. Use the Questline Outliner panel or the breadcrumbs at the top of the graph editor panel to return to the parent level.
 - **AND / OR / NOT combinators** — wire into any node's `Prerequisites` pin to gate activation on a boolean expression.
 - **Prerequisite Rule Entry / Exit** — define a named rule once; reference it from multiple content nodes without duplication.
 - **Prerequisite Fact Tag** — gate on any World State fact tag. Decoupled from graph topology, so you can compose with any UE gameplay system that tracks tag-keyed state (faction reputation, inventory, system flags).
@@ -280,7 +287,7 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 |---|---|
 | `LogSimpleQuest` | Module startup, settings, debug overlay, and anything not covered by a specialized channel below |
 | `LogSimpleQuestActivation` | Quest activation flow — starts, chain advancement, deactivation |
-| `LogSimpleQuestSubscription` | Component and Blueprint subscri~~~~ptions; catch-up event delivery |
+| `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery |
 | `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation |
 | `LogSimpleQuestState` | Quest history recording — resolutions, entries, tag registrations |
 

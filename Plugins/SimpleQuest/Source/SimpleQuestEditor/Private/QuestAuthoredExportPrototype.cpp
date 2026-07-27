@@ -22,31 +22,38 @@
 #include "Quests/QuestlineGraph.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Resolver/TsvQuestDataFormat.h"
-#include "Resolver/JsonQuestDataFormat.h"
+#include "Resolver/QuestDataFormatRegistry.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
-	// The export walk (ExportRouting) builds the shared, format-free FQuestDataBundle directly — the local FExport*
-	// bundle structs and the TSV framing (cell escaping + file layout in WriteBundle) moved to the TSV provider
-	// (Resolver/TsvQuestDataFormat) in Stage 2. The walk speaks ONLY the neutral bundle; the provider owns file/format.
-
-	// Pick the format provider from an optional "--format=<name>" console arg (default TSV). The arg is what the ORACLE
-	// needs to pin a format deterministically; a project setting/registry is the later human-facing selection seam.
+	// Select the format provider: a --format=<name> console argument (highest priority), else the project default,
+	// else "TSV". Export has no per-mapping format source, so that slot is empty.
 	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
 	{
+		FString ConsoleArgName;
 		for (const FString& Arg : Args)
 		{
 			if (Arg.StartsWith(TEXT("--format=")))
 			{
-				const FString Name = Arg.RightChop(9);
-				if (Name.Equals(TEXT("json"), ESearchCase::IgnoreCase)) return MakeUnique<FJsonQuestDataFormat>();
+				ConsoleArgName = Arg.RightChop(9);
+				break;
 			}
 		}
-		return MakeUnique<FTsvQuestDataFormat>();   // default
+		const FString SettingsDefault = GetDefault<USimpleQuestSettings>()->DefaultImportFormat.ToString();
+
+		FString Error;
+		const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
+		if (Name.IsEmpty())
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: %s. Nothing exported."), *Error);
+			return nullptr;
+		}
+		return FQuestDataFormatRegistry::Get().Create(Name);
 	}
 
 	// Make an exported map-key safe to embed inside a neutral ROW KEY (e.g. "QuestlineRewards[<key>].Rewards"): a key
@@ -498,9 +505,11 @@ namespace
 
 		const FString OutDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport") / SelfKey);
 
-		// Hand the neutral bundle to the format provider (Stage 2: hardcoded TSV; Stage 3 makes this selectable). The
-		// walk above never touched a file — all framing/IO lives in the provider now.
 		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
+		if (!Format)
+		{
+			return;   // the unregistered-format error was already logged; nothing exported.
+		}
 		if (Format->WriteBundle(Bundle, OutDir))
 		{
 			int32 RowTotal = 0;

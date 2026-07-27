@@ -5,6 +5,7 @@
 
 
 FOnPickerCategoriesChanged USimpleQuestSettings::OnPickerCategoriesChanged;
+TArray<FString> USimpleQuestSettings::AvailableFormats;
 
 namespace
 {
@@ -77,6 +78,16 @@ FString USimpleQuestSettings::ComposeOutcomePickerCategories() const
 FString USimpleQuestSettings::ComposeQuestlinePickerCategories() const
 {
 	return ComposePickerCategories(TEXT("SimpleQuest.Questline"), AdditionalQuestlinePickerCategories);
+}
+
+void USimpleQuestSettings::SetAvailableFormats(const TArray<FString>& InFormatNames)
+{
+	AvailableFormats = InFormatNames;
+}
+
+TArray<FString> USimpleQuestSettings::GetAvailableFormatNames()
+{
+	return AvailableFormats;
 }
 
 FString USimpleQuestSettings::ComposePickerCategories(const FString& DefaultNamespace, const TArray<FName>& AdditionalCategories)

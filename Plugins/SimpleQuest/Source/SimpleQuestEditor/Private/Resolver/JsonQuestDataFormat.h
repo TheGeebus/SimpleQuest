@@ -17,5 +17,5 @@ class FJsonQuestDataFormat final : public ISimpleQuestDataFormat
 public:
 	virtual bool WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder) override;
 	virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) override;
-	virtual FString FormatName() const override { return TEXT("json"); }
+	virtual FString FormatName() const override { return TEXT("JSON"); }
 };

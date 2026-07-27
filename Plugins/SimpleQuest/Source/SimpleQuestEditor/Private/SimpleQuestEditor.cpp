@@ -42,6 +42,9 @@
 #include "Nodes/Slate/SGraphNode_PrerequisiteCombinator.h"
 #include "Nodes/Slate/SGraphNode_QuestlineStep.h"
 #include "Nodes/Slate/SGraphNode_UtilityNode.h"
+#include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/TsvQuestDataFormat.h"
+#include "Resolver/JsonQuestDataFormat.h"
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
@@ -276,6 +279,17 @@ void FSimpleQuestEditor::StartupModule()
 			}
 		}
 	});
+
+	// Register the built-in data-format providers through the public registry — the same interface a studio's provider
+	// uses. TSV is the default; JSON is the second built-in. A studio adds its own from its module's StartupModule.
+	FQuestDataFormatRegistry::Get().RegisterFormat(TEXT("TSV"),
+		FQuestDataFormatFactoryDelegate::CreateLambda([]() -> TUniquePtr<ISimpleQuestDataFormat> { return MakeUnique<FTsvQuestDataFormat>(); }));
+	FQuestDataFormatRegistry::Get().RegisterFormat(TEXT("JSON"),
+		FQuestDataFormatFactoryDelegate::CreateLambda([]() -> TUniquePtr<ISimpleQuestDataFormat> { return MakeUnique<FJsonQuestDataFormat>(); }));
+
+	// Publish the registered format names to the project setting's dropdown (Project Settings -> Simple Quest ->
+	// Resolver). The names live in the editor-only registry; the setting reads them back for its picker.
+	USimpleQuestSettings::SetAvailableFormats(FQuestDataFormatRegistry::Get().GetRegisteredNames());
 	
 	StyleSet = MakeShareable(new FSlateStyleSet("SimpleQuestStyle"));
 	StyleSet->SetContentRoot(
@@ -405,6 +419,8 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 void FSimpleQuestEditor::ShutdownModule()
 {
 	FEditorDelegates::MapChange.RemoveAll(this);
+
+	FQuestDataFormatRegistry::Get().Reset();
 
 	if (PIEDebugChannel.IsValid())
 	{

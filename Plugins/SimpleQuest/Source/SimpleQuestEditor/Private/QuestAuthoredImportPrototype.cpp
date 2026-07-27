@@ -1,7 +1,6 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-
 // PROTOTYPE — Resolver, Phase 2 import (the round-trip's second half). Reconstructs AUTHORED editor nodes from the
 // interlingua table folder an export produced, then feeds the EXISTING compiler — never reverses the compiler. Creates
 // a FRESH asset (QuestlineID suffixed _RT so its compiled tag namespace doesn't collide with the original), so the
@@ -15,16 +14,15 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
-#include "EdGraphNode_Comment.h"
 #include "Misc/Paths.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Resolver/TsvQuestDataFormat.h"
+#include "Resolver/QuestDataFormatRegistry.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "UObject/UnrealType.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 #include "Internationalization/Text.h"
 #include "SimpleQuestLog.h"
-
 #include "Quests/QuestlineGraph.h"
 #include "Factories/QuestlineGraphFactory.h"
 #include "Nodes/QuestlineNodeBase.h"
@@ -35,9 +33,8 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "ISimpleQuestEditorModule.h"
-#include "Resolver/JsonQuestDataFormat.h"
+#include "Resolver/ISimpleQuestDataFormat.h"
 #include "Utilities/QuestlineGraphCompiler.h"
-#include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
@@ -260,19 +257,30 @@ namespace
 	}
 	// --------------------------------------------------------------------------------------------------------------
 
-	// Pick the format provider from an optional "--format=<name>" console arg (default TSV). The arg is what the ORACLE
-	// needs to pin a format deterministically; a project setting/registry is the later human-facing selection seam.
+	// Select the format provider: a --format=<name> console argument (highest priority), else the project default,
+	// else "TSV". The per-mapping format source is empty here for now. Returns null when a named format isn't
+	// registered, so the caller refuses before creating anything.
 	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
 	{
+		FString ConsoleArgName;
 		for (const FString& Arg : Args)
 		{
 			if (Arg.StartsWith(TEXT("--format=")))
 			{
-				const FString Name = Arg.RightChop(9);
-				if (Name.Equals(TEXT("json"), ESearchCase::IgnoreCase)) return MakeUnique<FJsonQuestDataFormat>();
+				ConsoleArgName = Arg.RightChop(9);   // length of "--format="
+				break;
 			}
 		}
-		return MakeUnique<FTsvQuestDataFormat>();   // default
+		const FString SettingsDefault = GetDefault<USimpleQuestSettings>()->DefaultImportFormat.ToString();
+
+		FString Error;
+		const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
+		if (Name.IsEmpty())
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: %s. No asset created."), *Error);
+			return nullptr;
+		}
+		return FQuestDataFormatRegistry::Get().Create(Name);
 	}
 
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
@@ -874,10 +882,11 @@ namespace
 		FString FolderPath = FString::Join(FolderParts, TEXT(" "));
 		FolderPath = FolderPath.TrimQuotes();                 // tolerate quotes if the caller added them
 
-		// P0 — read the folder via the format provider (picked from --format, default TSV), then validate the neutral
-		// bundle structurally, before creating anything. Provider reads files -> bundle; ValidateBundle checks the bundle
-		// (provider-agnostic). MakeQuestDataFormat scans the ORIGINAL Args for --format (present or not among PathArgs).
 		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
+		if (!Format)
+		{
+			return;   // the unregistered-format error was already logged; refuse before creating anything.
+		}
 		FQuestDataBundle Bundle;
 		if (!Format->ReadBundle(FolderPath, Bundle))
 		{

@@ -33,6 +33,6 @@ public:
 	// validity is checked downstream by the routing core.
 	virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) = 0;
 
-	// A short identifier for logging and (Stage 3) the provider registry.
+	// A short identifier for logging and the provider registry.
 	virtual FString FormatName() const = 0;
 };

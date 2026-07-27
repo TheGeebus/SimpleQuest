@@ -103,6 +103,8 @@ Right-click in the Content Browser and select **Gameplay > Questline Graph**. Th
 
 Open the asset to launch the graph editor. From Entry, drag off a wire and place a **Step** node. Questlines are composed of ordered Step nodes with inline objective class pickers. Drop the objective type from the Step widget, assign targets and parameters, and wire completion paths to downstream paths.
 
+Objective choice is where your game's specific gameplay meets the framework. The Step's inline picker lists the reference Objectives shipped in the plugin (counting-based, location-reach, multi-target interaction) plus any you author for your own event sources. See [Objectives](#objectives) for the lifecycle model and how to author your own.
+
 Completion Path pins (or simply "Path" pins, which are always an output) connected to Activation pins (always an input) automatically create Activation wires (solid), indicating the connection represents the flow of execution and dictates the order and timing of node activations. Connections between Path output pins and Prerequisite input pins automatically create Prerequisite wires (dashed), indicating activation is contingent on a given completion path.
 
 When a content node receives an activation signal, it checks satisfaction of any attached prerequisite expression. If the prerequisite is satisfied - or if there is no connected prerequisite wire - the node activates. If a connected prerequisite remains unsatisfied, further progress is deferred until that prerequisite is satisfied. A node that has been activated but deferred proceeds automatically when the prerequisite gating it is fulfilled, no additional signalling is needed.
@@ -201,6 +203,134 @@ Editor-side compilation translates authored graphs into runtime node instances a
 
 ---
 
+## Objectives
+
+Objectives are the primary variation point of the framework. Most games will author at least one custom Objective subclass - Objectives are where your specific gameplay meets the progression system, and the reference implementations shipped in the plugin cover common patterns but aren't a complete library.
+
+### What an Objective is
+
+An Objective is a stateful observer that subscribes to gameplay events, decides when it's complete, and emits a named outcome tag. Each Step in a Questline hosts exactly one Objective at runtime. The Objective owns the state that determines completion and the outcome that routes what happens next.
+
+### Reference implementations
+
+Base classes intended to be subclassed:
+
+- **`UQuestObjective`** — the raw base. Every custom Objective inherits directly or transitively from this.
+- **`UCountingQuestObjective`** — adds a `CurrentElements` / `MaxElements` counter initialized from the Step's authored `NumElementsRequired` (plus any caller contribution at activation) and an `AddProgress` convenience that increments, checks threshold, and fires exactly one event per call. Use for any objective with progress semantics.
+
+Example implementations in `Objectives/Examples/`:
+
+- **`UGoToQuestObjective`** — location-reach objective. Completes with a `Reached` outcome when the tracked target enters the goal.
+- **`UInteractAllTargetsObjective`** — multi-target objective. Auto-discovers Trigger Components targeting the owning Step at activation via `GetTriggersTargetingThisStep`; completes when every discovered target has fired. See the header for the full adopter wiring pattern.
+
+The reference set is expected to expand in v0.8.0 with timer, world-state-fact, and composite (ANY/ALL wrapper) objectives.
+
+### The lifecycle contract
+
+Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Override in C++ or Blueprint:
+```c++
+    UCLASS(Blueprintable)
+    class UMyObjective : public UQuestObjective
+    {
+        GENERATED_BODY()
+
+    protected:
+        virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored,
+                                                         const FQuestObjectiveRuntimeContext& Runtime) override
+        {
+            // Wire up listeners, subscribe to signals, store local tracking state, spawn UI, etc.
+            // Authored: design-time config from the Step's UPROPERTYs (target classes/actors, element count,
+            //           config asset). Owned by the Step, not the caller.
+            // Runtime:  caller's IncomingContext (instigator, custom data, lineage, target overrides) plus
+            //           Provenance and IncomingOutcomeTag stamped by the framework.
+            // The framework does NOT merge these — compose what you need, with full provenance over which
+            // values are authored vs caller-supplied.
+        }
+
+        virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& InContext) override
+        {
+            // InContext carries values supplied by the trigger fire: TriggeredActor, Instigator, and CustomData
+            // (an FInstancedStruct the trigger can populate with any shape you define — position, damage payload,
+            // interaction type, whatever your game needs to pass to the completion check).
+
+            if (/* your completion condition */)
+            {
+                // Trigger context from the inbound fire auto-forwards onto the completion event when omitted here.
+                CompleteObjectiveWithOutcome(MyOutcomeTag);
+            }
+        }
+
+        virtual void OnObjectiveDeactivated_Implementation() override
+        {
+            // Symmetric partner to OnObjectiveActivated. Fires on BOTH the completion path AND interruption
+            // paths (abandon, blocked, cascade-deactivated). Unsubscribe from external event sources, tear
+            // down UI handles, stop timers. The Objective is still live at this point — safe to inspect
+            // state stored during activation.
+        }
+    };
+```
+`UGoToQuestObjective` and `UInteractAllTargetsObjective` in `Objectives/Examples/` are working references for this pattern.
+
+### Completion Path discovery
+
+The editor discovers Completion Paths (Step node output pins) automatically from two sources, additive across the inheritance chain:
+
+- **C++ subclasses**: declare `FGameplayTag` properties with the `ObjectiveOutcome` metadata specifier. Back each tag with `UE_DEFINE_GAMEPLAY_TAG` to guarantee registration before CDO construction.
+```c++
+  // Header
+  UPROPERTY(EditDefaultsOnly, meta = (Categories = "SimpleQuest.Outcome", ObjectiveOutcome))
+  FGameplayTag Outcome_Reached;
+
+  // .cpp (file scope)
+  UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_Reached, "SimpleQuest.Outcome.Reached")
+
+  // Constructor
+  Outcome_Reached = Tag_Outcome_Reached;
+```
+- **Blueprint subclasses**: place `Complete Objective With Outcome` K2 nodes in event graphs. Each node's OutcomeTag is discovered automatically and surfaced as an independent Path pin on the hosting Step node.
+
+Both sources merge into a single deduplicated set - pins on the Step node reflect the union. Use "Add Call to Parent Function" on a Blueprint override to add a C++ base call to the appropriate branch.
+
+For fully programmatic outcomes that can't be expressed as individual UPROPERTYs or K2 nodes, override `GetPossibleOutcomes()` as a fallback.
+
+### Completion and trigger-context forwarding
+
+Call `CompleteObjectiveWithOutcome(OutcomeTag)` from `TryCompleteObjective` (or from the Blueprint `Complete Objective With Outcome` K2 node) to signal completion. The framework:
+
+- Auto-derives PathIdentity from the outcome tag if not explicitly specified and routes through the Step's structurally-keyed pin map.
+- Auto-forwards `TriggeredActor`, `Instigator`, and `CustomData` from the last inbound trigger context to the completion event if the adopter doesn't pass them explicitly. Adopters who pass explicit attribution win; the framework-owned `OriginatingTriggerComponent` is force-overridden from the last trigger context (immune to adopter mutation, guaranteeing the publishing trigger component receives its own feedback).
+
+### Progress and refusal
+
+- **`ReportProgress(ProgressContext)`** — broadcast an explicit progress signal. The framework never auto-fires incremental progress reporting. Objectives with per-fire progress semantics call this explicitly. Binary objectives never call it and listeners receive zero progress events, no event-shape filtering needed at the listener side.
+- **`RefuseTrigger(RefusalReason, TriggerContext)`** — decline a trigger fire that reached the Objective but didn't satisfy game-logic conditions (wrong actor, missing item, wrong phase). Publishes a refused-response event on the Step's channel so trigger actors can surface the refusal to UI or audio rather than silently dropping it.
+
+### Save/load hooks
+
+Objectives that carry durable per-instance progress (a counter, a phase index, a partial state) override two virtuals:
+
+    virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const override;
+    virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) override;
+
+Base returns empty / no-op because a stateless Objective needs nothing. Capture runs at save. Restore runs *after* the Objective has been rebuilt on load (which resets it), so the override re-applies the saved values. `UCountingQuestObjective` overrides these to persist its counter as a reference example.
+
+### When to write a custom Objective vs use a reference
+
+Use the shipped references when they fit: `UCountingQuestObjective` handles a substantial fraction of "N of X" completion patterns, `UGoToQuestObjective` and `UInteractAllTargetsObjective` cover their respective shapes. 
+
+Write a custom Objective when your completion condition depends on a game-specific event source the references don't cover: dialogue beats, GAS ability uses, inventory changes, faction reputation thresholds, cooldown expirations, weather changes, AI brain transitions - anything your game publishes as an event the framework doesn't know about. The custom Objective is where you bridge that event source into the progression pipeline.
+
+Common patterns you'll likely write:
+
+- **Signal-observer** — subscribe to a specific tag-channeled signal your game publishes, apply your own completion logic.
+- **Timer-based** — start a `FTimerManager` handle in `OnObjectiveActivated`, complete on expiry.
+- **World-state-fact-based** — subscribe to a specific WorldState fact tag, complete when it appears or disappears.
+- **Composite** — wrap other Objectives with ANY/ALL semantics for cases the graph combinators don't cover cleanly.
+
+The v0.7.0 release ships reference implementations for the timer, world-state-fact, and composite patterns. Until then they're straightforward to write against the base class.
+
+---
+
 ## Extending the Plugin
 
 Three tiers of extensibility, matched to the scope of the change:
@@ -216,37 +346,6 @@ Add a new quest node type by subclassing the relevant editor base class and over
 ### Tier 3 — Factory-registered algorithms (subclass + register factory)
 
 For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
-
-### Custom Objectives
-
-Subclass `UQuestObjective` (or `UCountingQuestObjective` for progress-tracking objectives). Override `OnObjectiveActivated_Implementation` to consume the typed activation params, and `TryCompleteObjective_Implementation` to decide when to resolve — calling `CompleteObjectiveWithOutcome` with the named outcome tag:
-
-```cpp
-UCLASS(Blueprintable)
-class UMyObjective : public UQuestObjective
-{
-    GENERATED_BODY()
-
-protected:
-    virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveActivationContext& Params) override
-    {
-        // Read Params.TargetActors, Params.NumElementsRequired, Params.CustomData (FInstancedStruct), Params.OriginTag, etc.
-        // Wire up listeners, store local tracking state, spawn UI, and so on.
-    }
-
-    virtual void TryCompleteObjective_Implementation(const FQuestObjectiveTriggerContext& Context) override
-    {
-        if (/* your completion condition */)
-        {
-            // The trigger context from the inbound fire (TriggeredActor, Instigator,
-            // CustomData) auto-forwards onto the completion event when omitted here.
-            CompleteObjectiveWithOutcome(MyOutcomeTag);
-        }
-    }
-};
-```
-
-Your objective class appears in the inline objective picker on any Step node.
 
 ### Custom Orchestration
 
@@ -303,22 +402,22 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 
 ## Roadmap
 
-| Quarter | Deliverable | Status |
-|---|---|---|
-| Q2 2026 | Visual graph editor + SimpleCore foundation | **Shipped** (v0.3.0) |
-| Q2 2026 | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge) | **Shipped** (v0.3.1) |
-| Q2 2026 | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references) | **Shipped** (v0.3.2) |
-| Q2 2026 | Catch-up outcome recovery + two-layer state foundations (`UQuestStateSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment) | **Shipped** (v0.3.3) |
-| Q2 2026 | Stale Quest Tags Tier 2 — project-wide stale-tag scanning (Actor Blueprint defaults + unloaded levels including World Partition; editor panel Full Project Scan + headless commandlet with CI-friendly exit codes) | **Shipped** (v0.3.4) |
-| Q2 2026 | Stale Quest Tags polish + design captures (multi-row mass-clear with confirmation + atomic undo, sortable Level column, sub-millisecond per-actor PostUndo rescan, designer-facing log clarity pass; rewards-design + scope-tag system docs) | **Shipped** (v0.3.5) |
-| Q2 2026 | Architectural cohesion + adopter ergonomics — distinct lifecycle events for offer-availability, accept-readiness, give-refusal, and activation failure; trigger response surface (per-fire response, structural-block, and per-lifecycle feedback delegates on the Trigger Component); rich payload propagation across all activation entry points; `SimpleQuest.*` namespace finalization with transparent migration redirects; tag rename resilience across Blueprints, components, and data assets; pin-wired prereq Path/Outcome separation with new Prerequisite Fact Tag and Prerequisite Outcome authoring nodes; outcome-channel event publishing for cross-quest subscribers; Blueprint-callable signal bus subscriptions plus `FSignalEventBase` marker for picker filtering; component model unification (single Giver component replaces stacked components); per-channel log verbosity; Electronic Nodes integration rewritten against the stock marketplace plugin on 5.7+ (no fork dependency); UE 5.7 compatibility verified | **Shipped** (v0.4.0) |
-| Q2 2026 | Authoring primitives + subscriber routing — Prereq Gate utility node; Add / Remove / Clear Facts nodes (questline graphs as first-class World State publishers); Resettable Replay prerequisite setting for honest re-gating on replayable content; subscriber-side hierarchical-vs-exact routing control; observer surface broadening (catch-all `OnAnyQuestEvent`, run-phase `ProgressRefused`); runtime add/remove of component watched-tag sets for dynamic-spawn join-in-progress; quest-resolution attribution fixes | **Shipped** (v0.4.1) |
-| Q3 2026 | Save/Load system — struct-based snapshot embedded in your own save game, with mid-step state handling | **Shipped** (v0.5.0) |
-| Q3 2026 | Rewards — first-class reward nodes + self-configuring reward adapters, broadcast-to-recipient delivery, the "do this, get this" advertisement query surface, and questline-level rewards | **Shipped** (v0.6.0, fixes v0.6.1) |
-| Q4 2026 | Universal adapter completion + expanded objective library — objective deactivation hook paired with timer, world-state-fact, and composite reference objectives, plus a systems-integration guide | Planned (v0.7.0) |
-| Q2 2027 | Sample project + documentation pass + SimpleCore public API versioning | Planned (v0.8.0 → v1.0.0) |
-| Post-1.0 | Multiplayer replication — server-authoritative quest state with join-in-progress | Pro Module |
-| Post-1.0 | GAS integration — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers | Pro Module |
+| Quarter  | Deliverable                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | Status                             |
+|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------|
+| Q2 2026  | Visual graph editor + SimpleCore foundation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | **Shipped** (v0.3.0)               |
+| Q2 2026  | Objective activation lifecycle (typed params, origin chain, giver + runtime + step-handoff merge)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | **Shipped** (v0.3.1)               |
+| Q2 2026  | Authoring diagnostics + runtime hardening (prereq validator, stale-tag cleanup panel, comment blocks, duplicate-outcome compile warning, event-subscription async action, soft class references)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | **Shipped** (v0.3.2)               |
+| Q2 2026  | Catch-up outcome recovery + two-layer state foundations (`UQuestStateSubsystem` rich-record store + BindToQuestEvent reliability fixes + pin-precise drag-create alignment)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | **Shipped** (v0.3.3)               |
+| Q2 2026  | Stale Quest Tags Tier 2 — project-wide stale-tag scanning (Actor Blueprint defaults + unloaded levels including World Partition; editor panel Full Project Scan + headless commandlet with CI-friendly exit codes)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | **Shipped** (v0.3.4)               |
+| Q2 2026  | Stale Quest Tags polish + design captures (multi-row mass-clear with confirmation + atomic undo, sortable Level column, sub-millisecond per-actor PostUndo rescan, designer-facing log clarity pass; rewards-design + scope-tag system docs)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | **Shipped** (v0.3.5)               |
+| Q2 2026  | Architectural cohesion + adopter ergonomics — distinct lifecycle events for offer-availability, accept-readiness, give-refusal, and activation failure; trigger response surface (per-fire response, structural-block, and per-lifecycle feedback delegates on the Trigger Component); rich payload propagation across all activation entry points; `SimpleQuest.*` namespace finalization with transparent migration redirects; tag rename resilience across Blueprints, components, and data assets; pin-wired prereq Path/Outcome separation with new Prerequisite Fact Tag and Prerequisite Outcome authoring nodes; outcome-channel event publishing for cross-quest subscribers; Blueprint-callable signal bus subscriptions plus `FSignalEventBase` marker for picker filtering; component model unification (single Giver component replaces stacked components); per-channel log verbosity; Electronic Nodes integration rewritten against the stock marketplace plugin on 5.7+ (no fork dependency); UE 5.7 compatibility verified | **Shipped** (v0.4.0)               |
+| Q2 2026  | Authoring primitives + subscriber routing — Prereq Gate utility node; Add / Remove / Clear Facts nodes (questline graphs as first-class World State publishers); Resettable Replay prerequisite setting for honest re-gating on replayable content; subscriber-side hierarchical-vs-exact routing control; observer surface broadening (catch-all `OnAnyQuestEvent`, run-phase `ProgressRefused`); runtime add/remove of component watched-tag sets for dynamic-spawn join-in-progress; quest-resolution attribution fixes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | **Shipped** (v0.4.1)               |
+| Q3 2026  | Save/Load system — struct-based snapshot embedded in your own save game, with mid-step state handling                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | **Shipped** (v0.5.0)               |
+| Q3 2026  | Rewards — first-class reward nodes + self-configuring reward adapters, broadcast-to-recipient delivery, the "do this, get this" advertisement query surface, and questline-level rewards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | **Shipped** (v0.6.0, fixes v0.6.1) |
+| Q3 2026  | Pluggable data resolver — user-writable adapters for bidirectional graph ↔ text data pipelines; version-controllable, diff-friendly progression data outside .uassets, fitting existing studio content workflows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | ***Active Development*** (v0.7.0) |
+| Q2 2027  | Expanded objective library + sample project + in-depth documentation + SimpleCore public API versioning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | Planned (v0.8.0 → v1.0.0)          |
+| Post-1.0 | Multiplayer replication — server-authoritative quest state with join-in-progress                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Pro Module                         |
+| Post-1.0 | GAS integration — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Pro Module                         |
 
 ---
 

@@ -84,8 +84,8 @@ Game progression framework. Runtime and editor modules, with an optional Electro
 >This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a .zip from the [Releases](https://github.com/TheGeebus/SimpleQuest/releases) page instead.
 
 1. Install [Git LFS](https://git-lfs.com/) and run `git lfs install` once.
-2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuestDemo.git` - LFS pointers resolve automatically during clone.
-3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config. Compiled tags, designer-authored tags, and demo content all travel with the plugin folders.
+2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuest.git` - LFS pointers resolve automatically during clone.
+3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config. Compiled tags, designer-authored tags, and demo content all travel with the plugin folders. Or just open the SimpleQuestDemo project, an empty host project that already has both plugins installed.
 4. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
 5. Open the solution and build the **Development Editor** target.
 6. Enable both plugins in **Edit > Plugins** if they are not already active.

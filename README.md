@@ -5,9 +5,9 @@
 
 Build progression systems using reusable Objective objects - stateful observers that respond to gameplay events through a decoupled event bus. Author complex progression flows visually with a graph-based editor.
 
-SimpleQuest started as an answer to a targeted question, *how do you make a single quest genuinely non-linear?* Working through that meant building primitives for branching outcomes, prerequisite composition, and lifecycle events - the infrastructure required to model complex gameplay progression. As those primitives evolved, they stopped being about quests specifically. What emerged is a framework that treats quests as one instance of a broader class: any progression you can express as branching content, prerequisite logic, and named outcomes.
+SimpleQuest started as an answer to a targeted question, *how do you make a single quest genuinely non-linear?* Working through that meant building primitives for branching outcomes, prerequisite composition, and lifecycle events - the infrastructure required to model complex gameplay progression. As those primitives evolved, they stopped being about any game or genre specifically. What emerged is a framework that treats quests as one instance of a broader class: any progression you can express as branching content, prerequisite logic, and named outcomes.
 
-**Build more than quests:**
+**Build any gameplay progression:**
 - Story missions with branching outcomes
 - Tutorials that adapt to player behavior
 - Achievements and challenges
@@ -79,13 +79,13 @@ Game progression framework. Runtime and editor modules, with an optional Electro
 
 ## Installation
 
-> **Important -- do not use GitHub's "Code > Download ZIP" button.** 
+> **Important -- do not use GitHub's "Code > Download ZIP" button.**
 >
 >This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a .zip from the [Releases](https://github.com/TheGeebus/SimpleQuest/releases) page instead.
 
 1. Install [Git LFS](https://git-lfs.com/) and run `git lfs install` once.
-2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuestDemo.git` - LFS pointers resolve automatically during clone.
-3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config. Compiled tags, designer-authored tags, and demo content all travel with the plugin folders.
+2. Clone the repository: `git clone https://github.com/TheGeebus/SimpleQuest.git` - LFS pointers resolve automatically during clone.
+3. Copy the `SimpleCore` and `SimpleQuest` folders from the cloned `Plugins/` directory into your project's `Plugins/` directory. The plugins are zero-config. Compiled tags, designer-authored tags, and demo content all travel with the plugin folders. Or just open the SimpleQuestDemo project, an empty host project that already has both plugins installed.
 4. Right-click your `.uproject` file and select **Generate Visual Studio project files**.
 5. Open the solution and build the **Development Editor** target.
 6. Enable both plugins in **Edit > Plugins** if they are not already active.
@@ -317,7 +317,7 @@ Base returns empty / no-op because a stateless Objective needs nothing. Capture 
 
 ### When to write a custom Objective vs use a reference
 
-Use the shipped references when they fit: `UCountingQuestObjective` handles a substantial fraction of "N of X" completion patterns, `UGoToQuestObjective` and `UInteractAllTargetsObjective` cover their respective shapes. 
+Use the shipped references when they fit: `UCountingQuestObjective` handles a substantial fraction of "N of X" completion patterns, `UGoToQuestObjective` and `UInteractAllTargetsObjective` cover their respective shapes.
 
 Write a custom Objective when your completion condition depends on a game-specific event source the references don't cover: dialogue beats, GAS ability uses, inventory changes, faction reputation thresholds, cooldown expirations, weather changes, AI brain transitions - anything your game publishes as an event the framework doesn't know about. The custom Objective is where you bridge that event source into the progression pipeline.
 

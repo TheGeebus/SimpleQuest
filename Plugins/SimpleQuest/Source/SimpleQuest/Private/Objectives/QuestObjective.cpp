@@ -66,6 +66,15 @@ void UQuestObjective::DispatchOnObjectiveDeactivated()
 	OwningStepTag = FGameplayTag();
 }
 
+void UQuestObjective::RestoreObjectiveState_Implementation(const FSimpleQuestObjectiveSaveState& State)
+{
+}
+
+FSimpleQuestObjectiveSaveState UQuestObjective::CaptureObjectiveState_Implementation() const
+{
+	return FSimpleQuestObjectiveSaveState{};
+}
+
 void UQuestObjective::OnObjectiveDeactivated_Implementation()
 {
 	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestObjective::OnObjectiveDeactivated_Implementation — base no-op. Override in "

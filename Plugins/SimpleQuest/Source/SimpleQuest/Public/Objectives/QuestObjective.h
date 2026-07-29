@@ -181,14 +181,15 @@ public:
 	// Objectives that carry durable per-instance progress (e.g. a running count) override these so save/load can
 	// persist and re-apply it. Base returns empty / no-op — a stateless objective needs nothing. Capture runs at save;
 	// Restore runs AFTER the objective is rebuilt on load (which has already reset it), so the override re-applies the
-	// saved values. Plain C++ virtual for now; promote to BlueprintNativeEvent (override becomes _Implementation) when a
-	// Blueprint objective needs to persist its own state.
+	// saved values. BlueprintNativeEvent: C++ override appends _Implementation.
 
 	/** Capture this objective's durable progress into a save-state struct. Base returns empty (nothing to persist). */
-	virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const { return FSimpleQuestObjectiveSaveState{}; }
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Quest|Objectives")
+	FSimpleQuestObjectiveSaveState CaptureObjectiveState() const;
 
 	/** Re-apply progress from a save-state struct after the objective has been rebuilt on load. Base is a no-op. */
-	virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) {}
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Quest|Objectives")
+	void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State);
 	
 protected:
 	/**

@@ -8,12 +8,9 @@
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestDisabledEvent.h"
-#include "Events/QuestEnabledEvent.h"
-#include "Events/QuestEndedEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
-#include "Events/QuestStartedEvent.h"
 #include "GameplayTagsManager.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
@@ -21,7 +18,6 @@
 #include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
 #include "Utilities/QuestTagComposer.h"
-#include "Utilities/SimpleCoreDebug.h"
 #include "Subsystems/WorldStateSubsystem.h"
 
 

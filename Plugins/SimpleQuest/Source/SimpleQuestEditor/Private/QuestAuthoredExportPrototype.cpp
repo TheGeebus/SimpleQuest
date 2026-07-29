@@ -24,6 +24,7 @@
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestReflectionUtils.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
@@ -119,20 +120,6 @@ namespace
 			}
 		}
 		return false;
-	}
-
-	// True when Prop counts as authored config for the export: designer-editable (CPF_Edit) OR explicitly opted in via
-	// meta=(QuestExport) — the marker for authored state mutated through custom actions rather than the Details panel
-	// (e.g. combinator ConditionPinCount). EditConst (VisibleAnywhere) and Transient are never authored config.
-	bool IsAuthoredConfig(const FProperty* Prop)
-	{
-#if WITH_EDITOR
-		const bool bOptedIn = Prop->HasMetaData(TEXT("QuestExport"));
-#else
-		const bool bOptedIn = false;
-#endif
-		if (!Prop->HasAnyPropertyFlags(CPF_Edit) && !bOptedIn) return false;
-		return !Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst);
 	}
 
 	// Build the structured neutral cell for one non-instanced property value. The type-dispatch that used to live in
@@ -339,7 +326,7 @@ namespace
 			}
 			for (TFieldIterator<FProperty> It(Class); It; ++It)
 			{
-				if (!IsAuthoredConfig(*It) || IsInstancedBearing(*It))
+				if (!IsAuthoredConfigProperty(*It) || IsInstancedBearing(*It))
 				{
 					continue;
 				}
@@ -370,7 +357,7 @@ namespace
 		for (TFieldIterator<FProperty> It(Class); It; ++It)
 		{
 			const FProperty* Prop = *It;
-			if (!IsAuthoredConfig(Prop))
+			if (!IsAuthoredConfigProperty(Prop))
 			{
 				continue;
 			}

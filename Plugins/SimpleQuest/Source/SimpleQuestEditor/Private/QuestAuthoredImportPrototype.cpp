@@ -17,6 +17,8 @@
 #include "Misc/Paths.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestReflectionUtils.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "UObject/UnrealType.h"
 #include "UObject/SavePackage.h"
@@ -147,6 +149,84 @@ namespace
 		for (FString& P : Parts) { const FString K = P.TrimStartAndEnd(); if (!K.IsEmpty()) Keys.Add(K); }
 		return Keys;
 	}
+
+	// ---- MAPPING (studio source-shape translation) ----------------------------------------------------------------
+	// A studio's own-shaped source (usually a flat table whose rows are different node kinds, distinguished by a "type"
+	// column) arrives as one table (ReadBundle keys tables by file). This makes it routable: read the discriminator
+	// column, look up each row's node class, stamp the row's "class" cell, then rename bound source columns to their
+	// canonical property names — applying a binding only where the resolved class actually has that property (bind once,
+	// land where it fits). Runs before ApplyFlowConventions/ValidateBundle so the class-driven pipeline sees canonical
+	// rows. The questline_graph self table is left untouched (it isn't a fanned-out source table).
+	void ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
+	{
+		if (Mapping.DiscriminatorColumn.IsNone())
+		{
+			Warnings.Add(TEXT("mapping has no discriminator column set — nothing routed"));
+			return;
+		}
+		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
+
+		// Resolve each discriminator value to its class once, and cache that class's authored-property name set so the
+		// per-row bind-where-it-fits check is a cheap set lookup rather than a reflection walk per row.
+		TMap<FString, UClass*> ClassByValue;
+		TMap<UClass*, TSet<FName>> PropsByClass;
+		for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping.ClassByDiscriminatorValue)
+		{
+			UClass* Cls = Pair.Value.LoadSynchronous();
+			if (!Cls)
+			{
+				Warnings.Add(FString::Printf(TEXT("mapping: discriminator value '%s' has no resolvable class"), *Pair.Key));
+				continue;
+			}
+			ClassByValue.Add(Pair.Key, Cls);
+			if (!PropsByClass.Contains(Cls))
+			{
+				TSet<FName> Names;
+				for (const FName& N : GetAuthoredPropertyNames(Cls)) Names.Add(N);
+				PropsByClass.Add(Cls, MoveTemp(Names));
+			}
+		}
+
+		int32 Routed = 0;
+		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+		{
+			if (TablePair.Key == TEXT("questline_graph")) continue;   // self row is not a fanned-out source table
+
+			for (FQuestDataRow& Row : TablePair.Value.Rows)
+			{
+				// 1. Which kind is this row? Read the discriminator cell, resolve its class, stamp the "class" cell.
+				const FString DiscValue = Row.Get(DiscCol);
+				UClass* const* Found = ClassByValue.Find(DiscValue);
+				if (!Found)
+				{
+					Warnings.Add(FString::Printf(TEXT("mapping: row '%s' has %s='%s' with no class mapping — row not routed"),
+						*Row.Key, *DiscCol, *DiscValue));
+					continue;
+				}
+				UClass* RowClass = *Found;
+				Row.Cells.Add(TEXT("class"), FQuestDataValue::MakeString(RowClass->GetName()));   // short name (TryFindTypeSlow form)
+				Row.Cells.Remove(DiscCol);   // the discriminator column isn't a node property
+				const TSet<FName>& RowProps = PropsByClass[RowClass];
+
+				// 2. Rename each bound source column to its canonical property name — but only when this class has that
+				//    property (bind once, land where it fits). A binding that doesn't fit this class is simply skipped.
+				for (const FQuestColumnBinding& B : Mapping.Bindings)
+				{
+					if (!RowProps.Contains(B.TargetProperty)) continue;   // property not on this class — binding doesn't apply
+					const FString SrcCol = B.SourceColumn.ToString();
+					FQuestDataValue* Cell = Row.Cells.Find(SrcCol);
+					if (!Cell) continue;   // source column absent on this row — the absent-policy is handled downstream
+					FQuestDataValue Moved = MoveTemp(*Cell);
+					Row.Cells.Remove(SrcCol);
+					Row.Cells.Add(B.TargetProperty.ToString(), MoveTemp(Moved));
+				}
+				++Routed;
+			}
+		}
+		if (Routed > 0)
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
+	}
+	// --------------------------------------------------------------------------------------------------------------
 
 	// Synthesize the structural prereq form for every convention cell found on any node row, then strip the cell so it
 	// never reaches RestoreCell as a bogus property. Runs on the bundle AFTER ReadBundle and BEFORE ValidateBundle, so
@@ -281,6 +361,20 @@ namespace
 			return nullptr;
 		}
 		return FQuestDataFormatRegistry::Get().Create(Name);
+	}
+
+	// Optional --mapping=<asset path>: loads a studio's source-shape translation. Null when no --mapping arg is present
+	// (the source is already in our shape — our own round-trip / export-as-teacher — so no mapping is needed).
+	const UQuestImportMapping* LoadMappingArg(const TArray<FString>& Args)
+	{
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--mapping=")))
+			{
+				return LoadObject<UQuestImportMapping>(nullptr, *Arg.RightChop(10));   // length of "--mapping="
+			}
+		}
+		return nullptr;
 	}
 
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
@@ -895,6 +989,14 @@ namespace
 		}
 
 		TArray<FString> Warnings;
+
+		// A studio's source-shape translation (optional). Absent = the source is already in our shape (our own
+		// round-trip / export-as-teacher), so no mapping is needed. Runs before flow-conventions so a mapped column can
+		// feed a convention (e.g. a source column mapped onto unlock_after).
+		if (const UQuestImportMapping* Mapping = LoadMappingArg(Args))
+		{
+			ApplyMapping(Bundle, *Mapping, Warnings);
+		}
 		ApplyFlowConventions(Bundle, Warnings);
 
 		TMap<FString, const FQuestDataRow*> NodeRowsByKey;

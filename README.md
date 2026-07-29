@@ -5,9 +5,9 @@
 
 Build progression systems using reusable Objective objects - stateful observers that respond to gameplay events through a decoupled event bus. Author complex progression flows visually with a graph-based editor.
 
-SimpleQuest started as an answer to a targeted question, *how do you make a single quest genuinely non-linear?* Working through that meant building primitives for branching outcomes, prerequisite composition, and lifecycle events - the infrastructure required to model complex gameplay progression. As those primitives evolved, they stopped being about quests specifically. What emerged is a framework that treats quests as one instance of a broader class: any progression you can express as branching content, prerequisite logic, and named outcomes.
+SimpleQuest started as an answer to a targeted question, *how do you make a single quest genuinely non-linear?* Working through that meant building primitives for branching outcomes, prerequisite composition, and lifecycle events - the infrastructure required to model complex gameplay progression. As those primitives evolved, they stopped being about any game or genre specifically. What emerged is a framework that treats quests as one instance of a broader class: any progression you can express as branching content, prerequisite logic, and named outcomes.
 
-**Build more than quests:**
+**Build any gameplay progression:**
 - Story missions with branching outcomes
 - Tutorials that adapt to player behavior
 - Achievements and challenges

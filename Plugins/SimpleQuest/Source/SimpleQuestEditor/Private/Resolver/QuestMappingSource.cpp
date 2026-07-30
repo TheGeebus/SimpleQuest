@@ -108,4 +108,87 @@ FQuestSourceColumns EnumerateMappingSourceColumns(const UQuestImportMapping& Map
 	}
 }
 
+FString NormalizeDiscriminatorValue(const FString& Raw)
+{
+	return Raw.TrimStartAndEnd().ToLower();
+}
+
+bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString, UClass*>& OutClassByNormValue,
+                                TArray<FText>& OutErrors)
+{
+	const int32 ErrorsBefore = OutErrors.Num();
+	TMap<FString, FString> NormToRaw;   // normalized -> the raw key that first claimed it, for collision reporting
+
+	for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping.ClassByDiscriminatorValue)
+	{
+		const FString Norm = NormalizeDiscriminatorValue(Pair.Key);
+
+		if (const FString* Prior = NormToRaw.Find(Norm))
+		{
+			OutErrors.Add(FText::Format(
+				LOCTEXT("NormKeyCollision", "Discriminator values '{0}' and '{1}' are the same after normalization — one would silently override the other."),
+				FText::FromString(*Prior), FText::FromString(Pair.Key)));
+			continue;
+		}
+		NormToRaw.Add(Norm, Pair.Key);
+
+		UClass* Cls = Pair.Value.LoadSynchronous();
+		if (!Cls)
+		{
+			OutErrors.Add(FText::Format(
+				LOCTEXT("UnresolvableClass", "Discriminator value '{0}' maps to a class that can't be resolved."),
+				FText::FromString(Pair.Key)));
+			continue;
+		}
+		OutClassByNormValue.Add(Norm, Cls);
+	}
+	return OutErrors.Num() == ErrorsBefore;
+}
+
+bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArray<FName>& ActualColumns,
+                                  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors)
+{
+	const int32 ErrorsBefore = OutErrors.Num();
+
+	// The class map: catches unresolvable-class + normalized-key-collision, and gives the accepted normalized-value set
+	// that EXACTLY matches what ApplyMapping will route (same builder, no drift). Its errors accumulate into OutErrors.
+	TMap<FString, UClass*> ClassByNormValue;
+	BuildDiscriminatorClassMap(Mapping, ClassByNormValue, OutErrors);
+
+	// (i) + (v): per-binding column existence + the None+Require contradiction.
+	const TSet<FName> ColumnSet(ActualColumns);
+	for (const FQuestColumnBinding& B : Mapping.Bindings)
+	{
+		if (B.SourceColumn.IsNone())
+		{
+			if (B.AbsentPolicy == EQuestAbsentFieldPolicy::Require)
+			{
+				OutErrors.Add(FText::Format(
+					LOCTEXT("NoneRequire", "Binding to '{0}' is unmapped (None) but its policy is Require — a value can't be required from a column that isn't mapped."),
+					FText::FromName(B.TargetProperty)));
+			}
+			continue;
+		}
+		if (!ColumnSet.Contains(B.SourceColumn))
+		{
+			OutErrors.Add(FText::Format(
+				LOCTEXT("MissingColumn", "Binding source column '{0}' (to {1}) is not present in the source."),
+				FText::FromName(B.SourceColumn), FText::FromName(B.TargetProperty)));
+		}
+	}
+
+	// (ii) + (iv): every ACTUAL discriminator value must resolve against the accepted (resolvable, collision-free) set.
+	for (const FString& ActualValue : ActualDiscriminatorValues)
+	{
+		if (!ClassByNormValue.Contains(NormalizeDiscriminatorValue(ActualValue)))
+		{
+			OutErrors.Add(FText::Format(
+				LOCTEXT("UnmappedValue", "Discriminator value '{0}' appears in the source but has no class mapping — its rows would be dropped."),
+				FText::FromString(ActualValue)));
+		}
+	}
+
+	return OutErrors.Num() == ErrorsBefore;
+}
+
 #undef LOCTEXT_NAMESPACE

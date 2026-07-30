@@ -36,3 +36,22 @@ FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& 
 
 // Dispatch on the mapping's SourceKind to the matching provenance. One call for a caller that just has a mapping.
 FQuestSourceColumns EnumerateMappingSourceColumns(const UQuestImportMapping& Mapping);
+
+// Normalize a discriminator VALUE for matching: trim surrounding whitespace + fold case. The ONE definition both the
+// validation guard and ApplyMapping use, so a value in the source and a key in the mapping match identically on both
+// sides — never two copies that could drift ("objective" vs "objective " silently mis-routing).
+FString NormalizeDiscriminatorValue(const FString& Raw);
+
+// Build the discriminator-value -> node class map the guard validates against AND ApplyMapping routes with — ONE builder so
+// the two never disagree on membership. Keyed by NormalizeDiscriminatorValue. Reports two authoring-time failures into
+// OutErrors: a value whose class won't resolve, and two raw keys that collide after normalization (many-to-one: "Step" and
+// "step " both fold to "step", which would silently overwrite). Returns true iff the map is clean (no errors added).
+bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString, UClass*>& OutClassByNormValue,
+								TArray<FText>& OutErrors);
+
+// The shared mapping-vs-source guard: the ONE rule set both the panel (edit-time, advisory -> readiness UI) and the import
+// path (bind-time, refuses -> the structural guarantee) enforce. Returns true iff the mapping can be applied to a source
+// exposing ActualColumns and ActualDiscriminatorValues without silent data loss; on false, OutErrors holds one entry per
+// problem. Source-agnostic: the panel passes the enumerated/cached source, the import passes the freshly-read actual data.
+bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArray<FName>& ActualColumns,
+								  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors);

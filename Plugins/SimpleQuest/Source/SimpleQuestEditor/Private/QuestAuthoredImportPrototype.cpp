@@ -18,6 +18,7 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "UObject/UnrealType.h"
@@ -158,33 +159,57 @@ namespace
 	// canonical property names — applying a binding only where the resolved class actually has that property (bind once,
 	// land where it fits). Runs before ApplyFlowConventions/ValidateBundle so the class-driven pipeline sees canonical
 	// rows. The questline_graph self table is left untouched (it isn't a fanned-out source table).
-	void ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
+	bool ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
 	{
 		if (Mapping.DiscriminatorColumn.IsNone())
 		{
-			Warnings.Add(TEXT("mapping has no discriminator column set — nothing routed"));
-			return;
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: mapping has no discriminator column set — malformed mapping, refusing."));
+			return false;
 		}
 		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
 
-		// Resolve each discriminator value to its class once, and cache that class's authored-property name set so the
-		// per-row bind-where-it-fits check is a cheap set lookup rather than a reflection walk per row.
-		TMap<FString, UClass*> ClassByValue;
-		TMap<UClass*, TSet<FName>> PropsByClass;
-		for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping.ClassByDiscriminatorValue)
+		// Extract the actual source shape from the bundle we're about to transform (no drift — this IS the data), then run
+		// the shared guard. BINDING: refuse the whole import on any failure rather than silently drop rows. The extraction
+		// must read the discriminator cell BEFORE the routing loop removes it (below).
+		TArray<FName> ActualColumns;
+		TArray<FString> ActualDiscriminatorValues;
 		{
-			UClass* Cls = Pair.Value.LoadSynchronous();
-			if (!Cls)
+			TSet<FName> ColSet; TSet<FString> ValSet;
+			for (const TPair<FString, FQuestDataTable>& TP : Bundle.TablesByType)
 			{
-				Warnings.Add(FString::Printf(TEXT("mapping: discriminator value '%s' has no resolvable class"), *Pair.Key));
-				continue;
+				if (TP.Key == TEXT("questline_graph")) continue;
+				for (const FString& C : TP.Value.Columns) ColSet.Add(FName(*C));
+				for (const FQuestDataRow& R : TP.Value.Rows)
+				{
+					const FString V = R.Get(DiscCol);
+					if (!V.IsEmpty()) ValSet.Add(V);
+				}
 			}
-			ClassByValue.Add(Pair.Key, Cls);
-			if (!PropsByClass.Contains(Cls))
+			ActualColumns = ColSet.Array();
+			ActualDiscriminatorValues = ValSet.Array();
+		}
+		TArray<FText> GuardErrors;
+		if (!ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors))
+		{
+			for (const FText& E : GuardErrors)
+				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
+			return false;   // refuse — no partial asset from an unsafe mapping
+		}
+
+		// The routing class map — the SAME shared builder the guard used, so membership can't drift. The guard already
+		// refused on any build error, so BuildErrors can't fire here. Then cache each class's authored-property set for the
+		// per-row bind-where-it-fits check.
+		TMap<FString, UClass*> ClassByValue;   // keyed by NormalizeDiscriminatorValue
+		TArray<FText> BuildErrors;
+		BuildDiscriminatorClassMap(Mapping, ClassByValue, BuildErrors);
+		TMap<UClass*, TSet<FName>> PropsByClass;
+		for (const TPair<FString, UClass*>& CV : ClassByValue)
+		{
+			if (!PropsByClass.Contains(CV.Value))
 			{
 				TSet<FName> Names;
-				for (const FName& N : GetAuthoredPropertyNames(Cls)) Names.Add(N);
-				PropsByClass.Add(Cls, MoveTemp(Names));
+				for (const FName& N : GetAuthoredPropertyNames(CV.Value)) Names.Add(N);
+				PropsByClass.Add(CV.Value, MoveTemp(Names));
 			}
 		}
 
@@ -197,9 +222,10 @@ namespace
 			{
 				// 1. Which kind is this row? Read the discriminator cell, resolve its class, stamp the "class" cell.
 				const FString DiscValue = Row.Get(DiscCol);
-				UClass* const* Found = ClassByValue.Find(DiscValue);
+				UClass* const* Found = ClassByValue.Find(NormalizeDiscriminatorValue(DiscValue));
 				if (!Found)
 				{
+					// Unreachable at import (the guard refused any unmapped value); defensive for a guard-less caller.
 					Warnings.Add(FString::Printf(TEXT("mapping: row '%s' has %s='%s' with no class mapping — row not routed"),
 						*Row.Key, *DiscCol, *DiscValue));
 					continue;
@@ -226,7 +252,9 @@ namespace
 		}
 		if (Routed > 0)
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
+		return true;
 	}
+	
 	// --------------------------------------------------------------------------------------------------------------
 
 	// Synthesize the structural prereq form for every convention cell found on any node row, then strip the cell so it
@@ -996,7 +1024,11 @@ namespace
 		// feed a convention (e.g. a source column mapped onto unlock_after).
 		if (const UQuestImportMapping* Mapping = LoadMappingArg(Args))
 		{
-			ApplyMapping(Bundle, *Mapping, Warnings);
+			if (!ApplyMapping(Bundle, *Mapping, Warnings))
+			{
+				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: mapping guard refused the import. No asset created."));
+				return;
+			}
 		}
 		ApplyFlowConventions(Bundle, Warnings);
 

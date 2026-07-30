@@ -37,7 +37,8 @@ public class SimpleQuestEditor: ModuleRules
 			"WorldPartitionEditor",
 			"SimpleCoreEditor",
 			"DataTableEditor",
-			"Json"
+			"Json",
+			"ToolWidgets",
 		});
 
 		if (Target.bBuildEditor)

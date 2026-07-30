@@ -254,8 +254,6 @@ namespace
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
 		return true;
 	}
-	
-	// --------------------------------------------------------------------------------------------------------------
 
 	// Synthesize the structural prereq form for every convention cell found on any node row, then strip the cell so it
 	// never reaches RestoreCell as a bogus property. Runs on the bundle AFTER ReadBundle and BEFORE ValidateBundle, so
@@ -363,33 +361,6 @@ namespace
 
 		if (Synthesized > 0)
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d prerequisite combinator(s) from flow conventions."), Synthesized);
-	}
-	// --------------------------------------------------------------------------------------------------------------
-
-	// Select the format provider: a --format=<name> console argument (highest priority), else the project default,
-	// else "TSV". The per-mapping format source is empty here for now. Returns null when a named format isn't
-	// registered, so the caller refuses before creating anything.
-	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
-	{
-		FString ConsoleArgName;
-		for (const FString& Arg : Args)
-		{
-			if (Arg.StartsWith(TEXT("--format=")))
-			{
-				ConsoleArgName = Arg.RightChop(9);   // length of "--format="
-				break;
-			}
-		}
-		const FString SettingsDefault = GetDefault<USimpleQuestSettings>()->DefaultImportFormat.ToString();
-
-		FString Error;
-		const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
-		if (Name.IsEmpty())
-		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: %s. No asset created."), *Error);
-			return nullptr;
-		}
-		return FQuestDataFormatRegistry::Get().Create(Name);
 	}
 
 	// Optional --mapping=<asset path>: loads a studio's source-shape translation. Null when no --mapping arg is present
@@ -1005,7 +976,7 @@ namespace
 		FString FolderPath = FString::Join(FolderParts, TEXT(" "));
 		FolderPath = FolderPath.TrimQuotes();                 // tolerate quotes if the caller added them
 
-		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ImportQuestline"));
 		if (!Format)
 		{
 			return;   // the unregistered-format error was already logged; refuse before creating anything.

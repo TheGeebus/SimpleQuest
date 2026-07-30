@@ -26,37 +26,13 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/QuestMappingSource.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
-	// Select the format provider: a --format=<name> console argument (highest priority), else the project default,
-	// else "TSV". Export has no per-mapping format source, so that slot is empty.
-	TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args)
-	{
-		FString ConsoleArgName;
-		for (const FString& Arg : Args)
-		{
-			if (Arg.StartsWith(TEXT("--format=")))
-			{
-				ConsoleArgName = Arg.RightChop(9);
-				break;
-			}
-		}
-		const FString SettingsDefault = GetDefault<USimpleQuestSettings>()->DefaultImportFormat.ToString();
-
-		FString Error;
-		const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
-		if (Name.IsEmpty())
-		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: %s. Nothing exported."), *Error);
-			return nullptr;
-		}
-		return FQuestDataFormatRegistry::Get().Create(Name);
-	}
-
 	// Make an exported map-key safe to embed inside a neutral ROW KEY (e.g. "QuestlineRewards[<key>].Rewards"): a key
 	// with an embedded tab/newline would corrupt the path segment the import later splits on. This is a KEY-well-formed-
 	// ness concern of the neutral bundle, NOT format escaping — it stays in the routing core regardless of provider.
@@ -492,7 +468,7 @@ namespace
 
 		const FString OutDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport") / SelfKey);
 
-		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args);
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ExportQuestline"));
 		if (!Format)
 		{
 			return;   // the unregistered-format error was already logged; nothing exported.

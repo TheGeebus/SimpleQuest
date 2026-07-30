@@ -9,6 +9,7 @@
 #include "Engine/DataTable.h"
 #include "SimpleQuestLog.h"
 #include "Resolver/QuestImportMapping.h"
+#include "Settings/SimpleQuestSettings.h"
 
 #define LOCTEXT_NAMESPACE "SimpleQuestMappingSource"
 
@@ -189,6 +190,29 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 	}
 
 	return OutErrors.Num() == ErrorsBefore;
+}
+
+TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix)
+{
+	FString ConsoleArgName;
+	for (const FString& Arg : Args)
+	{
+		if (Arg.StartsWith(TEXT("--format=")))
+		{
+			ConsoleArgName = Arg.RightChop(9);   // length of "--format="
+			break;
+		}
+	}
+	const FString SettingsDefault = GetDefault<USimpleQuestSettings>()->DefaultImportFormat.ToString();
+
+	FString Error;
+	const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
+	if (Name.IsEmpty())
+	{
+		UE_LOG(LogSimpleQuest, Error, TEXT("%s: %s"), LogPrefix, *Error);
+		return nullptr;
+	}
+	return FQuestDataFormatRegistry::Get().Create(Name);
 }
 
 #undef LOCTEXT_NAMESPACE

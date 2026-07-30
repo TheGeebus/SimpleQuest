@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 
+class ISimpleQuestDataFormat;
 class UDataTable;
 class UQuestImportMapping;
 
@@ -55,3 +56,8 @@ bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString
 // problem. Source-agnostic: the panel passes the enumerated/cached source, the import passes the freshly-read actual data.
 bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArray<FName>& ActualColumns,
 								  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors);
+
+// Select the format provider for an import/export op: a --format=<name> console arg (highest), else the project default,
+// else "TSV". Returns null (and logs the reason under LogPrefix) when a named format isn't registered — the caller refuses.
+// One definition shared by both the import and export prototypes; LogPrefix distinguishes their error messages.
+TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix);

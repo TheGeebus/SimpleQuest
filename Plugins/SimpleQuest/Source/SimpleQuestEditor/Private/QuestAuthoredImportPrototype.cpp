@@ -36,6 +36,7 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "ISimpleQuestEditorModule.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestMappingSource.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 
 namespace
@@ -1094,3 +1095,29 @@ static FAutoConsoleCommand GImportQuestlineCmd(
 		"compile it. Creates a fresh <QuestlineID>_RT asset. Args: <FolderPath> <DestPackagePath> (e.g. "
 		"\"E:/.../Saved/QuestExport/QL_Ch1_BasicTrigger\" /Game/Imported)."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&ImportQuestlineCmd));
+
+static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
+	TEXT("SimpleQuest.EnumerateSourceColumns"),
+	TEXT("PROTOTYPE: list the columns a mapping's source exposes (proves the source-column provider seam). "
+		"Arg: the UQuestImportMapping asset path."),
+	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogSimpleQuest, Warning, TEXT("EnumerateSourceColumns: usage <mapping asset path>"));
+			return;
+		}
+		const UQuestImportMapping* Mapping = LoadObject<UQuestImportMapping>(nullptr, *Args[0]);
+		if (!Mapping) { UE_LOG(LogSimpleQuest, Error, TEXT("EnumerateSourceColumns: couldn't load '%s'."), *Args[0]); return; }
+
+		const FQuestSourceColumns Cols = EnumerateMappingSourceColumns(*Mapping);
+		if (!Cols.bReadable)
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("EnumerateSourceColumns: %s"), *Cols.Error.ToString());
+			return;
+		}
+		FString Joined;
+		for (const FName& C : Cols.Columns) Joined += (Joined.IsEmpty() ? TEXT("") : TEXT(", ")) + C.ToString();
+		UE_LOG(LogSimpleQuest, Log, TEXT("EnumerateSourceColumns: %d column(s)%s: %s"),
+			Cols.Columns.Num(), Cols.bHasDuplicateColumns ? TEXT(" [DUPLICATE]") : TEXT(""), *Joined);
+	}));

@@ -69,6 +69,36 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 	return Result;
 }
 
+TArray<FString> EnumerateColumnDistinctValues(const FString& FormatName, const FString& SourceFolder, const FName& ColumnName)
+{
+	TArray<FString> Distinct;
+	if (FormatName.IsEmpty() || SourceFolder.IsEmpty() || ColumnName.IsNone()) return Distinct;
+
+	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
+	if (!Format) return Distinct;
+
+	FQuestDataBundle Bundle;
+	if (!Format->ReadBundle(SourceFolder, Bundle)) return Distinct;
+
+	// Collect distinct values of the column across every content table (same self-row exclusion as the column enumerator).
+	// First-seen order keeps the row list stable as the designer works; a Set guards the "seen" test without reordering.
+	const FString ColKey = ColumnName.ToString();
+	TSet<FString> Seen;
+	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+	{
+		if (TablePair.Key == TEXT("questline_graph")) continue;   // self row, not fanned source content
+		for (const FQuestDataRow& Row : TablePair.Value.Rows)
+		{
+			const FString Value = Row.Get(ColKey);
+			if (Value.IsEmpty()) continue;               // an absent/empty discriminator cell names no kind — skip it
+			if (Seen.Contains(Value)) continue;
+			Seen.Add(Value);
+			Distinct.Add(Value);
+		}
+	}
+	return Distinct;
+}
+
 FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& SourceTable)
 {
 	FQuestSourceColumns Result;
@@ -95,18 +125,6 @@ FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& 
 	Result.Columns.Sort(FNameLexicalLess());
 	Result.bReadable = true;
 	return Result;
-}
-
-FQuestSourceColumns EnumerateMappingSourceColumns(const UQuestImportMapping& Mapping)
-{
-	switch (Mapping.SourceKind)
-	{
-	case EQuestMappingSourceKind::DataTable:
-		return EnumerateDataTableColumns(Mapping.SourceDataTable);
-	case EQuestMappingSourceKind::ForeignFile:
-	default:
-		return EnumerateForeignFileColumns(Mapping.SourceFormatName.ToString(), Mapping.SourceFolder);
-	}
 }
 
 FString NormalizeDiscriminatorValue(const FString& Raw)
@@ -147,7 +165,8 @@ bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString
 }
 
 bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArray<FName>& ActualColumns,
-                                  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors)
+								  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors,
+								  TArray<FText>* OutWarnings)
 {
 	const int32 ErrorsBefore = OutErrors.Num();
 
@@ -156,7 +175,6 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 	TMap<FString, UClass*> ClassByNormValue;
 	BuildDiscriminatorClassMap(Mapping, ClassByNormValue, OutErrors);
 
-	// (i) + (v): per-binding column existence + the None+Require contradiction.
 	const TSet<FName> ColumnSet(ActualColumns);
 	for (const FQuestColumnBinding& B : Mapping.Bindings)
 	{
@@ -178,7 +196,6 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 		}
 	}
 
-	// (ii) + (iv): every ACTUAL discriminator value must resolve against the accepted (resolvable, collision-free) set.
 	for (const FString& ActualValue : ActualDiscriminatorValues)
 	{
 		if (!ClassByNormValue.Contains(NormalizeDiscriminatorValue(ActualValue)))
@@ -186,6 +203,22 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 			OutErrors.Add(FText::Format(
 				LOCTEXT("UnmappedValue", "Discriminator value '{0}' appears in the source but has no class mapping — its rows would be dropped."),
 				FText::FromString(ActualValue)));
+		}
+	}
+
+	// Advisory (non-fatal): the discriminator column is also bound to a property. Legal — the value populates the property AND
+	// still routes the row (routing reads the column independently, so this can't corrupt anything) — but unusual enough to
+	// flag, since an accidental bind to the type column is an easy mistake. Never changes the return.
+	if (OutWarnings && !Mapping.DiscriminatorColumn.IsNone())
+	{
+		for (const FQuestColumnBinding& B : Mapping.Bindings)
+		{
+			if (B.SourceColumn == Mapping.DiscriminatorColumn)
+			{
+				OutWarnings->Add(FText::Format(
+					LOCTEXT("DiscriminatorAlsoBound", "Column '{0}' is the discriminator and is also bound to property '{1}'. This is allowed (the value will both route the row and fill the property) — confirm you intend it."),
+					FText::FromName(Mapping.DiscriminatorColumn), FText::FromName(B.TargetProperty)));
+			}
 		}
 	}
 

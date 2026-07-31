@@ -42,7 +42,7 @@ void SQuestMappingBindingRow::Construct(const FArguments& InArgs, const TSharedR
 	Item = InItem;
 	List = InList;
 	RebuildSourceColumnOptions();
-	SMultiColumnTableRow<FQuestMappingRowItemPtr>::Construct(FSuperRowType::FArguments(), InOwnerTable);
+	SMultiColumnTableRow<FQuestMappingRowItemPtr>::Construct(FSuperRowType::FArguments().Style(&FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.Row")), InOwnerTable);
 }
 
 void SQuestMappingBindingRow::RebuildSourceColumnOptions()
@@ -213,6 +213,18 @@ void SQuestMappingBindingRow::SetPolicy(uint8 NewPolicy)
 	}
 	Mapping->PostEditChange();
 	L->NotifyModified();
+}
+
+const FSlateBrush* SQuestMappingBindingRow::GetBorder() const
+{
+	// Draw the row's hovered brush whenever the cursor is over the row — unconditional, so it works under SelectionMode::None
+	// (the base STableRow gates the hovered brush on selectability, which None disables). Falls back to the base otherwise.
+	if (IsHovered())
+	{
+		const FTableRowStyle& RowStyle = FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.Row");
+		return &RowStyle.EvenRowBackgroundHoveredBrush;
+	}
+	return SMultiColumnTableRow<FQuestMappingRowItemPtr>::GetBorder();
 }
 
 // ── List ───────────────────────────────────────────────────────────────────────────────────────────────────────────

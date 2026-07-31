@@ -10,7 +10,6 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "Engine/DataTable.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "QuestImportMapping.generated.h"
 
@@ -22,15 +21,6 @@ enum class EQuestAbsentFieldPolicy : uint8
 	Preserve UMETA(DisplayName = "Preserve graph value"),		// default: absent -> leave the current value untouched
 	Reset    UMETA(DisplayName = "Reset to default"),			// absent -> write the property's class default
 	Require  UMETA(DisplayName = "Require (error if absent)")	// absent -> refuse the import (no partial asset)
-};
-
-// Where the source data lives, so its columns can be listed at edit time. A Data Table's columns come from its row
-// struct (live, no file); a foreign file's columns come from reading it through a format provider.
-UENUM()
-enum class EQuestMappingSourceKind : uint8
-{
-	ForeignFile UMETA(DisplayName = "Foreign file (via a format)"),
-	DataTable   UMETA(DisplayName = "Data Table")
 };
 
 // One source column -> one node property. Applies to a row only when the row's resolved node class has a property of
@@ -74,24 +64,6 @@ public:
 	// Absent-case policy for a property that has no binding at all.
 	UPROPERTY(EditAnywhere, Category = "Bindings")
 	EQuestAbsentFieldPolicy DefaultAbsentPolicy = EQuestAbsentFieldPolicy::Preserve;
-
-	// ── Where the source lives ───────────────────────────────────────────────────────────────────────
-	UPROPERTY(EditAnywhere, Category = "Source")
-	EQuestMappingSourceKind SourceKind = EQuestMappingSourceKind::ForeignFile;
-
-	// Foreign-file source: the format to read it with + the folder it lives in.
-	UPROPERTY(EditAnywhere, Category = "Source",
-		meta = (EditCondition = "SourceKind == EQuestMappingSourceKind::ForeignFile", EditConditionHides))
-	FName SourceFormatName = TEXT("TSV");
-
-	UPROPERTY(EditAnywhere, Category = "Source",
-		meta = (EditCondition = "SourceKind == EQuestMappingSourceKind::ForeignFile", EditConditionHides))
-	FString SourceFolder;
-
-	// Data Table source (a later build target — declared now so the model doesn't churn).
-	UPROPERTY(EditAnywhere, Category = "Source",
-		meta = (EditCondition = "SourceKind == EQuestMappingSourceKind::DataTable", EditConditionHides))
-	TSoftObjectPtr<UDataTable> SourceDataTable;
 
 	// In-place re-import: keep nodes that exist in the asset but have no source row (the default keeps them).
 	UPROPERTY(EditAnywhere, Category = "In-Place")

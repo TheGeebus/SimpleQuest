@@ -79,6 +79,8 @@ private:
 	TWeakPtr<FQuestMappingRowItem> Item;
 	TWeakPtr<SQuestMappingBindingList> List;
 	friend class SQuestMappingBindingList;
+
+	virtual const FSlateBrush* GetBorder() const override;   // whole-row hover highlight, independent of SelectionMode (base gates it off under None)
 };
 
 using SQuestMappingListView = SListView<FQuestMappingRowItemPtr>;

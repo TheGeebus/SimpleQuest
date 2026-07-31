@@ -481,7 +481,12 @@ namespace
 				RowTotal += TablePair.Value.Rows.Num();
 			}
 			UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) collapsed. Wrote '%s'."),
-				*SelfKey, RowTotal, Bundle.TablesByType.Num(), Bundle.Edges.Num(), Bundle.KnotsCollapsed, *OutDir);
+				*SelfKey,
+				RowTotal,
+				Bundle.TablesByType.Num(),
+				Bundle.Edges.Num(),
+				Bundle.KnotsCollapsed,
+				*OutDir);
 		}
 	}
 }

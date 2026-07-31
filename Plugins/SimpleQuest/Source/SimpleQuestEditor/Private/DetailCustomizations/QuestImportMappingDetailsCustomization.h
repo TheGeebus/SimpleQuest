@@ -3,15 +3,18 @@
 
 #pragma once
 
-// Details customization for UQuestImportMapping: renders the stock properties (discriminator, class map, source descriptor,
-// policies) as normal rows, and embeds the bespoke binding-list widget for the column->property bindings. Follows the module's
-// existing customization pattern (see QuestlineGraphRewardsDetailsCustomization).
+// Details customization for UQuestImportMapping. The recipe describes a SHAPE, not where a file lives, so the panel gives a
+// transient "sample source" control (editor-only, never serialized) whose columns + discriminator values feed the two
+// bespoke pick-only widgets: the discriminator value->class list and the column->property binding list. Every authored field
+// is a PICK from the sample — nothing is typed (the anti-corruption bar). Follows the module's customization pattern (see
+// QuestlineGraphRewardsDetailsCustomization).
 
 #include "CoreMinimal.h"
 #include "IDetailCustomization.h"
 
 class IDetailLayoutBuilder;
 class SQuestMappingBindingList;
+class SQuestMappingDiscriminatorList;
 class UQuestImportMapping;
 
 class FQuestImportMappingDetailsCustomization : public IDetailCustomization
@@ -23,7 +26,31 @@ public:
 private:
 	TWeakObjectPtr<UQuestImportMapping> Mapping;
 	TSharedPtr<SQuestMappingBindingList> BindingList;
+	TSharedPtr<SQuestMappingDiscriminatorList> DiscriminatorList;
 
-	TArray<FName> EnumerateSourceColumnsForMapping() const;   // the provider the binding list calls
-	void OnMappingModified();                                  // mark dirty + refresh readiness (later)
+	// Transient sample source — editor-only, NEVER serialized on the recipe. Its job: give the two pick-only widgets real
+	// columns + discriminator values to choose from, so a designer authors the SHAPE against a representative file. Thrown
+	// away with the panel; the recipe stays shape-only (it describes a shape, not where a file lives).
+	FName SampleFormatName = TEXT("TSV");
+	FString SampleFolder;
+
+	TArray<FName> SampleSourceColumns() const;							// feeds the binding widget's SourceColumnProvider
+	TArray<FString> SampleDiscriminatorValues() const;					// feeds the discriminator widget's DistinctValueProvider
+	void OnMappingModified();
+
+	// Sample-source control callbacks
+	TArray<TSharedPtr<FString>> FormatOptions;							// registry names for the format dropdown
+	FText GetSampleFormatText() const;
+	void OnSampleFormatChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+	FText GetSampleFolderText() const;
+	void OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type);
+	void RefreshFromSample();											// re-enumerate + tell BOTH widgets to rebuild
+
+	// Discriminator-column picker: a dropdown of the sample's columns (never a typed FName).
+	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;				// rebuilt from the sample's columns
+	TSharedPtr<class SSearchableComboBox> DiscriminatorColumnCombo;		// held so a sample change can RefreshOptions() it
+	void RebuildDiscriminatorColumnOptions();
+	FText GetDiscriminatorColumnText() const;							// reads Mapping->DiscriminatorColumn
+	void OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
 };
+

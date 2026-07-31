@@ -31,12 +31,16 @@ struct FQuestSourceColumns
 // data is ambiguous). Runs a real ReadBundle — call it on source-descriptor change / Refresh, never per-frame.
 FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const FString& SourceFolder);
 
+// Distinct raw values found in one column of a foreign-file source — the discriminator column's actual value set, so the
+// value->class rows can be PICKED from the data instead of typed. Reads the folder through the format provider and collects
+// every distinct non-empty value of ColumnName across all content tables, in first-seen order (stable for the UI). Values
+// are returned RAW (un-normalized) — the caller displays them as-authored; matching against the class map normalizes. An
+// unreadable source / absent column yields an empty array (the panel shows no value rows, loudly, never typed guesses).
+TArray<FString> EnumerateColumnDistinctValues(const FString& FormatName, const FString& SourceFolder, const FName& ColumnName);
+
 // Data Table source: walk the row struct's properties. No file I/O, no parse, cannot be stale (the struct is the authority).
 // Both binding sides are FProperty-shaped here — the purest no-typing case. A null/unloadable table yields bReadable=false.
 FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& SourceTable);
-
-// Dispatch on the mapping's SourceKind to the matching provenance. One call for a caller that just has a mapping.
-FQuestSourceColumns EnumerateMappingSourceColumns(const UQuestImportMapping& Mapping);
 
 // Normalize a discriminator VALUE for matching: trim surrounding whitespace + fold case. The ONE definition both the
 // validation guard and ApplyMapping use, so a value in the source and a key in the mapping match identically on both
@@ -54,8 +58,11 @@ bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString
 // path (bind-time, refuses -> the structural guarantee) enforce. Returns true iff the mapping can be applied to a source
 // exposing ActualColumns and ActualDiscriminatorValues without silent data loss; on false, OutErrors holds one entry per
 // problem. Source-agnostic: the panel passes the enumerated/cached source, the import passes the freshly-read actual data.
+// OutWarnings (optional) collects NON-FATAL advisories — legibility concerns that don't threaten correctness and so never
+// change the return value (e.g. the discriminator column also being bound to a property). Pass nullptr to ignore them.
 bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArray<FName>& ActualColumns,
-								  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors);
+								  const TArray<FString>& ActualDiscriminatorValues, TArray<FText>& OutErrors,
+								  TArray<FText>* OutWarnings = nullptr);
 
 // Select the format provider for an import/export op: a --format=<name> console arg (highest), else the project default,
 // else "TSV". Returns null (and logs the reason under LogPrefix) when a named format isn't registered — the caller refuses.

@@ -189,7 +189,11 @@ namespace
 			ActualDiscriminatorValues = ValSet.Array();
 		}
 		TArray<FText> GuardErrors;
-		if (!ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors))
+		TArray<FText> GuardWarnings;
+		const bool bGuardOK = ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors, &GuardWarnings);
+		for (const FText& W : GuardWarnings)   // advisories log regardless of pass/fail — they never block, only inform
+			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline mapping advisory: %s"), *W.ToString());
+		if (!bGuardOK)
 		{
 			for (const FText& E : GuardErrors)
 				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
@@ -1101,19 +1105,34 @@ static FAutoConsoleCommand GImportQuestlineCmd(
 
 static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 	TEXT("SimpleQuest.EnumerateSourceColumns"),
-	TEXT("PROTOTYPE: list the columns a mapping's source exposes (proves the source-column provider seam). "
-		"Arg: the UQuestImportMapping asset path."),
+	TEXT("PROTOTYPE: list the columns a foreign source exposes (proves the source-column provider seam). "
+		"Args: <SourceFolder> [--format=<name>] (default TSV)."),
 	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("EnumerateSourceColumns: usage <mapping asset path>"));
+			UE_LOG(LogSimpleQuest, Warning, TEXT("EnumerateSourceColumns: usage <SourceFolder> [--format=<name>]"));
 			return;
 		}
-		const UQuestImportMapping* Mapping = LoadObject<UQuestImportMapping>(nullptr, *Args[0]);
-		if (!Mapping) { UE_LOG(LogSimpleQuest, Error, TEXT("EnumerateSourceColumns: couldn't load '%s'."), *Args[0]); return; }
+		// The console tokenizes on whitespace and strips quotes, so a path with spaces arrives as MULTIPLE args. Re-join all
+		// non-flag args with spaces to reconstruct the folder (quoted or not); --format=<name> is the only recognized flag.
+		FString Folder;
+		FString FormatName = TEXT("TSV");
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--format=")))
+			{
+				FormatName = Arg.RightChop(9);
+			}
+			else
+			{
+				if (!Folder.IsEmpty()) Folder += TEXT(" ");
+				Folder += Arg;
+			}
+		}
+		Folder = Folder.TrimStartAndEnd().TrimQuotes();   // tolerate stray outer quotes / padding if any survived
 
-		const FQuestSourceColumns Cols = EnumerateMappingSourceColumns(*Mapping);
+		const FQuestSourceColumns Cols = EnumerateForeignFileColumns(FormatName, Folder);
 		if (!Cols.bReadable)
 		{
 			UE_LOG(LogSimpleQuest, Error, TEXT("EnumerateSourceColumns: %s"), *Cols.Error.ToString());

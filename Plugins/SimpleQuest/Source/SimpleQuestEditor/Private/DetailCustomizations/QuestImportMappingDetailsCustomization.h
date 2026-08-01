@@ -15,6 +15,7 @@
 class IDetailLayoutBuilder;
 class SQuestMappingBindingList;
 class SQuestMappingDiscriminatorList;
+class SSearchableComboBox;
 class UQuestImportMapping;
 
 class FQuestImportMappingDetailsCustomization : public IDetailCustomization
@@ -48,9 +49,13 @@ private:
 
 	// Discriminator-column picker: a dropdown of the sample's columns (never a typed FName).
 	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;				// rebuilt from the sample's columns
-	TSharedPtr<class SSearchableComboBox> DiscriminatorColumnCombo;		// held so a sample change can RefreshOptions() it
+	TSharedPtr<SSearchableComboBox> DiscriminatorColumnCombo;		// held so a sample change can RefreshOptions() it
+	TSharedPtr<SSearchableComboBox> KeyColumnCombo;
 	void RebuildDiscriminatorColumnOptions();
 	FText GetDiscriminatorColumnText() const;							// reads Mapping->DiscriminatorColumn
 	void OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+	// Key-column picker (reuses DiscriminatorColumnOptions — both pick a source column; never a typed FName).
+	FText GetKeyColumnText() const;
+	void OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
 };
 

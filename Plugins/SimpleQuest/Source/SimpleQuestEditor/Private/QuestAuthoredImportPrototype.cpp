@@ -722,12 +722,15 @@ namespace
 			if (FGuid::Parse(Row.Key, ParsedGuid))
 			{
 				QNode->QuestGuid = ParsedGuid;   // round-trip: preserve our exported GUID verbatim
+				// (A GUID key came from our own export; there's no studio-semantic key to preserve — leave ImportSourceKey empty.)
 			}
 			else
 			{
 				// Fresh authoring: mint a stable GUID from the semantic key, namespaced so it can't collide with a
 				// different consumer's deterministic GUIDs.
 				QNode->QuestGuid = FGuid::NewDeterministicGuid(FString(TEXT("SimpleQuest.Import.")) + Row.Key);
+				// Preserve the original key STRING so reverse-export can write it back verbatim (the GUID hash isn't invertible).
+				QNode->ImportSourceKey = Row.Key;
 			}
 		}
 		RestoreRowProperties(Node, Row);

@@ -100,6 +100,15 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	FGuid QuestGuid;
 	
+	/**
+	 * The original row key from an imported source, when it was a semantic identifier (a studio's "kill_boss") rather than
+	 * one of our exported GUIDs. Populated at import from the source's key column; empty for hand-authored nodes and for
+	 * round-tripped nodes whose key already was a GUID. Read by reverse-export so the studio's key column comes back verbatim
+	 * instead of the (un-invertible) GUID its identity hashes to. Provenance only — never drives identity or wiring.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	FString ImportSourceKey;
+	
 protected:
 	/**
 	 * Syncs this node's pins of a category to match DesiredPinNames. See FSimpleQuestEditorUtilities::SyncPinsByCategory for

@@ -76,6 +76,12 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Row Kind")
 	TArray<FQuestDiscriminatorClass> DiscriminatorClasses;
 
+	// The source column holding each row's semantic key (the studio's "id"/"quest_key" column). Optional. On import the key
+	// is read from column 0 by the provider regardless; this records WHICH column that is so reverse-export writes the
+	// preserved source key back into the studio's own key column. Empty -> reverse-export keys default to the exported GUID.
+	UPROPERTY(EditAnywhere, Category = "Row Kind")
+	FName KeyColumn;
+
 	// ── Which source column fills which property? ────────────────────────────────────────────────────
 	// Flat binding list, bound once. Each applies to every resolved class that has a matching property.
 	UPROPERTY(EditAnywhere, Category = "Bindings")

@@ -62,6 +62,7 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	// at build time, so rebuilding the backing array isn't enough — tell the widget to re-read it.
 	RebuildDiscriminatorColumnOptions();
 	if (DiscriminatorColumnCombo.IsValid()) { DiscriminatorColumnCombo->RefreshOptions(); }
+	if (KeyColumnCombo.IsValid())			{ KeyColumnCombo->RefreshOptions(); }
 	if (DiscriminatorList.IsValid())        { DiscriminatorList->RefreshRows(); }
 	if (BindingList.IsValid())              { BindingList->RefreshRows(); }
 }
@@ -96,6 +97,25 @@ void FQuestImportMappingDetailsCustomization::OnDiscriminatorColumnChanged(TShar
 	if (DiscriminatorList.IsValid()) { DiscriminatorList->RefreshRows(); }
 }
 
+FText FQuestImportMappingDetailsCustomization::GetKeyColumnText() const
+{
+	const UQuestImportMapping* M = Mapping.Get();
+	return (M && !M->KeyColumn.IsNone()) ? FText::FromName(M->KeyColumn)
+		: LOCTEXT("PickKeyColumn", "Select a column...");
+}
+
+void FQuestImportMappingDetailsCustomization::OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
+{
+	UQuestImportMapping* M = Mapping.Get();
+	if (!M || !NewValue.IsValid()) return;
+
+	const FScopedTransaction Transaction(LOCTEXT("SetKeyColumn", "Set Key Column"));
+	M->Modify();
+	M->KeyColumn = FName(**NewValue);
+	M->PostEditChange();
+	OnMappingModified();
+}
+
 void FQuestImportMappingDetailsCustomization::OnMappingModified()
 {
 	if (UQuestImportMapping* M = Mapping.Get())
@@ -121,6 +141,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, DiscriminatorColumn));
 	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, DiscriminatorClasses));
 	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, Bindings));
+	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, KeyColumn));
 
 	// Populate the format dropdown from the registered providers (same source as the settings picker).
 	FormatOptions.Reset();
@@ -181,6 +202,21 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 		.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 		.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnDiscriminatorColumnChanged)
 		[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetDiscriminatorColumnText) ]
+	];
+
+	// Key-column picker: choose which sample column holds each row's semantic key (the studio's id/quest_key column). Optional
+	// — reverse-export writes the preserved source key back into this column; empty -> exported keys default to the GUID.
+	Category.AddCustomRow(LOCTEXT("KeyColumnFilter", "Key Column"))
+	.NameContent()[ SNew(STextBlock).Text(LOCTEXT("KeyColumnLabel", "Key Column"))
+		.ToolTipText(LOCTEXT("KeyColumnTip", "The sample column holding each row's semantic key. Optional — used by reverse-export to write your keys back instead of GUIDs."))
+		.Font(IDetailLayoutBuilder::GetDetailFont()) ]
+	.ValueContent().MinDesiredWidth(300.0f)
+	[
+		SAssignNew(KeyColumnCombo, SSearchableComboBox)
+		.OptionsSource(&DiscriminatorColumnOptions)
+		.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
+		.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnKeyColumnChanged)
+		[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetKeyColumnText) ]
 	];
 
 	// Discriminator value -> class list: one row per distinct value found in the discriminator column, class-picker only.

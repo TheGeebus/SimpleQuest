@@ -138,28 +138,33 @@ bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString
 	const int32 ErrorsBefore = OutErrors.Num();
 	TMap<FString, FString> NormToRaw;   // normalized -> the raw key that first claimed it, for collision reporting
 
-	for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping.ClassByDiscriminatorValue)
+	for (const FQuestDiscriminatorClass& Entry : Mapping.DiscriminatorClasses)
 	{
-		const FString Norm = NormalizeDiscriminatorValue(Pair.Key);
+		UClass* Cls = Entry.NodeClass.LoadSynchronous();   // resolve once per class (all its values share it)
+		const bool bClassOK = (Cls != nullptr);
 
-		if (const FString* Prior = NormToRaw.Find(Norm))
+		for (const FString& RawValue : Entry.Values)
 		{
-			OutErrors.Add(FText::Format(
-				LOCTEXT("NormKeyCollision", "Discriminator values '{0}' and '{1}' are the same after normalization — one would silently override the other."),
-				FText::FromString(*Prior), FText::FromString(Pair.Key)));
-			continue;
-		}
-		NormToRaw.Add(Norm, Pair.Key);
+			const FString Norm = NormalizeDiscriminatorValue(RawValue);
 
-		UClass* Cls = Pair.Value.LoadSynchronous();
-		if (!Cls)
-		{
-			OutErrors.Add(FText::Format(
-				LOCTEXT("UnresolvableClass", "Discriminator value '{0}' maps to a class that can't be resolved."),
-				FText::FromString(Pair.Key)));
-			continue;
+			if (const FString* Prior = NormToRaw.Find(Norm))
+			{
+				OutErrors.Add(FText::Format(
+					LOCTEXT("NormKeyCollision", "Discriminator values '{0}' and '{1}' are the same after normalization — one would silently override the other."),
+					FText::FromString(*Prior), FText::FromString(RawValue)));
+				continue;
+			}
+			NormToRaw.Add(Norm, RawValue);
+
+			if (!bClassOK)
+			{
+				OutErrors.Add(FText::Format(
+					LOCTEXT("UnresolvableClass", "Discriminator value '{0}' maps to a class that can't be resolved."),
+					FText::FromString(RawValue)));
+				continue;
+			}
+			OutClassByNormValue.Add(Norm, Cls);
 		}
-		OutClassByNormValue.Add(Norm, Cls);
 	}
 	return OutErrors.Num() == ErrorsBefore;
 }

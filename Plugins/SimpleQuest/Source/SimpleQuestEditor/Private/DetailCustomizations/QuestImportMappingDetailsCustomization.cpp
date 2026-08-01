@@ -119,7 +119,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	// Hide the stock discriminator column + class map: both are now driven by pickers (a typed FName + a typed TMap key were
 	// the last two corruption holes). The stock Bindings array stays hidden too — the binding widget is its editor.
 	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, DiscriminatorColumn));
-	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, ClassByDiscriminatorValue));
+	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, DiscriminatorClasses));
 	DetailBuilder.HideProperty(GET_MEMBER_NAME_CHECKED(UQuestImportMapping, Bindings));
 
 	// Populate the format dropdown from the registered providers (same source as the settings picker).
@@ -136,12 +136,18 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	// Sample-source row: an editor-only "point at a representative file to author against" control. NOT saved on the recipe.
 	Category.AddCustomRow(LOCTEXT("SampleSourceFilter", "Sample Source"))
 	.NameContent()[ SNew(STextBlock).Text(LOCTEXT("SampleSourceLabel", "Sample Source"))
-		.ToolTipText(LOCTEXT("SampleSourceTip", "Point at a representative source file to populate the pickers below. Editor-only — not saved on this recipe."))
-		.Font(IDetailLayoutBuilder::GetDetailFont()) ]
+		.ToolTipText(LOCTEXT("SampleSourceTip", "Point at a folder of representative source files. Reads every file of the chosen format and unions their columns to populate the pickers below. Editor-only — not saved on this recipe."))
+		.Font(IDetailLayoutBuilder::GetDetailFont())
+	]
 	.ValueContent().MinDesiredWidth(400.0f)
 	[
 		SNew(SHorizontalBox)
+		// "Format" label + picker
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+		[
+			SNew(STextBlock).Text(LOCTEXT("SampleFormatLabel", "Format")).Font(IDetailLayoutBuilder::GetDetailFont())
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 12, 0)
 		[
 			SNew(SSearchableComboBox)
 			.OptionsSource(&FormatOptions)
@@ -149,10 +155,15 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 			.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnSampleFormatChanged)
 			[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetSampleFormatText) ]
 		]
+		// "Directory" label + path field
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+		[
+			SNew(STextBlock).Text(LOCTEXT("SampleDirectoryLabel", "Directory")).Font(IDetailLayoutBuilder::GetDetailFont())
+		]
 		+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
 		[
 			SNew(SEditableTextBox)
-			.HintText(LOCTEXT("SampleFolderHint", "Source folder path..."))
+			.HintText(LOCTEXT("SampleDirHint", "Folder of source files..."))
 			.Text(this, &FQuestImportMappingDetailsCustomization::GetSampleFolderText)
 			.OnTextCommitted(this, &FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted)
 		]

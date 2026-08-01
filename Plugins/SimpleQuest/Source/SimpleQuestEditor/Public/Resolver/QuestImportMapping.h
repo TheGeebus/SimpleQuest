@@ -40,6 +40,26 @@ struct FQuestColumnBinding
 	EQuestAbsentFieldPolicy AbsentPolicy = EQuestAbsentFieldPolicy::Preserve;
 };
 
+// One node kind: the class rows of this kind become, plus every discriminator value that routes to it. A studio's source may
+// use several synonyms for one kind (e.g. "objective" and "task" both meaning Step); all live in Values. PrimaryValue is the
+// one written back on reverse-export (the inverse of the many-to-one value->class map) — it MUST be one of Values.
+USTRUCT()
+struct FQuestDiscriminatorClass
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Row Kind")
+	TSoftClassPtr<UQuestlineNodeBase> NodeClass;
+
+	// Every discriminator value that routes to NodeClass. Usually one; more when a studio uses synonyms for one kind.
+	UPROPERTY(EditAnywhere, Category = "Row Kind")
+	TArray<FString> Values;
+
+	// The value written back for this class on reverse-export (must be one of Values). Empty -> the first value is used.
+	UPROPERTY(EditAnywhere, Category = "Row Kind")
+	FString PrimaryValue;
+};
+
 UCLASS(BlueprintType)
 class SIMPLEQUESTEDITOR_API UQuestImportMapping : public UDataAsset
 {
@@ -51,10 +71,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Row Kind")
 	FName DiscriminatorColumn;
 
-	// Each distinct value of the discriminator column -> the node class rows of that kind become. A distinct value with
-	// no entry here is an error at import (rows can't be silently dropped).
+	// Each node kind + the discriminator value(s) that route to it. One class may claim several values (studio synonyms).
+	// A source discriminator value not covered by any entry here is an error at import (rows can't be silently dropped).
 	UPROPERTY(EditAnywhere, Category = "Row Kind")
-	TMap<FString, TSoftClassPtr<UQuestlineNodeBase>> ClassByDiscriminatorValue;
+	TArray<FQuestDiscriminatorClass> DiscriminatorClasses;
 
 	// ── Which source column fills which property? ────────────────────────────────────────────────────
 	// Flat binding list, bound once. Each applies to every resolved class that has a matching property.

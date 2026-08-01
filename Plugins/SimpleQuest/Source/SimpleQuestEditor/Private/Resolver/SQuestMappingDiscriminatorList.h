@@ -22,8 +22,8 @@ class STableViewBase;
 class SQuestMappingDiscriminatorList;
 
 // One list row = one discriminator VALUE (the fixed anchor). The class is read/written live on the mapping's
-// ClassByDiscriminatorValue map, looked up by this raw value — the element holds only the identity + whether the value is
-// present in the current sample (so a re-populate can't desync from the mapping, and stale rows render distinctly).
+// DiscriminatorClasses entries, matched by this value's normalized form — the element holds only the identity + whether the
+// value is present in the current sample (so a re-populate can't desync from the mapping, and stale rows render distinctly).
 class FQuestDiscriminatorRowItem
 {
 public:

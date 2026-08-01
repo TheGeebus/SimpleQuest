@@ -21,18 +21,20 @@ namespace
 	const FName ColumnId_Class(TEXT("Class"));
 	const FName ColumnId_Remove(TEXT("Remove"));
 
-	// Find the map key whose NORMALIZED form matches this row's value, so read/write/remove all target the exact stored key
-	// rather than a differently-cased duplicate. The panel displays the raw value but keys the map the way the guard matches
-	// (NormalizeDiscriminatorValue = trim+lower) — otherwise "Objective" and "objective" become two rows the guard then
-	// rejects for a normalized-key collision. Returns the found key by out-param (true) or leaves it untouched (false).
-	bool FindStoredKeyForValue(const UQuestImportMapping& Mapping, const FString& RowValue, FString& OutKey)
+	// Find the DiscriminatorClasses entry that carries a value normalizing to RowValue (any of its Values). The panel displays
+	// raw values but matches the way the guard does (NormalizeDiscriminatorValue = trim+lower), so "Objective"/"objective" are
+	// one entry, never two the guard would reject for collision. Returns the entry index (INDEX_NONE if none).
+	int32 FindEntryIndexForValue(const UQuestImportMapping& Mapping, const FString& RowValue)
 	{
 		const FString Norm = NormalizeDiscriminatorValue(RowValue);
-		for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping.ClassByDiscriminatorValue)
+		for (int32 i = 0; i < Mapping.DiscriminatorClasses.Num(); ++i)
 		{
-			if (NormalizeDiscriminatorValue(Pair.Key) == Norm) { OutKey = Pair.Key; return true; }
+			for (const FString& V : Mapping.DiscriminatorClasses[i].Values)
+			{
+				if (NormalizeDiscriminatorValue(V) == Norm) { return i; }
+			}
 		}
-		return false;
+		return INDEX_NONE;
 	}
 }
 
@@ -111,14 +113,9 @@ const UClass* SQuestMappingDiscriminatorRow::GetSelectedClass() const
 	if (!I.IsValid() || !L.IsValid()) return nullptr;
 	const UQuestImportMapping* M = L->GetConfig().Mapping.Get();
 	if (!M) return nullptr;
-	// Match by normalized key (the map may store a differently-cased raw key than this row's displayed value).
-	FString StoredKey;
-	if (!FindStoredKeyForValue(*M, I->Value, StoredKey)) return nullptr;
-	const TSoftClassPtr<UQuestlineNodeBase>* Entry = M->ClassByDiscriminatorValue.Find(StoredKey);
-	// LoadSynchronously: SClassPropertyEntryBox.SelectedClass takes a resolved UClass*, and Get() returns null until the soft
-	// class is otherwise loaded — so on reopen a mapped row would read as "None". One-time editor-only load on first display
-	// (matches SGraphNode_QuestlineStep::GetObjectiveClass, which loads for the same reason).
-	return Entry ? Entry->LoadSynchronous() : nullptr;
+	const int32 Idx = FindEntryIndexForValue(*M, I->Value);
+	if (Idx == INDEX_NONE) return nullptr;
+	return M->DiscriminatorClasses[Idx].NodeClass.LoadSynchronous();
 }
 
 void SQuestMappingDiscriminatorRow::OnSetClass(const UClass* NewClass)
@@ -131,18 +128,36 @@ void SQuestMappingDiscriminatorRow::OnSetClass(const UClass* NewClass)
 
 	const FScopedTransaction Transaction(LOCTEXT("SetDiscriminatorClass", "Set Discriminator Value Class"));
 	Mapping->Modify();
-	// Reuse an existing key that normalizes to this row's value (update in place); else key a new entry by the normalized
-	// form so the panel and the import guard agree from the first write — never store a raw-cased duplicate the guard rejects.
-	FString StoredKey;
-	const FString KeyToUse = FindStoredKeyForValue(*Mapping, I->Value, StoredKey) ? StoredKey : NormalizeDiscriminatorValue(I->Value);
+	// Match the entry any of whose values normalizes to this row's value (update in place); else create a new entry keyed by
+	// the normalized value, so the panel and the import guard agree from the first write — never store a raw-cased duplicate.
+	const int32 Idx = FindEntryIndexForValue(*Mapping, I->Value);
 	if (NewClass)
 	{
-		Mapping->ClassByDiscriminatorValue.Add(KeyToUse, TSoftClassPtr<UQuestlineNodeBase>(const_cast<UClass*>(NewClass)));
+		if (Idx != INDEX_NONE)
+		{
+			// Value already belongs to an entry — repoint that entry's class (all its values move together, by design).
+			Mapping->DiscriminatorClasses[Idx].NodeClass = TSoftClassPtr<UQuestlineNodeBase>(const_cast<UClass*>(NewClass));
+		}
+		else
+		{
+			// New value -> new entry keyed by the normalized value; PrimaryValue seeds to it (single-value entry).
+			FQuestDiscriminatorClass NewEntry;
+			NewEntry.NodeClass = TSoftClassPtr<UQuestlineNodeBase>(const_cast<UClass*>(NewClass));
+			NewEntry.Values.Add(NormalizeDiscriminatorValue(I->Value));
+			NewEntry.PrimaryValue = NewEntry.Values[0];
+			Mapping->DiscriminatorClasses.Add(MoveTemp(NewEntry));
+		}
 	}
-	else
+	else if (Idx != INDEX_NONE)
 	{
-		// Clearing to None removes the entry entirely (an absent entry == unmapped; keeps the map free of null-class rows).
-		Mapping->ClassByDiscriminatorValue.Remove(KeyToUse);
+		// Clearing to None: drop this value from its entry; remove the entry if it becomes empty.
+		FQuestDiscriminatorClass& Entry = Mapping->DiscriminatorClasses[Idx];
+		Entry.Values.RemoveAll([&](const FString& V){ return NormalizeDiscriminatorValue(V) == NormalizeDiscriminatorValue(I->Value); });
+		if (Entry.PrimaryValue.IsEmpty() || NormalizeDiscriminatorValue(Entry.PrimaryValue) == NormalizeDiscriminatorValue(I->Value))
+		{
+			Entry.PrimaryValue = Entry.Values.Num() > 0 ? Entry.Values[0] : FString();
+		}
+		if (Entry.Values.Num() == 0) { Mapping->DiscriminatorClasses.RemoveAt(Idx); }
 	}
 	Mapping->PostEditChange();
 	L->NotifyModified();
@@ -165,10 +180,13 @@ FReply SQuestMappingDiscriminatorRow::OnRemoveClicked()
 
 	const FScopedTransaction Transaction(LOCTEXT("RemoveDiscriminatorValue", "Remove Discriminator Value Mapping"));
 	Mapping->Modify();
-	FString StoredKey;
-	if (FindStoredKeyForValue(*Mapping, I->Value, StoredKey))   // remove the exact stored key (may differ in case from I->Value)
+	const int32 Idx = FindEntryIndexForValue(*Mapping, I->Value);   // entry may hold the value under a different casing
+	if (Idx != INDEX_NONE)
 	{
-		Mapping->ClassByDiscriminatorValue.Remove(StoredKey);
+		FQuestDiscriminatorClass& Entry = Mapping->DiscriminatorClasses[Idx];
+		Entry.Values.RemoveAll([&](const FString& V){ return NormalizeDiscriminatorValue(V) == NormalizeDiscriminatorValue(I->Value); });
+		if (Entry.Values.Num() == 0) { Mapping->DiscriminatorClasses.RemoveAt(Idx); }
+		else if (NormalizeDiscriminatorValue(Entry.PrimaryValue) == NormalizeDiscriminatorValue(I->Value)) { Entry.PrimaryValue = Entry.Values[0]; }
 	}
 	Mapping->PostEditChange();
 	L->NotifyModified();
@@ -234,12 +252,15 @@ void SQuestMappingDiscriminatorList::RefreshRows()
 			AddedNorm.Add(Norm);
 			Rows.Add(FQuestDiscriminatorRowItem::Make(V, /*bInSample*/ true));
 		}
-		for (const TPair<FString, TSoftClassPtr<UQuestlineNodeBase>>& Pair : Mapping->ClassByDiscriminatorValue)
+		for (const FQuestDiscriminatorClass& Entry : Mapping->DiscriminatorClasses)
 		{
-			const FString Norm = NormalizeDiscriminatorValue(Pair.Key);
-			if (AddedNorm.Contains(Norm)) continue;   // already shown as an in-sample row (case-insensitively)
-			AddedNorm.Add(Norm);
-			Rows.Add(FQuestDiscriminatorRowItem::Make(Pair.Key, /*bInSample*/ false));   // stored but not in sample = stale
+			for (const FString& V : Entry.Values)
+			{
+				const FString Norm = NormalizeDiscriminatorValue(V);
+				if (AddedNorm.Contains(Norm)) continue;   // already shown as an in-sample row (case-insensitively)
+				AddedNorm.Add(Norm);
+				Rows.Add(FQuestDiscriminatorRowItem::Make(V, /*bInSample*/ false));   // stored but not in sample = stale
+			}
 		}
 	}
 	if (ListView.IsValid())

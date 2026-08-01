@@ -135,17 +135,36 @@ namespace
 		return true;
 	}
 
+	// The canonical edge-table filename we WRITE. Reading no longer keys on this name — a table is recognized as the edge
+	// table by its column SIGNATURE (from/type/to), so a studio's differently-named relation file (e.g. connections.tsv)
+	// still parses. This name is only the default output.
+	const TCHAR* GEdgeTableDefaultName = TEXT("edges.tsv");
+
+	// Is this file's header the edge signature? An edge table's first line is exactly "from\ttype\tto"; a content table's
+	// first column is always "key". The two can't collide (every content row is keyed), so the header alone identifies it.
+	bool FileHasEdgeSignature(const FString& Path)
+	{
+		FString Text;
+		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
+		TArray<FString> Lines;
+		Text.ParseIntoArrayLines(Lines, false);
+		if (Lines.Num() == 0) return false;
+		TArray<FString> Header;
+		Lines[0].ParseIntoArray(Header, TEXT("\t"), false);
+		return Header.Num() == 3 && Header[0] == TEXT("from") && Header[1] == TEXT("type") && Header[2] == TEXT("to");
+	}
+
 	bool ParseTsvEdges(const FString& Path, TArray<FQuestDataEdge>& Out)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
 		TArray<FString> Lines;
-		Text.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
+		Text.ParseIntoArrayLines(Lines, false);
 		for (int32 i = 1; i < Lines.Num(); ++i)   // skip "from\ttype\tto"
 		{
 			if (Lines[i].IsEmpty()) continue;
 			TArray<FString> F;
-			Lines[i].ParseIntoArray(F, TEXT("\t"), /*CullEmpty*/ false);
+			Lines[i].ParseIntoArray(F, TEXT("\t"), false);
 			if (F.Num() >= 3) Out.Add({ F[0], F[1], F[2] });
 		}
 		return true;
@@ -154,7 +173,7 @@ namespace
 
 bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder)
 {
-	IFileManager::Get().MakeDirectory(*DestFolder, /*Tree*/ true);
+	IFileManager::Get().MakeDirectory(*DestFolder, true);
 
 	TArray<FString> Stems;
 	Bundle.TablesByType.GetKeys(Stems);
@@ -212,7 +231,7 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 	{
 		EdgeLines.Add(FString::Printf(TEXT("%s\t%s\t%s"), *E.From, *E.Type, *E.To));
 	}
-	const FString EdgePath = DestFolder / TEXT("edges.tsv");
+	const FString EdgePath = DestFolder / GEdgeTableDefaultName;
 	if (!FFileHelper::SaveStringToFile(FString::Join(EdgeLines, TEXT("\n")), *EdgePath))
 	{
 		UE_LOG(LogSimpleQuest, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *EdgePath);
@@ -240,7 +259,9 @@ bool FTsvQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle&
 
 	for (const FString& File : TsvFiles)
 	{
-		if (File == TEXT("edges.tsv"))
+		// The edge table is recognized by its column signature (from/type/to), NOT its filename — so a studio's own-named
+		// relation file parses as edges, and our default edges.tsv still round-trips (it carries the same signature).
+		if (FileHasEdgeSignature(SrcFolder / File))
 		{
 			if (!ParseTsvEdges(SrcFolder / File, OutBundle.Edges)) return false;
 			continue;

@@ -3,13 +3,15 @@
 
 #include "Resolver/QuestMappingSource.h"
 
-#include "Resolver/QuestDataFormatRegistry.h"
+#include "QuestDataValue.h"
+#include "SimpleQuestLog.h"
+#include "Engine/DataTable.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Engine/DataTable.h"
-#include "SimpleQuestLog.h"
+#include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Settings/SimpleQuestSettings.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 #define LOCTEXT_NAMESPACE "SimpleQuestMappingSource"
 
@@ -251,6 +253,113 @@ TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Ar
 		return nullptr;
 	}
 	return FQuestDataFormatRegistry::Get().Create(Name);
+}
+
+namespace
+{
+	// A DataTable is ONE flat table of rows: the row NAME is the key, each row-struct property is a value column. That maps
+	// onto the bundle's convention exactly (Columns holds value columns only; Row.Key is separate), so no key-stripping is
+	// needed the way a TSV header requires. Values are exported as text — string-bearing, Kind::String — matching the
+	// provider read-side contract: the routing core types each cell against the destination property, not the source.
+	bool BuildDataTableContent(const UDataTable& Table, const UScriptStruct& RowStruct, FQuestDataTable& OutContent)
+	{
+		for (TFieldIterator<FProperty> It(&RowStruct); It; ++It)
+		{
+			// AUTHORED name, not GetName(): a Blueprint-authored row struct mangles member names with a GUID suffix
+			// ("type_5_A1B2..."), and a studio's DataTable is usually BP-authored. UUserDefinedStruct overrides this to
+			// return the name the designer actually typed; for a C++ struct it's the plain property name.
+			OutContent.Columns.Add(RowStruct.GetAuthoredNameForField(*It));
+		}
+
+		for (const TPair<FName, uint8*>& RowPair : Table.GetRowMap())
+		{
+			if (!RowPair.Value) continue;
+
+			FQuestDataRow Row;
+			Row.Key = RowPair.Key.ToString();
+			for (TFieldIterator<FProperty> It(&RowStruct); It; ++It)
+			{
+				FString Value;
+				// Delta = nullptr: export the actual value, never a delta-suppressed blank.
+				It->ExportText_InContainer(0, Value, RowPair.Value, nullptr, nullptr, PPF_None);
+				if (Value.IsEmpty()) continue;   // absent == at-default, same contract as an empty TSV cell
+				Row.Cells.Add(RowStruct.GetAuthoredNameForField(*It), FQuestDataValue::MakeString(Value));
+			}
+			OutContent.Rows.Add(MoveTemp(Row));
+		}
+		return true;
+	}
+
+	// A DataTable carries no self-row table, but the routing core requires exactly one. Synthesize it from the ASSET NAME —
+	// the natural analogue of the folder name a file source is read from. Sanitized so it is a valid tag segment / package
+	// name, matching what the export writes for a file round-trip.
+	void SynthesizeDataTableSelfRow(const UDataTable& Table, FQuestDataBundle& OutBundle)
+	{
+		const FString AssetName = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Table.GetName());
+
+		FQuestDataTable Self;
+		Self.Columns.Add(TEXT("class"));
+		Self.Columns.Add(TEXT("QuestlineID"));
+
+		FQuestDataRow SelfRow;
+		SelfRow.Key = AssetName;
+		SelfRow.Cells.Add(TEXT("class"), FQuestDataValue::MakeString(TEXT("QuestlineGraph")));
+		SelfRow.Cells.Add(TEXT("QuestlineID"), FQuestDataValue::MakeString(AssetName));
+		Self.Rows.Add(MoveTemp(SelfRow));
+
+		OutBundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+	}
+}
+
+bool ReadEndpointBundle(const FQuestDataEndpoint& Endpoint, FQuestDataBundle& OutBundle, FString& OutError)
+{
+	if (Endpoint.Kind == EQuestEndpointKind::ForeignFile)
+	{
+		if (Endpoint.FormatName.IsEmpty() || Endpoint.Folder.IsEmpty())
+		{
+			OutError = TEXT("a file source needs both a format and a folder");
+			return false;
+		}
+		const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(Endpoint.FormatName);
+		if (!Format)
+		{
+			OutError = FString::Printf(TEXT("format '%s' is not registered"), *Endpoint.FormatName);
+			return false;
+		}
+		if (!Format->ReadBundle(Endpoint.Folder, OutBundle))
+		{
+			OutError = FString::Printf(TEXT("could not read '%s' as %s"), *Endpoint.Folder, *Format->FormatName());
+			return false;
+		}
+		return true;
+	}
+
+	// DataTable arm — no format, no file I/O; the row struct is the authority.
+	const UDataTable* Table = Endpoint.Table.LoadSynchronous();
+	if (!Table)
+	{
+		OutError = TEXT("the Data Table could not be loaded");
+		return false;
+	}
+	const UScriptStruct* RowStruct = Table->GetRowStruct();
+	if (!RowStruct)
+	{
+		OutError = FString::Printf(TEXT("Data Table '%s' has no row struct"), *Table->GetName());
+		return false;
+	}
+
+	FQuestDataTable Content;
+	BuildDataTableContent(*Table, *RowStruct, Content);
+	if (Content.Rows.Num() == 0)
+	{
+		OutError = FString::Printf(TEXT("Data Table '%s' has no rows"), *Table->GetName());
+		return false;
+	}
+	// One flat content table (the studio's rows are mixed kinds, routed later by the mapping's discriminator). The stem is
+	// arbitrary so long as it isn't the reserved self-row key; "content" mirrors the flat-file convention.
+	OutBundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+	SynthesizeDataTableSelfRow(*Table, OutBundle);
+	return true;
 }
 
 #undef LOCTEXT_NAMESPACE

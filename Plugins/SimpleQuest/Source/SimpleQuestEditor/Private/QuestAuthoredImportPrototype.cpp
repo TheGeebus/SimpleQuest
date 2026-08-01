@@ -7,34 +7,35 @@
 // round-trip is verifiable by the two oracles: C (re-export this asset, diff the folders modulo _RT) and B2
 // (compile + DumpCompiled both, diff modulo the tag prefix). Console-triggered, editor-only. Not shipped API.
 
-#include "CoreMinimal.h"
 #include "AssetToolsModule.h"
 #include "AssetRegistry/AssetRegistryModule.h"
-#include "IAssetTools.h"
+#include "CoreMinimal.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
-#include "Misc/Paths.h"
-#include "Resolver/QuestDataBundle.h"
-#include "Resolver/QuestImportMapping.h"
-#include "Resolver/QuestMappingSource.h"
-#include "Resolver/QuestReflectionUtils.h"
-#include "UObject/UnrealType.h"
-#include "UObject/SavePackage.h"
-#include "UObject/UObjectGlobals.h"
-#include "Internationalization/Text.h"
-#include "SimpleQuestLog.h"
-#include "Quests/QuestlineGraph.h"
+#include "Engine/DataTable.h"
 #include "Factories/QuestlineGraphFactory.h"
+#include "IAssetTools.h"
+#include "Internationalization/Text.h"
+#include "ISimpleQuestEditorModule.h"
+#include "Misc/Paths.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Entry.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
-#include "ISimpleQuestEditorModule.h"
+#include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestMappingSource.h"
+#include "Resolver/QuestReflectionUtils.h"
+#include "SimpleQuestLog.h"
+#include "UObject/SavePackage.h"
+#include "UObject/UObjectGlobals.h"
+#include "UObject/UnrealType.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -1038,34 +1039,76 @@ namespace
 	{
 		// Separate the optional "--format=<name>" arg from the positional path args BEFORE rejoining (it must not get
 		// swept into the space-rejoined folder path). PathArgs = every arg that isn't a --flag.
+		// --datatable=<AssetPath> selects the asset provenance; then no source FOLDER is needed (the dest path is the only
+		// positional arg). Otherwise the folder is the positional args before the dest, space-rejoined.
+		FString DataTablePath;
+		for (const FString& Arg : Args)
+		{
+			if (Arg.StartsWith(TEXT("--datatable="))) { DataTablePath = Arg.RightChop(12); break; }
+		}
+
 		TArray<FString> PathArgs;
 		for (const FString& Arg : Args)
 		{
 			if (!Arg.StartsWith(TEXT("--"))) PathArgs.Add(Arg);
 		}
-		if (PathArgs.Num() < 2)
+		const int32 MinPositional = DataTablePath.IsEmpty() ? 2 : 1;
+		if (PathArgs.Num() < MinPositional)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json]'."));
+			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json] [--mapping=<asset>]' "
+				"or 'SimpleQuest.ImportQuestline <DestPackagePath> --datatable=<asset> [--mapping=<asset>]'."));
 			return;
 		}
+		
 		// Console arg tokenization splits on whitespace and does NOT honor quotes, so a folder path containing spaces
 		// (e.g. "E:/Unreal Projects/...") arrives as multiple Args. The dest package path is the LAST path arg (never has
 		// spaces — it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces.
 		const FString DestPackagePath = PathArgs.Last();
-		TArray<FString> FolderParts = PathArgs;
-		FolderParts.Pop();                                    // drop the dest path
-		FString FolderPath = FString::Join(FolderParts, TEXT(" "));
-		FolderPath = FolderPath.TrimQuotes();                 // tolerate quotes if the caller added them
-
-		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ImportQuestline"));
-		if (!Format)
+		FString FolderPath;
+		if (DataTablePath.IsEmpty())
 		{
-			return;   // the unregistered-format error was already logged; refuse before creating anything.
+			TArray<FString> FolderParts = PathArgs;
+			FolderParts.Pop();                                // drop the dest path
+			FolderPath = FString::Join(FolderParts, TEXT(" "));
+			FolderPath = FolderPath.TrimQuotes();             // tolerate quotes if the caller added them
 		}
-		FQuestDataBundle Bundle;
-		if (!Format->ReadBundle(FolderPath, Bundle))
+
+		// The source is an ENDPOINT: a file folder read through a format provider, or a DataTable asset. One read call, so
+		// the import path never branches on provenance again.
+		FQuestDataEndpoint Endpoint;
+		if (!DataTablePath.IsEmpty())
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: could not read '%s' as %s. No asset created."), *FolderPath, *Format->FormatName());
+			// A console-typed asset path is usually the short form "/Game/Path/Asset"; FSoftObjectPath needs the full
+			// "/Game/Path/Asset.Asset". Normalize so --datatable accepts the same form --mapping does.
+			FString AssetPath = DataTablePath;
+			if (!AssetPath.Contains(TEXT(".")))
+			{
+				FString Ignored, AssetName;
+				if (AssetPath.Split(TEXT("/"), &Ignored, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+				{
+					AssetPath += TEXT(".") + AssetName;
+				}
+			}
+			Endpoint.Kind = EQuestEndpointKind::DataTable;
+			Endpoint.Table = TSoftObjectPtr<UDataTable>(FSoftObjectPath(AssetPath));
+		}
+		else
+		{
+			const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ImportQuestline"));
+			if (!Format)
+			{
+				return;   // the unregistered-format error was already logged; refuse before creating anything.
+			}
+			Endpoint.Kind = EQuestEndpointKind::ForeignFile;
+			Endpoint.FormatName = Format->FormatName();
+			Endpoint.Folder = FolderPath;
+		}
+
+		FQuestDataBundle Bundle;
+		FString ReadError;
+		if (!ReadEndpointBundle(Endpoint, Bundle, ReadError))
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
 			return;
 		}
 

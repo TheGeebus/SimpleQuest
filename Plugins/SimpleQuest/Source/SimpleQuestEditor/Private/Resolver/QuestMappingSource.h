@@ -13,6 +13,7 @@
 class ISimpleQuestDataFormat;
 class UDataTable;
 class UQuestImportMapping;
+struct FQuestDataBundle;
 
 // Result of a column enumeration: the columns found, plus whether the source was readable and whether it is ambiguous.
 // The caller (panel or the import guard) refuses/warns on !bReadable or bHasDuplicateColumns rather than binding blindly.
@@ -68,3 +69,24 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 // else "TSV". Returns null (and logs the reason under LogPrefix) when a named format isn't registered — the caller refuses.
 // One definition shared by both the import and export prototypes; LogPrefix distinguishes their error messages.
 TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix);
+
+// WHERE a source lives — the one concept both provenances answer to. Transient by nature: a console arg or panel state,
+// never stored on the recipe (which describes a SHAPE, not a location). Kind selects which fields are meaningful.
+enum class EQuestEndpointKind : uint8
+{
+	ForeignFile,   // FormatName + Folder, read through a registered format provider
+	DataTable,     // Table — an in-engine asset; no format, no folder
+};
+
+struct FQuestDataEndpoint
+{
+	EQuestEndpointKind Kind = EQuestEndpointKind::ForeignFile;
+	FString FormatName;                  // ForeignFile only
+	FString Folder;                      // ForeignFile only
+	TSoftObjectPtr<UDataTable> Table;    // DataTable only
+};
+
+// Read whichever provenance the endpoint names into the neutral bundle — the single entry point the import path uses, so it
+// never has to know whether the data came from files or an asset. ForeignFile delegates to the format provider; DataTable
+// walks the row struct directly (no format, no I/O). Returns false with OutError set on any failure.
+bool ReadEndpointBundle(const FQuestDataEndpoint& Endpoint, FQuestDataBundle& OutBundle, FString& OutError);

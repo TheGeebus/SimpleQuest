@@ -125,11 +125,5 @@ protected:
 	 */
 	void SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
 
-	/** Returns the leaf segment of a dotted tag name (everything after the last '.'). */
-	static FText GetTagLeafLabel(FName TagName);
-
-	/** Strips the SimpleQuest.Outcome. prefix, preserving any sub-hierarchy the designer authored. Falls back to GetTagLeafLabel. */
-	static FText GetOutcomeLabel(FName TagName);
-
 	static bool SortPinsAlphabetically(const FName& A, const FName& B) { return A.Compare(B) < 0; }
 };

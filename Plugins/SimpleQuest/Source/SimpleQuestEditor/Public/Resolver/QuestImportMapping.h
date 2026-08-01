@@ -40,6 +40,27 @@ struct FQuestColumnBinding
 	EQuestAbsentFieldPolicy AbsentPolicy = EQuestAbsentFieldPolicy::Preserve;
 };
 
+// One source column that declares RELATIONSHIPS instead of a property value: its cell holds the row key(s) this row connects
+// to. A single key ("n_exit") or a paren list ("(a,b)") both parse. Synthesized into the same {From,Type,To} edges the edge
+// table produces, so the routing core sees no difference — this is just the row-adjacent way to author the same thing.
+USTRUCT()
+struct FQuestWireBinding
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, Category = "Wiring", meta = (GetOptions = "GetSampleColumnOptions"))
+	FName SourceColumn;
+
+	// The relationship kind: activates / outcome / feeds-prereq / deactivates.
+	UPROPERTY(EditAnywhere, Category = "Wiring", meta = (GetOptions = "GetEdgeVerbOptions"))
+	FName EdgeVerb = TEXT("activates");
+
+	// Which output pin the edge leaves from. LEAVE EMPTY for "this node's default flow pin" — the importer picks the node's
+	// first output of the verb's kind, so one binding wires every node type correctly. Pick a named outcome to branch.
+	UPROPERTY(EditAnywhere, Category = "Wiring", meta = (GetOptions = "GetQualifierOptions"))
+	FString Qualifier;
+};
+
 // One node kind: the class rows of this kind become, plus every discriminator value that routes to it. A studio's source may
 // use several synonyms for one kind (e.g. "objective" and "task" both meaning Step); all live in Values. PrimaryValue is the
 // one written back on reverse-export (the inverse of the many-to-one value->class map) — it MUST be one of Values.
@@ -66,6 +87,29 @@ class SIMPLEQUESTEDITOR_API UQuestImportMapping : public UDataAsset
 	GENERATED_BODY()
 
 public:
+	// Editor-only cache of the CURRENT sample source's columns, refreshed by the details panel whenever the sample changes.
+	// Feeds the GetOptions dropdowns below so every column field is PICKED from real data, never typed. Not a UPROPERTY —
+	// it is never serialized; a recipe describes a shape, not the sample it was authored against.
+	TArray<FString> SampleColumnCache;
+
+	// Dropdown sources for the column/verb fields (UE's meta=(GetOptions=...) contract).
+	UFUNCTION()
+	TArray<FString> GetSampleColumnOptions() const { return SampleColumnCache; }
+
+	// Editor-only cache of the pin names this recipe's data can actually route from — the structural flow pins plus every
+	// outcome identity declared by the objective classes the sample's ObjectiveClass column references. Refreshed by the
+	// details panel with the column cache. Not serialized.
+	TArray<FString> SampleQualifierCache;
+
+	UFUNCTION()
+	TArray<FString> GetQualifierOptions() const { return SampleQualifierCache; }
+
+	UFUNCTION()
+	TArray<FString> GetEdgeVerbOptions() const
+	{
+		return { TEXT("activates"), TEXT("outcome"), TEXT("feeds-prereq"), TEXT("deactivates") };
+	}
+	
 	// ── Which node kind is each row? ─────────────────────────────────────────────────────────────────
 	// The source column whose value names each row's node kind (the studio's "type"/"kind" column).
 	UPROPERTY(EditAnywhere, Category = "Row Kind")
@@ -86,6 +130,11 @@ public:
 	// Flat binding list, bound once. Each applies to every resolved class that has a matching property.
 	UPROPERTY(EditAnywhere, Category = "Bindings")
 	TArray<FQuestColumnBinding> Bindings;
+
+	// Columns that declare wiring rather than property values (a studio's "next"/"unlocks" column). Each row's cell names the
+	// target row key(s); one edge is synthesized per target, then the cell is stripped (it isn't a node property).
+	UPROPERTY(EditAnywhere, Category = "Wiring")
+	TArray<FQuestWireBinding> WireBindings;
 
 	// Absent-case policy for a property that has no binding at all.
 	UPROPERTY(EditAnywhere, Category = "Bindings")

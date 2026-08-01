@@ -85,6 +85,18 @@ public:
 	static FString SanitizeQuestlineTagSegment(const FString& InLabel);
 
 	/**
+	 * Returns the leaf segment of a dotted tag name (everything after the last '.'), display-formatted.
+	 */
+	static FText GetTagLeafLabel(FName TagName);
+
+	/**
+	 * Strips the SimpleQuest.Outcome. prefix, preserving any sub-hierarchy the designer authored (so "Combat.Won" and
+	 * "Social.Won" stay distinct). Falls back to GetTagLeafLabel for non-outcome tags. This is the ONE rendering of an
+	 * outcome tag — node pins, the Prereq Examiner, and the mapping panel's qualifier picker all read identically.
+	 */
+	static FText GetOutcomeLabel(FName TagName);
+
+	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.
 	 */
 	static TArray<FName> CollectExitOutcomeTagNames(const UEdGraph* Graph);

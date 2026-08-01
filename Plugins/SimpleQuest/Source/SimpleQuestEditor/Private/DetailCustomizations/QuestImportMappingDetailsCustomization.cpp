@@ -3,21 +3,21 @@
 
 #include "DetailCustomizations/QuestImportMappingDetailsCustomization.h"
 
+#include "DetailLayoutBuilder.h"
+#include "DetailCategoryBuilder.h"
+#include "DetailWidgetRow.h"
+#include "ScopedTransaction.h"
+#include "SSearchableComboBox.h"
+#include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/SQuestMappingBindingList.h"
 #include "Resolver/SQuestMappingDiscriminatorList.h"
-#include "DetailLayoutBuilder.h"
-#include "DetailCategoryBuilder.h"
-#include "DetailWidgetRow.h"
-#include "IDetailGroup.h"
-#include "IPropertyUtilities.h"
-#include "ScopedTransaction.h"
-#include "SSearchableComboBox.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
-#include "Resolver/QuestDataFormatRegistry.h"
+
 
 #define LOCTEXT_NAMESPACE "QuestImportMappingDetails"
 
@@ -40,6 +40,32 @@ TArray<FString> FQuestImportMappingDetailsCustomization::SampleDiscriminatorValu
 	return EnumerateColumnDistinctValues(SampleFormatName.ToString(), SampleFolder, M->DiscriminatorColumn);
 }
 
+TArray<FString> FQuestImportMappingDetailsCustomization::SampleQualifierOptions() const
+{
+	// The structural flow pins every graph has, plus the combinator outputs a feeds-prereq wire can leave from.
+	TArray<FString> Out = { TEXT("Any Outcome"), TEXT("Entered"), TEXT("Deactivated"), TEXT("Out"), TEXT("PrereqOut") };
+
+	const UQuestImportMapping* M = Mapping.Get();
+	if (!M || SampleFolder.IsEmpty()) return Out;
+
+	// Outcome pins are declared by the OBJECTIVE CLASS a row carries, so the real vocabulary comes from the sample's own
+	// ObjectiveClass column: read its distinct values, load each class, and ask it for the paths it exposes.
+	const FQuestColumnBinding* ObjBinding = M->Bindings.FindByPredicate(
+		[](const FQuestColumnBinding& B) { return B.TargetProperty == TEXT("ObjectiveClass"); });
+	if (!ObjBinding || ObjBinding->SourceColumn.IsNone()) return Out;
+
+	for (const FString& ClassPath : EnumerateColumnDistinctValues(SampleFormatName.ToString(), SampleFolder, ObjBinding->SourceColumn))
+	{
+		UClass* ObjClass = LoadObject<UClass>(nullptr, *ClassPath);
+		if (!ObjClass) continue;
+		for (const FObjectivePathDescriptor& Desc : FSimpleQuestEditorUtilities::DiscoverObjectivePaths(ObjClass))
+		{
+			if (!Desc.Identity.IsNone()) Out.AddUnique(FSimpleQuestEditorUtilities::GetOutcomeLabel(Desc.Identity).ToString());
+		}
+	}
+	return Out;
+}
+
 FText FQuestImportMappingDetailsCustomization::GetSampleFormatText() const { return FText::FromName(SampleFormatName); }
 
 void FQuestImportMappingDetailsCustomization::OnSampleFormatChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
@@ -57,6 +83,15 @@ void FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted(const FTex
 
 void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 {
+	// Publish the sample's columns onto the mapping so the stock-array GetOptions dropdowns (wire bindings) can pick from
+	// them — the same column set the bespoke pickers use, one source of truth.
+	if (UQuestImportMapping* M = Mapping.Get())
+	{
+		M->SampleColumnCache.Reset();
+		for (const FName& Col : SampleSourceColumns()) { M->SampleColumnCache.Add(Col.ToString()); }
+		M->SampleQualifierCache = SampleQualifierOptions();
+	}
+	
 	// Sample changed -> the column set may have changed, so rebuild the discriminator-column dropdown, then re-pull both
 	// widgets (columns feed the binding list; discriminator values feed the value->class list). The combo caches its options
 	// at build time, so rebuilding the backing array isn't enough — tell the widget to re-read it.
@@ -150,6 +185,15 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 		FormatOptions.Add(MakeShareable(new FString(Name)));
 	}
 	RebuildDiscriminatorColumnOptions();
+
+	// Publish the sample's columns onto the mapping so the stock-array GetOptions dropdowns (wire bindings) can pick from
+	// them — the same column set the bespoke pickers use, one source of truth.
+	if (UQuestImportMapping* M = Mapping.Get())
+	{
+		M->SampleColumnCache.Reset();
+		for (const FName& Col : SampleSourceColumns()) { M->SampleColumnCache.Add(Col.ToString()); }
+		M->SampleQualifierCache = SampleQualifierOptions();
+	}
 
 	IDetailCategoryBuilder& Category = DetailBuilder.EditCategory(
 		TEXT("Bindings"), LOCTEXT("BindingsCategory", "Column Bindings"), ECategoryPriority::Important);

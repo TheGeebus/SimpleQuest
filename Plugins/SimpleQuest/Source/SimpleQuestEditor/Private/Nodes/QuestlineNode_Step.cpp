@@ -18,7 +18,7 @@ void UQuestlineNode_Step::AllocateOutcomePins()
 	{
 		if (Desc.Identity.IsNone()) continue;
 		UEdGraphPin* Pin = CreatePin(EGPD_Output, TEXT("QuestOutcome"), Desc.Identity);
-		if (Pin) Pin->PinFriendlyName = GetTagLeafLabel(Desc.Identity);
+		if (Pin) Pin->PinFriendlyName = FSimpleQuestEditorUtilities::GetTagLeafLabel(Desc.Identity);
 	}
 }
 

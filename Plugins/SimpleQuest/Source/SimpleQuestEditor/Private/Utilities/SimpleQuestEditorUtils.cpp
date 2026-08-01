@@ -2,43 +2,42 @@
 // SPDX-License-Identifier: MIT
 
 #include "Utilities/SimpleQuestEditorUtils.h"
-
 #include "DataTableEditorUtils.h"
 #include "SimpleQuestLog.h"
-#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
-#include "Nodes/QuestlineNode_Exit.h"
-#include "Objectives/QuestObjective.h"
 #include "Editor.h"
 #include "EditorWorldUtils.h"
 #include "EngineUtils.h"
 #include "GameplayTagsManager.h"
 #include "GameplayTagsSettings.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Misc/FileHelper.h"
-#include "Nodes/QuestlineNode_Step.h"
-#include "Nodes/QuestlineNode_Quest.h"
-#include "Quests/QuestlineGraph.h"
-#include "Components/QuestTriggerComponent.h"
-#include "Components/QuestGiverComponent.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
-#include "Quests/QuestNodeBase.h"
-#include "Toolkit/QuestlineGraphEditor.h"
-#include "Utilities/GroupExaminerTypes.h"
-#include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Components/QuestGiverComponent.h"
 #include "Components/QuestObserverComponent.h"
+#include "Components/QuestTriggerComponent.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Engine/SCS_Node.h"
+#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
+#include "Misc/FileHelper.h"
 #include "Nodes/QuestlineNode_Knot.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Nodes/QuestlineNode_Exit.h"
+#include "Objectives/QuestObjective.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
+#include "Utilities/GroupExaminerTypes.h"
+#include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -184,6 +183,18 @@ FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& 
 		}
 	}
 	return Result;
+}
+
+FText FSimpleQuestEditorUtilities::GetTagLeafLabel(FName TagName)
+{
+	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
+}
+
+FText FSimpleQuestEditorUtilities::GetOutcomeLabel(FName TagName)
+{
+	return FQuestTagComposer::IsOutcomeTag(TagName)
+		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
+		: GetTagLeafLabel(TagName);
 }
 
 TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)

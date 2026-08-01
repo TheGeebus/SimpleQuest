@@ -8,18 +8,6 @@
 #include "Utilities/QuestTagComposer.h"
 
 
-FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
-{
-	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
-}
-
-FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
-{
-	return FQuestTagComposer::IsOutcomeTag(TagName)
-		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
-		: GetTagLeafLabel(TagName);
-}
-
 EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
 {
 	if (!Pin) return EQuestPinRole::None;
@@ -112,7 +100,7 @@ FText UQuestlineNodeBase::GetPinDisplayName(const UEdGraphPin* Pin) const
 {
 	if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
 	{
-		return GetOutcomeLabel(Pin->PinName);
+		return FSimpleQuestEditorUtilities::GetOutcomeLabel(Pin->PinName);
 	}
 	return Super::GetPinDisplayName(Pin);
 }

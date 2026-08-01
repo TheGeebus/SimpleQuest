@@ -16,11 +16,9 @@
 #include "EdGraph/EdGraphPin.h"
 #include "Misc/Paths.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestReflectionUtils.h"
-#include "Settings/SimpleQuestSettings.h"
 #include "UObject/UnrealType.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
@@ -37,8 +35,8 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "ISimpleQuestEditorModule.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
-#include "Resolver/QuestMappingSource.h"
 #include "Utilities/QuestlineGraphCompiler.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
@@ -365,6 +363,48 @@ namespace
 
 		if (Synthesized > 0)
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d prerequisite combinator(s) from flow conventions."), Synthesized);
+	}
+
+	// ---- WIRE BINDINGS (studio-declared row-adjacent relationships) ------------------------------------------------
+	// A studio's flat source expresses flow as a COLUMN of target keys ("next": n_exit) rather than an edge table. Each
+	// wire-binding names such a column plus the edge kind it means; we synthesize the identical {From,Type,To} edges the
+	// edge table would have carried, then STRIP the cell so it never reaches RestoreCell as a bogus property (same
+	// contract as the flow conventions below). An EMPTY qualifier emits "verb()", which ResolveSourcePin reads as "this
+	// node's default output of that kind" — so one binding wires Entry, Step and Exit alike. Mapping-only: it's studio
+	// vocabulary translation, so it never runs on our own round-trip.
+	void ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
+	{
+		if (Mapping.WireBindings.Num() == 0) return;
+
+		int32 Synthesized = 0;
+		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+		{
+			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row wires nothing
+
+			for (FQuestDataRow& Row : TablePair.Value.Rows)
+			{
+				for (const FQuestWireBinding& Wire : Mapping.WireBindings)
+				{
+					if (Wire.SourceColumn.IsNone()) continue;
+					const FString Col = Wire.SourceColumn.ToString();
+					const FQuestDataValue* Cell = Row.Cells.Find(Col);
+					if (!Cell) continue;                                   // column absent on this row — nothing to wire
+
+					const TArray<FString> Targets = ParseFlowKeyList(*Cell);
+					Row.Cells.Remove(Col);                                 // strip: a wire column is not a node property
+					if (Targets.Num() == 0) continue;                      // present but empty == no wiring, not an error
+
+					const FString EdgeType = FString::Printf(TEXT("%s(%s)"), *Wire.EdgeVerb.ToString(), *Wire.Qualifier);
+					for (const FString& Target : Targets)
+					{
+						Bundle.Edges.Add({ Row.Key, EdgeType, Target });
+						++Synthesized;
+					}
+				}
+			}
+		}
+		if (Synthesized > 0)
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
 	}
 
 	// Optional --mapping=<asset path>: loads a studio's source-shape translation. Null when no --mapping arg is present
@@ -869,18 +909,52 @@ namespace
 		}
 	}
 
-	// Resolve an output pin on the source node by the edge type's parenthesized qualifier (the source pin name the
-	// export wrote). Falls back to category matching if the exact name isn't found (defensive).
+	// The pin CATEGORY each edge verb leaves from — the inverse of the export's category->verb mapping, used to resolve a
+	// wire binding that names no specific pin ("activates()" = this node's default activation output).
+	FName SourceCategoryForVerb(const FString& Verb)
+	{
+		if (Verb == TEXT("activates"))    return TEXT("QuestActivation");
+		if (Verb == TEXT("outcome"))      return TEXT("QuestOutcome");
+		if (Verb == TEXT("feeds-prereq")) return TEXT("QuestPrerequisite");
+		if (Verb == TEXT("deactivates"))  return TEXT("QuestDeactivated");
+		return NAME_None;
+	}
+
 	UEdGraphPin* ResolveSourcePin(UEdGraphNode* Node, const FString& EdgeType)
 	{
-		// EdgeType is "verb(PinName)" — extract PinName.
+		// EdgeType is "verb(PinName)" — split it. An EMPTY PinName means "the node's default output of this verb's kind",
+		// which is how a studio's row-adjacent wire column ("next") addresses Entry/Step/Exit uniformly without knowing
+		// that each names its forward pin differently.
+		FString Verb = EdgeType;
 		FString PinName;
 		int32 Open, Close;
 		if (EdgeType.FindChar(TEXT('('), Open) && EdgeType.FindLastChar(TEXT(')'), Close) && Close > Open)
+		{
+			Verb = EdgeType.Left(Open);
 			PinName = EdgeType.Mid(Open + 1, Close - Open - 1);
+		}
 
+		if (!PinName.IsEmpty())
+		{
+			// Exact pin name first — that's what our own export writes, so the round-trip is untouched.
+			for (UEdGraphPin* Pin : Node->Pins)
+				if (Pin && Pin->Direction == EGPD_Output && Pin->PinName.ToString() == PinName) return Pin;
+
+			// Then the OUTCOME LABEL form: an outcome pin's name is the full tag, but a studio authors (and the mapping
+			// panel offers) the namespace-stripped label. Computing the same label from each pin makes the two agree,
+			// and keeping the authored sub-hierarchy means "Combat.Won" never collides with "Social.Won".
+			for (UEdGraphPin* Pin : Node->Pins)
+				if (Pin && Pin->Direction == EGPD_Output
+					&& FSimpleQuestEditorUtilities::GetOutcomeLabel(Pin->PinName).ToString() == PinName) return Pin;
+
+			return nullptr;
+		}
+
+		// Unqualified: first output pin of the verb's category — the node's primary forward wire by pin-creation order.
+		const FName WantCategory = SourceCategoryForVerb(Verb);
+		if (WantCategory.IsNone()) return nullptr;
 		for (UEdGraphPin* Pin : Node->Pins)
-			if (Pin && Pin->Direction == EGPD_Output && Pin->PinName.ToString() == PinName) return Pin;
+			if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == WantCategory) return Pin;
 		return nullptr;
 	}
 
@@ -1007,6 +1081,8 @@ namespace
 				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: mapping guard refused the import. No asset created."));
 				return;
 			}
+			// After the column renames, before the conventions: a wire column is studio vocabulary, never a property.
+			ApplyWireBindings(Bundle, *Mapping, Warnings);
 		}
 		ApplyFlowConventions(Bundle, Warnings);
 

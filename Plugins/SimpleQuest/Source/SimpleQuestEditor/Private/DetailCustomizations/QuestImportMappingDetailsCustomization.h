@@ -35,25 +35,27 @@ private:
 	FName SampleFormatName = TEXT("TSV");
 	FString SampleFolder;
 
-	TArray<FName> SampleSourceColumns() const;							// feeds the binding widget's SourceColumnProvider
-	TArray<FString> SampleDiscriminatorValues() const;					// feeds the discriminator widget's DistinctValueProvider
+	TArray<FName> SampleSourceColumns() const;					// feeds the binding widget's SourceColumnProvider
+	TArray<FString> SampleDiscriminatorValues() const;			// feeds the discriminator widget's DistinctValueProvider
+	TArray<FString> SampleQualifierOptions() const;				// structural pins + outcome identities from the sample's objective classes
 	void OnMappingModified();
 
 	// Sample-source control callbacks
-	TArray<TSharedPtr<FString>> FormatOptions;							// registry names for the format dropdown
+	TArray<TSharedPtr<FString>> FormatOptions;					// registry names for the format dropdown
 	FText GetSampleFormatText() const;
 	void OnSampleFormatChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
 	FText GetSampleFolderText() const;
 	void OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type);
-	void RefreshFromSample();											// re-enumerate + tell BOTH widgets to rebuild
+	void RefreshFromSample();									// re-enumerate + tell BOTH widgets to rebuild
 
 	// Discriminator-column picker: a dropdown of the sample's columns (never a typed FName).
-	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;				// rebuilt from the sample's columns
-	TSharedPtr<SSearchableComboBox> DiscriminatorColumnCombo;		// held so a sample change can RefreshOptions() it
+	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;		// rebuilt from the sample's columns
+	TSharedPtr<SSearchableComboBox> DiscriminatorColumnCombo;	// held so a sample change can RefreshOptions() it
 	TSharedPtr<SSearchableComboBox> KeyColumnCombo;
 	void RebuildDiscriminatorColumnOptions();
-	FText GetDiscriminatorColumnText() const;							// reads Mapping->DiscriminatorColumn
+	FText GetDiscriminatorColumnText() const;					// reads Mapping->DiscriminatorColumn
 	void OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+	
 	// Key-column picker (reuses DiscriminatorColumnOptions — both pick a source column; never a typed FName).
 	FText GetKeyColumnText() const;
 	void OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);

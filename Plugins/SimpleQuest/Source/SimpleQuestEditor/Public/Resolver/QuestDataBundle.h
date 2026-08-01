@@ -3,11 +3,10 @@
 
 #pragma once
 
-// PROTOTYPE — Resolver, Phase 3 Stage 2. The ONE neutral bundle both routing halves speak and every format provider
-// produces/consumes. Format-free and editor-type-free: no UEdGraph/node types here (that's routing-core territory), no
-// file/format knowledge (that's the provider's). ExportRouting emits an FQuestDataBundle from the live graph; a provider
-// WriteBundle serializes it; a provider ReadBundle reconstructs it; ImportRouting ingests it. See
-// notes-07-phase3-stage2-code-spec.txt §2.
+// The ONE neutral bundle both routing halves speak and every format provider produces/consumes. Format-free and
+// editor-type-free: no UEdGraph/node types here (that's routing-core territory), no file/format knowledge
+// (that's the provider's). ExportRouting emits an FQuestDataBundle from the live graph; a provider WriteBundle
+// serializes it; a provider ReadBundle reconstructs it; ImportRouting ingests it.
 
 #include "CoreMinimal.h"
 #include "QuestDataValue.h"

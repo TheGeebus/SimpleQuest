@@ -3,14 +3,17 @@
 
 #include "Resolver/QuestMappingSource.h"
 
-#include "QuestDataValue.h"
+#include "Resolver/QuestDataValue.h"
 #include "SimpleQuestLog.h"
 #include "Engine/DataTable.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/QuestDataValueBuilder.h"
+#include "UObject/StructOnScope.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Settings/SimpleQuestSettings.h"
+#include "UObject/StructOnScope.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 #define LOCTEXT_NAMESPACE "SimpleQuestMappingSource"
@@ -257,19 +260,22 @@ TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Ar
 
 namespace
 {
-	// A DataTable is ONE flat table of rows: the row NAME is the key, each row-struct property is a value column. That maps
-	// onto the bundle's convention exactly (Columns holds value columns only; Row.Key is separate), so no key-stripping is
-	// needed the way a TSV header requires. Values are exported as text — string-bearing, Kind::String — matching the
-	// provider read-side contract: the routing core types each cell against the destination property, not the source.
-	bool BuildDataTableContent(const UDataTable& Table, const UScriptStruct& RowStruct, FQuestDataTable& OutContent)
+	// A DataTable maps onto the bundle convention exactly: the ROW NAME is Row.Key, each row-struct property is a value
+	// column. Unlike a text provider, this source has the FProperty in hand — so cells are built TYPED (Tag/Enum/Reference/
+	// Array/StructLiteral) through the same builder the graph export uses, never degraded to strings.
+	void BuildDataTableContent(const UDataTable& Table, const UScriptStruct& RowStruct, FQuestDataTable& OutContent)
 	{
 		for (TFieldIterator<FProperty> It(&RowStruct); It; ++It)
 		{
 			// AUTHORED name, not GetName(): a Blueprint-authored row struct mangles member names with a GUID suffix
-			// ("type_5_A1B2..."), and a studio's DataTable is usually BP-authored. UUserDefinedStruct overrides this to
-			// return the name the designer actually typed; for a C++ struct it's the plain property name.
+			// ("type_5_A1B2..."), and a studio's DataTable is usually BP-authored.
 			OutContent.Columns.Add(RowStruct.GetAuthoredNameForField(*It));
 		}
+
+		// A default-constructed row is the comparison basis, so a member sitting at its struct default emits Kind::Empty —
+		// the same "absent == at-default" contract an omitted TSV cell carries. FStructOnScope handles alignment,
+		// construction and teardown for us.
+		FStructOnScope DefaultRow(&RowStruct);
 
 		for (const TPair<FName, uint8*>& RowPair : Table.GetRowMap())
 		{
@@ -279,15 +285,16 @@ namespace
 			Row.Key = RowPair.Key.ToString();
 			for (TFieldIterator<FProperty> It(&RowStruct); It; ++It)
 			{
-				FString Value;
-				// Delta = nullptr: export the actual value, never a delta-suppressed blank.
-				It->ExportText_InContainer(0, Value, RowPair.Value, nullptr, nullptr, PPF_None);
-				if (Value.IsEmpty()) continue;   // absent == at-default, same contract as an empty TSV cell
-				Row.Cells.Add(RowStruct.GetAuthoredNameForField(*It), FQuestDataValue::MakeString(Value));
+				const void* ValuePtr   = It->ContainerPtrToValuePtr<void>(RowPair.Value);
+				const void* DefaultPtr = It->ContainerPtrToValuePtr<void>(DefaultRow.GetStructMemory());
+
+				FQuestDataValue V = BuildQuestDataValue(*It, ValuePtr, DefaultPtr);
+				if (V.Kind == EQuestDataValueKind::Empty) continue;   // at-default == absent, no cell
+
+				Row.Cells.Add(RowStruct.GetAuthoredNameForField(*It), MoveTemp(V));
 			}
 			OutContent.Rows.Add(MoveTemp(Row));
 		}
-		return true;
 	}
 
 	// A DataTable carries no self-row table, but the routing core requires exactly one. Synthesize it from the ASSET NAME —

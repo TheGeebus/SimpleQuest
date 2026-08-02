@@ -197,6 +197,15 @@ FText FSimpleQuestEditorUtilities::GetOutcomeLabel(FName TagName)
 		: GetTagLeafLabel(TagName);
 }
 
+FName FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(const FString& Verb)
+{
+	if (Verb == TEXT("activates"))    return TEXT("QuestActivation");
+	if (Verb == TEXT("outcome"))      return TEXT("QuestOutcome");
+	if (Verb == TEXT("feeds-prereq")) return TEXT("QuestPrerequisite");
+	if (Verb == TEXT("deactivates"))  return TEXT("QuestDeactivated");
+	return NAME_None;
+}
+
 TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)
 {
 	TArray<FName> Result;

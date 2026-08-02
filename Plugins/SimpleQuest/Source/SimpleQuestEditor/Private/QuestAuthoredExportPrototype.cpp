@@ -313,25 +313,71 @@ namespace
 		}
 	}
 
-	// Map exported row key (QuestGuid digits) -> the studio's own key, for nodes that came from an import that preserved it.
-	// Walks the graph directly rather than reusing the export traversal: we only need identity, so visiting a node the
-	// export skips (a knot) is harmless — it simply won't appear in the bundle.
-	void CollectSourceKeys(const UEdGraph* EdGraph, TMap<FString, FString>& Out)
+	// Map exported row key (QuestGuid digits) -> the studio's own key, and -> the node itself. The node is needed to resolve
+	// which output pin an edge left from, so an unqualified wire binding can be matched back the same way the import
+	// resolves it forward. Walks the graph directly: we only need identity, so visiting a node the export skips is harmless.
+	void CollectNodeIdentity(const UEdGraph* EdGraph, TMap<FString, FString>& OutSourceKeyByGuid,
+	                         TMap<FString, const UQuestlineNodeBase*>& OutNodeByGuid)
 	{
 		if (!EdGraph) return;
 		for (const UEdGraphNode* RawNode : EdGraph->Nodes)
 		{
 			const UQuestlineNodeBase* Node = Cast<UQuestlineNodeBase>(RawNode);
 			if (!Node) continue;
+			const FString Guid = Node->QuestGuid.ToString(EGuidFormats::Digits);
+			OutNodeByGuid.Add(Guid, Node);
 			if (!Node->ImportSourceKey.IsEmpty())
 			{
-				Out.Add(Node->QuestGuid.ToString(EGuidFormats::Digits), Node->ImportSourceKey);
+				OutSourceKeyByGuid.Add(Guid, Node->ImportSourceKey);
 			}
 			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
 			{
-				CollectSourceKeys(QuestNode->GetInnerGraph(), Out);
+				CollectNodeIdentity(QuestNode->GetInnerGraph(), OutSourceKeyByGuid, OutNodeByGuid);
 			}
 		}
+	}
+
+	// Which wire binding, if any, does this edge belong to? Qualified bindings are tested FIRST so a named-outcome column is
+	// never swallowed by the default-flow one. An unqualified binding then claims an edge only when its pin is the from-node's
+	// DEFAULT output for that verb — the same rule the import applies forward, read backwards.
+	const FQuestWireBinding* FindClaimingWireBinding(const FQuestDataEdge& Edge, const UQuestImportMapping& Mapping,
+	                                                 const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid)
+	{
+		FString Verb = Edge.Type, Pin;
+		int32 Open, Close;
+		if (Edge.Type.FindChar(TEXT('('), Open) && Edge.Type.FindLastChar(TEXT(')'), Close) && Close > Open)
+		{
+			Verb = Edge.Type.Left(Open);
+			Pin  = Edge.Type.Mid(Open + 1, Close - Open - 1);
+		}
+
+		for (const FQuestWireBinding& W : Mapping.WireBindings)
+		{
+			if (W.SourceColumn.IsNone() || W.Qualifier.IsEmpty()) continue;
+			if (W.EdgeVerb.ToString() != Verb) continue;
+			// The pin's real name is the full tag; the panel offers the outcome LABEL. Accept either, as the import does.
+			if (W.Qualifier == Pin) return &W;
+			if (FSimpleQuestEditorUtilities::GetOutcomeLabel(FName(*Pin)).ToString() == W.Qualifier) return &W;
+		}
+
+		const UQuestlineNodeBase* const* Found = NodeByGuid.Find(Edge.From);
+		if (!Found || !*Found) return nullptr;
+		const FName WantCategory = FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(Verb);
+		if (WantCategory.IsNone()) return nullptr;
+
+		const UEdGraphPin* DefaultPin = nullptr;
+		for (UEdGraphPin* P : (*Found)->Pins)
+		{
+			if (P && P->Direction == EGPD_Output && P->PinType.PinCategory == WantCategory) { DefaultPin = P; break; }
+		}
+		if (!DefaultPin || DefaultPin->PinName.ToString() != Pin) return nullptr;
+
+		for (const FQuestWireBinding& W : Mapping.WireBindings)
+		{
+			if (W.SourceColumn.IsNone() || !W.Qualifier.IsEmpty()) continue;
+			if (W.EdgeVerb.ToString() == Verb) return &W;
+		}
+		return nullptr;
 	}
 	
 	// ---- REVERSE MAPPING (restate the canonical bundle in the STUDIO's vocabulary) ---------------------------------
@@ -341,7 +387,8 @@ namespace
 	// This is a faithful RE-STATEMENT, not a regeneration: per-row casing, values equal to our defaults, and the studio's
 	// original file arrangement are not recoverable from the graph.
 	void ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping,
-							 const TMap<FString, FString>& SourceKeyByGuid, TArray<FString>& Warnings)
+							 const TMap<FString, FString>& SourceKeyByGuid,
+							 const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings)
 	{
 		if (Mapping.DiscriminatorColumn.IsNone())
 		{
@@ -364,6 +411,28 @@ namespace
 		TSet<FString> FlatCols;
 		auto AddCol = [&](const FString& Col) { if (!FlatCols.Contains(Col)) { FlatCols.Add(Col); Flat.Columns.Add(Col); } };
 		AddCol(DiscCol);   // the discriminator leads, as it does in a studio's own table
+		
+		// Claimed edges are recorded but NOT removed yet — the removal happens only after every one of them has actually
+		// become a cell (see the invariant after the row walk). Removing up front would make a mismatch unrecoverable.
+		TMap<FString, TMap<FString, TArray<FString>>> WireCellsByRow;   // from-guid -> column -> target keys
+		TSet<int32> ClaimedEdges;
+		int32 WiresClaimed = 0;
+		int32 WiresWritten = 0;
+		if (Mapping.WireBindings.Num() > 0)
+		{
+			for (int32 i = 0; i < Bundle.Edges.Num(); ++i)
+			{
+				const FQuestDataEdge& Edge = Bundle.Edges[i];
+				const FQuestWireBinding* Claim = FindClaimingWireBinding(Edge, Mapping, NodeByGuid);
+				if (!Claim) continue;
+				const FString* MappedTo = SourceKeyByGuid.Find(Edge.To);
+				WireCellsByRow.FindOrAdd(Edge.From)
+							  .FindOrAdd(Claim->SourceColumn.ToString())
+							  .Add(MappedTo ? *MappedTo : Edge.To);
+				ClaimedEdges.Add(i);
+				++WiresClaimed;
+			}
+		}
 
 		int32 Restated = 0;
 		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
@@ -398,14 +467,29 @@ namespace
 					}
 				}
 
-				// C. Their key, not our GUID. Import preserved the studio's row key on the node when it wasn't already one of
+				// C. Wiring this row declares, written as their column(s). MUST run before C — WireCellsByRow is keyed by the
+				//     exported GUID, and C is about to replace Row.Key with the studio's key. A single target is written bare;
+				//     several use the same paren list the import parses, so the value round-trips through ParseFlowKeyList.
+				if (const TMap<FString, TArray<FString>>* Cols = WireCellsByRow.Find(Row.Key))
+				{
+					for (const TPair<FString, TArray<FString>>& ColPair : *Cols)
+					{
+						const FString Value = ColPair.Value.Num() == 1
+							? ColPair.Value[0]
+							: FString::Printf(TEXT("(%s)"), *FString::Join(ColPair.Value, TEXT(",")));
+						Row.Cells.Add(ColPair.Key, FQuestDataValue::MakeString(Value));
+						WiresWritten += ColPair.Value.Num();
+					}
+				}
+
+				// D. Their key, not our GUID. Import preserved the studio's row key on the node when it wasn't already one of
 				//    our GUIDs; restoring it is what makes the file readable as a diff against their source.
 				if (const FString* SourceKey = SourceKeyByGuid.Find(Row.Key))
 				{
 					Row.Key = *SourceKey;
 				}
 
-				// D. Text as plain text. Import turned their plain string into an FText and INVENTED a localization key for
+				// E. Text as plain text. Import turned their plain string into an FText and INVENTED a localization key for
 				//    it — a different one every run — so writing the full NSLOCTEXT form back would hand them machinery they
 				//    never authored and that churns on every export. Emit what they wrote.
 				for (TPair<FString, FQuestDataValue>& Cell : Row.Cells)
@@ -422,6 +506,34 @@ namespace
 			}
 		}
 
+		// INVARIANT — every relationship taken out of the edge table must have become a cell. If a claimed edge's from-row
+		// never appeared in the bundle, dropping the edge while writing no column would silently DELETE that relationship:
+		// the failure this pass is most able to cause and least able to show, since the export would still look well-formed.
+		// On mismatch, keep the edge table intact and strip the partial columns, so the wiring is still expressed exactly
+		// once — canonically rather than in their vocabulary — and nothing is lost.
+		if (WiresClaimed == WiresWritten)
+		{
+			TArray<FQuestDataEdge> KeptEdges;
+			for (int32 i = 0; i < Bundle.Edges.Num(); ++i)
+			{
+				if (!ClaimedEdges.Contains(i)) { KeptEdges.Add(Bundle.Edges[i]); }
+			}
+			Bundle.Edges = MoveTemp(KeptEdges);
+		}
+		else
+		{
+			for (FQuestDataRow& R : Flat.Rows)
+			{
+				for (const FQuestWireBinding& W : Mapping.WireBindings)
+				{
+					if (!W.SourceColumn.IsNone()) { R.Cells.Remove(W.SourceColumn.ToString()); }
+				}
+			}
+			Warnings.Add(FString::Printf(TEXT("reverse mapping: %d relationship(s) matched a wire binding but only %d became "
+				"columns — the wiring has been left in the edge table rather than the studio's columns, so none is lost."),
+				WiresClaimed, WiresWritten));
+		}
+
 		// 3. Drop columns that carry nothing. Everything the recipe does NOT bind still arrives here under OUR property name
 		//    — that is our vocabulary leaking into their file, and it is what breaks a diff against their own source. A
 		//    column at its default on every row says nothing, so it goes. One that DOES carry a value stays (under our name),
@@ -432,6 +544,10 @@ namespace
 		for (const FQuestColumnBinding& B : Mapping.Bindings)
 		{
 			if (!B.SourceColumn.IsNone()) { Keep.Add(B.SourceColumn.ToString()); }
+		}
+		for (const FQuestWireBinding& W : Mapping.WireBindings)
+		{
+			if (!W.SourceColumn.IsNone()) { Keep.Add(W.SourceColumn.ToString()); }   // part of their shape even when unused here
 		}
 		for (const FQuestDataRow& Row : Flat.Rows)
 		{
@@ -470,10 +586,11 @@ namespace
 		}
 
 		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "
-			"(faithful re-statement — per-row casing, at-default values and original file layout are not reconstructed)."),
+			"(faithful re-statement — per-row casing, at-default values and original file layout are not reconstructed), %d wire(s) written."),
 			Restated,
 			ColsAfter,
-			ColsBefore);
+			ColsBefore,
+			WiresWritten);
 	}
 
 	void ExportQuestlineCmd(const TArray<FString>& Args)
@@ -519,8 +636,9 @@ namespace
 		if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
 		{
 			TMap<FString, FString> SourceKeyByGuid;
-			CollectSourceKeys(Graph->QuestlineEdGraph, SourceKeyByGuid);
-			ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, Warnings);
+			TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+			CollectNodeIdentity(Graph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
+			ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
 		}
 		for (const FString& W : Warnings) { UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: %s"), *W); }
 		

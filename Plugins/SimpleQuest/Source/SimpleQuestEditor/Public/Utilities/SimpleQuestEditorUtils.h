@@ -97,6 +97,12 @@ public:
 	static FText GetOutcomeLabel(FName TagName);
 
 	/**
+	 * The output pin CATEGORY an edge verb leaves from — the inverse of the export's category->verb rendering. One
+	 * definition, so the import's pin resolution and the export's wire-binding inversion can never disagree on the mapping.
+	 */
+	static FName PinCategoryForEdgeVerb(const FString& Verb);
+
+	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.
 	 */
 	static TArray<FName> CollectExitOutcomeTagNames(const UEdGraph* Graph);

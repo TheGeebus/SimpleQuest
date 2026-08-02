@@ -896,17 +896,6 @@ namespace
 		}
 	}
 
-	// The pin CATEGORY each edge verb leaves from — the inverse of the export's category->verb mapping, used to resolve a
-	// wire binding that names no specific pin ("activates()" = this node's default activation output).
-	FName SourceCategoryForVerb(const FString& Verb)
-	{
-		if (Verb == TEXT("activates"))    return TEXT("QuestActivation");
-		if (Verb == TEXT("outcome"))      return TEXT("QuestOutcome");
-		if (Verb == TEXT("feeds-prereq")) return TEXT("QuestPrerequisite");
-		if (Verb == TEXT("deactivates"))  return TEXT("QuestDeactivated");
-		return NAME_None;
-	}
-
 	UEdGraphPin* ResolveSourcePin(UEdGraphNode* Node, const FString& EdgeType)
 	{
 		// EdgeType is "verb(PinName)" — split it. An EMPTY PinName means "the node's default output of this verb's kind",
@@ -938,7 +927,7 @@ namespace
 		}
 
 		// Unqualified: first output pin of the verb's category — the node's primary forward wire by pin-creation order.
-		const FName WantCategory = SourceCategoryForVerb(Verb);
+		const FName WantCategory = FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(Verb);
 		if (WantCategory.IsNone()) return nullptr;
 		for (UEdGraphPin* Pin : Node->Pins)
 			if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == WantCategory) return Pin;

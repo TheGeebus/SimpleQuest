@@ -408,20 +408,6 @@ namespace
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
 	}
 
-	// Optional --mapping=<asset path>: loads a studio's source-shape translation. Null when no --mapping arg is present
-	// (the source is already in our shape — our own round-trip / export-as-teacher — so no mapping is needed).
-	const UQuestImportMapping* LoadMappingArg(const TArray<FString>& Args)
-	{
-		for (const FString& Arg : Args)
-		{
-			if (Arg.StartsWith(TEXT("--mapping=")))
-			{
-				return LoadObject<UQuestImportMapping>(nullptr, *Arg.RightChop(10));   // length of "--mapping="
-			}
-		}
-		return nullptr;
-	}
-
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
 
 	// Restore a Kind=Array cell into the destination container. The Kind erases container type (TArray vs TSet), so branch
@@ -1117,7 +1103,7 @@ namespace
 		// A studio's source-shape translation (optional). Absent = the source is already in our shape (our own
 		// round-trip / export-as-teacher), so no mapping is needed. Runs before flow-conventions so a mapped column can
 		// feed a convention (e.g. a source column mapped onto unlock_after).
-		if (const UQuestImportMapping* Mapping = LoadMappingArg(Args))
+		if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
 		{
 			if (!ApplyMapping(Bundle, *Mapping, Warnings))
 			{

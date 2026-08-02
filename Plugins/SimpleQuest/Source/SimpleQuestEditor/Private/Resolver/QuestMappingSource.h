@@ -26,6 +26,10 @@ struct FQuestSourceColumns
 	FText Error;						// human-readable reason when !bReadable or bHasDuplicateColumns
 };
 
+// Load the optional --mapping=<asset path> console arg. Null when absent (the source is already in our shape) or unloadable.
+// One definition shared by the import and export commands.
+const UQuestImportMapping* LoadQuestMappingArg(const TArray<FString>& Args);
+
 // Foreign-file source: read the folder through the named format provider and collect the UNION of value columns across all
 // content tables (the self-row "questline_graph" table is excluded — it isn't a fanned-out source of node rows). A column
 // name repeated within one table's header is flagged bHasDuplicateColumns (the parse already collapsed its cells, so the

@@ -18,6 +18,18 @@
 
 #define LOCTEXT_NAMESPACE "SimpleQuestMappingSource"
 
+const UQuestImportMapping* LoadQuestMappingArg(const TArray<FString>& Args)
+{
+	for (const FString& Arg : Args)
+	{
+		if (Arg.StartsWith(TEXT("--mapping=")))
+		{
+			return LoadObject<UQuestImportMapping>(nullptr, *Arg.RightChop(10));   // length of "--mapping="
+		}
+	}
+	return nullptr;
+}
+
 FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const FString& SourceFolder)
 {
 	FQuestSourceColumns Result;

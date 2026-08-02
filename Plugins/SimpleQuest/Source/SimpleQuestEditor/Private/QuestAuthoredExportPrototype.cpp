@@ -26,6 +26,7 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Resolver/QuestDataValueBuilder.h"
+#include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -312,6 +313,169 @@ namespace
 		}
 	}
 
+	// Map exported row key (QuestGuid digits) -> the studio's own key, for nodes that came from an import that preserved it.
+	// Walks the graph directly rather than reusing the export traversal: we only need identity, so visiting a node the
+	// export skips (a knot) is harmless — it simply won't appear in the bundle.
+	void CollectSourceKeys(const UEdGraph* EdGraph, TMap<FString, FString>& Out)
+	{
+		if (!EdGraph) return;
+		for (const UEdGraphNode* RawNode : EdGraph->Nodes)
+		{
+			const UQuestlineNodeBase* Node = Cast<UQuestlineNodeBase>(RawNode);
+			if (!Node) continue;
+			if (!Node->ImportSourceKey.IsEmpty())
+			{
+				Out.Add(Node->QuestGuid.ToString(EGuidFormats::Digits), Node->ImportSourceKey);
+			}
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				CollectSourceKeys(QuestNode->GetInnerGraph(), Out);
+			}
+		}
+	}
+	
+	// ---- REVERSE MAPPING (restate the canonical bundle in the STUDIO's vocabulary) ---------------------------------
+	// The inverse read of the same recipe the import uses forward: our class -> their discriminator value, our property
+	// names -> their column names, and the per-type tables merged back into the ONE mixed table their source actually was.
+	// Runs on the bundle the exporter just built, immediately before serialization — no second graph walk.
+	// This is a faithful RE-STATEMENT, not a regeneration: per-row casing, values equal to our defaults, and the studio's
+	// original file arrangement are not recoverable from the graph.
+	void ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping,
+							 const TMap<FString, FString>& SourceKeyByGuid, TArray<FString>& Warnings)
+	{
+		if (Mapping.DiscriminatorColumn.IsNone())
+		{
+			Warnings.Add(TEXT("reverse mapping: the recipe has no discriminator column — bundle left in canonical shape"));
+			return;
+		}
+
+		// Our class name -> the value the studio calls it. PrimaryValue is the authored choice when one class answers to
+		// several values; otherwise the first (and usually only) value.
+		TMap<FString, FString> ValueByClassName;
+		for (const FQuestDiscriminatorClass& Entry : Mapping.DiscriminatorClasses)
+		{
+			const UClass* Cls = Entry.NodeClass.LoadSynchronous();
+			if (!Cls || Entry.Values.Num() == 0) continue;
+			ValueByClassName.Add(Cls->GetName(), Entry.PrimaryValue.IsEmpty() ? Entry.Values[0] : Entry.PrimaryValue);
+		}
+
+		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
+		FQuestDataTable Flat;
+		TSet<FString> FlatCols;
+		auto AddCol = [&](const FString& Col) { if (!FlatCols.Contains(Col)) { FlatCols.Add(Col); Flat.Columns.Add(Col); } };
+		AddCol(DiscCol);   // the discriminator leads, as it does in a studio's own table
+
+		int32 Restated = 0;
+		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+		{
+			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row keeps its own shape
+
+			for (FQuestDataRow& Row : TablePair.Value.Rows)
+			{
+				// A. class cell -> their discriminator value. Our "class" marker is not part of their vocabulary.
+				const FString ClassName = Row.Get(TEXT("class"));
+				if (const FString* Value = ValueByClassName.Find(ClassName))
+				{
+					Row.Cells.Remove(TEXT("class"));
+					Row.Cells.Add(DiscCol, FQuestDataValue::MakeString(*Value));
+				}
+				else if (!ClassName.IsEmpty())
+				{
+					Warnings.Add(FString::Printf(TEXT("reverse mapping: no discriminator value maps class '%s' — "
+						"those rows keep the canonical class cell"), *ClassName));
+				}
+
+				// B. our property names -> their column names (the same Bindings list, read right-to-left).
+				for (const FQuestColumnBinding& B : Mapping.Bindings)
+				{
+					if (B.SourceColumn.IsNone() || B.TargetProperty.IsNone()) continue;
+					const FString Prop = B.TargetProperty.ToString();
+					if (FQuestDataValue* Cell = Row.Cells.Find(Prop))
+					{
+						FQuestDataValue Moved = MoveTemp(*Cell);
+						Row.Cells.Remove(Prop);
+						Row.Cells.Add(B.SourceColumn.ToString(), MoveTemp(Moved));
+					}
+				}
+
+				// C. Their key, not our GUID. Import preserved the studio's row key on the node when it wasn't already one of
+				//    our GUIDs; restoring it is what makes the file readable as a diff against their source.
+				if (const FString* SourceKey = SourceKeyByGuid.Find(Row.Key))
+				{
+					Row.Key = *SourceKey;
+				}
+
+				// D. Text as plain text. Import turned their plain string into an FText and INVENTED a localization key for
+				//    it — a different one every run — so writing the full NSLOCTEXT form back would hand them machinery they
+				//    never authored and that churns on every export. Emit what they wrote.
+				for (TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+				{
+					if (Cell.Value.Kind == EQuestDataValueKind::Text)
+					{
+						Cell.Value = FQuestDataValue::MakeString(Cell.Value.Text.ToString());
+					}
+				}
+
+				for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells) { AddCol(Cell.Key); }
+				Flat.Rows.Add(MoveTemp(Row));
+				++Restated;
+			}
+		}
+
+		// 3. Drop columns that carry nothing. Everything the recipe does NOT bind still arrives here under OUR property name
+		//    — that is our vocabulary leaking into their file, and it is what breaks a diff against their own source. A
+		//    column at its default on every row says nothing, so it goes. One that DOES carry a value stays (under our name),
+		//    so unmapped data is VISIBLE rather than silently dropped. The discriminator and every mapped column are always
+		//    kept: they are part of the studio's shape whether or not this particular export populated them.
+		TSet<FString> Keep;
+		Keep.Add(DiscCol);
+		for (const FQuestColumnBinding& B : Mapping.Bindings)
+		{
+			if (!B.SourceColumn.IsNone()) { Keep.Add(B.SourceColumn.ToString()); }
+		}
+		for (const FQuestDataRow& Row : Flat.Rows)
+		{
+			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+			{
+				if (Cell.Value.Kind != EQuestDataValueKind::Empty) { Keep.Add(Cell.Key); }
+			}
+		}
+		const int32 ColsBefore = Flat.Columns.Num();
+		Flat.Columns.RemoveAll([&Keep](const FString& Col) { return !Keep.Contains(Col); });
+		const int32 ColsAfter = Flat.Columns.Num();
+		for (FQuestDataRow& Row : Flat.Rows)
+		{
+			TArray<FString> Drop;
+			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+			{
+				if (!Keep.Contains(Cell.Key)) { Drop.Add(Cell.Key); }
+			}
+			for (const FString& D : Drop) { Row.Cells.Remove(D); }
+		}
+
+		// 4. Collapse the per-type tables into the single mixed table their source was. The self row is untouched.
+		FQuestDataTable SelfTable;
+		const bool bHasSelf = Bundle.TablesByType.Contains(TEXT("questline_graph"));
+		if (bHasSelf) { SelfTable = MoveTemp(Bundle.TablesByType[TEXT("questline_graph")]); }
+		Bundle.TablesByType.Empty();
+		if (bHasSelf) { Bundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(SelfTable)); }
+		Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Flat));
+
+		// 5. Edge endpoints reference rows by key, so they must follow the same substitution — otherwise the wiring points at
+		//    GUIDs that no longer appear in any row.
+		for (FQuestDataEdge& Edge : Bundle.Edges)
+		{
+			if (const FString* From = SourceKeyByGuid.Find(Edge.From)) { Edge.From = *From; }
+			if (const FString* To   = SourceKeyByGuid.Find(Edge.To))   { Edge.To   = *To; }
+		}
+
+		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "
+			"(faithful re-statement — per-row casing, at-default values and original file layout are not reconstructed)."),
+			Restated,
+			ColsAfter,
+			ColsBefore);
+	}
+
 	void ExportQuestlineCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)
@@ -334,11 +498,47 @@ namespace
 		// Keyed by the SANITIZED EffectiveID — the same segment form compiled tags use, so the export key aligns with
 		// tag identity and stays interchange-safe (no spaces/punctuation in keys or folder names).
 		const FString SelfKey = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
+		
+		// The key can come out EMPTY from input a designer can type: a whitespace-only QuestlineID is not IsEmpty(), so the
+		// asset-name fallback never fires, and the sanitizer trims it to nothing. An empty segment appends only a separator,
+		// so the destination would collapse to the export ROOT and scatter this export across every other questline's output.
+		// Refuse rather than write somewhere unintended, and name the field to fix.
+		if (SelfKey.IsEmpty())
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: '%s' has a QuestlineID that reduces to an empty export key "
+				"(raw value: '%s'). Give it at least one letter, digit or underscore — or clear the field entirely to fall back "
+				"to the asset name. Nothing exported."), *Args[0], *Graph->GetEffectiveID());
+			return;
+		}
 		CollectEntityRow(Graph, SelfKey, {}, Bundle);
 
 		CollectGraph(Graph->QuestlineEdGraph, TEXT("root"), *Policy, Bundle);
 
-		const FString OutDir = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport") / SelfKey);
+		// Optional studio-shape restatement. Absent = canonical export (our vocabulary), byte-identical to before.
+		TArray<FString> Warnings;
+		if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
+		{
+			TMap<FString, FString> SourceKeyByGuid;
+			CollectSourceKeys(Graph->QuestlineEdGraph, SourceKeyByGuid);
+			ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, Warnings);
+		}
+		for (const FString& W : Warnings) { UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: %s"), *W); }
+		
+		// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
+		// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
+		const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
+		const FString OutDir = FPaths::ConvertRelativePathToFull(ExportRoot / SelfKey);
+		{
+			FString NormRoot = ExportRoot;  FPaths::NormalizeDirectoryName(NormRoot);
+			FString NormOut  = OutDir;      FPaths::NormalizeDirectoryName(NormOut);
+			if (NormOut == NormRoot || FPaths::GetPath(NormOut) != NormRoot)
+			{
+				UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: refusing — destination '%s' is not a direct child of the "
+					"export root '%s' (export key '%s'). Nothing exported."), *NormOut, *NormRoot, *SelfKey);
+				return;
+			}
+		}
+		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: destination '%s'."), *OutDir);
 
 		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ExportQuestline"));
 		if (!Format)

@@ -252,6 +252,9 @@ public:
      * survive a delimited round-trip. Accumulated by the editor's AccumulateCompiledDisplay, coalesced to the ini in EndCompileBatch.
      */
     TArray<FString> GetCompiledDisplayRecords() const;
+    
+    /** Normalizes QuestlineID on edit — see the implementation for why surrounding whitespace can't be allowed to survive. */
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
     /**

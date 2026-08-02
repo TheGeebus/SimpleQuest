@@ -289,6 +289,9 @@ void SQuestMappingBindingList::RefreshRows()
 	if (ListView.IsValid())
 	{
 		ListView->RequestListRefresh();
+		// The list generates row WIDGETS on its first paint, not here — so at construct time our desired height is ~0 and the
+		// details panel concludes it needs no scrollbar. Invalidate so it re-measures once the rows actually exist.
+		Invalidate(EInvalidateWidgetReason::Layout);
 	}
 }
 

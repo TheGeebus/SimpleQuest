@@ -163,8 +163,22 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     NumWarnings = 0;
     RootGraph = InGraph;
 
-    // Derive the effective questline ID; designer override takes priority, asset name is the fallback
-    const FString TagPrefix = SanitizeTagSegment(InGraph->QuestlineID.IsEmpty() ? InGraph->GetName() : InGraph->QuestlineID);
+	// Derive the effective questline ID; designer override takes priority, asset name is the fallback
+	const FString TagPrefix = SanitizeTagSegment(InGraph->QuestlineID.IsEmpty() ? InGraph->GetName() : InGraph->QuestlineID);
+
+	// A QuestlineID of only whitespace is NOT IsEmpty(), so the asset-name fallback above never fires — and the sanitizer
+	// trims it away to nothing. An empty prefix composes the tag "SimpleQuest.Questline." which the engine rejects for its
+	// trailing period and SILENTLY substitutes with the bare root "SimpleQuest.Questline" — so every node would compile onto
+	// a tag that is not this questline's, while the compile still reported success. Refuse it, exactly as an empty node
+	// label is refused.
+	if (TagPrefix.IsEmpty())
+	{
+		AddError(FString::Printf(
+			TEXT("QuestlineID '%s' contains no usable characters - it reduces to an empty tag segment. Give it at least one "
+				 "letter, digit or underscore, or clear the field entirely to fall back to the asset name."),
+			*InGraph->QuestlineID));
+		return false;
+	}
 
     // Validate that no other questline asset shares this effective ID
     IAssetRegistry& AssetRegistry = FAssetRegistryModule::GetRegistry();

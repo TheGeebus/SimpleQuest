@@ -117,6 +117,25 @@ TArray<FString> UQuestlineGraph::GetCompiledDisplayRecords() const
 	Records.Sort();   // deterministic line order → stable, scoped diffs
 	return Records;
 }
+
+void UQuestlineGraph::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(UQuestlineGraph, QuestlineID))
+	{
+		// Trim surrounding whitespace so a stray space can never become the identity. This is more than tidiness: a
+		// whitespace-only value is not IsEmpty(), so GetEffectiveID() returns it instead of falling back to the asset name,
+		// and it then sanitizes away to nothing — which composes the tag "SimpleQuest.Questline." (rejected by the engine,
+		// silently replaced with the bare root) and resolves the export folder to the export root. Trimming converts that
+		// case into the plain empty value the asset-name fallback already handles correctly.
+		const FString Trimmed = QuestlineID.TrimStartAndEnd();
+		if (Trimmed != QuestlineID)
+		{
+			QuestlineID = Trimmed;
+		}
+	}
+}
 #endif
 
 FText UQuestlineGraph::GetDisplayName() const

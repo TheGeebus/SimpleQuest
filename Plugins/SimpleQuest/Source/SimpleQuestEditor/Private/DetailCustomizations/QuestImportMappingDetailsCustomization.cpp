@@ -11,6 +11,7 @@
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
+#include "Resolver/QuestResolverEditorMemo.h"
 #include "Resolver/SQuestMappingBindingList.h"
 #include "Resolver/SQuestMappingDiscriminatorList.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -100,6 +101,8 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	if (KeyColumnCombo.IsValid())			{ KeyColumnCombo->RefreshOptions(); }
 	if (DiscriminatorList.IsValid())        { DiscriminatorList->RefreshRows(); }
 	if (BindingList.IsValid())              { BindingList->RefreshRows(); }
+
+	SaveSampleToMemo();
 }
 
 void FQuestImportMappingDetailsCustomization::RebuildDiscriminatorColumnOptions()
@@ -151,6 +154,32 @@ void FQuestImportMappingDetailsCustomization::OnKeyColumnChanged(TSharedPtr<FStr
 	OnMappingModified();
 }
 
+void FQuestImportMappingDetailsCustomization::RestoreSampleFromMemo()
+{
+	const UQuestImportMapping* M = Mapping.Get();
+	if (!M) return;
+	const FString Key = FSoftObjectPath(M).ToString();
+	if (const FString* Folder = UQuestResolverEditorMemo::Get()->SampleFolderByMapping.Find(Key))
+	{
+		SampleFolder = *Folder;
+	}
+	if (const FString* Format = UQuestResolverEditorMemo::Get()->SampleFormatByMapping.Find(Key))
+	{
+		if (!Format->IsEmpty()) { SampleFormatName = FName(**Format); }
+	}
+}
+
+void FQuestImportMappingDetailsCustomization::SaveSampleToMemo() const
+{
+	const UQuestImportMapping* M = Mapping.Get();
+	if (!M) return;
+	const FString Key = FSoftObjectPath(M).ToString();
+	UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
+	Memo->SampleFolderByMapping.Add(Key, SampleFolder);
+	Memo->SampleFormatByMapping.Add(Key, SampleFormatName.ToString());
+	Memo->SaveConfig();
+}
+
 void FQuestImportMappingDetailsCustomization::OnMappingModified()
 {
 	if (UQuestImportMapping* M = Mapping.Get())
@@ -170,6 +199,8 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	if (Objects.Num() != 1) return;   // single-object edit only
 	Mapping = Cast<UQuestImportMapping>(Objects[0].Get());
 	if (!Mapping.IsValid()) return;
+
+	RestoreSampleFromMemo();   // per-user convenience only; the recipe itself stays shape-only
 	
 	// Hide the stock discriminator column + class map: both are now driven by pickers (a typed FName + a typed TMap key were
 	// the last two corruption holes). The stock Bindings array stays hidden too — the binding widget is its editor.

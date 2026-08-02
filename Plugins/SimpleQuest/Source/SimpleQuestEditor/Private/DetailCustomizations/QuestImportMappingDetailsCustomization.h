@@ -59,5 +59,8 @@ private:
 	// Key-column picker (reuses DiscriminatorColumnOptions — both pick a source column; never a typed FName).
 	FText GetKeyColumnText() const;
 	void OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+
+	void RestoreSampleFromMemo();   // per-user last-used sample for this recipe (never recipe data)
+	void SaveSampleToMemo() const;
 };
 

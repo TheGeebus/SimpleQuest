@@ -45,6 +45,33 @@ struct FQuestDataValue
 	int64                  EnumValue = 0;   // Kind==Enum numeric (paired with StringForm = the enum token string)
 	TArray<FQuestDataValue> Elements;       // Kind==Array
 
+	// Value equality, for change detection. In-place re-import compares an incoming cell against a node's CURRENT value to
+	// decide whether anything would actually change; without this, every re-import rewrites every property and reports a
+	// diff for rows nobody touched. Only the field the Kind makes meaningful participates.
+	// Text compares by its source string, NOT by localization identity: two FTexts with the same words but different keys
+	// carry the same authored content, and treating a key difference as a content change would churn every localized field.
+	// Array compares element-wise IN ORDER, which is correct for TArray. A TSet arrives here with its ordering already
+	// erased, so a reordered set can read as changed — a false positive that costs a redundant write, never a missed one.
+	bool operator==(const FQuestDataValue& Other) const
+	{
+		if (Kind != Other.Kind) return false;
+		switch (Kind)
+		{
+		case EQuestDataValueKind::Empty:        return true;
+		case EQuestDataValueKind::Tag:          return Tag == Other.Tag;
+		case EQuestDataValueKind::TagContainer: return TagContainer == Other.TagContainer;
+		case EQuestDataValueKind::Text:         return Text.ToString() == Other.Text.ToString();
+		case EQuestDataValueKind::Bool:         return bBool == Other.bBool;
+		case EQuestDataValueKind::Enum:         return EnumValue == Other.EnumValue && StringForm == Other.StringForm;
+		case EQuestDataValueKind::Array:
+			if (Elements.Num() != Other.Elements.Num()) return false;
+			for (int32 Idx = 0; Idx < Elements.Num(); ++Idx) { if (!(Elements[Idx] == Other.Elements[Idx])) return false; }
+			return true;
+		default: return StringForm == Other.StringForm;   // String / Number / Reference / StructLiteral all carry StringForm
+		}
+	}
+	bool operator!=(const FQuestDataValue& Other) const { return !(*this == Other); }
+
 	static FQuestDataValue MakeEmpty() { return FQuestDataValue{}; }
 
 	// Convenience constructors for the string-carrying Kinds — the routing core synthesizes cells (flow conventions)

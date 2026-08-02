@@ -304,6 +304,16 @@ namespace
 		// the ID-derived FOLDER name differs. So match files by identical name.
 		const TMap<FString, TArray<FString>> Rt = LoadFolderTsvs(RtFolder);
 
+		// FAIL CLOSED when there is nothing to compare. With both sides empty the loops below run zero times and this
+		// returns a clean 0 — reporting a PASS for a comparison it never made. B2 already refuses a missing dump; C should
+		// refuse an empty pair for the same reason: an oracle that can't tell "identical" from "absent" isn't an oracle.
+		if (Src.IsEmpty() && Rt.IsEmpty())
+		{
+			UE_LOG(LogSimpleQuest, Warning, TEXT("[C] neither folder yielded any .tsv — nothing was compared. src='%s' rt='%s'"),
+				*SrcFolder, *RtFolder);
+			return 1;
+		}
+
 		int32 Mismatches = 0;
 		for (const auto& Pair : Src)
 		{

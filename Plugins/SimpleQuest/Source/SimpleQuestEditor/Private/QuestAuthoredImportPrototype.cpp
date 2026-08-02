@@ -30,8 +30,11 @@
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestDataValueBuilder.h"
 #include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestMappingSource.h"
+#include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "SimpleQuestLog.h"
 #include "UObject/SavePackage.h"
@@ -1011,6 +1014,200 @@ namespace
 		}
 	}
 
+		// ---- In-place planning -----------------------------------------------------------------------------------------
+	// Compare a validated bundle against an EXISTING asset and describe what a re-import would do, changing nothing.
+
+	// A console-typed asset path is usually the short form "/Game/Path/Asset"; FSoftObjectPath needs "/Game/Path/Asset.Asset".
+	FString NormalizeConsoleAssetPath(const FString& In)
+	{
+		if (In.Contains(TEXT("."))) return In;
+		FString Ignored, AssetName;
+		if (In.Split(TEXT("/"), &Ignored, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
+		{
+			return In + TEXT(".") + AssetName;
+		}
+		return In;
+	}
+
+	// One-line human-readable form of a cell, for the plan's before/after columns.
+	FString DescribeValue(const FQuestDataValue& Value)
+	{
+		switch (Value.Kind)
+		{
+		case EQuestDataValueKind::Empty:        return TEXT("<default>");
+		case EQuestDataValueKind::Tag:          return Value.Tag.IsValid() ? Value.Tag.ToString() : TEXT("<none>");
+		case EQuestDataValueKind::TagContainer: return Value.TagContainer.ToStringSimple();
+		case EQuestDataValueKind::Text:         return Value.Text.ToString();
+		case EQuestDataValueKind::Bool:         return Value.bBool ? TEXT("true") : TEXT("false");
+		case EQuestDataValueKind::Array:
+		{
+			TArray<FString> Parts;
+			for (const FQuestDataValue& Element : Value.Elements) Parts.Add(DescribeValue(Element));
+			return FString::Printf(TEXT("[%s]"), *FString::Join(Parts, TEXT(", ")));
+		}
+		default: return Value.StringForm;
+		}
+	}
+
+	// Re-express an incoming cell in the SAME typed form a live property produces, so the two can be compared meaningfully.
+	// A text provider hands us Kind::String for a tag, enum or reference property, while the node's current value builds as
+	// Kind::Tag / Kind::Enum / Kind::Reference. Comparing those directly would mark every property changed on every import.
+	// Routing the cell through the real restore path onto scratch memory and rebuilding it from the property normalizes both
+	// sides through one definition, whatever representation the provider happened to use.
+	FQuestDataValue TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell)
+	{
+		void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
+		Prop->InitializeValue(Scratch);
+		RestoreCell(Prop, Scratch, Cell);
+		// Null default: we want the value the source would actually produce, never collapsed to Empty for being at-default.
+		FQuestDataValue Typed = BuildQuestDataValue(Prop, Scratch, nullptr);
+		Prop->DestroyValue(Scratch);
+		FMemory::Free(Scratch);
+		return Typed;
+	}
+
+	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle,
+	                 const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings,
+	                 FQuestInPlacePlan& OutPlan)
+	{
+		OutPlan.Warnings = ReadWarnings;
+
+		// Read the existing nodes under the SAME keying rule the spawn path writes: a studio-authored key when the node
+		// carries one, else our GUID. That is the dual-key identity contract read in reverse.
+		TMap<FString, FString> SourceKeyByGuid;
+		TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+		TMap<FString, FString> GraphCellByGuid;
+		CollectQuestNodeIdentity(Target.QuestlineEdGraph, SourceKeyByGuid, NodeByGuid, &GraphCellByGuid);
+
+		TMap<FString, FString> GuidByKey;
+		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+		{
+			GuidByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Pair.Key);
+		}
+
+		TSet<FString> MatchedGuids;
+		for (const TPair<FString, const FQuestDataRow*>& Pair : NodeRowsByKey)
+		{
+			const FQuestDataRow& Row = *Pair.Value;
+
+			FQuestNodePlanEntry Entry;
+			Entry.Key       = Row.Key;
+			Entry.ClassName = Row.Get(TEXT("class"));
+			Entry.GraphCell = Row.Get(TEXT("graph"));
+
+			const FString* FoundGuid = GuidByKey.Find(Row.Key);
+			const UQuestlineNodeBase* Node = FoundGuid ? NodeByGuid.FindRef(*FoundGuid) : nullptr;
+			if (!Node)
+			{
+				Entry.Action = EQuestNodePlanAction::Create;
+				OutPlan.Entries.Add(MoveTemp(Entry));
+				continue;
+			}
+
+			MatchedGuids.Add(*FoundGuid);
+			Entry.Action           = EQuestNodePlanAction::Update;
+			Entry.Guid             = *FoundGuid;
+			Entry.CurrentClassName = Node->GetClass()->GetName();
+			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(*FoundGuid);
+
+			// A class change or a move between graph levels cannot be applied by writing properties — the node has to be
+			// rebuilt. Surfacing it here keeps the apply step from silently doing half of it.
+			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (Entry.GraphCell != Entry.CurrentGraphCell);
+
+			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+			{
+				const FString& Column = Cell.Key;
+				if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural — describes the row, not a property
+
+				FProperty* Prop = Node->GetClass()->FindPropertyByName(FName(*Column));
+				if (!Prop)
+				{
+					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
+						*Row.Key, *Column, *Entry.CurrentClassName));
+					continue;
+				}
+
+				const FQuestDataValue Current  = BuildQuestDataValue(Prop, Prop->ContainerPtrToValuePtr<void>(Node), nullptr);
+				const FQuestDataValue Incoming = TypeIncomingLikeProperty(Prop, Cell.Value);
+				if (Current == Incoming) continue;
+
+				FQuestPropertyChange Change;
+				Change.Property     = FName(*Column);
+				Change.CurrentText  = DescribeValue(Current);
+				Change.IncomingText = DescribeValue(Incoming);
+				Entry.Changes.Add(MoveTemp(Change));
+			}
+
+			OutPlan.Entries.Add(MoveTemp(Entry));
+		}
+
+		// Anything the asset holds that the source no longer mentions.
+		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+		{
+			if (MatchedGuids.Contains(Pair.Key)) continue;
+
+			FQuestNodePlanEntry Entry;
+			Entry.Action           = EQuestNodePlanAction::Orphan;
+			Entry.Key              = QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid);
+			Entry.Guid             = Pair.Key;
+			Entry.ClassName        = Pair.Value->GetClass()->GetName();
+			Entry.CurrentClassName = Entry.ClassName;
+			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(Pair.Key);
+			OutPlan.Entries.Add(MoveTemp(Entry));
+		}
+	}
+
+	const TCHAR* PlanActionName(EQuestNodePlanAction Action)
+	{
+		switch (Action)
+		{
+		case EQuestNodePlanAction::Create: return TEXT("CREATE");
+		case EQuestNodePlanAction::Orphan: return TEXT("ORPHAN");
+		default:                           return TEXT("UPDATE");
+		}
+	}
+
+	void LogInPlacePlan(const FQuestInPlacePlan& Plan)
+	{
+		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s). Nothing was modified."),
+			*Plan.TargetAssetPath, Plan.CountOf(EQuestNodePlanAction::Update), Plan.ChangedNodeCount(),
+			Plan.CountOf(EQuestNodePlanAction::Create), Plan.CountOf(EQuestNodePlanAction::Orphan));
+
+		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+		{
+			// Unchanged matches are the common case on a healthy re-import; listing them would bury the ones that matter.
+			if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bStructuralChange) continue;
+
+			// An orphan has no incoming row, so its level is only known from the asset side.
+			const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
+			UE_LOG(LogSimpleQuest, Log, TEXT("  [%s] %s (%s) — graph '%s'%s"),
+				PlanActionName(Entry.Action),
+				*Entry.Key,
+				*Entry.ClassName,
+				*Level,
+				Entry.bStructuralChange ? TEXT("  ** structural: needs rebuild, not an edit **") : TEXT(""));
+
+			if (Entry.bStructuralChange && Entry.ClassName != Entry.CurrentClassName)
+			{
+				UE_LOG(LogSimpleQuest, Log, TEXT("      class: %s -> %s"), *Entry.CurrentClassName, *Entry.ClassName);
+			}
+			if (Entry.bStructuralChange && Entry.GraphCell != Entry.CurrentGraphCell)
+			{
+				UE_LOG(LogSimpleQuest, Log, TEXT("      graph: %s -> %s"), *Entry.CurrentGraphCell, *Entry.GraphCell);
+			}
+			for (const FQuestPropertyChange& Change : Entry.Changes)
+			{
+				UE_LOG(LogSimpleQuest, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property.ToString(), *Change.CurrentText, *Change.IncomingText);
+			}
+		}
+
+		for (const FString& W : Plan.Warnings) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: %s"), *W);
+		if (Plan.IsNoOp())
+		{
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: the asset already matches the source — a re-import would change nothing."));
+		}
+	}
+
 	void ImportQuestlineCmd(const TArray<FString>& Args)
 	{
 		// Separate the optional "--format=<name>" arg from the positional path args BEFORE rejoining (it must not get
@@ -1018,33 +1215,50 @@ namespace
 		// --datatable=<AssetPath> selects the asset provenance; then no source FOLDER is needed (the dest path is the only
 		// positional arg). Otherwise the folder is the positional args before the dest, space-rejoined.
 		FString DataTablePath;
+		FString InPlacePath;
 		for (const FString& Arg : Args)
 		{
-			if (Arg.StartsWith(TEXT("--datatable="))) { DataTablePath = Arg.RightChop(12); break; }
+			if (Arg.StartsWith(TEXT("--datatable="))) DataTablePath = Arg.RightChop(12);
+			else if (Arg.StartsWith(TEXT("--in-place="))) InPlacePath = Arg.RightChop(11);
 		}
+		const bool bInPlace = !InPlacePath.IsEmpty();
 
 		TArray<FString> PathArgs;
 		for (const FString& Arg : Args)
 		{
 			if (!Arg.StartsWith(TEXT("--"))) PathArgs.Add(Arg);
 		}
-		const int32 MinPositional = DataTablePath.IsEmpty() ? 2 : 1;
+		// A source folder unless the DataTable provenance supplies it, plus a dest package unless --in-place names the target.
+		const int32 MinPositional = (DataTablePath.IsEmpty() ? 1 : 0) + (bInPlace ? 0 : 1);
 		if (PathArgs.Num() < MinPositional)
 		{
 			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json] [--mapping=<asset>]' "
-				"or 'SimpleQuest.ImportQuestline <DestPackagePath> --datatable=<asset> [--mapping=<asset>]'."));
+				"or 'SimpleQuest.ImportQuestline <DestPackagePath> --datatable=<asset> [--mapping=<asset>]'. "
+				"Add '--in-place=<AssetPath>' to compare against an existing asset instead of creating one; the dest package arg is then omitted."));
 			return;
 		}
-		
+
+		// --in-place takes no dest package arg, but the create form does — so adapting one command into the other easily
+		// leaves the dest behind. Space-rejoining would swallow it into the folder path, and the only symptom would be a
+		// "folder not found" naming a path the caller never typed. Name the actual mistake instead. Guarded on there being
+		// more than one positional arg so a genuine root-anchored source folder is never mistaken for a package path.
+		if (bInPlace && PathArgs.Num() > 1 && FPackageName::IsValidLongPackageName(PathArgs.Last()))
+		{
+			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: trailing argument '%s' is a package path, which --in-place does not take — the "
+				"target is named by --in-place=<AssetPath>. Pass only the source folder. Nothing was modified."), *PathArgs.Last());
+			return;
+		}
+
 		// Console arg tokenization splits on whitespace and does NOT honor quotes, so a folder path containing spaces
 		// (e.g. "E:/Unreal Projects/...") arrives as multiple Args. The dest package path is the LAST path arg (never has
-		// spaces — it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces.
-		const FString DestPackagePath = PathArgs.Last();
+		// spaces — it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces. With
+		// --in-place there is no dest arg to peel off, so the whole positional remainder is the folder.
+		const FString DestPackagePath = bInPlace ? FString() : PathArgs.Last();
 		FString FolderPath;
 		if (DataTablePath.IsEmpty())
 		{
 			TArray<FString> FolderParts = PathArgs;
-			FolderParts.Pop();                                // drop the dest path
+			if (!bInPlace) FolderParts.Pop();                 // drop the dest path
 			FolderPath = FString::Join(FolderParts, TEXT(" "));
 			FolderPath = FolderPath.TrimQuotes();             // tolerate quotes if the caller added them
 		}
@@ -1054,19 +1268,9 @@ namespace
 		FQuestDataEndpoint Endpoint;
 		if (!DataTablePath.IsEmpty())
 		{
-			// A console-typed asset path is usually the short form "/Game/Path/Asset"; FSoftObjectPath needs the full
-			// "/Game/Path/Asset.Asset". Normalize so --datatable accepts the same form --mapping does.
-			FString AssetPath = DataTablePath;
-			if (!AssetPath.Contains(TEXT(".")))
-			{
-				FString Ignored, AssetName;
-				if (AssetPath.Split(TEXT("/"), &Ignored, &AssetName, ESearchCase::CaseSensitive, ESearchDir::FromEnd))
-				{
-					AssetPath += TEXT(".") + AssetName;
-				}
-			}
+			// A console-typed asset path is usually the short form; normalize so --datatable accepts the same form --mapping does.
 			Endpoint.Kind = EQuestEndpointKind::DataTable;
-			Endpoint.Table = TSoftObjectPtr<UDataTable>(FSoftObjectPath(AssetPath));
+			Endpoint.Table = TSoftObjectPtr<UDataTable>(FSoftObjectPath(NormalizeConsoleAssetPath(DataTablePath)));
 		}
 		else
 		{
@@ -1111,6 +1315,27 @@ namespace
 		if (!ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, Error))
 		{
 			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: validation failed — %s. No asset created."), *Error);
+			return;
+		}
+
+		// In-place: describe what a re-import WOULD do to the existing asset, then stop. Planning is read-only and is the
+		// only thing --in-place does; applying a plan is a separate, explicitly-requested step. That ordering means a
+		// mistyped target path can never damage an asset. The plan is produced as data rather than only logged, so the
+		// editor action can render exactly what the console prints.
+		if (bInPlace)
+		{
+			const FString AssetPath = NormalizeConsoleAssetPath(InPlacePath);
+			UQuestlineGraph* TargetGraph = Cast<UQuestlineGraph>(FSoftObjectPath(AssetPath).TryLoad());
+			if (!TargetGraph || !TargetGraph->QuestlineEdGraph)
+			{
+				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --in-place target '%s' did not load as a questline graph. Nothing was modified."), *AssetPath);
+				return;
+			}
+
+			FQuestInPlacePlan Plan;
+			Plan.TargetAssetPath = AssetPath;
+			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan);
+			LogInPlacePlan(Plan);
 			return;
 		}
 

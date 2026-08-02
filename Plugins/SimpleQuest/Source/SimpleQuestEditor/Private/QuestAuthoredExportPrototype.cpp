@@ -29,6 +29,7 @@
 #include "Resolver/QuestDataValueBuilder.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
+#include "Resolver/QuestNodeIdentity.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -310,30 +311,6 @@ namespace
 					}
 					CollectGraph(Inner, Key, Policy, Bundle);
 				}
-			}
-		}
-	}
-
-	// Map exported row key (QuestGuid digits) -> the studio's own key, and -> the node itself. The node is needed to resolve
-	// which output pin an edge left from, so an unqualified wire binding can be matched back the same way the import
-	// resolves it forward. Walks the graph directly: we only need identity, so visiting a node the export skips is harmless.
-	void CollectNodeIdentity(const UEdGraph* EdGraph, TMap<FString, FString>& OutSourceKeyByGuid,
-	                         TMap<FString, const UQuestlineNodeBase*>& OutNodeByGuid)
-	{
-		if (!EdGraph) return;
-		for (const UEdGraphNode* RawNode : EdGraph->Nodes)
-		{
-			const UQuestlineNodeBase* Node = Cast<UQuestlineNodeBase>(RawNode);
-			if (!Node) continue;
-			const FString Guid = Node->QuestGuid.ToString(EGuidFormats::Digits);
-			OutNodeByGuid.Add(Guid, Node);
-			if (!Node->ImportSourceKey.IsEmpty())
-			{
-				OutSourceKeyByGuid.Add(Guid, Node->ImportSourceKey);
-			}
-			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
-			{
-				CollectNodeIdentity(QuestNode->GetInnerGraph(), OutSourceKeyByGuid, OutNodeByGuid);
 			}
 		}
 	}
@@ -690,7 +667,7 @@ namespace
 		{
 			TMap<FString, FString> SourceKeyByGuid;
 			TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
-			CollectNodeIdentity(Graph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
+			CollectQuestNodeIdentity(Graph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
 			ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
 		}
 		for (const FString& W : Warnings) { UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: %s"), *W); }

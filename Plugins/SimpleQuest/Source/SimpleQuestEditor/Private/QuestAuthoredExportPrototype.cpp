@@ -465,7 +465,20 @@ namespace
 					Row.Key = *SourceKey;
 				}
 
-				// E. Text as plain text. Import turned their plain string into an FText and INVENTED a localization key for
+				// E. The LEVEL a row sits in, restated the same way. The graph cell names its owning container by OUR exported
+				//     GUID, while D has just renamed that container's row to the studio's key — so left alone, a nested file
+				//     refers to a level no row declares. That is not cosmetic: import matches a child to its level by comparing
+				//     this cell against the container's ROW KEY, so a mismatch makes every nested row silently vanish on the way
+				//     back in. The top level is "root", which names no node and passes through untouched.
+				if (FQuestDataValue* GraphCell = Row.Cells.Find(TEXT("graph")))
+				{
+					if (const FString* SourceLevel = SourceKeyByGuid.Find(GraphCell->StringForm))
+					{
+						GraphCell->StringForm = *SourceLevel;
+					}
+				}
+
+				// F. Text as plain text. Import turned their plain string into an FText and INVENTED a localization key for
 				//    it — a different one every run — so writing the full NSLOCTEXT form back would hand them machinery they
 				//    never authored and that churns on every export. Emit what they wrote.
 				for (TPair<FString, FQuestDataValue>& Cell : Row.Cells)

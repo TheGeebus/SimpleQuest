@@ -477,7 +477,7 @@ namespace
 		{
 		case EQuestDataValueKind::Empty:
 			return;   // leave the constructed default (Q6 symmetry — replaces the old CellText.IsEmpty() skip)
-
+/*
 		case EQuestDataValueKind::Tag:
 			if (CastField<FStructProperty>(Prop))
 			{
@@ -490,6 +490,36 @@ namespace
 			{
 				*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
 			}
+			return;
+*/
+		case EQuestDataValueKind::Tag:
+			// A cell's Kind and its destination are paired by NAME alone — a mapping binds any column onto any property and
+			// nothing type-checks the pair — so "it is a struct" does not justify the cast. Writing a tag over an unrelated
+			// struct is type confusion, and a caller restoring onto an exactly-sized buffer turns the larger write into a heap
+			// overflow. Same identity test the array path applies. A mismatch is an authoring error: report it, change nothing.
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				if (StructProp->Struct == TBaseStructure<FGameplayTag>::Get())
+				{
+					*static_cast<FGameplayTag*>(ValuePtr) = Value.Tag;   // typed; inverse of the export reinterpret read
+					return;
+				}
+			}
+			UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag — left at its default."),
+				*Prop->GetName());
+			return;
+
+		case EQuestDataValueKind::TagContainer:
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				if (StructProp->Struct == TBaseStructure<FGameplayTagContainer>::Get())
+				{
+					*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
+					return;
+				}
+			}
+			UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer — left at its default."),
+				*Prop->GetName());
 			return;
 
 		case EQuestDataValueKind::Text:
@@ -1431,6 +1461,11 @@ bool QuestBundle_ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMappin
 void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
 {
 	ApplyWireBindings(Bundle, Mapping, Warnings);
+}
+
+void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
+{
+	RestoreCell(Prop, ValuePtr, Value);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

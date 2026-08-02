@@ -298,4 +298,121 @@ bool FQuestResolver_GuardDoubleDutyAdvises::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RoundTripNestedGraphLevel, "SimpleQuest.Resolver.RoundTrip.NestedGraphLevel", TestFlags)
+bool FQuestResolver_RoundTripNestedGraphLevel::RunTest(const FString& Parameters)
+{
+	// A file the reverse read produces must be readable by the forward read. Nesting is where that can quietly stop being
+	// true: rows are addressed by KEY, but the level a row belongs to is named by a SEPARATE cell, and import pairs the two
+	// by string equality. Restating one without the other yields a file whose children point at a container that no longer
+	// answers to that name — and import drops them without a word rather than failing. Flat fixtures cannot see this.
+	UQuestImportMapping* M = MakeMapping();
+	AddKind(*M, UQuestlineNode_Step::StaticClass(), { TEXT("objective") });
+	AddBinding(*M, TEXT("label"), TEXT("NodeLabel"));
+
+	const FString ContainerGuid = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+	const FString ChildGuid     = TEXT("643F4B0946C4741C952AACB8AC82550B");
+
+	// The canonical shape the exporter produces: GUID keys, and a child whose level is its container's GUID.
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, *ContainerGuid, { { TEXT("graph"), TEXT("root") },       { TEXT("class"), TEXT("QuestlineNode_Quest") } });
+	AddRow(Content, *ChildGuid,     { { TEXT("graph"), *ContainerGuid },     { TEXT("class"), TEXT("QuestlineNode_Step") },
+	                                  { TEXT("NodeLabel"), TEXT("Go There") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	// What import recorded on the nodes: both came from a studio source, so both carry their original key.
+	TMap<FString, FString> SourceKeyByGuid;
+	SourceKeyByGuid.Add(ContainerGuid, TEXT("chapter_1"));
+	SourceKeyByGuid.Add(ChildGuid,     TEXT("c1_step"));
+
+	TArray<FString> Warnings;
+	QuestBundle_ApplyReverseMapping(Bundle, *M, SourceKeyByGuid, {}, Warnings);
+
+	auto FindRow = [&Bundle](const FString& Key) -> const FQuestDataRow*
+	{
+		for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+		{
+			for (const FQuestDataRow& Row : Table.Value.Rows) { if (Row.Key == Key) return &Row; }
+		}
+		return nullptr;
+	};
+
+	const FQuestDataRow* Child = FindRow(TEXT("c1_step"));
+	TestNotNull(TEXT("Child row was restated to the studio key"), Child);
+	if (Child)
+	{
+		// The defect: the key becomes 'c1_step' while the level stays the container's GUID.
+		TestEqual(TEXT("Child's level is restated to the container's studio key"), Child->Get(TEXT("graph")), FString(TEXT("chapter_1")));
+	}
+	TestNotNull(TEXT("Container row was restated to the studio key"), FindRow(TEXT("chapter_1")));
+
+	// The property that actually matters, stated directly: every level a row names must be a level some row declares,
+	// or the forward read cannot pair them. Checking the invariant rather than only the one cell keeps this test honest
+	// if the restatement is ever moved or reimplemented.
+	for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+	{
+		if (Table.Key == TEXT("questline_graph")) continue;
+		for (const FQuestDataRow& Row : Table.Value.Rows)
+		{
+			const FString Level = Row.Get(TEXT("graph"));
+			if (Level.IsEmpty() || Level == TEXT("root")) continue;
+			TestNotNull(*FString::Printf(TEXT("Level '%s' named by row '%s' is declared by some row"), *Level, *Row.Key), FindRow(Level));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_TagCellRejectsForeignStruct, "SimpleQuest.Resolver.RestoreCell.TagCellRejectsForeignStruct", TestFlags)
+bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Parameters)
+{
+	// A cell's Kind and its destination are paired by NAME alone: a mapping binds any column onto any property, and a source
+	// column reaches a property just by spelling its name. So a tag-shaped value CAN arrive at a struct that is not a tag, and
+	// "it is a struct" does not justify the cast — an FGameplayTagContainer is twice the size of an FGuid, so restoring one
+	// over the other writes past the value. Callers that restore onto an exactly-sized allocation make that a heap overflow.
+	//
+	// The destination is backed by ZEROED slack rather than a poison pattern, because an assignment READS its destination
+	// before writing: zeroes read as a well-formed empty container, so the unguarded write is well-defined and the failure is
+	// an assertion. Any non-zero byte pattern there would instead be read as a live allocator pointer and freed.
+	FProperty* GuidProp = UQuestlineNodeBase::StaticClass()->FindPropertyByName(TEXT("QuestGuid"));
+	TestNotNull(TEXT("QuestGuid property resolved"), GuidProp);
+	if (!GuidProp) { return false; }
+
+	const FGameplayTag TestTag = FGameplayTag::RequestGameplayTag(TEXT("SimpleQuest.Outcome.Solved"), /*ErrorIfNotFound*/ false);
+	TestTrue(TEXT("Test tag resolved (an empty container would write nothing observable)"), TestTag.IsValid());
+	if (!TestTag.IsValid()) { return false; }
+
+	const int32 ValueBytes = GuidProp->GetSize();
+	const int32 SlackBytes = sizeof(FGameplayTagContainer) + 64;
+
+	TArray<uint8> Buffer;
+	Buffer.SetNumZeroed(ValueBytes + SlackBytes);
+	void* ValuePtr = Buffer.GetData();
+	GuidProp->InitializeValue(ValuePtr);
+
+	FQuestDataValue Cell;
+	Cell.Kind = EQuestDataValueKind::TagContainer;
+	Cell.TagContainer.AddTag(TestTag);
+
+	QuestBundle_RestoreCell(GuidProp, ValuePtr, Cell);
+
+	// Nothing may be written beyond the destination property's own footprint.
+	bool bSlackClean = true;
+	for (int32 Idx = ValueBytes; Idx < Buffer.Num(); ++Idx)
+	{
+		if (Buffer[Idx] != 0) { bSlackClean = false; break; }
+	}
+	TestTrue(TEXT("A tag-container cell aimed at a non-tag struct wrote nothing past the value"), bSlackClean);
+	TestFalse(TEXT("The non-tag struct's own bytes were overwritten"), static_cast<FGuid*>(ValuePtr)->IsValid());
+	if (bSlackClean)
+	{
+		GuidProp->DestroyValue(ValuePtr);
+	}
+	else
+	{
+		// An unguarded write left a live container straddling the value; release what it allocated rather than leaking it.
+		static_cast<FGameplayTagContainer*>(ValuePtr)->~FGameplayTagContainer();
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

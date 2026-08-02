@@ -11,6 +11,8 @@
 #include "CoreMinimal.h"
 
 struct FQuestDataBundle;
+struct FQuestDataValue;
+class FProperty;
 class UQuestImportMapping;
 class UQuestlineNodeBase;
 
@@ -22,3 +24,6 @@ void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportM
 
 /** Canonical bundle -> studio-shaped: the same recipe read backwards. Pass empty maps to exercise it without a graph. */
 void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, const TMap<FString, FString>& SourceKeyByGuid, const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings);
+
+/** Write one bundle cell into a typed property value. Exposed so the Kind-to-property pairing's type safety is testable. */
+void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);

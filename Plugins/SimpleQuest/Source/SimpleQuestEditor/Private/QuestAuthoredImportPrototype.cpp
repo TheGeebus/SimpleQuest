@@ -28,6 +28,7 @@
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
@@ -1191,6 +1192,20 @@ namespace
 		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' — %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
 			*OriginalKey, *DestPackagePath, *AssetName, NodeByKey.Num(), Bundle.Edges.Num(), Warnings.Num(), bCompiled ? TEXT("OK") : TEXT("FAILED"));
 	}
+}
+
+// ---- Transform seam --------------------------------------------------------------------------------------------
+// External linkage for the transforms above, without moving them away from the routing code they belong with.
+// See Resolver/QuestBundleTransforms.h.
+
+bool QuestBundle_ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
+{
+	return ApplyMapping(Bundle, Mapping, Warnings);
+}
+
+void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
+{
+	ApplyWireBindings(Bundle, Mapping, Warnings);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

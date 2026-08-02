@@ -23,6 +23,7 @@
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Resolver/QuestDataValueBuilder.h"
@@ -386,9 +387,7 @@ namespace
 	// Runs on the bundle the exporter just built, immediately before serialization — no second graph walk.
 	// This is a faithful RE-STATEMENT, not a regeneration: per-row casing, values equal to our defaults, and the studio's
 	// original file arrangement are not recoverable from the graph.
-	void ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping,
-							 const TMap<FString, FString>& SourceKeyByGuid,
-							 const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings)
+	void ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, const TMap<FString, FString>& SourceKeyByGuid, const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings)
 	{
 		if (Mapping.DiscriminatorColumn.IsNone())
 		{
@@ -679,6 +678,11 @@ namespace
 				*OutDir);
 		}
 	}
+}
+
+void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, const TMap<FString, FString>& SourceKeyByGuid, const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings)
+{
+	ApplyReverseMapping(Bundle, Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
 }
 
 static FAutoConsoleCommand GExportQuestlineCmd(

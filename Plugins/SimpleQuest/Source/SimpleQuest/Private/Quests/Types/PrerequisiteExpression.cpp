@@ -432,7 +432,9 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafOutcomeTag = OutcomeTag;
 #if !UE_BUILD_SHIPPING
-	ValidatePrereqNodeAgainstContract(Node);
+	// Same rule AddPathLeaf applies: LeafQuestTag comes from RequestGameplayTag(..., ErrorIfNotFound=false), so an invalid
+	// one means the name isn't registered yet (first-compile transient), not builder drift. Signal that rather than ensure.
+	ValidatePrereqNodeAgainstContract(Node, Node.LeafQuestTag.IsValid());
 #endif
 	return Nodes.Add(Node);
 }
@@ -470,7 +472,9 @@ int32 FPrerequisiteExpression::AddEntryLeaf(FName NodeTagName, const FGameplayTa
 	Node.LeafQuestTag = UGameplayTagsManager::Get().RequestGameplayTag(NodeTagName, false);
 	Node.LeafOutcomeTag = OutcomeTag;
 #if !UE_BUILD_SHIPPING
-	ValidatePrereqNodeAgainstContract(Node);
+	// Same rule AddPathLeaf applies: LeafQuestTag comes from RequestGameplayTag(..., ErrorIfNotFound=false), so an invalid
+	// one means the name isn't registered yet (first-compile transient), not builder drift. Signal that rather than ensure.
+	ValidatePrereqNodeAgainstContract(Node, Node.LeafQuestTag.IsValid());
 #endif
 	return Nodes.Add(Node);
 }

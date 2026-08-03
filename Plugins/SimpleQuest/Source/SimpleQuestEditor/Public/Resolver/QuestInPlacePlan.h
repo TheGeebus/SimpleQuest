@@ -49,6 +49,12 @@ struct FQuestInPlacePlan
 	TArray<FQuestNodePlanEntry> Entries;
 	TArray<FString> Warnings;
 
+	/** Keys that name more than one node. Those rows are not planned and those nodes are not orphaned — the caller refuses. */
+	TArray<FString> AmbiguousKeys;
+
+	/** Nodes outside every level the source declares. Counted, never entered: a narrow source must not orphan the whole asset. */
+	int32 UntouchedNodeCount = 0;
+
 	int32 CountOf(EQuestNodePlanAction Action) const
 	{
 		int32 N = 0;

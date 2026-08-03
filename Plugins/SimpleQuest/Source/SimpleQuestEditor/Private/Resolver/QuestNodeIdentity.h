@@ -29,3 +29,18 @@ void CollectQuestNodeIdentity(const UEdGraph* EdGraph,
 
 /** The key a node is addressed by: its studio-authored key when it has one, else its GUID. Mirrors how rows are keyed. */
 FString QuestNodeIdentityKey(const FString& Guid, const TMap<FString, FString>& SourceKeyByGuid);
+
+/**
+ * Index every node under BOTH names a source can legitimately address it by: its GUID and, when it has one, its
+ * studio-authored key. Which name a source uses depends on how that source was produced, not on the node — a canonical
+ * export writes GUID keys for every node, while a studio's own file writes semantic ones.
+ * A key claimed by more than one node, or a node claimed by more than one key, is AMBIGUOUS: it is reported and left out
+ * of the index entirely, so a caller refuses rather than picking a winner by hash order.
+ */
+void BuildQuestNodeKeyIndex(const TMap<FString, FString>& SourceKeyByGuid,
+	const TArray<FString>& AllGuids,
+	TMap<FString, FString>& OutGuidByKey,
+	TArray<FString>& OutAmbiguousKeys);
+
+/** Resolve a graph-level name to the one namespace: "root" stays "root", any other spelling resolves to the owning node's GUID. */
+FString ResolveQuestLevelToGuid(const FString& LevelName, const TMap<FString, FString>& GuidByKey);

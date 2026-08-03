@@ -14,6 +14,7 @@
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
 
@@ -646,6 +647,77 @@ bool FQuestResolver_BlankGateColumnsAreSilent::RunTest(const FString& Parameters
 	}
 
 	IFileManager::Get().DeleteDirectory(*TempDir, /*RequireExists*/ false, /*Tree*/ true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_NodeKeyIndexAnswersToBothNames, "SimpleQuest.Resolver.Identity.BothNames", TestFlags)
+bool FQuestResolver_NodeKeyIndexAnswersToBothNames::RunTest(const FString& Parameters)
+{
+	// A node has two legitimate names, and which one a source uses is a fact about the SOURCE, not the node: a canonical
+	// export writes GUID keys for everything, a studio's own file writes its semantic keys. Indexing under one name only
+	// makes the other source read as a wholesale rewrite of an asset it actually matches exactly.
+	const FString GuidA = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+	const FString GuidB = TEXT("643F4B0946C4741C952AACB8AC82550B");
+
+	TMap<FString, FString> SourceKeyByGuid;
+	SourceKeyByGuid.Add(GuidA, TEXT("kill_boss"));   // imported from a studio source
+	// GuidB carries no studio key — it was authored in the editor.
+
+	TMap<FString, FString> GuidByKey;
+	TArray<FString> Ambiguous;
+	BuildQuestNodeKeyIndex(SourceKeyByGuid, { GuidA, GuidB }, GuidByKey, Ambiguous);
+
+	TestEqual(TEXT("No ambiguity in the clean case"), Ambiguous.Num(), 0);
+	TestEqual(TEXT("A studio-keyed node answers to its semantic key"), GuidByKey.FindRef(TEXT("kill_boss")), GuidA);
+	TestEqual(TEXT("...and still answers to its GUID"), GuidByKey.FindRef(GuidA), GuidA);
+	TestEqual(TEXT("An editor-authored node answers to its GUID"), GuidByKey.FindRef(GuidB), GuidB);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_NodeKeyIndexRefusesAmbiguity, "SimpleQuest.Resolver.Identity.RefusesAmbiguity", TestFlags)
+bool FQuestResolver_NodeKeyIndexRefusesAmbiguity::RunTest(const FString& Parameters)
+{
+	// Nothing clears ImportSourceKey on paste, so duplicating an imported node leaves two nodes answering to one name.
+	// Picking a winner by hash order would plan an edit to one copy and a deletion of the other, chosen by nothing the
+	// designer can see. Both claimants must leave the index so the caller can refuse that key specifically.
+	const FString GuidA = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+	const FString GuidB = TEXT("643F4B0946C4741C952AACB8AC82550B");
+
+	TMap<FString, FString> SourceKeyByGuid;
+	SourceKeyByGuid.Add(GuidA, TEXT("kill_boss"));
+	SourceKeyByGuid.Add(GuidB, TEXT("kill_boss"));   // the pasted copy kept the original's provenance
+
+	TMap<FString, FString> GuidByKey;
+	TArray<FString> Ambiguous;
+	BuildQuestNodeKeyIndex(SourceKeyByGuid, { GuidA, GuidB }, GuidByKey, Ambiguous);
+
+	TestTrue(TEXT("The contested key is reported"), Ambiguous.Contains(TEXT("kill_boss")));
+	TestFalse(TEXT("The contested key resolves to nobody"), GuidByKey.Contains(TEXT("kill_boss")));
+	// The GUIDs are still unambiguous, so a GUID-keyed source can still address either node precisely.
+	TestEqual(TEXT("Each node still answers to its own GUID"), GuidByKey.FindRef(GuidA), GuidA);
+	TestEqual(TEXT("...both of them"), GuidByKey.FindRef(GuidB), GuidB);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_LevelResolvesToOneNamespace, "SimpleQuest.Resolver.Identity.LevelNamespace", TestFlags)
+bool FQuestResolver_LevelResolvesToOneNamespace::RunTest(const FString& Parameters)
+{
+	// A level is spelled differently depending on who wrote it: our export names an inner level by the container's GUID, a
+	// studio's source names it by their own key. Comparing those raw reports "needs rebuilding" for nodes that never moved.
+	const FString ContainerGuid = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+
+	TMap<FString, FString> SourceKeyByGuid;
+	SourceKeyByGuid.Add(ContainerGuid, TEXT("chapter_1"));
+
+	TMap<FString, FString> GuidByKey;
+	TArray<FString> Ambiguous;
+	BuildQuestNodeKeyIndex(SourceKeyByGuid, { ContainerGuid }, GuidByKey, Ambiguous);
+
+	TestEqual(TEXT("The studio spelling resolves to the container"), ResolveQuestLevelToGuid(TEXT("chapter_1"), GuidByKey), ContainerGuid);
+	TestEqual(TEXT("Our spelling resolves to the same container"), ResolveQuestLevelToGuid(ContainerGuid, GuidByKey), ContainerGuid);
+	TestEqual(TEXT("The top level is its own name"), ResolveQuestLevelToGuid(TEXT("root"), GuidByKey), FString(TEXT("root")));
+	// A level naming nothing we know passes through, so a caller can tell "unreachable" from "root".
+	TestEqual(TEXT("An unknown level passes through"), ResolveQuestLevelToGuid(TEXT("nope"), GuidByKey), FString(TEXT("nope")));
 	return true;
 }
 

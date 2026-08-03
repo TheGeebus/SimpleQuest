@@ -1146,10 +1146,21 @@ namespace
 		TMap<FString, FString> GraphCellByGuid;
 		CollectQuestNodeIdentity(Target.QuestlineEdGraph, SourceKeyByGuid, NodeByGuid, &GraphCellByGuid);
 
+		TArray<FString> AllGuids;
+		NodeByGuid.GetKeys(AllGuids);
 		TMap<FString, FString> GuidByKey;
-		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+		BuildQuestNodeKeyIndex(SourceKeyByGuid, AllGuids, GuidByKey, OutPlan.AmbiguousKeys);
+		for (const FString& Key : OutPlan.AmbiguousKeys)
 		{
-			GuidByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Pair.Key);
+			OutPlan.Warnings.Add(FString::Printf(TEXT("'%s' names more than one node — that row is not planned, and neither "
+				"claimant is treated as an orphan. Clear the import provenance on the duplicate to resolve it."), *Key));
+		}
+
+		// The levels this source is talking about, in the one namespace. Anything outside them is none of its business.
+		TSet<FString> DeclaredLevels;
+		for (const TPair<FString, const FQuestDataRow*>& Pair : NodeRowsByKey)
+		{
+			DeclaredLevels.Add(ResolveQuestLevelToGuid(Pair.Value->Get(TEXT("graph")), GuidByKey));
 		}
 
 		TSet<FString> MatchedGuids;
@@ -1177,9 +1188,12 @@ namespace
 			Entry.CurrentClassName = Node->GetClass()->GetName();
 			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(*FoundGuid);
 
-			// A class change or a move between graph levels cannot be applied by writing properties — the node has to be
-			// rebuilt. Surfacing it here keeps the apply step from silently doing half of it.
-			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (Entry.GraphCell != Entry.CurrentGraphCell);
+			// Compare levels in ONE namespace. The two sides spell a level differently by design — the writer names it by the
+			// container's GUID, the asset walk by whatever key that container answers to — so a raw compare would flag every
+			// node inside a semantically-keyed container as needing a rebuild it does not need.
+			const FString IncomingLevel = ResolveQuestLevelToGuid(Entry.GraphCell, GuidByKey);
+			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
+			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (IncomingLevel != CurrentLevel);
 
 			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 			{
@@ -1216,10 +1230,18 @@ namespace
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
 
-		// Anything the asset holds that the source no longer mentions.
+		// Anything the asset holds that the source no longer mentions — but ONLY within the levels the source actually
+		// declares. A source describing one container says nothing about the rest of the asset, and treating its silence as
+		// deletion is what would make a delete-orphans policy unsafe to offer at all.
 		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
 		{
 			if (MatchedGuids.Contains(Pair.Key)) continue;
+
+			const FString NodeLevel = ResolveQuestLevelToGuid(GraphCellByGuid.FindRef(Pair.Key), GuidByKey);
+			if (!DeclaredLevels.Contains(NodeLevel)) { ++OutPlan.UntouchedNodeCount; continue; }
+
+			// A contested key names two nodes; neither is a row's target, and neither may be deleted on that basis.
+			if (OutPlan.AmbiguousKeys.Contains(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid))) continue;
 
 			FQuestNodePlanEntry Entry;
 			Entry.Action           = EQuestNodePlanAction::Orphan;
@@ -1244,9 +1266,15 @@ namespace
 
 	void LogInPlacePlan(const FQuestInPlacePlan& Plan)
 	{
-		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s). Nothing was modified."),
-			*Plan.TargetAssetPath, Plan.CountOf(EQuestNodePlanAction::Update), Plan.ChangedNodeCount(),
-			Plan.CountOf(EQuestNodePlanAction::Create), Plan.CountOf(EQuestNodePlanAction::Orphan));
+		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s), "
+			"%d node(s) outside the levels this source declares, %d contested key(s). Nothing was modified."),
+			*Plan.TargetAssetPath,
+			Plan.CountOf(EQuestNodePlanAction::Update),
+			Plan.ChangedNodeCount(),
+			Plan.CountOf(EQuestNodePlanAction::Create),
+			Plan.CountOf(EQuestNodePlanAction::Orphan),
+			Plan.UntouchedNodeCount,
+			Plan.AmbiguousKeys.Num());
 
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{

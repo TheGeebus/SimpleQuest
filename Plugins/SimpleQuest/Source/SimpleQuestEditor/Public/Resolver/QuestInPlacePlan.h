@@ -64,6 +64,10 @@ struct FQuestInPlacePlan
 	/** Nodes outside every level the source declares. Counted, never entered: a narrow source must not orphan the whole asset. */
 	int32 UntouchedNodeCount = 0;
 
+	/** Wiring a re-import would add or remove, canonicalized. Plan-level because an edge belongs to no single node. */
+	TArray<FString> AddedEdges;
+	TArray<FString> RemovedEdges;
+
 	int32 CountOf(EQuestNodePlanAction Action) const
 	{
 		int32 N = 0;
@@ -85,6 +89,7 @@ struct FQuestInPlacePlan
 	/** Nothing to do: no creations, no orphans, and no matched node differs. */
 	bool IsNoOp() const
 	{
-		return CountOf(EQuestNodePlanAction::Create) == 0 && CountOf(EQuestNodePlanAction::Orphan) == 0 && ChangedNodeCount() == 0;
+		return CountOf(EQuestNodePlanAction::Create) == 0 && CountOf(EQuestNodePlanAction::Orphan) == 0
+			&& ChangedNodeCount() == 0 && AddedEdges.IsEmpty() && RemovedEdges.IsEmpty();
 	}
 };

@@ -51,8 +51,7 @@ FString QuestNodeIdentityKey(const FString& Guid, const TMap<FString, FString>& 
 	return Semantic ? *Semantic : Guid;
 }
 
-void BuildQuestNodeKeyIndex(const TMap<FString, FString>& SourceKeyByGuid, const TArray<FString>& AllGuids,
-							TMap<FString, FString>& OutGuidByKey, TArray<FString>& OutAmbiguousKeys)
+void BuildQuestNodeKeyIndex(const TMap<FString, FString>& SourceKeyByGuid, const TArray<FString>& AllGuids,	TMap<FString, FString>& OutGuidByKey, TArray<FString>& OutAmbiguousKeys)
 {
 	// Collect claims first, resolve after: a key is only trustworthy once every claimant is known, so a single pass that
 	// wrote as it went would have to decide a collision before it could see there was one.
@@ -121,8 +120,7 @@ bool IsQuestInstancedBearing(const FProperty* Prop)
 	return false;
 }
 
-void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix,
-                                TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit)
+void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit)
 {
 	// Direct instanced object: one child. A null slot yields nothing — absence is the honest representation.
 	if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
@@ -184,8 +182,7 @@ FString QuestEdgeVerb(FName PinCategory)
 	return FString::Printf(TEXT("wire:%s"), *PinCategory.ToString());
 }
 
-void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy,
-						   TArray<FQuestDataEdge>& OutEdges)
+void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges)
 {
 	if (!Node) return;
 	const FString FromKey = Node->QuestGuid.ToString(EGuidFormats::Digits);
@@ -211,5 +208,32 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
 			OutEdges.Add({ FromKey, Type, ToNode->QuestGuid.ToString(EGuidFormats::Digits) });
 		}
 	}
+}
+
+void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming, const TArray<FQuestDataEdge>& Live, const TMap<FString, FString>& GuidByKey, TArray<FString>& OutAdded, TArray<FString>& OutRemoved)
+{
+	auto Canonical = [&GuidByKey](const FQuestDataEdge& Edge) -> FString
+	{
+		const FString* From = GuidByKey.Find(Edge.From);
+		const FString* To   = GuidByKey.Find(Edge.To);
+		return FString::Printf(TEXT("%s|%s|%s"), From ? **From : *Edge.From, *Edge.Type, To ? **To : *Edge.To);
+	};
+	auto IsWiring = [](const FQuestDataEdge& Edge) { return !Edge.Type.StartsWith(TEXT("contains(")); };
+
+	TSet<FString> LiveSet;
+	for (const FQuestDataEdge& Edge : Live)
+	{
+		if (IsWiring(Edge)) { LiveSet.Add(Canonical(Edge)); }
+	}
+	TSet<FString> IncomingSet;
+	for (const FQuestDataEdge& Edge : Incoming)
+	{
+		if (IsWiring(Edge)) { IncomingSet.Add(Canonical(Edge)); }
+	}
+
+	for (const FString& Id : IncomingSet) { if (!LiveSet.Contains(Id))     { OutAdded.Add(Id); } }
+	for (const FString& Id : LiveSet)     { if (!IncomingSet.Contains(Id)) { OutRemoved.Add(Id); } }
+	OutAdded.Sort();     // deterministic reporting; set iteration order is not
+	OutRemoved.Sort();
 }
 

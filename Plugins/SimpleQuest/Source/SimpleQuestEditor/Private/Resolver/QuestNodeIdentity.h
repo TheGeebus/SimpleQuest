@@ -94,3 +94,18 @@ FString QuestEdgeVerb(FName PinCategory);
  */
 void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges);
 
+/**
+ * Which wire edges would a re-import add, and which would it remove? Both sides are canonicalized through the key index
+ * first: live edges are always GUID-keyed, while a source's edges carry whatever keys that source uses, so comparing them
+ * raw reports every unchanged edge as both an addition AND a removal.
+ * 'contains' edges are ignored — an inner-graph membership is covered by the graph-level comparison, and an instanced
+ * child by the child diff, so including them here would double-report.
+ * An endpoint naming no known node passes through unresolved, which correctly makes an edge touching a to-be-created node
+ * an addition rather than a match.
+ */
+void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming,
+	const TArray<FQuestDataEdge>& Live,
+	const TMap<FString, FString>& GuidByKey,
+	TArray<FString>& OutAdded,
+	TArray<FString>& OutRemoved);
+

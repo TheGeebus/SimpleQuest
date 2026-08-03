@@ -15,6 +15,7 @@
 #include "EdGraph/EdGraphPin.h"
 #include "Engine/DataTable.h"
 #include "Factories/QuestlineGraphFactory.h"
+#include "Graph/QuestlineGraphSchema.h"
 #include "IAssetTools.h"
 #include "Internationalization/Text.h"
 #include "ISimpleQuestEditorModule.h"
@@ -1377,6 +1378,19 @@ namespace
 			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(Pair.Key);
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
+
+		// Wiring. Derived from the live graph with the SAME walk the writer uses, so an unchanged questline compares clean
+		// rather than looking rewired. Without this a source that only re-points a "next" column reports no change at all,
+		// and a synthesized gate appears as a CREATE while the edges that make it function stay invisible.
+		{
+			const TUniquePtr<FQuestlineGraphTraversalPolicy> Policy = MakeUnique<FQuestlineGraphTraversalPolicy>();
+			TArray<FQuestDataEdge> LiveEdges;
+			for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+			{
+				CollectQuestWireEdges(Pair.Value, *Policy, LiveEdges);
+			}
+			CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, OutPlan.AddedEdges, OutPlan.RemovedEdges);
+		}
 	}
 
 	const TCHAR* PlanActionName(EQuestNodePlanAction Action)
@@ -1392,14 +1406,19 @@ namespace
 	void LogInPlacePlan(const FQuestInPlacePlan& Plan)
 	{
 		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s), "
-			"%d node(s) outside the levels this source declares, %d contested key(s). Nothing was modified."),
+			"%d node(s) outside the levels this source declares, %d contested key(s), %d wire edge(s) added, %d removed. Nothing was modified."),
 			*Plan.TargetAssetPath,
 			Plan.CountOf(EQuestNodePlanAction::Update),
 			Plan.ChangedNodeCount(),
 			Plan.CountOf(EQuestNodePlanAction::Create),
 			Plan.CountOf(EQuestNodePlanAction::Orphan),
 			Plan.UntouchedNodeCount,
-			Plan.AmbiguousKeys.Num());
+			Plan.AmbiguousKeys.Num(),
+			Plan.AddedEdges.Num(),
+			Plan.RemovedEdges.Num());
+
+		for (const FString& Edge : Plan.RemovedEdges) { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE-] %s"), *Edge); }
+		for (const FString& Edge : Plan.AddedEdges)   { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE+] %s"), *Edge); }
 
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{

@@ -871,4 +871,42 @@ bool FQuestResolver_SilentSourceLeavesChildrenAlone::RunTest(const FString& Para
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_EdgesCompareAcrossNamespaces, "SimpleQuest.Resolver.Plan.EdgeNamespaces", TestFlags)
+bool FQuestResolver_EdgesCompareAcrossNamespaces::RunTest(const FString& Parameters)
+{
+	// Live wiring is always GUID-keyed; a studio's file names the same nodes by its own keys. Comparing the two raw would
+	// report every unchanged edge as an addition AND a removal — a plan claiming a questline's entire wiring is being
+	// rebuilt when nothing moved. Canonicalizing both sides first is the whole job.
+	const FString GuidA = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+	const FString GuidB = TEXT("643F4B0946C4741C952AACB8AC82550B");
+
+	TMap<FString, FString> GuidByKey;
+	GuidByKey.Add(TEXT("kill_boss"), GuidA);
+	GuidByKey.Add(TEXT("guard_post"), GuidB);
+	GuidByKey.Add(GuidA, GuidA);
+	GuidByKey.Add(GuidB, GuidB);
+
+	TArray<FQuestDataEdge> Incoming = { { TEXT("kill_boss"), TEXT("activates(Any Outcome)"), TEXT("guard_post") } };
+	TArray<FQuestDataEdge> Live     = { { GuidA,             TEXT("activates(Any Outcome)"), GuidB } };
+
+	TArray<FString> Added, Removed;
+	CompareQuestEdges(Incoming, Live, GuidByKey, Added, Removed);
+	TestEqual(TEXT("The same edge in two spellings is not an addition"), Added.Num(), 0);
+	TestEqual(TEXT("...nor a removal"), Removed.Num(), 0);
+
+	// Rewire the target: one edge goes, one arrives.
+	Added.Reset(); Removed.Reset();
+	TArray<FQuestDataEdge> Rewired = { { TEXT("kill_boss"), TEXT("activates(Any Outcome)"), TEXT("somewhere_else") } };
+	CompareQuestEdges(Rewired, Live, GuidByKey, Added, Removed);
+	TestEqual(TEXT("A rewire is one addition"), Added.Num(), 1);
+	TestEqual(TEXT("...and one removal"), Removed.Num(), 1);
+
+	// Containment is described elsewhere in the plan; counting it here would double-report.
+	Added.Reset(); Removed.Reset();
+	TArray<FQuestDataEdge> Contains = { { TEXT("kill_boss"), TEXT("contains(Rewards[0])"), TEXT("kill_boss/Rewards[0]") } };
+	CompareQuestEdges(Contains, {}, GuidByKey, Added, Removed);
+	TestEqual(TEXT("A contains edge is not wiring"), Added.Num(), 0);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

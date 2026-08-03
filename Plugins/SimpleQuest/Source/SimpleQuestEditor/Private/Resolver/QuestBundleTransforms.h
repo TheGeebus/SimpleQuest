@@ -10,10 +10,13 @@
 
 #include "CoreMinimal.h"
 
+struct FQuestDataRow;
 struct FQuestDataBundle;
 struct FQuestDataValue;
+struct FQuestInPlacePlan;
 class FProperty;
 class UQuestImportMapping;
+class UQuestlineGraph;
 class UQuestlineNodeBase;
 
 /** Studio-shaped bundle -> canonical: route rows to classes by the discriminator, rename bound columns. False = refused. */
@@ -36,4 +39,7 @@ void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>&
 
 /** Re-express a bundle cell in the typed form a live property produces, starting from SeedPtr. Exposed to pin the seed rule. */
 FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr);
+
+/** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
+void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan);
 

@@ -20,7 +20,7 @@ enum class EQuestNodePlanAction : uint8
 
 struct FQuestPropertyChange
 {
-	FName   Property;
+	FString Property;		// a property NAME, or a path like "Rewards[0].Amount" once nested values are described
 	FString CurrentText;    // what the asset holds now, for display
 	FString IncomingText;   // what the source would write, for display
 
@@ -46,6 +46,9 @@ struct FQuestNodePlanEntry
 
 	/** True when the node would have to be rebuilt rather than edited: its class changed, or it moved to another level. */
 	bool bStructuralChange = false;
+
+	/** True for the one entry describing the questline asset itself rather than a node in it. */
+	bool bIsQuestlineSelf = false;
 };
 
 /** The whole comparison. */

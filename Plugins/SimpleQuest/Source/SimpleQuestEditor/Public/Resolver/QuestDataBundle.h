@@ -55,4 +55,9 @@ struct FQuestDataBundle
 	TMap<FString, FQuestDataTable> TablesByType;
 	TArray<FQuestDataEdge> Edges;
 	int32 KnotsCollapsed = 0;
+	
+	// True when the self row was FABRICATED rather than read. A DataTable has no self row, so one is synthesized to satisfy
+	// the "exactly one questline row" rule — stamped with the table's asset name. That name is ours, not the author's, so a
+	// consumer comparing identity must not treat it as something the source asserted.
+	bool bSelfRowSynthesized = false;
 };

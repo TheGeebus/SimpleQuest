@@ -1138,11 +1138,84 @@ namespace
 		return Typed;
 	}
 
+		// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes — a node,
+	// the questline itself, and (once nested values are described) an instanced child — so the comparison rule has exactly
+	// one definition and cannot drift between them. PathPrefix names where this object sits under its owner, empty at the top.
+	void DiffObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
+	                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
+	{
+		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+		{
+			const FString& Column = Cell.Key;
+			if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural — describes the row, not a property
+
+			FProperty* Prop = Object->GetClass()->FindPropertyByName(FName(*Column));
+			if (!Prop)
+			{
+				// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a
+				// whole table, so an unbound bookkeeping column would otherwise warn once per ROW instead of once.
+				if (Cell.Value.Kind != EQuestDataValueKind::Empty)
+				{
+					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
+						*Row.Key,
+						*Column,
+						*Object->GetClass()->GetName()));
+				}
+				continue;
+			}
+
+			const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
+
+			// Compare through the PROPERTY, not the neutral value: FProperty::Identical knows each type's own equality, where
+			// a value-level comparison must pick one rule for a Kind that deliberately fuses several types.
+			void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
+			Prop->InitializeValue(Scratch);
+			Prop->CopyCompleteValue(Scratch, LivePtr);
+			RestoreCell(Prop, Scratch, Cell.Value);
+			const bool bIdentical = Prop->Identical(Scratch, LivePtr, PPF_None);
+			const FQuestDataValue Incoming = BuildQuestDataValue(Prop, Scratch, nullptr);
+			Prop->DestroyValue(Scratch);
+			FMemory::Free(Scratch);
+			if (bIdentical) continue;
+
+			FQuestPropertyChange Change;
+			Change.Property      = PathPrefix.IsEmpty() ? Column : (PathPrefix + TEXT(".") + Column);
+			Change.CurrentText   = DescribeValue(BuildQuestDataValue(Prop, LivePtr, nullptr));
+			Change.IncomingText  = DescribeValue(Incoming);
+			Change.IncomingValue = Incoming;   // what apply writes — never re-derived from the row
+			Entry.Changes.Add(MoveTemp(Change));
+		}
+	}
+
 	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle,
 	                 const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings,
 	                 FQuestInPlacePlan& OutPlan)
 	{
 		OutPlan.Warnings = ReadWarnings;
+
+		// The questline's own authored properties. A re-import writes these exactly as it writes a node's, so a plan that
+		// describes only nodes would report an unchanged questline while a rename was pending.
+		if (const FQuestDataTable* SelfTable = Bundle.TablesByType.Find(TEXT("questline_graph")))
+		{
+			if (SelfTable->Rows.Num() > 0)
+			{
+				FQuestNodePlanEntry SelfEntry;
+				SelfEntry.Action           = EQuestNodePlanAction::Update;
+				SelfEntry.bIsQuestlineSelf = true;
+				SelfEntry.Key              = SelfTable->Rows[0].Key;
+				SelfEntry.ClassName        = Target.GetClass()->GetName();
+				SelfEntry.CurrentClassName = SelfEntry.ClassName;
+
+				// A FABRICATED self row asserts nothing. The DataTable provenance has no self row, so one is invented from the
+				// table's asset name purely to satisfy validation — comparing it would let a source that never described the
+				// questline rename it. Entered anyway, so the plan still accounts for the questline, but with no changes.
+				if (!Bundle.bSelfRowSynthesized)
+				{
+					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan);
+				}
+				OutPlan.Entries.Add(MoveTemp(SelfEntry));
+			}
+		}
 
 		// Read the existing nodes under the SAME keying rule the spawn path writes: a studio-authored key when the node
 		// carries one, else our GUID. That is the dual-key identity contract read in reverse.
@@ -1200,51 +1273,7 @@ namespace
 			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
 			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (IncomingLevel != CurrentLevel);
 
-			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
-			{
-				const FString& Column = Cell.Key;
-				if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural — describes the row, not a property
-
-				FProperty* Prop = Node->GetClass()->FindPropertyByName(FName(*Column));
-				if (!Prop)
-				{
-					// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a
-					// whole table, so an unbound bookkeeping column would otherwise warn once per ROW instead of once, burying
-					// the plan under lines about a column we already ignore.
-					if (Cell.Value.Kind != EQuestDataValueKind::Empty)
-					{
-						OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
-							*Row.Key,
-							*Column,
-							*Entry.CurrentClassName));
-					}
-					continue;
-				}
-
-				const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Node);
-
-				// Compare through the PROPERTY, not through the neutral value. FProperty::Identical knows each type's own
-				// notion of equality — including that soft object paths are case-insensitive because UE cannot hold two
-				// packages differing only in case — where a value-level comparison has to pick one rule for a Kind that
-				// deliberately fuses several types (Kind::String covers both FString and FName). The neutral values are still
-				// built, for display and for the value the apply step will write.
-				void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
-				Prop->InitializeValue(Scratch);
-				Prop->CopyCompleteValue(Scratch, LivePtr);
-				RestoreCell(Prop, Scratch, Cell.Value);
-				const bool bIdentical = Prop->Identical(Scratch, LivePtr, PPF_None);
-				const FQuestDataValue Incoming = BuildQuestDataValue(Prop, Scratch, nullptr);
-				Prop->DestroyValue(Scratch);
-				FMemory::Free(Scratch);
-				if (bIdentical) continue;
-
-				FQuestPropertyChange Change;
-				Change.Property      = FName(*Column);
-				Change.CurrentText   = DescribeValue(BuildQuestDataValue(Prop, LivePtr, nullptr));
-				Change.IncomingText  = DescribeValue(Incoming);
-				Change.IncomingValue = Incoming;   // what apply writes — never re-derived from the row
-				Entry.Changes.Add(MoveTemp(Change));
-			}
+			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan);
 
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
@@ -1300,13 +1329,15 @@ namespace
 			// Unchanged matches are the common case on a healthy re-import; listing them would bury the ones that matter.
 			if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bStructuralChange) continue;
 
-			// An orphan has no incoming row, so its level is only known from the asset side.
+			// An orphan has no incoming row, so its level is only known from the asset side; the questline itself sits in no
+			// level at all, being the thing levels belong to.
 			const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
-			UE_LOG(LogSimpleQuest, Log, TEXT("  [%s] %s (%s) — graph '%s'%s"),
+			const FString Where = Entry.bIsQuestlineSelf ? FString(TEXT("the questline itself")) : FString::Printf(TEXT("graph '%s'"), *Level);
+			UE_LOG(LogSimpleQuest, Log, TEXT("  [%s] %s (%s) — %s%s"),
 				PlanActionName(Entry.Action),
 				*Entry.Key,
 				*Entry.ClassName,
-				*Level,
+				*Where,
 				Entry.bStructuralChange ? TEXT("  ** structural: needs rebuild, not an edit **") : TEXT(""));
 
 			if (Entry.bStructuralChange && Entry.ClassName != Entry.CurrentClassName)
@@ -1319,7 +1350,7 @@ namespace
 			}
 			for (const FQuestPropertyChange& Change : Entry.Changes)
 			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property.ToString(), *Change.CurrentText, *Change.IncomingText);
+				UE_LOG(LogSimpleQuest, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property, *Change.CurrentText, *Change.IncomingText);
 			}
 		}
 
@@ -1573,6 +1604,11 @@ void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>&
 FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr)
 {
 	return TypeIncomingLikeProperty(Prop, Cell, SeedPtr);
+}
+
+void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan)
+{
+	PlanInPlace(Target, Bundle, NodeRowsByKey, ReadWarnings, OutPlan);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

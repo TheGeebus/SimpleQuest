@@ -329,6 +329,7 @@ namespace
 		Self.Rows.Add(MoveTemp(SelfRow));
 
 		OutBundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+		OutBundle.bSelfRowSynthesized = true;   // this identity is the framework's, not the author's — consumers must not diff it
 	}
 }
 

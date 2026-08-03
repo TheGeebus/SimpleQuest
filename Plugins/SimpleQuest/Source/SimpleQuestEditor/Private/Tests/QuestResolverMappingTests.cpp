@@ -10,10 +10,12 @@
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Utility/QuestlineNode_Reward.h"
+#include "Quests/QuestlineGraph.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
@@ -748,6 +750,70 @@ bool FQuestResolver_ScratchSeedIsTheAbsentPolicy::RunTest(const FString& Paramet
 	const FQuestDataValue Overridden = QuestBundle_TypeIncomingLikeProperty(Prop, Populated, Live);
 	TestEqual(TEXT("A populated cell still overrides the seed"), Overridden.Tag.ToString(),
 		FString(TEXT("SimpleQuest.Outcome.Triumph")));
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_SelfRowIsPlanned, "SimpleQuest.Resolver.Plan.SelfRow", TestFlags)
+bool FQuestResolver_SelfRowIsPlanned::RunTest(const FString& Parameters)
+{
+	// The questline's OWN properties are authored data like any node's, and a re-import writes them. A plan that describes
+	// only nodes tells a designer their questline is unchanged while a re-import is about to rename it.
+	UQuestlineGraph* Graph = NewObject<UQuestlineGraph>(GetTransientPackage());
+	FProperty* IdProp = UQuestlineGraph::StaticClass()->FindPropertyByName(TEXT("QuestlineID"));
+	TestNotNull(TEXT("QuestlineID property resolved"), IdProp);
+	if (!IdProp) { return false; }
+	IdProp->ImportText_Direct(TEXT("Authored"), IdProp->ContainerPtrToValuePtr<void>(Graph), nullptr, PPF_None);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Self;
+	AddRow(Self, TEXT("whatever"), { { TEXT("class"), TEXT("QuestlineGraph") }, { TEXT("QuestlineID"), TEXT("Renamed") } });
+	Bundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+
+	const TMap<FString, const FQuestDataRow*> NoNodes;
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NoNodes, {}, Plan);
+
+	const FQuestNodePlanEntry* SelfEntry = nullptr;
+	for (const FQuestNodePlanEntry& E : Plan.Entries) { if (E.bIsQuestlineSelf) { SelfEntry = &E; break; } }
+	TestNotNull(TEXT("The questline itself is planned"), SelfEntry);
+	if (SelfEntry)
+	{
+		TestEqual(TEXT("Its changed property is reported"), SelfEntry->Changes.Num(), 1);
+		if (SelfEntry->Changes.Num() == 1)
+		{
+			TestEqual(TEXT("...and it is QuestlineID"), SelfEntry->Changes[0].Property, FString(TEXT("QuestlineID")));
+			TestEqual(TEXT("...reading the incoming value"), SelfEntry->Changes[0].IncomingText, FString(TEXT("Renamed")));
+		}
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_SynthesizedSelfRowAssertsNothing, "SimpleQuest.Resolver.Plan.SynthesizedSelfRow", TestFlags)
+bool FQuestResolver_SynthesizedSelfRowAssertsNothing::RunTest(const FString& Parameters)
+{
+	// A DataTable has no self row at all, so one is FABRICATED to satisfy the "exactly one questline row" rule, stamped with
+	// the table's asset name. That name is ours. Diffing it would let a source that never described the questline rename it —
+	// and on a re-import the designer's authored identity would quietly become a filename.
+	UQuestlineGraph* Graph = NewObject<UQuestlineGraph>(GetTransientPackage());
+	FProperty* IdProp = UQuestlineGraph::StaticClass()->FindPropertyByName(TEXT("QuestlineID"));
+	if (!IdProp) { return false; }
+	IdProp->ImportText_Direct(TEXT("Authored"), IdProp->ContainerPtrToValuePtr<void>(Graph), nullptr, PPF_None);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Self;
+	AddRow(Self, TEXT("DT_Rewards"), { { TEXT("class"), TEXT("QuestlineGraph") }, { TEXT("QuestlineID"), TEXT("DT_Rewards") } });
+	Bundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+	Bundle.bSelfRowSynthesized = true;   // the read arm fabricated it
+
+	const TMap<FString, const FQuestDataRow*> NoNodes;
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NoNodes, {}, Plan);
+
+	for (const FQuestNodePlanEntry& E : Plan.Entries)
+	{
+		if (!E.bIsQuestlineSelf) continue;
+		TestEqual(TEXT("A fabricated self row proposes no change"), E.Changes.Num(), 0);
+	}
 	return true;
 }
 

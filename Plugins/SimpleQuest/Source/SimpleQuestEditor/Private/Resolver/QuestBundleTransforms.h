@@ -34,3 +34,6 @@ void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, cons
 /** Synthesize prerequisite combinators from row-adjacent convention columns, then strip those cells. */
 void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings);
 
+/** Re-express a bundle cell in the typed form a live property produces, starting from SeedPtr. Exposed to pin the seed rule. */
+FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr);
+

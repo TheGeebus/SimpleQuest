@@ -721,4 +721,34 @@ bool FQuestResolver_LevelResolvesToOneNamespace::RunTest(const FString& Paramete
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ScratchSeedIsTheAbsentPolicy, "SimpleQuest.Resolver.Compare.ScratchSeed", TestFlags)
+bool FQuestResolver_ScratchSeedIsTheAbsentPolicy::RunTest(const FString& Parameters)
+{
+	// The plan's contract is to SIMULATE the apply, and the apply starts from the property's live value — so the simulation
+	// must too. RestoreCell deliberately leaves some cells unwritten (an Empty one above all), and whatever the scratch was
+	// seeded with is what survives that. Seeding from zero therefore reports a change to nothing-in-particular for every
+	// declared-but-blank column. Seeding from the current value makes an absent cell mean "leave it alone" — which is
+	// precisely Preserve, and seeding from the class default instead would be Reset. The seed IS the policy.
+	UQuestlineNode_Exit* Node = NewObject<UQuestlineNode_Exit>(GetTransientPackage());
+	FProperty* Prop = UQuestlineNode_Exit::StaticClass()->FindPropertyByName(TEXT("OutcomeTag"));
+	TestNotNull(TEXT("OutcomeTag property resolved"), Prop);
+	if (!Prop) { return false; }
+
+	void* Live = Prop->ContainerPtrToValuePtr<void>(Node);
+	Prop->ImportText_Direct(TEXT("(TagName=\"SimpleQuest.Outcome.Solved\")"), Live, nullptr, PPF_None);
+
+	// An EMPTY cell says nothing, so the property keeps what it had.
+	FQuestDataValue Blank;   // Kind::Empty
+	const FQuestDataValue Preserved = QuestBundle_TypeIncomingLikeProperty(Prop, Blank, Live);
+	TestEqual(TEXT("An empty cell preserves the property's current value"), Preserved.Tag.ToString(),
+		FString(TEXT("SimpleQuest.Outcome.Solved")));
+
+	// A populated cell overrides it, seed or no seed — otherwise the seed would swallow real edits.
+	const FQuestDataValue Populated = FQuestDataValue::MakeString(TEXT("(TagName=\"SimpleQuest.Outcome.Triumph\")"));
+	const FQuestDataValue Overridden = QuestBundle_TypeIncomingLikeProperty(Prop, Populated, Live);
+	TestEqual(TEXT("A populated cell still overrides the seed"), Overridden.Tag.ToString(),
+		FString(TEXT("SimpleQuest.Outcome.Triumph")));
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

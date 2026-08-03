@@ -8,6 +8,7 @@
 // by a designer, and applied on a later frame without holding references across a garbage collection.
 
 #include "CoreMinimal.h"
+#include "QuestDataValue.h"
 
 /** What happens to one node when the plan is applied. */
 enum class EQuestNodePlanAction : uint8
@@ -17,12 +18,17 @@ enum class EQuestNodePlanAction : uint8
 	Orphan,   // the asset has it, the source does not
 };
 
-/** One property whose value would differ after a re-import. */
 struct FQuestPropertyChange
 {
 	FName   Property;
-	FString CurrentText;    // what the asset holds now
-	FString IncomingText;   // what the source would write
+	FString CurrentText;    // what the asset holds now, for display
+	FString IncomingText;   // what the source would write, for display
+
+	// The value the apply step must WRITE. Carried as data rather than re-derived from the row, because the row alone is not
+	// enough: the restore path deliberately leaves some cells unwritten, so "what the source says" and "what the property
+	// would end up holding" are different questions. Planning answers the second one; re-answering it at apply time from the
+	// first is how a plan and its application drift. Plain data, so it survives between being shown and being applied.
+	FQuestDataValue IncomingValue;
 };
 
 /** One node's disposition, plus the properties that would actually change. */

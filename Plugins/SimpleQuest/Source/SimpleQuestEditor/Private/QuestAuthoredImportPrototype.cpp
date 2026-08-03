@@ -1121,10 +1121,15 @@ namespace
 	// Kind::Tag / Kind::Enum / Kind::Reference. Comparing those directly would mark every property changed on every import.
 	// Routing the cell through the real restore path onto scratch memory and rebuilding it from the property normalizes both
 	// sides through one definition, whatever representation the provider happened to use.
-	FQuestDataValue TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell)
+	FQuestDataValue TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr)
 	{
 		void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
 		Prop->InitializeValue(Scratch);
+		// Start from what the apply step would start from. RestoreCell's non-writing arms leave the seed in place, which is
+		// what makes an absent cell mean "unchanged" rather than "reset to zero" — and zero is not even the right default,
+		// since a property with an in-class initializer is non-zero on a freshly constructed object.
+		// CopyCompleteValue, not CopySingleValue: the buffer is sized at GetSize(), which includes ArrayDim.
+		if (SeedPtr) { Prop->CopyCompleteValue(Scratch, SeedPtr); }
 		RestoreCell(Prop, Scratch, Cell);
 		// Null default: we want the value the source would actually produce, never collapsed to Empty for being at-default.
 		FQuestDataValue Typed = BuildQuestDataValue(Prop, Scratch, nullptr);
@@ -1216,14 +1221,28 @@ namespace
 					continue;
 				}
 
-				const FQuestDataValue Current  = BuildQuestDataValue(Prop, Prop->ContainerPtrToValuePtr<void>(Node), nullptr);
-				const FQuestDataValue Incoming = TypeIncomingLikeProperty(Prop, Cell.Value);
-				if (Current == Incoming) continue;
+				const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Node);
+
+				// Compare through the PROPERTY, not through the neutral value. FProperty::Identical knows each type's own
+				// notion of equality — including that soft object paths are case-insensitive because UE cannot hold two
+				// packages differing only in case — where a value-level comparison has to pick one rule for a Kind that
+				// deliberately fuses several types (Kind::String covers both FString and FName). The neutral values are still
+				// built, for display and for the value the apply step will write.
+				void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
+				Prop->InitializeValue(Scratch);
+				Prop->CopyCompleteValue(Scratch, LivePtr);
+				RestoreCell(Prop, Scratch, Cell.Value);
+				const bool bIdentical = Prop->Identical(Scratch, LivePtr, PPF_None);
+				const FQuestDataValue Incoming = BuildQuestDataValue(Prop, Scratch, nullptr);
+				Prop->DestroyValue(Scratch);
+				FMemory::Free(Scratch);
+				if (bIdentical) continue;
 
 				FQuestPropertyChange Change;
-				Change.Property     = FName(*Column);
-				Change.CurrentText  = DescribeValue(Current);
-				Change.IncomingText = DescribeValue(Incoming);
+				Change.Property      = FName(*Column);
+				Change.CurrentText   = DescribeValue(BuildQuestDataValue(Prop, LivePtr, nullptr));
+				Change.IncomingText  = DescribeValue(Incoming);
+				Change.IncomingValue = Incoming;   // what apply writes — never re-derived from the row
 				Entry.Changes.Add(MoveTemp(Change));
 			}
 
@@ -1549,6 +1568,11 @@ void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, cons
 void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings)
 {
 	ApplyFlowConventions(Bundle, Warnings);
+}
+
+FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr)
+{
+	return TypeIncomingLikeProperty(Prop, Cell, SeedPtr);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

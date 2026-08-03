@@ -9,7 +9,10 @@
 // key refers to.
 
 #include "CoreMinimal.h"
+#include "Templates/Function.h"
 
+class FProperty;
+class UObject;
 class UEdGraph;
 class UQuestlineNodeBase;
 
@@ -44,3 +47,26 @@ void BuildQuestNodeKeyIndex(const TMap<FString, FString>& SourceKeyByGuid,
 
 /** Resolve a graph-level name to the one namespace: "root" stays "root", any other spelling resolves to the owning node's GUID. */
 FString ResolveQuestLevelToGuid(const FString& LevelName, const TMap<FString, FString>& GuidByKey);
+
+/**
+ * True when a property's value(s) are Instanced UObjects — the shapes that must explode to child rows rather than
+ * serialize as a dangling object path. Recurses array inners, map values and struct fields, so container-wrapped instanced
+ * data (e.g. TMap<FGameplayTag, FQuestRewardSet> wrapping an instanced array) classifies correctly.
+ */
+bool IsQuestInstancedBearing(const FProperty* Prop);
+
+/**
+ * Visit every instanced child reachable from Prop, deriving the SAME key the writer emits for it. ONE level: a child's own
+ * instanced properties are the caller's to descend, which is what lets the export and the planner do different things at
+ * each level while agreeing exactly on names.
+ * Both directions walk this — the export to emit a row per child, the planner to find the live child a row refers to.
+ * A key derived two ways is a key that eventually disagrees, and a child addressed by a name nobody else uses is a child
+ * that silently disappears.
+ * @param PathPrefix  the property path so far, relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards").
+ */
+void ForEachQuestInstancedChild(const FProperty* Prop,
+	const void* ValuePtr,
+	const FString& OwnerKey,
+	const FString& PathPrefix,
+	TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit);
+

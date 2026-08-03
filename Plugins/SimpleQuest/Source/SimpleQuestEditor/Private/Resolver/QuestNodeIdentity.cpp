@@ -7,6 +7,8 @@
 #include "EdGraph/EdGraphNode.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "UObject/UnrealType.h"
+
 
 void CollectQuestNodeIdentity(const UEdGraph* EdGraph, TMap<FString, FString>& OutSourceKeyByGuid, TMap<FString, const UQuestlineNodeBase*>& OutNodeByGuid, TMap<FString, FString>* OutGraphCellByGuid, const FString& GraphCell)
 {
@@ -79,4 +81,92 @@ FString ResolveQuestLevelToGuid(const FString& LevelName, const TMap<FString, FS
 	if (LevelName.IsEmpty() || LevelName == TEXT("root")) { return LevelName; }
 	if (const FString* Guid = GuidByKey.Find(LevelName)) { return *Guid; }
 	return LevelName;   // names no node we know — the caller decides whether that is a create or a refusal
+}
+
+namespace
+{
+	// Child keys travel in tab-separated tables, so a map key's exported text must not carry framing characters.
+	FString SanitizeChildKeySegment(const FString& In)
+	{
+		return In.Replace(TEXT("\t"), TEXT("\\t")).Replace(TEXT("\r"), TEXT("")).Replace(TEXT("\n"), TEXT("\\n"));
+	}
+}
+
+bool IsQuestInstancedBearing(const FProperty* Prop)
+{
+	if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
+	{
+		return Obj->HasAnyPropertyFlags(CPF_InstancedReference);
+	}
+	if (const FArrayProperty* Arr = CastField<FArrayProperty>(Prop))
+	{
+		return IsQuestInstancedBearing(Arr->Inner);
+	}
+	if (const FMapProperty* Map = CastField<FMapProperty>(Prop))
+	{
+		return IsQuestInstancedBearing(Map->ValueProp);
+	}
+	if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
+	{
+		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+		{
+			if (IsQuestInstancedBearing(*It))
+			{
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix,
+                                TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit)
+{
+	// Direct instanced object: one child. A null slot yields nothing — absence is the honest representation.
+	if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
+	{
+		if (const UObject* Sub = Obj->GetObjectPropertyValue(ValuePtr))
+		{
+			Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Sub);
+		}
+		return;
+	}
+	// Array: each element carries an [i] path segment.
+	if (const FArrayProperty* Arr = CastField<FArrayProperty>(Prop))
+	{
+		FScriptArrayHelper Helper(Arr, ValuePtr);
+		for (int32 Idx = 0; Idx < Helper.Num(); ++Idx)
+		{
+			ForEachQuestInstancedChild(Arr->Inner, Helper.GetRawPtr(Idx), OwnerKey,
+				FString::Printf(TEXT("%s[%d]"), *PathPrefix, Idx), Visit);
+		}
+		return;
+	}
+	// Map: each VALUE carries a [KeyExport] segment (corpus case: questline rewards keyed by outcome tag).
+	if (const FMapProperty* Map = CastField<FMapProperty>(Prop))
+	{
+		FScriptMapHelper Helper(Map, ValuePtr);
+		for (FScriptMapHelper::FIterator It(Helper); It; ++It)
+		{
+			FString KeyExport;
+			Map->KeyProp->ExportTextItem_Direct(KeyExport, Helper.GetKeyPtr(It), nullptr, nullptr, PPF_None);
+			ForEachQuestInstancedChild(Map->ValueProp, Helper.GetValuePtr(It), OwnerKey,
+				FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeChildKeySegment(KeyExport)), Visit);
+		}
+		return;
+	}
+	// Struct: descend its instanced-bearing fields, extending the path with the field name. Non-instanced siblings are
+	// dropped — the only corpus case is a reward set whose sole field IS the instanced array.
+	if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
+	{
+		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
+		{
+			if (!IsQuestInstancedBearing(*It))
+			{
+				continue;
+			}
+			ForEachQuestInstancedChild(*It, It->ContainerPtrToValuePtr<void>(ValuePtr), OwnerKey,
+				FString::Printf(TEXT("%s.%s"), *PathPrefix, *It->GetName()), Visit);
+		}
+	}
 }

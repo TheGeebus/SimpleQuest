@@ -35,15 +35,6 @@
 
 namespace
 {
-	// Make an exported map-key safe to embed inside a neutral ROW KEY (e.g. "QuestlineRewards[<key>].Rewards"): a key
-	// with an embedded tab/newline would corrupt the path segment the import later splits on. This is a KEY-well-formed-
-	// ness concern of the neutral bundle, NOT format escaping — it stays in the routing core regardless of provider.
-	// (Distinct from the provider's own cell-escaping, which happens to use the same three replacements today.)
-	FString SanitizeKeySegment(const FString& In)
-	{
-		return In.Replace(TEXT("\t"), TEXT("\\t")).Replace(TEXT("\r"), TEXT("")).Replace(TEXT("\n"), TEXT("\\n"));
-	}
-
 	// Table file stem for a class: strip the QuestlineNode_ prefix, snake_case the remainder. Underscores insert only on a
 	// lower→upper boundary so acronym runs stay together. Derived display, not identity — collisions can't occur because
 	// class names are unique and the transform is injective enough for this corpus.
@@ -75,29 +66,7 @@ namespace
 	// instanced data (e.g. TMap<FGameplayTag, FQuestRewardSet> wrapping an instanced array) classifies correctly.
 	bool IsInstancedBearing(const FProperty* Prop)
 	{
-		if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
-		{
-			return Obj->HasAnyPropertyFlags(CPF_InstancedReference);
-		}
-		if (const FArrayProperty* Arr = CastField<FArrayProperty>(Prop))
-		{
-			return IsInstancedBearing(Arr->Inner);
-		}
-		if (const FMapProperty* Map = CastField<FMapProperty>(Prop))
-		{
-			return IsInstancedBearing(Map->ValueProp);
-		}
-		if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
-		{
-			for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
-			{
-				if (IsInstancedBearing(*It))
-				{
-					return true;
-				}
-			}
-		}
-		return false;
+		return IsQuestInstancedBearing(Prop);   // one definition, shared with the reader that must agree about what a child IS
 	}
 
 	void CollectEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FQuestDataBundle& Bundle);
@@ -107,52 +76,12 @@ namespace
 	// it becomes both the contains-edge qualifier and the child row's synthetic key suffix, so edge and key corroborate.
 	void RecurseInstanced(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, FQuestDataBundle& Bundle)
 	{
-		// Direct instanced object: one child row. Null slot = no row, no edge — absence is the honest representation.
-		if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
-		{
-			if (const UObject* Sub = Obj->GetObjectPropertyValue(ValuePtr))
+		ForEachQuestInstancedChild(Prop, ValuePtr, OwnerKey, PathPrefix,
+			[&Bundle, &OwnerKey](const FString& ChildKey, const FString& Path, const UObject* Child)
 			{
-				const FString ChildKey = FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix);
-				Bundle.Edges.Add({ OwnerKey, FString::Printf(TEXT("contains(%s)"), *PathPrefix), ChildKey });
-				CollectEntityRow(Sub, ChildKey, {}, Bundle);
-			}
-			return;
-		}
-		// Array: recurse each element with an [i] path segment.
-		if (const FArrayProperty* Arr = CastField<FArrayProperty>(Prop))
-		{
-			FScriptArrayHelper Helper(Arr, ValuePtr);
-			for (int32 i = 0; i < Helper.Num(); ++i)
-			{
-				RecurseInstanced(Arr->Inner, Helper.GetRawPtr(i), OwnerKey, FString::Printf(TEXT("%s[%d]"), *PathPrefix, i), Bundle);
-			}
-			return;
-		}
-		// Map: recurse each VALUE with a [KeyExport] path segment (corpus case: QuestlineRewards keyed by outcome tag).
-		if (const FMapProperty* Map = CastField<FMapProperty>(Prop))
-		{
-			FScriptMapHelper Helper(Map, ValuePtr);
-			for (FScriptMapHelper::FIterator It(Helper); It; ++It)
-			{
-				FString KeyExport;
-				Map->KeyProp->ExportTextItem_Direct(KeyExport, Helper.GetKeyPtr(It), nullptr, nullptr, PPF_None);
-				RecurseInstanced(Map->ValueProp, Helper.GetValuePtr(It), OwnerKey, FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeKeySegment(KeyExport)), Bundle);
-			}
-			return;
-		}
-		// Struct: descend into its instanced-bearing fields, extending the path with the field name. Non-instanced sibling
-		// fields are dropped (acceptable — the only corpus case is FQuestRewardSet, whose only field IS the instanced array).
-		if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
-		{
-			for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
-			{
-				if (!IsInstancedBearing(*It))
-				{
-					continue;
-				}
-				RecurseInstanced(*It, It->ContainerPtrToValuePtr<void>(ValuePtr), OwnerKey, FString::Printf(TEXT("%s.%s"), *PathPrefix, *It->GetName()), Bundle);
-			}
-		}
+				Bundle.Edges.Add({ OwnerKey, FString::Printf(TEXT("contains(%s)"), *Path), ChildKey });
+				CollectEntityRow(Child, ChildKey, {}, Bundle);   // which recurses this child's own instanced properties
+			});
 	}
 
 	// Serialize Entity into its type table (creating the table + capturing the column list on first encounter of the class)

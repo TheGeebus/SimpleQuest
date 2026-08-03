@@ -477,21 +477,7 @@ namespace
 		{
 		case EQuestDataValueKind::Empty:
 			return;   // leave the constructed default (Q6 symmetry — replaces the old CellText.IsEmpty() skip)
-/*
-		case EQuestDataValueKind::Tag:
-			if (CastField<FStructProperty>(Prop))
-			{
-				*static_cast<FGameplayTag*>(ValuePtr) = Value.Tag;   // typed; inverse of the export reinterpret read
-			}
-			return;
 
-		case EQuestDataValueKind::TagContainer:
-			if (CastField<FStructProperty>(Prop))
-			{
-				*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
-			}
-			return;
-*/
 		case EQuestDataValueKind::Tag:
 			// A cell's Kind and its destination are paired by NAME alone — a mapping binds any column onto any property and
 			// nothing type-checks the pair — so "it is a struct" does not justify the cast. Writing a tag over an unrelated
@@ -607,6 +593,32 @@ namespace
 	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
 						   TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
 
+	// Resolve a class named by a bundle cell. The file carries SHORT names deliberately — they are what a studio reads and
+	// diffs, and qualifying them would trade the format's legibility for the reader's convenience. But UClass::TryFindTypeSlow
+	// captures AND SYMBOLICATES a ten-frame stack walk for every short name it is handed (CoreUObject's deprecation nudge),
+	// which on a corpus import is a per-row cost rather than a one-off. Try the qualified form against the packages our own
+	// types live in first; anything else — an adopter's module, a Blueprint-generated "<Name>_C", a full /Game/... path —
+	// falls through to exactly the behaviour that was there before.
+	UClass* ResolveBundleClass(const FString& ClassName)
+	{
+		if (ClassName.IsEmpty()) return nullptr;
+
+		if (!FPackageName::IsShortPackageName(ClassName))
+		{
+			if (UClass* Direct = FindObject<UClass>(nullptr, *ClassName)) return Direct;
+			return LoadObject<UClass>(nullptr, *ClassName);
+		}
+
+		static const TCHAR* ScriptPackages[] = { TEXT("/Script/SimpleQuest"), TEXT("/Script/SimpleQuestEditor"), TEXT("/Script/SimpleCore") };
+		for (const TCHAR* Package : ScriptPackages)
+		{
+			if (UClass* Found = FindObject<UClass>(nullptr, *FString::Printf(TEXT("%s.%s"), Package, *ClassName))) return Found;
+		}
+
+		if (UClass* Found = UClass::TryFindTypeSlow<UClass>(ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous)) return Found;
+		return LoadObject<UClass>(nullptr, *ClassName);
+	}
+
 	// Rebuild one instanced child object from its row: NewObject<class> under Owner, restore its cells, recurse its
 	// own instanced properties. Returns the constructed object (or null if the row/class is missing).
 	UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const FQuestDataBundle& Bundle,
@@ -616,7 +628,12 @@ namespace
 		const FQuestDataRow* Row = FindChildRow(Bundle, ChildKey, ClassName);
 		if (!Row) { OutWarnings.Add(FString::Printf(TEXT("child row missing for key '%s'"), *ChildKey)); return nullptr; }
 
-		UClass* Class = UClass::TryFindTypeSlow<UClass>(ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
+		UClass* Class = ResolveBundleClass(ClassName);
+		if (!Class)
+		{
+			OutWarnings.Add(FString::Printf(TEXT("could not resolve child class '%s' for key '%s'"), *ClassName, *ChildKey));
+			return nullptr;
+		}
 		if (!Class)
 		{
 			// Blueprint-generated adapters serialize as "<Name>_C"; TryFindTypeSlow handles those too, but a fully
@@ -677,6 +694,13 @@ namespace
 						}
 				Indexed.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
 
+				// SILENCE IS NOT AN ASSERTION OF EMPTINESS. A source that declares no children for this property has said
+				// nothing about it — the same contract a missing scalar cell carries, where RestoreCell's Empty arm leaves the
+				// constructed value alone. Clearing here would make silence destructive: restoring onto an owner that already
+				// holds authored children would discard them for no reason the source ever gave. Declaring children still
+				// replaces the contents wholesale, which is the source stating what they are.
+				if (Indexed.IsEmpty()) continue;
+
 				FScriptArrayHelper Helper(Arr, Prop->ContainerPtrToValuePtr<void>(Owner));
 				Helper.EmptyValues();
 				for (const TPair<int32, FString>& Pair : Indexed)
@@ -706,6 +730,8 @@ namespace
 							if (Close > Open) MapKeyTokens.Add(R.Key.Mid(Open + 1, Close - Open - 1));
 						}
 
+				if (MapKeyTokens.IsEmpty()) continue;   // see the array case: an unmentioned property is not an empty one
+
 				FScriptMapHelper Helper(Map, Prop->ContainerPtrToValuePtr<void>(Owner));
 				Helper.EmptyValues();
 				for (const FString& KeyTok : MapKeyTokens)
@@ -733,6 +759,8 @@ namespace
 										if (R.Key.StartsWith(ArrPrefix + TEXT("[")))
 										{ FString Tok; SplitLeafSegment(R.Key, Tok); Indexed.Add({ FCString::Atoi(*Tok), R.Key }); }
 								Indexed.Sort([](const auto& A, const auto& B){ return A.Key < B.Key; });
+								
+								if (Indexed.IsEmpty()) continue;   // see the array case
 
 								FScriptArrayHelper AH(InnerArr, SIt->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Pair)));
 								AH.EmptyValues();
@@ -759,10 +787,7 @@ namespace
 	                               TMap<FString, UEdGraphNode*>& NodeByKey, TSet<FString>& Consumed, TArray<FString>& Warnings)
 	{
 		const FString ClassName = Row.Get(TEXT("class"));
-		// TryFindTypeSlow resolves a class by short name across loaded packages — robust to the class living in any
-		// module (not just SimpleQuestEditor), which the hardcoded /Script/ prefix assumed. Same resolver the reward
-		// child classes use, so node + sub-object class resolution stay uniform.
-		UClass* Class = UClass::TryFindTypeSlow<UClass>(ClassName, EFindFirstObjectOptions::EnsureIfAmbiguous);
+		UClass* Class = ResolveBundleClass(ClassName);
 		if (!Class) { Warnings.Add(FString::Printf(TEXT("unknown node class '%s' for key '%s'"), *ClassName, *Row.Key)); return nullptr; }
 
 		UEdGraphNode* Node = NewObject<UEdGraphNode>(TargetGraph, Class, NAME_None, RF_Transactional);
@@ -1466,6 +1491,11 @@ void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportM
 void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 {
 	RestoreCell(Prop, ValuePtr, Value);
+}
+
+void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+{
+	ReattachInstanced(Owner, OwnerKey, Bundle, OutConsumed, OutWarnings);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

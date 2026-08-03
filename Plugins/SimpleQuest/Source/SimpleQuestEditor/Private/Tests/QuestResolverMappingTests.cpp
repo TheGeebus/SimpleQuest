@@ -6,10 +6,12 @@
 #include "Misc/AutomationTest.h"
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Rewards/XPReward.h"
 
 
 // The mapping guard is the one place a drifted source is refused instead of silently dropping rows, so its REFUSALS are the
@@ -377,6 +379,10 @@ bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Paramete
 	TestNotNull(TEXT("QuestGuid property resolved"), GuidProp);
 	if (!GuidProp) { return false; }
 
+	// The refusal is supposed to be LOUD, so declare the warning rather than tolerating it: this both keeps the run clean
+	// and asserts the guard reported itself. A silent refusal would be a different bug, and this catches it.
+	AddExpectedMessagePlain(TEXT("a tag-container value was bound to 'QuestGuid'"), ELogVerbosity::Warning);
+
 	const FGameplayTag TestTag = FGameplayTag::RequestGameplayTag(TEXT("SimpleQuest.Outcome.Solved"), /*ErrorIfNotFound*/ false);
 	TestTrue(TEXT("Test tag resolved (an empty container would write nothing observable)"), TestTag.IsValid());
 	if (!TestTag.IsValid()) { return false; }
@@ -412,6 +418,54 @@ bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Paramete
 		// An unguarded write left a live container straddling the value; release what it allocated rather than leaking it.
 		static_cast<FGameplayTagContainer*>(ValuePtr)->~FGameplayTagContainer();
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ReattachSilenceIsNotEmptiness, "SimpleQuest.Resolver.Reattach.SilenceIsNotEmptiness", TestFlags)
+bool FQuestResolver_ReattachSilenceIsNotEmptiness::RunTest(const FString& Parameters)
+{
+	// The destructive reading of an unmentioned property. Restoring onto an owner that already holds authored children must
+	// not treat "the source never mentioned this" as "the source wants this empty" — those are different statements, and only
+	// one of them is in the data. This is latent while every owner is freshly constructed, and becomes real the moment a
+	// restore targets an asset that already exists.
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+	Owner->Rewards.Add(NewObject<UXPReward>(Owner));
+	TestEqual(TEXT("Owner starts with one authored reward"), Owner->Rewards.Num(), 1);
+
+	FQuestDataBundle Bundle;   // says nothing about this owner at all
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	QuestBundle_ReattachInstanced(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+
+	TestEqual(TEXT("A source that never mentions the property leaves its children alone"), Owner->Rewards.Num(), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ReattachDeclaredChildrenStillRebuild, "SimpleQuest.Resolver.Reattach.DeclaredChildrenRebuild", TestFlags)
+bool FQuestResolver_ReattachDeclaredChildrenStillRebuild::RunTest(const FString& Parameters)
+{
+	// The other half, and the reason the preserve rule is trustworthy: a guard that skipped too eagerly would make the test
+	// above pass by disabling reattachment entirely. A source that DOES declare children must still replace the contents.
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+	UXPReward* Original = NewObject<UXPReward>(Owner);
+	Owner->Rewards.Add(Original);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Children;
+	AddRow(Children, TEXT("n_reward/Rewards[0]"), { { TEXT("class"), TEXT("XPReward") } });
+	Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Children));
+
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	QuestBundle_ReattachInstanced(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+
+	TestEqual(TEXT("Declared children rebuild the container"), Owner->Rewards.Num(), 1);
+	if (Owner->Rewards.Num() == 1)
+	{
+		TestNotEqual(TEXT("The declared child replaced the existing instance"), Owner->Rewards[0].Get(), static_cast<UQuestRewardBase*>(Original));
+		TestTrue(TEXT("The rebuilt child has the declared class"), Owner->Rewards[0] && Owner->Rewards[0]->IsA<UXPReward>());
+	}
+	TestTrue(TEXT("The child row was consumed"), Consumed.Contains(TEXT("n_reward/Rewards[0]")));
 	return true;
 }
 

@@ -27,3 +27,6 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 
 /** Write one bundle cell into a typed property value. Exposed so the Kind-to-property pairing's type safety is testable. */
 void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);
+
+/** Rebuild an owner's instanced children from the bundle's child rows. Exposed so the declare-versus-silence rule is testable. */
+void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);

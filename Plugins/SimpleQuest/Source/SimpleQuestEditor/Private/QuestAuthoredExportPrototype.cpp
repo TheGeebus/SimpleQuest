@@ -357,6 +357,23 @@ namespace
 		}
 		return nullptr;
 	}
+
+	// Restate a row key in the studio's vocabulary. A CHILD key is "<owner>/<property path>", and only the OWNER segment is
+	// a node identity — the rest is a path we author and they never see. Restating the owner alone keeps a child addressable
+	// by the name its owner now answers to; leaving it addresses a row that no longer exists. Nesting is handled for free,
+	// because a grandchild's owner segment is still the leading path component.
+	FString RestateKey(const FString& Key, const TMap<FString, FString>& SourceKeyByGuid)
+	{
+		int32 SlashIdx;
+		if (Key.FindChar(TEXT('/'), SlashIdx))
+		{
+			const FString Owner = Key.Left(SlashIdx);
+			if (const FString* Mapped = SourceKeyByGuid.Find(Owner)) { return *Mapped + Key.Mid(SlashIdx); }
+			return Key;
+		}
+		if (const FString* Mapped = SourceKeyByGuid.Find(Key)) { return *Mapped; }
+		return Key;
+	}
 	
 	// ---- REVERSE MAPPING (restate the canonical bundle in the STUDIO's vocabulary) ---------------------------------
 	// The inverse read of the same recipe the import uses forward: our class -> their discriminator value, our property
@@ -404,19 +421,35 @@ namespace
 				const FString* MappedTo = SourceKeyByGuid.Find(Edge.To);
 				WireCellsByRow.FindOrAdd(Edge.From)
 							  .FindOrAdd(Claim->SourceColumn.ToString())
-							  .Add(MappedTo ? *MappedTo : Edge.To);
+							  .Add(RestateKey(Edge.To, SourceKeyByGuid));
 				ClaimedEdges.Add(i);
 				++WiresClaimed;
 			}
 		}
-
+		
 		int32 Restated = 0;
+		TMap<FString, FQuestDataTable> RetainedChildTables;   // instanced children keep their own tables; only node rows flatten
 		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 		{
 			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row keeps its own shape
 
+			FQuestDataTable Retained;
+			Retained.Columns = TablePair.Value.Columns;
+
 			for (FQuestDataRow& Row : TablePair.Value.Rows)
 			{
+				// An instanced CHILD row is OURS, not theirs. A studio's flat source has no way to express one, so the recipe
+				// says nothing about its vocabulary and there is nothing to translate — collapsing it into their content file
+				// would hand them rows they never wrote, with columns that pollute the header. Its KEY still has to follow its
+				// owner into the studio's namespace or it addresses a row that no longer exists, but the row itself stays
+				// canonical, in its own table.
+				if (Row.Key.Contains(TEXT("/")))
+				{
+					Row.Key = RestateKey(Row.Key, SourceKeyByGuid);
+					Retained.Rows.Add(MoveTemp(Row));
+					continue;
+				}
+				
 				// A. class cell -> their discriminator value. Our "class" marker is not part of their vocabulary.
 				const FString ClassName = Row.Get(TEXT("class"));
 				if (const FString* Value = ValueByClassName.Find(ClassName))
@@ -459,11 +492,9 @@ namespace
 				}
 
 				// D. Their key, not our GUID. Import preserved the studio's row key on the node when it wasn't already one of
-				//    our GUIDs; restoring it is what makes the file readable as a diff against their source.
-				if (const FString* SourceKey = SourceKeyByGuid.Find(Row.Key))
-				{
-					Row.Key = *SourceKey;
-				}
+				//    our GUIDs; restoring it is what makes the file readable as a diff against their source. A CHILD key
+				//    carries its owner as a leading path segment, so it goes through the same helper rather than a bare lookup.
+				Row.Key = RestateKey(Row.Key, SourceKeyByGuid);
 
 				// E. The LEVEL a row sits in, restated the same way. The graph cell names its owning container by OUR exported
 				//     GUID, while D has just renamed that container's row to the studio's key — so left alone, a nested file
@@ -493,6 +524,8 @@ namespace
 				Flat.Rows.Add(MoveTemp(Row));
 				++Restated;
 			}
+
+			if (!Retained.Rows.IsEmpty()) { RetainedChildTables.Add(TablePair.Key, MoveTemp(Retained)); }
 		}
 
 		// INVARIANT — every relationship taken out of the edge table must have become a cell. If a claimed edge's from-row
@@ -565,13 +598,17 @@ namespace
 		Bundle.TablesByType.Empty();
 		if (bHasSelf) { Bundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(SelfTable)); }
 		Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Flat));
-
+		for (TPair<FString, FQuestDataTable>& Child : RetainedChildTables)
+		{
+			Bundle.TablesByType.Add(Child.Key, MoveTemp(Child.Value));
+		}
+		
 		// 5. Edge endpoints reference rows by key, so they must follow the same substitution — otherwise the wiring points at
 		//    GUIDs that no longer appear in any row.
 		for (FQuestDataEdge& Edge : Bundle.Edges)
 		{
-			if (const FString* From = SourceKeyByGuid.Find(Edge.From)) { Edge.From = *From; }
-			if (const FString* To   = SourceKeyByGuid.Find(Edge.To))   { Edge.To   = *To; }
+			Edge.From = RestateKey(Edge.From, SourceKeyByGuid);
+			Edge.To   = RestateKey(Edge.To,   SourceKeyByGuid);   // a contains edge's target is a CHILD key, not a bare GUID
 		}
 
 		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "

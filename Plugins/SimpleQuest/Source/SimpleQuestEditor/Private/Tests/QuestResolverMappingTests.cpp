@@ -469,4 +469,65 @@ bool FQuestResolver_ReattachDeclaredChildrenStillRebuild::RunTest(const FString&
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RoundTripInstancedChildKeys, "SimpleQuest.Resolver.RoundTrip.InstancedChildKeys", TestFlags)
+bool FQuestResolver_RoundTripInstancedChildKeys::RunTest(const FString& Parameters)
+{
+	// The same partial-restatement shape as nested levels, one layer down. A row's KEY and everything that REFERS to that key
+	// have to move into the studio's vocabulary together. An instanced child is referred to twice — by the owner segment of
+	// its own key, and by the contains edge that reaches it — so restating only the owner's row splits both.
+	UQuestImportMapping* M = MakeMapping();
+	AddKind(*M, UQuestlineNode_Reward::StaticClass(), { TEXT("loot") });
+
+	const FString OwnerGuid = TEXT("4D88DDB0450CAE0BE0549F9F56892550");
+	const FString ChildKey  = OwnerGuid + TEXT("/Rewards[0]");
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, *OwnerGuid, { { TEXT("graph"), TEXT("root") }, { TEXT("class"), TEXT("QuestlineNode_Reward") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	FQuestDataTable Children;
+	AddRow(Children, *ChildKey, { { TEXT("class"), TEXT("XPReward") } });
+	Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Children));
+
+	Bundle.Edges.Add({ OwnerGuid, TEXT("contains(Rewards[0])"), ChildKey });
+
+	TMap<FString, FString> SourceKeyByGuid;
+	SourceKeyByGuid.Add(OwnerGuid, TEXT("give_loot"));
+
+	TArray<FString> Warnings;
+	QuestBundle_ApplyReverseMapping(Bundle, *M, SourceKeyByGuid, {}, Warnings);
+
+	auto FindRow = [&Bundle](const FString& Key) -> const FQuestDataRow*
+	{
+		for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+		{
+			for (const FQuestDataRow& Row : Table.Value.Rows) { if (Row.Key == Key) return &Row; }
+		}
+		return nullptr;
+	};
+
+	TestNotNull(TEXT("The owner row was restated to the studio key"), FindRow(TEXT("give_loot")));
+	TestNotNull(TEXT("The child key's owner segment followed it"), FindRow(TEXT("give_loot/Rewards[0]")));
+
+	// A child row is ours, not theirs — it must not be collapsed into the content file the studio authored.
+	const FQuestDataTable* ContentTable = Bundle.TablesByType.Find(TEXT("content"));
+	TestNotNull(TEXT("A content table exists"), ContentTable);
+	if (ContentTable)
+	{
+		bool bChildLeaked = false;
+		for (const FQuestDataRow& Row : ContentTable->Rows) { if (Row.Key.Contains(TEXT("/"))) { bChildLeaked = true; break; } }
+		TestFalse(TEXT("A child row leaked into the studio's content table"), bChildLeaked);
+	}
+
+	// The invariant, stated directly: every edge endpoint must name a row that exists. This is what actually breaks on a
+	// partial restatement, and it keeps the test honest if the mechanism is ever moved or reimplemented.
+	for (const FQuestDataEdge& Edge : Bundle.Edges)
+	{
+		TestNotNull(*FString::Printf(TEXT("Edge from-endpoint '%s' names a row"), *Edge.From), FindRow(Edge.From));
+		TestNotNull(*FString::Printf(TEXT("Edge to-endpoint '%s' names a row"), *Edge.To), FindRow(Edge.To));
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

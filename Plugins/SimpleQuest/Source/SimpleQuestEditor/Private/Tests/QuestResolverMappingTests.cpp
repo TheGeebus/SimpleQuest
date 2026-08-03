@@ -909,4 +909,35 @@ bool FQuestResolver_EdgesCompareAcrossNamespaces::RunTest(const FString& Paramet
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_PlanRefusesUndeliverableRows, "SimpleQuest.Resolver.Plan.RefusesUndeliverable", TestFlags)
+bool FQuestResolver_PlanRefusesUndeliverableRows::RunTest(const FString& Parameters)
+{
+	// Resolving a deliberately-bogus class exhausts every lookup before refusing, and the engine narrates each miss. Declare
+	// both so the run stays clean AND the exhaustion is asserted — a refusal that skipped the lookup would be a different bug.
+	AddExpectedMessagePlain(TEXT("Short type name \"NoSuchNodeClass\" provided for TryFindType"), EAutomationExpectedMessageFlags::Contains, 1);
+	AddExpectedMessagePlain(TEXT("Failed to find object 'Class None.NoSuchNodeClass'"), EAutomationExpectedMessageFlags::Contains, 1);
+	
+	// A plan is a promise the apply step keeps. Promising to CREATE a node whose class does not resolve, or one whose level
+	// nothing declares, is a promise the spawn path refuses — so the plan would report work that silently never happens, and
+	// a designer reading it would believe their source landed. Refuse at planning time, where it is still free.
+	UQuestlineGraph* Graph = NewObject<UQuestlineGraph>(GetTransientPackage());
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("n_bogus"),  { { TEXT("graph"), TEXT("root") },        { TEXT("class"), TEXT("NoSuchNodeClass") } });
+	AddRow(Content, TEXT("n_orphan"), { { TEXT("graph"), TEXT("no_such_box") }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+
+	TestEqual(TEXT("Neither undeliverable row is promised as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 0);
+	TestEqual(TEXT("Both are refused instead"), Plan.Refusals.Num(), 2);
+	TestFalse(TEXT("A plan carrying refusals is not a no-op"), Plan.IsNoOp());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

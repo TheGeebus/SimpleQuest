@@ -1332,6 +1332,25 @@ namespace
 			const UQuestlineNodeBase* Node = FoundGuid ? NodeByGuid.FindRef(*FoundGuid) : nullptr;
 			if (!Node)
 			{
+				// Only promise what the spawn path can deliver. A class no loaded module provides, or a level nothing declares,
+				// both make SpawnNodeFromRow / ImportGraphLevel skip the row — so planning a CREATE would report work that
+				// silently never happens, which is worse than reporting nothing.
+				if (!ResolveBundleClass(Entry.ClassName))
+				{
+					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' names class '%s', which no loaded module provides — "
+						"it cannot be created"), *Row.Key, *Entry.ClassName));
+					continue;
+				}
+				const FString Level = ResolveQuestLevelToGuid(Entry.GraphCell, GuidByKey);
+				const bool bLevelExists = Level.IsEmpty() || Level == TEXT("root")
+					|| GuidByKey.Contains(Level) || NodeRowsByKey.Contains(Entry.GraphCell);
+				if (!bLevelExists)
+				{
+					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' sits in level '%s', which no node or row declares — "
+						"it cannot be reached"), *Row.Key, *Entry.GraphCell));
+					continue;
+				}
+
 				Entry.Action = EQuestNodePlanAction::Create;
 				OutPlan.Entries.Add(MoveTemp(Entry));
 				continue;
@@ -1419,6 +1438,7 @@ namespace
 
 		for (const FString& Edge : Plan.RemovedEdges) { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE-] %s"), *Edge); }
 		for (const FString& Edge : Plan.AddedEdges)   { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE+] %s"), *Edge); }
+		for (const FString& R : Plan.Refusals) { UE_LOG(LogSimpleQuest, Warning, TEXT("  [REFUSED] %s"), *R); }
 
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{

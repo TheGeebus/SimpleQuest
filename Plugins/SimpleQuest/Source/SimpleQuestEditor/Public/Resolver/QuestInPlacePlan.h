@@ -61,6 +61,9 @@ struct FQuestInPlacePlan
 	/** Keys that name more than one node. Those rows are not planned and those nodes are not orphaned — the caller refuses. */
 	TArray<FString> AmbiguousKeys;
 
+	/** Rows the apply step could not deliver — an unresolvable class, or a level nothing declares. Reported, never planned. */
+	TArray<FString> Refusals;
+
 	/** Nodes outside every level the source declares. Counted, never entered: a narrow source must not orphan the whole asset. */
 	int32 UntouchedNodeCount = 0;
 
@@ -90,6 +93,6 @@ struct FQuestInPlacePlan
 	bool IsNoOp() const
 	{
 		return CountOf(EQuestNodePlanAction::Create) == 0 && CountOf(EQuestNodePlanAction::Orphan) == 0
-			&& ChangedNodeCount() == 0 && AddedEdges.IsEmpty() && RemovedEdges.IsEmpty();
+			&& ChangedNodeCount() == 0 && AddedEdges.IsEmpty() && RemovedEdges.IsEmpty() && Refusals.IsEmpty();
 	}
 };

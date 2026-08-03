@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 
+struct FQuestNodePlanEntry;
 struct FQuestDataRow;
 struct FQuestDataBundle;
 struct FQuestDataValue;
@@ -42,4 +43,7 @@ FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, cons
 
 /** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
 void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan);
+
+/** Compare an owner's instanced children against the rows describing them, recursively. Appends to Entry.Changes. */
+void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan);
 

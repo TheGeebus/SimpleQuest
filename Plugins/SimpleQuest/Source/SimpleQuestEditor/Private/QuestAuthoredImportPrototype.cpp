@@ -1186,6 +1186,81 @@ namespace
 			Entry.Changes.Add(MoveTemp(Change));
 		}
 	}
+	// True when the bundle describes anything under this property — a row keyed exactly "<owner>/<prop>" (a direct instanced
+	// object) or "<owner>/<prop>[..." (a container). This is the SAME rule the restore path applies before it touches a
+	// property: a source declaring no children has said nothing about it, so the property is left alone. The plan has to
+	// agree, or it describes an apply that will not happen.
+	bool BundleDeclaresChildrenUnder(const FQuestDataBundle& Bundle, const FString& PropPrefix)
+	{
+		const FString Indexed = PropPrefix + TEXT("[");
+		for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+		{
+			for (const FQuestDataRow& Row : Table.Value.Rows)
+			{
+				if (Row.Key == PropPrefix || Row.Key.StartsWith(Indexed)) return true;
+			}
+		}
+		return false;
+	}
+
+	// Compare an owner's instanced children against the rows describing them. The walk that finds the live children is the
+	// SAME one the writer uses to name them, so a row and the object it describes are matched by construction rather than by
+	// a second guess at the naming rule — which is exactly where the two directions have drifted before.
+	void DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
+	                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
+	{
+		for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
+		{
+			FProperty* Prop = *It;
+			// The same filter that decided what became a child row on the way out.
+			if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
+			if (!IsQuestInstancedBearing(Prop)) continue;
+
+			const FString PropPrefix = FString::Printf(TEXT("%s/%s"), *OwnerKey, *Prop->GetName());
+			if (!BundleDeclaresChildrenUnder(Bundle, PropPrefix)) continue;   // silence is not emptiness
+
+			TSet<FString> LiveKeys;
+			ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
+				[&](const FString& ChildKey, const FString& Path, const UObject* Child)
+				{
+					LiveKeys.Add(ChildKey);
+
+					FString ChildClass;
+					const FQuestDataRow* ChildRow = FindChildRow(Bundle, ChildKey, ChildClass);
+					if (!ChildRow)
+					{
+						// The source DOES describe this property's contents, and this child is not among them.
+						FQuestPropertyChange Change;
+						Change.Property     = Path;
+						Change.CurrentText  = Child->GetClass()->GetName();
+						Change.IncomingText = TEXT("<removed>");
+						Entry.Changes.Add(MoveTemp(Change));
+						return;
+					}
+					DiffObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan);
+					DiffInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan);   // a child can itself nest
+				});
+
+			// Rows under this property with no live counterpart are additions.
+			const FString Indexed = PropPrefix + TEXT("[");
+			for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+			{
+				for (const FQuestDataRow& Row : Table.Value.Rows)
+				{
+					if (Row.Key != PropPrefix && !Row.Key.StartsWith(Indexed)) continue;
+					if (LiveKeys.Contains(Row.Key)) continue;
+					// DIRECT children only — a grandchild's key carries a further '/' segment, and belongs to its own owner.
+					if (Row.Key.RightChop(OwnerKey.Len() + 1).Contains(TEXT("/"))) continue;
+
+					FQuestPropertyChange Change;
+					Change.Property     = Row.Key.RightChop(OwnerKey.Len() + 1);
+					Change.CurrentText  = TEXT("<absent>");
+					Change.IncomingText = Row.Get(TEXT("class"));
+					Entry.Changes.Add(MoveTemp(Change));
+				}
+			}
+		}
+	}
 
 	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle,
 	                 const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings,
@@ -1212,6 +1287,7 @@ namespace
 				if (!Bundle.bSelfRowSynthesized)
 				{
 					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan);
+					DiffInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan);
 				}
 				OutPlan.Entries.Add(MoveTemp(SelfEntry));
 			}
@@ -1274,6 +1350,7 @@ namespace
 			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (IncomingLevel != CurrentLevel);
 
 			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan);
+			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan);
 
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
@@ -1609,6 +1686,11 @@ FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, cons
 void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan)
 {
 	PlanInPlace(Target, Bundle, NodeRowsByKey, ReadWarnings, OutPlan);
+}
+
+void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
+{
+	DiffInstancedChildren(Owner, OwnerKey, Bundle, Entry, OutPlan);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

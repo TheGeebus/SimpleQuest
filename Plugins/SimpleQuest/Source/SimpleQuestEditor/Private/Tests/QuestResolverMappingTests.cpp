@@ -817,4 +817,58 @@ bool FQuestResolver_SynthesizedSelfRowAssertsNothing::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_InstancedChildrenAreDiffed, "SimpleQuest.Resolver.Plan.InstancedChildren", TestFlags)
+bool FQuestResolver_InstancedChildrenAreDiffed::RunTest(const FString& Parameters)
+{
+	// A reward is authored data living in its OWN row, not in a cell of its owner's. A plan that walks only a node's own
+	// cells reports "nothing would change" while a re-import is about to rewrite every reward the questline grants — the
+	// single most valuable thing an in-place preview could tell a designer, and the one it was silent about.
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+	UXPReward* Reward = NewObject<UXPReward>(Owner);
+	Owner->Rewards.Add(Reward);
+
+	FProperty* AmountProp = UXPReward::StaticClass()->FindPropertyByName(TEXT("Amount"));
+	TestNotNull(TEXT("Amount property resolved"), AmountProp);
+	if (!AmountProp) { return false; }
+	AmountProp->ImportText_Direct(TEXT("10"), AmountProp->ContainerPtrToValuePtr<void>(Reward), nullptr, PPF_None);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Children;
+	AddRow(Children, TEXT("n_reward/Rewards[0]"), { { TEXT("class"), TEXT("XPReward") }, { TEXT("Amount"), TEXT("99") } });
+	Bundle.TablesByType.Add(TEXT("xpreward"), MoveTemp(Children));
+
+	FQuestNodePlanEntry Entry;
+	FQuestInPlacePlan Plan;
+	QuestBundle_DiffInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
+
+	TestEqual(TEXT("The reward's changed field is reported"), Entry.Changes.Num(), 1);
+	if (Entry.Changes.Num() == 1)
+	{
+		// The path is what makes a nested change actionable — "Amount changed" on a node with four rewards says nothing.
+		TestEqual(TEXT("...under its path"), Entry.Changes[0].Property, FString(TEXT("Rewards[0].Amount")));
+		TestEqual(TEXT("...reading the incoming value"), Entry.Changes[0].IncomingText, FString(TEXT("99")));
+		TestEqual(TEXT("...and the current one"), Entry.Changes[0].CurrentText, FString(TEXT("10")));
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_SilentSourceLeavesChildrenAlone, "SimpleQuest.Resolver.Plan.SilentChildren", TestFlags)
+bool FQuestResolver_SilentSourceLeavesChildrenAlone::RunTest(const FString& Parameters)
+{
+	// The plan must agree with the restore path about silence, or it describes an apply that will not happen. The restore
+	// path skips a property the bundle declares no children for; a plan reporting those rewards as removals would tell a
+	// designer their data is about to vanish when nothing of the sort is pending.
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+	Owner->Rewards.Add(NewObject<UXPReward>(Owner));
+
+	FQuestDataBundle Bundle;   // says nothing about this owner at all
+
+	FQuestNodePlanEntry Entry;
+	FQuestInPlacePlan Plan;
+	QuestBundle_DiffInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
+
+	TestEqual(TEXT("A source that never mentions the property proposes no change"), Entry.Changes.Num(), 0);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

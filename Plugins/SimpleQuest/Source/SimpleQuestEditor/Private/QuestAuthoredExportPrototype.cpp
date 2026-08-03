@@ -153,45 +153,12 @@ namespace
 		Table.Rows.Add(MoveTemp(Row));
 	}
 
-	// Wire-edge verb by source pin category. Every edge is written output→input (signal-flow-forward) and the verbs read
-	// true in that direction — "FactTag feeds-prereq Chapter_1" means the fact leaf feeds the gate's prereq input.
-	FString EdgeVerb(FName PinCategory)
-	{
-		if (PinCategory == TEXT("QuestActivation"))   return TEXT("activates");
-		if (PinCategory == TEXT("QuestOutcome"))      return TEXT("outcome");
-		if (PinCategory == TEXT("QuestPrerequisite")) return TEXT("feeds-prereq");
-		// Output-side category is past-tense "QuestDeactivated" (the input side's "QuestDeactivate" never appears
-		// as an edge source — sources are always output pins).
-		if (PinCategory == TEXT("QuestDeactivated"))   return TEXT("deactivates");
-		return FString::Printf(TEXT("wire:%s"), *PinCategory.ToString());
-	}
-
 	// Emit knot-collapsed wire edges for one node: every output pin's terminals via the traversal policy's forward walk
 	// (works for any output pin — the zero-knot case degenerates to the direct link). Fresh Visited per source pin: the
 	// walker's visited set is node-granular, so sharing one across pins would suppress legitimate edges from later pins.
 	void CollectEdgesForNode(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle)
 	{
-		const FString FromKey = NodeKeyOf(Node);
-		for (const UEdGraphPin* Pin : Node->Pins)
-		{
-			if (!Pin || Pin->Direction != EGPD_Output)
-			{
-				continue;
-			}
-			TArray<const UEdGraphPin*> Terminals;
-			TSet<const UEdGraphNode*> Visited;
-			Policy.CollectDownstreamTerminalInputs(Pin, Terminals, Visited);
-			for (const UEdGraphPin* Terminal : Terminals)
-			{
-				const UQuestlineNodeBase* ToNode = Cast<UQuestlineNodeBase>(Terminal->GetOwningNode());
-				if (!ToNode)
-				{
-					continue;   // non-questline node downstream — shouldn't occur; skip defensively
-				}
-				const FString Type = FString::Printf(TEXT("%s(%s)"), *EdgeVerb(Pin->PinType.PinCategory), *Pin->PinName.ToString());
-				Bundle.Edges.Add({ FromKey, Type, NodeKeyOf(ToNode) });
-			}
-		}
+		CollectQuestWireEdges(Node, Policy, Bundle.Edges);
 	}
 
 	// Recursively collect one graph level: entity rows + wire edges for every non-knot questline node (content, utility,

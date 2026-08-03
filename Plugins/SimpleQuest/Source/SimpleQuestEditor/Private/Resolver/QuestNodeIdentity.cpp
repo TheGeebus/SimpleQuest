@@ -5,6 +5,8 @@
 
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
+#include "EdGraph/EdGraphPin.h"
+#include "Graph/QuestlineGraphSchema.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "UObject/UnrealType.h"
@@ -170,3 +172,44 @@ void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, con
 		}
 	}
 }
+
+FString QuestEdgeVerb(FName PinCategory)
+{
+	if (PinCategory == TEXT("QuestActivation"))   return TEXT("activates");
+	if (PinCategory == TEXT("QuestOutcome"))      return TEXT("outcome");
+	if (PinCategory == TEXT("QuestPrerequisite")) return TEXT("feeds-prereq");
+	// Output-side category is past-tense "QuestDeactivated" (the input side's "QuestDeactivate" never appears as an edge
+	// source — sources are always output pins).
+	if (PinCategory == TEXT("QuestDeactivated"))  return TEXT("deactivates");
+	return FString::Printf(TEXT("wire:%s"), *PinCategory.ToString());
+}
+
+void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy,
+						   TArray<FQuestDataEdge>& OutEdges)
+{
+	if (!Node) return;
+	const FString FromKey = Node->QuestGuid.ToString(EGuidFormats::Digits);
+	for (const UEdGraphPin* Pin : Node->Pins)
+	{
+		if (!Pin || Pin->Direction != EGPD_Output)
+		{
+			continue;
+		}
+		// Fresh Visited per source pin: the walker's visited set is node-granular, so sharing one across pins would
+		// suppress legitimate edges from later pins.
+		TArray<const UEdGraphPin*> Terminals;
+		TSet<const UEdGraphNode*> Visited;
+		Policy.CollectDownstreamTerminalInputs(Pin, Terminals, Visited);
+		for (const UEdGraphPin* Terminal : Terminals)
+		{
+			const UQuestlineNodeBase* ToNode = Cast<UQuestlineNodeBase>(Terminal->GetOwningNode());
+			if (!ToNode)
+			{
+				continue;   // non-questline node downstream — shouldn't occur; skip defensively
+			}
+			const FString Type = FString::Printf(TEXT("%s(%s)"), *QuestEdgeVerb(Pin->PinType.PinCategory), *Pin->PinName.ToString());
+			OutEdges.Add({ FromKey, Type, ToNode->QuestGuid.ToString(EGuidFormats::Digits) });
+		}
+	}
+}
+

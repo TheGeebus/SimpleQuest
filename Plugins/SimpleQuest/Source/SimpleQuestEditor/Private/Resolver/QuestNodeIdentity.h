@@ -9,9 +9,11 @@
 // key refers to.
 
 #include "CoreMinimal.h"
+#include "Resolver/QuestDataBundle.h"
 #include "Templates/Function.h"
 
 class FProperty;
+class FQuestlineGraphTraversalPolicy;
 class UObject;
 class UEdGraph;
 class UQuestlineNodeBase;
@@ -69,4 +71,26 @@ void ForEachQuestInstancedChild(const FProperty* Prop,
 	const FString& OwnerKey,
 	const FString& PathPrefix,
 	TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit);
+
+/** Wire-edge verb for a source pin category. Every edge is written output->input, and the verbs read true in that direction. */
+FString QuestEdgeVerb(FName PinCategory);
+
+/**
+ * Knot-collapsed wire edges leaving one node, appended to OutEdges. Every output pin's terminals via the traversal policy's
+ * forward walk, so a chain of reroutes reads as the single edge it means.
+ * Shared for the same reason the child walk is: the reader that wants to know how an asset is CURRENTLY wired must derive
+ * edges exactly as the writer does, or the two disagree about wiring that never changed.
+ */
+void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges);
+
+/** Wire-edge verb for a source pin category. Every edge is written output->input, and the verbs read true in that direction. */
+FString QuestEdgeVerb(FName PinCategory);
+
+/**
+ * Knot-collapsed wire edges leaving one node, appended to OutEdges. Every output pin's terminals via the traversal policy's
+ * forward walk, so a chain of reroutes reads as the single edge it means.
+ * Shared for the same reason the child walk is: the reader that wants to know how an asset is CURRENTLY wired must derive
+ * edges exactly as the writer does, or the two disagree about wiring that never changed.
+ */
+void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges);
 

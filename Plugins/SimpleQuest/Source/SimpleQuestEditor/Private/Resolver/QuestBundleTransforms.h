@@ -30,3 +30,7 @@ void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuest
 
 /** Rebuild an owner's instanced children from the bundle's child rows. Exposed so the declare-versus-silence rule is testable. */
 void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
+
+/** Synthesize prerequisite combinators from row-adjacent convention columns, then strip those cells. */
+void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings);
+

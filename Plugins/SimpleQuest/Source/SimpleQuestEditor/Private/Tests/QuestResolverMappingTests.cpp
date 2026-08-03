@@ -3,7 +3,10 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 #include "Nodes/QuestlineNode_Exit.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Utility/QuestlineNode_Reward.h"
@@ -11,6 +14,7 @@
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
 
 
@@ -527,6 +531,121 @@ bool FQuestResolver_RoundTripInstancedChildKeys::RunTest(const FString& Paramete
 		TestNotNull(*FString::Printf(TEXT("Edge from-endpoint '%s' names a row"), *Edge.From), FindRow(Edge.From));
 		TestNotNull(*FString::Printf(TEXT("Edge to-endpoint '%s' names a row"), *Edge.To), FindRow(Edge.To));
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_BlankColumnIsDeclared, "SimpleQuest.Resolver.Read.BlankColumnIsDeclared", TestFlags)
+bool FQuestResolver_BlankColumnIsDeclared::RunTest(const FString& Parameters)
+{
+	// The distinction the whole absent-field question rests on. A column the source DECLARES and leaves blank is a positive
+	// statement — "this field is at its default" — while a column the source never had is silence. Dropping blank cells at the
+	// read arm collapses the two, so nothing downstream can tell a designer CLEARING a field from a narrow source that never
+	// mentioned it. The declaration has to ride on the ROW, because that is the only thing every later transform carries.
+	const FString TempDir = FPaths::ProjectIntermediateDir() / TEXT("QuestResolverTests") / TEXT("BlankColumnIsDeclared");
+	IFileManager::Get().DeleteDirectory(*TempDir, /*RequireExists*/ false, /*Tree*/ true);
+	IFileManager::Get().MakeDirectory(*TempDir, /*Tree*/ true);
+
+	// The header declares NodeLabel and the second row leaves it blank. Nothing declares Description at all.
+	const FString Tsv =
+		TEXT("key\tgraph\tclass\tNodeLabel\n")
+		TEXT("n_a\troot\tQuestlineNode_Step\tGo There\n")
+		TEXT("n_b\troot\tQuestlineNode_Step\t\n");
+	TestTrue(TEXT("Fixture written"),
+		FFileHelper::SaveStringToFile(Tsv, *(TempDir / TEXT("content.tsv")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+	FQuestDataBundle Bundle;
+	FTsvQuestDataFormat Format;
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(TempDir, Bundle));
+
+	const FQuestDataTable* Content = Bundle.TablesByType.Find(TEXT("content"));
+	TestNotNull(TEXT("Content table parsed"), Content);
+	if (Content)
+	{
+		const FQuestDataRow* Blank = nullptr;
+		const FQuestDataRow* Filled = nullptr;
+		for (const FQuestDataRow& Row : Content->Rows)
+		{
+			if (Row.Key == TEXT("n_b")) { Blank = &Row; }
+			if (Row.Key == TEXT("n_a")) { Filled = &Row; }
+		}
+		TestNotNull(TEXT("Blank-cell row parsed"), Blank);
+		TestNotNull(TEXT("Filled-cell row parsed"), Filled);
+
+		if (Filled)
+		{
+			// Regression guard: a column that carries a value must still arrive exactly as it did before.
+			const FQuestDataValue* V = Filled->Cells.Find(TEXT("NodeLabel"));
+			TestNotNull(TEXT("A populated column still produces a cell"), V);
+			if (V) { TestEqual(TEXT("Its value survives"), V->StringForm, FString(TEXT("Go There"))); }
+		}
+		if (Blank)
+		{
+			const FQuestDataValue* V = Blank->Cells.Find(TEXT("NodeLabel"));
+			TestNotNull(TEXT("A declared-but-blank column produces a cell"), V);
+			if (V) { TestTrue(TEXT("That cell is Empty-kinded"), V->Kind == EQuestDataValueKind::Empty); }
+
+			// The other half, and the reason this is not just "always add a cell": silence must stay silence.
+			TestFalse(TEXT("An undeclared column produces no cell"), Blank->Cells.Contains(TEXT("Description")));
+		}
+	}
+
+	IFileManager::Get().DeleteDirectory(*TempDir, /*RequireExists*/ false, /*Tree*/ true);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_BlankGateColumnsAreSilent, "SimpleQuest.Resolver.Read.BlankGateColumnsAreSilent", TestFlags)
+bool FQuestResolver_BlankGateColumnsAreSilent::RunTest(const FString& Parameters)
+{
+	// A rectangular source declares every gate column it uses ANYWHERE, so a row that uses one leaves the others blank — that
+	// is the ordinary shape, not an authoring error. Once a declared-but-blank column carries a cell, the convention scan
+	// starts finding those blanks, and the conflict branch runs BEFORE the operand check: without a guard at the lookup, a row
+	// legitimately gated by one convention gets accused of double-declaring a prerequisite it never wrote.
+	const FString TempDir = FPaths::ProjectIntermediateDir() / TEXT("QuestResolverTests") / TEXT("BlankGateColumns");
+	IFileManager::Get().DeleteDirectory(*TempDir, /*RequireExists*/ false, /*Tree*/ true);
+	IFileManager::Get().MakeDirectory(*TempDir, /*Tree*/ true);
+
+	const FString Tsv =
+		TEXT("key\tgraph\tclass\tunlock_after\tunlock_any\tunlock_unless\n")
+		TEXT("n_a\troot\tQuestlineNode_Step\t\t\t\n")
+		TEXT("n_b\troot\tQuestlineNode_Step\t\t\t\n")
+		TEXT("n_x\troot\tQuestlineNode_Step\t(n_a,n_b)\t\t\n")
+		TEXT("n_y\troot\tQuestlineNode_Step\t\t(n_a,n_b)\t\n")
+		TEXT("n_z\troot\tQuestlineNode_Step\t\t\tn_a\n");
+	TestTrue(TEXT("Fixture written"),
+		FFileHelper::SaveStringToFile(Tsv, *(TempDir / TEXT("content.tsv")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+	FQuestDataBundle Bundle;
+	FTsvQuestDataFormat Format;
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(TempDir, Bundle));
+
+	auto CountRows = [&Bundle]()
+	{
+		int32 N = 0;
+		for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType) { N += Table.Value.Rows.Num(); }
+		return N;
+	};
+	const int32 RowsBefore = CountRows();
+
+	TArray<FString> Warnings;
+	QuestBundle_ApplyFlowConventions(Bundle, Warnings);
+
+	// The regression: one gate per row, three rows gated, and NOTHING to say about the blanks.
+	for (const FString& W : Warnings) { AddInfo(FString::Printf(TEXT("unexpected warning: %s"), *W)); }
+	TestEqual(TEXT("A blank gate column produces no warning"), Warnings.Num(), 0);
+	TestEqual(TEXT("One combinator synthesized per gated row"), CountRows(), RowsBefore + 3);
+
+	// The gate columns are studio vocabulary, never properties — they must be stripped whether used or blank.
+	for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
+	{
+		for (const FQuestDataRow& Row : Table.Value.Rows)
+		{
+			TestFalse(*FString::Printf(TEXT("unlock_after stripped from '%s'"), *Row.Key), Row.Cells.Contains(TEXT("unlock_after")));
+			TestFalse(*FString::Printf(TEXT("unlock_any stripped from '%s'"), *Row.Key), Row.Cells.Contains(TEXT("unlock_any")));
+			TestFalse(*FString::Printf(TEXT("unlock_unless stripped from '%s'"), *Row.Key), Row.Cells.Contains(TEXT("unlock_unless")));
+		}
+	}
+
+	IFileManager::Get().DeleteDirectory(*TempDir, /*RequireExists*/ false, /*Tree*/ true);
 	return true;
 }
 

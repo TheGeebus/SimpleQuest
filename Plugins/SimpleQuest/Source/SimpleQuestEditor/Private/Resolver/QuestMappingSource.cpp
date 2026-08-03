@@ -300,9 +300,11 @@ namespace
 				const void* ValuePtr   = It->ContainerPtrToValuePtr<void>(RowPair.Value);
 				const void* DefaultPtr = It->ContainerPtrToValuePtr<void>(DefaultRow.GetStructMemory());
 
+				// A DataTable row HAS a value for every field of its struct — absence is not expressible here at all. An
+				// at-default field therefore yields an Empty cell that is still PRESENT: the source declared it and left it
+				// at its default. Dropping it would make a typed source look narrower than it is, and would erase exactly the
+				// distinction a re-import needs to tell "the author cleared this" from "the source never mentioned it".
 				FQuestDataValue V = BuildQuestDataValue(*It, ValuePtr, DefaultPtr);
-				if (V.Kind == EQuestDataValueKind::Empty) continue;   // at-default == absent, no cell
-
 				Row.Cells.Add(RowStruct.GetAuthoredNameForField(*It), MoveTemp(V));
 			}
 			OutContent.Rows.Add(MoveTemp(Row));

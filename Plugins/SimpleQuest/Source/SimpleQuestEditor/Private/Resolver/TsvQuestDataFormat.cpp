@@ -121,13 +121,21 @@ namespace
 			{
 				const int32 FieldIdx = c + 1;   // +1 for the leading key column
 				const FString Cell = Fields.IsValidIndex(FieldIdx) ? Unsanitize(Fields[FieldIdx]) : FString();
+
+				// A column the HEADER declares still gets a cell on a row that leaves it blank — an Empty one. That is a
+				// positive statement ("this field is at its default"), and it is not the same as a column the source never
+				// declared, which still produces no cell at all. Consumers that only want the value are unaffected: Get()
+				// reads "" either way, and the restore path's Empty arm leaves the destination property untouched.
+				FQuestDataValue V;
 				if (Cell.IsEmpty())
 				{
-					continue;   // absent/empty cell == Kind::Empty (routing core leaves the property at its default)
+					V.Kind = EQuestDataValueKind::Empty;
 				}
-				FQuestDataValue V;
-				V.Kind = EQuestDataValueKind::String;   // TSV is all-text: produce generic String; the property types it downstream
-				V.StringForm = Cell;
+				else
+				{
+					V.Kind = EQuestDataValueKind::String;   // TSV is all-text: produce generic String; the property types it downstream
+					V.StringForm = Cell;
+				}
 				Row.Cells.Add(OutTable.Columns[c], V);
 			}
 			OutRows.Add(MoveTemp(Row));

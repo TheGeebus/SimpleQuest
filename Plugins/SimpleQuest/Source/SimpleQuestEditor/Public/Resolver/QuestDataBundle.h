@@ -11,9 +11,12 @@
 #include "CoreMinimal.h"
 #include "QuestDataValue.h"
 
-// One entity row: its key + structured cells by column name. A column may be ABSENT (== Kind::Empty / a value left at
-// its CDO default); consumers treat absent and present-Empty identically. Get() returns a cell's plain-string value —
-// the convenience the routing core uses for structural columns (class / graph / QuestlineID), which are always string cells.
+// One entity row: its key + structured cells by column name. ABSENT and present-Kind::Empty are DIFFERENT statements: a
+// present Empty cell means the source declared the column and left it at its default, while no cell at all means the source
+// never had that column. Both leave the destination property untouched on restore, so a consumer that only wants the value
+// can ignore the difference — but one that must decide whether the source is asserting a default or saying nothing cannot.
+// Get() returns a cell's plain-string value ("" for either case) — the convenience the routing core uses for structural
+// columns (class / graph / QuestlineID), which are always string cells.
 struct FQuestDataRow
 {
 	FString Key;

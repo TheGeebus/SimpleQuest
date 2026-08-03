@@ -290,6 +290,18 @@ namespace
 				{
 					const FQuestDataValue* Cell = Row.Cells.Find(Conv.Column);
 					if (!Cell) continue;
+
+					// Declared but blank on THIS row: the source has the column and this row does not use it. That is the normal
+					// shape for a rectangular source — a header or a row struct must declare every gate column used ANYWHERE, so
+					// most rows leave most of them blank. It is not a gate, not a conflict with an earlier one, and not a property
+					// either, so strip it and move on without a word. Placed ahead of the conflict check deliberately: that branch
+					// fires first, and would otherwise accuse a designer of double-declaring a prerequisite they never wrote.
+					if (Cell->Kind == EQuestDataValueKind::Empty)
+					{
+						Row.Cells.Remove(Conv.Column);
+						continue;
+					}
+					
 					if (bRowConsumed)
 					{
 						Warnings.Add(FString::Printf(TEXT("'%s' carries %s in addition to an earlier prerequisite convention — "
@@ -1177,8 +1189,16 @@ namespace
 				FProperty* Prop = Node->GetClass()->FindPropertyByName(FName(*Column));
 				if (!Prop)
 				{
-					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
-						*Row.Key, *Column, *Entry.CurrentClassName));
+					// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a
+					// whole table, so an unbound bookkeeping column would otherwise warn once per ROW instead of once, burying
+					// the plan under lines about a column we already ignore.
+					if (Cell.Value.Kind != EQuestDataValueKind::Empty)
+					{
+						OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
+							*Row.Key,
+							*Column,
+							*Entry.CurrentClassName));
+					}
 					continue;
 				}
 
@@ -1496,6 +1516,11 @@ void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuest
 void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
 {
 	ReattachInstanced(Owner, OwnerKey, Bundle, OutConsumed, OutWarnings);
+}
+
+void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings)
+{
+	ApplyFlowConventions(Bundle, Warnings);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

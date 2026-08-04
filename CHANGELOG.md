@@ -5,6 +5,102 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 0.7.0 — The Data Resolver
+
+Quest data has always lived inside the `.uasset` binary. That's fine while
+you're authoring one questline in the graph editor, and increasingly awkward
+after that: you can't diff a change, review one, bulk-edit a hundred rows,
+generate content from a spreadsheet, or hand a designer's table to a build
+pipeline. This release opens that up in **both** directions - a questline can
+be written out as plain tables you can read, edit and version, and those tables
+can be read back into a questline. Not as an export format to look at, but as a
+working surface you can actually operate on.
+
+The point isn't a file. It's that a questline stops being a thing only the
+graph editor can change.
+
+### Questlines out, questlines back in
+
+- **Export a questline to readable tables.** You get one table per node kind
+  plus a single relationship table, keyed stably so the same questline always
+  writes the same rows. Diffable, reviewable, and legible without the editor
+  open.
+- **Import them back.** Round-tripping a questline through tables and back
+  produces the same questline: the same nodes, the same wiring, the same
+  configured rewards, including reward objects nested inside other data.
+- **Reroute nodes stay out of your way.** Wiring routed through reroute knots
+  is written as the relationship it *means*, not as the hops it takes, so
+  tidying a graph's layout doesn't churn the data.
+
+### Bring your own shape
+
+Your data probably doesn't look like ours, and shouldn't have to.
+
+- **Map your columns to quest properties.** A reusable *recipe* asset says
+  which of your columns feed which node properties, which of your type values
+  mean which kind of node, and which column carries your row keys. Your source
+  keeps its own vocabulary; the recipe does the translating.
+- **Author the recipe by picking, never typing.** Point it at a sample of your
+  own data and every field is chosen from what's actually there, so a typo
+  can't quietly mis-bind a column.
+- **Express relationships as columns.** If your table says a step's `next` is
+  `guard_post`, that's wiring - no separate edge table required. Name an
+  outcome instead of a plain target and you get outcome branching straight from
+  flat data.
+- **Prerequisites from a column too.** `unlock_after`, `unlock_any` and
+  `unlock_unless` columns build the same prerequisite gates you'd wire by hand.
+- **Your keys come back.** Export through the same recipe and you get *your*
+  column names, *your* type values and *your* row keys - a file you can diff
+  against the one you started with.
+
+### Your data can stay where it lives
+
+- **A folder of tab-separated files, JSON, or an in-engine Data Table.** One
+  unchanged recipe reads all of them to the same result.
+- **Split across files however suits you.** A source can be one table or many -
+  by chapter, by author, by whatever boundary your team already has.
+- **Write your own format.** The reader/writer interface and the data types it
+  exchanges are public, so a studio can support an encoding we've never heard
+  of without forking anything, and can implement only the direction it needs.
+
+### Re-importing into a questline that already exists
+
+The interesting case isn't building a questline from data once. It's the
+tenth time, into a questline someone has since edited by hand.
+
+- **See what would change before anything changes.** A re-import first produces
+  a preview: which nodes would be updated and in which properties, what would be
+  created, what the source no longer mentions, and how the wiring would differ.
+  Nested values are named by path, so you see *`Rewards[0].Amount` 42 → 99*,
+  not "something in this node changed."
+- **Nothing is written until you ask.** Previewing is the default; applying is a
+  separate, deliberate step.
+- **Decide what a blank cell means.** A column your source declares but leaves
+  empty can either preserve whatever the questline currently holds or reset it
+  to its default: per column, or as a default for the whole recipe. A third
+  setting refuses the import outright if a required value is missing.
+- **Deleting is opt-in, and scoped.** Nodes your source no longer mentions are
+  always *reported*; they're only removed if you ask. And a source that
+  describes one part of a questline is never treated as speaking for the rest.
+- **One undo takes it all back**, including created nodes, deleted nodes and
+  nested reward values.
+
+### It refuses rather than guessing
+
+- **A source it can't fully describe is refused, not partly applied.** If the
+  preview couldn't make sense of the data, applying part of it would be acting
+  on a description already known to be wrong.
+- **Renaming a questline isn't a property write.** A questline's ID is its
+  compiled tag namespace and changing it moves every tag the questline owns and
+  breaks save data keyed on them. A re-import reports the difference and
+  declines to make it.
+- **Rebuilds are refused, not half-done.** A node whose kind changed, or that
+  moved into a different container, can't be edited in place, so it's reported
+  rather than partially updated.
+- **Exports won't overwrite a folder they didn't write.** An export claims its
+  destination and refuses one belonging to something else, so pointing it at
+  the wrong directory costs you nothing.
+
 ## [0.6.1] — 2026-07-21 — Embedded Questline Rewards Fix
 
 A fix release for questline-level rewards. In 0.6.0, a questline's own

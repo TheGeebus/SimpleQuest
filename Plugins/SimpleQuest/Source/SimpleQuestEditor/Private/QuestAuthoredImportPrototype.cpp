@@ -1390,6 +1390,133 @@ namespace
 		return Written;
 	}
 
+	// The graph a level names: "root" is the questline's own graph, anything else names a container node whose inner graph
+	// it is. Null means the level names nothing reachable — the planner refuses genuinely unreachable levels, so a null here
+	// means either the asset moved under us or the container is itself a create that has not spawned yet.
+	UEdGraph* ResolveLevelGraph(UQuestlineGraph& Target, const FString& Level, const TMap<FString, UEdGraphNode*>& NodeByKey)
+	{
+		if (Level.IsEmpty() || Level == TEXT("root")) { return Target.QuestlineEdGraph; }
+		if (UEdGraphNode* const* Found = NodeByKey.Find(Level))
+		{
+			if (UQuestlineNode_Quest* Quest = Cast<UQuestlineNode_Quest>(*Found)) { return Quest->GetInnerGraph(); }
+		}
+		return nullptr;
+	}
+
+	// Execute a plan. Deliberately separate from the console command that currently drives it: the editor action will be a
+	// second caller, and a test is a third — and a mutation worth trusting is one that can be exercised without a UI.
+	// The caller owns the transaction, because a caller may want several applies inside one undo.
+	void ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult)
+	{
+		// A plan carrying refusals or contested keys is untrustworthy in ANY part — those say the planner could not describe
+		// the source, not merely that one row is odd. Acting on the rest would be acting on a description known to be wrong.
+		if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
+		{
+			OutResult.bRefused = true;
+			return;
+		}
+
+		Target.Modify();
+
+		// Existing nodes, addressed the way rows address them AND by GUID, since a source may use either spelling.
+		TMap<FString, FString> SourceKeyByGuid;
+		TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+		CollectQuestNodeIdentity(Target.QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
+		TMap<FString, UEdGraphNode*> NodeByKey;
+		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+		{
+			UEdGraphNode* Node = const_cast<UQuestlineNodeBase*>(Pair.Value);
+			NodeByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Node);
+			NodeByKey.Add(Pair.Key, Node);
+		}
+
+		// CREATE before anything else: a container has to exist before nodes inside it, and wiring will reference new nodes.
+		{
+			TArray<const FQuestNodePlanEntry*> Pending;
+			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+			{
+				if (Entry.Action == EQuestNodePlanAction::Create) { Pending.Add(&Entry); }
+			}
+
+			TSet<FString> Consumed;
+			TArray<FString> SpawnWarnings;
+			TMap<FString, UEdGraphNode*> CreatedByKey;
+
+			// A source may declare a container AND its contents, so one create's level can be another create. Spawn whatever
+			// is reachable and repeat while anything moved; the planner already refuses genuinely unreachable levels, so this
+			// settles in a pass or two. Anything still pending is REPORTED rather than dropped — a create that quietly does
+			// not happen is the failure mode this whole arc exists to prevent.
+			bool bProgress = true;
+			while (bProgress && Pending.Num() > 0)
+			{
+				bProgress = false;
+				for (int32 Idx = Pending.Num() - 1; Idx >= 0; --Idx)
+				{
+					const FQuestNodePlanEntry& Entry = *Pending[Idx];
+					UEdGraph* Level = ResolveLevelGraph(Target, Entry.GraphCell, NodeByKey);
+					if (!Level) { continue; }
+
+					const FQuestDataRow* const* Row = NodeRowsByKey.Find(Entry.Key);
+					if (!Row || !*Row)
+					{
+						OutResult.Skipped.Add(FString::Printf(TEXT("create '%s' has no row in the source"), *Entry.Key));
+					}
+					else
+					{
+						Level->Modify();
+						if (UEdGraphNode* Node = SpawnNodeFromRow(Level, **Row, Bundle, NodeByKey, Consumed, SpawnWarnings))
+						{
+							CreatedByKey.Add(Entry.Key, Node);
+							++OutResult.NodesCreated;
+						}
+						else
+						{
+							OutResult.Skipped.Add(FString::Printf(TEXT("create '%s' could not be spawned"), *Entry.Key));
+						}
+					}
+					Pending.RemoveAt(Idx);
+					bProgress = true;
+				}
+			}
+			for (const FQuestNodePlanEntry* Entry : Pending)
+			{
+				OutResult.Skipped.Add(FString::Printf(TEXT("create '%s' sits in level '%s', which never became reachable"),
+					*Entry->Key, *Entry->GraphCell));
+			}
+
+			// Property-derived pins only exist once the properties are restored, and wiring will need them. Restricted to the
+			// nodes just created — refreshing pins on nodes nobody asked about would disturb an asset this plan never
+			// described.
+			if (CreatedByKey.Num() > 0)
+			{
+				RefreshPinsPass(Bundle, NodeRowsByKey, CreatedByKey, SpawnWarnings);
+			}
+			OutResult.Skipped.Append(SpawnWarnings);
+		}
+
+		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+		{
+			if (Entry.Action == EQuestNodePlanAction::Create) { continue; }   // already handled by the creation pass above
+			if (Entry.Action != EQuestNodePlanAction::Update) { ++OutResult.EntriesDeferred; continue; }
+			if (Entry.bStructuralChange)
+			{
+				// A class change or a move between levels cannot be edited into place, and doing the property half would
+				// leave a node matching neither its source nor its former self.
+				++OutResult.EntriesDeferred;
+				continue;
+			}
+			if (Entry.Changes.IsEmpty()) continue;
+
+			UObject* Object = Entry.bIsQuestlineSelf ? static_cast<UObject*>(&Target) : NodeByKey.FindRef(Entry.Guid);
+			if (!Object)
+			{
+				OutResult.Skipped.Add(FString::Printf(TEXT("entry '%s' no longer resolves to an object"), *Entry.Key));
+				continue;
+			}
+			OutResult.PropertiesWritten += ApplyChangesToObject(Object, Entry.Key, Entry.Changes, OutResult.Skipped);
+		}
+	}
+
 	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
 	{
 		OutPlan.Warnings = ReadWarnings;
@@ -1786,51 +1913,31 @@ namespace
 			if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
 			{
 				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
-					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
+					"Resolve those and re-plan. Nothing was modified."),
+					Plan.Refusals.Num(),
+					Plan.AmbiguousKeys.Num());
 				return;
 			}
 
 			const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ApplyInPlaceImport", "Apply In-Place Import"));
-			TargetGraph->Modify();
 
-			int32 Written = 0, Deferred = 0;
-			TArray<FString> Skipped;
-			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+			FQuestApplyResult Result;
+			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result);
+			if (Result.bRefused)
 			{
-				if (Entry.Action != EQuestNodePlanAction::Update) { ++Deferred; continue; }
-				if (Entry.bStructuralChange)
-				{
-					// A class change or a move between levels cannot be edited into place, and doing the property half would
-					// leave a node that matches neither its source nor its former self.
-					++Deferred;
-					continue;
-				}
-				if (Entry.Changes.IsEmpty()) continue;
-
-				UObject* Object = nullptr;
-				if (Entry.bIsQuestlineSelf)
-				{
-					Object = TargetGraph;
-				}
-				else
-				{
-					TMap<FString, FString> SourceKeyByGuid;
-					TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
-					CollectQuestNodeIdentity(TargetGraph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
-					Object = const_cast<UQuestlineNodeBase*>(NodeByGuid.FindRef(Entry.Guid));
-				}
-				if (!Object)
-				{
-					Skipped.Add(FString::Printf(TEXT("entry '%s' no longer resolves to an object"), *Entry.Key));
-					continue;
-				}
-				Written += ApplyChangesToObject(Object, Entry.Key, Entry.Changes, Skipped);
+				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
+				return;
 			}
 
-			for (const FString& S : Skipped) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
+			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
 			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: APPLIED %d property change(s) to '%s'. %d entry/entries deferred "
-				"(creation, deletion, rewiring and structural rebuilds are not yet implemented). %d skipped."),
-				Written, *AssetPath, Deferred, Skipped.Num());
+				"(deletion and rewiring are not yet implemented). %d node(s) created. %d skipped."),
+				Result.PropertiesWritten,
+				*AssetPath,
+				Result.EntriesDeferred,
+				Result.NodesCreated,
+				Result.Skipped.Num());
 
 			TargetGraph->GetPackage()->MarkPackageDirty();
 			return;
@@ -1912,7 +2019,13 @@ namespace
 
 		for (const FString& W : Warnings) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: %s"), *W);
 		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' — %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
-			*OriginalKey, *DestPackagePath, *AssetName, NodeByKey.Num(), Bundle.Edges.Num(), Warnings.Num(), bCompiled ? TEXT("OK") : TEXT("FAILED"));
+			*OriginalKey,
+			*DestPackagePath,
+			*AssetName,
+			NodeByKey.Num(),
+			Bundle.Edges.Num(),
+			Warnings.Num(),
+			bCompiled ? TEXT("OK") : TEXT("FAILED"));
 	}
 }
 
@@ -1963,6 +2076,11 @@ void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& Owne
 int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)
 {
 	return ApplyChangesToObject(Owner, OwnerKey, Changes, OutSkipped);
+}
+
+void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult)
+{
+	ApplyPlan(Target, Plan, Bundle, NodeRowsByKey, OutResult);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

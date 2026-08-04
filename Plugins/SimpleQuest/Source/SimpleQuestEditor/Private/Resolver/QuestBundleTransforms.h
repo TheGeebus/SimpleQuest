@@ -11,6 +11,8 @@
 #include "CoreMinimal.h"
 #include "Resolver/QuestImportMapping.h"
 
+
+struct FQuestApplyResult;
 struct FQuestNodePlanEntry;
 struct FQuestDataRow;
 struct FQuestDataBundle;
@@ -51,3 +53,7 @@ void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& Owne
 
 /** Write a plan's property changes onto one object and its instanced descendants. Returns the count actually written. */
 int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped);
+
+/** Execute a plan against the asset it was computed for. Caller owns the transaction. */
+void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult);
+

@@ -3,6 +3,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Graph/QuestlineGraphSchema.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
 #include "Misc/FileHelper.h"
@@ -1053,6 +1054,75 @@ bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameter
 		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
 		TestEqual(TEXT("A per-property override wins over the default"), SelfChanges(Plan), 0);
 	}
+	return true;
+}
+
+namespace
+{
+	// A real questline graph, in the transient package — the same four steps the asset factory performs. Cheap enough that
+	// the mutating half of in-place can be unit-tested rather than only exercised by hand against a disposable asset, which
+	// matters most for the operations that DESTROY.
+	UQuestlineGraph* MakeTransientQuestlineGraph()
+	{
+		UQuestlineGraph* Graph = NewObject<UQuestlineGraph>(GetTransientPackage());
+		Graph->QuestlineEdGraph = NewObject<UEdGraph>(Graph, NAME_None, RF_Transactional);
+		Graph->QuestlineEdGraph->Schema = UQuestlineGraphSchema::StaticClass();
+		Graph->QuestlineEdGraph->GetSchema()->CreateDefaultNodesForGraph(*Graph->QuestlineEdGraph);
+		return Graph;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyRefusesUntrustworthyPlan, "SimpleQuest.Resolver.Apply.RefusesUntrustworthyPlan", TestFlags)
+bool FQuestResolver_ApplyRefusesUntrustworthyPlan::RunTest(const FString& Parameters)
+{
+	// A refusal or a contested key says the planner could not describe the source — not that one row is unusual. Applying
+	// the parts it DID describe would be acting on a description already known to be incomplete, so apply declines wholesale.
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	TestNotNull(TEXT("Transient questline graph built"), Graph->QuestlineEdGraph.Get());
+
+	FQuestInPlacePlan Plan;
+	Plan.Refusals.Add(TEXT("something the planner could not deliver"));
+
+	FQuestDataBundle Bundle;
+	const TMap<FString, const FQuestDataRow*> NoRows;
+	FQuestApplyResult Result;
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NoRows, Result);
+
+	TestTrue(TEXT("Apply refused the plan"), Result.bRefused);
+	TestEqual(TEXT("...and wrote nothing"), Result.PropertiesWritten, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyCreatesDeclaredNodes, "SimpleQuest.Resolver.Apply.CreatesNodes", TestFlags)
+bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters)
+{
+	// The first ADDITIVE mutation. A source declaring a node the asset does not have plans as a create; applying it has to
+	// actually put a node in the graph, at the level the row names, with its properties restored — and then the same source
+	// planned again must have nothing left to create. That last part is the fixpoint, and it is what distinguishes "a node
+	// was spawned" from "a node was spawned that the planner still does not recognise as the row's node".
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	const int32 NodesBefore = Graph->QuestlineEdGraph->Nodes.Num();
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("n_new"), { { TEXT("graph"), TEXT("root") }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	TestEqual(TEXT("The new row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
+
+	FQuestApplyResult Result;
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result);
+	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("...and it is actually in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
+
+	FQuestInPlacePlan Replanned;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
 	return true;
 }
 

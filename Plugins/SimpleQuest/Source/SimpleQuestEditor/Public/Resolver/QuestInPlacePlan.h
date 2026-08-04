@@ -96,3 +96,16 @@ struct FQuestInPlacePlan
 			&& ChangedNodeCount() == 0 && AddedEdges.IsEmpty() && RemovedEdges.IsEmpty() && Refusals.IsEmpty();
 	}
 };
+
+/** What an apply actually did. Counts rather than prose, so a caller can report it, assert on it, or render it. */
+struct FQuestApplyResult
+{
+	int32 PropertiesWritten = 0;
+	int32 NodesCreated      = 0;
+	int32 NodesDeleted      = 0;
+	int32 EdgesChanged      = 0;
+	int32 EntriesDeferred   = 0;   // structural work this step does not perform
+	TArray<FString> Skipped;
+	bool  bRefused = false;        // the plan was not trustworthy enough to act on any part of
+};
+

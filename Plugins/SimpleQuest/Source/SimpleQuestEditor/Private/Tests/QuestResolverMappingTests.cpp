@@ -1217,4 +1217,22 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_PasteClearsImportProvenance, "SimpleQuest.Resolver.Identity.PasteClearsProvenance", TestFlags)
+bool FQuestResolver_PasteClearsImportProvenance::RunTest(const FString& Parameters)
+{
+	// Pasting a node inside a graph is the ENTIRE duplicate-identity failure mode. The GUID is already regenerated, but the
+	// studio key the node was imported under is not — so the copy still claims to be the source row's node, and one row
+	// resolves to two nodes. The planner refuses that collision rather than picking a winner by hash order, which is correct
+	// but leaves a designer holding a plan they cannot act on until they fix it by hand. Better not to create it.
+	UQuestlineNode_Step* Node = NewObject<UQuestlineNode_Step>(GetTransientPackage());
+	Node->ImportSourceKey = TEXT("kill_boss");
+	const FGuid BeforeGuid = Node->QuestGuid;
+
+	Node->PostPasteNode();
+
+	TestTrue(TEXT("Paste mints a fresh identity"), Node->QuestGuid != BeforeGuid);
+	TestTrue(TEXT("Paste clears the import provenance"), Node->ImportSourceKey.IsEmpty());
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

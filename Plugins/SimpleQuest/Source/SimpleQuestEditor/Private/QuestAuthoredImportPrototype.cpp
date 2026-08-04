@@ -1416,7 +1416,10 @@ namespace
 			return;
 		}
 
-		Target.Modify();
+		// Record the questline for undo WITHOUT dirtying: at this point we do not yet know whether anything will change, and
+		// UObject::Modify marks the package dirty by default. The caller dirties once, at the end, only if something did.
+		// Every other Modify in this function sits inside a branch that is about to write, so those dirty correctly.
+		Target.Modify(false);
 
 		// Existing nodes, addressed the way rows address them AND by GUID, since a source may use either spelling.
 		TMap<FString, FString> SourceKeyByGuid;
@@ -2044,7 +2047,19 @@ namespace
 				Result.EntriesDeferred,
 				Result.Skipped.Num());
 
-			TargetGraph->GetPackage()->MarkPackageDirty();
+			// Only dirty the package if something actually happened. A re-import that changes nothing should leave no trace:
+			// marking it regardless makes every no-op run look like a modification, which costs a save and a diff for work
+			// that was not done — and trains a designer to ignore the one signal that says an asset moved.
+			const bool bChangedAnything = Result.PropertiesWritten > 0 || Result.NodesCreated > 0 || Result.EdgesChanged > 0 || Result.NodesDeleted > 0;
+			if (bChangedAnything)
+			{
+				TargetGraph->GetPackage()->MarkPackageDirty();
+			}
+			else
+			{
+				UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: nothing to apply — the asset already matches the source. "
+					"Package left clean."));
+			}
 			return;
 		}
 

@@ -210,30 +210,36 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
 	}
 }
 
-void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming, const TArray<FQuestDataEdge>& Live, const TMap<FString, FString>& GuidByKey, TArray<FString>& OutAdded, TArray<FString>& OutRemoved)
+void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming, const TArray<FQuestDataEdge>& Live, const TMap<FString, FString>& GuidByKey, TArray<FQuestDataEdge>& OutAdded, TArray<FQuestDataEdge>& OutRemoved)
 {
-	auto Canonical = [&GuidByKey](const FQuestDataEdge& Edge) -> FString
+	auto Canonical = [&GuidByKey](const FQuestDataEdge& Edge)
 	{
 		const FString* From = GuidByKey.Find(Edge.From);
 		const FString* To   = GuidByKey.Find(Edge.To);
-		return FString::Printf(TEXT("%s|%s|%s"), From ? **From : *Edge.From, *Edge.Type, To ? **To : *Edge.To);
+		return FQuestDataEdge{ From ? *From : Edge.From, Edge.Type, To ? *To : Edge.To };
 	};
-	auto IsWiring = [](const FQuestDataEdge& Edge) { return !Edge.Type.StartsWith(TEXT("contains(")); };
+	auto Id       = [](const FQuestDataEdge& E) { return FString::Printf(TEXT("%s|%s|%s"), *E.From, *E.Type, *E.To); };
+	auto IsWiring = [](const FQuestDataEdge& E) { return !E.Type.StartsWith(TEXT("contains(")); };
 
-	TSet<FString> LiveSet;
+	TMap<FString, FQuestDataEdge> LiveById;
 	for (const FQuestDataEdge& Edge : Live)
 	{
-		if (IsWiring(Edge)) { LiveSet.Add(Canonical(Edge)); }
+		if (IsWiring(Edge)) { const FQuestDataEdge C = Canonical(Edge); LiveById.Add(Id(C), C); }
 	}
-	TSet<FString> IncomingSet;
+	TMap<FString, FQuestDataEdge> IncomingById;
 	for (const FQuestDataEdge& Edge : Incoming)
 	{
-		if (IsWiring(Edge)) { IncomingSet.Add(Canonical(Edge)); }
+		if (IsWiring(Edge)) { const FQuestDataEdge C = Canonical(Edge); IncomingById.Add(Id(C), C); }
 	}
 
-	for (const FString& Id : IncomingSet) { if (!LiveSet.Contains(Id))     { OutAdded.Add(Id); } }
-	for (const FString& Id : LiveSet)     { if (!IncomingSet.Contains(Id)) { OutRemoved.Add(Id); } }
-	OutAdded.Sort();     // deterministic reporting; set iteration order is not
-	OutRemoved.Sort();
+	for (const TPair<FString, FQuestDataEdge>& Pair : IncomingById) { if (!LiveById.Contains(Pair.Key))     { OutAdded.Add(Pair.Value); } }
+	for (const TPair<FString, FQuestDataEdge>& Pair : LiveById)     { if (!IncomingById.Contains(Pair.Key)) { OutRemoved.Add(Pair.Value); } }
+
+	auto ByIdentity = [](const FQuestDataEdge& A, const FQuestDataEdge& B)
+	{
+		return FString::Printf(TEXT("%s|%s|%s"), *A.From, *A.Type, *A.To) < FString::Printf(TEXT("%s|%s|%s"), *B.From, *B.Type, *B.To);
+	};
+	OutAdded.Sort(ByIdentity);     // deterministic reporting; map iteration order is not
+	OutRemoved.Sort(ByIdentity);
 }
 

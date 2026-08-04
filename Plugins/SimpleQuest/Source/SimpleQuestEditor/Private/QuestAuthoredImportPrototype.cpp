@@ -1494,6 +1494,52 @@ namespace
 			OutResult.Skipped.Append(SpawnWarnings);
 		}
 
+		// WIRING, after creation so both endpoints of a new relationship exist.
+		{
+			for (const FQuestDataEdge& Edge : Plan.RemovedEdges)
+			{
+				UEdGraphNode* const* FromNode = NodeByKey.Find(Edge.From);
+				UEdGraphNode* const* ToNode   = NodeByKey.Find(Edge.To);
+				if (!FromNode || !ToNode) { OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s -> %s: endpoint missing"), *Edge.From, *Edge.To)); continue; }
+
+				UEdGraphPin* SourcePin = ResolveSourcePin(*FromNode, Edge.Type);
+				UEdGraphPin* DestPin   = SourcePin ? ResolveDestPin(*ToNode, SourcePin->PinType.PinCategory) : nullptr;
+				if (!SourcePin || !DestPin) { OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s -> %s: pin unresolved"), *Edge.From, *Edge.To)); continue; }
+
+				// Break it ONLY when a direct link is what is actually there. The plan's edges are knot-collapsed, so this
+				// relationship may run through reroute knots that fan out to other targets as well — breaking the first hop
+				// would remove those relationships too, and deleting the chain would destroy routing placed deliberately.
+				// Neither is derivable from the data, so a knot-routed removal is reported instead of guessed at.
+				if (!SourcePin->LinkedTo.Contains(DestPin))
+				{
+					OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s %s %s is routed through reroute nodes — "
+						"rewire it by hand, or the knots' other targets would go with it"), *Edge.From, *Edge.Type, *Edge.To));
+					continue;
+				}
+				(*FromNode)->Modify();
+				(*ToNode)->Modify();
+				SourcePin->BreakLinkTo(DestPin);
+				++OutResult.EdgesChanged;
+			}
+
+			for (const FQuestDataEdge& Edge : Plan.AddedEdges)
+			{
+				UEdGraphNode* const* FromNode = NodeByKey.Find(Edge.From);
+				UEdGraphNode* const* ToNode   = NodeByKey.Find(Edge.To);
+				if (!FromNode || !ToNode) { OutResult.Skipped.Add(FString::Printf(TEXT("added edge %s -> %s: endpoint missing"), *Edge.From, *Edge.To)); continue; }
+
+				UEdGraphPin* SourcePin = ResolveSourcePin(*FromNode, Edge.Type);
+				UEdGraphPin* DestPin   = SourcePin ? ResolveDestPin(*ToNode, SourcePin->PinType.PinCategory) : nullptr;
+				if (!SourcePin || !DestPin) { OutResult.Skipped.Add(FString::Printf(TEXT("added edge %s -> %s: pin unresolved"), *Edge.From, *Edge.To)); continue; }
+				if (SourcePin->LinkedTo.Contains(DestPin)) { continue; }   // already there; the comparison saw it through knots
+
+				(*FromNode)->Modify();
+				(*ToNode)->Modify();
+				SourcePin->MakeLinkTo(DestPin);
+				++OutResult.EdgesChanged;
+			}
+		}
+
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{
 			if (Entry.Action == EQuestNodePlanAction::Create) { continue; }   // already handled by the creation pass above
@@ -1688,8 +1734,8 @@ namespace
 			Plan.AddedEdges.Num(),
 			Plan.RemovedEdges.Num());
 
-		for (const FString& Edge : Plan.RemovedEdges) { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE-] %s"), *Edge); }
-		for (const FString& Edge : Plan.AddedEdges)   { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE+] %s"), *Edge); }
+		for (const FQuestDataEdge& E : Plan.RemovedEdges) { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE-] %s|%s|%s"), *E.From, *E.Type, *E.To); }
+		for (const FQuestDataEdge& E : Plan.AddedEdges)   { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE+] %s|%s|%s"), *E.From, *E.Type, *E.To); }
 		for (const FString& R : Plan.Refusals) { UE_LOG(LogSimpleQuest, Warning, TEXT("  [REFUSED] %s"), *R); }
 
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)

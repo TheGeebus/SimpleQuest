@@ -890,7 +890,7 @@ bool FQuestResolver_EdgesCompareAcrossNamespaces::RunTest(const FString& Paramet
 	TArray<FQuestDataEdge> Incoming = { { TEXT("kill_boss"), TEXT("activates(Any Outcome)"), TEXT("guard_post") } };
 	TArray<FQuestDataEdge> Live     = { { GuidA,             TEXT("activates(Any Outcome)"), GuidB } };
 
-	TArray<FString> Added, Removed;
+	TArray<FQuestDataEdge> Added, Removed;
 	CompareQuestEdges(Incoming, Live, GuidByKey, Added, Removed);
 	TestEqual(TEXT("The same edge in two spellings is not an addition"), Added.Num(), 0);
 	TestEqual(TEXT("...nor a removal"), Removed.Num(), 0);
@@ -1123,6 +1123,48 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 	FQuestInPlacePlan Replanned;
 	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyWiresDeclaredEdges, "SimpleQuest.Resolver.Apply.WiresEdges", TestFlags)
+bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
+{
+	// Wiring is the relationship half of a questline, and until now apply could build every node a source declared and leave
+	// them all disconnected. The fixpoint is the real assertion: after applying, the same source must report no wiring delta,
+	// which means the link that was made is the link the comparison recognises — not merely that MakeLinkTo was called.
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	const UQuestlineNodeBase* Entry = nullptr;
+	for (UEdGraphNode* N : Graph->QuestlineEdGraph->Nodes) { if ((Entry = Cast<UQuestlineNodeBase>(N)) != nullptr) break; }
+	TestNotNull(TEXT("The schema's default entry node is present"), Entry);
+	if (!Entry) { return false; }
+
+	const FString EntryKey = Entry->QuestGuid.ToString(EGuidFormats::Digits);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, *EntryKey,   { { TEXT("graph"), TEXT("root") }, { TEXT("class"), *Entry->GetClass()->GetName() } });
+	AddRow(Content, TEXT("n_step"), { { TEXT("graph"), TEXT("root") }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+	Bundle.Edges.Add({ EntryKey, TEXT("activates(Entered)"), TEXT("n_step") });
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	TestEqual(TEXT("The step plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
+	TestEqual(TEXT("The edge plans as an addition"), Plan.AddedEdges.Num(), 1);
+
+	FQuestApplyResult Result;
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result);
+	TestEqual(TEXT("The node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("The edge was wired"), Result.EdgesChanged, 1);
+
+	FQuestInPlacePlan Replanned;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
+	TestEqual(TEXT("Re-planning has no wiring delta"), Replanned.AddedEdges.Num(), 0);
+	TestEqual(TEXT("...in either direction"), Replanned.RemovedEdges.Num(), 0);
 	return true;
 }
 

@@ -8,6 +8,7 @@
 // by a designer, and applied on a later frame without holding references across a garbage collection.
 
 #include "CoreMinimal.h"
+#include "QuestDataBundle.h"
 #include "QuestDataValue.h"
 
 /** What happens to one node when the plan is applied. */
@@ -67,9 +68,12 @@ struct FQuestInPlacePlan
 	/** Nodes outside every level the source declares. Counted, never entered: a narrow source must not orphan the whole asset. */
 	int32 UntouchedNodeCount = 0;
 
-	/** Wiring a re-import would add or remove, canonicalized. Plan-level because an edge belongs to no single node. */
-	TArray<FString> AddedEdges;
-	TArray<FString> RemovedEdges;
+	/**
+	 * Canonicalized wiring deltas, as DATA rather than display text — apply needs the endpoints and the pin, and re-parsing
+	 * a formatted string to recover them would be a lossy round-trip through our own output.
+	 */
+	TArray<FQuestDataEdge> AddedEdges;
+	TArray<FQuestDataEdge> RemovedEdges;
 
 	int32 CountOf(EQuestNodePlanAction Action) const
 	{

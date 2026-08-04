@@ -940,4 +940,46 @@ bool FQuestResolver_PlanRefusesUndeliverableRows::RunTest(const FString& Paramet
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyWritesNestedChanges, "SimpleQuest.Resolver.Apply.NestedPath", TestFlags)
+bool FQuestResolver_ApplyWritesNestedChanges::RunTest(const FString& Parameters)
+{
+	// Apply has to find the live property a change names, and a change names it by PATH. Those paths cannot be parsed: a
+	// map-key segment carries an exported tag, dots and brackets included, so splitting on punctuation would mis-resolve.
+	// Apply therefore re-walks the object with the same walk that produced the paths and matches the longest prefix — which
+	// also means a path the plan can produce is always one apply can resolve, by construction.
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+	UXPReward* Reward = NewObject<UXPReward>(Owner);
+	Owner->Rewards.Add(Reward);
+
+	FProperty* AmountProp = UXPReward::StaticClass()->FindPropertyByName(TEXT("Amount"));
+	TestNotNull(TEXT("Amount property resolved"), AmountProp);
+	if (!AmountProp) { return false; }
+	void* AmountPtr = AmountProp->ContainerPtrToValuePtr<void>(Reward);
+	AmountProp->ImportText_Direct(TEXT("10"), AmountPtr, nullptr, PPF_None);
+
+	FQuestPropertyChange Change;
+	Change.Property      = TEXT("Rewards[0].Amount");
+	Change.IncomingValue = FQuestDataValue::MakeNumber(TEXT("99"));
+
+	TArray<FString> Skipped;
+	const int32 Written = QuestBundle_ApplyChangesToObject(Owner, TEXT("n_reward"), { Change }, Skipped);
+
+	TestEqual(TEXT("The nested change was written"), Written, 1);
+	TestEqual(TEXT("Nothing was skipped"), Skipped.Num(), 0);
+
+	FString After;
+	AmountProp->ExportTextItem_Direct(After, AmountPtr, nullptr, nullptr, PPF_None);
+	TestEqual(TEXT("The live property now holds the incoming value"), After, FString(TEXT("99")));
+
+	// A path naming nothing must be reported, never silently dropped — apply's failure mode is a designer believing a change
+	// landed when it did not.
+	Skipped.Reset();
+	FQuestPropertyChange Bogus;
+	Bogus.Property      = TEXT("Rewards[9].Nope");
+	Bogus.IncomingValue = FQuestDataValue::MakeNumber(TEXT("1"));
+	TestEqual(TEXT("An unresolvable path writes nothing"), QuestBundle_ApplyChangesToObject(Owner, TEXT("n_reward"), { Bogus }, Skipped), 0);
+	TestEqual(TEXT("...and is reported"), Skipped.Num(), 1);
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

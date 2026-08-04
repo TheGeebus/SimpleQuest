@@ -15,6 +15,7 @@ struct FQuestDataRow;
 struct FQuestDataBundle;
 struct FQuestDataValue;
 struct FQuestInPlacePlan;
+struct FQuestPropertyChange;
 class FProperty;
 class UQuestImportMapping;
 class UQuestlineGraph;
@@ -47,3 +48,5 @@ void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBund
 /** Compare an owner's instanced children against the rows describing them, recursively. Appends to Entry.Changes. */
 void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan);
 
+/** Write a plan's property changes onto one object and its instanced descendants. Returns the count actually written. */
+int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped);

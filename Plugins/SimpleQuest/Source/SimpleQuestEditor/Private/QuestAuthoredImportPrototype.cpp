@@ -1262,10 +1262,104 @@ namespace
 			}
 		}
 	}
+	
+	// Every object a change's path could name, keyed by the path that names it: "" for the entity itself, then each instanced
+	// descendant under the path the WRITER gives it. Built by the same walk the plan used, so any path the plan produced
+	// resolves here by construction. The children are reached from a non-const owner, so widening them back is sound.
+	void CollectApplyTargets(UObject* Owner, const FString& OwnerKey, const FString& PathPrefix, TMap<FString, UObject*>& OutByPath)
+	{
+		OutByPath.Add(PathPrefix, Owner);
+		for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
+		{
+			FProperty* Prop = *It;
+			if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
+			if (!IsQuestInstancedBearing(Prop)) continue;
 
-	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle,
-	                 const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings,
-	                 FQuestInPlacePlan& OutPlan)
+			ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
+				[&OutByPath](const FString& ChildKey, const FString& Path, const UObject* Child)
+				{
+					CollectApplyTargets(const_cast<UObject*>(Child), ChildKey, Path, OutByPath);
+				});
+		}
+	}
+
+	// Which object owns this change, and under what property name? LONGEST matching path wins, and the candidate must
+	// actually have a property by the remaining name — that pair of conditions is what makes this safe without parsing a
+	// path whose segments can contain dots and brackets of their own.
+	UObject* FindApplyTarget(const TMap<FString, UObject*>& ByPath, const FString& ChangePath, FString& OutPropertyName)
+	{
+		UObject* Best = nullptr;
+		int32 BestLen = -1;
+		for (const TPair<FString, UObject*>& Pair : ByPath)
+		{
+			FString Remainder;
+			if (Pair.Key.IsEmpty())                                    { Remainder = ChangePath; }
+			else if (ChangePath.StartsWith(Pair.Key + TEXT("."))) { Remainder = ChangePath.RightChop(Pair.Key.Len() + 1); }
+			else                                                       { continue; }
+
+			if (Remainder.IsEmpty() || Pair.Key.Len() <= BestLen) continue;
+			if (Pair.Value->GetClass()->FindPropertyByName(FName(*Remainder)))
+			{
+				Best = Pair.Value;
+				BestLen = Pair.Key.Len();
+				OutPropertyName = Remainder;
+			}
+		}
+		return Best;
+	}
+
+	// Properties that carry IDENTITY rather than configuration. QuestlineID is not a field — it is the questline's compiled
+	// tag namespace, so rewriting it moves every tag the questline owns, invalidates save data keyed on them, and can
+	// collide with another asset. A rename is a deliberate operation with consequences a property write cannot express, so
+	// apply reports it and declines. The plan still SHOWS the difference; it simply is not something this step performs.
+	bool IsIdentityBearingProperty(const UObject* Target, const FString& PropertyName)
+	{
+		return Target && Target->IsA<UQuestlineGraph>() && PropertyName == TEXT("QuestlineID");
+	}
+
+	int32 ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)
+	{
+		if (!Owner) return 0;
+
+		TMap<FString, UObject*> ByPath;
+		CollectApplyTargets(Owner, OwnerKey, FString(), ByPath);
+
+		int32 Written = 0;
+		for (const FQuestPropertyChange& Change : Changes)
+		{
+			FString PropertyName;
+			UObject* Target = FindApplyTarget(ByPath, Change.Property, PropertyName);
+			if (!Target)
+			{
+				// The structure moved between planning and applying, or the plan came from elsewhere. Either way, say so —
+				// a change that silently evaporates is worse than one that fails, because the plan already promised it.
+				OutSkipped.Add(FString::Printf(TEXT("'%s' names no property reachable from '%s'"), *Change.Property, *OwnerKey));
+				continue;
+			}
+			FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*PropertyName));
+			if (!Prop)
+			{
+				OutSkipped.Add(FString::Printf(TEXT("'%s' resolved to no property"), *Change.Property));
+				continue;
+			}
+
+			if (IsIdentityBearingProperty(Target, PropertyName))
+			{
+				OutSkipped.Add(FString::Printf(TEXT("'%s' is identity-bearing — rewriting it would move the questline's compiled "
+					"tag namespace and orphan save data keyed on it. Rename deliberately instead."), *Change.Property));
+				continue;
+			}
+
+			Target->Modify();   // per-object, so undo restores instanced children as well as the node
+			// Write the value the PLAN computed, not a re-reading of the row. Once the restore path can decline to write,
+			// those are different questions, and answering the second one here is how an apply drifts from its own preview.
+			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Change.IncomingValue);
+			++Written;
+		}
+		return Written;
+	}
+
+	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan)
 	{
 		OutPlan.Warnings = ReadWarnings;
 
@@ -1491,6 +1585,7 @@ namespace
 			else if (Arg.StartsWith(TEXT("--in-place="))) InPlacePath = Arg.RightChop(11);
 		}
 		const bool bInPlace = !InPlacePath.IsEmpty();
+		const bool bApply = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--apply"), ESearchCase::IgnoreCase); });
 
 		TArray<FString> PathArgs;
 		for (const FString& Arg : Args)
@@ -1605,6 +1700,65 @@ namespace
 			Plan.TargetAssetPath = AssetPath;
 			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan);
 			LogInPlacePlan(Plan);
+
+			if (!bApply)
+			{
+				return;   // planning is the default; mutating is opted into
+			}
+
+			// A plan carrying refusals or contested keys is not trustworthy in ANY part — those say the planner could not
+			// describe the source, not merely that one row is odd. Applying the rest would be acting on a description we
+			// already know is incomplete.
+			if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
+			{
+				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
+				return;
+			}
+
+			const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ApplyInPlaceImport", "Apply In-Place Import"));
+			TargetGraph->Modify();
+
+			int32 Written = 0, Deferred = 0;
+			TArray<FString> Skipped;
+			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+			{
+				if (Entry.Action != EQuestNodePlanAction::Update) { ++Deferred; continue; }
+				if (Entry.bStructuralChange)
+				{
+					// A class change or a move between levels cannot be edited into place, and doing the property half would
+					// leave a node that matches neither its source nor its former self.
+					++Deferred;
+					continue;
+				}
+				if (Entry.Changes.IsEmpty()) continue;
+
+				UObject* Object = nullptr;
+				if (Entry.bIsQuestlineSelf)
+				{
+					Object = TargetGraph;
+				}
+				else
+				{
+					TMap<FString, FString> SourceKeyByGuid;
+					TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+					CollectQuestNodeIdentity(TargetGraph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
+					Object = const_cast<UQuestlineNodeBase*>(NodeByGuid.FindRef(Entry.Guid));
+				}
+				if (!Object)
+				{
+					Skipped.Add(FString::Printf(TEXT("entry '%s' no longer resolves to an object"), *Entry.Key));
+					continue;
+				}
+				Written += ApplyChangesToObject(Object, Entry.Key, Entry.Changes, Skipped);
+			}
+
+			for (const FString& S : Skipped) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: APPLIED %d property change(s) to '%s'. %d entry/entries deferred "
+				"(creation, deletion, rewiring and structural rebuilds are not yet implemented). %d skipped."),
+				Written, *AssetPath, Deferred, Skipped.Num());
+
+			TargetGraph->GetPackage()->MarkPackageDirty();
 			return;
 		}
 
@@ -1730,6 +1884,11 @@ void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBund
 void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
 {
 	DiffInstancedChildren(Owner, OwnerKey, Bundle, Entry, OutPlan);
+}
+
+int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)
+{
+	return ApplyChangesToObject(Owner, OwnerKey, Changes, OutSkipped);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

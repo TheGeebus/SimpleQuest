@@ -9,6 +9,7 @@
 // no asset, no files — which is precisely what makes the forward/reverse round-trip property testable.
 
 #include "CoreMinimal.h"
+#include "Resolver/QuestImportMapping.h"
 
 struct FQuestNodePlanEntry;
 struct FQuestDataRow;
@@ -43,7 +44,7 @@ void QuestBundle_ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>&
 FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr);
 
 /** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
-void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan);
+void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 
 /** Compare an owner's instanced children against the rows describing them, recursively. Appends to Entry.Changes. */
 void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan);

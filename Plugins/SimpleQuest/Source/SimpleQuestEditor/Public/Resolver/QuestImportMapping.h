@@ -23,6 +23,22 @@ enum class EQuestAbsentFieldPolicy : uint8
 	Require  UMETA(DisplayName = "Require (error if absent)")	// absent -> refuse the import (no partial asset)
 };
 
+// The absent-field policy resolved PER PROPERTY. Built from a recipe (its per-binding overrides plus its default), or left
+// at its own default when no recipe is in play. Separate from the recipe itself because by the time a plan is computed the
+// mapping has already run and renamed its columns to property names — the policy has to survive that rename, so it travels
+// keyed the way the planner will ask for it.
+struct FQuestAbsentPolicyResolver
+{
+	EQuestAbsentFieldPolicy Default = EQuestAbsentFieldPolicy::Preserve;
+	TMap<FName, EQuestAbsentFieldPolicy> ByProperty;
+
+	EQuestAbsentFieldPolicy Resolve(const FName Property) const
+	{
+		const EQuestAbsentFieldPolicy* Found = ByProperty.Find(Property);
+		return Found ? *Found : Default;
+	}
+};
+
 // One source column -> one node property. Applies to a row only when the row's resolved node class has a property of
 // this name (bind once, land where it fits). Every field is a stable identifier the picker populates.
 USTRUCT()

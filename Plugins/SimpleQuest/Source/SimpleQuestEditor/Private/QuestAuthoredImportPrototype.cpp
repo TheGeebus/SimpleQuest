@@ -1139,11 +1139,11 @@ namespace
 		return Typed;
 	}
 
-		// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes — a node,
+	// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes — a node,
 	// the questline itself, and (once nested values are described) an instanced child — so the comparison rule has exactly
 	// one definition and cannot drift between them. PathPrefix names where this object sits under its owner, empty at the top.
 	void DiffObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
-	                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
+	                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
 	{
 		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 		{
@@ -1166,12 +1166,35 @@ namespace
 			}
 
 			const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
+			
+			// An ABSENT cell is the only place policy applies. The source declared the column and left it blank, which is a
+			// statement about the default — but which default, and whether blank is permitted at all, is the recipe's call.
+			// A cell that CARRIES a value overwrites the seed regardless, so policy never reaches it.
+			const bool bAbsent = (Cell.Value.Kind == EQuestDataValueKind::Empty);
+			const EQuestAbsentFieldPolicy Policy = bAbsent ? Policies.Resolve(FName(*Column)) : EQuestAbsentFieldPolicy::Preserve;
+			if (bAbsent && Policy == EQuestAbsentFieldPolicy::Require)
+			{
+				OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' leaves '%s' blank, and the recipe requires a value for it"),
+					*Row.Key, *Column));
+				continue;
+			}
+
+			// THE SEED IS THE POLICY. From the live value, an absent cell changes nothing; from the class default, it resets.
+			// The comparison below is byte-for-byte the same either way — only its starting point moves.
+			const void* SeedPtr = LivePtr;
+			if (bAbsent && Policy == EQuestAbsentFieldPolicy::Reset)
+			{
+				// The CDO of the class the property was RESOLVED on, not of the incoming class — a property offset is only
+				// meaningful against the layout it belongs to.
+				const UClass* OwnerClass = Prop->GetOwnerClass();
+				if (OwnerClass) { SeedPtr = Prop->ContainerPtrToValuePtr<void>(OwnerClass->GetDefaultObject()); }
+			}
 
 			// Compare through the PROPERTY, not the neutral value: FProperty::Identical knows each type's own equality, where
 			// a value-level comparison must pick one rule for a Kind that deliberately fuses several types.
 			void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
 			Prop->InitializeValue(Scratch);
-			Prop->CopyCompleteValue(Scratch, LivePtr);
+			Prop->CopyCompleteValue(Scratch, SeedPtr);
 			RestoreCell(Prop, Scratch, Cell.Value);
 			const bool bIdentical = Prop->Identical(Scratch, LivePtr, PPF_None);
 			const FQuestDataValue Incoming = BuildQuestDataValue(Prop, Scratch, nullptr);
@@ -1179,10 +1202,18 @@ namespace
 			FMemory::Free(Scratch);
 			if (bIdentical) continue;
 
+			// A reset says WHY the value is what it is, not just what it is. Without that, "the source blanked this field"
+			// and "the policy is resetting it to a default that happens to be blank" print identically — and they are
+			// different decisions a designer might want to question. The VALUE is untouched; only its description changes.
+			const FString Described = DescribeValue(Incoming);
+			const bool bResetToDefault = bAbsent && Policy == EQuestAbsentFieldPolicy::Reset;
+
 			FQuestPropertyChange Change;
 			Change.Property      = PathPrefix.IsEmpty() ? Column : (PathPrefix + TEXT(".") + Column);
 			Change.CurrentText   = DescribeValue(BuildQuestDataValue(Prop, LivePtr, nullptr));
-			Change.IncomingText  = DescribeValue(Incoming);
+			Change.IncomingText  = !bResetToDefault ? Described
+								 : (Described.IsEmpty() ? FString(TEXT("<default>"))
+														: FString::Printf(TEXT("<default> (%s)"), *Described));
 			Change.IncomingValue = Incoming;   // what apply writes — never re-derived from the row
 			Entry.Changes.Add(MoveTemp(Change));
 		}
@@ -1208,7 +1239,7 @@ namespace
 	// SAME one the writer uses to name them, so a row and the object it describes are matched by construction rather than by
 	// a second guess at the naming rule — which is exactly where the two directions have drifted before.
 	void DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
-	                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
+	                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
 	{
 		for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
 		{
@@ -1238,8 +1269,8 @@ namespace
 						Entry.Changes.Add(MoveTemp(Change));
 						return;
 					}
-					DiffObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan);
-					DiffInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan);   // a child can itself nest
+					DiffObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan, Policies);
+					DiffInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
 				});
 
 			// Rows under this property with no live counterpart are additions.
@@ -1359,7 +1390,7 @@ namespace
 		return Written;
 	}
 
-	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan)
+	void PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
 	{
 		OutPlan.Warnings = ReadWarnings;
 
@@ -1381,8 +1412,8 @@ namespace
 				// questline rename it. Entered anyway, so the plan still accounts for the questline, but with no changes.
 				if (!Bundle.bSelfRowSynthesized)
 				{
-					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan);
-					DiffInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan);
+					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan, Policies);
+					DiffInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan, Policies);
 				}
 				OutPlan.Entries.Add(MoveTemp(SelfEntry));
 			}
@@ -1463,8 +1494,8 @@ namespace
 			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
 			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (IncomingLevel != CurrentLevel);
 
-			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan);
-			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan);
+			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan, Policies);
+			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan, Policies);
 
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
@@ -1586,6 +1617,7 @@ namespace
 		}
 		const bool bInPlace = !InPlacePath.IsEmpty();
 		const bool bApply = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--apply"), ESearchCase::IgnoreCase); });
+		const bool bResetAbsent = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--reset-absent"), ESearchCase::IgnoreCase); });
 
 		TArray<FString> PathArgs;
 		for (const FString& Arg : Args)
@@ -1698,7 +1730,49 @@ namespace
 
 			FQuestInPlacePlan Plan;
 			Plan.TargetAssetPath = AssetPath;
-			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan);
+
+			// Policy comes from the recipe when there is one, and from the flag otherwise. Preserve stays the default in both
+			// cases: the destructive reading should never be what you get by typing nothing.
+			FQuestAbsentPolicyResolver Policies;
+			if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
+			{
+				Policies.Default = Mapping->DefaultAbsentPolicy;
+				for (const FQuestColumnBinding& B : Mapping->Bindings)
+				{
+					if (!B.TargetProperty.IsNone()) { Policies.ByProperty.Add(B.TargetProperty, B.AbsentPolicy); }
+				}
+			}
+			
+			// The flag is a RUN-LEVEL instruction and has to reach the per-property entries, not just the fallback: loading a
+			// recipe writes an explicit entry for every bound column, and a per-binding Preserve would otherwise shadow the
+			// flag for exactly the columns the recipe covers. It says "do not preserve", so it upgrades Preserve to Reset and
+			// leaves Require alone — Require is a designer asserting a value must be present, which a convenience flag has no
+			// business switching off.
+			if (bResetAbsent)
+			{
+				if (Policies.Default == EQuestAbsentFieldPolicy::Preserve)
+				{
+					Policies.Default = EQuestAbsentFieldPolicy::Reset;
+				}
+				for (TPair<FName, EQuestAbsentFieldPolicy>& Entry : Policies.ByProperty)
+				{
+					if (Entry.Value == EQuestAbsentFieldPolicy::Preserve) { Entry.Value = EQuestAbsentFieldPolicy::Reset; }
+				}
+			}
+
+			// Say what mode this run is in. A plan is only interpretable against the policy that produced it — the same source
+			// and asset yield different plans under Preserve and Reset — and the console does not reliably echo the command
+			// that produced a log, so the output has to identify itself.
+			const TCHAR* PolicyName =
+				Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
+				Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s."),
+				bApply ? TEXT("APPLY") : TEXT("PLAN (read-only)"),
+				DataTablePath.IsEmpty() ? *FolderPath : *DataTablePath,
+				PolicyName,
+				bResetAbsent ? TEXT(" (via --reset-absent)") : TEXT(""));
+			
+			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan, Policies);
 			LogInPlacePlan(Plan);
 
 			if (!bApply)
@@ -1876,14 +1950,14 @@ FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, cons
 	return TypeIncomingLikeProperty(Prop, Cell, SeedPtr);
 }
 
-void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan)
+void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
-	PlanInPlace(Target, Bundle, NodeRowsByKey, ReadWarnings, OutPlan);
+	PlanInPlace(Target, Bundle, NodeRowsByKey, ReadWarnings, OutPlan, Policies);
 }
 
 void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
 {
-	DiffInstancedChildren(Owner, OwnerKey, Bundle, Entry, OutPlan);
+	DiffInstancedChildren(Owner, OwnerKey, Bundle, Entry, OutPlan, FQuestAbsentPolicyResolver());
 }
 
 int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)

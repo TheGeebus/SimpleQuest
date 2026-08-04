@@ -982,4 +982,78 @@ bool FQuestResolver_ApplyWritesNestedChanges::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_AbsentPolicySelectsTheSeed, "SimpleQuest.Resolver.Plan.AbsentPolicy", TestFlags)
+bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameters)
+{
+	// A declared-but-blank cell is a statement about the default — but WHICH default, and whether blank is even allowed, is
+	// the recipe's call. All three answers come out of one knob: what the comparison scratch is seeded with. Preserve seeds
+	// from the live value so an absent cell changes nothing; Reset seeds from the class default so it resets; Require does
+	// not seed at all, it refuses. Nothing else about the comparison differs between them.
+	// (This exercises the PLANNER. Apply separately declines identity-bearing properties, which is a different guard.)
+	auto MakeGraph = []()
+	{
+		UQuestlineGraph* G = NewObject<UQuestlineGraph>(GetTransientPackage());
+		FProperty* P = UQuestlineGraph::StaticClass()->FindPropertyByName(TEXT("QuestlineID"));
+		if (P) { P->ImportText_Direct(TEXT("Authored"), P->ContainerPtrToValuePtr<void>(G), nullptr, PPF_None); }
+		return G;
+	};
+	auto MakeBundle = []()
+	{
+		FQuestDataBundle B;
+		FQuestDataTable Self;
+		FQuestDataRow Row;
+		Row.Key = TEXT("whatever");
+		Row.Cells.Add(TEXT("class"), FQuestDataValue::MakeString(TEXT("QuestlineGraph")));
+		Row.Cells.Add(TEXT("QuestlineID"), FQuestDataValue::MakeEmpty());   // DECLARED, and left blank
+		Self.Rows.Add(MoveTemp(Row));
+		B.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+		return B;
+	};
+	auto SelfChanges = [](const FQuestInPlacePlan& Plan)
+	{
+		for (const FQuestNodePlanEntry& E : Plan.Entries) { if (E.bIsQuestlineSelf) return E.Changes.Num(); }
+		return -1;
+	};
+
+	const TMap<FString, const FQuestDataRow*> NoNodes;
+
+	{
+		FQuestAbsentPolicyResolver Policies;   // Preserve is the default default
+		FQuestInPlacePlan Plan;
+		const FQuestDataBundle Bundle = MakeBundle();
+		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		TestEqual(TEXT("Preserve: a blank cell proposes no change"), SelfChanges(Plan), 0);
+		TestEqual(TEXT("Preserve: and refuses nothing"), Plan.Refusals.Num(), 0);
+	}
+	{
+		FQuestAbsentPolicyResolver Policies;
+		Policies.Default = EQuestAbsentFieldPolicy::Reset;
+		FQuestInPlacePlan Plan;
+		const FQuestDataBundle Bundle = MakeBundle();
+		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		TestEqual(TEXT("Reset: a blank cell proposes the default"), SelfChanges(Plan), 1);
+	}
+	{
+		FQuestAbsentPolicyResolver Policies;
+		Policies.Default = EQuestAbsentFieldPolicy::Require;
+		FQuestInPlacePlan Plan;
+		const FQuestDataBundle Bundle = MakeBundle();
+		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		TestEqual(TEXT("Require: a blank cell is refused"), Plan.Refusals.Num(), 1);
+		TestEqual(TEXT("Require: and nothing is proposed"), SelfChanges(Plan), 0);
+	}
+
+	// A per-property override beats the default, which is the whole point of per-binding policy.
+	{
+		FQuestAbsentPolicyResolver Policies;
+		Policies.Default = EQuestAbsentFieldPolicy::Reset;
+		Policies.ByProperty.Add(TEXT("QuestlineID"), EQuestAbsentFieldPolicy::Preserve);
+		FQuestInPlacePlan Plan;
+		const FQuestDataBundle Bundle = MakeBundle();
+		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		TestEqual(TEXT("A per-property override wins over the default"), SelfChanges(Plan), 0);
+	}
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

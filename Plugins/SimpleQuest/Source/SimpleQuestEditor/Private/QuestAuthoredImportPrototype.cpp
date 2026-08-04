@@ -1406,7 +1406,7 @@ namespace
 	// Execute a plan. Deliberately separate from the console command that currently drives it: the editor action will be a
 	// second caller, and a test is a third — and a mutation worth trusting is one that can be exercised without a UI.
 	// The caller owns the transaction, because a caller may want several applies inside one undo.
-	void ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult)
+	void ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options)
 	{
 		// A plan carrying refusals or contested keys is untrustworthy in ANY part — those say the planner could not describe
 		// the source, not merely that one row is odd. Acting on the rest would be acting on a description known to be wrong.
@@ -1540,9 +1540,56 @@ namespace
 			}
 		}
 
+		// DELETION LAST, and only when explicitly permitted. This is the one operation here that destroys authored work, so
+		// it is opt-in twice: the plan reports an orphan whatever the setting, and removal happens only if asked. The plan has
+		// already scoped orphans to levels the source DECLARES — a source describing one container says nothing about the
+		// rest of the asset — and this honours that scoping rather than re-deriving it, which is where it would drift.
+		if (Options.bDeleteOrphanedNodes)
+		{
+			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+			{
+				if (Entry.Action != EQuestNodePlanAction::Orphan) { continue; }
+
+				UEdGraphNode* Node = NodeByKey.FindRef(Entry.Guid);
+				if (!Node) { OutResult.Skipped.Add(FString::Printf(TEXT("orphan '%s' no longer resolves to a node"), *Entry.Key)); continue; }
+
+				// A container carries its inner graph, so removing one takes everything inside it — nodes the plan counted as
+				// UNTOUCHED rather than as orphans. Deleting a container by hand behaves the same way, so this is not refused,
+				// but the blast radius has to be stated: a destructive step that under-reports what it removed is worse than
+				// one that refuses.
+				if (const UQuestlineNode_Quest* Quest = Cast<UQuestlineNode_Quest>(Node))
+				{
+					if (const UEdGraph* Inner = Quest->GetInnerGraph())
+					{
+						if (Inner->Nodes.Num() > 0)
+						{
+							OutResult.Skipped.Add(FString::Printf(TEXT("deleting container '%s' also removed %d node(s) inside it"),
+								*Entry.Key, Inner->Nodes.Num()));
+						}
+					}
+				}
+
+				UEdGraph* OwningGraph = Node->GetGraph();
+				if (!OwningGraph) { OutResult.Skipped.Add(FString::Printf(TEXT("orphan '%s' has no owning graph"), *Entry.Key)); continue; }
+
+				OwningGraph->Modify();
+				Node->Modify();
+				Node->BreakAllNodeLinks();
+				OwningGraph->RemoveNode(Node);
+				++OutResult.NodesDeleted;
+			}
+		}
+
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{
 			if (Entry.Action == EQuestNodePlanAction::Create) { continue; }   // already handled by the creation pass above
+			if (Entry.Action == EQuestNodePlanAction::Orphan)
+			{
+				// Deferred only when deletion is not permitted. When it is, the deletion pass owns these — counting them here
+				// as well would report the same node as both removed and left alone.
+				if (!Options.bDeleteOrphanedNodes) { ++OutResult.EntriesDeferred; }
+				continue;
+			}
 			if (Entry.Action != EQuestNodePlanAction::Update) { ++OutResult.EntriesDeferred; continue; }
 			if (Entry.bStructuralChange)
 			{
@@ -1791,6 +1838,7 @@ namespace
 		const bool bInPlace = !InPlacePath.IsEmpty();
 		const bool bApply = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--apply"), ESearchCase::IgnoreCase); });
 		const bool bResetAbsent = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--reset-absent"), ESearchCase::IgnoreCase); });
+		const bool bDeleteOrphans = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--delete-orphans"), ESearchCase::IgnoreCase); });
 
 		TArray<FString> PathArgs;
 		for (const FString& Arg : Args)
@@ -1915,6 +1963,13 @@ namespace
 					if (!B.TargetProperty.IsNone()) { Policies.ByProperty.Add(B.TargetProperty, B.AbsentPolicy); }
 				}
 			}
+
+			FQuestApplyOptions ApplyOptions;
+			if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
+			{
+				ApplyOptions.bDeleteOrphanedNodes = Mapping->bDeleteOrphanedNodes;
+			}
+			if (bDeleteOrphans) { ApplyOptions.bDeleteOrphanedNodes = true; }
 			
 			// The flag is a RUN-LEVEL instruction and has to reach the per-property entries, not just the fallback: loading a
 			// recipe writes an explicit entry for every bound column, and a per-binding Preserve would otherwise shadow the
@@ -1939,11 +1994,12 @@ namespace
 			const TCHAR* PolicyName =
 				Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
 				Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s."),
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s.%s"),
 				bApply ? TEXT("APPLY") : TEXT("PLAN (read-only)"),
 				DataTablePath.IsEmpty() ? *FolderPath : *DataTablePath,
 				PolicyName,
-				bResetAbsent ? TEXT(" (via --reset-absent)") : TEXT(""));
+				bResetAbsent ? TEXT(" (via --reset-absent)") : TEXT(""),
+				bApply && ApplyOptions.bDeleteOrphanedNodes ? TEXT(" [WILL DELETE ORPHANS]") : TEXT(""));
 			
 			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan, Policies);
 			LogInPlacePlan(Plan);
@@ -1968,7 +2024,7 @@ namespace
 			const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ApplyInPlaceImport", "Apply In-Place Import"));
 
 			FQuestApplyResult Result;
-			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result);
+			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result, ApplyOptions);
 			if (Result.bRefused)
 			{
 				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
@@ -1977,12 +2033,15 @@ namespace
 			}
 
 			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: APPLIED %d property change(s) to '%s'. %d entry/entries deferred "
-				"(deletion and rewiring are not yet implemented). %d node(s) created. %d skipped."),
-				Result.PropertiesWritten,
+			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: APPLIED to '%s' — %d property change(s), %d node(s) created, "
+				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred (structural rebuilds are not "
+				"performed). %d skipped."),
 				*AssetPath,
-				Result.EntriesDeferred,
+				Result.PropertiesWritten,
 				Result.NodesCreated,
+				Result.EdgesChanged,
+				Result.NodesDeleted,
+				Result.EntriesDeferred,
 				Result.Skipped.Num());
 
 			TargetGraph->GetPackage()->MarkPackageDirty();
@@ -2124,9 +2183,9 @@ int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, 
 	return ApplyChangesToObject(Owner, OwnerKey, Changes, OutSkipped);
 }
 
-void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult)
+void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options)
 {
-	ApplyPlan(Target, Plan, Bundle, NodeRowsByKey, OutResult);
+	ApplyPlan(Target, Plan, Bundle, NodeRowsByKey, OutResult, Options);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

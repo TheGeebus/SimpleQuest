@@ -1086,7 +1086,7 @@ bool FQuestResolver_ApplyRefusesUntrustworthyPlan::RunTest(const FString& Parame
 	FQuestDataBundle Bundle;
 	const TMap<FString, const FQuestDataRow*> NoRows;
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NoRows, Result);
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NoRows, Result, FQuestApplyOptions());
 
 	TestTrue(TEXT("Apply refused the plan"), Result.bRefused);
 	TestEqual(TEXT("...and wrote nothing"), Result.PropertiesWritten, 0);
@@ -1116,7 +1116,7 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 	TestEqual(TEXT("The new row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result);
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
 	TestEqual(TEXT("...and it is actually in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
 
@@ -1156,7 +1156,7 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The edge plans as an addition"), Plan.AddedEdges.Num(), 1);
 
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result);
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	TestEqual(TEXT("The node was created"), Result.NodesCreated, 1);
 	TestEqual(TEXT("The edge was wired"), Result.EdgesChanged, 1);
 
@@ -1165,6 +1165,55 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
 	TestEqual(TEXT("Re-planning has no wiring delta"), Replanned.AddedEdges.Num(), 0);
 	TestEqual(TEXT("...in either direction"), Replanned.RemovedEdges.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked, "SimpleQuest.Resolver.Apply.DeletesOrphans", TestFlags)
+bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Parameters)
+{
+	// The only operation in this arc that DESTROYS, so it is opt-in twice over: the plan reports an orphan regardless, and
+	// apply removes one only when explicitly permitted. The schema's default entry node is a genuine orphan here — it exists,
+	// no source mentions it, and it sits in a level the source DOES declare, which is exactly the case the scoping rule
+	// admits. A node outside the declared levels would not be an orphan at all.
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	const int32 NodesBefore = Graph->QuestlineEdGraph->Nodes.Num();
+	TestEqual(TEXT("The harness starts with the schema's default node"), NodesBefore, 1);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("n_step"), { { TEXT("graph"), TEXT("root") }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	TestEqual(TEXT("The unmentioned node plans as an orphan"), Plan.CountOf(EQuestNodePlanAction::Orphan), 1);
+
+	// Not permitted: the orphan is reported and left exactly where it is.
+	{
+		FQuestApplyResult Result;
+		FQuestApplyOptions Options;   // bDeleteOrphanedNodes stays false
+		QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, Options);
+		TestEqual(TEXT("Nothing is deleted without permission"), Result.NodesDeleted, 0);
+		TestTrue(TEXT("The orphan is still in the graph"), Graph->QuestlineEdGraph->Nodes.Num() >= NodesBefore);
+	}
+
+	// Permitted: it goes, and re-planning no longer sees an orphan.
+	{
+		FQuestInPlacePlan Fresh;
+		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Fresh);
+		FQuestApplyResult Result;
+		FQuestApplyOptions Options;
+		Options.bDeleteOrphanedNodes = true;
+		QuestBundle_ApplyPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
+		TestEqual(TEXT("The orphan is deleted when asked"), Result.NodesDeleted, 1);
+
+		FQuestInPlacePlan Replanned;
+		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+		TestEqual(TEXT("Re-planning reports no orphan"), Replanned.CountOf(EQuestNodePlanAction::Orphan), 0);
+	}
 	return true;
 }
 

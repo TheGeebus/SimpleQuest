@@ -10,6 +10,7 @@
 
 #include "CoreMinimal.h"
 #include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestInPlacePlan.h"
 
 
 struct FQuestApplyResult;
@@ -55,5 +56,5 @@ void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& Owne
 int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped);
 
 /** Execute a plan against the asset it was computed for. Caller owns the transaction. */
-void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult);
+void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options = FQuestApplyOptions());
 

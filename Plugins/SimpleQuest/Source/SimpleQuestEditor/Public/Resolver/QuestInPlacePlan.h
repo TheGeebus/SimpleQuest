@@ -113,3 +113,9 @@ struct FQuestApplyResult
 	bool  bRefused = false;        // the plan was not trustworthy enough to act on any part of
 };
 
+/** What an apply is permitted to do beyond writing properties. Destructive actions are opt-in, never inferred. */
+struct FQuestApplyOptions
+{
+	bool bDeleteOrphanedNodes = false;
+};
+

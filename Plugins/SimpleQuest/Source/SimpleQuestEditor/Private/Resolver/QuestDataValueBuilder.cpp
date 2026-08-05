@@ -77,7 +77,7 @@ FQuestDataValue BuildQuestDataValue(const FProperty* Prop, const void* ValuePtr,
 			if (!GLoggedStructFallbacks.Contains(StructKey))
 			{
 				GLoggedStructFallbacks.Add(StructKey);
-				UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: StructLiteral fallback for %s (struct '%s') — opaque "
+				UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: StructLiteral fallback for %s (struct '%s') — opaque "
 					"to structured providers; structure-me-later candidate."), *StructKey, *StructProp->Struct->GetName());
 			}
 			V.Kind = EQuestDataValueKind::StructLiteral;

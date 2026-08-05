@@ -70,6 +70,13 @@ public:
 	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
 
 	/**
+	 * Import/export pipeline — reading and writing external tables, mapping columns onto node properties, and the
+	 * in-place re-import plan. Raise to Verbose when debugging "why didn't my column land on the node I expected."
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Resolver"))
+	EQuestLogVerbosity LogSimpleQuestResolverVerbosity = EQuestLogVerbosity::Log;
+
+	/**
 	 * UQuestStateSubsystem registry mutations — resolutions, entries, tag/alias registrations. The durable record of
 	 * what happened (becomes load-bearing once save/load lands in 0.5.0). Raise to Verbose when debugging "what's
 	 * persisted vs ephemeral."

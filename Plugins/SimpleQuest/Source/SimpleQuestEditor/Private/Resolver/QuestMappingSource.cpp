@@ -264,7 +264,7 @@ TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Ar
 	const FString Name = ResolveQuestDataFormatName(ConsoleArgName, /*MappingAsset*/ FString(), SettingsDefault, Error);
 	if (Name.IsEmpty())
 	{
-		UE_LOG(LogSimpleQuest, Error, TEXT("%s: %s"), LogPrefix, *Error);
+		UE_LOG(LogSimpleQuestResolver, Error, TEXT("%s: %s"), LogPrefix, *Error);
 		return nullptr;
 	}
 	return FQuestDataFormatRegistry::Get().Create(Name);

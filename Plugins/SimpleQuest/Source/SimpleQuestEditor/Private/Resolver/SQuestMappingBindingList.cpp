@@ -3,6 +3,7 @@
 
 #include "Resolver/SQuestMappingBindingList.h"
 #include "ScopedTransaction.h"
+#include "SimpleQuestLog.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Nodes/QuestlineNodeBase.h"
@@ -79,11 +80,17 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 					{
 						return LOCTEXT("EmptyNoKinds", "No row kinds defined yet — add one above and its properties appear here.");
 					}
+					// Two different filters can empty this table. Test the search first: it is the more recent action, and rows
+					// surviving into the table at all proves the Show filter left something for the search to hide.
+					if (Table.IsValid() && Table->IsFilterActive())
+					{
+						return LOCTEXT("EmptyNoMatch", "No properties match the current search.");
+					}
 					if (bHideBound || bHideUnbound)
 					{
 						return LOCTEXT("EmptyAllFilteredOut", "Every property is hidden by the current Show filter.");
 					}
-					return LOCTEXT("EmptyNoMatch", "No properties match the current filter.");
+					return LOCTEXT("EmptyNoProperties", "These row kinds expose no properties that can be bound.");
 				})
 			]
 		]
@@ -134,6 +141,7 @@ TSharedRef<SWidget> SQuestMappingBindingList::MakeTargetCell(const FQuestMapping
 		[
 			SNew(STextBlock)
 			.Text(GetTargetText(Item))
+			.HighlightText(this, &SQuestMappingBindingList::GetTableFilterText)
 			.Font(FAppStyle::GetFontStyle(TEXT("BoldFont")))
 			.ToolTipText(FText::Format(LOCTEXT("PropTypeHint", "Type: {0}"), Hint))
 		];
@@ -146,12 +154,11 @@ TSharedRef<SWidget> SQuestMappingBindingList::MakeSourceCell(const FQuestMapping
 			SNew(SSearchableComboBox)
 			.OptionsSource(&SourceColumnOptions)
 			.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
-			.OnSelectionChanged(SComboBox<TSharedPtr<FString>>::FOnSelectionChanged::CreateSP(
-				this, &SQuestMappingBindingList::OnSourceColumnChanged, Item))
+			.OnSelectionChanged(SComboBox<TSharedPtr<FString>>::FOnSelectionChanged::CreateSP(this, &SQuestMappingBindingList::OnSourceColumnChanged, Item))
 			[
 				SNew(STextBlock)
-				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
-					this, &SQuestMappingBindingList::GetSourceColumnText, Item)))
+				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SQuestMappingBindingList::GetSourceColumnText, Item)))
+				.HighlightText(this, &SQuestMappingBindingList::GetTableFilterText)
 			]
 		];
 }
@@ -165,8 +172,8 @@ TSharedRef<SWidget> SQuestMappingBindingList::MakePolicyCell(const FQuestMapping
 			.ButtonContent()
 			[
 				SNew(STextBlock)
-				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
-					this, &SQuestMappingBindingList::GetPolicyText, Item)))
+				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(this, &SQuestMappingBindingList::GetPolicyText, Item)))
+				.HighlightText(this, &SQuestMappingBindingList::GetTableFilterText)
 			]
 		];
 }
@@ -176,6 +183,11 @@ TSharedRef<SWidget> SQuestMappingBindingList::MakePolicyCell(const FQuestMapping
 FText SQuestMappingBindingList::GetTargetText(const FQuestMappingRowItemPtr& Item) const
 {
 	return Item.IsValid() ? FText::FromName(Item->TargetProperty) : FText::GetEmpty();
+}
+
+FText SQuestMappingBindingList::GetTableFilterText() const
+{
+	return Table.IsValid() ? Table->GetFilterText() : FText::GetEmpty();
 }
 
 FText SQuestMappingBindingList::GetSourceColumnText(FQuestMappingRowItemPtr Item) const
@@ -331,12 +343,15 @@ void SQuestMappingBindingList::RebuildSourceColumnOptions()
 			SourceColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
 		}
 	}
+	
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("Binding list rebuilt: %d row(s) (HideBound=%d HideUnbound=%d)."),
+		Rows.Num(),
+		bHideBound ? 1 : 0,
+		bHideUnbound ? 1 : 0);
 }
 
 void SQuestMappingBindingList::RefreshRows()
 {
-	RebuildSourceColumnOptions();
-
 	Rows.Reset();
 	const UQuestImportMapping* Mapping = Config.Mapping.Get();
 	if (Mapping)
@@ -377,6 +392,17 @@ void SQuestMappingBindingList::RefreshRows()
 	{
 		Table->SetRootItems(Rows);
 	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("Binding list rebuilt: %d row(s) (HideBound=%d HideUnbound=%d)."),
+		Rows.Num(),
+		bHideBound ? 1 : 0,
+		bHideUnbound ? 1 : 0);
+}
+
+void SQuestMappingBindingList::RefreshFromSource()
+{
+	RebuildSourceColumnOptions();
+	RefreshRows();
 }
 
 void SQuestMappingBindingList::NotifyModified()

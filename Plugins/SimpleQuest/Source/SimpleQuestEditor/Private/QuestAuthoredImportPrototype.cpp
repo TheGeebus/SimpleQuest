@@ -167,7 +167,7 @@ namespace
 	{
 		if (Mapping.DiscriminatorColumn.IsNone())
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: mapping has no discriminator column set — malformed mapping, refusing."));
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping has no discriminator column set — malformed mapping, refusing."));
 			return false;
 		}
 		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
@@ -196,11 +196,11 @@ namespace
 		TArray<FText> GuardWarnings;
 		const bool bGuardOK = ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors, &GuardWarnings);
 		for (const FText& W : GuardWarnings)   // advisories log regardless of pass/fail — they never block, only inform
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline mapping advisory: %s"), *W.ToString());
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline mapping advisory: %s"), *W.ToString());
 		if (!bGuardOK)
 		{
 			for (const FText& E : GuardErrors)
-				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
 			return false;   // refuse — no partial asset from an unsafe mapping
 		}
 
@@ -259,7 +259,7 @@ namespace
 			}
 		}
 		if (Routed > 0)
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
 		return true;
 	}
 
@@ -351,7 +351,7 @@ namespace
 
 					++Synthesized;
 					bRowConsumed = true;
-					UE_LOG(LogSimpleQuest, Verbose, TEXT("ImportQuestline: flow-convention %s on '%s' -> %s '%s' gating via %d operand(s)"),
+					UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ImportQuestline: flow-convention %s on '%s' -> %s '%s' gating via %d operand(s)"),
 						Conv.Column,
 						*Row.Key,
 						Conv.CombinatorClass,
@@ -380,7 +380,7 @@ namespace
 		Bundle.Edges.Append(MoveTemp(EdgesToAdd));
 
 		if (Synthesized > 0)
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d prerequisite combinator(s) from flow conventions."), Synthesized);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: synthesized %d prerequisite combinator(s) from flow conventions."), Synthesized);
 	}
 
 	// ---- WIRE BINDINGS (studio-declared row-adjacent relationships) ------------------------------------------------
@@ -422,7 +422,7 @@ namespace
 			}
 		}
 		if (Synthesized > 0)
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
 	}
 
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
@@ -504,7 +504,7 @@ namespace
 					return;
 				}
 			}
-			UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag — left at its default."),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag — left at its default."),
 				*Prop->GetName());
 			return;
 
@@ -517,7 +517,7 @@ namespace
 					return;
 				}
 			}
-			UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer — left at its default."),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer — left at its default."),
 				*Prop->GetName());
 			return;
 
@@ -1076,9 +1076,13 @@ namespace
 			if (!DestPin) { Warnings.Add(FString::Printf(TEXT("no dest pin for edge -> %s (cat %s)"), *E.To, *SourcePin->PinType.PinCategory.ToString())); continue; }
 
 			SourcePin->MakeLinkTo(DestPin);   // raw link — reconstruct-known-topology, no schema side effects
-			UE_LOG(LogSimpleQuest, Verbose, TEXT("ImportQuestline: wired [%s] %s(%s) -> [%s] %s(%s)"),
-				*E.From, *SourcePin->PinName.ToString(), *SourcePin->PinType.PinCategory.ToString(),
-				*E.To, *DestPin->PinName.ToString(), *DestPin->PinType.PinCategory.ToString());
+			UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ImportQuestline: wired [%s] %s(%s) -> [%s] %s(%s)"),
+				*E.From,
+				*SourcePin->PinName.ToString(),
+				*SourcePin->PinType.PinCategory.ToString(),
+				*E.To,
+				*DestPin->PinName.ToString(),
+				*DestPin->PinType.PinCategory.ToString());
 		}
 	}
 
@@ -1772,7 +1776,7 @@ namespace
 
 	void LogInPlacePlan(const FQuestInPlacePlan& Plan)
 	{
-		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s), "
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s), "
 			"%d node(s) outside the levels this source declares, %d contested key(s), %d wire edge(s) added, %d removed. Nothing was modified."),
 			*Plan.TargetAssetPath,
 			Plan.CountOf(EQuestNodePlanAction::Update),
@@ -1784,9 +1788,9 @@ namespace
 			Plan.AddedEdges.Num(),
 			Plan.RemovedEdges.Num());
 
-		for (const FQuestDataEdge& E : Plan.RemovedEdges) { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE-] %s|%s|%s"), *E.From, *E.Type, *E.To); }
-		for (const FQuestDataEdge& E : Plan.AddedEdges)   { UE_LOG(LogSimpleQuest, Log, TEXT("  [WIRE+] %s|%s|%s"), *E.From, *E.Type, *E.To); }
-		for (const FString& R : Plan.Refusals) { UE_LOG(LogSimpleQuest, Warning, TEXT("  [REFUSED] %s"), *R); }
+		for (const FQuestDataEdge& E : Plan.RemovedEdges) { UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [WIRE-] %s|%s|%s"), *E.From, *E.Type, *E.To); }
+		for (const FQuestDataEdge& E : Plan.AddedEdges)   { UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [WIRE+] %s|%s|%s"), *E.From, *E.Type, *E.To); }
+		for (const FString& R : Plan.Refusals) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("  [REFUSED] %s"), *R); }
 
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{
@@ -1797,7 +1801,7 @@ namespace
 			// level at all, being the thing levels belong to.
 			const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
 			const FString Where = Entry.bIsQuestlineSelf ? FString(TEXT("the questline itself")) : FString::Printf(TEXT("graph '%s'"), *Level);
-			UE_LOG(LogSimpleQuest, Log, TEXT("  [%s] %s (%s) — %s%s"),
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [%s] %s (%s) — %s%s"),
 				PlanActionName(Entry.Action),
 				*Entry.Key,
 				*Entry.ClassName,
@@ -1806,22 +1810,22 @@ namespace
 
 			if (Entry.bStructuralChange && Entry.ClassName != Entry.CurrentClassName)
 			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("      class: %s -> %s"), *Entry.CurrentClassName, *Entry.ClassName);
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("      class: %s -> %s"), *Entry.CurrentClassName, *Entry.ClassName);
 			}
 			if (Entry.bStructuralChange && Entry.GraphCell != Entry.CurrentGraphCell)
 			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("      graph: %s -> %s"), *Entry.CurrentGraphCell, *Entry.GraphCell);
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("      graph: %s -> %s"), *Entry.CurrentGraphCell, *Entry.GraphCell);
 			}
 			for (const FQuestPropertyChange& Change : Entry.Changes)
 			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property, *Change.CurrentText, *Change.IncomingText);
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property, *Change.CurrentText, *Change.IncomingText);
 			}
 		}
 
-		for (const FString& W : Plan.Warnings) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: %s"), *W);
+		for (const FString& W : Plan.Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
 		if (Plan.IsNoOp())
 		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: the asset already matches the source — a re-import would change nothing."));
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: the asset already matches the source — a re-import would change nothing."));
 		}
 	}
 
@@ -1852,7 +1856,7 @@ namespace
 		const int32 MinPositional = (DataTablePath.IsEmpty() ? 1 : 0) + (bInPlace ? 0 : 1);
 		if (PathArgs.Num() < MinPositional)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json] [--mapping=<asset>]' "
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: usage 'SimpleQuest.ImportQuestline <FolderPath> <DestPackagePath> [--format=json] [--mapping=<asset>]' "
 				"or 'SimpleQuest.ImportQuestline <DestPackagePath> --datatable=<asset> [--mapping=<asset>]'. "
 				"Add '--in-place=<AssetPath>' to compare against an existing asset instead of creating one; the dest package arg is then omitted."));
 			return;
@@ -1864,7 +1868,7 @@ namespace
 		// more than one positional arg so a genuine root-anchored source folder is never mistaken for a package path.
 		if (bInPlace && PathArgs.Num() > 1 && FPackageName::IsValidLongPackageName(PathArgs.Last()))
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: trailing argument '%s' is a package path, which --in-place does not take — the "
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: trailing argument '%s' is a package path, which --in-place does not take — the "
 				"target is named by --in-place=<AssetPath>. Pass only the source folder. Nothing was modified."), *PathArgs.Last());
 			return;
 		}
@@ -1908,7 +1912,7 @@ namespace
 		FString ReadError;
 		if (!ReadEndpointBundle(Endpoint, Bundle, ReadError))
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
 			return;
 		}
 
@@ -1921,7 +1925,7 @@ namespace
 		{
 			if (!ApplyMapping(Bundle, *Mapping, Warnings))
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: mapping guard refused the import. No asset created."));
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping guard refused the import. No asset created."));
 				return;
 			}
 			// After the column renames, before the conventions: a wire column is studio vocabulary, never a property.
@@ -1934,7 +1938,7 @@ namespace
 		FString Error;
 		if (!ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, Error))
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: validation failed — %s. No asset created."), *Error);
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: validation failed — %s. No asset created."), *Error);
 			return;
 		}
 
@@ -1948,7 +1952,7 @@ namespace
 			UQuestlineGraph* TargetGraph = Cast<UQuestlineGraph>(FSoftObjectPath(AssetPath).TryLoad());
 			if (!TargetGraph || !TargetGraph->QuestlineEdGraph)
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --in-place target '%s' did not load as a questline graph. Nothing was modified."), *AssetPath);
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --in-place target '%s' did not load as a questline graph. Nothing was modified."), *AssetPath);
 				return;
 			}
 
@@ -1997,7 +2001,7 @@ namespace
 			const TCHAR* PolicyName =
 				Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
 				Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s.%s"),
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s.%s"),
 				bApply ? TEXT("APPLY") : TEXT("PLAN (read-only)"),
 				DataTablePath.IsEmpty() ? *FolderPath : *DataTablePath,
 				PolicyName,
@@ -2017,7 +2021,7 @@ namespace
 			// already know is incomplete.
 			if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
 					"Resolve those and re-plan. Nothing was modified."),
 					Plan.Refusals.Num(),
 					Plan.AmbiguousKeys.Num());
@@ -2030,13 +2034,13 @@ namespace
 			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result, ApplyOptions);
 			if (Result.bRefused)
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
 					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
 				return;
 			}
 
-			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
-			UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: APPLIED to '%s' — %d property change(s), %d node(s) created, "
+			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' — %d property change(s), %d node(s) created, "
 				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred (structural rebuilds are not "
 				"performed). %d skipped."),
 				*AssetPath,
@@ -2057,7 +2061,7 @@ namespace
 			}
 			else
 			{
-				UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: nothing to apply — the asset already matches the source. "
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: nothing to apply — the asset already matches the source. "
 					"Package left clean."));
 			}
 			return;
@@ -2079,7 +2083,7 @@ namespace
 		UQuestlineGraph* Graph = Cast<UQuestlineGraph>(Created);
 		if (!Graph || !Graph->QuestlineEdGraph)
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ImportQuestline: asset creation failed at '%s/%s'."), *DestPackagePath, *AssetName);
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: asset creation failed at '%s/%s'."), *DestPackagePath, *AssetName);
 			return;
 		}
 		
@@ -2137,8 +2141,8 @@ namespace
 		SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 		UPackage::SavePackage(Package, Graph, *FileName, SaveArgs);
 
-		for (const FString& W : Warnings) UE_LOG(LogSimpleQuest, Warning, TEXT("ImportQuestline: %s"), *W);
-		UE_LOG(LogSimpleQuest, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' — %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
+		for (const FString& W : Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' — %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
 			*OriginalKey,
 			*DestPackagePath,
 			*AssetName,
@@ -2218,7 +2222,7 @@ static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("EnumerateSourceColumns: usage <SourceFolder> [--format=<name>]"));
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("EnumerateSourceColumns: usage <SourceFolder> [--format=<name>]"));
 			return;
 		}
 		// The console tokenizes on whitespace and strips quotes, so a path with spaces arrives as MULTIPLE args. Re-join all
@@ -2242,11 +2246,11 @@ static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 		const FQuestSourceColumns Cols = EnumerateForeignFileColumns(FormatName, Folder);
 		if (!Cols.bReadable)
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("EnumerateSourceColumns: %s"), *Cols.Error.ToString());
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("EnumerateSourceColumns: %s"), *Cols.Error.ToString());
 			return;
 		}
 		FString Joined;
 		for (const FName& C : Cols.Columns) Joined += (Joined.IsEmpty() ? TEXT("") : TEXT(", ")) + C.ToString();
-		UE_LOG(LogSimpleQuest, Log, TEXT("EnumerateSourceColumns: %d column(s)%s: %s"),
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("EnumerateSourceColumns: %d column(s)%s: %s"),
 			Cols.Columns.Num(), Cols.bHasDuplicateColumns ? TEXT(" [DUPLICATE]") : TEXT(""), *Joined);
 	}));

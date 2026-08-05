@@ -17,15 +17,15 @@ void FQuestDataFormatRegistry::RegisterFormat(const FString& Name, FQuestDataFor
 	const FString Key = Name.ToUpper();
 	if (Key.IsEmpty() || !Factory.IsBound())
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("QuestDataFormatRegistry: refused to register format '%s' (empty name or unbound factory)."), *Name);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("QuestDataFormatRegistry: refused to register format '%s' (empty name or unbound factory)."), *Name);
 		return;
 	}
 	if (Factories.Contains(Key))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("QuestDataFormatRegistry: format '%s' already registered — replacing."), *Key);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("QuestDataFormatRegistry: format '%s' already registered — replacing."), *Key);
 	}
 	Factories.Add(Key, MoveTemp(Factory));
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("QuestDataFormatRegistry: registered format '%s'."), *Key);
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("QuestDataFormatRegistry: registered format '%s'."), *Key);
 }
 
 void FQuestDataFormatRegistry::UnregisterFormat(const FString& Name)

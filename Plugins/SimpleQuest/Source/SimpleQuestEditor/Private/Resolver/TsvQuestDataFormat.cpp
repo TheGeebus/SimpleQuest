@@ -220,10 +220,10 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 		const FString Path = DestFolder / (Stem + TEXT(".tsv"));
 		if (!FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *Path))
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *Path);
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *Path);
 			return false;
 		}
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d row(s))."), *Path, SortedRows.Num());
+		UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d row(s))."), *Path, SortedRows.Num());
 	}
 
 	TArray<FQuestDataEdge> SortedEdges = Bundle.Edges;
@@ -242,10 +242,10 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 	const FString EdgePath = DestFolder / GEdgeTableDefaultName;
 	if (!FFileHelper::SaveStringToFile(FString::Join(EdgeLines, TEXT("\n")), *EdgePath))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *EdgePath);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *EdgePath);
 		return false;
 	}
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d edge(s))."), *EdgePath, SortedEdges.Num());
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d edge(s))."), *EdgePath, SortedEdges.Num());
 	return true;
 }
 
@@ -253,7 +253,7 @@ bool FTsvQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle&
 {
 	if (!FPaths::DirectoryExists(SrcFolder))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("TsvQuestDataFormat: folder not found '%s'."), *SrcFolder);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: folder not found '%s'."), *SrcFolder);
 		return false;
 	}
 
@@ -261,7 +261,7 @@ bool FTsvQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle&
 	IFileManager::Get().FindFiles(TsvFiles, *(SrcFolder / TEXT("*.tsv")), /*Files*/ true, /*Dirs*/ false);
 	if (TsvFiles.Num() == 0)
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("TsvQuestDataFormat: no .tsv files in '%s'."), *SrcFolder);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: no .tsv files in '%s'."), *SrcFolder);
 		return false;
 	}
 

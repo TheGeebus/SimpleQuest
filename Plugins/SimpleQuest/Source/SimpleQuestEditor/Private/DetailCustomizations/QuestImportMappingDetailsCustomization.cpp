@@ -100,7 +100,7 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	if (DiscriminatorColumnCombo.IsValid()) { DiscriminatorColumnCombo->RefreshOptions(); }
 	if (KeyColumnCombo.IsValid())			{ KeyColumnCombo->RefreshOptions(); }
 	if (DiscriminatorList.IsValid())        { DiscriminatorList->RefreshRows(); }
-	if (BindingList.IsValid())              { BindingList->RefreshRows(); }
+	if (BindingList.IsValid())              { BindingList->RefreshFromSource(); }
 
 	SaveSampleToMemo();
 }

@@ -309,7 +309,7 @@ namespace
 		// refuse an empty pair for the same reason: an oracle that can't tell "identical" from "absent" isn't an oracle.
 		if (Src.IsEmpty() && Rt.IsEmpty())
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("[C] neither folder yielded any .tsv — nothing was compared. src='%s' rt='%s'"),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[C] neither folder yielded any .tsv — nothing was compared. src='%s' rt='%s'"),
 				*SrcFolder, *RtFolder);
 			return 1;
 		}
@@ -320,7 +320,7 @@ namespace
 			const TArray<FString>* RtLines = Rt.Find(Pair.Key);
 			if (!RtLines)
 			{
-				UE_LOG(LogSimpleQuest, Warning, TEXT("[C] file '%s' present in source, absent in round-trip."), *Pair.Key);
+				UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[C] file '%s' present in source, absent in round-trip."), *Pair.Key);
 				++Mismatches; continue;
 			}
 			const TArray<FString> Diffs = DiffNormalized(Pair.Value, *RtLines,
@@ -328,13 +328,13 @@ namespace
 			if (Diffs.Num() > 0)
 			{
 				++Mismatches;
-				UE_LOG(LogSimpleQuest, Warning, TEXT("[C] '%s' differs (%d line(s)):\n%s"),
+				UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[C] '%s' differs (%d line(s)):\n%s"),
 					*Pair.Key, Diffs.Num(), *FString::Join(Diffs, TEXT("\n")));
 			}
 		}
 		for (const auto& Pair : Rt)
 			if (!Src.Contains(Pair.Key))
-			{ UE_LOG(LogSimpleQuest, Warning, TEXT("[C] file '%s' present in round-trip, absent in source."), *Pair.Key); ++Mismatches; }
+			{ UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[C] file '%s' present in round-trip, absent in source."), *Pair.Key); ++Mismatches; }
 		return Mismatches;
 	}
 
@@ -342,8 +342,8 @@ namespace
 	int32 CompareB2(const FString& SrcDump, const FString& RtDump, const FString& OriginalID)
 	{
 		FString SrcText, RtText;
-		if (!FFileHelper::LoadFileToString(SrcText, *SrcDump)) { UE_LOG(LogSimpleQuest, Warning, TEXT("[B2] source dump missing: %s"), *SrcDump); return 1; }
-		if (!FFileHelper::LoadFileToString(RtText, *RtDump))  { UE_LOG(LogSimpleQuest, Warning, TEXT("[B2] round-trip dump missing: %s"), *RtDump); return 1; }
+		if (!FFileHelper::LoadFileToString(SrcText, *SrcDump)) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[B2] source dump missing: %s"), *SrcDump); return 1; }
+		if (!FFileHelper::LoadFileToString(RtText, *RtDump))  { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[B2] round-trip dump missing: %s"), *RtDump); return 1; }
 		TArray<FString> SrcLines, RtLines;
 		SrcText.ParseIntoArrayLines(SrcLines, false);
 		RtText.ParseIntoArrayLines(RtLines, false);
@@ -358,7 +358,7 @@ namespace
 		const TArray<FString> Diffs = DiffNormalized(SrcLines, RtLines,
 			[&](const FString& L){ return StripObjectRefPaths(StripLocNamespaces(SortTagNameTokens(StripRTFromDump(L, OriginalID)))); });
 		if (Diffs.Num() > 0)
-			UE_LOG(LogSimpleQuest, Warning, TEXT("[B2] compiled dumps differ (%d line(s)):\n%s"), Diffs.Num(), *FString::Join(Diffs, TEXT("\n")));
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[B2] compiled dumps differ (%d line(s)):\n%s"), Diffs.Num(), *FString::Join(Diffs, TEXT("\n")));
 		return Diffs.Num();
 	}
 
@@ -366,7 +366,7 @@ namespace
 	{
 		if (Args.Num() < 2)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("RoundTrip: usage 'SimpleQuest.RoundTrip <QuestlineAssetPath> <DestPackagePath>'."));
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RoundTrip: usage 'SimpleQuest.RoundTrip <QuestlineAssetPath> <DestPackagePath>'."));
 			return;
 		}
 		const FString AssetPath = Args[0];
@@ -383,7 +383,7 @@ namespace
 		}
 
 		const UQuestlineGraph* Src = LoadObject<UQuestlineGraph>(nullptr, *AssetPath);
-		if (!Src) { UE_LOG(LogSimpleQuest, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
+		if (!Src) { UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
 		const FString OriginalID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Src->GetEffectiveID());
 
 		const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
@@ -394,7 +394,7 @@ namespace
 
 		auto Exec = [](const FString& Cmd)
 		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("RoundTrip: > %s"), *Cmd);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("RoundTrip: > %s"), *Cmd);
 			GEngine->Exec(nullptr, *Cmd);
 		};
 
@@ -415,7 +415,7 @@ namespace
 		const int32 CMiss  = CompareC(SrcFolder, RtFolder, OriginalID);
 		const int32 B2Miss = CompareB2(SrcDump, RtDump, OriginalID);
 
-		UE_LOG(LogSimpleQuest, Log, TEXT("==== RoundTrip '%s': C %s (%d), B2 %s (%d) ===="),
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTrip '%s': C %s (%d), B2 %s (%d) ===="),
 			*OriginalID,
 			CMiss  == 0 ? TEXT("PASS") : TEXT("FAIL"), CMiss,
 			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);
@@ -432,7 +432,7 @@ namespace
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("RoundTripCompare: usage 'SimpleQuest.RoundTripCompare <OriginalID>' "
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RoundTripCompare: usage 'SimpleQuest.RoundTripCompare <OriginalID>' "
 				"(compares the on-disk <ID> vs <ID>_RT artifacts a prior RoundTrip left; no re-export/import)."));
 			return;
 		}
@@ -445,7 +445,7 @@ namespace
 
 		const int32 CMiss  = CompareC(SrcFolder, RtFolder, OriginalID);
 		const int32 B2Miss = CompareB2(SrcDump, RtDump, OriginalID);
-		UE_LOG(LogSimpleQuest, Log, TEXT("==== RoundTripCompare '%s': C %s (%d), B2 %s (%d) ===="),
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': C %s (%d), B2 %s (%d) ===="),
 			*OriginalID,
 			CMiss  == 0 ? TEXT("PASS") : TEXT("FAIL"), CMiss,
 			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);

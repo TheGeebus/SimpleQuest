@@ -65,14 +65,19 @@ public:
 
 	/**
 	 * Rebuild the row set from the mapping's current mapped node classes (their authored properties = the anchor rows),
-	 * honouring the bound/unbound filter. Called on construct and whenever the mapping's classes or source change.
+	 * honouring the bound/unbound filter. Cheap: it does not re-read the source. Call whenever the mapped classes change.
 	 */
 	void RefreshRows();
 
-	const FQuestMappingBindingListConfig& GetConfig() const { return Config; }
-	void NotifyModified();
+	/**
+	 * As RefreshRows, but re-asks the provider for the source's columns first. That read parses the sample folder, so it
+	 * belongs only where the SOURCE changed - a different folder or format - never on an ordinary edit.
+	 */
+	void RefreshFromSource();
 
 private:
+	void NotifyModified();
+	
 	TArray<FTableColumnDef<FQuestMappingRowItemPtr>> MakeColumns();
 
 	/**
@@ -84,6 +89,9 @@ private:
 	TSharedRef<SWidget> MakePolicyCell(const FQuestMappingRowItemPtr& Item);
 
 	FText GetTargetText(const FQuestMappingRowItemPtr& Item) const;
+
+	/** The table's live search text, so a custom cell can box its matched substring the way the default text cell does. */
+	FText GetTableFilterText() const;
 
 	/**
 	 * These two take the item BY VALUE, unlike their neighbours. TDelegate decays its payload types, so a member bound

@@ -120,7 +120,7 @@ namespace
 		}
 		if (Val->Type != EJson::String)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("JsonQuestDataFormat: field '%s' in %s is not a string (EJson=%d) — ignored."),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: field '%s' in %s is not a string (EJson=%d) — ignored."),
 				Field, Context, (int32)Val->Type);
 			return false;
 		}
@@ -276,17 +276,17 @@ bool FJsonQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FSt
 		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Out);
 	if (!FJsonSerializer::Serialize(Root.ToSharedRef(), Writer))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("JsonQuestDataFormat: failed to serialize bundle."));
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to serialize bundle."));
 		return false;
 	}
 
 	const FString Path = DestFolder / TEXT("questline.json");
 	if (!FFileHelper::SaveStringToFile(Out, *Path))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("JsonQuestDataFormat: failed to write '%s'."), *Path);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to write '%s'."), *Path);
 		return false;
 	}
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("JsonQuestDataFormat: wrote '%s'."), *Path);
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("JsonQuestDataFormat: wrote '%s'."), *Path);
 	return true;
 }
 
@@ -296,7 +296,7 @@ bool FJsonQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle
 	FString Text;
 	if (!FFileHelper::LoadFileToString(Text, *Path))
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("JsonQuestDataFormat: could not read '%s'."), *Path);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: could not read '%s'."), *Path);
 		return false;
 	}
 
@@ -304,7 +304,7 @@ bool FJsonQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle
 	const TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(Text);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		UE_LOG(LogSimpleQuest, Warning, TEXT("JsonQuestDataFormat: failed to parse '%s'."), *Path);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to parse '%s'."), *Path);
 		return false;
 	}
 

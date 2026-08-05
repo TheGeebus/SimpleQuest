@@ -507,7 +507,7 @@ namespace
 			Edge.To   = RestateKey(Edge.To,   SourceKeyByGuid);   // a contains edge's target is a CHILD key, not a bare GUID
 		}
 
-		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "
 			"(faithful re-statement — per-row casing, at-default values and original file layout are not reconstructed), %d wire(s) written."),
 			Restated,
 			ColsAfter,
@@ -571,13 +571,13 @@ namespace
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: usage 'SimpleQuest.ExportQuestline <QuestlineAssetPath>'."));
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: usage 'SimpleQuest.ExportQuestline <QuestlineAssetPath>'."));
 			return;
 		}
 		const UQuestlineGraph* Graph = LoadObject<UQuestlineGraph>(nullptr, *Args[0]);
 		if (!Graph || !Graph->QuestlineEdGraph)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: couldn't load questline asset or its authored graph '%s'."), *Args[0]);
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: couldn't load questline asset or its authored graph '%s'."), *Args[0]);
 			return;
 		}
 
@@ -596,7 +596,7 @@ namespace
 		// Refuse rather than write somewhere unintended, and name the field to fix.
 		if (SelfKey.IsEmpty())
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: '%s' has a QuestlineID that reduces to an empty export key "
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: '%s' has a QuestlineID that reduces to an empty export key "
 				"(raw value: '%s'). Give it at least one letter, digit or underscore — or clear the field entirely to fall back "
 				"to the asset name. Nothing exported."),
 				*Args[0],
@@ -616,7 +616,7 @@ namespace
 			CollectQuestNodeIdentity(Graph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
 			ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
 		}
-		for (const FString& W : Warnings) { UE_LOG(LogSimpleQuest, Warning, TEXT("ExportQuestline: %s"), *W); }
+		for (const FString& W : Warnings) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: %s"), *W); }
 		
 		// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
 		// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
@@ -627,7 +627,7 @@ namespace
 			FString NormOut  = OutDir;      FPaths::NormalizeDirectoryName(NormOut);
 			if (NormOut == NormRoot || FPaths::GetPath(NormOut) != NormRoot)
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: refusing — destination '%s' is not a direct child of the "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — destination '%s' is not a direct child of the "
 					"export root '%s' (export key '%s'). Nothing exported."),
 					*NormOut,
 					*NormRoot,
@@ -635,7 +635,7 @@ namespace
 				return;
 			}
 		}
-		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: destination '%s'."), *OutDir);
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: destination '%s'."), *OutDir);
 
 		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ExportQuestline"));
 		if (!Format)
@@ -650,7 +650,7 @@ namespace
 		const TArray<FString> Existing = FilesIn(OutDir);
 		if (Existing.Num() > 0 && !bHadMarker)
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: refusing — '%s' already holds %d file(s) and carries no "
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' already holds %d file(s) and carries no "
 				"SimpleQuest export marker, so an export did not write it. Exporting would replace its contents. Move or delete "
 				"that folder, or give this questline a different QuestlineID. Nothing written."),
 				*OutDir,
@@ -659,7 +659,7 @@ namespace
 		}
 		if (bHadMarker && !Previous.SourceAsset.IsEmpty() && Previous.SourceAsset != Args[0])
 		{
-			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: refusing — '%s' holds the export of a DIFFERENT questline "
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' holds the export of a DIFFERENT questline "
 				"('%s'). Their IDs reduce to the same folder name, so each would overwrite the other. Give one a distinct "
 				"QuestlineID. Nothing written."),
 				*OutDir,
@@ -675,7 +675,7 @@ namespace
 		if (!Format->WriteBundle(Bundle, Staging))
 		{
 			IFileManager::Get().DeleteDirectory(*Staging, false, true);
-			UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: the %s provider failed to write. '%s' is unchanged."),
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: the %s provider failed to write. '%s' is unchanged."),
 				*Format->FormatName(),
 				*OutDir);
 			return;
@@ -697,7 +697,7 @@ namespace
 			if (!IFileManager::Get().FileExists(*OldPath)) continue;
 			if (!IFileManager::Get().Delete(*OldPath, /*RequireExists*/ false, /*EvenReadOnly*/ false, /*Quiet*/ false))
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: couldn't remove '%s' from the previous export — it may be "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: couldn't remove '%s' from the previous export — it may be "
 					"read-only or open elsewhere. '%s' is unchanged; the finished new export is at '%s'."),
 					*OldPath,
 					*OutDir,
@@ -713,7 +713,7 @@ namespace
 		{
 			if (!IFileManager::Get().Move(*(OutDir / New), *(Staging / New)))
 			{
-				UE_LOG(LogSimpleQuest, Error, TEXT("ExportQuestline: couldn't move '%s' into place — '%s' is now PARTIAL and "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: couldn't move '%s' into place — '%s' is now PARTIAL and "
 					"should not be imported. The complete export is at '%s'."),
 					*New,
 					*OutDir,
@@ -729,7 +729,7 @@ namespace
 		{
 			RowTotal += TablePair.Value.Rows.Num();
 		}
-		UE_LOG(LogSimpleQuest, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
 			"collapsed. Wrote %d file(s) to '%s'; removed %d from the previous export."),
 			*SelfKey,
 			RowTotal,

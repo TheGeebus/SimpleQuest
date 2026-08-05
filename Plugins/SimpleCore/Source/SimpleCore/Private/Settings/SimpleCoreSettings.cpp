@@ -4,6 +4,7 @@
 #include "Settings/SimpleCoreSettings.h"
 #include "Utilities/SimpleCoreLog.h"
 
+#if !NO_LOGGING
 namespace
 {
 	ELogVerbosity::Type ToELogVerbosity(ESimpleCoreLogVerbosity Verbosity)
@@ -22,10 +23,13 @@ namespace
 		}
 	}
 }
+#endif
 
 void USimpleCoreSettings::ApplyLogVerbosity() const
 {
+#if !NO_LOGGING
 	LogSimpleCore.SetVerbosity(ToELogVerbosity(LogSimpleCoreVerbosity));
+#endif
 }
 
 #if WITH_EDITOR

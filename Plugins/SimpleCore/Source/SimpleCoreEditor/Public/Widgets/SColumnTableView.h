@@ -39,6 +39,15 @@ struct FTableColumnDef
 	FName  Id;
 	FText  Label;
 	float  FillWidth = 1.0f;
+	
+	/**
+	 * Set above zero for a column that should neither stretch nor be dragged - an icon gutter, a status dot, a fixed
+	 * button. It wins over FillWidth, and the column is then neither resizable nor persisted, because there is nothing
+	 * to remember. Pair it with bSortable = false and an empty Label; a gutter carrying a sort arrow on a blank header
+	 * reads as a bug rather than a control.
+	 */
+	float  FixedWidth = 0.0f;
+	
 	bool   bSortable = true;
 
 	/**
@@ -180,21 +189,30 @@ public:
 			Args.DefaultLabel(Column.Label);
 			Args.HAlignHeader(Column.HeaderAlignment);
 
-			/**
-			 * Bound as a DELEGATE, never a value. FColumn::SetWidth only writes its own Width when OnWidthChanged is
-			 * UNBOUND - binding the notification makes the column controlled, so the width has to come back from us or
-			 * dragging does nothing at all. Feeding it from SavedWidths is what makes a drag move the column AND persist,
-			 * out of one mechanism rather than two.
-			 */
-			Args.FillWidth(TAttribute<float>::Create(
-				TAttribute<float>::FGetter::CreateSP(this, &SColumnTableView::GetColumnFillWidth, Id)));
+			if (Column.FixedWidth > 0.0f)
+			{
+				// A fixed column cannot be dragged, so it wants neither the width attribute nor a change notification -
+				// and leaving OnWidthChanged unbound is precisely what keeps it fixed rather than controlled.
+				Args.FixedWidth(Column.FixedWidth);
+			}
+			else
+			{
+				/**
+				 * Bound as a DELEGATE, never a value. FColumn::SetWidth only writes its own Width when OnWidthChanged is
+				 * UNBOUND - binding the notification makes the column controlled, so the width has to come back from us or
+				 * dragging does nothing at all. Feeding it from SavedWidths is what makes a drag move the column AND persist,
+				 * out of one mechanism rather than two.
+				 */
+				Args.FillWidth(TAttribute<float>::Create(
+					TAttribute<float>::FGetter::CreateSP(this, &SColumnTableView::GetColumnFillWidth, Id)));
+				Args.OnWidthChanged(FOnWidthChanged::CreateSP(this, &SColumnTableView::OnColumnWidthChanged, Id));
+			}
 
 			if (Column.bSortable)
 			{
 				Args.SortMode(this, &SColumnTableView::GetSortModeForColumn, Id);
 				Args.OnSort(this, &SColumnTableView::OnSortColumn);
 			}
-			Args.OnWidthChanged(FOnWidthChanged::CreateSP(this, &SColumnTableView::OnColumnWidthChanged, Id));
 			Header->AddColumn(Args);
 		}
 
@@ -541,6 +559,7 @@ private:
 		}
 		for (const FTableColumnDef<ItemType>& Col : Columns)
 		{
+			if (Col.FixedWidth > 0.0f) { continue; }   // nothing to restore, and a stale entry would outlive the change
 			float Width = 0.0f;
 			if (GConfig->GetFloat(PersistSection(), *(PersistenceKey + TEXT(".Width.") + Col.Id.ToString()), Width, GEditorPerProjectIni)
 				&& Width > 0.0f)

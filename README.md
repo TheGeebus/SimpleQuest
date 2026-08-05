@@ -381,7 +381,7 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 
 **Editor Preferences > Plugins > Simple Quest Visuals** — wire, pin, node title, and debug-highlight colors used by the questline graph editor. Per-developer; not committed to source control.
 
-**Log verbosity** — SimpleQuest's logging is split into five channels for independent dial control:
+**Log verbosity** — SimpleQuest's logging is split into six channels for independent dial control:
 
 | Channel | Coverage                                                                                         |
 |---|--------------------------------------------------------------------------------------------------|
@@ -389,6 +389,7 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 | `LogSimpleQuestActivation` | Quest activation flow - starts, chain advancement, deactivation                                  |
 | `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery                                   |
 | `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation                            |
+| `LogSimpleQuestResolver` | Import/export pipeline - reading and writing external tables, column mapping, in-place re-import |
 | `LogSimpleQuestState` | Quest history recording - resolutions, entries, tag registrations                                |
 
 SimpleCore logs under `LogSimpleCore`. Set verbosity per channel via the Project Settings pages above - changes apply live without editor restart. The `[Core.Log]` section in `DefaultEngine.ini` still works as a fallback for non-editor builds.

@@ -85,6 +85,15 @@ tenth time, into a questline someone has since edited by hand.
 - **One undo takes it all back**, including created nodes, deleted nodes and
   nested reward values.
 
+### Watching it work
+
+- **Resolver output has its own log channel.** Export, import, column mapping
+  and the re-import preview all report on `LogSimpleQuestResolver`, separate
+  from quest activation and graph compilation. Turn it up when you want to see
+  what an import did without everything else coming along for the ride.
+- **Dial it from Project Settings.** *Plugins → Simple Quest → Logging →
+  Resolver*, applied live without an editor restart.
+
 ### It refuses rather than guessing
 
 - **A source it can't fully describe is refused, not partly applied.** If the

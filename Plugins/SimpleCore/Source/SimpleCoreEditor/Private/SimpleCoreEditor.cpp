@@ -47,8 +47,7 @@ void FSimpleCoreEditorModule::StartupModule()
     FFactsPanelRegistry::Get().RegisterView(
         WorldStateViewId,
         LOCTEXT("WorldStateViewName", "World State"),
-        [](FName PanelPersistenceKey) -> TSharedRef<SWidget> { return SNew(SWorldStateFactsView); });
-
+        [](FName PanelPersistenceKey) -> TSharedRef<SWidget> { return SNew(SWorldStateFactsView).PanelPersistenceKey(PanelPersistenceKey); });
     // Nomad tab under Window > Developer Tools. SetReuseTabMethod returning null forces a fresh SFactsPanel on each
     // menu invocation - designers can dock multiple panels showing different registries side-by-side.
     FGlobalTabmanager::Get()->RegisterNomadTabSpawner(

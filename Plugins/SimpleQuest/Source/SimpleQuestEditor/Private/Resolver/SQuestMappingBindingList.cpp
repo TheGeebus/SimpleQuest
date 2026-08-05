@@ -45,7 +45,6 @@ namespace
 void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 {
 	Config = InArgs._Config;
-	RebuildSourceColumnOptions();
 
 	// Per-ASSET persistence: a designer returning to a recipe should find the columns and sort they left it with. Keyed by
 	// path rather than by widget instance, because what they think they are returning to is the recipe, not a panel.
@@ -96,7 +95,7 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 		]
 	];
 
-	RefreshRows();
+	RefreshFromSource();
 }
 
 TArray<FTableColumnDef<FQuestMappingRowItemPtr>> SQuestMappingBindingList::MakeColumns()
@@ -344,10 +343,8 @@ void SQuestMappingBindingList::RebuildSourceColumnOptions()
 		}
 	}
 	
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("Binding list rebuilt: %d row(s) (HideBound=%d HideUnbound=%d)."),
-		Rows.Num(),
-		bHideBound ? 1 : 0,
-		bHideUnbound ? 1 : 0);
+	// This read parses every file in the sample folder. Logged so an unexpected cadence shows up as a pattern, not just as lag.
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Binding list: provider returned %d source column(s)."), SourceColumnOptions.Num() - 1);
 }
 
 void SQuestMappingBindingList::RefreshRows()
@@ -393,7 +390,7 @@ void SQuestMappingBindingList::RefreshRows()
 		Table->SetRootItems(Rows);
 	}
 
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("Binding list rebuilt: %d row(s) (HideBound=%d HideUnbound=%d)."),
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Binding list rebuilt: %d row(s) (HideBound=%d HideUnbound=%d)."),
 		Rows.Num(),
 		bHideBound ? 1 : 0,
 		bHideUnbound ? 1 : 0);

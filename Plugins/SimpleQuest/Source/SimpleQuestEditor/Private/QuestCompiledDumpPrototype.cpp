@@ -202,13 +202,13 @@ namespace
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("DumpCompiled: usage 'SimpleQuest.DumpCompiled <QuestlineAssetPath>'."));
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: usage 'SimpleQuest.DumpCompiled <QuestlineAssetPath>'."));
 			return;
 		}
 		const UQuestlineGraph* Graph = LoadObject<UQuestlineGraph>(nullptr, *Args[0]);
 		if (!Graph)
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("DumpCompiled: couldn't load questline asset '%s'."), *Args[0]);
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: couldn't load questline asset '%s'."), *Args[0]);
 			return;
 		}
 
@@ -302,12 +302,12 @@ namespace
 		const FString OutPath = FPaths::ConvertRelativePathToFull(OutDir / (QLID + TEXT("_compiled_dump.tsv")));
 		if (FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *OutPath))
 		{
-			UE_LOG(LogSimpleQuest, Log, TEXT("DumpCompiled: '%s' — %d line(s), %d node(s). Wrote '%s'."),
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("DumpCompiled: '%s' — %d line(s), %d node(s). Wrote '%s'."),
 				*QLID, Lines.Num(), NodeTags.Num(), *OutPath);
 		}
 		else
 		{
-			UE_LOG(LogSimpleQuest, Warning, TEXT("DumpCompiled: failed to write '%s'."), *OutPath);
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: failed to write '%s'."), *OutPath);
 		}
 	}
 }

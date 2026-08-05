@@ -163,20 +163,26 @@ bool FSimpleQuestSaveLoad_UnflaggedFieldsStillPersist::RunTest(const FString& Pa
 	// asserted here only because it is the cheapest available proof that the flag is not consulted on this path.
 	TestTrue(TEXT("unflagged bHasState persisted anyway"), Loaded->Snapshot.ObjectiveStates.FindRef(TestStepGuid).bHasState);
 
-	// FQuestContextBase::Instigator is also unflagged, for the documented reason that a weak pointer resolves eagerly on
-	// load. It is reached here through FQuestEntryArrival -> ActivationContextSnapshot, and it is inside the archive.
-	const FQuestEntryRecord* EntryRecord = Loaded->Snapshot.Entries.Find(QuestTag);
-	TestNotNull(TEXT("entry record present"), EntryRecord);
-	if (EntryRecord && EntryRecord->History.Num() == 1)
+	// The Instigator half needs a different kind of evidence. With no real actor to point at, the value round-trips as an
+	// empty string whether or not the flag is honoured, so no value assertion can tell those two worlds apart. What does
+	// distinguish them is whether the property is in the archive at all - an excluded property emits no tag.
+	// The null terminator is load-bearing. Property names are written as strings WITH their terminator, and searching for
+	// "Instigator" alone also matches the neighbouring InstigatorRef tag, which is flagged and always present - so the
+	// search would succeed regardless of what happened to this field. Comparing the terminator too keeps them distinct.
+	auto ArchiveContainsTag = [&Bytes](const ANSICHAR* Name)
 	{
-		// Null in, null out - the point is that the property is SERIALIZED, which the next line proves structurally
-		// rather than by value: if the flag were honoured, the whole FQuestObjectiveActivationContext would still
-		// arrive (it IS flagged) but its inherited Instigator would be skipped. There is no value-level assertion
-		// available without a real AActor, so this documents the reachable path and the sabotage step below is what
-		// actually demonstrates the behaviour.
-		TestTrue(TEXT("activation context reached and intact"),
-			EntryRecord->History[0].ActivationContextSnapshot.Config.NumElementsRequired == 7);
-	}
+		const int32 Len = FCStringAnsi::Strlen(Name) + 1;   // include the terminator the archive writes
+		for (int32 Index = 0; Index + Len <= Bytes.Num(); ++Index)
+		{
+			if (FMemory::Memcmp(Bytes.GetData() + Index, Name, Len) == 0) { return true; }
+		}
+		return false;
+	};
+
+	// Control first: a field that is flagged and unquestionably present, so a failure below means the field is missing
+	// rather than the search being broken.
+	TestTrue(TEXT("control - the InstigatorRef tag is findable"), ArchiveContainsTag("InstigatorRef"));
+	TestTrue(TEXT("the unflagged Instigator property is present in the archive"), ArchiveContainsTag("Instigator"));
 	return true;
 }
 
@@ -193,11 +199,9 @@ bool FSimpleQuestSaveLoad_ApplySnapshotRebuildsIndices::RunTest(const FString& P
 	const FGameplayTag QuestTag = Tag_Channel_QuestGiven.GetTag();
 	const FGameplayTag OutcomeTag = TAG_Outcome_AnyOutcome.GetTag();
 
-	/**
-	 * A GameInstance exists here only to satisfy UGameInstanceSubsystem's Within specifier. Init() is deliberately not
-	 * called: the subsystem collection stays empty, so ApplySnapshot's WorldState lookup finds nothing and its fact
-	 * restore no-ops. That is why nothing below asserts on WorldFacts - those would not fail, they would never run.
-	 */
+	// A GameInstance exists here only to satisfy UGameInstanceSubsystem's Within specifier. Init() is deliberately not
+	// called: the subsystem collection stays empty, so ApplySnapshot's WorldState lookup finds nothing and its fact
+	// restore no-ops. That is why nothing below asserts on WorldFacts - those would not fail, they would never run.
 	UGameInstance* GameInstance = NewObject<UGameInstance>(GetTransientPackage(), UGameInstance::StaticClass());
 	FGCObjectScopeGuard GameInstanceGuard(GameInstance);
 	UQuestStateSubsystem* QuestState = NewObject<UQuestStateSubsystem>(GameInstance);
@@ -263,11 +267,9 @@ bool FSimpleQuestSaveLoad_CountingObjectiveCaptureRestore::RunTest(const FString
 	Objective->RestoreObjectiveState(Captured);
 	TestEqual(TEXT("restore clamped to the lowered threshold"), Objective->GetCurrentElements(), 2);
 
-	/**
-	 * No guard against an empty save state is needed here and none exists: the manager captures only objectives whose
-	 * class reports durable state, and calls restore only when it finds an entry under that Step's GUID. What the clamp
-	 * does owe is a floor - a hand-edited or corrupted save carrying a negative count must not drive progress below zero.
-	 */
+	// No guard against an empty save state is needed here and none exists: the manager captures only objectives whose
+	// class reports durable state, and calls restore only when it finds an entry under that Step's GUID. What the clamp
+	// does owe is a floor - a hand-edited or corrupted save carrying a negative count must not drive progress below zero.
 	Objective->DispatchOnObjectiveActivated(Authored, Runtime, FGameplayTag());
 	FSimpleQuestObjectiveSaveState Negative;
 	Negative.bHasState = true;
@@ -281,3 +283,4 @@ bool FSimpleQuestSaveLoad_CountingObjectiveCaptureRestore::RunTest(const FString
 }
 
 #endif   // WITH_DEV_AUTOMATION_TESTS
+

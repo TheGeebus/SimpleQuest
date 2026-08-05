@@ -4,29 +4,30 @@
 #pragma once
 
 // The binding-list widget for a UQuestImportMapping: one row per authored TARGET property of the mapped node classes, each
-// with a source-column picker (a searchable dropdown of the source's ACTUAL columns — never free text, so a typo can't
+// with a source-column picker (a searchable dropdown of the source's ACTUAL columns - never free text, so a typo can't
 // silently mis-bind) and an inline absent-field policy combo. Adapts the engine's chain-map list: the row anchors on the
 // stable reflection side (our properties), the variable source column is the per-row selection. Parameterized by a config
 // struct so it hardcodes nothing and can be embedded by the mapping asset editor now and a toolbar import flow later.
+//
+// Table mechanics - sorting, filtering, column widths, clipboard - come from SColumnTableView. This file supplies only
+// what a binding row MEANS, which is why each column pairs a cell widget with the text value that cell is showing.
 
 #include "CoreMinimal.h"
+#include "Widgets/SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
-#include "Widgets/Views/SListView.h"
-#include "Widgets/Views/STableRow.h"
 
 class UQuestImportMapping;
-class ITableRow;
-class STableViewBase;
-class SQuestMappingBindingList;
 
-// One list row = one target property (the fixed anchor). The source column + policy are read/written live on the mapping's
-// Bindings array, looked up by this property name — the element holds only the identity, never authored state (so a
-// re-populate can't desync from the mapping).
+/**
+ * One list row = one target property (the fixed anchor). The source column and policy are read and written live on the
+ * mapping's Bindings array, looked up by this property name - the element holds only the identity, never authored state,
+ * so a re-populate cannot desync from the mapping.
+ */
 class FQuestMappingRowItem
 {
 public:
 	FName TargetProperty;
-	FString PropertyTypeLabel;   // e.g. "FText", "bool" — a display hint so a designer picks the right source column
+	FString PropertyTypeLabel;   // e.g. "FText", "bool" - a display hint so a designer picks the right source column
 
 	static TSharedRef<FQuestMappingRowItem> Make(FName InProperty, const FString& InTypeLabel)
 	{
@@ -40,8 +41,10 @@ private:
 
 using FQuestMappingRowItemPtr = TSharedPtr<FQuestMappingRowItem>;
 
-// How the widget reaches its mapping + source. TWeakObjectPtr so the widget never needs FGCObject; SourceColumnProvider is
-// the provenance seam (returns the source's actual column names) — the widget calls it, never parses anything itself.
+/**
+ * How the widget reaches its mapping and source. TWeakObjectPtr so the widget never needs FGCObject; SourceColumnProvider
+ * is the provenance seam (returns the source's actual column names) - the widget calls it, never parses anything itself.
+ */
 struct FQuestMappingBindingListConfig
 {
 	TWeakObjectPtr<UQuestImportMapping> Mapping;
@@ -50,40 +53,6 @@ struct FQuestMappingBindingListConfig
 
 	bool IsValid() const { return Mapping.IsValid() && SourceColumnProvider; }
 };
-
-// One row widget: fixed property label | source-column searchable combo | inline policy combo.
-class SQuestMappingBindingRow : public SMultiColumnTableRow<FQuestMappingRowItemPtr>
-{
-public:
-	SLATE_BEGIN_ARGS(SQuestMappingBindingRow) {}
-	SLATE_END_ARGS()
-
-	void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable,
-		TSharedRef<FQuestMappingRowItem> InItem, TSharedPtr<SQuestMappingBindingList> InList);
-
-	virtual TSharedRef<SWidget> GenerateWidgetForColumn(const FName& ColumnName) override;
-
-private:
-	// Source-column combo: options are the provider's columns + a leading "None" (unmapped). String-backed, NOT FName —
-	// Slate drops NAME_None from a combo, which would erase the unmapped state.
-	TArray<TSharedPtr<FString>> SourceColumnOptions;
-	void RebuildSourceColumnOptions();
-
-	FText GetSelectedSourceColumn() const;                                          // reads the mapping's binding for this prop
-	void OnSourceColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);    // writes it back
-
-	FText GetPolicyText() const;
-	TSharedRef<SWidget> BuildPolicyMenu();                                          // Preserve/Reset/Require
-	void SetPolicy(uint8 NewPolicy);
-
-	TWeakPtr<FQuestMappingRowItem> Item;
-	TWeakPtr<SQuestMappingBindingList> List;
-	friend class SQuestMappingBindingList;
-
-	virtual const FSlateBrush* GetBorder() const override;   // whole-row hover highlight, independent of SelectionMode (base gates it off under None)
-};
-
-using SQuestMappingListView = SListView<FQuestMappingRowItemPtr>;
 
 class SQuestMappingBindingList : public SCompoundWidget
 {
@@ -94,19 +63,53 @@ public:
 
 	void Construct(const FArguments& InArgs);
 
-	// Rebuild the row set from the mapping's current mapped node classes (their authored properties = the anchor rows).
-	// Called on construct + whenever the mapping's classes/source change (the host triggers it).
+	/**
+	 * Rebuild the row set from the mapping's current mapped node classes (their authored properties = the anchor rows),
+	 * honouring the bound/unbound filter. Called on construct and whenever the mapping's classes or source change.
+	 */
 	void RefreshRows();
 
 	const FQuestMappingBindingListConfig& GetConfig() const { return Config; }
-	void NotifyModified();   // fires Config.OnMappingModified
+	void NotifyModified();
 
 private:
+	TArray<FTableColumnDef<FQuestMappingRowItemPtr>> MakeColumns();
+
+	/**
+	 * Cell widgets. Each is paired with a text accessor below, because the cell is only the APPEARANCE - the text is what
+	 * the table searches, sorts and copies. A picker that nothing can search by its selection is the gap this closes.
+	 */
+	TSharedRef<SWidget> MakeTargetCell(const FQuestMappingRowItemPtr& Item);
+	TSharedRef<SWidget> MakeSourceCell(const FQuestMappingRowItemPtr& Item);
+	TSharedRef<SWidget> MakePolicyCell(const FQuestMappingRowItemPtr& Item);
+
+	FText GetTargetText(const FQuestMappingRowItemPtr& Item) const;
+
+	/**
+	 * These two take the item BY VALUE, unlike their neighbours. TDelegate decays its payload types, so a member bound
+	 * with a payload must accept that payload by value - a const reference will not match the bound signature. They are
+	 * reached both directly and through an attribute binding, and the binding is what dictates the parameter.
+	 */
+	FText GetSourceColumnText(FQuestMappingRowItemPtr Item) const;
+	FText GetPolicyText(FQuestMappingRowItemPtr Item) const;
+
+	void OnSourceColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type, FQuestMappingRowItemPtr Item);
+	TSharedRef<SWidget> BuildPolicyMenu(FQuestMappingRowItemPtr Item);
+	void SetPolicy(uint8 NewPolicy, FQuestMappingRowItemPtr Item);
+
+	/** Hide Bound / Hide Unbound - the "what have I not mapped yet" question, which is why anyone scans this list. */
+	TSharedRef<SWidget> BuildFilterMenu();
+
+	/** Every row offers the SAME options (the source's columns), so one array serves the whole list. */
+	void RebuildSourceColumnOptions();
+
+	bool IsBound(const FQuestMappingRowItemPtr& Item) const;
+
 	FQuestMappingBindingListConfig Config;
-	TSharedPtr<SQuestMappingListView> ListView;
 	TArray<FQuestMappingRowItemPtr> Rows;
+	TArray<TSharedPtr<FString>> SourceColumnOptions;
+	TSharedPtr<SColumnTableView<FQuestMappingRowItemPtr>> Table;
 
-	TSharedRef<ITableRow> MakeRow(FQuestMappingRowItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable);
-
-	friend class SQuestMappingBindingRow;
+	bool bHideBound = false;
+	bool bHideUnbound = false;
 };

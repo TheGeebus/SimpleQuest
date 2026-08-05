@@ -7,10 +7,10 @@
 #include "Resolver/QuestReflectionUtils.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "SSearchableComboBox.h"
-#include "Widgets/Input/SComboButton.h"
-#include "Widgets/Text/STextBlock.h"
-#include "Widgets/Layout/SBox.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Widgets/Input/SComboButton.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Text/STextBlock.h"
 #include "Styling/AppStyle.h"
 
 #define LOCTEXT_NAMESPACE "SQuestMappingBindingList"
@@ -32,101 +32,181 @@ namespace
 		default:                               return LOCTEXT("PolPreserve", "Preserve graph value");
 		}
 	}
+
+	/** The binding for a target property, or null. Const read helper. */
+	const FQuestColumnBinding* FindBinding(const UQuestImportMapping* Mapping, FName TargetProperty)
+	{
+		if (!Mapping) return nullptr;
+		return Mapping->Bindings.FindByPredicate([&](const FQuestColumnBinding& B) { return B.TargetProperty == TargetProperty; });
+	}
 }
 
-// ── Row ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-void SQuestMappingBindingRow::Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable,
-	TSharedRef<FQuestMappingRowItem> InItem, TSharedPtr<SQuestMappingBindingList> InList)
+void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 {
-	Item = InItem;
-	List = InList;
+	Config = InArgs._Config;
 	RebuildSourceColumnOptions();
-	SMultiColumnTableRow<FQuestMappingRowItemPtr>::Construct(FSuperRowType::FArguments().Style(&FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.Row")), InOwnerTable);
-}
 
-void SQuestMappingBindingRow::RebuildSourceColumnOptions()
-{
-	SourceColumnOptions.Reset();
-	SourceColumnOptions.Add(MakeShareable(new FString(NoneOption)));   // unmapped, always first
-	if (const TSharedPtr<SQuestMappingBindingList> L = List.Pin())
-	{
-		for (const FName& Col : L->GetConfig().SourceColumnProvider())
-		{
-			SourceColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
-		}
-	}
-}
+	// Per-ASSET persistence: a designer returning to a recipe should find the columns and sort they left it with. Keyed by
+	// path rather than by widget instance, because what they think they are returning to is the recipe, not a panel.
+	const UQuestImportMapping* Mapping = Config.Mapping.Get();
+	const FString PersistKey = Mapping ? FString::Printf(TEXT("QuestMappingBindings.%s"), *Mapping->GetPathName()) : FString();
 
-TSharedRef<SWidget> SQuestMappingBindingRow::GenerateWidgetForColumn(const FName& ColumnName)
-{
-	if (ColumnName == ColumnId_Target)
-	{
-		const TSharedPtr<FQuestMappingRowItem> I = Item.Pin();
-		const FText Label = I.IsValid() ? FText::FromName(I->TargetProperty) : FText::GetEmpty();
-		const FText Hint  = I.IsValid() ? FText::FromString(I->PropertyTypeLabel) : FText::GetEmpty();
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(3.0f, 1.0f)
-			[
-				SNew(STextBlock).Text(Label).Font(FAppStyle::GetFontStyle(TEXT("BoldFont")))
-				.ToolTipText(FText::Format(LOCTEXT("PropTypeHint", "Type: {0}"), Hint))
-			];
-	}
-
-	if (ColumnName == ColumnId_Source)
-	{
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(3.0f, 1.0f)
-			[
-				SNew(SSearchableComboBox)
-				.OptionsSource(&SourceColumnOptions)
-				.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
-				.OnSelectionChanged(this, &SQuestMappingBindingRow::OnSourceColumnChanged)
-				[
-					SNew(STextBlock).Text(this, &SQuestMappingBindingRow::GetSelectedSourceColumn)
-				]
-			];
-	}
-
-	if (ColumnName == ColumnId_Policy)
-	{
-		return SNew(SHorizontalBox)
-			+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(3.0f, 1.0f)
+	ChildSlot
+	[
+		SNew(SBox).MaxDesiredHeight(400.0f)
+		[
+			SAssignNew(Table, SColumnTableView<FQuestMappingRowItemPtr>)
+			.Columns(MakeColumns())
+			.SelectionMode(ESelectionMode::Single)
+			.PersistenceKey(PersistKey)
+			.FilterHintText(LOCTEXT("FilterHint", "Filter properties and columns..."))
+			.Toolbar()
 			[
 				SNew(SComboButton)
-				.OnGetMenuContent(this, &SQuestMappingBindingRow::BuildPolicyMenu)
+				.OnGetMenuContent(this, &SQuestMappingBindingList::BuildFilterMenu)
 				.ButtonContent()
 				[
-					SNew(STextBlock).Text(this, &SQuestMappingBindingRow::GetPolicyText)
+					SNew(STextBlock).Text(LOCTEXT("FilterMenu", "Show"))
 				]
-			];
-	}
+			]
+			.EmptyState()
+			[
+				SNew(STextBlock)
+				.Text_Lambda([this]()
+				{
+					const UQuestImportMapping* M = Config.Mapping.Get();
+					if (!M || M->DiscriminatorClasses.IsEmpty())
+					{
+						return LOCTEXT("EmptyNoKinds", "No row kinds defined yet — add one above and its properties appear here.");
+					}
+					if (bHideBound || bHideUnbound)
+					{
+						return LOCTEXT("EmptyAllFilteredOut", "Every property is hidden by the current Show filter.");
+					}
+					return LOCTEXT("EmptyNoMatch", "No properties match the current filter.");
+				})
+			]
+		]
+	];
 
-	return SNullWidget::NullWidget;
+	RefreshRows();
 }
 
-// Find the binding for this row's target property (or null). Const read helper.
-static const FQuestColumnBinding* FindBinding(const UQuestImportMapping* Mapping, FName TargetProperty)
+TArray<FTableColumnDef<FQuestMappingRowItemPtr>> SQuestMappingBindingList::MakeColumns()
 {
-	if (!Mapping) return nullptr;
-	return Mapping->Bindings.FindByPredicate([&](const FQuestColumnBinding& B) { return B.TargetProperty == TargetProperty; });
+	TArray<FTableColumnDef<FQuestMappingRowItemPtr>> Cols;
+
+	FTableColumnDef<FQuestMappingRowItemPtr> TargetCol;
+	TargetCol.Id        = ColumnId_Target;
+	TargetCol.Label     = LOCTEXT("HdrTarget", "Node Property");
+	TargetCol.FillWidth = 0.35f;
+	TargetCol.GetText   = [this](const FQuestMappingRowItemPtr& Item) { return GetTargetText(Item); };
+	TargetCol.MakeCell  = [this](const FQuestMappingRowItemPtr& Item) { return MakeTargetCell(Item); };
+	Cols.Add(MoveTemp(TargetCol));
+
+	// The source column is a PICKER, and its selection is still what the table searches and sorts by. That pairing is the
+	// whole reason this list can now answer "which property did I bind to 'reward_xp'?" - it never could before.
+	FTableColumnDef<FQuestMappingRowItemPtr> SourceCol;
+	SourceCol.Id        = ColumnId_Source;
+	SourceCol.Label     = LOCTEXT("HdrSource", "Source Column");
+	SourceCol.FillWidth = 0.40f;
+	SourceCol.GetText   = [this](const FQuestMappingRowItemPtr& Item) { return GetSourceColumnText(Item); };
+	SourceCol.MakeCell  = [this](const FQuestMappingRowItemPtr& Item) { return MakeSourceCell(Item); };
+	Cols.Add(MoveTemp(SourceCol));
+
+	FTableColumnDef<FQuestMappingRowItemPtr> PolicyCol;
+	PolicyCol.Id        = ColumnId_Policy;
+	PolicyCol.Label     = LOCTEXT("HdrPolicy", "If Absent");
+	PolicyCol.FillWidth = 0.25f;
+	PolicyCol.GetText   = [this](const FQuestMappingRowItemPtr& Item) { return GetPolicyText(Item); };
+	PolicyCol.MakeCell  = [this](const FQuestMappingRowItemPtr& Item) { return MakePolicyCell(Item); };
+	Cols.Add(MoveTemp(PolicyCol));
+
+	return Cols;
 }
 
-FText SQuestMappingBindingRow::GetSelectedSourceColumn() const
+// ── Cells ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+TSharedRef<SWidget> SQuestMappingBindingList::MakeTargetCell(const FQuestMappingRowItemPtr& Item)
 {
-	const TSharedPtr<FQuestMappingRowItem> I = Item.Pin();
-	const TSharedPtr<SQuestMappingBindingList> L = List.Pin();
-	if (!I.IsValid() || !L.IsValid()) return FText::FromString(NoneOption);
-	const FQuestColumnBinding* B = FindBinding(L->GetConfig().Mapping.Get(), I->TargetProperty);
+	const FText Hint = Item.IsValid() ? FText::FromString(Item->PropertyTypeLabel) : FText::GetEmpty();
+	return SNew(SBox).VAlign(VAlign_Center).Padding(3.0f, 1.0f)
+		[
+			SNew(STextBlock)
+			.Text(GetTargetText(Item))
+			.Font(FAppStyle::GetFontStyle(TEXT("BoldFont")))
+			.ToolTipText(FText::Format(LOCTEXT("PropTypeHint", "Type: {0}"), Hint))
+		];
+}
+
+TSharedRef<SWidget> SQuestMappingBindingList::MakeSourceCell(const FQuestMappingRowItemPtr& Item)
+{
+	return SNew(SBox).VAlign(VAlign_Center).Padding(3.0f, 1.0f)
+		[
+			SNew(SSearchableComboBox)
+			.OptionsSource(&SourceColumnOptions)
+			.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
+			.OnSelectionChanged(SComboBox<TSharedPtr<FString>>::FOnSelectionChanged::CreateSP(
+				this, &SQuestMappingBindingList::OnSourceColumnChanged, Item))
+			[
+				SNew(STextBlock)
+				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
+					this, &SQuestMappingBindingList::GetSourceColumnText, Item)))
+			]
+		];
+}
+
+TSharedRef<SWidget> SQuestMappingBindingList::MakePolicyCell(const FQuestMappingRowItemPtr& Item)
+{
+	return SNew(SBox).VAlign(VAlign_Center).Padding(3.0f, 1.0f)
+		[
+			SNew(SComboButton)
+			.OnGetMenuContent(FOnGetContent::CreateSP(this, &SQuestMappingBindingList::BuildPolicyMenu, Item))
+			.ButtonContent()
+			[
+				SNew(STextBlock)
+				.Text(TAttribute<FText>::Create(TAttribute<FText>::FGetter::CreateSP(
+					this, &SQuestMappingBindingList::GetPolicyText, Item)))
+			]
+		];
+}
+
+// ── Values ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+FText SQuestMappingBindingList::GetTargetText(const FQuestMappingRowItemPtr& Item) const
+{
+	return Item.IsValid() ? FText::FromName(Item->TargetProperty) : FText::GetEmpty();
+}
+
+FText SQuestMappingBindingList::GetSourceColumnText(FQuestMappingRowItemPtr Item) const
+{
+	if (!Item.IsValid()) return FText::FromString(NoneOption);
+	const FQuestColumnBinding* B = FindBinding(Config.Mapping.Get(), Item->TargetProperty);
 	return (B && !B->SourceColumn.IsNone()) ? FText::FromName(B->SourceColumn) : FText::FromString(NoneOption);
 }
 
-void SQuestMappingBindingRow::OnSourceColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
+FText SQuestMappingBindingList::GetPolicyText(FQuestMappingRowItemPtr Item) const
 {
-	const TSharedPtr<FQuestMappingRowItem> I = Item.Pin();
-	const TSharedPtr<SQuestMappingBindingList> L = List.Pin();
-	if (!I.IsValid() || !L.IsValid() || !NewValue.IsValid()) return;
-	UQuestImportMapping* Mapping = L->GetConfig().Mapping.Get();
+	if (!Item.IsValid()) return PolicyDisplay(EQuestAbsentFieldPolicy::Preserve);
+	const UQuestImportMapping* M = Config.Mapping.Get();
+	const FQuestColumnBinding* B = FindBinding(M, Item->TargetProperty);
+	// No binding = falls to the mapping's DefaultAbsentPolicy at import; show that so the row is honest about what applies.
+	return PolicyDisplay(B ? B->AbsentPolicy : (M ? M->DefaultAbsentPolicy : EQuestAbsentFieldPolicy::Preserve));
+}
+
+bool SQuestMappingBindingList::IsBound(const FQuestMappingRowItemPtr& Item) const
+{
+	if (!Item.IsValid()) return false;
+	const FQuestColumnBinding* B = FindBinding(Config.Mapping.Get(), Item->TargetProperty);
+	return B && !B->SourceColumn.IsNone();
+}
+
+// ── Writes ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+void SQuestMappingBindingList::OnSourceColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type, FQuestMappingRowItemPtr Item)
+{
+	if (!Item.IsValid() || !NewValue.IsValid()) return;
+	UQuestImportMapping* Mapping = Config.Mapping.Get();
 	if (!Mapping) return;
 
 	const bool bUnmapped = (*NewValue == NoneOption);
@@ -135,14 +215,14 @@ void SQuestMappingBindingRow::OnSourceColumnChanged(TSharedPtr<FString> NewValue
 	const FScopedTransaction Transaction(LOCTEXT("SetSourceColumn", "Set Mapping Source Column"));
 	Mapping->Modify();
 	FQuestColumnBinding* Existing = Mapping->Bindings.FindByPredicate(
-		[&](const FQuestColumnBinding& B) { return B.TargetProperty == I->TargetProperty; });
+		[&](const FQuestColumnBinding& B) { return B.TargetProperty == Item->TargetProperty; });
 
 	if (bUnmapped)
 	{
 		// Unmapping = remove the binding entirely (an absent binding == unmapped; keeps the array free of dead rows).
 		if (Existing)
 		{
-			Mapping->Bindings.RemoveAll([&](const FQuestColumnBinding& B) { return B.TargetProperty == I->TargetProperty; });
+			Mapping->Bindings.RemoveAll([&](const FQuestColumnBinding& B) { return B.TargetProperty == Item->TargetProperty; });
 		}
 	}
 	else if (Existing)
@@ -152,33 +232,26 @@ void SQuestMappingBindingRow::OnSourceColumnChanged(TSharedPtr<FString> NewValue
 	else
 	{
 		FQuestColumnBinding NewBinding;
-		NewBinding.TargetProperty = I->TargetProperty;
+		NewBinding.TargetProperty = Item->TargetProperty;
 		NewBinding.SourceColumn = NewCol;
 		// AbsentPolicy defaults to Preserve (the struct default).
 		Mapping->Bindings.Add(MoveTemp(NewBinding));
 	}
 	Mapping->PostEditChange();   // sets the dirty flag + fires PostEditChangeProperty listeners (matches the Rewards customization precedent)
-	L->NotifyModified();
+	NotifyModified();
+
+	// Binding state feeds both the bound/unbound filter and the sort order, so the table has to re-evaluate.
+	if (bHideBound || bHideUnbound) { RefreshRows(); }
+	else if (Table.IsValid())       { Table->Refresh(); }
 }
 
-FText SQuestMappingBindingRow::GetPolicyText() const
-{
-	const TSharedPtr<FQuestMappingRowItem> I = Item.Pin();
-	const TSharedPtr<SQuestMappingBindingList> L = List.Pin();
-	if (!I.IsValid() || !L.IsValid()) return PolicyDisplay(EQuestAbsentFieldPolicy::Preserve);
-	const FQuestColumnBinding* B = FindBinding(L->GetConfig().Mapping.Get(), I->TargetProperty);
-	// No binding = falls to the mapping's DefaultAbsentPolicy at import; show that so the row is honest about what applies.
-	const UQuestImportMapping* M = L->GetConfig().Mapping.Get();
-	return PolicyDisplay(B ? B->AbsentPolicy : (M ? M->DefaultAbsentPolicy : EQuestAbsentFieldPolicy::Preserve));
-}
-
-TSharedRef<SWidget> SQuestMappingBindingRow::BuildPolicyMenu()
+TSharedRef<SWidget> SQuestMappingBindingList::BuildPolicyMenu(FQuestMappingRowItemPtr Item)
 {
 	FMenuBuilder Menu(/*bCloseAfterSelection*/ true, nullptr);
 	auto AddEntry = [&](EQuestAbsentFieldPolicy P)
 	{
 		Menu.AddMenuEntry(PolicyDisplay(P), FText::GetEmpty(), FSlateIcon(),
-			FUIAction(FExecuteAction::CreateSP(this, &SQuestMappingBindingRow::SetPolicy, static_cast<uint8>(P))));
+			FUIAction(FExecuteAction::CreateSP(this, &SQuestMappingBindingList::SetPolicy, static_cast<uint8>(P), Item)));
 	};
 	AddEntry(EQuestAbsentFieldPolicy::Preserve);
 	AddEntry(EQuestAbsentFieldPolicy::Reset);
@@ -186,18 +259,16 @@ TSharedRef<SWidget> SQuestMappingBindingRow::BuildPolicyMenu()
 	return Menu.MakeWidget();
 }
 
-void SQuestMappingBindingRow::SetPolicy(uint8 NewPolicy)
+void SQuestMappingBindingList::SetPolicy(uint8 NewPolicy, FQuestMappingRowItemPtr Item)
 {
-	const TSharedPtr<FQuestMappingRowItem> I = Item.Pin();
-	const TSharedPtr<SQuestMappingBindingList> L = List.Pin();
-	if (!I.IsValid() || !L.IsValid()) return;
-	UQuestImportMapping* Mapping = L->GetConfig().Mapping.Get();
+	if (!Item.IsValid()) return;
+	UQuestImportMapping* Mapping = Config.Mapping.Get();
 	if (!Mapping) return;
 
 	const FScopedTransaction Transaction(LOCTEXT("SetAbsentPolicy", "Set Mapping Absent-Field Policy"));
 	Mapping->Modify();
 	FQuestColumnBinding* Existing = Mapping->Bindings.FindByPredicate(
-		[&](const FQuestColumnBinding& B) { return B.TargetProperty == I->TargetProperty; });
+		[&](const FQuestColumnBinding& B) { return B.TargetProperty == Item->TargetProperty; });
 	if (Existing)
 	{
 		Existing->AbsentPolicy = static_cast<EQuestAbsentFieldPolicy>(NewPolicy);
@@ -205,57 +276,67 @@ void SQuestMappingBindingRow::SetPolicy(uint8 NewPolicy)
 	else
 	{
 		// Setting a policy on an unmapped row creates the binding (unmapped column + a non-default policy is a state the
-		// guard flags as contradictory — but authoring it is allowed; the guard reports it at validate/import time).
+		// guard flags as contradictory - but authoring it is allowed; the guard reports it at validate/import time).
 		FQuestColumnBinding NewBinding;
-		NewBinding.TargetProperty = I->TargetProperty;
+		NewBinding.TargetProperty = Item->TargetProperty;
 		NewBinding.AbsentPolicy = static_cast<EQuestAbsentFieldPolicy>(NewPolicy);
 		Mapping->Bindings.Add(MoveTemp(NewBinding));
 	}
 	Mapping->PostEditChange();
-	L->NotifyModified();
+	NotifyModified();
+	if (Table.IsValid()) { Table->Refresh(); }
 }
 
-const FSlateBrush* SQuestMappingBindingRow::GetBorder() const
+// ── Filter menu ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+TSharedRef<SWidget> SQuestMappingBindingList::BuildFilterMenu()
 {
-	// Draw the row's hovered brush whenever the cursor is over the row — unconditional, so it works under SelectionMode::None
-	// (the base STableRow gates the hovered brush on selectability, which None disables). Falls back to the base otherwise.
-	if (IsHovered())
+	FMenuBuilder Menu(/*bCloseAfterSelection*/ false, nullptr);
+	Menu.BeginSection(NAME_None, LOCTEXT("ShowSection", "Show"));
+
+	Menu.AddMenuEntry(
+		LOCTEXT("HideBound", "Hide bound properties"),
+		LOCTEXT("HideBoundTip", "Show only properties with no source column yet — what is left to map."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { bHideBound = !bHideBound; RefreshRows(); }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this]() { return bHideBound; })),
+		NAME_None, EUserInterfaceActionType::ToggleButton);
+
+	Menu.AddMenuEntry(
+		LOCTEXT("HideUnbound", "Hide unbound properties"),
+		LOCTEXT("HideUnboundTip", "Show only properties that already have a source column."),
+		FSlateIcon(),
+		FUIAction(
+			FExecuteAction::CreateLambda([this]() { bHideUnbound = !bHideUnbound; RefreshRows(); }),
+			FCanExecuteAction(),
+			FIsActionChecked::CreateLambda([this]() { return bHideUnbound; })),
+		NAME_None, EUserInterfaceActionType::ToggleButton);
+
+	Menu.EndSection();
+	return Menu.MakeWidget();
+}
+
+// ── Population ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+void SQuestMappingBindingList::RebuildSourceColumnOptions()
+{
+	SourceColumnOptions.Reset();
+	SourceColumnOptions.Add(MakeShareable(new FString(NoneOption)));   // unmapped, always first
+	if (Config.SourceColumnProvider)
 	{
-		const FTableRowStyle& RowStyle = FAppStyle::Get().GetWidgetStyle<FTableRowStyle>("TableView.Row");
-		return &RowStyle.EvenRowBackgroundHoveredBrush;
+		for (const FName& Col : Config.SourceColumnProvider())
+		{
+			SourceColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
+		}
 	}
-	return SMultiColumnTableRow<FQuestMappingRowItemPtr>::GetBorder();
-}
-
-// ── List ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-
-void SQuestMappingBindingList::Construct(const FArguments& InArgs)
-{
-	Config = InArgs._Config;
-
-	ChildSlot
-	[
-		SNew(SBox).MaxDesiredHeight(400.0f)
-		[
-			SAssignNew(ListView, SQuestMappingListView)
-			.ListItemsSource(&Rows)
-			.SelectionMode(ESelectionMode::None)
-			.OnGenerateRow(this, &SQuestMappingBindingList::MakeRow)
-			.HeaderRow
-			(
-				SNew(SHeaderRow)
-				+ SHeaderRow::Column(ColumnId_Target).DefaultLabel(LOCTEXT("HdrTarget", "Node Property")).FillWidth(0.35f)
-				+ SHeaderRow::Column(ColumnId_Source).DefaultLabel(LOCTEXT("HdrSource", "Source Column")).FillWidth(0.40f)
-				+ SHeaderRow::Column(ColumnId_Policy).DefaultLabel(LOCTEXT("HdrPolicy", "If Absent")).FillWidth(0.25f)
-			)
-		]
-	];
-
-	RefreshRows();
 }
 
 void SQuestMappingBindingList::RefreshRows()
 {
+	RebuildSourceColumnOptions();
+
 	Rows.Reset();
 	const UQuestImportMapping* Mapping = Config.Mapping.Get();
 	if (Mapping)
@@ -283,21 +364,19 @@ void SQuestMappingBindingList::RefreshRows()
 		SortedNames.Sort(FNameLexicalLess());
 		for (const FName& N : SortedNames)
 		{
-			Rows.Add(FQuestMappingRowItem::Make(N, PropToType[N]));
+			FQuestMappingRowItemPtr Item = FQuestMappingRowItem::Make(N, PropToType[N]);
+			// The bound/unbound filter is a POPULATION concern, not a text filter - the table's search box narrows what is
+			// shown, this decides what exists to be shown at all.
+			const bool bBound = IsBound(Item);
+			if ((bBound && bHideBound) || (!bBound && bHideUnbound)) continue;
+			Rows.Add(MoveTemp(Item));
 		}
 	}
-	if (ListView.IsValid())
-	{
-		ListView->RequestListRefresh();
-		// The list generates row WIDGETS on its first paint, not here — so at construct time our desired height is ~0 and the
-		// details panel concludes it needs no scrollbar. Invalidate so it re-measures once the rows actually exist.
-		Invalidate(EInvalidateWidgetReason::Layout);
-	}
-}
 
-TSharedRef<ITableRow> SQuestMappingBindingList::MakeRow(FQuestMappingRowItemPtr Item, const TSharedRef<STableViewBase>& OwnerTable)
-{
-	return SNew(SQuestMappingBindingRow, OwnerTable, Item.ToSharedRef(), SharedThis(this));
+	if (Table.IsValid())
+	{
+		Table->SetRootItems(Rows);
+	}
 }
 
 void SQuestMappingBindingList::NotifyModified()
@@ -306,3 +385,4 @@ void SQuestMappingBindingList::NotifyModified()
 }
 
 #undef LOCTEXT_NAMESPACE
+

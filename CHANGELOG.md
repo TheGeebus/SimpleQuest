@@ -34,7 +34,7 @@ graph editor can change.
 
 ### Bring your own shape
 
-Your data probably doesn't look like ours, and shouldn't have to.
+Your data probably doesn't look like the framework's does, and shouldn't have to.
 
 - **Map your columns to quest properties.** A reusable *recipe* asset says
   which of your columns feed which node properties, which of your type values

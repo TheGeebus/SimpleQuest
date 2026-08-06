@@ -17,6 +17,9 @@
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Brushes/SlateColorBrush.h"
+#include "Styling/AppStyle.h"
+#include "Styling/StyleColors.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Input/SSearchBox.h"
 #include "Widgets/Layout/SBorder.h"
@@ -234,6 +237,7 @@ public:
 	SLATE_BEGIN_ARGS(SColumnTableView<ItemType>)
 		: _SelectionMode(ESelectionMode::Single)
 		, _AllowClipboardCopy(true)
+		, _bDistinctHeader(false)
 	{}
 		SLATE_ARGUMENT(TArray<FTableColumnDef<ItemType>>, Columns)
 
@@ -253,6 +257,24 @@ public:
 		SLATE_ARGUMENT(FString, PersistenceKey)
 
 		SLATE_ARGUMENT(FText, FilterHintText)
+		
+		/**
+		 * Optional heading. Supply it when the table sits among other content that names itself - a details panel row is
+		 * the case that needs it, since a whole-row widget has no name column and is otherwise the only unlabelled thing
+		 * on the page. Omit it for a table under its own tab or category header, where a second title just repeats.
+		 * Use the SAME words the host filters this row by, or searching the title a user can see will hide the table.
+		 */
+		SLATE_ARGUMENT(FText, Title)
+
+		SLATE_ARGUMENT(bool, AllowClipboardCopy)
+	
+		/**
+		 * Set when the table is embedded in a details panel row. Such a row paints Colors.Panel normally and Colors.Header
+		 * on hover (PropertyEditorConstants::GetRowBackgroundColor), and the stock table header IS Colors.Header - so the
+		 * header is invisible for exactly as long as the cursor is over the table. This steps the header past both.
+		 * Leave it off for a table under its own tab, where nothing alternates behind it.
+		 */
+		SLATE_ARGUMENT(bool, bDistinctHeader)
 
 		/** Extra controls beside the search box: a filter menu, a bulk action. Keeps table-specific vocabulary out of here. */
 		SLATE_NAMED_SLOT(FArguments, Toolbar)
@@ -263,7 +285,6 @@ public:
 		*/
 		SLATE_NAMED_SLOT(FArguments, EmptyState)
 
-		SLATE_ARGUMENT(bool, AllowClipboardCopy)
 		SLATE_EVENT(FOnItemSelected, OnItemSelected)
 		SLATE_EVENT(FOnContextMenuOpening, OnContextMenuOpening)
 
@@ -290,7 +311,9 @@ public:
 
 		LoadPersistedState();
 
-		TSharedRef<SHeaderRow> Header = SNew(SHeaderRow);
+		TSharedRef<SHeaderRow> Header = InArgs._bDistinctHeader
+			? SNew(SHeaderRow).Style(&GetDistinctHeaderStyle())
+			: SNew(SHeaderRow);
 		for (const FTableColumnDef<ItemType>& Column : Columns)
 		{
 			const FName Id = Column.Id;
@@ -328,50 +351,65 @@ public:
 		ChildSlot
 		[
 			SNew(SVerticalBox)
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
+			// Collapsed outright when no title is given, so the option existing costs nothing - no stray padding above a
+			// table that already sits under a heading.
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 4.0f, 0.0f, 4.0f))
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.0f, 0.0f, 8.0f, 0.0f))
-				[
-					// Toolbar leads and the search fills the remainder, matching the existing facts views - where that
-					// order is load-bearing, because their search boxes are aligned to land on identical y across views.
-					InArgs._Toolbar.Widget
-				]
-				+ SHorizontalBox::Slot().FillWidth(1.0f)
-				[
-					// The table brings its own search because it cannot borrow one: a details panel's filter never reaches
-					// inside an embedded widget, and a dockable tab has none to borrow.
-					SNew(SSearchBox)
-					.HintText(InArgs._FilterHintText.IsEmpty()
-						? NSLOCTEXT("SimpleCore", "TableFilterHint", "Search...")
-						: InArgs._FilterHintText)
-					.OnTextChanged(this, &SColumnTableView::OnFilterTextChanged)
-				]
+				SNew(STextBlock)
+				.Text(InArgs._Title)
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+				.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 			]
-			+ SVerticalBox::Slot().FillHeight(1.0f)
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(FMargin(InArgs._Title.IsEmpty() ? 0.f : 12.0f, 0.0f, 0.0f, 0.0f))
 			[
-				SNew(SOverlay)
-				+ SOverlay::Slot()
+				SNew(SVerticalBox)
+				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
 				[
-					SAssignNew(TreeView, STreeView<ItemType>)
-					.TreeItemsSource(&VisibleRoots)
-					.HeaderRow(Header)
-					.SelectionMode(InArgs._SelectionMode)
-					.OnGenerateRow(this, &SColumnTableView::GenerateRow)
-					.OnGetChildren(this, &SColumnTableView::GetVisibleChildren)
-					.OnSelectionChanged(this, &SColumnTableView::HandleSelectionChanged)
-					.OnContextMenuOpening(InArgs._OnContextMenuOpening.IsBound()
-						? InArgs._OnContextMenuOpening
-						: FOnContextMenuOpening::CreateSP(this, &SColumnTableView::MakeDefaultContextMenu))
-				]
-				+ SOverlay::Slot()
-				.HAlign(HAlign_Center)
-				.VAlign(VAlign_Center)
-				[
-					SNew(SBox)
-					.Visibility(this, &SColumnTableView::GetEmptyStateVisibility)
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.0f, 0.0f, 0.0f, 0.0f))
 					[
-						InArgs._EmptyState.Widget
+						// Toolbar leads and the search fills the remainder, matching the existing facts views - where that
+						// order is load-bearing, because their search boxes are aligned to land on identical y across views.
+						InArgs._Toolbar.Widget
+					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+					[
+						// The table brings its own search because it cannot borrow one: a details panel's filter never reaches
+						// inside an embedded widget, and a dockable tab has none to borrow.
+						SNew(SSearchBox)
+						.HintText(InArgs._FilterHintText.IsEmpty()
+							? NSLOCTEXT("SimpleCore", "TableFilterHint", "Search...")
+							: InArgs._FilterHintText)
+						.OnTextChanged(this, &SColumnTableView::OnFilterTextChanged)
+					]
+				]
+				+ SVerticalBox::Slot().FillHeight(1.0f)
+				[
+					SNew(SOverlay)
+					+ SOverlay::Slot().Padding(FMargin(0.0f, 0.0f, 0.0f, 0.0f))
+					[
+						SAssignNew(TreeView, STreeView<ItemType>)
+						.TreeItemsSource(&VisibleRoots)
+						.HeaderRow(Header)
+						.SelectionMode(InArgs._SelectionMode)
+						.OnGenerateRow(this, &SColumnTableView::GenerateRow)
+						.OnGetChildren(this, &SColumnTableView::GetVisibleChildren)
+						.OnSelectionChanged(this, &SColumnTableView::HandleSelectionChanged)
+						.OnContextMenuOpening(InArgs._OnContextMenuOpening.IsBound()
+							? InArgs._OnContextMenuOpening
+							: FOnContextMenuOpening::CreateSP(this, &SColumnTableView::MakeDefaultContextMenu))
+					]
+					+ SOverlay::Slot()
+					[
+						// The box fills the overlay and centres its own content, rather than the slot centring a
+						// content-sized box - the latter depends on the overlay having resolved a height first.
+						SNew(SBox)
+						.Visibility(this, &SColumnTableView::GetEmptyStateVisibility)
+						.HAlign(HAlign_Center)
+						.VAlign(VAlign_Center)
+						[
+							InArgs._EmptyState.Widget
+						]
 					]
 				]
 			]
@@ -582,6 +620,25 @@ private:
 	}
 
 	FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
+
+	/**
+	 * The stock header uses Colors.Header, which is precisely the colour a details row takes on hover. This is that style
+	 * with the column brushes stepped up to the next theme entries, so the header stays legible over either row state and
+	 * follows the theme rather than a hardcoded grey.
+	 */
+	static const FHeaderRowStyle& GetDistinctHeaderStyle()
+	{
+		static const FHeaderRowStyle Style = []()
+		{
+			FHeaderRowStyle Copy = FAppStyle::Get().GetWidgetStyle<FHeaderRowStyle>("TableView.Header");
+			Copy.ColumnStyle.NormalBrush      = FSlateColorBrush(FStyleColors::Dropdown);
+			Copy.ColumnStyle.HoveredBrush     = FSlateColorBrush(FStyleColors::Hover);
+			Copy.LastColumnStyle.NormalBrush  = FSlateColorBrush(FStyleColors::Dropdown);
+			Copy.LastColumnStyle.HoveredBrush = FSlateColorBrush(FStyleColors::Hover);
+			return Copy;
+		}();
+		return Style;
+	}
 	
 	void HandleRowRightClicked(ItemType Item) { RightClickedItem = Item; }
 

@@ -44,15 +44,16 @@ namespace
 		return INDEX_NONE;
 	}
 
-	// Versioned so the payload can change later without a new build silently mis-reading old clipboard text.
-	const FString ClipboardHeader(TEXT("SimpleQuestDiscriminatorRow/1"));
+	// Versioned, and named for this panel rather than generically - see the note in SQuestMappingBindingList.cpp about
+	// unity builds merging anonymous namespaces across files.
+	const FString DiscriminatorClipboardHeader(TEXT("SimpleQuestDiscriminatorRow/1"));
 
 	/** Pull the class path out of a copied payload. False for anything that is not our format at all. */
 	bool ParseClipboardClassPath(const FString& Text, FString& OutClassPath)
 	{
 		TArray<FString> Lines;
 		Text.ParseIntoArrayLines(Lines);
-		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != ClipboardHeader) { return false; }
+		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != DiscriminatorClipboardHeader) { return false; }
 		for (int32 i = 1; i < Lines.Num(); ++i)
 		{
 			FString Key, Value;
@@ -92,7 +93,17 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SNew(SBox).MaxDesiredHeight(300.0f)
+		// HeightOverride, NOT MaxDesiredHeight. A details row's height IS its desired height, and a list's desired height
+		// is derived from the rows it has already generated - so a cap leaves the table measuring itself in a circle, and
+		// the first pass (zero rows generated) reports a zero-height panel. The scrollbar track then coerces "nothing
+		// fits" into "everything fits" and hides itself for good. An override never reads the child's desired size.
+		SNew(SBox)
+		.HeightOverride_Lambda([this]()
+		{
+			const float Chrome = 78.0f, RowHeight = 22.0f;
+			const int32 Rows = Table.IsValid() ? Table->GetVisibleRowCount() : 0;
+			return FOptionalSize(FMath::Min(300.0f, Chrome + RowHeight * static_cast<float>(Rows)));
+		})
 		[
 			SAssignNew(Table, SColumnTableView<FQuestDiscriminatorRowItemPtr>)
 			.Columns(MakeColumns())
@@ -100,6 +111,9 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 			// noise, and a stale one is misleading. Hover survives; the shared row restores it explicitly.
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
+			.Title(LOCTEXT("TableTitle", "Row Kinds"))
+			// Embedded in a details row, which tints its whole background on hover - see bOpaqueHeader.
+			.bDistinctHeader(true)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter values and classes..."))
 			.OnCopyRow(this, &SQuestMappingDiscriminatorList::CopyRow)
 			.OnPasteRow(this, &SQuestMappingDiscriminatorList::PasteRow)
@@ -117,7 +131,7 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 					]
 				]
 				// The drift signal. It reads the pre-filter count, so hiding rows never makes the panel look clean.
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(8.0f, 0.0f, 0.0f, 0.0f)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 0.0f, 0.0f)
 				[
 					SNew(STextBlock)
 					.Text(this, &SQuestMappingDiscriminatorList::GetStaleSummaryText)
@@ -280,7 +294,7 @@ FText SQuestMappingDiscriminatorList::GetTableFilterText() const
 void SQuestMappingDiscriminatorList::CopyRow(FQuestDiscriminatorRowItemPtr Item)
 {
 	const UClass* Cls = GetSelectedClass(Item);
-	const FString Payload = FString::Printf(TEXT("%s%sClass=%s"), *ClipboardHeader, LINE_TERMINATOR,
+	const FString Payload = FString::Printf(TEXT("%s%sClass=%s"), *DiscriminatorClipboardHeader, LINE_TERMINATOR,
 		Cls ? *Cls->GetPathName() : TEXT(""));
 	FPlatformApplicationMisc::ClipboardCopy(*Payload);
 

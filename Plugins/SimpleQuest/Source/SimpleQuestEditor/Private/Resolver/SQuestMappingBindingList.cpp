@@ -41,9 +41,13 @@ namespace
 		if (!Mapping) return nullptr;
 		return Mapping->Bindings.FindByPredicate([&](const FQuestColumnBinding& B) { return B.TargetProperty == TargetProperty; });
 	}
-
-	// Versioned so the payload can change later without a new build silently mis-reading old clipboard text.
-	const FString ClipboardHeader(TEXT("SimpleQuestBindingRow/1"));
+	/**
+	 * Versioned so the payload can change later without a new build silently mis-reading old clipboard text. Named for
+	 * this panel, not generically: unity builds concatenate .cpp files into one translation unit, which merges their
+	 * anonymous namespaces - so a file-local name here collides with the same name in a sibling file, and only when UBT
+	 * happens to bundle the two together.
+	 */
+	const FString BindingClipboardHeader(TEXT("SimpleQuestBindingRow/1"));
 
 	/** Stable wire names for the policy - deliberately NOT the display strings, which are prose and will get reworded. */
 	FString PolicyToWire(EQuestAbsentFieldPolicy P)
@@ -77,7 +81,7 @@ namespace
 	{
 		TArray<FString> Lines;
 		Text.ParseIntoArrayLines(Lines);
-		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != ClipboardHeader) { return false; }
+		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != BindingClipboardHeader) { return false; }
 
 		bool bSawBound = false;
 		FString PolicyWire;
@@ -108,7 +112,17 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 
 	ChildSlot
 	[
-		SNew(SBox).MaxDesiredHeight(400.0f)
+		// HeightOverride, NOT MaxDesiredHeight. A details row's height IS its desired height, and a list's desired height
+		// is derived from the rows it has already generated - so a cap leaves the table measuring itself in a circle, and
+		// the first pass (zero rows generated) reports a zero-height panel. The scrollbar track then coerces "nothing
+		// fits" into "everything fits" and hides itself for good. An override never reads the child's desired size.
+		SNew(SBox)
+		.HeightOverride_Lambda([this]()
+		{
+			const float Chrome = 78.0f, RowHeight = 22.0f;
+			const int32 Rows = Table.IsValid() ? Table->GetVisibleRowCount() : 0;
+			return FOptionalSize(FMath::Min(400.0f, Chrome + RowHeight * static_cast<float>(Rows)));
+		})
 		[
 			SAssignNew(Table, SColumnTableView<FQuestMappingRowItemPtr>)
 			.Columns(MakeColumns())
@@ -116,6 +130,9 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 			// noise, and a stale one is misleading. Hover survives; the shared row restores it explicitly.
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
+			.Title(LOCTEXT("TableTitle", "Column Bindings"))
+			// Embedded in a details row, which tints its whole background on hover - see bOpaqueHeader.
+			.bDistinctHeader(true)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter properties and columns..."))
 			.OnCopyRow(this, &SQuestMappingBindingList::CopyRow)
 			.OnPasteRow(this, &SQuestMappingBindingList::PasteRow)
@@ -291,7 +308,7 @@ void SQuestMappingBindingList::CopyRow(FQuestMappingRowItemPtr Item)
 	if (!Item.IsValid()) return;
 	const FQuestColumnBinding* B = FindBinding(Config.Mapping.Get(), Item->TargetProperty);
 
-	FString Payload = ClipboardHeader + LINE_TERMINATOR;
+	FString Payload = BindingClipboardHeader + LINE_TERMINATOR;
 	Payload += FString::Printf(TEXT("Bound=%d%s"), B ? 1 : 0, LINE_TERMINATOR);
 	if (B)
 	{

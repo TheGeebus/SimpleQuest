@@ -19,9 +19,21 @@ enum class EQuestNodePlanAction : uint8
 	Orphan,   // the asset has it, the source does not
 };
 
+/**
+ * What a single change IS. Three genuinely different things shared one struct and were told apart by sentinel strings in
+ * the display text, which meant anything wanting to render them differently had to match on prose.
+ */
+enum class EQuestPropertyChangeKind : uint8
+{
+	Edit,          // a value differs between the asset and the source
+	ChildAdded,    // the source declares an instanced child the asset does not have
+	ChildRemoved,  // the asset holds an instanced child the source does not mention
+};
+
 struct FQuestPropertyChange
 {
 	FString Property;		// a property NAME, or a path like "Rewards[0].Amount" once nested values are described
+	EQuestPropertyChangeKind Kind = EQuestPropertyChangeKind::Edit;
 	FString CurrentText;    // what the asset holds now, for display
 	FString IncomingText;   // what the source would write, for display
 
@@ -36,6 +48,13 @@ struct FQuestPropertyChange
 struct FQuestNodePlanEntry
 {
 	FString Key;                 // the row key: a studio-authored id, or our exported GUID
+
+	/**
+	 * What the node calls itself in the editor, for display only - never for matching. A canonical export keys every row
+	 * by GUID, so without this a plan reads as a wall of hex. Empty when there is nothing to ask: a Create has no live
+	 * node yet, and takes whatever the incoming row offers or nothing at all.
+	 */
+	FString Label;
 	FString Guid;                // the existing node's GUID; empty for Create
 	FString ClassName;           // incoming class (Orphan entries carry the existing class)
 	FString CurrentClassName;    // existing class; empty for Create

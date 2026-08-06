@@ -1,8 +1,8 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-// PROTOTYPE — Resolver, Phase 2 import (the round-trip's second half). Reconstructs AUTHORED editor nodes from the
-// interlingua table folder an export produced, then feeds the EXISTING compiler — never reverses the compiler. Creates
+// PROTOTYPE - Resolver, Phase 2 import (the round-trip's second half). Reconstructs AUTHORED editor nodes from the
+// interlingua table folder an export produced, then feeds the EXISTING compiler - never reverses the compiler. Creates
 // a FRESH asset (QuestlineID suffixed _RT so its compiled tag namespace doesn't collide with the original), so the
 // round-trip is verifiable by the two oracles: C (re-export this asset, diff the folders modulo _RT) and B2
 // (compile + DumpCompiled both, diff modulo the tag prefix). Console-triggered, editor-only. Not shipped API.
@@ -48,11 +48,11 @@ namespace
 {
 	// The import routing core speaks the shared, format-free FQuestDataBundle (Resolver/QuestDataBundle.h). The local
 	// FImport* bundle structs + the TSV parsing (Unsanitize / ParseTable / ParseEdges) moved to the TSV provider
-	// (Resolver/TsvQuestDataFormat::ReadBundle) in Stage 2 — the routing core never touches a file or format. What was
+	// (Resolver/TsvQuestDataFormat::ReadBundle) in Stage 2 - the routing core never touches a file or format. What was
 	// ReadAndValidate splits: the provider reads the folder into a bundle; ValidateBundle (below) does the structural
 	// checks on that already-parsed bundle.
 
-	// P0 (routing half) — structural validation of an ALREADY-READ bundle. File reading (folder discovery + TSV parse)
+	// P0 (routing half) - structural validation of an ALREADY-READ bundle. File reading (folder discovery + TSV parse)
 	// is the provider's job (ReadBundle); this does ONLY the structural checks and builds the two lookup indices the
 	// later phases need. Refuse (return false) on any inconsistency so no partial asset is ever created (validate-
 	// upfront). Provider-agnostic: a malformed bundle from ANY format provider is refused here identically.
@@ -61,13 +61,13 @@ namespace
 	                    TSet<FString>& AllRowKeys,                            // every key incl. instanced child keys
 	                    FString& OutError)
 	{
-		// The questline-self table is keyed "questline_graph" — required, exactly one row.
+		// The questline-self table is keyed "questline_graph" - required, exactly one row.
 		const FQuestDataTable* Questline = Bundle.TablesByType.Find(TEXT("questline_graph"));
 		if (!Questline) { OutError = TEXT("no questline_graph table (the self row)"); return false; }
 		if (Questline->Rows.Num() != 1) { OutError = TEXT("questline_graph table must have exactly one row"); return false; }
 
 		// Index every row key. Node/self rows are keyed by GUID digits or the EffectiveID; instanced child rows carry
-		// a '/' path segment. Only NODE rows spawn editor nodes, so split the two — but track ALL keys so edge
+		// a '/' path segment. Only NODE rows spawn editor nodes, so split the two - but track ALL keys so edge
 		// endpoints that legitimately reference child rows (contains edges) validate. Self = the questline_graph table.
 		for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 		{
@@ -87,7 +87,7 @@ namespace
 			if (!AllRowKeys.Contains(E.To))   { OutError = FString::Printf(TEXT("edge 'to' references unknown key: %s"), *E.To); return false; }
 		}
 
-		// Validate exactly one Entry row per graph cell (each graph level has one Entry — the import adopts it).
+		// Validate exactly one Entry row per graph cell (each graph level has one Entry - the import adopts it).
 		TMap<FString, int32> EntryCountByGraph;
 		for (const TPair<FString, const FQuestDataRow*>& Pair : NodeRowsByKey)
 		{
@@ -107,11 +107,11 @@ namespace
 	// ---- FLOW CONVENTIONS (prereq-from-table) ---------------------------------------------------------------------
 	// Write-in authoring sugar: a flat source (no edge/flow notion) declares a prereq as a COLUMN of operand row-keys
 	// (e.g. unlock_after:(step_a,step_b)) instead of hand-wiring a combinator. We SYNTHESIZE the exact structural form
-	// the graph would have — a combinator row + operand edges in + a feeds-prereq edge out — into the neutral bundle,
+	// the graph would have - a combinator row + operand edges in + a feeds-prereq edge out - into the neutral bundle,
 	// then the ordinary P0-P5 pipeline compiles it (no new compiler path; combinators store NO operands, the wiring is
-	// emergent from edges — same shape Ch6 round-trips green). Routing-core + format-agnostic: identical for TSV/JSON.
+	// emergent from edges - same shape Ch6 round-trips green). Routing-core + format-agnostic: identical for TSV/JSON.
 	// The convention is a WRITE-IN only; export always emits the explicit structural form (so "graph is sugar" the
-	// reverse way — a re-export of an unlock_after import shows prerequisite_and rows, never unlock_after).
+	// reverse way - a re-export of an unlock_after import shows prerequisite_and rows, never unlock_after).
 	struct FFlowConvention
 	{
 		const TCHAR* Column;              // authored column name a designer writes
@@ -123,8 +123,8 @@ namespace
 	};
 
 	// Vocab. Each convention is the SAME synthesis with a different combinator class + output verb, so extending is data,
-	// not new control flow. AND's output pin is "Out"; OR's (and NOT's) is "PrereqOut" — verified vs AllocateDefaultPins
-	// + the Ch6 export edges — which is why the output verb is a per-row field rather than hardcoded.
+	// not new control flow. AND's output pin is "Out"; OR's (and NOT's) is "PrereqOut" - verified vs AllocateDefaultPins
+	// + the Ch6 export edges - which is why the output verb is a per-row field rather than hardcoded.
 	static const FFlowConvention GFlowConventions[] =
 	{
 		{ TEXT("unlock_after"),  TEXT("QuestlineNode_PrerequisiteAnd"), TEXT("prerequisite_and"), TEXT("feeds-prereq(Out)"),       MAX_int32, true  },
@@ -160,19 +160,19 @@ namespace
 	// A studio's own-shaped source (usually a flat table whose rows are different node kinds, distinguished by a "type"
 	// column) arrives as one table (ReadBundle keys tables by file). This makes it routable: read the discriminator
 	// column, look up each row's node class, stamp the row's "class" cell, then rename bound source columns to their
-	// canonical property names — applying a binding only where the resolved class actually has that property (bind once,
+	// canonical property names - applying a binding only where the resolved class actually has that property (bind once,
 	// land where it fits). Runs before ApplyFlowConventions/ValidateBundle so the class-driven pipeline sees canonical
 	// rows. The questline_graph self table is left untouched (it isn't a fanned-out source table).
 	bool ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
 	{
 		if (Mapping.DiscriminatorColumn.IsNone())
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping has no discriminator column set — malformed mapping, refusing."));
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping has no discriminator column set - malformed mapping, refusing."));
 			return false;
 		}
 		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
 
-		// Extract the actual source shape from the bundle we're about to transform (no drift — this IS the data), then run
+		// Extract the actual source shape from the bundle we're about to transform (no drift - this IS the data), then run
 		// the shared guard. BINDING: refuse the whole import on any failure rather than silently drop rows. The extraction
 		// must read the discriminator cell BEFORE the routing loop removes it (below).
 		TArray<FName> ActualColumns;
@@ -195,16 +195,16 @@ namespace
 		TArray<FText> GuardErrors;
 		TArray<FText> GuardWarnings;
 		const bool bGuardOK = ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors, &GuardWarnings);
-		for (const FText& W : GuardWarnings)   // advisories log regardless of pass/fail — they never block, only inform
+		for (const FText& W : GuardWarnings)   // advisories log regardless of pass/fail - they never block, only inform
 			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline mapping advisory: %s"), *W.ToString());
 		if (!bGuardOK)
 		{
 			for (const FText& E : GuardErrors)
 				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
-			return false;   // refuse — no partial asset from an unsafe mapping
+			return false;   // refuse - no partial asset from an unsafe mapping
 		}
 
-		// The routing class map — the SAME shared builder the guard used, so membership can't drift. The guard already
+		// The routing class map - the SAME shared builder the guard used, so membership can't drift. The guard already
 		// refused on any build error, so BuildErrors can't fire here. Then cache each class's authored-property set for the
 		// per-row bind-where-it-fits check.
 		TMap<FString, UClass*> ClassByValue;   // keyed by NormalizeDiscriminatorValue
@@ -234,7 +234,7 @@ namespace
 				if (!Found)
 				{
 					// Unreachable at import (the guard refused any unmapped value); defensive for a guard-less caller.
-					Warnings.Add(FString::Printf(TEXT("mapping: row '%s' has %s='%s' with no class mapping — row not routed"),
+					Warnings.Add(FString::Printf(TEXT("mapping: row '%s' has %s='%s' with no class mapping - row not routed"),
 						*Row.Key, *DiscCol, *DiscValue));
 					continue;
 				}
@@ -243,14 +243,14 @@ namespace
 				Row.Cells.Remove(DiscCol);   // the discriminator column isn't a node property
 				const TSet<FName>& RowProps = PropsByClass[RowClass];
 
-				// 2. Rename each bound source column to its canonical property name — but only when this class has that
+				// 2. Rename each bound source column to its canonical property name - but only when this class has that
 				//    property (bind once, land where it fits). A binding that doesn't fit this class is simply skipped.
 				for (const FQuestColumnBinding& B : Mapping.Bindings)
 				{
-					if (!RowProps.Contains(B.TargetProperty)) continue;   // property not on this class — binding doesn't apply
+					if (!RowProps.Contains(B.TargetProperty)) continue;   // property not on this class - binding doesn't apply
 					const FString SrcCol = B.SourceColumn.ToString();
 					FQuestDataValue* Cell = Row.Cells.Find(SrcCol);
-					if (!Cell) continue;   // source column absent on this row — the absent-policy is handled downstream
+					if (!Cell) continue;   // source column absent on this row - the absent-policy is handled downstream
 					FQuestDataValue Moved = MoveTemp(*Cell);
 					Row.Cells.Remove(SrcCol);
 					Row.Cells.Add(B.TargetProperty.ToString(), MoveTemp(Moved));
@@ -266,11 +266,11 @@ namespace
 	// Synthesize the structural prereq form for every convention cell found on any node row, then strip the cell so it
 	// never reaches RestoreCell as a bogus property. Runs on the bundle AFTER ReadBundle and BEFORE ValidateBundle, so
 	// the synthesized edges' endpoints are checked by the ordinary endpoint guard (a typo'd operand key is refused with
-	// no half-built asset). PrerequisiteAnd has a floor of 2 condition pins, so ConditionPinCount = max(N, 2) — a
+	// no half-built asset). PrerequisiteAnd has a floor of 2 condition pins, so ConditionPinCount = max(N, 2) - a
 	// single operand wires one pin and leaves one free (legal; ResolveDestPin only fills FREE condition pins).
 	void ApplyFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings)
 	{
-		// Synthesized rows/edges are STAGED into locals and applied AFTER the scan — never insert into Bundle.TablesByType
+		// Synthesized rows/edges are STAGED into locals and applied AFTER the scan - never insert into Bundle.TablesByType
 		// while iterating it (FindOrAdd can rehash + invalidate the outer iterator when the combinator table doesn't yet
 		// exist, which is the common case). Stage per-stem so a single new table absorbs every gate of that kind.
 		TMap<FString, TArray<FQuestDataRow>> RowsToAddByStem;
@@ -282,9 +282,9 @@ namespace
 			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row can't be gated
 			for (FQuestDataRow& Row : TablePair.Value.Rows)
 			{
-				// A content node's Prerequisites input is single-link (the schema disallows a second wire — combine with
+				// A content node's Prerequisites input is single-link (the schema disallows a second wire - combine with
 				// AND/OR instead). So at most ONE flow-convention may apply per row; a second populated convention column
-				// is a source authoring error. Honor the FIRST (table order), strip + warn the rest — never synthesize two
+				// is a source authoring error. Honor the FIRST (table order), strip + warn the rest - never synthesize two
 				// combinators into one input (that can't round-trip and the compiled model would be undefined).
 				bool bRowConsumed = false;
 				for (const FFlowConvention& Conv : GFlowConventions)
@@ -293,7 +293,7 @@ namespace
 					if (!Cell) continue;
 
 					// Declared but blank on THIS row: the source has the column and this row does not use it. That is the normal
-					// shape for a rectangular source — a header or a row struct must declare every gate column used ANYWHERE, so
+					// shape for a rectangular source - a header or a row struct must declare every gate column used ANYWHERE, so
 					// most rows leave most of them blank. It is not a gate, not a conflict with an earlier one, and not a property
 					// either, so strip it and move on without a word. Placed ahead of the conflict check deliberately: that branch
 					// fires first, and would otherwise accuse a designer of double-declaring a prerequisite they never wrote.
@@ -305,7 +305,7 @@ namespace
 					
 					if (bRowConsumed)
 					{
-						Warnings.Add(FString::Printf(TEXT("'%s' carries %s in addition to an earlier prerequisite convention — "
+						Warnings.Add(FString::Printf(TEXT("'%s' carries %s in addition to an earlier prerequisite convention - "
 							"a node's Prerequisites input takes only one; ignoring %s (combine operands within a single convention)"),
 							*Row.Key, Conv.Column, Conv.Column));
 						Row.Cells.Remove(Conv.Column);
@@ -313,10 +313,10 @@ namespace
 					}
 
 					TArray<FString> Operands = ParseFlowKeyList(*Cell);
-					Row.Cells.Remove(Conv.Column);   // strip regardless — a declared-but-empty gate is still not a property
+					Row.Cells.Remove(Conv.Column);   // strip regardless - a declared-but-empty gate is still not a property
 					if (Operands.Num() == 0)
 					{
-						Warnings.Add(FString::Printf(TEXT("%s on '%s' listed no operands — no prerequisite synthesized"),
+						Warnings.Add(FString::Printf(TEXT("%s on '%s' listed no operands - no prerequisite synthesized"),
 							Conv.Column,
 							*Row.Key));
 						continue;
@@ -325,13 +325,13 @@ namespace
 					// the whole gate would be harsher than honoring the clear intent of the first operand).
 					if (Operands.Num() > Conv.MaxOperands)
 					{
-						Warnings.Add(FString::Printf(TEXT("%s on '%s' lists %d operands but takes at most %d — using the first, ignoring the rest"),
+						Warnings.Add(FString::Printf(TEXT("%s on '%s' lists %d operands but takes at most %d - using the first, ignoring the rest"),
 							Conv.Column, *Row.Key, Operands.Num(), Conv.MaxOperands));
 						Operands.SetNum(Conv.MaxOperands);
 					}
 
 					// Combinator key: derived from the GATED row + column so re-imports are stable and two gates never
-					// collide. Needn't be a GUID — SpawnNodeFromRow mints a deterministic FGuid from any non-GUID key.
+					// collide. Needn't be a GUID - SpawnNodeFromRow mints a deterministic FGuid from any non-GUID key.
 					const FString CombKey = Row.Key + TEXT("__") + FString(Conv.Column);
 					const FString GraphCell = Row.Get(TEXT("graph"));   // same graph level as the gated node
 
@@ -340,7 +340,7 @@ namespace
 					CombRow.Cells.Add(TEXT("class"),  FQuestDataValue::MakeString(Conv.CombinatorClass));
 					CombRow.Cells.Add(TEXT("graph"),  FQuestDataValue::MakeString(GraphCell));
 					// ConditionPinCount only for variadic combinators (AND/OR). NOT's single input pin is fixed at
-					// AllocateDefaultPins with no count property — emitting the cell would be a stray column.
+					// AllocateDefaultPins with no count property - emitting the cell would be a stray column.
 					if (Conv.bHasConditionPinCount)
 						CombRow.Cells.Add(TEXT("ConditionPinCount"), FQuestDataValue::MakeNumber(FString::FromInt(FMath::Max(Operands.Num(), 2))));
 					RowsToAddByStem.FindOrAdd(Conv.TableStem).Add(MoveTemp(CombRow));
@@ -368,7 +368,7 @@ namespace
 			if (CombTable.Columns.Num() == 0 && StemPair.Value.Num() > 0)
 			{
 				// Seed value columns (WriteBundle prepends "key" itself) in a STABLE order, and only those the rows
-				// actually carry — NOT rows omit ConditionPinCount, so a hardcoded list would seed a phantom column that
+				// actually carry - NOT rows omit ConditionPinCount, so a hardcoded list would seed a phantom column that
 				// breaks the re-export diff. class/graph are on every combinator row; ConditionPinCount only on variadic ones.
 				const FQuestDataRow& Sample = StemPair.Value[0];
 				CombTable.Columns = { TEXT("class"), TEXT("graph") };
@@ -388,7 +388,7 @@ namespace
 	// wire-binding names such a column plus the edge kind it means; we synthesize the identical {From,Type,To} edges the
 	// edge table would have carried, then STRIP the cell so it never reaches RestoreCell as a bogus property (same
 	// contract as the flow conventions below). An EMPTY qualifier emits "verb()", which ResolveSourcePin reads as "this
-	// node's default output of that kind" — so one binding wires Entry, Step and Exit alike. Mapping-only: it's studio
+	// node's default output of that kind" - so one binding wires Entry, Step and Exit alike. Mapping-only: it's studio
 	// vocabulary translation, so it never runs on our own round-trip.
 	void ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
 	{
@@ -406,7 +406,7 @@ namespace
 					if (Wire.SourceColumn.IsNone()) continue;
 					const FString Col = Wire.SourceColumn.ToString();
 					const FQuestDataValue* Cell = Row.Cells.Find(Col);
-					if (!Cell) continue;                                   // column absent on this row — nothing to wire
+					if (!Cell) continue;                                   // column absent on this row - nothing to wire
 
 					const TArray<FString> Targets = ParseFlowKeyList(*Cell);
 					Row.Cells.Remove(Col);                                 // strip: a wire column is not a node property
@@ -430,9 +430,9 @@ namespace
 	// Restore a Kind=Array cell into the destination container. The Kind erases container type (TArray vs TSet), so branch
 	// on the destination Prop. Each element recurses through RestoreCell by ITS own Kind. NOTE: this path is exercised only
 	// by a STRUCTURED provider (JSON); TSV delivers arrays as a single Kind=Scalar cell (the "(a,b)" literal -> ImportText),
-	// so TSV never reaches here — no regression risk. FGameplayTagContainer arriving as an Array (a JSON tag list) is also
+	// so TSV never reaches here - no regression risk. FGameplayTagContainer arriving as an Array (a JSON tag list) is also
 	// handled: a TagContainer destination isn't an FArray/FSetProperty, so it falls to the ImportText fallback on the
-	// element-joined literal — but in practice JSON emits FGameplayTagContainer as Kind=TagContainer, not Array.
+	// element-joined literal - but in practice JSON emits FGameplayTagContainer as Kind=TagContainer, not Array.
 	void RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 	{
 		// A structured provider (JSON) delivers an FGameplayTagContainer as a Kind=Array of tag-string elements. The
@@ -475,25 +475,25 @@ namespace
 			Helper.Rehash();
 			return;
 		}
-		// Unexpected destination for an Array Kind — leave default (defensive; a structured provider shouldn't emit this).
+		// Unexpected destination for an Array Kind - leave default (defensive; a structured provider shouldn't emit this).
 	}
 
 	// Restore one property from a structured cell value. switch(Kind): a STRUCTURED provider (JSON) delivers typed Kinds
 	// (Tag/Text/Bool/Array) that write directly to the property from the typed field; the string-carrying Kinds (Scalar/
 	// Enum/Reference/StructLiteral) go through ImportText from Value.StringForm. The TSV provider produces Kind=Scalar for
 	// EVERY cell (including FText cells, which arrive as a Scalar holding the NSLOCTEXT string), so the Scalar arm MUST
-	// preserve the property-type FText branch (ReadFromBuffer) that the pre-Stage-3 code used — otherwise TSV FText cells
+	// preserve the property-type FText branch (ReadFromBuffer) that the pre-Stage-3 code used - otherwise TSV FText cells
 	// regress from ReadFromBuffer to ImportText. This keeps the refactor byte-identical for TSV (the B2 no-regression gate).
 	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 	{
 		switch (Value.Kind)
 		{
 		case EQuestDataValueKind::Empty:
-			return;   // leave the constructed default (Q6 symmetry — replaces the old CellText.IsEmpty() skip)
+			return;   // leave the constructed default (Q6 symmetry - replaces the old CellText.IsEmpty() skip)
 
 		case EQuestDataValueKind::Tag:
-			// A cell's Kind and its destination are paired by NAME alone — a mapping binds any column onto any property and
-			// nothing type-checks the pair — so "it is a struct" does not justify the cast. Writing a tag over an unrelated
+			// A cell's Kind and its destination are paired by NAME alone - a mapping binds any column onto any property and
+			// nothing type-checks the pair - so "it is a struct" does not justify the cast. Writing a tag over an unrelated
 			// struct is type confusion, and a caller restoring onto an exactly-sized buffer turns the larger write into a heap
 			// overflow. Same identity test the array path applies. A mismatch is an authoring error: report it, change nothing.
 			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
@@ -504,7 +504,7 @@ namespace
 					return;
 				}
 			}
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag — left at its default."),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag - left at its default."),
 				*Prop->GetName());
 			return;
 
@@ -517,14 +517,14 @@ namespace
 					return;
 				}
 			}
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer — left at its default."),
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer - left at its default."),
 				*Prop->GetName());
 			return;
 
 		case EQuestDataValueKind::Text:
 			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
 			{
-				TextProp->SetPropertyValue(ValuePtr, Value.Text);   // typed — carries loc ns/key, no buffer round-trip
+				TextProp->SetPropertyValue(ValuePtr, Value.Text);   // typed - carries loc ns/key, no buffer round-trip
 			}
 			return;
 
@@ -546,12 +546,12 @@ namespace
 		case EQuestDataValueKind::StructLiteral:
 		default:
 			{
-			// String-carrying Kinds — all route through StringForm -> ImportText, which types against the property (a
+			// String-carrying Kinds - all route through StringForm -> ImportText, which types against the property (a
 			// numeric property parses "3" fine; the Number/String distinction is a provider-render concern, not a
 			// restore concern). Value.StringForm holds the cell string (== today's CellText for the TSV path). The FText
 			// special-case is PRESERVED here because TSV delivers FText cells as Kind=Scalar (a Scalar holding NSLOCTEXT);
 			// routing them to ImportText instead of ReadFromBuffer would regress TSV. JSON never lands here for FText (it
-			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar — exactly the old behavior.
+			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar - exactly the old behavior.
 			if (Value.StringForm.IsEmpty()) return;
 			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
 			{
@@ -570,7 +570,7 @@ namespace
 	}
 
 	// Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns (key/class/graph)
-	// and any column with no matching property (defensive — a stale table column shouldn't abort the import).
+	// and any column with no matching property (defensive - a stale table column shouldn't abort the import).
 	void RestoreRowProperties(UObject* Target, const FQuestDataRow& Row)
 	{
 		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
@@ -580,7 +580,7 @@ namespace
 			FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*Col));
 			if (!Prop) continue;
 			// RestoreCell types the value against the property (structured providers write typed fields directly; string-
-			// carrying Kinds route through ImportText on Scalar) — see the switch(Kind) in RestoreCell.
+			// carrying Kinds route through ImportText on Scalar) - see the switch(Kind) in RestoreCell.
 			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
 		}
 	}
@@ -606,11 +606,11 @@ namespace
 	void ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
 						   TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
 
-	// Resolve a class named by a bundle cell. The file carries SHORT names deliberately — they are what a studio reads and
+	// Resolve a class named by a bundle cell. The file carries SHORT names deliberately - they are what a studio reads and
 	// diffs, and qualifying them would trade the format's legibility for the reader's convenience. But UClass::TryFindTypeSlow
 	// captures AND SYMBOLICATES a ten-frame stack walk for every short name it is handed (CoreUObject's deprecation nudge),
 	// which on a corpus import is a per-row cost rather than a one-off. Try the qualified form against the packages our own
-	// types live in first; anything else — an adopter's module, a Blueprint-generated "<Name>_C", a full /Game/... path —
+	// types live in first; anything else - an adopter's module, a Blueprint-generated "<Name>_C", a full /Game/... path -
 	// falls through to exactly the behaviour that was there before.
 	UClass* ResolveBundleClass(const FString& ClassName)
 	{
@@ -708,7 +708,7 @@ namespace
 				Indexed.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
 
 				// SILENCE IS NOT AN ASSERTION OF EMPTINESS. A source that declares no children for this property has said
-				// nothing about it — the same contract a missing scalar cell carries, where RestoreCell's Empty arm leaves the
+				// nothing about it - the same contract a missing scalar cell carries, where RestoreCell's Empty arm leaves the
 				// constructed value alone. Clearing here would make silence destructive: restoring onto an owner that already
 				// holds authored children would discard them for no reason the source ever gave. Declaring children still
 				// replaces the contents wholesale, which is the source stating what they are.
@@ -810,8 +810,8 @@ namespace
 		Node->AllocateDefaultPins();
 
 		// Adopt identity AFTER the placement hooks (which regenerate GUID + sweep the label). Dual-key contract: a row
-		// key that parses as a GUID is one of OUR exports — preserve it verbatim (round-trip identity). A key that does
-		// NOT parse is a fresh-authoring semantic id (a studio's "kill_boss") — mint a DETERMINISTIC GUID from it so the
+		// key that parses as a GUID is one of OUR exports - preserve it verbatim (round-trip identity). A key that does
+		// NOT parse is a fresh-authoring semantic id (a studio's "kill_boss") - mint a DETERMINISTIC GUID from it so the
 		// identity is stable across re-imports (save data + cross-asset refs + in-place round-trip don't churn).
 		// NewDeterministicGuid is a pure name-based hash (no process/build state), so the same id always mints the same
 		// GUID. Edge wiring is unaffected: NodeByKey is keyed by the row-key STRING, never this GUID.
@@ -821,7 +821,7 @@ namespace
 			if (FGuid::Parse(Row.Key, ParsedGuid))
 			{
 				QNode->QuestGuid = ParsedGuid;   // round-trip: preserve our exported GUID verbatim
-				// (A GUID key came from our own export; there's no studio-semantic key to preserve — leave ImportSourceKey empty.)
+				// (A GUID key came from our own export; there's no studio-semantic key to preserve - leave ImportSourceKey empty.)
 			}
 			else
 			{
@@ -843,13 +843,13 @@ namespace
 	}
 
 	// Remove schema-seeded default nodes (the auto-Entry) from a freshly-created graph so it's populated purely from
-	// exported rows. Safe: CreateInnerGraph / the factory only use the default Entry as a starting affordance — nothing
+	// exported rows. Safe: CreateInnerGraph / the factory only use the default Entry as a starting affordance - nothing
 	// retains it; the graph's Entry is always re-found by class (verified: CreateInnerGraph holds no ref, callers scan
 	// Graph->Nodes for the Entry type). Schema + (for inner graphs) the change subscription are unaffected.
 	void ClearDefaultNodes(UEdGraph* Graph)
 	{
 		if (!Graph) return;
-		TArray<UEdGraphNode*> ToRemove = Graph->Nodes;   // copy — RemoveNode mutates the array
+		TArray<UEdGraphNode*> ToRemove = Graph->Nodes;   // copy - RemoveNode mutates the array
 		for (UEdGraphNode* N : ToRemove)
 		{
 			if (N) Graph->RemoveNode(N);
@@ -857,13 +857,13 @@ namespace
 	}
 
 	// Import every node row belonging to one graph level (graph cell). Quest containers, once spawned + Finalized,
-	// have auto-created inner graphs whose auto-Entry we adopt by GUID-overwrite from that inner graph's Entry row —
+	// have auto-created inner graphs whose auto-Entry we adopt by GUID-overwrite from that inner graph's Entry row -
 	// then recurse into the inner level. GraphCell is "root" for the top graph, else the container node's key.
 	void ImportGraphLevel(UEdGraph* TargetGraph, const FString& GraphCell, const FQuestDataBundle& Bundle,
 						  const TMap<FString, const FQuestDataRow*>& NodeRowsByKey,
 						  TMap<FString, UEdGraphNode*>& NodeByKey, TSet<FString>& Consumed, TArray<FString>& Warnings)
 	{
-		ClearDefaultNodes(TargetGraph);   // populate entirely from rows (incl. the exported Entry) — no double-Entry
+		ClearDefaultNodes(TargetGraph);   // populate entirely from rows (incl. the exported Entry) - no double-Entry
 
 		for (const auto& Pair : NodeRowsByKey)
 		{
@@ -921,7 +921,7 @@ namespace
 			UEdGraphNode* Node = NodeByKey[Key];
 			
 			// Optional deactivation pins. AllocateDefaultPins (at spawn) creates the "Deactivated" output only when
-			// bShowDeactivationPins is true — but that ran BEFORE the property restore, so it was skipped. Both content
+			// bShowDeactivationPins is true - but that ran BEFORE the property restore, so it was skipped. Both content
 			// nodes AND Entry nodes carry this flag (on different classes) and both create the pin the same way. Create
 			// it here for any node whose restored flag is true but lacks the pin. Content nodes ALSO get the paired
 			// "Deactivate" INPUT (via EnsureDeactivationPinsForAutowire, which handles both); Entry has only the output.
@@ -970,7 +970,7 @@ namespace
 
 	UEdGraphPin* ResolveSourcePin(UEdGraphNode* Node, const FString& EdgeType)
 	{
-		// EdgeType is "verb(PinName)" — split it. An EMPTY PinName means "the node's default output of this verb's kind",
+		// EdgeType is "verb(PinName)" - split it. An EMPTY PinName means "the node's default output of this verb's kind",
 		// which is how a studio's row-adjacent wire column ("next") addresses Entry/Step/Exit uniformly without knowing
 		// that each names its forward pin differently.
 		FString Verb = EdgeType;
@@ -984,7 +984,7 @@ namespace
 
 		if (!PinName.IsEmpty())
 		{
-			// Exact pin name first — that's what our own export writes, so the round-trip is untouched.
+			// Exact pin name first - that's what our own export writes, so the round-trip is untouched.
 			for (UEdGraphPin* Pin : Node->Pins)
 				if (Pin && Pin->Direction == EGPD_Output && Pin->PinName.ToString() == PinName) return Pin;
 
@@ -998,7 +998,7 @@ namespace
 			return nullptr;
 		}
 
-		// Unqualified: first output pin of the verb's category — the node's primary forward wire by pin-creation order.
+		// Unqualified: first output pin of the verb's category - the node's primary forward wire by pin-creation order.
 		const FName WantCategory = FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(Verb);
 		if (WantCategory.IsNone()) return nullptr;
 		for (UEdGraphPin* Pin : Node->Pins)
@@ -1007,7 +1007,7 @@ namespace
 	}
 
 	// The DESTINATION input category isn't always the source output category. Outcome outputs (QuestOutcome) route
-	// into a target's activation-style input (QuestActivation) — an Exit's "Outcome" pin, or a content node's
+	// into a target's activation-style input (QuestActivation) - an Exit's "Outcome" pin, or a content node's
 	// "Activate". Prereq and activation and deactivation wires keep their category across the wire. Map source
 	// category -> the category the destination exposes for that wire kind.
 	FName ResolveDestCategory(FName SourceCategory)
@@ -1020,16 +1020,16 @@ namespace
 	}
 
 	// Resolve the DESTINATION input pin. Driven by the DESTINATION NODE'S SHAPE, not by mapping from the source
-	// category — because the graph legitimately connects across categories: a Step's QuestActivation "Any Outcome"
+	// category - because the graph legitimately connects across categories: a Step's QuestActivation "Any Outcome"
 	// output AND a NOT's QuestPrerequisite "PrereqOut" output can BOTH feed a combinator's QuestPrerequisite
-	// Condition_N input (UE's schema permits it — that's how "step completion satisfies a prereq condition" is
+	// Condition_N input (UE's schema permits it - that's how "step completion satisfies a prereq condition" is
 	// authored). Priority:
-	//   1. A prereq Condition_N input (combinators): ANY source category routes here — take the first free slot.
+	//   1. A prereq Condition_N input (combinators): ANY source category routes here - take the first free slot.
 	//   2. Else the single input of the source-derived category (outcome/activation -> Activate; prereq -> a
 	//      Prerequisites input; deactivate -> Deactivate).
 	UEdGraphPin* ResolveDestPin(UEdGraphNode* Node, FName SourceCategory)
 	{
-		// 1. Combinator condition input — category-agnostic on the source side (a prereq input accepts outcome,
+		// 1. Combinator condition input - category-agnostic on the source side (a prereq input accepts outcome,
 		//    activation, or prereq outputs). First free Condition_N (order-free: no per-slot semantics).
 		for (UEdGraphPin* Pin : Node->Pins)
 			if (Pin && Pin->Direction == EGPD_Input && Pin->PinType.PinCategory == TEXT("QuestPrerequisite")
@@ -1048,7 +1048,7 @@ namespace
 	{
 		for (const FQuestDataEdge& E : Bundle.Edges)
 		{
-			// contains edges are NOT wiring — they're the instanced-reattach record. Cross-check (D1's completeness
+			// contains edges are NOT wiring - they're the instanced-reattach record. Cross-check (D1's completeness
 			// property, kept as a tripwire): every contains edge's child must have been consumed by the property walk.
 			if (E.Type.StartsWith(TEXT("contains")))
 			{
@@ -1075,7 +1075,7 @@ namespace
 			UEdGraphPin* DestPin = ResolveDestPin(*ToNode, SourcePin->PinType.PinCategory);
 			if (!DestPin) { Warnings.Add(FString::Printf(TEXT("no dest pin for edge -> %s (cat %s)"), *E.To, *SourcePin->PinType.PinCategory.ToString())); continue; }
 
-			SourcePin->MakeLinkTo(DestPin);   // raw link — reconstruct-known-topology, no schema side effects
+			SourcePin->MakeLinkTo(DestPin);   // raw link - reconstruct-known-topology, no schema side effects
 			UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ImportQuestline: wired [%s] %s(%s) -> [%s] %s(%s)"),
 				*E.From,
 				*SourcePin->PinName.ToString(),
@@ -1131,7 +1131,7 @@ namespace
 		void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
 		Prop->InitializeValue(Scratch);
 		// Start from what the apply step would start from. RestoreCell's non-writing arms leave the seed in place, which is
-		// what makes an absent cell mean "unchanged" rather than "reset to zero" — and zero is not even the right default,
+		// what makes an absent cell mean "unchanged" rather than "reset to zero" - and zero is not even the right default,
 		// since a property with an in-class initializer is non-zero on a freshly constructed object.
 		// CopyCompleteValue, not CopySingleValue: the buffer is sized at GetSize(), which includes ArrayDim.
 		if (SeedPtr) { Prop->CopyCompleteValue(Scratch, SeedPtr); }
@@ -1143,8 +1143,8 @@ namespace
 		return Typed;
 	}
 
-	// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes — a node,
-	// the questline itself, and (once nested values are described) an instanced child — so the comparison rule has exactly
+	// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes - a node,
+	// the questline itself, and (once nested values are described) an instanced child - so the comparison rule has exactly
 	// one definition and cannot drift between them. PathPrefix names where this object sits under its owner, empty at the top.
 	void DiffObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
 	                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
@@ -1152,7 +1152,7 @@ namespace
 		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 		{
 			const FString& Column = Cell.Key;
-			if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural — describes the row, not a property
+			if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural - describes the row, not a property
 
 			FProperty* Prop = Object->GetClass()->FindPropertyByName(FName(*Column));
 			if (!Prop)
@@ -1161,7 +1161,7 @@ namespace
 				// whole table, so an unbound bookkeeping column would otherwise warn once per ROW instead of once.
 				if (Cell.Value.Kind != EQuestDataValueKind::Empty)
 				{
-					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s — it would be ignored"),
+					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s - it would be ignored"),
 						*Row.Key,
 						*Column,
 						*Object->GetClass()->GetName()));
@@ -1172,7 +1172,7 @@ namespace
 			const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
 			
 			// An ABSENT cell is the only place policy applies. The source declared the column and left it blank, which is a
-			// statement about the default — but which default, and whether blank is permitted at all, is the recipe's call.
+			// statement about the default - but which default, and whether blank is permitted at all, is the recipe's call.
 			// A cell that CARRIES a value overwrites the seed regardless, so policy never reaches it.
 			const bool bAbsent = (Cell.Value.Kind == EQuestDataValueKind::Empty);
 			const EQuestAbsentFieldPolicy Policy = bAbsent ? Policies.Resolve(FName(*Column)) : EQuestAbsentFieldPolicy::Preserve;
@@ -1184,11 +1184,11 @@ namespace
 			}
 
 			// THE SEED IS THE POLICY. From the live value, an absent cell changes nothing; from the class default, it resets.
-			// The comparison below is byte-for-byte the same either way — only its starting point moves.
+			// The comparison below is byte-for-byte the same either way - only its starting point moves.
 			const void* SeedPtr = LivePtr;
 			if (bAbsent && Policy == EQuestAbsentFieldPolicy::Reset)
 			{
-				// The CDO of the class the property was RESOLVED on, not of the incoming class — a property offset is only
+				// The CDO of the class the property was RESOLVED on, not of the incoming class - a property offset is only
 				// meaningful against the layout it belongs to.
 				const UClass* OwnerClass = Prop->GetOwnerClass();
 				if (OwnerClass) { SeedPtr = Prop->ContainerPtrToValuePtr<void>(OwnerClass->GetDefaultObject()); }
@@ -1207,7 +1207,7 @@ namespace
 			if (bIdentical) continue;
 
 			// A reset says WHY the value is what it is, not just what it is. Without that, "the source blanked this field"
-			// and "the policy is resetting it to a default that happens to be blank" print identically — and they are
+			// and "the policy is resetting it to a default that happens to be blank" print identically - and they are
 			// different decisions a designer might want to question. The VALUE is untouched; only its description changes.
 			const FString Described = DescribeValue(Incoming);
 			const bool bResetToDefault = bAbsent && Policy == EQuestAbsentFieldPolicy::Reset;
@@ -1218,11 +1218,11 @@ namespace
 			Change.IncomingText  = !bResetToDefault ? Described
 								 : (Described.IsEmpty() ? FString(TEXT("<default>"))
 														: FString::Printf(TEXT("<default> (%s)"), *Described));
-			Change.IncomingValue = Incoming;   // what apply writes — never re-derived from the row
+			Change.IncomingValue = Incoming;   // what apply writes - never re-derived from the row
 			Entry.Changes.Add(MoveTemp(Change));
 		}
 	}
-	// True when the bundle describes anything under this property — a row keyed exactly "<owner>/<prop>" (a direct instanced
+	// True when the bundle describes anything under this property - a row keyed exactly "<owner>/<prop>" (a direct instanced
 	// object) or "<owner>/<prop>[..." (a container). This is the SAME rule the restore path applies before it touches a
 	// property: a source declaring no children has said nothing about it, so the property is left alone. The plan has to
 	// agree, or it describes an apply that will not happen.
@@ -1241,7 +1241,7 @@ namespace
 
 	// Compare an owner's instanced children against the rows describing them. The walk that finds the live children is the
 	// SAME one the writer uses to name them, so a row and the object it describes are matched by construction rather than by
-	// a second guess at the naming rule — which is exactly where the two directions have drifted before.
+	// a second guess at the naming rule - which is exactly where the two directions have drifted before.
 	void DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
 	                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
 	{
@@ -1269,6 +1269,7 @@ namespace
 						FQuestPropertyChange Change;
 						Change.Property     = Path;
 						Change.CurrentText  = Child->GetClass()->GetName();
+						Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
 						Change.IncomingText = TEXT("<removed>");
 						Entry.Changes.Add(MoveTemp(Change));
 						return;
@@ -1285,11 +1286,12 @@ namespace
 				{
 					if (Row.Key != PropPrefix && !Row.Key.StartsWith(Indexed)) continue;
 					if (LiveKeys.Contains(Row.Key)) continue;
-					// DIRECT children only — a grandchild's key carries a further '/' segment, and belongs to its own owner.
+					// DIRECT children only - a grandchild's key carries a further '/' segment, and belongs to its own owner.
 					if (Row.Key.RightChop(OwnerKey.Len() + 1).Contains(TEXT("/"))) continue;
 
 					FQuestPropertyChange Change;
 					Change.Property     = Row.Key.RightChop(OwnerKey.Len() + 1);
+					Change.Kind         = EQuestPropertyChangeKind::ChildAdded;
 					Change.CurrentText  = TEXT("<absent>");
 					Change.IncomingText = Row.Get(TEXT("class"));
 					Entry.Changes.Add(MoveTemp(Change));
@@ -1319,7 +1321,7 @@ namespace
 	}
 
 	// Which object owns this change, and under what property name? LONGEST matching path wins, and the candidate must
-	// actually have a property by the remaining name — that pair of conditions is what makes this safe without parsing a
+	// actually have a property by the remaining name - that pair of conditions is what makes this safe without parsing a
 	// path whose segments can contain dots and brackets of their own.
 	UObject* FindApplyTarget(const TMap<FString, UObject*>& ByPath, const FString& ChangePath, FString& OutPropertyName)
 	{
@@ -1343,7 +1345,7 @@ namespace
 		return Best;
 	}
 
-	// Properties that carry IDENTITY rather than configuration. QuestlineID is not a field — it is the questline's compiled
+	// Properties that carry IDENTITY rather than configuration. QuestlineID is not a field - it is the questline's compiled
 	// tag namespace, so rewriting it moves every tag the questline owns, invalidates save data keyed on them, and can
 	// collide with another asset. A rename is a deliberate operation with consequences a property write cannot express, so
 	// apply reports it and declines. The plan still SHOWS the difference; it simply is not something this step performs.
@@ -1366,7 +1368,7 @@ namespace
 			UObject* Target = FindApplyTarget(ByPath, Change.Property, PropertyName);
 			if (!Target)
 			{
-				// The structure moved between planning and applying, or the plan came from elsewhere. Either way, say so —
+				// The structure moved between planning and applying, or the plan came from elsewhere. Either way, say so -
 				// a change that silently evaporates is worse than one that fails, because the plan already promised it.
 				OutSkipped.Add(FString::Printf(TEXT("'%s' names no property reachable from '%s'"), *Change.Property, *OwnerKey));
 				continue;
@@ -1380,7 +1382,7 @@ namespace
 
 			if (IsIdentityBearingProperty(Target, PropertyName))
 			{
-				OutSkipped.Add(FString::Printf(TEXT("'%s' is identity-bearing — rewriting it would move the questline's compiled "
+				OutSkipped.Add(FString::Printf(TEXT("'%s' is identity-bearing - rewriting it would move the questline's compiled "
 					"tag namespace and orphan save data keyed on it. Rename deliberately instead."), *Change.Property));
 				continue;
 			}
@@ -1395,7 +1397,7 @@ namespace
 	}
 
 	// The graph a level names: "root" is the questline's own graph, anything else names a container node whose inner graph
-	// it is. Null means the level names nothing reachable — the planner refuses genuinely unreachable levels, so a null here
+	// it is. Null means the level names nothing reachable - the planner refuses genuinely unreachable levels, so a null here
 	// means either the asset moved under us or the container is itself a create that has not spawned yet.
 	UEdGraph* ResolveLevelGraph(UQuestlineGraph& Target, const FString& Level, const TMap<FString, UEdGraphNode*>& NodeByKey)
 	{
@@ -1408,11 +1410,11 @@ namespace
 	}
 
 	// Execute a plan. Deliberately separate from the console command that currently drives it: the editor action will be a
-	// second caller, and a test is a third — and a mutation worth trusting is one that can be exercised without a UI.
+	// second caller, and a test is a third - and a mutation worth trusting is one that can be exercised without a UI.
 	// The caller owns the transaction, because a caller may want several applies inside one undo.
 	void ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options)
 	{
-		// A plan carrying refusals or contested keys is untrustworthy in ANY part — those say the planner could not describe
+		// A plan carrying refusals or contested keys is untrustworthy in ANY part - those say the planner could not describe
 		// the source, not merely that one row is odd. Acting on the rest would be acting on a description known to be wrong.
 		if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
 		{
@@ -1451,7 +1453,7 @@ namespace
 
 			// A source may declare a container AND its contents, so one create's level can be another create. Spawn whatever
 			// is reachable and repeat while anything moved; the planner already refuses genuinely unreachable levels, so this
-			// settles in a pass or two. Anything still pending is REPORTED rather than dropped — a create that quietly does
+			// settles in a pass or two. Anything still pending is REPORTED rather than dropped - a create that quietly does
 			// not happen is the failure mode this whole arc exists to prevent.
 			bool bProgress = true;
 			while (bProgress && Pending.Num() > 0)
@@ -1492,7 +1494,7 @@ namespace
 			}
 
 			// Property-derived pins only exist once the properties are restored, and wiring will need them. Restricted to the
-			// nodes just created — refreshing pins on nodes nobody asked about would disturb an asset this plan never
+			// nodes just created - refreshing pins on nodes nobody asked about would disturb an asset this plan never
 			// described.
 			if (CreatedByKey.Num() > 0)
 			{
@@ -1514,12 +1516,12 @@ namespace
 				if (!SourcePin || !DestPin) { OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s -> %s: pin unresolved"), *Edge.From, *Edge.To)); continue; }
 
 				// Break it ONLY when a direct link is what is actually there. The plan's edges are knot-collapsed, so this
-				// relationship may run through reroute knots that fan out to other targets as well — breaking the first hop
+				// relationship may run through reroute knots that fan out to other targets as well - breaking the first hop
 				// would remove those relationships too, and deleting the chain would destroy routing placed deliberately.
 				// Neither is derivable from the data, so a knot-routed removal is reported instead of guessed at.
 				if (!SourcePin->LinkedTo.Contains(DestPin))
 				{
-					OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s %s %s is routed through reroute nodes — "
+					OutResult.Skipped.Add(FString::Printf(TEXT("removed edge %s %s %s is routed through reroute nodes - "
 						"rewire it by hand, or the knots' other targets would go with it"), *Edge.From, *Edge.Type, *Edge.To));
 					continue;
 				}
@@ -1549,8 +1551,8 @@ namespace
 
 		// DELETION LAST, and only when explicitly permitted. This is the one operation here that destroys authored work, so
 		// it is opt-in twice: the plan reports an orphan whatever the setting, and removal happens only if asked. The plan has
-		// already scoped orphans to levels the source DECLARES — a source describing one container says nothing about the
-		// rest of the asset — and this honours that scoping rather than re-deriving it, which is where it would drift.
+		// already scoped orphans to levels the source DECLARES - a source describing one container says nothing about the
+		// rest of the asset - and this honours that scoping rather than re-deriving it, which is where it would drift.
 		if (Options.bDeleteOrphanedNodes)
 		{
 			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
@@ -1560,7 +1562,7 @@ namespace
 				UEdGraphNode* Node = NodeByKey.FindRef(Entry.Guid);
 				if (!Node) { OutResult.Skipped.Add(FString::Printf(TEXT("orphan '%s' no longer resolves to a node"), *Entry.Key)); continue; }
 
-				// A container carries its inner graph, so removing one takes everything inside it — nodes the plan counted as
+				// A container carries its inner graph, so removing one takes everything inside it - nodes the plan counted as
 				// UNTOUCHED rather than as orphans. Deleting a container by hand behaves the same way, so this is not refused,
 				// but the blast radius has to be stated: a destructive step that under-reports what it removed is worse than
 				// one that refuses.
@@ -1592,7 +1594,7 @@ namespace
 			if (Entry.Action == EQuestNodePlanAction::Create) { continue; }   // already handled by the creation pass above
 			if (Entry.Action == EQuestNodePlanAction::Orphan)
 			{
-				// Deferred only when deletion is not permitted. When it is, the deletion pass owns these — counting them here
+				// Deferred only when deletion is not permitted. When it is, the deletion pass owns these - counting them here
 				// as well would report the same node as both removed and left alone.
 				if (!Options.bDeleteOrphanedNodes) { ++OutResult.EntriesDeferred; }
 				continue;
@@ -1635,13 +1637,14 @@ namespace
 				SelfEntry.CurrentClassName = SelfEntry.ClassName;
 
 				// A FABRICATED self row asserts nothing. The DataTable provenance has no self row, so one is invented from the
-				// table's asset name purely to satisfy validation — comparing it would let a source that never described the
+				// table's asset name purely to satisfy validation - comparing it would let a source that never described the
 				// questline rename it. Entered anyway, so the plan still accounts for the questline, but with no changes.
 				if (!Bundle.bSelfRowSynthesized)
 				{
 					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan, Policies);
 					DiffInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan, Policies);
 				}
+				SelfEntry.Label = Target.GetName();
 				OutPlan.Entries.Add(MoveTemp(SelfEntry));
 			}
 		}
@@ -1659,7 +1662,7 @@ namespace
 		BuildQuestNodeKeyIndex(SourceKeyByGuid, AllGuids, GuidByKey, OutPlan.AmbiguousKeys);
 		for (const FString& Key : OutPlan.AmbiguousKeys)
 		{
-			OutPlan.Warnings.Add(FString::Printf(TEXT("'%s' names more than one node — that row is not planned, and neither "
+			OutPlan.Warnings.Add(FString::Printf(TEXT("'%s' names more than one node - that row is not planned, and neither "
 				"claimant is treated as an orphan. Clear the import provenance on the duplicate to resolve it."), *Key));
 		}
 
@@ -1685,11 +1688,11 @@ namespace
 			if (!Node)
 			{
 				// Only promise what the spawn path can deliver. A class no loaded module provides, or a level nothing declares,
-				// both make SpawnNodeFromRow / ImportGraphLevel skip the row — so planning a CREATE would report work that
+				// both make SpawnNodeFromRow / ImportGraphLevel skip the row - so planning a CREATE would report work that
 				// silently never happens, which is worse than reporting nothing.
 				if (!ResolveBundleClass(Entry.ClassName))
 				{
-					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' names class '%s', which no loaded module provides — "
+					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' names class '%s', which no loaded module provides - "
 						"it cannot be created"), *Row.Key, *Entry.ClassName));
 					continue;
 				}
@@ -1698,12 +1701,14 @@ namespace
 					|| GuidByKey.Contains(Level) || NodeRowsByKey.Contains(Entry.GraphCell);
 				if (!bLevelExists)
 				{
-					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' sits in level '%s', which no node or row declares — "
+					OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' sits in level '%s', which no node or row declares - "
 						"it cannot be reached"), *Row.Key, *Entry.GraphCell));
 					continue;
 				}
 
 				Entry.Action = EQuestNodePlanAction::Create;
+				// A create has nothing to ask, so this is whatever the source volunteered - often nothing, which is honest.
+				Entry.Label = Row.Get(TEXT("NodeLabel"));
 				OutPlan.Entries.Add(MoveTemp(Entry));
 				continue;
 			}
@@ -1714,8 +1719,8 @@ namespace
 			Entry.CurrentClassName = Node->GetClass()->GetName();
 			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(*FoundGuid);
 
-			// Compare levels in ONE namespace. The two sides spell a level differently by design — the writer names it by the
-			// container's GUID, the asset walk by whatever key that container answers to — so a raw compare would flag every
+			// Compare levels in ONE namespace. The two sides spell a level differently by design - the writer names it by the
+			// container's GUID, the asset walk by whatever key that container answers to - so a raw compare would flag every
 			// node inside a semantically-keyed container as needing a rebuild it does not need.
 			const FString IncomingLevel = ResolveQuestLevelToGuid(Entry.GraphCell, GuidByKey);
 			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
@@ -1724,10 +1729,13 @@ namespace
 			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan, Policies);
 			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan, Policies);
 
+			// FullTitle, not ListView: ListView is a palette context, and a node that distinguishes them answers it with its
+			// TYPE label - which would give every placement of that class the same name to sort and display by.
+			Entry.Label = Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
 
-		// Anything the asset holds that the source no longer mentions — but ONLY within the levels the source actually
+		// Anything the asset holds that the source no longer mentions - but ONLY within the levels the source actually
 		// declares. A source describing one container says nothing about the rest of the asset, and treating its silence as
 		// deletion is what would make a delete-orphans policy unsafe to offer at all.
 		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
@@ -1747,6 +1755,7 @@ namespace
 			Entry.ClassName        = Pair.Value->GetClass()->GetName();
 			Entry.CurrentClassName = Entry.ClassName;
 			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(Pair.Key);
+			Entry.Label            = Pair.Value->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
 
@@ -1762,6 +1771,27 @@ namespace
 			}
 			CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, OutPlan.AddedEdges, OutPlan.RemovedEdges);
 		}
+		
+		/**
+		 * Deterministic order, because everything above walks TMaps and two identical plans would otherwise render differently
+		 * - which makes a panel feel broken and makes two screenshots impossible to compare. The questline itself leads, then
+		 * by action so like sits with like, then by name. A panel re-sorts on top of this; it only needs a stable start.
+		 */
+		OutPlan.Entries.Sort([](const FQuestNodePlanEntry& A, const FQuestNodePlanEntry& B)
+		{
+			if (A.bIsQuestlineSelf != B.bIsQuestlineSelf) { return A.bIsQuestlineSelf; }
+			if (A.Action != B.Action) { return static_cast<uint8>(A.Action) < static_cast<uint8>(B.Action); }
+			const FString& AName = A.Label.IsEmpty() ? A.Key : A.Label;
+			const FString& BName = B.Label.IsEmpty() ? B.Key : B.Label;
+			// Natural order, so "Chapter 10" follows "Chapter 9" instead of "Chapter 1". Authored labels routinely end in a
+			// number, and that is exactly the case a plain lexicographic sort scatters worst.
+			const int32 ByName = UE::ComparisonUtility::CompareNaturalOrder(AName, BName);
+			return ByName == 0 ? A.Key < B.Key : ByName < 0;   // key breaks ties, so duplicates never swap
+		});
+		for (FQuestNodePlanEntry& Entry : OutPlan.Entries)
+		{
+			Entry.Changes.Sort([](const FQuestPropertyChange& A, const FQuestPropertyChange& B) { return A.Property < B.Property; });
+		}
 	}
 
 	const TCHAR* PlanActionName(EQuestNodePlanAction Action)
@@ -1776,7 +1806,7 @@ namespace
 
 	void LogInPlacePlan(const FQuestInPlacePlan& Plan)
 	{
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place PLAN for '%s' — %d update(s) (%d with changes), %d create(s), %d orphan(s), "
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place PLAN for '%s' - %d update(s) (%d with changes), %d create(s), %d orphan(s), "
 			"%d node(s) outside the levels this source declares, %d contested key(s), %d wire edge(s) added, %d removed. Nothing was modified."),
 			*Plan.TargetAssetPath,
 			Plan.CountOf(EQuestNodePlanAction::Update),
@@ -1801,7 +1831,7 @@ namespace
 			// level at all, being the thing levels belong to.
 			const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
 			const FString Where = Entry.bIsQuestlineSelf ? FString(TEXT("the questline itself")) : FString::Printf(TEXT("graph '%s'"), *Level);
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [%s] %s (%s) — %s%s"),
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [%s] %s (%s) - %s%s"),
 				PlanActionName(Entry.Action),
 				*Entry.Key,
 				*Entry.ClassName,
@@ -1825,7 +1855,7 @@ namespace
 		for (const FString& W : Plan.Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
 		if (Plan.IsNoOp())
 		{
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: the asset already matches the source — a re-import would change nothing."));
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: the asset already matches the source - a re-import would change nothing."));
 		}
 	}
 
@@ -1862,20 +1892,20 @@ namespace
 			return;
 		}
 
-		// --in-place takes no dest package arg, but the create form does — so adapting one command into the other easily
+		// --in-place takes no dest package arg, but the create form does - so adapting one command into the other easily
 		// leaves the dest behind. Space-rejoining would swallow it into the folder path, and the only symptom would be a
 		// "folder not found" naming a path the caller never typed. Name the actual mistake instead. Guarded on there being
 		// more than one positional arg so a genuine root-anchored source folder is never mistaken for a package path.
 		if (bInPlace && PathArgs.Num() > 1 && FPackageName::IsValidLongPackageName(PathArgs.Last()))
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: trailing argument '%s' is a package path, which --in-place does not take — the "
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: trailing argument '%s' is a package path, which --in-place does not take - the "
 				"target is named by --in-place=<AssetPath>. Pass only the source folder. Nothing was modified."), *PathArgs.Last());
 			return;
 		}
 
 		// Console arg tokenization splits on whitespace and does NOT honor quotes, so a folder path containing spaces
 		// (e.g. "E:/Unreal Projects/...") arrives as multiple Args. The dest package path is the LAST path arg (never has
-		// spaces — it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces. With
+		// spaces - it's a /Game/... mount path); the folder path is everything before it, rejoined with spaces. With
 		// --in-place there is no dest arg to peel off, so the whole positional remainder is the folder.
 		const FString DestPackagePath = bInPlace ? FString() : PathArgs.Last();
 		FString FolderPath;
@@ -1938,7 +1968,7 @@ namespace
 		FString Error;
 		if (!ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, Error))
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: validation failed — %s. No asset created."), *Error);
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: validation failed - %s. No asset created."), *Error);
 			return;
 		}
 
@@ -1981,7 +2011,7 @@ namespace
 			// The flag is a RUN-LEVEL instruction and has to reach the per-property entries, not just the fallback: loading a
 			// recipe writes an explicit entry for every bound column, and a per-binding Preserve would otherwise shadow the
 			// flag for exactly the columns the recipe covers. It says "do not preserve", so it upgrades Preserve to Reset and
-			// leaves Require alone — Require is a designer asserting a value must be present, which a convenience flag has no
+			// leaves Require alone - Require is a designer asserting a value must be present, which a convenience flag has no
 			// business switching off.
 			if (bResetAbsent)
 			{
@@ -1995,13 +2025,13 @@ namespace
 				}
 			}
 
-			// Say what mode this run is in. A plan is only interpretable against the policy that produced it — the same source
-			// and asset yield different plans under Preserve and Reset — and the console does not reliably echo the command
+			// Say what mode this run is in. A plan is only interpretable against the policy that produced it - the same source
+			// and asset yield different plans under Preserve and Reset - and the console does not reliably echo the command
 			// that produced a log, so the output has to identify itself.
 			const TCHAR* PolicyName =
 				Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
 				Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place %s — source '%s', absent-field policy %s%s.%s"),
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place %s - source '%s', absent-field policy %s%s.%s"),
 				bApply ? TEXT("APPLY") : TEXT("PLAN (read-only)"),
 				DataTablePath.IsEmpty() ? *FolderPath : *DataTablePath,
 				PolicyName,
@@ -2016,12 +2046,12 @@ namespace
 				return;   // planning is the default; mutating is opted into
 			}
 
-			// A plan carrying refusals or contested keys is not trustworthy in ANY part — those say the planner could not
+			// A plan carrying refusals or contested keys is not trustworthy in ANY part - those say the planner could not
 			// describe the source, not merely that one row is odd. Applying the rest would be acting on a description we
 			// already know is incomplete.
 			if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
 			{
-				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused - the plan carries %d refusal(s) and %d contested key(s). "
 					"Resolve those and re-plan. Nothing was modified."),
 					Plan.Refusals.Num(),
 					Plan.AmbiguousKeys.Num());
@@ -2034,13 +2064,13 @@ namespace
 			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result, ApplyOptions);
 			if (Result.bRefused)
 			{
-				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused — the plan carries %d refusal(s) and %d contested key(s). "
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused - the plan carries %d refusal(s) and %d contested key(s). "
 					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
 				return;
 			}
 
 			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' — %d property change(s), %d node(s) created, "
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' - %d property change(s), %d node(s) created, "
 				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred (structural rebuilds are not "
 				"performed). %d skipped."),
 				*AssetPath,
@@ -2053,7 +2083,7 @@ namespace
 
 			// Only dirty the package if something actually happened. A re-import that changes nothing should leave no trace:
 			// marking it regardless makes every no-op run look like a modification, which costs a save and a diff for work
-			// that was not done — and trains a designer to ignore the one signal that says an asset moved.
+			// that was not done - and trains a designer to ignore the one signal that says an asset moved.
 			const bool bChangedAnything = Result.PropertiesWritten > 0 || Result.NodesCreated > 0 || Result.EdgesChanged > 0 || Result.NodesDeleted > 0;
 			if (bChangedAnything)
 			{
@@ -2061,19 +2091,19 @@ namespace
 			}
 			else
 			{
-				UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: nothing to apply — the asset already matches the source. "
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: nothing to apply - the asset already matches the source. "
 					"Package left clean."));
 			}
 			return;
 		}
 
-		// P1 — create the asset via the factory, then restore the self row (with _RT identity + instanced rewards).
-		// Two distinct identities: the ROW KEY (sanitized EffectiveID — folder name, tag namespace) and the authored
-		// QuestlineID FIELD (raw, whatever the designer typed, spaces and all — the compiler sanitizes it only when
+		// P1 - create the asset via the factory, then restore the self row (with _RT identity + instanced rewards).
+		// Two distinct identities: the ROW KEY (sanitized EffectiveID - folder name, tag namespace) and the authored
+		// QuestlineID FIELD (raw, whatever the designer typed, spaces and all - the compiler sanitizes it only when
 		// building tags, never mutating the field). The asset NAME rides the sanitized key (a package name can't hold
 		// spaces); the QuestlineID FIELD must preserve the raw authored value so the round-trip doesn't alter it.
 		const FQuestDataRow& SelfRow = Bundle.TablesByType[TEXT("questline_graph")].Rows[0];
-		const FString OriginalKey = SelfRow.Key;                          // sanitized — folder/tag identity
+		const FString OriginalKey = SelfRow.Key;                          // sanitized - folder/tag identity
 		const FString RawQuestlineID = SelfRow.Get(TEXT("QuestlineID"));  // raw authored field (may be empty)
 		const FString AssetName = OriginalKey + TEXT("_RT");              // _RT so the compiled tag namespace doesn't collide.
 
@@ -2098,9 +2128,9 @@ namespace
 			//     source's modulo _RT.
 			//   - Source field EMPTY (asset-name-derived): LEAVE IT EMPTY. The source's EffectiveID was its asset
 			//     name (e.g. "QL_Ch5_Blocking"); the RT asset's name is "<name>_RT", so the same empty->asset-name
-			//     fallback yields "<name>_RT" — matching the source modulo _RT. Writing the literal "_RT" here (the
+			//     fallback yields "<name>_RT" - matching the source modulo _RT. Writing the literal "_RT" here (the
 			//     prior bug) would make QuestlineID = "_RT", tags = SimpleQuest.Questline._RT.*, and the export folder
-			//     "_RT" — diverging from the asset-name identity the source actually used.
+			//     "_RT" - diverging from the asset-name identity the source actually used.
 			if (!RawQuestlineID.IsEmpty())
 			{
 				if (FProperty* IDProp = Graph->GetClass()->FindPropertyByName(TEXT("QuestlineID")))
@@ -2109,18 +2139,18 @@ namespace
 					IDProp->ImportText_Direct(*RT, IDProp->ContainerPtrToValuePtr<void>(Graph), nullptr, PPF_None);
 				}
 			}
-			// else: RestoreRowProperties already left it empty (the source cell was empty) — nothing to do.
+			// else: RestoreRowProperties already left it empty (the source cell was empty) - nothing to do.
 		}
 		ReattachInstanced(Graph, OriginalKey, Bundle, Consumed, Warnings);   // self-row child keys are prefixed by the self key
 
-		// P2 — spawn nodes, root graph first, recursing into container inner graphs.
+		// P2 - spawn nodes, root graph first, recursing into container inner graphs.
 		TMap<FString, UEdGraphNode*> NodeByKey;
 		ImportGraphLevel(Graph->QuestlineEdGraph, TEXT("root"), Bundle, NodeRowsByKey, NodeByKey, Consumed, Warnings);
 
-		// P3 — pin refresh pass (innermost-first).
+		// P3 - pin refresh pass (innermost-first).
 		RefreshPinsPass(Bundle, NodeRowsByKey, NodeByKey, Warnings);
 
-		// P4 — wire edges + contains-edge cross-check.
+		// P4 - wire edges + contains-edge cross-check.
 		WireEdges(Bundle, NodeByKey, Consumed, Warnings);
 
 		// Wrap the double-compile in a compile batch so the gameplay-tag-tree rebuild coalesces to ONCE (at EndCompileBatch)
@@ -2142,7 +2172,7 @@ namespace
 		UPackage::SavePackage(Package, Graph, *FileName, SaveArgs);
 
 		for (const FString& W : Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' — %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' - %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
 			*OriginalKey,
 			*DestPackagePath,
 			*AssetName,

@@ -34,6 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Prerequisite composition** — AND / OR / NOT combinators plus reusable Prerequisite Rules gate activation, progression, or completion on arbitrarily deep boolean expressions. Rules are named and referenced from multiple content nodes without duplication.
 - **Rewards as adapters** — self-configuring reward types read completion context and broadcast to any actor whose Reward Recipient component watches that reward type. The granting node never needs to know who's listening. A preview query returns what a completion advertises *before* it's earned: the "do this, get this" data a quest-giver hub or bounty board needs.
 - **Visual graph authoring** — compose progressions in a node graph with designer-friendly widgets, inline tag pickers, and in-editor compile with clickable diagnostics that navigate straight to the offending node. The graph is the authoring surface on the framework, but the framework works without opening a graph editor.
+- **Progression data as text** *(in development, v0.7.0)* — export a questline to flat, diffable tables, edit them wherever your team already works, and re-import onto the existing asset. A read-only plan states every property it would change before anything is written, and refuses structural rewrites rather than half-applying them. A Mapping asset teaches the importer to read your studio's own file shape, so nobody reformats a spreadsheet to suit the plugin, and file formats are a registered seam you can add to.
 - **Save/load** — full progression state packs into a single serializable snapshot you embed in whatever save game your project already uses. Plain value copy, safe to hand off to an async save. Restored actors see events flagged as catch-up so they can jump straight to settled state rather than replaying transitions.
 - **Late-registration catch-up** — components that register after an event has fired receive the recorded state immediately on bind. Streaming levels, dynamically spawned actors, late-joining players, and save-game restoration all work without special-casing.
 - **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A searchable World State Facts panel lists every asserted fact. No log-diving to understand runtime state.
@@ -206,7 +207,7 @@ Editor-side compilation translates authored graphs into runtime node instances a
 
 ## Objectives
 
-Objectives are the primary variation point of the framework. Most games will author at least one custom Objective subclass - Objectives are where your specific gameplay meets the progression system, and the reference implementations shipped in the plugin cover common patterns but aren't a complete library.
+Objectives are the primary variation point of the framework - they occupy the same place in SimpleQuest that Abilities occupy in GAS: the type you subclass, where your own gameplay lives, and the thing to understand before the rest of the framework means much. The surface is much smaller, though - three `BlueprintNativeEvent` overrides, covered below. Most games will author at least one custom Objective subclass, and the reference implementations shipped in the plugin cover common patterns without being a complete library.
 
 ### What an Objective is
 
@@ -267,6 +268,11 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
             // paths (abandon, blocked, cascade-deactivated). Unsubscribe from external event sources, tear
             // down UI handles, stop timers. The Objective is still live at this point — safe to inspect
             // state stored during activation.
+            //
+            // CAVEAT: the hook takes no parameters and receives no reason code, so it cannot currently tell
+            // WHICH of those paths fired. Write teardown that is correct either way. If you need to branch -
+            // to release a reservation on abandon but not on success, say - track it yourself by setting a
+            // flag where you call CompleteObjectiveWithOutcome and reading it here. A reason code is a known gap.
         }
     };
 ```
@@ -332,27 +338,9 @@ The v0.8.0 release ships reference implementations for the timer, world-state-fa
 
 ---
 
-## Extending the Plugin
+## Reacting to Quest Events
 
-Three tiers of extensibility, matched to the scope of the change:
-
-### Tier 1 — Self-describing node types (subclass + override)
-
-Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals - no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
-
-### Tier 2 — Replaceable policies (subclass + register)
-
-`FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide. Useful for projects with bespoke node-type behavior that differs from the defaults.
-
-### Tier 3 — Factory-registered algorithms (subclass + register factory)
-
-For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
-
-### Custom Orchestration
-
-Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
-
-### Reacting to Quest Events
+Objectives are how your game *drives* progression. This is how it *listens* - and neither direction requires the framework to hold a reference to your code, or your code to hold one to the framework. Subscriptions route by tag, so a publisher and a listener never need to meet.
 
 **Blueprint** — drop the **Observe Quest Lifecycle** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The observation stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. observe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` - `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` - plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Observer` reference when you're done, or let the GameInstance tear it down.
 
@@ -370,6 +358,102 @@ USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(this, QuestTag, Handle);
 ```
 
 Same semantics as the async action, but returns a raw `FDelegateHandle` for caller-managed lifetime. Guards against stale tags via `IsTagRegisteredInRuntime` and returns an invalid handle if the subsystem or tag can't be resolved.
+
+Components cover the common shapes without either of the above: the Giver, Observer, Trigger, and Reward Recipient components each subscribe on the tags you set on them, and all four handle late registration - an actor that spawns or streams in after an event has fired receives the recorded state on bind.
+
+---
+
+## Data Resolver
+
+Progression data lives in `.uasset` graphs, and binary assets don't diff, don't merge, and don't open in the tools narrative and design teams already use. The Data Resolver moves that data in and out of plain text without giving up the graph as the source of truth for structure.
+
+### Export, import, and re-import
+
+**Export** writes a questline to a folder of flat tables - one per node type, plus a single `edges` table holding every connection as `{from, type, to}`. Routing, nesting, and prerequisite wiring are one primitive underneath, so one edge table describes all three. The output is text: diffable in a pull request, editable in a spreadsheet, greppable.
+
+**Import** reads that folder back. The round trip is lossless - the same questline compiles to the same tags - which is what makes the format safe to hand to someone who will edit it by hand.
+
+**In-place re-import** applies external edits to a questline that already exists, matching rows to live nodes by stable identity rather than by position. This is the case a real pipeline needs: a designer changes one column in a spreadsheet and the edit lands on the existing asset without disturbing anything around it.
+
+### Nothing is written until you ask
+
+In-place re-import always produces a **plan** first - a read-only account of every node it would update, create, or orphan, every property that would change with its before and after values, and every wire it would add or remove. Applying is a separate, deliberate step.
+
+The plan also states what it won't do. A row that would change a node's class or move it to a different container is a structural change, and those are **refused rather than half-performed** - the safe version of that edit is a rebuild, not a patch. Each refusal names the row and the reason. An apply that does run is a single transaction: one undo reverses all of it, deletions included.
+
+### Reading a studio's own data
+
+A round trip through SimpleQuest's own export assumes SimpleQuest's table shape. Most studios already have their own, so the resolver takes a **Mapping** - a `UQuestImportMapping` data asset - that teaches it to read a foreign layout with nobody reformatting a file:
+
+- **Row kinds** — which column distinguishes rows, and which value in it means which node type.
+- **Column bindings** — which source column feeds which node property, *picked* from the columns in a real sample file rather than typed by hand.
+- **Absent-field policy** — per binding, what a blank cell means: preserve the current value, reset to the class default, or refuse the import outright.
+- **Wiring** — which columns express relationships, and what verb each one carries.
+
+A mapping is an asset, so it's authored once, versioned, and reused by every import that speaks the same dialect. Mapping authoring lives in that asset's details panel.
+
+### Sources and formats
+
+A source can be a **folder of files** or an **in-engine DataTable** - both are first-class, and one unchanged mapping reads either. Shipped file formats are **TSV** and **JSON**.
+
+Formats are a registered seam, not a fixed list. Implement `ISimpleQuestDataFormat`, register it from your editor module, and your format works everywhere the shipped ones do:
+
+```c++
+    class FMyFormat : public ISimpleQuestDataFormat
+    {
+        virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) override;
+        virtual bool WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder) override;
+        virtual FString FormatName() const override { return TEXT("MyFormat"); }
+    };
+```
+
+Both directions are optional - a read-only provider implements `ReadBundle` and leaves `WriteBundle` alone, and the base reports the unsupported direction honestly rather than failing obscurely. A provider owns parsing, framing, and escaping, and needs to know nothing about quests; structural validity is checked downstream.
+
+#### *"Do I use a Mapping asset or a format provider?"*
+
+It depends on what doesn't fit. If your data is already TSV, JSON, or a DataTable, a Mapping asset finishes the job by naming which of your columns is which. Anything else - XML, YAML, a studio's own exporter - needs a format provider first: until something can read the file, there are no columns to map.
+
+### Driving it today
+
+The pipeline is complete and exercised end to end, driven by console commands - which is how the backend was proven before any UI existed:
+
+| Command | Purpose |
+|---|---|
+| `SimpleQuest.ExportQuestline <asset>` | Write a questline out to a table folder |
+| `SimpleQuest.ImportQuestline <folder> <destpackage>` | Build a new questline asset from tables |
+| `SimpleQuest.ImportQuestline <folder> --in-place=<asset>` | Plan against an existing asset; add `--apply` to perform it |
+| `SimpleQuest.ImportQuestline <destpackage> --datatable=<asset>` | Use an in-engine DataTable as the source |
+| `SimpleQuest.EnumerateSourceColumns <folder>` | List the columns a source exposes |
+
+Add `--format=<name>` to select a registered format and `--mapping=<asset>` to apply a mapping. The editor surfaces are what remains for v0.7.0: Export and Import on the questline graph editor toolbar, and a dockable panel showing the same plan the console prints.
+
+---
+
+## Extending the Plugin
+
+**Reach for the variation points first.** Most of what looks like it needs new code is already a knob, and the sections above are largely a tour of them: Objectives compose authored config with runtime context before you subclass anything, and the shipped references cover common shapes; named outcomes and Completion Path discovery let a single Step branch as many ways as you author without code; prerequisite composition and reusable Rules express gating as data; rewards are adapters that self-configure from completion context and broadcast to whoever is listening; the Giver, Observer, Trigger, and Reward Recipient components each carry their own settings; **Observe Quest Lifecycle** and the C++ subscription library let anything in your game react without the framework knowing it exists; and a Mapping asset reshapes foreign data without a line of code. Between those and the Configuration section below, most projects never need what follows.
+
+This section is for when those genuinely aren't enough - when you need the framework itself to *behave* differently rather than be configured differently. Three tiers, matched to the scope of the change:
+
+### Tier 1 — Self-describing node types (subclass + override)
+
+Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals - no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
+
+### Tier 2 — Registered seams (subclass + register)
+
+Two seams take a registration from your module: one replaces a default, the other adds alongside it.
+
+**Graph walk rules are replaceable.** `FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide. Useful for projects with bespoke node-type behavior that differs from the defaults.
+
+**Data formats register additively.** `FQuestDataFormatRegistry::RegisterFormat` *adds* a format alongside the shipped TSV and JSON rather than replacing anything, so any number coexist and each source selects one by name. Implement `ISimpleQuestDataFormat` and register from your editor module's startup - see [Data Resolver](#data-resolver) for the interface and what a provider is responsible for. Used when your data is in a format the framework doesn't already read - a Mapping asset covers the other case, where the file type is one of those but the *columns* are yours.
+
+### Tier 3 — Factory-registered algorithms (subclass + register factory)
+
+For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
+
+### Custom Orchestration
+
+Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
 
 ---
 

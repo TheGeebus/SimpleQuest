@@ -12,6 +12,8 @@
 // ItemType is expected to be a shared pointer (the STreeView convention) - it is used as a map key while filtering.
 
 #include "CoreMinimal.h"
+#include "Animation/CurveSequence.h"
+#include "Framework/Commands/InputChord.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Misc/ConfigCacheIni.h"
@@ -72,10 +74,20 @@ template<typename ItemType>
 class SColumnTableRow : public SMultiColumnTableRow<ItemType>
 {
 public:
+	/** Per-row clipboard actions. Declared here because the row raises them and the table forwards them. */
+	DECLARE_DELEGATE_OneParam(FOnRowAction, ItemType);
+	DECLARE_DELEGATE_RetVal_OneParam(bool, FCanRowAction, ItemType);
+
 	SLATE_BEGIN_ARGS(SColumnTableRow<ItemType>) {}
 		SLATE_ARGUMENT(ItemType, Item)
 		SLATE_ARGUMENT(const TArray<FTableColumnDef<ItemType>>*, Columns)
 		SLATE_ATTRIBUTE(FText, HighlightText)
+		SLATE_EVENT(FOnRowAction, OnCopyRow)
+		SLATE_EVENT(FOnRowAction, OnPasteRow)
+		SLATE_EVENT(FCanRowAction, CanPasteRow)
+
+		/** Raised on an unshifted right-click, just before the base opens the menu, so the table knows what it is about. */
+		SLATE_EVENT(FOnRowAction, OnRowRightClicked)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwner)
@@ -83,7 +95,66 @@ public:
 		Item = InArgs._Item;
 		Columns = InArgs._Columns;
 		HighlightText = InArgs._HighlightText;
+		OnCopyRow = InArgs._OnCopyRow;
+		OnPasteRow = InArgs._OnPasteRow;
+		CanPasteRow = InArgs._CanPasteRow;
+		OnRowRightClicked = InArgs._OnRowRightClicked;
+		// A copy changes nothing on screen, so the row flashes to say it happened - without it the chord is invisible.
+		Pulse.AddCurve(0.0f, 0.35f);
 		SMultiColumnTableRow<ItemType>::Construct(typename SMultiColumnTableRow<ItemType>::FArguments(), InOwner);
+	}
+
+	/**
+	 * Shift+RMB copies this row, Shift+LMB pastes onto it - the details panel's own gesture, and the reason it lives on
+	 * the ROW is that the row under the cursor is the row being acted on, with nothing to look up. Returning Handled on
+	 * the right-click is what stops the context menu opening on top of a copy. Unshifted clicks fall through to the base,
+	 * which still selects and still opens the menu.
+	 */
+	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		if (MouseEvent.GetModifierKeys().IsShiftDown() && Item.IsValid())
+		{
+			if (OnCopyRow.IsBound() && MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+			{
+				OnCopyRow.Execute(Item);
+				Pulse.Play(this->AsShared());
+				return FReply::Handled();
+			}
+			if (OnPasteRow.IsBound() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
+				&& (!CanPasteRow.IsBound() || CanPasteRow.Execute(Item)))
+			{
+				OnPasteRow.Execute(Item);
+				Pulse.Play(this->AsShared());
+				return FReply::Handled();
+			}
+		}
+		/**
+		 * Tell the table which row a menu is about to be built for. Selection cannot answer that once selection is off,
+		 * and under Multi it answers a different question entirely - "a member of the selection" is not "the row you
+		 * clicked". This is a hand-off valid only for the menu that opens next, not a stored selection.
+		 */
+		if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton && Item.IsValid())
+		{
+			OnRowRightClicked.ExecuteIfBound(Item);
+		}
+		return SMultiColumnTableRow<ItemType>::OnMouseButtonUp(MyGeometry, MouseEvent);
+	}
+
+	/**
+	 * The engine gates the HOVERED brush behind selectability - STableRow::GetBorder tests
+	 * GetSelectionMode() != None - so a table that turns selection off silently loses the cursor-follows highlight too.
+	 * That highlight is a readability cue, not a selection cue, and there is no reason for the two to be linked. Put it
+	 * back for exactly that case and defer to the base everywhere else, so a selectable table is untouched.
+	 */
+	virtual const FSlateBrush* GetBorder() const override
+	{
+		if (this->GetSelectionMode() == ESelectionMode::None && this->IsHovered() && this->Style)
+		{
+			return (this->IndexInList % 2 == 0)
+				? &this->Style->EvenRowBackgroundHoveredBrush
+				: &this->Style->OddRowBackgroundHoveredBrush;
+		}
+		return SMultiColumnTableRow<ItemType>::GetBorder();
 	}
 
 	virtual TSharedRef<SWidget> GenerateWidgetForColumn(const FName& ColumnId) override
@@ -119,12 +190,21 @@ public:
 private:
 	FSlateColor GetStripeColor() const
 	{
-		return FSimpleCoreEditorWidgetUtils::GetTableRowStripeColor(this->IndexInList);
+		const FSlateColor Base = FSimpleCoreEditorWidgetUtils::GetTableRowStripeColor(this->IndexInList);
+		if (!Pulse.IsPlaying()) { return Base; }
+		// Starts at the flash colour and settles back to the stripe, so the row reads as "that did something" and then
+		// stops drawing attention. The border is already delegate-bound for the stripe, so this costs no extra widget.
+		return FSlateColor(FMath::Lerp(FLinearColor(0.35f, 0.55f, 0.95f, 0.35f), Base.GetSpecifiedColor(), Pulse.GetLerp()));
 	}
 
 	ItemType Item;
 	const TArray<FTableColumnDef<ItemType>>* Columns = nullptr;
 	TAttribute<FText> HighlightText;
+	FOnRowAction OnCopyRow;
+	FOnRowAction OnPasteRow;
+	FCanRowAction CanPasteRow;
+	FOnRowAction OnRowRightClicked;
+	mutable FCurveSequence Pulse;
 };
 
 template<typename ItemType>
@@ -133,6 +213,9 @@ class SColumnTableView : public SCompoundWidget
 public:
 	DECLARE_DELEGATE_TwoParams(FOnGetChildren, ItemType /*Parent*/, TArray<ItemType>& /*OutChildren*/);
 	DECLARE_DELEGATE_OneParam(FOnItemSelected, ItemType);
+
+	using FOnRowAction  = typename SColumnTableRow<ItemType>::FOnRowAction;
+	using FCanRowAction = typename SColumnTableRow<ItemType>::FCanRowAction;
 
 	SLATE_BEGIN_ARGS(SColumnTableView<ItemType>)
 		: _SelectionMode(ESelectionMode::Single)
@@ -169,15 +252,27 @@ public:
 		SLATE_ARGUMENT(bool, AllowClipboardCopy)
 		SLATE_EVENT(FOnItemSelected, OnItemSelected)
 		SLATE_EVENT(FOnContextMenuOpening, OnContextMenuOpening)
+
+		/**
+		 * Per-row settings copy/paste, reached by Shift+RMB / Shift+LMB and by an Edit section in the default menu. This
+		 * is a DIFFERENT action from copying the table's contents, and the two never share a gesture or a menu section.
+		 * Bind both or neither; a consumer supplying its own OnContextMenuOpening keeps the chords but loses the entries.
+		 */
+		SLATE_EVENT(FOnRowAction, OnCopyRow)
+		SLATE_EVENT(FOnRowAction, OnPasteRow)
+		SLATE_EVENT(FCanRowAction, CanPasteRow)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs)
 	{
-		Columns         = InArgs._Columns;
-		OnGetChildren   = InArgs._OnGetChildren;
-		PersistenceKey  = InArgs._PersistenceKey;
-		bAllowCopy      = InArgs._AllowClipboardCopy;
-		OnItemSelected  = InArgs._OnItemSelected;
+		Columns				= InArgs._Columns;
+		OnGetChildren		= InArgs._OnGetChildren;
+		PersistenceKey		= InArgs._PersistenceKey;
+		bAllowCopy			= InArgs._AllowClipboardCopy;
+		OnItemSelected		= InArgs._OnItemSelected;
+		OnCopyRow			= InArgs._OnCopyRow;
+		OnPasteRow			= InArgs._OnPasteRow;
+		CanPasteRow			= InArgs._CanPasteRow;
 
 		LoadPersistedState();
 
@@ -465,10 +560,16 @@ private:
 		return SNew(SColumnTableRow<ItemType>, Owner)
 			.Item(Item)
 			.Columns(&Columns)
-			.HighlightText(this, &SColumnTableView::GetFilterTextAsText);
+			.HighlightText(this, &SColumnTableView::GetFilterTextAsText)
+			.OnCopyRow(OnCopyRow)
+			.OnPasteRow(OnPasteRow)
+			.CanPasteRow(CanPasteRow)
+			.OnRowRightClicked(FOnRowAction::CreateSP(this, &SColumnTableView::HandleRowRightClicked));
 	}
 
 	FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
+	
+	void HandleRowRightClicked(ItemType Item) { RightClickedItem = Item; }
 
 	void HandleSelectionChanged(ItemType Item, ESelectInfo::Type)
 	{
@@ -477,13 +578,56 @@ private:
 
 	TSharedPtr<SWidget> MakeDefaultContextMenu()
 	{
-		if (!bAllowCopy) { return nullptr; }
+		// The clicked row arrives from the row itself rather than from the selection, which means this is correct under
+		// every selection mode - including None, where nothing is ever selected, and Multi, where the selection is not
+		// the same question as "which row did you click".
+		const ItemType Row = RightClickedItem;
+		const bool bRowSection = Row.IsValid() && (OnCopyRow.IsBound() || OnPasteRow.IsBound());
+		if (!bRowSection && !bAllowCopy) { return nullptr; }
+
 		FMenuBuilder Menu(true, nullptr);
-		Menu.AddMenuEntry(
-			NSLOCTEXT("SimpleCore", "CopyVisibleRows", "Copy visible rows"),
-			NSLOCTEXT("SimpleCore", "CopyVisibleRowsTip", "Copy every row the current filter leaves visible, as tab-separated text."),
-			FSlateIcon(),
-			FUIAction(FExecuteAction::CreateSP(this, &SColumnTableView::CopyVisibleRows)));
+		if (bRowSection)
+		{
+			Menu.BeginSection(TEXT("RowEdit"), NSLOCTEXT("SimpleCore", "RowEditSection", "Edit"));
+			if (OnCopyRow.IsBound())
+			{
+				Menu.AddMenuEntry(
+					NSLOCTEXT("SimpleCore", "CopyRow", "Copy"),
+					NSLOCTEXT("SimpleCore", "CopyRowTip", "Copy this row's settings."),
+					FSlateIcon(FCoreStyle::Get().GetStyleSetName(), TEXT("GenericCommands.Copy")),
+					FUIAction(FExecuteAction::CreateLambda([this, Row]() { OnCopyRow.ExecuteIfBound(Row); })),
+					NAME_None, EUserInterfaceActionType::Button, NAME_None,
+					FInputChord(EModifierKey::Shift, EKeys::RightMouseButton).GetInputText(/*bLongDisplayName*/ false));
+			}
+			if (OnPasteRow.IsBound())
+			{
+				FUIAction PasteAction(FExecuteAction::CreateLambda([this, Row]() { OnPasteRow.ExecuteIfBound(Row); }));
+				if (CanPasteRow.IsBound())
+				{
+					PasteAction.CanExecuteAction = FCanExecuteAction::CreateLambda([this, Row]() { return CanPasteRow.Execute(Row); });
+				}
+				Menu.AddMenuEntry(
+					NSLOCTEXT("SimpleCore", "PasteRow", "Paste"),
+					NSLOCTEXT("SimpleCore", "PasteRowTip", "Paste copied settings onto this row."),
+					FSlateIcon(FCoreStyle::Get().GetStyleSetName(), TEXT("GenericCommands.Paste")),
+					PasteAction,
+					NAME_None, EUserInterfaceActionType::Button, NAME_None,
+					FInputChord(EModifierKey::Shift, EKeys::LeftMouseButton).GetInputText(/*bLongDisplayName*/ false));
+			}
+			Menu.EndSection();
+		}
+
+		if (bAllowCopy)
+		{
+			Menu.BeginSection(TEXT("Table"), NSLOCTEXT("SimpleCore", "TableSection", "Table"));
+			Menu.AddMenuEntry(
+				NSLOCTEXT("SimpleCore", "CopyVisibleRows", "Copy All Visible Rows"),
+				NSLOCTEXT("SimpleCore", "CopyVisibleRowsTip", "Copy every row the current filter leaves visible, as tab-separated text."),
+				FSlateIcon(),
+				FUIAction(FExecuteAction::CreateSP(this, &SColumnTableView::CopyVisibleRows)));
+			Menu.EndSection();
+		}
+
 		return Menu.MakeWidget();
 	}
 
@@ -588,19 +732,23 @@ private:
 
 	// ---- state -------------------------------------------------------------------------------------------------------
 
-	TArray<FTableColumnDef<ItemType>> Columns;
-	FOnGetChildren                    OnGetChildren;
-	FOnItemSelected                   OnItemSelected;
-	TSharedPtr<STreeView<ItemType>>   TreeView;
+	TArray<FTableColumnDef<ItemType>>	Columns;
+	ItemType							RightClickedItem;
+	FOnRowAction						OnCopyRow;
+	FOnRowAction						OnPasteRow;
+	FCanRowAction						CanPasteRow;
+	FOnGetChildren						OnGetChildren;
+	FOnItemSelected						OnItemSelected;
+	TSharedPtr<STreeView<ItemType>>		TreeView;
 
-	TArray<ItemType>                  RootItems;
-	TArray<ItemType>                  VisibleRoots;
-	TMap<ItemType, TArray<ItemType>>  VisibleChildren;
+	TArray<ItemType>					RootItems;
+	TArray<ItemType>					VisibleRoots;
+	TMap<ItemType, TArray<ItemType>>	VisibleChildren;
 
-	FString                 FilterText;
-	FName                   SortColumnId;
-	EColumnSortMode::Type   SortMode = EColumnSortMode::Ascending;
-	TMap<FName, float>      SavedWidths;
-	FString                 PersistenceKey;
-	bool                    bAllowCopy = true;
+	FString								FilterText;
+	FName								SortColumnId;
+	EColumnSortMode::Type				SortMode = EColumnSortMode::Ascending;
+	TMap<FName, float>					SavedWidths;
+	FString								PersistenceKey;
+	bool								bAllowCopy = true;
 };

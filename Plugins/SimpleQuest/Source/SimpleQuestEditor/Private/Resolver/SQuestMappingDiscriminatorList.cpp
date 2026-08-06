@@ -7,6 +7,7 @@
 #include "Resolver/QuestMappingSource.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "SimpleQuestLog.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "PropertyCustomizationHelpers.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Input/SButton.h"
@@ -42,6 +43,42 @@ namespace
 		}
 		return INDEX_NONE;
 	}
+
+	// Versioned so the payload can change later without a new build silently mis-reading old clipboard text.
+	const FString ClipboardHeader(TEXT("SimpleQuestDiscriminatorRow/1"));
+
+	/** Pull the class path out of a copied payload. False for anything that is not our format at all. */
+	bool ParseClipboardClassPath(const FString& Text, FString& OutClassPath)
+	{
+		TArray<FString> Lines;
+		Text.ParseIntoArrayLines(Lines);
+		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != ClipboardHeader) { return false; }
+		for (int32 i = 1; i < Lines.Num(); ++i)
+		{
+			FString Key, Value;
+			if (Lines[i].Split(TEXT("="), &Key, &Value) && Key.TrimStartAndEnd() == TEXT("Class"))
+			{
+				OutClassPath = Value.TrimStartAndEnd();
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * True when the path names a class the PICKER would have accepted - a paste must not reach a state the dropdown
+	 * could not produce. An EMPTY path is valid and means "clear the class", which is why the class comes back through a
+	 * parameter rather than as the return value.
+	 */
+	bool IsPastableClassPath(const FString& ClassPath, UClass*& OutClass)
+	{
+		OutClass = nullptr;
+		if (ClassPath.IsEmpty()) { return true; }
+		UClass* Cls = LoadClass<UQuestlineNodeBase>(nullptr, *ClassPath);
+		if (!Cls || Cls->HasAnyClassFlags(CLASS_Abstract)) { return false; }
+		OutClass = Cls;
+		return true;
+	}
 }
 
 void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
@@ -59,9 +96,14 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 		[
 			SAssignNew(Table, SColumnTableView<FQuestDiscriminatorRowItemPtr>)
 			.Columns(MakeColumns())
-			.SelectionMode(ESelectionMode::Single)
+			// Nothing here acts on a selected row - you click a picker, not a row - so a persistent blue highlight is
+			// noise, and a stale one is misleading. Hover survives; the shared row restores it explicitly.
+			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter values and classes..."))
+			.OnCopyRow(this, &SQuestMappingDiscriminatorList::CopyRow)
+			.OnPasteRow(this, &SQuestMappingDiscriminatorList::PasteRow)
+			.CanPasteRow(this, &SQuestMappingDiscriminatorList::CanPasteRow)
 			.Toolbar()
 			[
 				SNew(SHorizontalBox)
@@ -233,6 +275,54 @@ const UClass* SQuestMappingDiscriminatorList::GetSelectedClass(FQuestDiscriminat
 FText SQuestMappingDiscriminatorList::GetTableFilterText() const
 {
 	return Table.IsValid() ? Table->GetFilterText() : FText::GetEmpty();
+}
+
+void SQuestMappingDiscriminatorList::CopyRow(FQuestDiscriminatorRowItemPtr Item)
+{
+	const UClass* Cls = GetSelectedClass(Item);
+	const FString Payload = FString::Printf(TEXT("%s%sClass=%s"), *ClipboardHeader, LINE_TERMINATOR,
+		Cls ? *Cls->GetPathName() : TEXT(""));
+	FPlatformApplicationMisc::ClipboardCopy(*Payload);
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Discriminator row copied: '%s' -> %s."),
+		Item.IsValid() ? *Item->Value : TEXT("<invalid>"), Cls ? *Cls->GetPathName() : TEXT("(no class)"));
+}
+
+void SQuestMappingDiscriminatorList::PasteRow(FQuestDiscriminatorRowItemPtr Item)
+{
+	if (!Item.IsValid()) return;
+
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	FString ClassPath;
+	UClass* Cls = nullptr;
+	if (!ParseClipboardClassPath(Text, ClassPath) || !IsPastableClassPath(ClassPath, Cls))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning,
+			TEXT("Discriminator paste onto '%s' refused: the clipboard does not hold a copied row."), *Item->Value);
+		return;
+	}
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Discriminator row pasting onto '%s': %s."),
+		*Item->Value,
+		Cls ? *Cls->GetPathName() : TEXT("(cleared)"));
+
+	// Straight through the picker's own write, so a paste cannot reach a state the dropdown could not - same transaction,
+	// same normalized matching, same PrimaryValue repair. Announced BEFORE the write on purpose: the write cascades into
+	// the binding list's own refresh log, so announcing afterwards prints the consequence above its cause.
+	OnSetClass(Cls, Item);
+
+
+}
+
+bool SQuestMappingDiscriminatorList::CanPasteRow(FQuestDiscriminatorRowItemPtr Item)
+{
+	if (!Item.IsValid() || !Config.Mapping.IsValid()) { return false; }
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	FString ClassPath;
+	UClass* Cls = nullptr;
+	return ParseClipboardClassPath(Text, ClassPath) && IsPastableClassPath(ClassPath, Cls);
 }
 
 // ── Writes ─────────────────────────────────────────────────────────────────────────────────────────────────────────

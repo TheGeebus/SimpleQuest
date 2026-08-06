@@ -57,7 +57,9 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 		[
 			SAssignNew(Table, SColumnTableView<FQuestMappingRowItemPtr>)
 			.Columns(MakeColumns())
-			.SelectionMode(ESelectionMode::Single)
+			// Nothing here acts on a selected row - you click a picker, not a row - so a persistent blue highlight is
+			// noise, and a stale one is misleading. Hover survives; the shared row restores it explicitly.
+			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter properties and columns..."))
 			.Toolbar()

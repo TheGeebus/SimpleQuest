@@ -6,7 +6,9 @@
 #include "DetailLayoutBuilder.h"
 #include "DetailCategoryBuilder.h"
 #include "DetailWidgetRow.h"
+#include "Misc/TransactionObjectEvent.h"
 #include "ScopedTransaction.h"
+#include "SimpleQuestLog.h"
 #include "SSearchableComboBox.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
@@ -190,6 +192,41 @@ void FQuestImportMappingDetailsCustomization::OnMappingModified()
 	// so refresh it too (this is the live-refresh-on-class-map-change that used to require a reopen).
 	if (BindingList.IsValid()) { BindingList->RefreshRows(); }
 	// (Readiness banner re-validation lands with the next cut.)
+}
+
+void FQuestImportMappingDetailsCustomization::PostUndo(bool bSuccess)
+{
+	RefreshListsAfterTransaction();
+}
+
+void FQuestImportMappingDetailsCustomization::PostRedo(bool bSuccess)
+{
+	RefreshListsAfterTransaction();
+}
+
+bool FQuestImportMappingDetailsCustomization::MatchesContext(const FTransactionContext& InContext,
+	const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const
+{
+	const UQuestImportMapping* M = Mapping.Get();
+	if (!M) { return false; }
+	for (const TPair<UObject*, FTransactionObjectEvent>& Pair : TransactionObjectContexts)
+	{
+		if (Pair.Key == M) { return true; }
+	}
+	return false;
+}
+
+void FQuestImportMappingDetailsCustomization::RefreshListsAfterTransaction()
+{
+	/**
+	 * BOTH lists, unlike OnMappingModified which re-reads only the bindings: an undo can restore a discriminator entry,
+	 * and the discriminator list's own rows are built from those. Neither MarkPackageDirty nor a source re-read belongs
+	 * here - the transaction system owns the dirty flag, and the sample source is editor-side state an undo never touched.
+	 */
+	if (DiscriminatorList.IsValid()) { DiscriminatorList->RefreshRows(); }
+	if (BindingList.IsValid())       { BindingList->RefreshRows(); }
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Mapping panel refreshed after an undo/redo."));
 }
 
 void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)

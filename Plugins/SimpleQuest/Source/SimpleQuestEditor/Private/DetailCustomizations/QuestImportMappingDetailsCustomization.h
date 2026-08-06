@@ -10,6 +10,7 @@
 // QuestlineGraphRewardsDetailsCustomization).
 
 #include "CoreMinimal.h"
+#include "EditorUndoClient.h"
 #include "IDetailCustomization.h"
 
 class IDetailLayoutBuilder;
@@ -18,13 +19,28 @@ class SQuestMappingDiscriminatorList;
 class SSearchableComboBox;
 class UQuestImportMapping;
 
-class FQuestImportMappingDetailsCustomization : public IDetailCustomization
+class FQuestImportMappingDetailsCustomization : public IDetailCustomization, public FSelfRegisteringEditorUndoClient
 {
 public:
 	static TSharedRef<IDetailCustomization> MakeInstance();
 	virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override;
 
+	/**
+	 * A transaction rollback restores the mapping asset directly and notifies nobody, so both list widgets keep the rows
+	 * they built from the pre-undo state. The panel's own writes route through OnMappingModified, which an undo never
+	 * reaches - these are the only hook that hears about it.
+	 */
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
+
+	/** Narrows the above to transactions that actually touched OUR mapping; without it every editor undo rebuilds both lists. */
+	virtual bool MatchesContext(const FTransactionContext& InContext,
+		const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const override;
+
 private:
+	/** Re-read both lists from the mapping. Shared by undo and redo. */
+	void RefreshListsAfterTransaction();
+	
 	TWeakObjectPtr<UQuestImportMapping> Mapping;
 	TSharedPtr<SQuestMappingBindingList> BindingList;
 	TSharedPtr<SQuestMappingDiscriminatorList> DiscriminatorList;

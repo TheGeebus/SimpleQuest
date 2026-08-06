@@ -94,6 +94,19 @@ private:
 	FText GetTableFilterText() const;
 
 	/**
+	 * Row clipboard. The payload states whether a binding EXISTS separately from its values, because the DISPLAY cannot:
+	 * the source cell reads "None" both when no binding exists and when one exists pointing at no column, and the policy
+	 * cell falls back to the mapping's default when unbound. Copying what is on screen would turn "this row is unbound"
+	 * into "delete the target's policy", and "the default applies here" into an explicit override.
+	 */
+	void CopyRow(FQuestMappingRowItemPtr Item);
+	bool PasteRow(FQuestMappingRowItemPtr Item);
+	bool CanPasteRow(FQuestMappingRowItemPtr Item);
+
+	/** A paste may not name a column the picker could not offer - that is the typo hole this panel exists to close. */
+	bool IsPastableSourceColumn(FName Column) const;
+
+	/**
 	 * These two take the item BY VALUE, unlike their neighbours. TDelegate decays its payload types, so a member bound
 	 * with a payload must accept that payload by value - a const reference will not match the bound signature. They are
 	 * reached both directly and through an attribute binding, and the binding is what dictates the parameter.

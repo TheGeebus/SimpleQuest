@@ -104,7 +104,7 @@ private:
 	 * rather than half-parsing something arbitrary into a recipe.
 	 */
 	void CopyRow(FQuestDiscriminatorRowItemPtr Item);
-	void PasteRow(FQuestDiscriminatorRowItemPtr Item);
+	bool PasteRow(FQuestDiscriminatorRowItemPtr Item);
 	bool CanPasteRow(FQuestDiscriminatorRowItemPtr Item);
 
 	/** Hide values in the sample / hide values not in it - the "what has drifted" question this panel exists to answer. */

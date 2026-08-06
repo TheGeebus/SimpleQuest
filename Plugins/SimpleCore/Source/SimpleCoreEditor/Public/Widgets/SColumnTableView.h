@@ -77,13 +77,19 @@ public:
 	/** Per-row clipboard actions. Declared here because the row raises them and the table forwards them. */
 	DECLARE_DELEGATE_OneParam(FOnRowAction, ItemType);
 	DECLARE_DELEGATE_RetVal_OneParam(bool, FCanRowAction, ItemType);
+		
+	/**
+	 * Paste reports whether it actually CHANGED anything. A refusal must be distinguishable from a chord that never
+	 * registered, so the handler runs unconditionally, states its own reason, and answers false when it declined.
+	 */
+	DECLARE_DELEGATE_RetVal_OneParam(bool, FOnRowPaste, ItemType);
 
 	SLATE_BEGIN_ARGS(SColumnTableRow<ItemType>) {}
 		SLATE_ARGUMENT(ItemType, Item)
 		SLATE_ARGUMENT(const TArray<FTableColumnDef<ItemType>>*, Columns)
 		SLATE_ATTRIBUTE(FText, HighlightText)
 		SLATE_EVENT(FOnRowAction, OnCopyRow)
-		SLATE_EVENT(FOnRowAction, OnPasteRow)
+		SLATE_EVENT(FOnRowPaste, OnPasteRow)
 		SLATE_EVENT(FCanRowAction, CanPasteRow)
 
 		/** Raised on an unshifted right-click, just before the base opens the menu, so the table knows what it is about. */
@@ -120,11 +126,18 @@ public:
 				Pulse.Play(this->AsShared());
 				return FReply::Handled();
 			}
-			if (OnPasteRow.IsBound() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton
-				&& (!CanPasteRow.IsBound() || CanPasteRow.Execute(Item)))
+			if (OnPasteRow.IsBound() && MouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
 			{
-				OnPasteRow.Execute(Item);
-				Pulse.Play(this->AsShared());
+				/**
+				 * Deliberately NOT gated on CanPasteRow. Gating here made a refusal silent - the handler never ran, so
+				 * nothing could say why - and silence reads as a chord that failed to register. The handler decides,
+				 * states its reason, and answers whether it changed anything; only then is there something to flash.
+				 * CanPasteRow still greys the menu entry, where the greying is itself the explanation.
+				 */
+				if (OnPasteRow.Execute(Item))
+				{
+					Pulse.Play(this->AsShared());
+				}
 				return FReply::Handled();
 			}
 		}
@@ -201,7 +214,7 @@ private:
 	const TArray<FTableColumnDef<ItemType>>* Columns = nullptr;
 	TAttribute<FText> HighlightText;
 	FOnRowAction OnCopyRow;
-	FOnRowAction OnPasteRow;
+	FOnRowPaste OnPasteRow;
 	FCanRowAction CanPasteRow;
 	FOnRowAction OnRowRightClicked;
 	mutable FCurveSequence Pulse;
@@ -216,6 +229,7 @@ public:
 
 	using FOnRowAction  = typename SColumnTableRow<ItemType>::FOnRowAction;
 	using FCanRowAction = typename SColumnTableRow<ItemType>::FCanRowAction;
+	using FOnRowPaste   = typename SColumnTableRow<ItemType>::FOnRowPaste;
 
 	SLATE_BEGIN_ARGS(SColumnTableView<ItemType>)
 		: _SelectionMode(ESelectionMode::Single)
@@ -259,7 +273,7 @@ public:
 		 * Bind both or neither; a consumer supplying its own OnContextMenuOpening keeps the chords but loses the entries.
 		 */
 		SLATE_EVENT(FOnRowAction, OnCopyRow)
-		SLATE_EVENT(FOnRowAction, OnPasteRow)
+		SLATE_EVENT(FOnRowPaste, OnPasteRow)
 		SLATE_EVENT(FCanRowAction, CanPasteRow)
 	SLATE_END_ARGS()
 
@@ -601,7 +615,7 @@ private:
 			}
 			if (OnPasteRow.IsBound())
 			{
-				FUIAction PasteAction(FExecuteAction::CreateLambda([this, Row]() { OnPasteRow.ExecuteIfBound(Row); }));
+				FUIAction PasteAction(FExecuteAction::CreateLambda([this, Row]() { if (OnPasteRow.IsBound()) { OnPasteRow.Execute(Row); } }));
 				if (CanPasteRow.IsBound())
 				{
 					PasteAction.CanExecuteAction = FCanExecuteAction::CreateLambda([this, Row]() { return CanPasteRow.Execute(Row); });
@@ -735,7 +749,7 @@ private:
 	TArray<FTableColumnDef<ItemType>>	Columns;
 	ItemType							RightClickedItem;
 	FOnRowAction						OnCopyRow;
-	FOnRowAction						OnPasteRow;
+	FOnRowPaste							OnPasteRow;
 	FCanRowAction						CanPasteRow;
 	FOnGetChildren						OnGetChildren;
 	FOnItemSelected						OnItemSelected;

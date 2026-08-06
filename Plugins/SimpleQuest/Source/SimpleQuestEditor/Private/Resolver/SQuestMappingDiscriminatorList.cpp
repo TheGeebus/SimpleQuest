@@ -288,9 +288,9 @@ void SQuestMappingDiscriminatorList::CopyRow(FQuestDiscriminatorRowItemPtr Item)
 		Item.IsValid() ? *Item->Value : TEXT("<invalid>"), Cls ? *Cls->GetPathName() : TEXT("(no class)"));
 }
 
-void SQuestMappingDiscriminatorList::PasteRow(FQuestDiscriminatorRowItemPtr Item)
+bool SQuestMappingDiscriminatorList::PasteRow(FQuestDiscriminatorRowItemPtr Item)
 {
-	if (!Item.IsValid()) return;
+	if (!Item.IsValid()) return false;
 
 	FString Text;
 	FPlatformApplicationMisc::ClipboardPaste(Text);
@@ -300,7 +300,7 @@ void SQuestMappingDiscriminatorList::PasteRow(FQuestDiscriminatorRowItemPtr Item
 	{
 		UE_LOG(LogSimpleQuestResolver, Warning,
 			TEXT("Discriminator paste onto '%s' refused: the clipboard does not hold a copied row."), *Item->Value);
-		return;
+		return false;
 	}
 
 	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Discriminator row pasting onto '%s': %s."),
@@ -311,8 +311,7 @@ void SQuestMappingDiscriminatorList::PasteRow(FQuestDiscriminatorRowItemPtr Item
 	// same normalized matching, same PrimaryValue repair. Announced BEFORE the write on purpose: the write cascades into
 	// the binding list's own refresh log, so announcing afterwards prints the consequence above its cause.
 	OnSetClass(Cls, Item);
-
-
+	return true;
 }
 
 bool SQuestMappingDiscriminatorList::CanPasteRow(FQuestDiscriminatorRowItemPtr Item)

@@ -100,9 +100,11 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 		SNew(SBox)
 		.HeightOverride_Lambda([this]()
 		{
-			const float Chrome = 78.0f, RowHeight = 22.0f;
+			// Chrome = title + toolbar + header. The floor leaves the empty-state message somewhere to sit; without it an
+			// empty table collapses to its header and the message has no body to be centred in.
+			const float Chrome = 78.0f, RowHeight = 22.0f, MinBody = RowHeight * 2.0f;
 			const int32 Rows = Table.IsValid() ? Table->GetVisibleRowCount() : 0;
-			return FOptionalSize(FMath::Min(300.0f, Chrome + RowHeight * static_cast<float>(Rows)));
+			return FOptionalSize(FMath::Clamp(Chrome + RowHeight * static_cast<float>(Rows), Chrome + MinBody, 300.0f));
 		})
 		[
 			SAssignNew(Table, SColumnTableView<FQuestDiscriminatorRowItemPtr>)

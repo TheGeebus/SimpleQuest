@@ -400,6 +400,13 @@ public:
 							: FOnContextMenuOpening::CreateSP(this, &SColumnTableView::MakeDefaultContextMenu))
 					]
 					+ SOverlay::Slot()
+					.Padding(TAttribute<FMargin>::CreateLambda([Header]()
+					{
+						// STableViewBase puts the header INSIDE the tree, above the list, so this overlay covers it too.
+						// Offset the message below it or a short table centres it straight across the column names. Bound
+						// to the header's real height rather than a guessed constant, so a restyle cannot desync it.
+						return FMargin(0.0f, Header->GetDesiredSize().Y, 0.0f, 0.0f);
+					}))
 					[
 						// The box fills the overlay and centres its own content, rather than the slot centring a
 						// content-sized box - the latter depends on the overlay having resolved a height first.

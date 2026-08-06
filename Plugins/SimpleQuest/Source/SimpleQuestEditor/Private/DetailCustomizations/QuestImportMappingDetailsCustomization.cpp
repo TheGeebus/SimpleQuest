@@ -3,9 +3,11 @@
 
 #include "DetailCustomizations/QuestImportMappingDetailsCustomization.h"
 
+#include "DesktopPlatformModule.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailCategoryBuilder.h"
 #include "DetailWidgetRow.h"
+#include "IDesktopPlatform.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Misc/TransactionObjectEvent.h"
@@ -103,6 +105,29 @@ void FQuestImportMappingDetailsCustomization::OnSampleFormatChanged(TSharedPtr<F
 }
 
 FText FQuestImportMappingDetailsCustomization::GetSampleFolderText() const { return FText::FromString(SampleFolder); }
+
+FReply FQuestImportMappingDetailsCustomization::OnBrowseForSampleFolder()
+{
+	IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+	if (!Desktop) { return FReply::Handled(); }
+
+	// Open where they already are, so re-picking a sibling folder is one click rather than a walk from the drive root.
+	const FString DefaultPath = (!SampleFolder.IsEmpty() && IFileManager::Get().DirectoryExists(*SampleFolder))
+		? SampleFolder : FPaths::ProjectDir();
+
+	FString Picked;
+	const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+	if (!Desktop->OpenDirectoryDialog(ParentWindow, LOCTEXT("BrowseSampleDirTitle", "Choose a folder of source files").ToString(),
+		DefaultPath, Picked))
+	{
+		return FReply::Handled();   // cancelled - leave the current folder alone
+	}
+
+	SampleFolder = Picked;
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Sample folder picked: '%s'."), *SampleFolder);
+	RefreshFromSample();   // re-reads the columns, rebuilds both pickers and both lists, and saves the memo
+	return FReply::Handled();
+}
 
 void FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type)
 {
@@ -449,6 +474,18 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 			.HintText(LOCTEXT("SampleDirHint", "Folder of source files..."))
 			.Text(this, &FQuestImportMappingDetailsCustomization::GetSampleFolderText)
 			.OnTextCommitted(this, &FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted)
+		]
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(FMargin(4.0f, 0.0f, 0.0f, 0.0f))
+		[
+			SNew(SButton)
+			.ButtonStyle(FAppStyle::Get(), TEXT("SimpleButton"))
+			.ToolTipText(LOCTEXT("BrowseSampleDirTip", "Browse for a folder of source files."))
+			.OnClicked(this, &FQuestImportMappingDetailsCustomization::OnBrowseForSampleFolder)
+			[
+				SNew(SImage)
+				.Image(FAppStyle::GetBrush(TEXT("Icons.FolderOpen")))
+				.ColorAndOpacity(FSlateColor::UseForeground())
+			]
 		]
 	]
 	.CopyAction(FUIAction(FExecuteAction::CreateSP(this, &FQuestImportMappingDetailsCustomization::CopySampleSource)))

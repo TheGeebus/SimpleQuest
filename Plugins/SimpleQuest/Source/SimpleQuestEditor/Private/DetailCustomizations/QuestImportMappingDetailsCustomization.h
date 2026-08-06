@@ -89,6 +89,13 @@ private:
 	FText GetSampleFormatText() const;
 	void OnSampleFormatChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
 	FText GetSampleFolderText() const;
+
+	/**
+	 * Browse for the sample folder. Deliberately NOT SDirectoryPicker: that widget takes the path as a one-time
+	 * SLATE_ARGUMENT and keeps a private copy with no setter, so a paste - which writes SampleFolder directly - would
+	 * leave it showing the old path. The text box beside this button is attribute-bound and has no such problem.
+	 */
+	FReply OnBrowseForSampleFolder();
 	void OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type);
 	void RefreshFromSample();									// re-enumerate + tell BOTH widgets to rebuild
 

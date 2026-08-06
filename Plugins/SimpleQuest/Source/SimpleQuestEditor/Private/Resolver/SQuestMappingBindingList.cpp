@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "Resolver/SQuestMappingBindingList.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
 #include "Resolver/QuestImportMapping.h"
@@ -40,6 +41,60 @@ namespace
 		if (!Mapping) return nullptr;
 		return Mapping->Bindings.FindByPredicate([&](const FQuestColumnBinding& B) { return B.TargetProperty == TargetProperty; });
 	}
+
+	// Versioned so the payload can change later without a new build silently mis-reading old clipboard text.
+	const FString ClipboardHeader(TEXT("SimpleQuestBindingRow/1"));
+
+	/** Stable wire names for the policy - deliberately NOT the display strings, which are prose and will get reworded. */
+	FString PolicyToWire(EQuestAbsentFieldPolicy P)
+	{
+		switch (P)
+		{
+		case EQuestAbsentFieldPolicy::Reset:   return TEXT("Reset");
+		case EQuestAbsentFieldPolicy::Require: return TEXT("Require");
+		case EQuestAbsentFieldPolicy::Preserve:
+		default:                               return TEXT("Preserve");
+		}
+	}
+
+	bool WireToPolicy(const FString& S, EQuestAbsentFieldPolicy& Out)
+	{
+		if (S == TEXT("Preserve")) { Out = EQuestAbsentFieldPolicy::Preserve; return true; }
+		if (S == TEXT("Reset"))    { Out = EQuestAbsentFieldPolicy::Reset;    return true; }
+		if (S == TEXT("Require"))  { Out = EQuestAbsentFieldPolicy::Require;  return true; }
+		return false;
+	}
+
+	/** What a copied row carries. bBound is the field the display cannot express, which is the whole reason this exists. */
+	struct FBindingRowPayload
+	{
+		bool bBound = false;
+		FName SourceColumn = NAME_None;
+		EQuestAbsentFieldPolicy AbsentPolicy = EQuestAbsentFieldPolicy::Preserve;
+	};
+
+	bool ParseClipboardPayload(const FString& Text, FBindingRowPayload& Out)
+	{
+		TArray<FString> Lines;
+		Text.ParseIntoArrayLines(Lines);
+		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != ClipboardHeader) { return false; }
+
+		bool bSawBound = false;
+		FString PolicyWire;
+		for (int32 i = 1; i < Lines.Num(); ++i)
+		{
+			FString Key, Value;
+			if (!Lines[i].Split(TEXT("="), &Key, &Value)) { continue; }
+			Key = Key.TrimStartAndEnd();
+			Value = Value.TrimStartAndEnd();
+			if      (Key == TEXT("Bound"))        { Out.bBound = (Value == TEXT("1")); bSawBound = true; }
+			else if (Key == TEXT("SourceColumn")) { Out.SourceColumn = Value.IsEmpty() ? NAME_None : FName(*Value); }
+			else if (Key == TEXT("AbsentPolicy")) { PolicyWire = Value; }
+		}
+		// A payload that never states existence is not ours whatever else it holds; a BOUND one must name a known policy.
+		if (!bSawBound) { return false; }
+		return !Out.bBound || WireToPolicy(PolicyWire, Out.AbsentPolicy);
+	}
 }
 
 void SQuestMappingBindingList::Construct(const FArguments& InArgs)
@@ -62,6 +117,9 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter properties and columns..."))
+			.OnCopyRow(this, &SQuestMappingBindingList::CopyRow)
+			.OnPasteRow(this, &SQuestMappingBindingList::PasteRow)
+			.CanPasteRow(this, &SQuestMappingBindingList::CanPasteRow)
 			.Toolbar()
 			[
 				SNew(SComboButton)
@@ -154,6 +212,9 @@ TSharedRef<SWidget> SQuestMappingBindingList::MakeSourceCell(const FQuestMapping
 		[
 			SNew(SSearchableComboBox)
 			.OptionsSource(&SourceColumnOptions)
+			// The combo drops a re-pick matching its own cached selection, and a paste or undo writes the binding without
+			// going through it - so without this, re-selecting the pre-paste column would silently do nothing.
+			.bAlwaysSelectItem(true)
 			.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 			.OnSelectionChanged(SComboBox<TSharedPtr<FString>>::FOnSelectionChanged::CreateSP(this, &SQuestMappingBindingList::OnSourceColumnChanged, Item))
 			[
@@ -212,6 +273,100 @@ bool SQuestMappingBindingList::IsBound(const FQuestMappingRowItemPtr& Item) cons
 	if (!Item.IsValid()) return false;
 	const FQuestColumnBinding* B = FindBinding(Config.Mapping.Get(), Item->TargetProperty);
 	return B && !B->SourceColumn.IsNone();
+}
+
+bool SQuestMappingBindingList::IsPastableSourceColumn(FName Column) const
+{
+	// A binding with no column is legal - setting a policy on an unmapped row creates exactly that.
+	if (Column.IsNone()) { return true; }
+	const FString AsText = Column.ToString();
+	return SourceColumnOptions.ContainsByPredicate([&AsText](const TSharedPtr<FString>& Opt)
+	{
+		return Opt.IsValid() && *Opt != NoneOption && *Opt == AsText;
+	});
+}
+
+void SQuestMappingBindingList::CopyRow(FQuestMappingRowItemPtr Item)
+{
+	if (!Item.IsValid()) return;
+	const FQuestColumnBinding* B = FindBinding(Config.Mapping.Get(), Item->TargetProperty);
+
+	FString Payload = ClipboardHeader + LINE_TERMINATOR;
+	Payload += FString::Printf(TEXT("Bound=%d%s"), B ? 1 : 0, LINE_TERMINATOR);
+	if (B)
+	{
+		const FString ColumnText = B->SourceColumn.IsNone() ? FString() : B->SourceColumn.ToString();
+		Payload += FString::Printf(TEXT("SourceColumn=%s%s"), *ColumnText, LINE_TERMINATOR);
+		Payload += FString::Printf(TEXT("AbsentPolicy=%s"), *PolicyToWire(B->AbsentPolicy));
+	}
+	FPlatformApplicationMisc::ClipboardCopy(*Payload);
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Binding row copied: '%s' -> %s."), *Item->TargetProperty.ToString(),
+		B ? *FString::Printf(TEXT("column '%s', policy %s"),
+				B->SourceColumn.IsNone() ? TEXT("(none)") : *B->SourceColumn.ToString(), *PolicyToWire(B->AbsentPolicy))
+		  : TEXT("(unbound)"));
+}
+
+bool SQuestMappingBindingList::PasteRow(FQuestMappingRowItemPtr Item)
+{
+	if (!Item.IsValid()) return false;
+	UQuestImportMapping* Mapping = Config.Mapping.Get();
+	if (!Mapping) return false;
+
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	FBindingRowPayload Payload;
+	if (!ParseClipboardPayload(Text, Payload))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Binding paste onto '%s' refused: the clipboard does not hold a copied row."),
+			*Item->TargetProperty.ToString());
+		return false;
+	}
+	if (!IsPastableSourceColumn(Payload.SourceColumn))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Binding paste onto '%s' refused: column '%s' is not in the current sample."),
+			*Item->TargetProperty.ToString(), *Payload.SourceColumn.ToString());
+		return false;
+	}
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Binding row pasting onto '%s': %s."), *Item->TargetProperty.ToString(),
+		Payload.bBound ? *FString::Printf(TEXT("column '%s', policy %s"),
+				Payload.SourceColumn.IsNone() ? TEXT("(none)") : *Payload.SourceColumn.ToString(), *PolicyToWire(Payload.AbsentPolicy))
+		               : TEXT("(unbound)"));
+
+	/**
+	 * ONE transaction replacing the binding wholesale, rather than reusing the two pickers' write paths. Two writes would
+	 * be two undo steps for a single gesture, and would pass through an intermediate "no column but Require" state that
+	 * the import guard rejects. Remove-then-add has no intermediate state at all, and FQuestColumnBinding holds nothing
+	 * beyond these three fields, so rewriting it entirely loses nothing.
+	 */
+	const FScopedTransaction Transaction(LOCTEXT("PasteBindingRow", "Paste Mapping Row Settings"));
+	Mapping->Modify();
+	Mapping->Bindings.RemoveAll([&](const FQuestColumnBinding& B) { return B.TargetProperty == Item->TargetProperty; });
+	if (Payload.bBound)
+	{
+		FQuestColumnBinding NewBinding;
+		NewBinding.TargetProperty = Item->TargetProperty;
+		NewBinding.SourceColumn = Payload.SourceColumn;
+		NewBinding.AbsentPolicy = Payload.AbsentPolicy;
+		Mapping->Bindings.Add(MoveTemp(NewBinding));
+	}
+	Mapping->PostEditChange();
+	NotifyModified();
+
+	// Binding state feeds both the bound/unbound filter and the sort order, so the table has to re-evaluate.
+	if (bHideBound || bHideUnbound) { RefreshRows(); }
+	else if (Table.IsValid())       { Table->Refresh(); }
+	return true;
+}
+
+bool SQuestMappingBindingList::CanPasteRow(FQuestMappingRowItemPtr Item)
+{
+	if (!Item.IsValid() || !Config.Mapping.IsValid()) { return false; }
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	FBindingRowPayload Payload;
+	return ParseClipboardPayload(Text, Payload) && IsPastableSourceColumn(Payload.SourceColumn);
 }
 
 // ── Writes ─────────────────────────────────────────────────────────────────────────────────────────────────────────

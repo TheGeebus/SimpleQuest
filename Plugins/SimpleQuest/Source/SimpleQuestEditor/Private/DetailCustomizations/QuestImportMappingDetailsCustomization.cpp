@@ -6,6 +6,8 @@
 #include "DetailLayoutBuilder.h"
 #include "DetailCategoryBuilder.h"
 #include "DetailWidgetRow.h"
+#include "HAL/FileManager.h"
+#include "HAL/PlatformApplicationMisc.h"
 #include "Misc/TransactionObjectEvent.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
@@ -23,6 +25,30 @@
 
 
 #define LOCTEXT_NAMESPACE "QuestImportMappingDetails"
+
+namespace
+{
+	// Versioned magic first lines, so a paste refuses clipboard content that is not ours rather than half-parsing it.
+	const FString SampleSourceHeader(TEXT("SimpleQuestSampleSource/1"));
+	const FString SourceColumnHeader(TEXT("SimpleQuestSourceColumn/1"));
+
+	/** Read "Key=Value" lines sitting under a magic header. False when the header does not match at all. */
+	bool ParseTaggedPayload(const FString& Text, const FString& Header, TMap<FString, FString>& OutFields)
+	{
+		TArray<FString> Lines;
+		Text.ParseIntoArrayLines(Lines);
+		if (Lines.Num() < 1 || Lines[0].TrimStartAndEnd() != Header) { return false; }
+		for (int32 i = 1; i < Lines.Num(); ++i)
+		{
+			FString Key, Value;
+			if (Lines[i].Split(TEXT("="), &Key, &Value))
+			{
+				OutFields.Add(Key.TrimStartAndEnd(), Value.TrimStartAndEnd());
+			}
+		}
+		return true;
+	}
+}
 
 TSharedRef<IDetailCustomization> FQuestImportMappingDetailsCustomization::MakeInstance()
 {
@@ -125,12 +151,17 @@ FText FQuestImportMappingDetailsCustomization::GetDiscriminatorColumnText() cons
 
 void FQuestImportMappingDetailsCustomization::OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
 {
+	if (NewValue.IsValid()) { ApplyDiscriminatorColumn(FName(**NewValue)); }
+}
+
+void FQuestImportMappingDetailsCustomization::ApplyDiscriminatorColumn(FName Column)
+{
 	UQuestImportMapping* M = Mapping.Get();
-	if (!M || !NewValue.IsValid()) return;
+	if (!M || M->DiscriminatorColumn == Column) return;   // compare against the ASSET, never a widget's idea of state
 
 	const FScopedTransaction Transaction(LOCTEXT("SetDiscriminatorColumn", "Set Discriminator Column"));
 	M->Modify();
-	M->DiscriminatorColumn = FName(**NewValue);
+	M->DiscriminatorColumn = Column;
 	M->PostEditChange();
 	OnMappingModified();
 	// The discriminator column changed -> its distinct value set changed -> rebuild the value->class rows.
@@ -146,14 +177,129 @@ FText FQuestImportMappingDetailsCustomization::GetKeyColumnText() const
 
 void FQuestImportMappingDetailsCustomization::OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
 {
-	UQuestImportMapping* M = Mapping.Get();
-	if (!M || !NewValue.IsValid()) return;
+	if (NewValue.IsValid()) { ApplyKeyColumn(FName(**NewValue)); }
+}
 
+void FQuestImportMappingDetailsCustomization::ApplyKeyColumn(FName Column)
+{
+	UQuestImportMapping* M = Mapping.Get();
+	if (!M || M->KeyColumn == Column) return;   // compare against the ASSET, never a widget's idea of state
+	
 	const FScopedTransaction Transaction(LOCTEXT("SetKeyColumn", "Set Key Column"));
 	M->Modify();
-	M->KeyColumn = FName(**NewValue);
+	M->KeyColumn = Column;
 	M->PostEditChange();
 	OnMappingModified();
+}
+
+bool FQuestImportMappingDetailsCustomization::IsPastableColumn(FName Column) const
+{
+	if (Column.IsNone()) { return true; }   // empty means "clear it", which is always legal
+	const FString AsText = Column.ToString();
+	// The CACHED options, not a fresh enumeration - both column combos read this same array, and re-reading would parse
+	// the whole sample folder for a validity check.
+	return DiscriminatorColumnOptions.ContainsByPredicate(
+		[&AsText](const TSharedPtr<FString>& Opt) { return Opt.IsValid() && *Opt == AsText; });
+}
+
+void FQuestImportMappingDetailsCustomization::CopySampleSource() const
+{
+	const FString Payload = FString::Printf(TEXT("%s%sFormat=%s%sFolder=%s"),
+		*SampleSourceHeader, LINE_TERMINATOR, *SampleFormatName.ToString(), LINE_TERMINATOR, *SampleFolder);
+	FPlatformApplicationMisc::ClipboardCopy(*Payload);
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Sample source copied: %s at '%s'."),
+		*SampleFormatName.ToString(), SampleFolder.IsEmpty() ? TEXT("(unset)") : *SampleFolder);
+}
+
+void FQuestImportMappingDetailsCustomization::PasteSampleSource()
+{
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	TMap<FString, FString> Fields;
+	const FString* Format = nullptr;
+	const FString* Folder = nullptr;
+	if (ParseTaggedPayload(Text, SampleSourceHeader, Fields))
+	{
+		Format = Fields.Find(TEXT("Format"));
+		Folder = Fields.Find(TEXT("Folder"));
+	}
+	if (!Format || !Folder)
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Sample source paste refused: the clipboard does not hold a copied sample source."));
+		return;
+	}
+	// A paste must not reach a state the pickers could not: the format has to be one the registry offers, and a folder
+	// that does not exist would leave every picker below silently empty with nothing saying why.
+	if (!FormatOptions.ContainsByPredicate([Format](const TSharedPtr<FString>& O) { return O.IsValid() && *O == *Format; }))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Sample source paste refused: '%s' is not a registered format."), **Format);
+		return;
+	}
+	if (!Folder->IsEmpty() && !IFileManager::Get().DirectoryExists(**Folder))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Sample source paste refused: '%s' does not exist."), **Folder);
+		return;
+	}
+
+	SampleFormatName = FName(**Format);
+	SampleFolder = *Folder;
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Sample source pasted: %s at '%s'."),
+		*SampleFormatName.ToString(), SampleFolder.IsEmpty() ? TEXT("(unset)") : *SampleFolder);
+
+	RefreshFromSample();   // re-reads the columns, rebuilds both pickers and both lists, and saves the memo
+}
+
+void FQuestImportMappingDetailsCustomization::CopyColumnValue(FName Column) const
+{
+	const FString Payload = FString::Printf(TEXT("%s%sColumn=%s"), *SourceColumnHeader, LINE_TERMINATOR,
+		Column.IsNone() ? TEXT("") : *Column.ToString());
+	FPlatformApplicationMisc::ClipboardCopy(*Payload);
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Source column copied: '%s'."),
+		Column.IsNone() ? TEXT("(none)") : *Column.ToString());
+}
+
+void FQuestImportMappingDetailsCustomization::PasteDiscriminatorColumn()
+{
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	TMap<FString, FString> Fields;
+	const FString* Value = ParseTaggedPayload(Text, SourceColumnHeader, Fields) ? Fields.Find(TEXT("Column")) : nullptr;
+	if (!Value)
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Discriminator column paste refused: the clipboard does not hold a copied column."));
+		return;
+	}
+	const FName Column = Value->IsEmpty() ? NAME_None : FName(**Value);
+	if (!IsPastableColumn(Column))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Discriminator column paste refused: '%s' is not in the current sample."), **Value);
+		return;
+	}
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Discriminator column pasting: '%s'."), **Value);
+	ApplyDiscriminatorColumn(Column);
+}
+
+void FQuestImportMappingDetailsCustomization::PasteKeyColumn()
+{
+	FString Text;
+	FPlatformApplicationMisc::ClipboardPaste(Text);
+	TMap<FString, FString> Fields;
+	const FString* Value = ParseTaggedPayload(Text, SourceColumnHeader, Fields) ? Fields.Find(TEXT("Column")) : nullptr;
+	if (!Value)
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Key column paste refused: the clipboard does not hold a copied column."));
+		return;
+	}
+	const FName Column = Value->IsEmpty() ? NAME_None : FName(**Value);
+	if (!IsPastableColumn(Column))
+	{
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Key column paste refused: '%s' is not in the current sample."), **Value);
+		return;
+	}
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Key column pasting: '%s'."), **Value);
+	ApplyKeyColumn(Column);
 }
 
 void FQuestImportMappingDetailsCustomization::RestoreSampleFromMemo()
@@ -284,6 +430,10 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 		[
 			SNew(SSearchableComboBox)
 			.OptionsSource(&FormatOptions)
+			// Fire on every pick. The combo caches its own SelectedItem and drops a re-pick that matches it, but anything
+			// that writes the value WITHOUT going through the combo - a paste, an undo - leaves that cache stale, and then
+			// re-selecting the previous value looks like "no change" and silently does nothing.
+			.bAlwaysSelectItem(true)
 			.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 			.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnSampleFormatChanged)
 			[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetSampleFormatText) ]
@@ -300,7 +450,9 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 			.Text(this, &FQuestImportMappingDetailsCustomization::GetSampleFolderText)
 			.OnTextCommitted(this, &FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted)
 		]
-	];
+	]
+	.CopyAction(FUIAction(FExecuteAction::CreateSP(this, &FQuestImportMappingDetailsCustomization::CopySampleSource)))
+	.PasteAction(FUIAction(FExecuteAction::CreateSP(this, &FQuestImportMappingDetailsCustomization::PasteSampleSource)));
 
 	// Discriminator-column picker: choose which sample column names each row's node kind (never a typed FName).
 	Category.AddCustomRow(LOCTEXT("DiscriminatorFilter", "Discriminator Column"))
@@ -311,10 +463,14 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	[
 		SAssignNew(DiscriminatorColumnCombo, SSearchableComboBox)
 		.OptionsSource(&DiscriminatorColumnOptions)
+		.bAlwaysSelectItem(true)   // see the Format combo above - external writes leave the combo's own cache stale
 		.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 		.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnDiscriminatorColumnChanged)
 		[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetDiscriminatorColumnText) ]
-	];
+	]
+	.CopyAction(FUIAction(FExecuteAction::CreateLambda([this]()
+		{ if (const UQuestImportMapping* M = Mapping.Get()) { CopyColumnValue(M->DiscriminatorColumn); } })))
+	.PasteAction(FUIAction(FExecuteAction::CreateSP(this, &FQuestImportMappingDetailsCustomization::PasteDiscriminatorColumn)));
 
 	// Key-column picker: choose which sample column holds each row's semantic key (the studio's id/quest_key column). Optional
 	// — reverse-export writes the preserved source key back into this column; empty -> exported keys default to the GUID.
@@ -326,10 +482,14 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	[
 		SAssignNew(KeyColumnCombo, SSearchableComboBox)
 		.OptionsSource(&DiscriminatorColumnOptions)
+		.bAlwaysSelectItem(true)   // see the Format combo above - external writes leave the combo's own cache stale
 		.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 		.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnKeyColumnChanged)
 		[ SNew(STextBlock).Text(this, &FQuestImportMappingDetailsCustomization::GetKeyColumnText) ]
-	];
+	]
+	.CopyAction(FUIAction(FExecuteAction::CreateLambda([this]()
+		{ if (const UQuestImportMapping* M = Mapping.Get()) { CopyColumnValue(M->KeyColumn); } })))
+	.PasteAction(FUIAction(FExecuteAction::CreateSP(this, &FQuestImportMappingDetailsCustomization::PasteKeyColumn)));
 
 	// Discriminator value -> class list: one row per distinct value found in the discriminator column, class-picker only.
 	FQuestMappingDiscriminatorListConfig DiscConfig;

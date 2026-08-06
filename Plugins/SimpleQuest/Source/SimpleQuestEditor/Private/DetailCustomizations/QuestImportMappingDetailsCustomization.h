@@ -38,8 +38,36 @@ public:
 		const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const override;
 
 private:
+private:
 	/** Re-read both lists from the mapping. Shared by undo and redo. */
 	void RefreshListsAfterTransaction();
+
+	/**
+	 * Copy/paste for the three picker rows. Without BOTH a CopyAction and a PasteAction the details panel treats a custom
+	 * row as having no value and greys its whole context menu - FDetailWidgetRow::IsCopyPasteBound() requires the pair.
+	 * Supplying them also lights up the stock Shift+RMB / Shift+LMB here, matching the tables below.
+	 *
+	 * No CanExecuteAction is wired, deliberately. SDetailSingleItemRow gates the paste CHORD on CanExecute, so a predicate
+	 * would grey the menu entry at the cost of making a refused chord do nothing at all and say nothing - and a silent
+	 * no-op is indistinguishable from a click that never registered. Each handler validates, reports, and returns.
+	 */
+	void CopySampleSource() const;
+	void PasteSampleSource();
+
+	/**
+	 * Both column rows share one payload type on purpose: each holds a column name drawn from the same sample, so copying
+	 * one into the other is something a designer actually wants rather than an accident to guard against.
+	 */
+	void CopyColumnValue(FName Column) const;
+	void PasteDiscriminatorColumn();
+	void PasteKeyColumn();
+
+	/** The write, shared by the combo callback and the paste so both land identically. */
+	void ApplyDiscriminatorColumn(FName Column);
+	void ApplyKeyColumn(FName Column);
+
+	/** True when the sample actually offers this column, or it is empty (meaning clear). Reads the CACHED option list. */
+	bool IsPastableColumn(FName Column) const;
 	
 	TWeakObjectPtr<UQuestImportMapping> Mapping;
 	TSharedPtr<SQuestMappingBindingList> BindingList;

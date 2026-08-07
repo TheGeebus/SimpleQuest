@@ -10,6 +10,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Nodes/QuestlineNode_Exit.h"
+#include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "Quests/QuestlineGraph.h"
@@ -1280,6 +1281,80 @@ bool FQuestResolver_PasteClearsImportProvenance::RunTest(const FString& Paramete
 
 	TestTrue(TEXT("Paste mints a fresh identity"), Node->QuestGuid != BeforeGuid);
 	TestTrue(TEXT("Paste clears the import provenance"), Node->ImportSourceKey.IsEmpty());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_UndoRestoresAMovedNode, "SimpleQuest.Resolver.Apply.UndoRestoresMovedNode", TestFlags)
+bool FQuestResolver_UndoRestoresAMovedNode::RunTest(const FString& Parameters)
+{
+	/**
+	 * A move is a REPARENT, so undoing one has to put the node back in the graph it came FROM - not merely take it out of
+	 * the one it went to. Those two outcomes are indistinguishable to a test that only counts the destination, and the
+	 * failure between them is real: a half-reverted move leaves the node parented to the container but absent from both
+	 * node arrays, belonging to no graph at all. Asserting membership on BOTH sides is the only way to tell them apart,
+	 * and it is the assertion UndoRevertsWholeApply structurally cannot make, because a create has no source graph.
+	 */
+	if (!GEditor)
+	{
+		AddError(TEXT("No GEditor - this test needs the editor transaction buffer"));
+		return false;
+	}
+
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	UEdGraph* Root = Graph->QuestlineEdGraph;
+
+	// Built directly rather than through an import, so the move is the ONLY thing under test - a create landing in the
+	// same run would make a failure ambiguous between the two passes.
+	UQuestlineNode_Quest* Container = NewObject<UQuestlineNode_Quest>(Root, NAME_None, RF_Transactional);
+	Container->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(Container);
+	Container->PostPlacedNewNode();   // this is what builds the inner graph
+
+	UQuestlineNode_Step* Step = NewObject<UQuestlineNode_Step>(Root, NAME_None, RF_Transactional);
+	Step->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(Step);
+	Step->PostPlacedNewNode();
+
+	UEdGraph* Inner = Container->GetInnerGraph();
+	TestNotNull(TEXT("The container built an inner graph"), Inner);
+	if (!Inner) { return false; }
+
+	const FString ContainerKey = Container->QuestGuid.ToString(EGuidFormats::Digits);
+	const FString StepKey      = Step->QuestGuid.ToString(EGuidFormats::Digits);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, *ContainerKey, { { TEXT("graph"), TEXT("root") },  { TEXT("class"), TEXT("QuestlineNode_Quest") } });
+	AddRow(Content, *StepKey,      { { TEXT("graph"), *ContainerKey }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	TestEqual(TEXT("Nothing is refused - the source declares no wiring to cross a boundary"), Plan.Refusals.Num(), 0);
+
+	const FQuestNodePlanEntry* Entry = Plan.Entries.FindByPredicate(
+		[&StepKey](const FQuestNodePlanEntry& E){ return E.Key == StepKey; });
+	TestNotNull(TEXT("The Step is planned"), Entry);
+	if (!Entry) { return false; }
+	TestTrue(TEXT("...as a move"), Entry->bMoved);
+
+	GEditor->BeginTransaction(NSLOCTEXT("QuestResolverTests", "MoveUndoTest", "Apply Quest Import"));
+	FQuestApplyResult Result;
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	GEditor->EndTransaction();
+
+	TestEqual(TEXT("One node moved"), Result.NodesMoved, 1);
+	TestTrue(TEXT("The Step is in the container"), Inner->Nodes.Contains(Step));
+	TestFalse(TEXT("...and gone from the graph it left"), Root->Nodes.Contains(Step));
+
+	GEditor->UndoTransaction();
+
+	// BOTH sides, deliberately. "Gone from the container" is equally true of a node that ended up nowhere.
+	TestTrue(TEXT("Undo returned the Step to the graph it came from"), Root->Nodes.Contains(Step));
+	TestFalse(TEXT("...and took it back out of the container"), Inner->Nodes.Contains(Step));
 	return true;
 }
 

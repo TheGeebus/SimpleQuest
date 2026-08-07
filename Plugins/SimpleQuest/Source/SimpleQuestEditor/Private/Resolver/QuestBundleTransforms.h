@@ -58,3 +58,12 @@ int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, 
 /** Execute a plan against the asset it was computed for. Caller owns the transaction. */
 void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options = FQuestApplyOptions());
 
+/**
+ * Structural check on a read bundle: every row keyed, every class resolvable, every graph cell reachable, no duplicate
+ * or contested keys. Refuses on any inconsistency rather than letting a partial asset be built from a malformed source.
+ * Provider-agnostic - a bad bundle from any format is refused identically.
+ * NodeRowsByKey comes back holding pointers INTO Bundle, so the two have the same lifetime; AllRowKeys additionally
+ * includes instanced-child keys, which NodeRowsByKey deliberately excludes.
+ */
+bool QuestBundle_Validate(const FQuestDataBundle& Bundle, TMap<FString, const FQuestDataRow*>& NodeRowsByKey, TSet<FString>& AllRowKeys, FString& OutError);
+

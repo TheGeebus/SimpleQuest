@@ -39,6 +39,7 @@
 #include "Resolver/QuestPlanBroker.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "SimpleQuestLog.h"
+#include "Resolver/QuestImportOperations.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
@@ -2065,37 +2066,16 @@ namespace
 			Endpoint.Folder = FolderPath;
 		}
 
+		// Read, translate and validate in one call, shared with the in-place branch below so the pipeline has a single
+		// definition. The three failure modes still read differently because the operation phrases its own error.
 		FQuestDataBundle Bundle;
-		FString ReadError;
-		if (!ReadEndpointBundle(Endpoint, Bundle, ReadError))
-		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
-			return;
-		}
-
-		TArray<FString> Warnings;
-
-		// A studio's source-shape translation (optional). Absent = the source is already in our shape (our own
-		// round-trip / export-as-teacher), so no mapping is needed. Runs before flow-conventions so a mapped column can
-		// feed a convention (e.g. a source column mapped onto unlock_after).
-		if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
-		{
-			if (!ApplyMapping(Bundle, *Mapping, Warnings))
-			{
-				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping guard refused the import. No asset created."));
-				return;
-			}
-			// After the column renames, before the conventions: a wire column is studio vocabulary, never a property.
-			ApplyWireBindings(Bundle, *Mapping, Warnings);
-		}
-		ApplyFlowConventions(Bundle, Warnings);
-
 		TMap<FString, const FQuestDataRow*> NodeRowsByKey;
 		TSet<FString> AllRowKeys;
-		FString Error;
-		if (!ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, Error))
+		TArray<FString> Warnings;
+		FString ReadError;
+		if (!QuestImport_ReadAndValidate(Endpoint, LoadQuestMappingArg(Args), Bundle, NodeRowsByKey, AllRowKeys, Warnings, ReadError))
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: validation failed - %s. No asset created."), *Error);
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
 			return;
 		}
 
@@ -2114,62 +2094,48 @@ namespace
 			}
 
 			FQuestInPlacePlan Plan;
-			Plan.TargetAssetPath = AssetPath;
+			FQuestImportRequest Request;
+			Request.Endpoint = Endpoint;
+			Request.Mapping = LoadQuestMappingArg(Args);
+			Request.bDeleteOrphans = bDeleteOrphans;
+			// Resolved out here rather than inside the run, because the mode has to be REPORTED before any work happens:
+			// a plan is only interpretable against the policy that produced it, and the same source and asset yield
+			// different plans under Preserve and Reset.
+			Request.Policies = QuestImport_ResolvePolicies(Request.Mapping, bResetAbsent);
 
-			// Policy comes from the recipe when there is one, and from the flag otherwise. Preserve stays the default in both
-			// cases: the destructive reading should never be what you get by typing nothing.
-			FQuestAbsentPolicyResolver Policies;
-			if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
-			{
-				Policies.Default = Mapping->DefaultAbsentPolicy;
-				for (const FQuestColumnBinding& B : Mapping->Bindings)
-				{
-					if (!B.TargetProperty.IsNone()) { Policies.ByProperty.Add(B.TargetProperty, B.AbsentPolicy); }
-				}
-			}
-
-			FQuestApplyOptions ApplyOptions;
-			if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
-			{
-				ApplyOptions.bDeleteOrphanedNodes = Mapping->bDeleteOrphanedNodes;
-			}
-			if (bDeleteOrphans) { ApplyOptions.bDeleteOrphanedNodes = true; }
-			
-			// The flag is a RUN-LEVEL instruction and has to reach the per-property entries, not just the fallback: loading a
-			// recipe writes an explicit entry for every bound column, and a per-binding Preserve would otherwise shadow the
-			// flag for exactly the columns the recipe covers. It says "do not preserve", so it upgrades Preserve to Reset and
-			// leaves Require alone - Require is a designer asserting a value must be present, which a convenience flag has no
-			// business switching off.
-			if (bResetAbsent)
-			{
-				if (Policies.Default == EQuestAbsentFieldPolicy::Preserve)
-				{
-					Policies.Default = EQuestAbsentFieldPolicy::Reset;
-				}
-				for (TPair<FName, EQuestAbsentFieldPolicy>& Entry : Policies.ByProperty)
-				{
-					if (Entry.Value == EQuestAbsentFieldPolicy::Preserve) { Entry.Value = EQuestAbsentFieldPolicy::Reset; }
-				}
-			}
-
-			// Say what mode this run is in. A plan is only interpretable against the policy that produced it - the same source
-			// and asset yield different plans under Preserve and Reset - and the console does not reliably echo the command
-			// that produced a log, so the output has to identify itself.
 			const TCHAR* PolicyName =
-				Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
-				Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
+				Request.Policies.Default == EQuestAbsentFieldPolicy::Reset   ? TEXT("Reset") :
+				Request.Policies.Default == EQuestAbsentFieldPolicy::Require ? TEXT("Require") : TEXT("Preserve");
+			const bool bWouldDeleteOrphans =
+				bDeleteOrphans || (Request.Mapping && Request.Mapping->bDeleteOrphanedNodes);
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place %s - source '%s', absent-field policy %s%s.%s"),
 				bApply ? TEXT("APPLY") : TEXT("PLAN (read-only)"),
 				DataTablePath.IsEmpty() ? *FolderPath : *DataTablePath,
 				PolicyName,
 				bResetAbsent ? TEXT(" (via --reset-absent)") : TEXT(""),
-				bApply && ApplyOptions.bDeleteOrphanedNodes ? TEXT(" [WILL DELETE ORPHANS]") : TEXT(""));
-			
-			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan, Policies);
-			LogInPlacePlan(Plan);
+				bApply && bWouldDeleteOrphans ? TEXT(" [WILL DELETE ORPHANS]") : TEXT(""));
+
+			// The transaction wraps the call because the run applies internally. A plan carrying refusals applies nothing,
+			// so on that path this opens and closes with no object recorded - which the transaction buffer discards.
+			TUniquePtr<FScopedTransaction> Transaction;
+			if (bApply)
+			{
+				Transaction = MakeUnique<FScopedTransaction>(
+					NSLOCTEXT("SimpleQuestEditor", "ApplyInPlaceImport", "Apply In-Place Import"));
+			}
+
+			FQuestImportOutcome Outcome;
+			if (!QuestImport_RunInPlace(*TargetGraph, Request, bApply, Outcome))
+			{
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. Nothing was modified."), *Outcome.Error);
+				return;
+			}
+
+			Outcome.Plan.TargetAssetPath = AssetPath;
+			LogInPlacePlan(Outcome.Plan);
 			// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 			// about to be applied, so the panel always shows what the run actually decided.
-			FQuestPlanBroker::Get().Publish(Plan.TargetAssetPath, Plan);
+			FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan);
 
 			if (!bApply)
 			{
@@ -2177,27 +2143,17 @@ namespace
 			}
 
 			// A plan carrying refusals or contested keys is not trustworthy in ANY part - those say the planner could not
-			// describe the source, not merely that one row is odd. Applying the rest would be acting on a description we
-			// already know is incomplete.
-			if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
+			// describe the source, not merely that one row is odd. ApplyPlan already declined; this reports why.
+			if (Outcome.ApplyResult.bRefused)
 			{
 				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused - the plan carries %d refusal(s) and %d contested key(s). "
 					"Resolve those and re-plan. Nothing was modified."),
-					Plan.Refusals.Num(),
-					Plan.AmbiguousKeys.Num());
+					Outcome.Plan.Refusals.Num(),
+					Outcome.Plan.AmbiguousKeys.Num());
 				return;
 			}
 
-			const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ApplyInPlaceImport", "Apply In-Place Import"));
-
-			FQuestApplyResult Result;
-			ApplyPlan(*TargetGraph, Plan, Bundle, NodeRowsByKey, Result, ApplyOptions);
-			if (Result.bRefused)
-			{
-				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused - the plan carries %d refusal(s) and %d contested key(s). "
-					"Resolve those and re-plan. Nothing was modified."), Plan.Refusals.Num(), Plan.AmbiguousKeys.Num());
-				return;
-			}
+			const FQuestApplyResult& Result = Outcome.ApplyResult;
 
 			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' - %d property change(s), %d node(s) created, "
@@ -2334,6 +2290,11 @@ bool QuestBundle_ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMappin
 void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
 {
 	ApplyWireBindings(Bundle, Mapping, Warnings);
+}
+
+bool QuestBundle_Validate(const FQuestDataBundle& Bundle, TMap<FString, const FQuestDataRow*>& NodeRowsByKey, TSet<FString>& AllRowKeys, FString& OutError)
+{
+	return ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, OutError);
 }
 
 void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)

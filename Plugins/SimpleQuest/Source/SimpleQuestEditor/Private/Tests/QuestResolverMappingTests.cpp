@@ -3,6 +3,7 @@
 
 #if WITH_DEV_AUTOMATION_TESTS
 
+#include "Editor.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
@@ -1209,11 +1210,58 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 		Options.bDeleteOrphanedNodes = true;
 		QuestBundle_ApplyPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
 		TestEqual(TEXT("The orphan is deleted when asked"), Result.NodesDeleted, 1);
-
 		FQuestInPlacePlan Replanned;
 		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 		TestEqual(TEXT("Re-planning reports no orphan"), Replanned.CountOf(EQuestNodePlanAction::Orphan), 0);
 	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ApplyIsOneUndoStep, "SimpleQuest.Resolver.Apply.UndoRevertsWholeApply", TestFlags)
+bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
+{
+	/**
+	 * "One undo reverses an entire apply" is a promise the resolver makes and, until this test, nothing checked. Every other
+	 * apply test runs with no transaction open, so GUndo is null and every Modify() inside ApplyPlan is a no-op - the whole
+	 * lot could be deleted and the suite would stay green.
+	 * TWO conditions gate SaveToTransactionBuffer, not one: an open transaction AND RF_Transactional on the object. A test
+	 * that opens a transaction over objects lacking the flag proves nothing, so this leans on MakeTransientQuestlineGraph
+	 * setting it on the inner UEdGraph and on SpawnNodeFromRow setting it on every node it creates.
+	 */
+	if (!GEditor)
+	{
+		AddError(TEXT("No GEditor - this test needs the editor transaction buffer"));
+		return false;
+	}
+
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	const int32 NodesBefore = Graph->QuestlineEdGraph->Nodes.Num();
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("n_undo"), { { TEXT("graph"), TEXT("root") }, { TEXT("class"), TEXT("QuestlineNode_Step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
+
+	FQuestInPlacePlan Plan;
+	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	TestEqual(TEXT("The row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
+
+	// ApplyPlan deliberately does not own the transaction - its caller does - so the test has to BE the caller.
+	GEditor->BeginTransaction(NSLOCTEXT("QuestResolverTests", "ApplyUndoTest", "Apply Quest Import"));
+	FQuestApplyResult Result;
+	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	GEditor->EndTransaction();
+
+	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("...and it is in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
+
+	// The assertion that earns the test. UEdGraph::AddNode does NOT Modify() - it appends and notifies - so the Level->Modify()
+	// inside the create pass is the only thing recording the node array. Remove it and this line is what goes red.
+	GEditor->UndoTransaction();
+	TestEqual(TEXT("Undo reversed the create"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore);
 	return true;
 }
 

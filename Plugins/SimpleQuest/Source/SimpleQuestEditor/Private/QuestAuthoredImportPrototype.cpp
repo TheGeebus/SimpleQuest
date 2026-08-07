@@ -1600,11 +1600,13 @@ namespace
 				continue;
 			}
 			if (Entry.Action != EQuestNodePlanAction::Update) { ++OutResult.EntriesDeferred; continue; }
-			if (Entry.bStructuralChange)
+			if (Entry.bMoved)
 			{
-				// A class change or a move between levels cannot be edited into place, and doing the property half would
-				// leave a node matching neither its source nor its former self.
-				++OutResult.EntriesDeferred;
+				// Moving is not yet implemented, and doing the property half alone would leave a node matching neither its
+				// source nor its former self. Named, not counted. EntriesDeferred is the anonymous tally for entries
+				// left alone by POLICY - an orphan under bDeleteOrphanedNodes=false - while Skipped is the named list
+				// of things that could not be done. Incrementing both reports one problem as two.
+				OutResult.Skipped.Add(FString::Printf(TEXT("entry '%s' moves to a different container, which apply cannot yet perform"), *Entry.Key));
 				continue;
 			}
 			if (Entry.Changes.IsEmpty()) continue;
@@ -1718,13 +1720,27 @@ namespace
 			Entry.Guid             = *FoundGuid;
 			Entry.CurrentClassName = Node->GetClass()->GetName();
 			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(*FoundGuid);
+			
+			// A class difference is not a change to this node - it says the row describes a DIFFERENT node. A Step is not a
+			// mutated Quest, and nothing about one instance can be carried into the other, so there is nothing to apply and
+			// no identity to preserve. A source that genuinely means "replace this" says so by giving the row a NEW KEY,
+			// which orphans the old node and creates a new one with a new identity - already supported, and the honest
+			// expression of the intent. Refused after the match above is recorded, so a refused row does not ALSO report
+			// its node as an orphan.
+			if (Entry.ClassName != Entry.CurrentClassName)
+			{
+				OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' names class '%s' but matches a node of class '%s'. A node "
+					"cannot change class - to replace it, give the row a new key so the old node orphans and a new one is created"),
+					*Row.Key, *Entry.ClassName, *Entry.CurrentClassName));
+				continue;
+			}
 
 			// Compare levels in ONE namespace. The two sides spell a level differently by design - the writer names it by the
-			// container's GUID, the asset walk by whatever key that container answers to - so a raw compare would flag every
-			// node inside a semantically-keyed container as needing a rebuild it does not need.
+			// container's GUID, the asset walk by whatever key that container answers to - so a raw compare would report every
+			// node inside a semantically-keyed container as having moved when it has not.
 			const FString IncomingLevel = ResolveQuestLevelToGuid(Entry.GraphCell, GuidByKey);
 			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
-			Entry.bStructuralChange = (Entry.ClassName != Entry.CurrentClassName) || (IncomingLevel != CurrentLevel);
+			Entry.bMoved = (IncomingLevel != CurrentLevel);
 
 			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan, Policies);
 			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan, Policies);
@@ -1825,8 +1841,8 @@ namespace
 		for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 		{
 			// Unchanged matches are the common case on a healthy re-import; listing them would bury the ones that matter.
-			if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bStructuralChange) continue;
-
+			if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bMoved) continue;
+			
 			// An orphan has no incoming row, so its level is only known from the asset side; the questline itself sits in no
 			// level at all, being the thing levels belong to.
 			const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
@@ -1836,13 +1852,9 @@ namespace
 				*Entry.Key,
 				*Entry.ClassName,
 				*Where,
-				Entry.bStructuralChange ? TEXT("  ** structural: needs rebuild, not an edit **") : TEXT(""));
+				Entry.bMoved ? TEXT("  ** moves to a different container **") : TEXT(""));
 
-			if (Entry.bStructuralChange && Entry.ClassName != Entry.CurrentClassName)
-			{
-				UE_LOG(LogSimpleQuestResolver, Log, TEXT("      class: %s -> %s"), *Entry.CurrentClassName, *Entry.ClassName);
-			}
-			if (Entry.bStructuralChange && Entry.GraphCell != Entry.CurrentGraphCell)
+			if (Entry.bMoved)
 			{
 				UE_LOG(LogSimpleQuestResolver, Log, TEXT("      graph: %s -> %s"), *Entry.CurrentGraphCell, *Entry.GraphCell);
 			}
@@ -2071,8 +2083,7 @@ namespace
 
 			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' - %d property change(s), %d node(s) created, "
-				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred (structural rebuilds are not "
-				"performed). %d skipped."),
+				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred by policy, %d skipped."),
 				*AssetPath,
 				Result.PropertiesWritten,
 				Result.NodesCreated,
@@ -2088,6 +2099,15 @@ namespace
 			if (bChangedAnything)
 			{
 				TargetGraph->GetPackage()->MarkPackageDirty();
+			}
+			else if (Result.EntriesDeferred > 0 || Result.Skipped.Num() > 0)
+			{
+				// Nothing was WRITTEN, but the asset does not match the source either. "Already matches" is the one line a
+				// designer acts on by stopping, so it must never appear while work remains. The package still stays clean,
+				// because nothing changed - that half was right.
+				UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: nothing was applied, and the asset does NOT match the "
+					"source - %d entry/entries could not be performed. Package left clean."),
+					Result.EntriesDeferred + Result.Skipped.Num());
 			}
 			else
 			{

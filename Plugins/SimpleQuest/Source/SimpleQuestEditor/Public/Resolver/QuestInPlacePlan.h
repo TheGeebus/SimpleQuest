@@ -64,8 +64,13 @@ struct FQuestNodePlanEntry
 	EQuestNodePlanAction Action = EQuestNodePlanAction::Update;
 	TArray<FQuestPropertyChange> Changes;
 
-	/** True when the node would have to be rebuilt rather than edited: its class changed, or it moved to another level. */
-	bool bStructuralChange = false;
+	/**
+	 * True when the node belongs in a different container than the one it currently sits in. A MOVE, not a rebuild: the
+	 * node keeps its identity, its properties, its position and - if it is a container - its inner graph and everything
+	 * inside it. A class difference is deliberately NOT recorded here. A node whose class differs is a different node,
+	 * so it is refused rather than described; see the refusal in PlanInPlace.
+	 */
+	bool bMoved = false;
 
 	/** True for the one entry describing the questline asset itself rather than a node in it. */
 	bool bIsQuestlineSelf = false;
@@ -107,7 +112,7 @@ struct FQuestInPlacePlan
 		int32 N = 0;
 		for (const FQuestNodePlanEntry& E : Entries)
 		{
-			if (E.Action == EQuestNodePlanAction::Update && (E.Changes.Num() > 0 || E.bStructuralChange)) ++N;
+			if (E.Action == EQuestNodePlanAction::Update && (E.Changes.Num() > 0 || E.bMoved)) ++N;
 		}
 		return N;
 	}

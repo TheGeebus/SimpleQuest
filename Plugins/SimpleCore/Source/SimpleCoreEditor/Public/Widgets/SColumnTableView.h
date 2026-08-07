@@ -29,6 +29,7 @@
 #include "Widgets/SOverlay.h"
 #include "Widgets/SimpleCoreEditorWidgetUtils.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/Views/SExpanderArrow.h"
 #include "Widgets/Views/SHeaderRow.h"
 #include "Widgets/Views/STreeView.h"
 
@@ -97,6 +98,14 @@ public:
 
 		/** Raised on an unshifted right-click, just before the base opens the menu, so the table knows what it is about. */
 		SLATE_EVENT(FOnRowAction, OnRowRightClicked)
+
+		/**
+		 * Which column carries the expander. SMultiColumnTableRow deliberately drops the expander its own base class
+		 * builds - "MultiColumnRows let the user decide which column should contain the expander/indenter item" - so a
+		 * multi-column tree has no arrow and no indentation until a column claims it. None leaves the row flat.
+		 */
+		SLATE_ARGUMENT(FName, ExpanderColumnId)
+		SLATE_ARGUMENT(bool, bShowExpanderWires)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwner)
@@ -108,6 +117,8 @@ public:
 		OnPasteRow = InArgs._OnPasteRow;
 		CanPasteRow = InArgs._CanPasteRow;
 		OnRowRightClicked = InArgs._OnRowRightClicked;
+		ExpanderColumnId = InArgs._ExpanderColumnId;
+		bShowExpanderWires = InArgs._bShowExpanderWires;
 		// A copy changes nothing on screen, so the row flashes to say it happened - without it the chord is invisible.
 		Pulse.AddCurve(0.0f, 0.35f);
 		SMultiColumnTableRow<ItemType>::Construct(typename SMultiColumnTableRow<ItemType>::FArguments(), InOwner);
@@ -192,6 +203,25 @@ public:
 					.HighlightText(HighlightText)
 				]);
 
+		// The expander goes INSIDE the tinted border so the stripe runs unbroken across the row, and it supplies the depth
+		// indent itself from the row's GetIndentLevel - an arrow and separate padding would be two things to keep in step.
+		TSharedRef<SWidget> Cell = Inner;
+		if (!ExpanderColumnId.IsNone() && ColumnId == ExpanderColumnId)
+		{
+			Cell = SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					// this-> is load-bearing: SMultiColumnTableRow<ItemType> is a dependent base, so unqualified lookup
+					// cannot see SharedThis at template definition time. The engine's own STableRow omits it because it
+					// declares the member itself; a subclass template does not have that luxury.
+					SNew(SExpanderArrow, this->SharedThis(this)).ShouldDrawWires(bShowExpanderWires)
+				]
+				+ SHorizontalBox::Slot().FillWidth(1.0f)
+				[
+					Inner
+				];
+		}
+
 		// Zebra tint per cell, with the colour bound as a DELEGATE rather than a value: the attribute must evaluate at
 		// paint time, by which point IndexInList has been populated. See FSimpleCoreEditorWidgetUtils.
 		return SNew(SBorder)
@@ -199,7 +229,7 @@ public:
 			.BorderBackgroundColor(this, &SColumnTableRow::GetStripeColor)
 			.Padding(0.0f)
 			[
-				Inner
+				Cell
 			];
 	}
 
@@ -220,6 +250,8 @@ private:
 	FOnRowPaste OnPasteRow;
 	FCanRowAction CanPasteRow;
 	FOnRowAction OnRowRightClicked;
+	FName ExpanderColumnId;
+	bool bShowExpanderWires = false;
 	mutable FCurveSequence Pulse;
 };
 
@@ -230,9 +262,10 @@ public:
 	DECLARE_DELEGATE_TwoParams(FOnGetChildren, ItemType /*Parent*/, TArray<ItemType>& /*OutChildren*/);
 	DECLARE_DELEGATE_OneParam(FOnItemSelected, ItemType);
 
-	using FOnRowAction  = typename SColumnTableRow<ItemType>::FOnRowAction;
-	using FCanRowAction = typename SColumnTableRow<ItemType>::FCanRowAction;
-	using FOnRowPaste   = typename SColumnTableRow<ItemType>::FOnRowPaste;
+	using FOnRowAction			= typename SColumnTableRow<ItemType>::FOnRowAction;
+	using FCanRowAction			= typename SColumnTableRow<ItemType>::FCanRowAction;
+	using FOnRowPaste			= typename SColumnTableRow<ItemType>::FOnRowPaste;
+	using FOnExpansionChanged	= typename TSlateDelegates<ItemType>::FOnExpansionChanged;
 
 	SLATE_BEGIN_ARGS(SColumnTableView<ItemType>)
 		: _SelectionMode(ESelectionMode::Single)
@@ -243,6 +276,17 @@ public:
 
 		/** Supply to make the table hierarchical. Omit for a flat list. */
 		SLATE_EVENT(FOnGetChildren, OnGetChildren)
+
+		/**
+		 * Which column carries the expander arrow and the depth indent. Defaults to the first column that is not a fixed
+		 * gutter, because an arrow in an icon-width column clips as soon as the tree is more than a level or two deep.
+		 * Ignored entirely by a flat table.
+		 */
+		SLATE_ARGUMENT(FName, ExpanderColumnId)
+		SLATE_ARGUMENT(bool, bShowExpanderWires)
+
+		/** Fires when a row is expanded or collapsed, so a consumer can persist expansion or load children lazily. */
+		SLATE_EVENT(FOnExpansionChanged, OnExpansionChanged)
 
 		/**
 		 * Multi suits a table you read data OUT of. Single suits one you EDIT, where a stale selection can be acted on
@@ -308,6 +352,17 @@ public:
 		OnCopyRow			= InArgs._OnCopyRow;
 		OnPasteRow			= InArgs._OnPasteRow;
 		CanPasteRow			= InArgs._CanPasteRow;
+		OnGetChildren		= InArgs._OnGetChildren;
+		bShowExpanderWires	= InArgs._bShowExpanderWires;
+		// Resolved once here rather than per row. A caller that named a column gets it; otherwise the first column wide
+		// enough to hold an arrow. Left None for a flat table so no row pays for a branch it can never take.
+		ExpanderColumnId = InArgs._ExpanderColumnId;
+		if (ExpanderColumnId.IsNone() && InArgs._OnGetChildren.IsBound())
+		{
+			const FTableColumnDef<ItemType>* Host = InArgs._Columns.FindByPredicate(
+				[](const FTableColumnDef<ItemType>& C){ return C.FixedWidth <= 0.0f; });
+			ExpanderColumnId = Host ? Host->Id : (InArgs._Columns.Num() > 0 ? InArgs._Columns[0].Id : FName());
+		}
 
 		LoadPersistedState();
 
@@ -394,6 +449,7 @@ public:
 						.SelectionMode(InArgs._SelectionMode)
 						.OnGenerateRow(this, &SColumnTableView::GenerateRow)
 						.OnGetChildren(this, &SColumnTableView::GetVisibleChildren)
+						.OnExpansionChanged(InArgs._OnExpansionChanged)
 						.OnSelectionChanged(this, &SColumnTableView::HandleSelectionChanged)
 						.OnContextMenuOpening(InArgs._OnContextMenuOpening.IsBound()
 							? InArgs._OnContextMenuOpening
@@ -428,6 +484,19 @@ public:
 	 * empty state for the situation the user is actually in.
 	 */
 	bool IsFilterActive() const { return !FilterText.IsEmpty(); }
+
+	/** Expand or collapse one row, optionally its whole subtree. Safe on a flat table, where it simply does nothing. */
+	void SetExpansion(const ItemType& Item, bool bExpand, bool bRecursive = false)
+	{
+		if (!TreeView.IsValid()) { return; }
+		if (bRecursive) { ExpandRecursive(Item, bExpand); }
+		else            { TreeView->SetItemExpansion(Item, bExpand); }
+	}
+
+	void SetAllExpansion(bool bExpand)
+	{
+		for (const ItemType& Item : VisibleRoots) { ExpandRecursive(Item, bExpand); }
+	}
 
 	/** Replace the root rows. The caller owns when data changes; this widget never polls. */
 	void SetRootItems(TArray<ItemType> InItems)
@@ -619,6 +688,8 @@ private:
 		return SNew(SColumnTableRow<ItemType>, Owner)
 			.Item(Item)
 			.Columns(&Columns)
+			.ExpanderColumnId(ExpanderColumnId)
+			.bShowExpanderWires(bShowExpanderWires)
 			.HighlightText(this, &SColumnTableView::GetFilterTextAsText)
 			.OnCopyRow(OnCopyRow)
 			.OnPasteRow(OnPasteRow)
@@ -816,6 +887,8 @@ private:
 	FOnRowPaste							OnPasteRow;
 	FCanRowAction						CanPasteRow;
 	FOnGetChildren						OnGetChildren;
+	FName								ExpanderColumnId;
+	bool								bShowExpanderWires = false;
 	FOnItemSelected						OnItemSelected;
 	TSharedPtr<STreeView<ItemType>>		TreeView;
 

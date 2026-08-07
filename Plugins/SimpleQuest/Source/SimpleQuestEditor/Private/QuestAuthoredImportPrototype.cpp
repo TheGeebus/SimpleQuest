@@ -1438,6 +1438,11 @@ namespace
 			NodeByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Node);
 			NodeByKey.Add(Pair.Key, Node);
 		}
+		
+		// Shared by the create and move passes, consumed by the single pin-refresh below. Declared out here because a move
+		// can land in a container a create just made, and both have to reach the same refresh.
+		TMap<FString, UEdGraphNode*> PinRefreshTargets;
+		TArray<FString> SpawnWarnings;
 
 		// CREATE before anything else: a container has to exist before nodes inside it, and wiring will reference new nodes.
 		{
@@ -1448,8 +1453,6 @@ namespace
 			}
 
 			TSet<FString> Consumed;
-			TArray<FString> SpawnWarnings;
-			TMap<FString, UEdGraphNode*> CreatedByKey;
 
 			// A source may declare a container AND its contents, so one create's level can be another create. Spawn whatever
 			// is reachable and repeat while anything moved; the planner already refuses genuinely unreachable levels, so this
@@ -1475,7 +1478,10 @@ namespace
 						Level->Modify();
 						if (UEdGraphNode* Node = SpawnNodeFromRow(Level, **Row, Bundle, NodeByKey, Consumed, SpawnWarnings))
 						{
-							CreatedByKey.Add(Entry.Key, Node);
+							PinRefreshTargets.Add(Entry.Key, Node);
+							// The container this landed in advertises outcome pins derived from its inner Exits, so it needs
+							// refreshing too - otherwise an edge out of the container cannot resolve a pin that should exist.
+							if (UEdGraphNode* Container = NodeByKey.FindRef(Entry.GraphCell)) { PinRefreshTargets.Add(Entry.GraphCell, Container); }
 							++OutResult.NodesCreated;
 						}
 						else
@@ -1492,16 +1498,54 @@ namespace
 				OutResult.Skipped.Add(FString::Printf(TEXT("create '%s' sits in level '%s', which never became reachable"),
 					*Entry->Key, *Entry->GraphCell));
 			}
-
-			// Property-derived pins only exist once the properties are restored, and wiring will need them. Restricted to the
-			// nodes just created - refreshing pins on nodes nobody asked about would disturb an asset this plan never
-			// described.
-			if (CreatedByKey.Num() > 0)
-			{
-				RefreshPinsPass(Bundle, NodeRowsByKey, CreatedByKey, SpawnWarnings);
-			}
-			OutResult.Skipped.Append(SpawnWarnings);
 		}
+		
+		// MOVE, after creation so a destination container this same source declares already exists, and before wiring so the
+		// delta pass sees final placement. A move is a REPARENT, not a rebuild - the node keeps its identity, properties,
+		// position, and, if it is a container, its inner graph and everything in it, because CreateInnerGraph outers that
+		// graph to the NODE. Engine precedent: FBlueprintEditor::CollapseNodesIntoGraph.
+		// Links are deliberately left alone. A source that relocates a node also restates its wiring, so the plan's edge
+		// deltas already describe the post-move topology and the wiring pass below is what applies them.
+		{
+			for (const FQuestNodePlanEntry& Entry : Plan.Entries)
+			{
+				if (Entry.Action != EQuestNodePlanAction::Update || !Entry.bMoved) { continue; }
+
+				UEdGraphNode* Node = NodeByKey.FindRef(Entry.Guid);
+				UEdGraph* Dest = ResolveLevelGraph(Target, Entry.GraphCell, NodeByKey);
+				if (!Node || !Dest)
+				{
+					OutResult.Skipped.Add(FString::Printf(TEXT("move '%s' could not resolve its %s"), *Entry.Key,
+						Node ? TEXT("destination container") : TEXT("node")));
+					continue;
+				}
+
+				UEdGraph* Source = Node->GetGraph();
+				if (Source == Dest) { continue; }   // the plan and the graph already agree; nothing to relocate
+
+				// Modify all three before touching anything: the two node arrays change, and the node's outer changes.
+				Source->Modify();
+				Dest->Modify();
+				Node->Modify();
+				Source->Nodes.Remove(Node);
+				Dest->Nodes.Add(Node);
+				Node->Rename(nullptr, Dest);
+				++OutResult.NodesMoved;
+				PinRefreshTargets.Add(Entry.Key, Node);
+				if (UEdGraphNode* Container = NodeByKey.FindRef(Entry.GraphCell)) { PinRefreshTargets.Add(Entry.GraphCell, Container); }
+			}
+		}
+		
+		// Pin refresh runs ONCE, after both creates and moves and before wiring, because wiring resolves pins that may
+		// not exist until this runs. A container's outcome pins are DERIVED from the Exit nodes in its inner graph, so a
+		// node created or moved INSIDE one changes what the container advertises - which is why the destination
+		// containers are registered alongside the nodes themselves. Deeper-first ordering inside RefreshPinsPass means a
+		// container is rebuilt after the inner nodes it reads.
+		if (PinRefreshTargets.Num() > 0)
+		{
+			RefreshPinsPass(Bundle, NodeRowsByKey, PinRefreshTargets, SpawnWarnings);
+		}
+		OutResult.Skipped.Append(SpawnWarnings);
 
 		// WIRING, after creation so both endpoints of a new relationship exist.
 		{
@@ -1600,15 +1644,6 @@ namespace
 				continue;
 			}
 			if (Entry.Action != EQuestNodePlanAction::Update) { ++OutResult.EntriesDeferred; continue; }
-			if (Entry.bMoved)
-			{
-				// Moving is not yet implemented, and doing the property half alone would leave a node matching neither its
-				// source nor its former self. Named, not counted. EntriesDeferred is the anonymous tally for entries
-				// left alone by POLICY - an orphan under bDeleteOrphanedNodes=false - while Skipped is the named list
-				// of things that could not be done. Incrementing both reports one problem as two.
-				OutResult.Skipped.Add(FString::Printf(TEXT("entry '%s' moves to a different container, which apply cannot yet perform"), *Entry.Key));
-				continue;
-			}
 			if (Entry.Changes.IsEmpty()) continue;
 
 			UObject* Object = Entry.bIsQuestlineSelf ? static_cast<UObject*>(&Target) : NodeByKey.FindRef(Entry.Guid);
@@ -1618,6 +1653,16 @@ namespace
 				continue;
 			}
 			OutResult.PropertiesWritten += ApplyChangesToObject(Object, Entry.Key, Entry.Changes, OutResult.Skipped);
+		}
+
+		// ONE notify for the whole apply, rather than one per pass. Only AddNode / RemoveNode tell the editor anything on
+		// their own - a direct Nodes-array mutation, a property write and MakeLinkTo / BreakLinkTo all leave it drawing
+		// pre-apply state until something unrelated forces a redraw. Here rather than in the passes so every caller gets
+		// it, the panel included, and no future pass has to remember. Skipped when nothing was written, so a no-op apply
+		// stays genuinely inert.
+		if (OutResult.ChangedAnything())
+		{
+			FSimpleQuestEditorUtilities::NotifyGraphAndDescendants(Target.QuestlineEdGraph);
 		}
 	}
 
@@ -1786,6 +1831,51 @@ namespace
 				CollectQuestWireEdges(Pair.Value, *Policy, LiveEdges);
 			}
 			CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, OutPlan.AddedEdges, OutPlan.RemovedEdges);
+		}
+		
+		/**
+		 * WIRING MUST NOT CROSS A CONTAINER BOUNDARY. A link joins two nodes in ONE graph - a designer cannot author one
+		 * that leaves a container, because authoring happens inside a single graph at a time. The compiler TOLERATES such
+		 * a link (it mints a context alias to route it), so nothing downstream complains and a source could quietly
+		 * produce a topology nobody can open and edit. That silence is why this is refused here rather than left to fail
+		 * later. Not move-specific: a hand-written source declaring the same edge is the same defect.
+		 * Containment is exempt - contains(InnerGraph) names a container and a node INSIDE it, so differing levels is its
+		 * definition rather than a fault.
+		 * Bundle.Edges is the POST-APPLY wiring set: anything live it omits is already planned as a removal, so comparing
+		 * against it describes the graph the source is asking for rather than the one that exists now.
+		 */
+		{
+			auto LevelAfterApply = [&NodeRowsByKey, &GuidByKey, &GraphCellByGuid](const FString& Key) -> FString
+			{
+				if (const FQuestDataRow* const* Row = NodeRowsByKey.Find(Key))
+				{
+					return ResolveQuestLevelToGuid((*Row)->Get(TEXT("graph")), GuidByKey);
+				}
+				const FString* Guid = GuidByKey.Find(Key);
+				return Guid ? ResolveQuestLevelToGuid(GraphCellByGuid.FindRef(*Guid), GuidByKey) : FString();
+			};
+
+			for (const FQuestDataEdge& E : Bundle.Edges)
+			{
+				if (E.Type.StartsWith(TEXT("contains("))) { continue; }
+
+				const FString FromLevel = LevelAfterApply(E.From);
+				const FString ToLevel   = LevelAfterApply(E.To);
+				// An endpoint that resolves to nothing is not this check's business - a missing node is reported by the
+				// passes that own it, and guessing here would refuse a row for a reason that is not its own.
+				if (FromLevel.IsEmpty() || ToLevel.IsEmpty() || FromLevel == ToLevel) { continue; }
+
+				OutPlan.Refusals.Add(FString::Printf(TEXT("edge '%s' %s '%s' would cross a container boundary - '%s' ends up in "
+					"level '%s' while '%s' is in level '%s'. A link can only join two nodes in the same graph, so this is a "
+					"topology the editor cannot author"),
+					*E.From,
+					*E.Type,
+					*E.To,
+					*E.From,
+					*FromLevel,
+					*E.To,
+					*ToLevel));
+			}
 		}
 		
 		/**
@@ -2083,10 +2173,11 @@ namespace
 
 			for (const FString& S : Result.Skipped) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: apply skipped %s"), *S);
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: APPLIED to '%s' - %d property change(s), %d node(s) created, "
-				"%d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred by policy, %d skipped."),
+				"%d node(s) moved, %d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred by policy, %d skipped."),
 				*AssetPath,
 				Result.PropertiesWritten,
 				Result.NodesCreated,
+				Result.NodesMoved,
 				Result.EdgesChanged,
 				Result.NodesDeleted,
 				Result.EntriesDeferred,
@@ -2095,7 +2186,7 @@ namespace
 			// Only dirty the package if something actually happened. A re-import that changes nothing should leave no trace:
 			// marking it regardless makes every no-op run look like a modification, which costs a save and a diff for work
 			// that was not done - and trains a designer to ignore the one signal that says an asset moved.
-			const bool bChangedAnything = Result.PropertiesWritten > 0 || Result.NodesCreated > 0 || Result.EdgesChanged > 0 || Result.NodesDeleted > 0;
+			const bool bChangedAnything = Result.ChangedAnything();
 			if (bChangedAnything)
 			{
 				TargetGraph->GetPackage()->MarkPackageDirty();

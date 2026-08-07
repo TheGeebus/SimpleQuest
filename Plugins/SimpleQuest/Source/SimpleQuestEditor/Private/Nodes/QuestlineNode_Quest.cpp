@@ -110,25 +110,9 @@ void UQuestlineNode_Quest::RegenerateInnerGraphIdentitiesRecursive(UEdGraph* Gra
 	}
 }
 
-static void NotifyGraphAndDescendants(UEdGraph* Graph)
-{
-	if (!Graph) return;
-	Graph->NotifyGraphChanged();
-	for (UEdGraphNode* Node : Graph->Nodes)
-	{
-		if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
-		{
-			if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
-			{
-				NotifyGraphAndDescendants(InnerGraph);
-			}
-		}
-	}
-}
-
 void UQuestlineNode_Quest::NotifyInnerGraphsOfRename()
 {
-	NotifyGraphAndDescendants(GetInnerGraph());
+	FSimpleQuestEditorUtilities::NotifyGraphAndDescendants(GetInnerGraph());
 }
 
 void UQuestlineNode_Quest::CreateInnerGraph()

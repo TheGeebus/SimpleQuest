@@ -101,6 +101,14 @@ public:
 	 * definition, so the import's pin resolution and the export's wire-binding inversion can never disagree on the mapping.
 	 */
 	static FName PinCategoryForEdgeVerb(const FString& Verb);
+	
+	/**
+	 * Tells the editor a graph and every graph nested inside it have changed, so open panels redraw. Needed by anything
+	 * that mutates a graph's Nodes array directly rather than through UEdGraph::AddNode / RemoveNode, which notify on
+	 * their own - a reparent has to, because AddNode asserts the node's outer already matches and that is only true
+	 * after the Rename.
+	 */
+	static void NotifyGraphAndDescendants(UEdGraph* Graph);
 
 	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.

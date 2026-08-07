@@ -131,10 +131,21 @@ struct FQuestApplyResult
 	int32 PropertiesWritten = 0;
 	int32 NodesCreated      = 0;
 	int32 NodesDeleted      = 0;
+	int32 NodesMoved        = 0;
 	int32 EdgesChanged      = 0;
 	int32 EntriesDeferred   = 0;   // structural work this step does not perform
 	TArray<FString> Skipped;
 	bool  bRefused = false;        // the plan was not trustworthy enough to act on any part of
+
+	/**
+	 * Did the apply actually WRITE anything? Deliberately distinct from "was anything skipped or deferred" - a run can
+	 * decline work and change nothing, and the two answers drive different decisions: whether to dirty the package,
+	 * whether to redraw open graphs, and whether "already matches the source" is an honest thing to print.
+	 */
+	bool ChangedAnything() const
+	{
+		return PropertiesWritten > 0 || NodesCreated > 0 || NodesMoved > 0 || EdgesChanged > 0 || NodesDeleted > 0;
+	}
 };
 
 /** What an apply is permitted to do beyond writing properties. Destructive actions are opt-in, never inferred. */

@@ -206,6 +206,19 @@ FName FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(const FString& Verb)
 	return NAME_None;
 }
 
+void FSimpleQuestEditorUtilities::NotifyGraphAndDescendants(UEdGraph* Graph)
+{
+	if (!Graph) { return; }
+	Graph->NotifyGraphChanged();
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			NotifyGraphAndDescendants(QuestNode->GetInnerGraph());
+		}
+	}
+}
+
 TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)
 {
 	TArray<FName> Result;

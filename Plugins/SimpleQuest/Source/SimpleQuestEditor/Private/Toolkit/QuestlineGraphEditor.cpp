@@ -1093,7 +1093,8 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         // Bound to the asset path the resolver keys plans by, so a plan computed for a DIFFERENT questline never
         // renders here. GetPathName gives the same spelling the console command resolves --in-place to.
         PlanPanel = SNew(SQuestPlanPanel)
-            .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString());
+            .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString())
+            .Questline(QuestlineGraph);
     }
 
     return SNew(SDockTab)

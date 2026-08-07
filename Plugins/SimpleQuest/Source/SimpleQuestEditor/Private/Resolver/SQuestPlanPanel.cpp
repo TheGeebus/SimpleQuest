@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 #include "SQuestPlanPanel.h"
-
+#include "Quests/QuestlineGraph.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Styling/StyleColors.h"
+#include "UObject/UObjectGlobals.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
@@ -41,6 +42,11 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
 	PublishHandle = FQuestPlanBroker::Get().OnPlanPublished().AddSP(this, &SQuestPlanPanel::HandlePlanPublished);
+	Questline = InArgs._Questline;
+	// UObject::Modify broadcasts this, so it catches edits anywhere in the asset - including inside a container's INNER
+	// graph, which subscribing to the root UEdGraph's OnGraphChanged would miss entirely. Cheap: it only sets a bool, and
+	// only for objects belonging to this questline.
+	ModifiedHandle = FCoreUObjectDelegates::OnObjectModified.AddSP(this, &SQuestPlanPanel::HandleObjectModified);
 
 	ChildSlot
 	[
@@ -63,6 +69,20 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			.Padding(6.0f)
 			[
 				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetBlockersText).AutoWrapText(true)
+			]
+		]
+		
+		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+		[
+			SNew(SBorder)
+			.Visibility(this, &SQuestPlanPanel::GetStaleVisibility)
+			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+			.BorderBackgroundColor(FStyleColors::AccentYellow)
+			.Padding(6.0f)
+			[
+				SNew(STextBlock)
+				.Text(LOCTEXT("PlanStale", "This questline has changed since this plan was computed. Re-run the import to refresh it."))
+				.AutoWrapText(true)
 			]
 		]
 
@@ -95,6 +115,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 SQuestPlanPanel::~SQuestPlanPanel()
 {
 	FQuestPlanBroker::Get().OnPlanPublished().Remove(PublishHandle);
+	FCoreUObjectDelegates::OnObjectModified.Remove(ModifiedHandle);
 }
 
 TArray<FTableColumnDef<FQuestPlanRowPtr>> SQuestPlanPanel::MakeColumns() const
@@ -146,6 +167,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 	if (InAssetPath != TargetAssetPath) { return; }
 
 	bHasPlan = true;
+	bStale = false;   // a fresh plan is by definition current
 
 	Summary = FText::FromString(FString::Printf(
 	TEXT("%d update(s), %d with changes  |  %d created  |  %d orphaned  |  %d connections added, %d removed  |  %d untouched"),
@@ -168,6 +190,21 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 	Blockers = FText::FromString(FString::Join(Lines, TEXT("\n")));
 
 	RebuildRows(Plan);
+}
+
+void SQuestPlanPanel::HandleObjectModified(UObject* Modified)
+{
+	if (!bHasPlan || bStale || !Modified || !Questline.IsValid()) { return; }
+	// The asset itself, or anything living inside it - a node, an inner graph, an instanced reward.
+	if (Modified == Questline.Get() || Modified->IsIn(Questline.Get()))
+	{
+		bStale = true;
+	}
+}
+
+EVisibility SQuestPlanPanel::GetStaleVisibility() const
+{
+	return bStale ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)

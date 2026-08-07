@@ -8,6 +8,7 @@
 #include "Widgets/SCompoundWidget.h"
 
 struct FQuestInPlacePlan;
+class UQuestlineGraph;
 
 /**
  * One line in the plan tree. A plan has two levels and they are genuinely different things - a NODE that would change,
@@ -39,6 +40,13 @@ public:
 	SLATE_BEGIN_ARGS(SQuestPlanPanel) {}
 		/** The asset this panel speaks for. Plans for any other asset are ignored - a plan is about one questline. */
 		SLATE_ARGUMENT(FString, TargetAssetPath)
+		
+		/**
+		 * The asset itself, so the panel can notice when it changes underneath a plan. A plan is a COMPARISON against a
+		 * particular asset state; the moment that state moves, the plan stops being true, and a panel still displaying it
+		 * is worse than an empty one because it looks authoritative.
+		 */
+		SLATE_ARGUMENT(TWeakObjectPtr<UQuestlineGraph>, Questline)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -52,13 +60,18 @@ private:
 	FText GetSummaryText() const;
 	FText GetBlockersText() const;
 	EVisibility GetBlockersVisibility() const;
+	EVisibility GetStaleVisibility() const;
+	void HandleObjectModified(UObject* Modified);
 
 	FString TargetAssetPath;
+	TWeakObjectPtr<UQuestlineGraph> Questline;
 	FDelegateHandle PublishHandle;
+	FDelegateHandle ModifiedHandle;
 
 	FText Summary;
 	FText Blockers;
 	bool  bHasPlan = false;
+	bool  bStale   = false;
 
 	TArray<FQuestPlanRowPtr> Rows;
 	TSharedPtr<SColumnTableView<FQuestPlanRowPtr>> Table;

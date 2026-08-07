@@ -10,13 +10,14 @@
 #include "Toolkit/QuestlineBreadcrumbBar.h"
 
 
-class SQuestlineGraphPanel;
 struct FQuestlineOutlinerItem;
-class SQuestlineOutlinerPanel;
-class UQuestlineGraph;
 class SGraphEditor;
 class SGroupExaminerPanel;
 class SPrereqExaminerPanel;
+class SQuestPlanPanel;
+class SQuestlineGraphPanel;
+class SQuestlineOutlinerPanel;
+class UQuestlineGraph;
 
 
 class FQuestlineGraphEditor : public FAssetEditorToolkit, public FEditorUndoClient
@@ -171,6 +172,10 @@ private:
 	
 	TSharedPtr<SGroupExaminerPanel> GroupExaminerPanel;
 	static const FName GroupExaminerTabId;
+	
+	TSharedRef<SDockTab> SpawnPlanTab(const FSpawnTabArgs& Args);
+	TSharedPtr<SQuestPlanPanel> PlanPanel;
+	static const FName PlanTabId;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

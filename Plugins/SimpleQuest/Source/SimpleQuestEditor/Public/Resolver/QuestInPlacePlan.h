@@ -60,6 +60,15 @@ struct FQuestNodePlanEntry
 	FString CurrentClassName;    // existing class; empty for Create
 	FString GraphCell;           // incoming graph level
 	FString CurrentGraphCell;    // existing graph level; empty for Create
+	
+	/**
+	 * The same two levels as a reader would recognise them. A level is named by its CONTAINER'S KEY, which in a canonical
+	 * export is a GUID - so a panel rendering the raw cell shows a wall of hex for the one question a designer is asking:
+	 * which container. Resolved by the planner because only the planner has the nodes. Falls back to the raw cell when the
+	 * level is "root" or names something no longer present.
+	 */
+	FString GraphLabel;
+	FString CurrentGraphLabel;
 
 	EQuestNodePlanAction Action = EQuestNodePlanAction::Update;
 	TArray<FQuestPropertyChange> Changes;
@@ -98,6 +107,14 @@ struct FQuestInPlacePlan
 	 */
 	TArray<FQuestDataEdge> AddedEdges;
 	TArray<FQuestDataEdge> RemovedEdges;
+	
+	/**
+	 * Every key this plan mentions, as a reader would recognise it. Edges reference nodes by KEY, which in a canonical
+	 * export is a GUID - so a panel rendering an edge shows two walls of hex for the one question being asked: which
+	 * nodes. Built by the planner because only the planner has the nodes; a key with no live node stays absent, and the
+	 * caller falls back to the key itself.
+	 */
+	TMap<FString, FString> LabelByKey;
 
 	int32 CountOf(EQuestNodePlanAction Action) const
 	{

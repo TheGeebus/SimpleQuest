@@ -36,6 +36,7 @@
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestNodeIdentity.h"
+#include "Resolver/QuestPlanBroker.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "SimpleQuestLog.h"
 #include "UObject/SavePackage.h"
@@ -1707,6 +1708,27 @@ namespace
 		NodeByGuid.GetKeys(AllGuids);
 		TMap<FString, FString> GuidByKey;
 		BuildQuestNodeKeyIndex(SourceKeyByGuid, AllGuids, GuidByKey, OutPlan.AmbiguousKeys);
+		
+		// A level cell names a container by KEY; a reader wants its NAME. Declared here rather than as a free function
+		// because it needs the identity maps this walk just built, and it is nobody else's business.
+		auto LevelDisplayName = [&NodeByGuid, &GuidByKey](const FString& Cell) -> FString
+		{
+			if (Cell.IsEmpty() || Cell == TEXT("root")) { return TEXT("root"); }
+			const FString* Guid = GuidByKey.Find(Cell);
+			const UQuestlineNodeBase* Node = Guid ? NodeByGuid.FindRef(*Guid) : NodeByGuid.FindRef(Cell);
+			return Node ? Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString() : Cell;
+		};
+		
+		// Names for every live node, keyed the way rows and edges address them. Done once here rather than per consumer,
+		// because resolving a key to a title needs the identity maps and the panel has neither.
+		for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
+		{
+			if (!Pair.Value) { continue; }
+			const FString Title = Pair.Value->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
+			OutPlan.LabelByKey.Add(Pair.Key, Title);
+			OutPlan.LabelByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Title);
+		}
+		
 		for (const FString& Key : OutPlan.AmbiguousKeys)
 		{
 			OutPlan.Warnings.Add(FString::Printf(TEXT("'%s' names more than one node - that row is not planned, and neither "
@@ -1726,9 +1748,10 @@ namespace
 			const FQuestDataRow& Row = *Pair.Value;
 
 			FQuestNodePlanEntry Entry;
-			Entry.Key       = Row.Key;
-			Entry.ClassName = Row.Get(TEXT("class"));
-			Entry.GraphCell = Row.Get(TEXT("graph"));
+			Entry.Key			= Row.Key;
+			Entry.ClassName		= Row.Get(TEXT("class"));
+			Entry.GraphCell		= Row.Get(TEXT("graph"));
+			Entry.GraphLabel	= LevelDisplayName(Entry.GraphCell);
 
 			const FString* FoundGuid = GuidByKey.Find(Row.Key);
 			const UQuestlineNodeBase* Node = FoundGuid ? NodeByGuid.FindRef(*FoundGuid) : nullptr;
@@ -1761,10 +1784,11 @@ namespace
 			}
 
 			MatchedGuids.Add(*FoundGuid);
-			Entry.Action           = EQuestNodePlanAction::Update;
-			Entry.Guid             = *FoundGuid;
-			Entry.CurrentClassName = Node->GetClass()->GetName();
-			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(*FoundGuid);
+			Entry.Action			= EQuestNodePlanAction::Update;
+			Entry.Guid				= *FoundGuid;
+			Entry.CurrentClassName	= Node->GetClass()->GetName();
+			Entry.CurrentGraphCell  = GraphCellByGuid.FindRef(*FoundGuid);
+			Entry.CurrentGraphLabel = LevelDisplayName(Entry.CurrentGraphCell);
 			
 			// A class difference is not a change to this node - it says the row describes a DIFFERENT node. A Step is not a
 			// mutated Quest, and nothing about one instance can be carried into the other, so there is nothing to apply and
@@ -1810,13 +1834,14 @@ namespace
 			if (OutPlan.AmbiguousKeys.Contains(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid))) continue;
 
 			FQuestNodePlanEntry Entry;
-			Entry.Action           = EQuestNodePlanAction::Orphan;
-			Entry.Key              = QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid);
-			Entry.Guid             = Pair.Key;
-			Entry.ClassName        = Pair.Value->GetClass()->GetName();
-			Entry.CurrentClassName = Entry.ClassName;
-			Entry.CurrentGraphCell = GraphCellByGuid.FindRef(Pair.Key);
-			Entry.Label            = Pair.Value->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
+			Entry.Action			= EQuestNodePlanAction::Orphan;
+			Entry.Key				= QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid);
+			Entry.Guid				= Pair.Key;
+			Entry.ClassName			= Pair.Value->GetClass()->GetName();
+			Entry.CurrentClassName	= Entry.ClassName;
+			Entry.CurrentGraphCell  = GraphCellByGuid.FindRef(Pair.Key);
+			Entry.CurrentGraphLabel = LevelDisplayName(Entry.CurrentGraphCell);
+			Entry.Label				= Pair.Value->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
 			OutPlan.Entries.Add(MoveTemp(Entry));
 		}
 
@@ -2142,6 +2167,9 @@ namespace
 			
 			PlanInPlace(*TargetGraph, Bundle, NodeRowsByKey, Warnings, Plan, Policies);
 			LogInPlacePlan(Plan);
+			// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
+			// about to be applied, so the panel always shows what the run actually decided.
+			FQuestPlanBroker::Get().Publish(Plan.TargetAssetPath, Plan);
 
 			if (!bApply)
 			{

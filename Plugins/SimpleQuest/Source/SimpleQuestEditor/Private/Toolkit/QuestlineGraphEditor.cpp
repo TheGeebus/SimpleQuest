@@ -33,6 +33,7 @@
 #include "GameplayTagsManager.h"
 #include "GraphEditorActions.h"
 #include "ScopedTransaction.h"
+#include "Resolver/SQuestPlanPanel.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -40,6 +41,7 @@ const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Detai
 const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outliner"));
 const FName FQuestlineGraphEditor::GroupExaminerTabId(TEXT("QuestlineGraphEditor_GroupExaminer"));
 const FName FQuestlineGraphEditor::PrereqExaminerTabId(TEXT("QuestlineGraphEditor_PrereqExaminer"));
+const FName FQuestlineGraphEditor::PlanTabId(TEXT("QuestlineGraphEditor_Plan"));
 
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
@@ -219,7 +221,12 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPrereqExaminerTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerTabLabel", "Prereq Examiner"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef())
-        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint")); /* "Kismet.Tabs.FindResults" "Kismet.FindInBlueprints.MenuIcon" "BlueprintEditor.FindInBlueprint" */
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint"));
+    InTabManager->RegisterTabSpawner(PlanTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPlanTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "PlanTabLabel", "Import Plan"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef())
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.AssetActions.Duplicate"));
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -229,6 +236,7 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
     InTabManager->UnregisterTabSpawner(OutlinerTabId);
     InTabManager->UnregisterTabSpawner(GroupExaminerTabId);
     InTabManager->UnregisterTabSpawner(PrereqExaminerTabId);
+    InTabManager->UnregisterTabSpawner(PlanTabId);
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 }
 
@@ -1075,6 +1083,23 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGroupExaminerTab(const FSpawnTa
         .Label(NSLOCTEXT("SimpleQuestEditor", "GroupExaminerTabLabel", "Group Examiner"))
         [
             GroupExaminerPanel.ToSharedRef()
+        ];
+}
+
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Args)
+{
+    if (!PlanPanel.IsValid())
+    {
+        // Bound to the asset path the resolver keys plans by, so a plan computed for a DIFFERENT questline never
+        // renders here. GetPathName gives the same spelling the console command resolves --in-place to.
+        PlanPanel = SNew(SQuestPlanPanel)
+            .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString());
+    }
+
+    return SNew(SDockTab)
+        .Label(NSLOCTEXT("SimpleQuestEditor", "PlanTabLabel", "Import Plan"))
+        [
+            PlanPanel.ToSharedRef()
         ];
 }
 

@@ -71,6 +71,14 @@ struct FTableColumnDef
 
 	/** Optional cell widget. Absent renders GetText as a text block with filter-match highlighting. */
 	TFunction<TSharedRef<SWidget>(const ItemType&)> MakeCell;
+
+	/**
+	 * Optional per-row styling for the DEFAULT text cell. Exists so a caller can distinguish row kinds - a parent from
+	 * its children, a warning from a value - without reaching for MakeCell, which would silently cost that column its
+	 * filter-match highlighting. Ignored when MakeCell is supplied, since a custom cell owns its presentation entirely.
+	 */
+	TFunction<FSlateColor(const ItemType&)> GetTextColor;
+	TFunction<FSlateFontInfo(const ItemType&)> GetFont;
 };
 
 /** One row. Generates cells from the column definitions. Nothing here knows what the data is. */
@@ -201,6 +209,8 @@ public:
 					SNew(STextBlock)
 					.Text(Column->GetText ? Column->GetText(Item) : FText::GetEmpty())
 					.HighlightText(HighlightText)
+					.ColorAndOpacity(Column->GetTextColor ? Column->GetTextColor(Item) : FSlateColor::UseForeground())
+					.Font(Column->GetFont ? Column->GetFont(Item) : FCoreStyle::GetDefaultFontStyle("Regular", 9))
 				]);
 
 		// The expander goes INSIDE the tinted border so the stripe runs unbroken across the row, and it supplies the depth
@@ -209,7 +219,11 @@ public:
 		if (!ExpanderColumnId.IsNone() && ColumnId == ExpanderColumnId)
 		{
 			Cell = SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				// NO VAlign - the slot must stay VAlign_Fill (the default). SExpanderArrow computes every wire length from
+				// AllottedGeometry.Size.Y, so centring it shrinks the geometry to the arrow's own height and the wires are
+				// drawn against the wrong extent. The engine's STableRow and both hand-rolled trees in SimpleQuest
+				// (the Questline Outliner and the Group Examiner) all leave this alone; matching them is the fix.
+				+ SHorizontalBox::Slot().AutoWidth()
 				[
 					// this-> is load-bearing: SMultiColumnTableRow<ItemType> is a dependent base, so unqualified lookup
 					// cannot see SharedThis at template definition time. The engine's own STableRow omits it because it

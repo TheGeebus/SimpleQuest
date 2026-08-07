@@ -176,6 +176,15 @@ private:
 	TSharedRef<SDockTab> SpawnPlanTab(const FSpawnTabArgs& Args);
 	TSharedPtr<SQuestPlanPanel> PlanPanel;
 	static const FName PlanTabId;
+
+	void BuildImportPlan();
+	void ApplyImportPlan();
+	bool CanApplyImportPlan() const;
+	TSharedRef<SWidget> GenerateImportOptionsMenu();
+	bool RunImportFromFolder(bool bApply);
+
+	/** The folder the last Build Plan read, so Apply re-reads the same source without asking again. */
+	FString LastImportFolder;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

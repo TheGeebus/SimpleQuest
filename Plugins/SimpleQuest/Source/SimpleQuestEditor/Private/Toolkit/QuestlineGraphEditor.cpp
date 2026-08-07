@@ -3,6 +3,7 @@
 
 #include "Toolkit/QuestlineGraphEditor.h"
 
+#include "DesktopPlatformModule.h"
 #include "EdGraphUtilities.h"
 #include "Toolkit/QuestlineGraphPanel.h"
 #include "Quests/QuestlineGraph.h"
@@ -32,7 +33,10 @@
 #include "EdGraphNode_Comment.h"
 #include "GameplayTagsManager.h"
 #include "GraphEditorActions.h"
+#include "IDesktopPlatform.h"
 #include "ScopedTransaction.h"
+#include "Resolver/QuestImportOperations.h"
+#include "Resolver/QuestPlanBroker.h"
 #include "Resolver/SQuestPlanPanel.h"
 
 
@@ -402,6 +406,15 @@ void FQuestlineGraphEditor::BindGraphCommands()
     GraphEditorCommands->MapAction(
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
+
+    GraphEditorCommands->MapAction(
+    FQuestlineGraphEditorCommands::Get().BuildImportPlan,
+    FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::BuildImportPlan));
+
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().ApplyImportPlan,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan));
 
     GraphEditorCommands->MapAction(
         FQuestlineGraphEditorCommands::Get().CompileAllQuestlineGraphs,
@@ -840,6 +853,25 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
 
     ToolbarBuilder.EndSection();
 
+    ToolbarBuilder.BeginSection("Resolver");
+
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().BuildImportPlan,
+        NAME_None,
+        NSLOCTEXT("SimpleQuestEditor", "BuildPlan_Label", "Build Plan"),
+        TAttribute<FText>(),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
+
+    ToolbarBuilder.AddComboButton(
+        FUIAction(),
+        FOnGetContent::CreateSP(this, &FQuestlineGraphEditor::GenerateImportOptionsMenu),
+        TAttribute<FText>(),
+        NSLOCTEXT("SimpleQuestEditor", "ImportOptions_Tooltip", "Import options"),
+        TAttribute<FSlateIcon>(),
+        true);
+
+    ToolbarBuilder.EndSection();
+
     ToolbarBuilder.BeginSection("GraphDefaults");
 
     // Graph Defaults — pins the Details panel to the asset's own properties. Toggle button, mirrors BP's Class Defaults.
@@ -1102,6 +1134,82 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         [
             PlanPanel.ToSharedRef()
         ];
+}
+
+bool FQuestlineGraphEditor::RunImportFromFolder(bool bApply)
+{
+    if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
+
+    FQuestImportRequest Request;
+    Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
+    Request.Endpoint.FormatName = TEXT("TSV");
+    Request.Endpoint.Folder = LastImportFolder;
+    Request.Policies = QuestImport_ResolvePolicies(nullptr, /*bResetAbsent*/ false);
+
+    // The caller owns the transaction, so an apply driven from the toolbar is ONE undo step covering everything the
+    // plan performs - the same guarantee the console gives.
+    TUniquePtr<FScopedTransaction> Transaction;
+    if (bApply)
+    {
+        Transaction = MakeUnique<FScopedTransaction>(
+            NSLOCTEXT("SimpleQuestEditor", "ApplyImportPlanTransaction", "Apply Import Plan"));
+    }
+
+    FQuestImportOutcome Outcome;
+    if (!QuestImport_RunInPlace(*QuestlineGraph, Request, bApply, Outcome))
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Build Plan: %s. Nothing was modified."), *Outcome.Error);
+        return false;
+    }
+
+    Outcome.Plan.TargetAssetPath = QuestlineGraph->GetPathName();
+    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan);
+    return true;
+}
+
+void FQuestlineGraphEditor::BuildImportPlan()
+{
+    IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+    if (!Desktop) { return; }
+
+    const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+    FString Chosen;
+    if (!Desktop->OpenDirectoryDialog(ParentWindow,
+            NSLOCTEXT("SimpleQuestEditor", "BuildPlanBrowseTitle", "Choose a folder of source data").ToString(),
+            LastImportFolder, Chosen))
+    {
+        return;   // cancelled; nothing to say
+    }
+
+    LastImportFolder = Chosen;
+    if (RunImportFromFolder(false) && TabManager.IsValid())
+    {
+        // Bring the plan into view. Building one and leaving it in a closed tab is the same as not building it.
+        TabManager->TryInvokeTab(PlanTabId);
+    }
+}
+
+void FQuestlineGraphEditor::ApplyImportPlan()
+{
+    RunImportFromFolder(true);
+}
+
+bool FQuestlineGraphEditor::CanApplyImportPlan() const
+{
+    // Greyed unless there is something to apply. Deliberately gated on the PLAN rather than on a folder being chosen:
+    // a plan carrying refusals applies nothing, and offering the action anyway teaches people to ignore the greying.
+    if (LastImportFolder.IsEmpty() || !QuestlineGraph) { return false; }
+    const FQuestInPlacePlan* Plan = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    return Plan && Plan->Refusals.IsEmpty() && Plan->AmbiguousKeys.IsEmpty() && !Plan->IsNoOp();
+}
+
+TSharedRef<SWidget> FQuestlineGraphEditor::GenerateImportOptionsMenu()
+{
+    FMenuBuilder MenuBuilder(true, GraphEditorCommands);
+    MenuBuilder.BeginSection(NAME_None, NSLOCTEXT("SimpleQuestEditor", "ImportOptionsSection", "Import"));
+    MenuBuilder.AddMenuEntry(FQuestlineGraphEditorCommands::Get().ApplyImportPlan);
+    MenuBuilder.EndSection();
+    return MenuBuilder.MakeWidget();
 }
 
 void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const

@@ -26,4 +26,6 @@ public:
 	TSharedPtr<FUICommandInfo> NavigateForward;
 	TSharedPtr<FUICommandInfo> ToggleGraphDefaults;
 	TSharedPtr<FUICommandInfo> ValidatePrereqTags;
+	TSharedPtr<FUICommandInfo> BuildImportPlan;
+	TSharedPtr<FUICommandInfo> ApplyImportPlan;
 };

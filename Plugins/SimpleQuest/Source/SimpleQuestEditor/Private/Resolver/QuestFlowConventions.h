@@ -23,7 +23,7 @@ TArray<FString> ParseQuestKeyList(const FQuestDataValue& Cell);
 
 /**
  * Synthesize the structural prereq form for every convention cell on every node row, then strip the cell so it never
- * reaches RestoreQuestCell as a bogus property. Runs AFTER ReadBundle and BEFORE ValidateBundle, so synthesized endpoints
+ * reaches RestoreQuestCell as a bogus property. Runs AFTER ReadBundle and BEFORE QuestBundle_Validate, so synthesized endpoints
  * are checked by the ordinary endpoint guard and a typo'd operand key is refused with no half-built asset.
  */
 void ApplyQuestFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnings);

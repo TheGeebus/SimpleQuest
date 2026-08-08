@@ -59,13 +59,13 @@ FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& 
 
 /**
  * Normalize a discriminator VALUE for matching: trim surrounding whitespace + fold case. The ONE definition both the
- * validation guard and ApplyMapping use, so a value in the source and a key in the mapping match identically on both
+ * validation guard and QuestBundle_ApplyMapping use, so a value in the source and a key in the mapping match identically on both
  * sides — never two copies that could drift ("objective" vs "objective " silently mis-routing).
  */
 FString NormalizeDiscriminatorValue(const FString& Raw);
 
 /**
- * Build the discriminator-value -> node class map the guard validates against AND ApplyMapping routes with — ONE builder so
+ * Build the discriminator-value -> node class map the guard validates against AND QuestBundle_ApplyMapping routes with — ONE builder so
  * the two never disagree on membership. Keyed by NormalizeDiscriminatorValue. Reports two authoring-time failures into
  * OutErrors: a value whose class won't resolve, and two raw keys that collide after normalization (many-to-one: "Step" and
  * "step " both fold to "step", which would silently overwrite). Returns true iff the map is clean (no errors added).

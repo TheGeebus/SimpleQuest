@@ -3,26 +3,19 @@
 
 #pragma once
 
-// The bundle-to-bundle transforms the resolver pipeline is built from, given external linkage so they can be exercised
-// directly. Their definitions stay with the import/export routing they belong to; these are thin, stable entry points so a
-// caller does not have to reach into a translation unit's internals. Every one is pure data in, pure data out — no world,
-// no asset, no files — which is precisely what makes the forward/reverse round-trip property testable.
+// The recipe applied to a bundle, both directions. QuestBundle_ApplyMapping routes a flat studio table's rows to classes by the
+// discriminator and renames bound columns; ApplyWireBindings turns row-adjacent target columns into edges;
+// QuestBundle_ApplyReverseMapping reads the identical recipe backwards to restate a canonical bundle in the studio's vocabulary; and
+// Validate refuses anything structurally incoherent before a partial asset can exist. Forward and reverse live together
+// because they are ONE RECIPE READ TWO WAYS, and drift between them is the failure this file exists to prevent. Every one
+// is pure data in, pure data out — no world, no asset, no files — which is what makes the round-trip property testable.
 
 #include "CoreMinimal.h"
 #include "Resolver/QuestImportMapping.h"
-#include "Resolver/QuestInPlacePlan.h"
 
-
-struct FQuestApplyResult;
-struct FQuestNodePlanEntry;
 struct FQuestDataRow;
 struct FQuestDataBundle;
-struct FQuestDataValue;
-struct FQuestInPlacePlan;
-struct FQuestPropertyChange;
-class FProperty;
 class UQuestImportMapping;
-class UQuestlineGraph;
 class UQuestlineNodeBase;
 
 /** Studio-shaped bundle -> canonical: route rows to classes by the discriminator, rename bound columns. False = refused. */

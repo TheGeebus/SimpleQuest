@@ -15,244 +15,30 @@
 #include "EdGraph/EdGraphPin.h"
 #include "Engine/DataTable.h"
 #include "Factories/QuestlineGraphFactory.h"
-#include "Graph/QuestlineGraphSchema.h"
 #include "IAssetTools.h"
 #include "Internationalization/Text.h"
 #include "ISimpleQuestEditorModule.h"
 #include "Misc/Paths.h"
-#include "Nodes/QuestlineNodeBase.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
-#include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Resolver/QuestDataValueBuilder.h"
-#include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestGraphBuilder.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestMappingSource.h"
-#include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestPlanBroker.h"
-#include "Resolver/QuestReflectionUtils.h"
 #include "Resolver/QuestRowRestore.h"
 #include "SimpleQuestLog.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 #include "Utilities/QuestlineGraphCompiler.h"
-#include "Utilities/SimpleQuestEditorUtils.h"
+
 
 namespace
 {
-	// The import routing core speaks the shared, format-free FQuestDataBundle (Resolver/QuestDataBundle.h). The local
-	// FImport* bundle structs + the TSV parsing (Unsanitize / ParseTable / ParseEdges) moved to the TSV provider
-	// (Resolver/TsvQuestDataFormat::ReadBundle) in Stage 2 - the routing core never touches a file or format. What was
-	// ReadAndValidate splits: the provider reads the folder into a bundle; ValidateBundle (below) does the structural
-	// checks on that already-parsed bundle.
-
-	// P0 (routing half) - structural validation of an ALREADY-READ bundle. File reading (folder discovery + TSV parse)
-	// is the provider's job (ReadBundle); this does ONLY the structural checks and builds the two lookup indices the
-	// later phases need. Refuse (return false) on any inconsistency so no partial asset is ever created (validate-
-	// upfront). Provider-agnostic: a malformed bundle from ANY format provider is refused here identically.
-	bool ValidateBundle(const FQuestDataBundle& Bundle,
-	                    TMap<FString, const FQuestDataRow*>& NodeRowsByKey,   // node/self key -> row (excludes child rows)
-	                    TSet<FString>& AllRowKeys,                            // every key incl. instanced child keys
-	                    FString& OutError)
-	{
-		// The questline-self table is keyed "questline_graph" - required, exactly one row.
-		const FQuestDataTable* Questline = Bundle.TablesByType.Find(TEXT("questline_graph"));
-		if (!Questline) { OutError = TEXT("no questline_graph table (the self row)"); return false; }
-		if (Questline->Rows.Num() != 1) { OutError = TEXT("questline_graph table must have exactly one row"); return false; }
-
-		// Index every row key. Node/self rows are keyed by GUID digits or the EffectiveID; instanced child rows carry
-		// a '/' path segment. Only NODE rows spawn editor nodes, so split the two - but track ALL keys so edge
-		// endpoints that legitimately reference child rows (contains edges) validate. Self = the questline_graph table.
-		for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-		{
-			const bool bIsSelf = (TablePair.Key == TEXT("questline_graph"));
-			for (const FQuestDataRow& R : TablePair.Value.Rows)
-			{
-				AllRowKeys.Add(R.Key);
-				const bool bIsChild = R.Key.Contains(TEXT("/"));
-				if (!bIsChild && !bIsSelf) NodeRowsByKey.Add(R.Key, &R);
-			}
-		}
-
-		// Validate every edge endpoint resolves to a known key (node, self, or child).
-		for (const FQuestDataEdge& E : Bundle.Edges)
-		{
-			if (!AllRowKeys.Contains(E.From)) { OutError = FString::Printf(TEXT("edge 'from' references unknown key: %s"), *E.From); return false; }
-			if (!AllRowKeys.Contains(E.To))   { OutError = FString::Printf(TEXT("edge 'to' references unknown key: %s"), *E.To); return false; }
-		}
-
-		// Validate exactly one Entry row per graph cell (each graph level has one Entry - the import adopts it).
-		TMap<FString, int32> EntryCountByGraph;
-		for (const TPair<FString, const FQuestDataRow*>& Pair : NodeRowsByKey)
-		{
-			const FQuestDataRow* R = Pair.Value;
-			if (R->Get(TEXT("class")) == TEXT("QuestlineNode_Entry"))
-			{
-				EntryCountByGraph.FindOrAdd(R->Get(TEXT("graph")))++;
-			}
-		}
-		for (const TPair<FString, int32>& Pair : EntryCountByGraph)
-		{
-			if (Pair.Value != 1) { OutError = FString::Printf(TEXT("graph '%s' has %d Entry rows (expected 1)"), *Pair.Key, Pair.Value); return false; }
-		}
-		return true;
-	}
-
-	// ---- MAPPING (studio source-shape translation) ----------------------------------------------------------------
-	// A studio's own-shaped source (usually a flat table whose rows are different node kinds, distinguished by a "type"
-	// column) arrives as one table (ReadQuestBundle keys tables by file). This makes it routable: read the discriminator
-	// column, look up each row's node class, stamp the row's "class" cell, then rename bound source columns to their
-	// canonical property names - applying a binding only where the resolved class actually has that property (bind once,
-	// land where it fits). Runs before ApplyQuestFlowConventions/ValidateBundle so the class-driven pipeline sees canonical
-	// rows. The questline_graph self table is left untouched (it isn't a fanned-out source table).
-	bool ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
-	{
-		if (Mapping.DiscriminatorColumn.IsNone())
-		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: mapping has no discriminator column set - malformed mapping, refusing."));
-			return false;
-		}
-		const FString DiscCol = Mapping.DiscriminatorColumn.ToString();
-
-		// Extract the actual source shape from the bundle we're about to transform (no drift - this IS the data), then run
-		// the shared guard. BINDING: refuse the whole import on any failure rather than silently drop rows. The extraction
-		// must read the discriminator cell BEFORE the routing loop removes it (below).
-		TArray<FName> ActualColumns;
-		TArray<FString> ActualDiscriminatorValues;
-		{
-			TSet<FName> ColSet; TSet<FString> ValSet;
-			for (const TPair<FString, FQuestDataTable>& TP : Bundle.TablesByType)
-			{
-				if (TP.Key == TEXT("questline_graph")) continue;
-				for (const FString& C : TP.Value.Columns) ColSet.Add(FName(*C));
-				for (const FQuestDataRow& R : TP.Value.Rows)
-				{
-					const FString V = R.Get(DiscCol);
-					if (!V.IsEmpty()) ValSet.Add(V);
-				}
-			}
-			ActualColumns = ColSet.Array();
-			ActualDiscriminatorValues = ValSet.Array();
-		}
-		TArray<FText> GuardErrors;
-		TArray<FText> GuardWarnings;
-		const bool bGuardOK = ValidateMappingAgainstSource(Mapping, ActualColumns, ActualDiscriminatorValues, GuardErrors, &GuardWarnings);
-		for (const FText& W : GuardWarnings)   // advisories log regardless of pass/fail - they never block, only inform
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline mapping advisory: %s"), *W.ToString());
-		if (!bGuardOK)
-		{
-			for (const FText& E : GuardErrors)
-				UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline mapping guard: %s"), *E.ToString());
-			return false;   // refuse - no partial asset from an unsafe mapping
-		}
-
-		// The routing class map - the SAME shared builder the guard used, so membership can't drift. The guard already
-		// refused on any build error, so BuildErrors can't fire here. Then cache each class's authored-property set for the
-		// per-row bind-where-it-fits check.
-		TMap<FString, UClass*> ClassByValue;   // keyed by NormalizeDiscriminatorValue
-		TArray<FText> BuildErrors;
-		BuildDiscriminatorClassMap(Mapping, ClassByValue, BuildErrors);
-		TMap<UClass*, TSet<FName>> PropsByClass;
-		for (const TPair<FString, UClass*>& CV : ClassByValue)
-		{
-			if (!PropsByClass.Contains(CV.Value))
-			{
-				TSet<FName> Names;
-				for (const FName& N : GetAuthoredPropertyNames(CV.Value)) Names.Add(N);
-				PropsByClass.Add(CV.Value, MoveTemp(Names));
-			}
-		}
-
-		int32 Routed = 0;
-		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-		{
-			if (TablePair.Key == TEXT("questline_graph")) continue;   // self row is not a fanned-out source table
-
-			for (FQuestDataRow& Row : TablePair.Value.Rows)
-			{
-				// 1. Which kind is this row? Read the discriminator cell, resolve its class, stamp the "class" cell.
-				const FString DiscValue = Row.Get(DiscCol);
-				UClass* const* Found = ClassByValue.Find(NormalizeDiscriminatorValue(DiscValue));
-				if (!Found)
-				{
-					// Unreachable at import (the guard refused any unmapped value); defensive for a guard-less caller.
-					Warnings.Add(FString::Printf(TEXT("mapping: row '%s' has %s='%s' with no class mapping - row not routed"),
-						*Row.Key, *DiscCol, *DiscValue));
-					continue;
-				}
-				UClass* RowClass = *Found;
-				Row.Cells.Add(TEXT("class"), FQuestDataValue::MakeString(RowClass->GetName()));   // short name (TryFindTypeSlow form)
-				Row.Cells.Remove(DiscCol);   // the discriminator column isn't a node property
-				const TSet<FName>& RowProps = PropsByClass[RowClass];
-
-				// 2. Rename each bound source column to its canonical property name - but only when this class has that
-				//    property (bind once, land where it fits). A binding that doesn't fit this class is simply skipped.
-				for (const FQuestColumnBinding& B : Mapping.Bindings)
-				{
-					if (!RowProps.Contains(B.TargetProperty)) continue;   // property not on this class - binding doesn't apply
-					const FString SrcCol = B.SourceColumn.ToString();
-					FQuestDataValue* Cell = Row.Cells.Find(SrcCol);
-					if (!Cell) continue;   // source column absent on this row - the absent-policy is handled downstream
-					FQuestDataValue Moved = MoveTemp(*Cell);
-					Row.Cells.Remove(SrcCol);
-					Row.Cells.Add(B.TargetProperty.ToString(), MoveTemp(Moved));
-				}
-				++Routed;
-			}
-		}
-		if (Routed > 0)
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: mapping routed + renamed %d row(s)."), Routed);
-		return true;
-	}
-
-	// ---- WIRE BINDINGS (studio-declared row-adjacent relationships) ------------------------------------------------
-	// A studio's flat source expresses flow as a COLUMN of target keys ("next": n_exit) rather than an edge table. Each
-	// wire-binding names such a column plus the edge kind it means; we synthesize the identical {From,Type,To} edges the
-	// edge table would have carried, then STRIP the cell so it never reaches RestoreQuestCell as a bogus property (same
-	// contract as the flow conventions below). An EMPTY qualifier emits "verb()", which ResolveSourcePin reads as "this
-	// node's default output of that kind" - so one binding wires Entry, Step and Exit alike. Mapping-only: it's studio
-	// vocabulary translation, so it never runs on our own round-trip.
-	void ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
-	{
-		if (Mapping.WireBindings.Num() == 0) return;
-
-		int32 Synthesized = 0;
-		for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-		{
-			if (TablePair.Key == TEXT("questline_graph")) continue;   // the self row wires nothing
-
-			for (FQuestDataRow& Row : TablePair.Value.Rows)
-			{
-				for (const FQuestWireBinding& Wire : Mapping.WireBindings)
-				{
-					if (Wire.SourceColumn.IsNone()) continue;
-					const FString Col = Wire.SourceColumn.ToString();
-					const FQuestDataValue* Cell = Row.Cells.Find(Col);
-					if (!Cell) continue;                                   // column absent on this row - nothing to wire
-
-					const TArray<FString> Targets = ParseQuestKeyList(*Cell);
-					Row.Cells.Remove(Col);                                 // strip: a wire column is not a node property
-					if (Targets.Num() == 0) continue;                      // present but empty == no wiring, not an error
-
-					const FString EdgeType = FString::Printf(TEXT("%s(%s)"), *Wire.EdgeVerb.ToString(), *Wire.Qualifier);
-					for (const FString& Target : Targets)
-					{
-						Bundle.Edges.Add({ Row.Key, EdgeType, Target });
-						++Synthesized;
-					}
-				}
-			}
-		}
-		if (Synthesized > 0)
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
-	}
-
 	// A console-typed asset path is usually the short form "/Game/Path/Asset"; FSoftObjectPath needs "/Game/Path/Asset.Asset".
 	FString NormalizeConsoleAssetPath(const FString& In)
 	{
@@ -619,25 +405,6 @@ namespace
 			Warnings.Num(),
 			bCompiled ? TEXT("OK") : TEXT("FAILED"));
 	}
-}
-
-// ---- Transform seam --------------------------------------------------------------------------------------------
-// External linkage for the transforms above, without moving them away from the routing code they belong with.
-// See Resolver/QuestBundleTransforms.h.
-
-bool QuestBundle_ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
-{
-	return ApplyMapping(Bundle, Mapping, Warnings);
-}
-
-void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
-{
-	ApplyWireBindings(Bundle, Mapping, Warnings);
-}
-
-bool QuestBundle_Validate(const FQuestDataBundle& Bundle, TMap<FString, const FQuestDataRow*>& NodeRowsByKey, TSet<FString>& AllRowKeys, FString& OutError)
-{
-	return ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, OutError);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

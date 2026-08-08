@@ -5,6 +5,7 @@
 
 #include "QuestBundleTransforms.h"
 #include "QuestFlowConventions.h"
+#include "QuestInPlaceApply.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestImportMapping.h"
 
@@ -82,7 +83,7 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 	if (Request.Mapping) { Options.bDeleteOrphanedNodes = Request.Mapping->bDeleteOrphanedNodes; }
 	if (Request.bDeleteOrphans) { Options.bDeleteOrphanedNodes = true; }
 
-	QuestBundle_ApplyPlan(Target, Out.Plan, Bundle, NodeRowsByKey, Out.ApplyResult, Options);
+	ApplyQuestPlan(Target, Out.Plan, Bundle, NodeRowsByKey, Out.ApplyResult, Options);
 	Out.bApplied = !Out.ApplyResult.bRefused;
 	return true;
 }

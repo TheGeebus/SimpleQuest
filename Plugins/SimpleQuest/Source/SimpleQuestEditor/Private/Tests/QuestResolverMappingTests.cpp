@@ -20,6 +20,7 @@
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestFlowConventions.h"
+#include "Resolver/QuestInPlaceApply.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
@@ -973,7 +974,7 @@ bool FQuestResolver_ApplyWritesNestedChanges::RunTest(const FString& Parameters)
 	Change.IncomingValue = FQuestDataValue::MakeNumber(TEXT("99"));
 
 	TArray<FString> Skipped;
-	const int32 Written = QuestBundle_ApplyChangesToObject(Owner, TEXT("n_reward"), { Change }, Skipped);
+	const int32 Written = ApplyQuestChangesToObject(Owner, TEXT("n_reward"), { Change }, Skipped);
 
 	TestEqual(TEXT("The nested change was written"), Written, 1);
 	TestEqual(TEXT("Nothing was skipped"), Skipped.Num(), 0);
@@ -988,7 +989,7 @@ bool FQuestResolver_ApplyWritesNestedChanges::RunTest(const FString& Parameters)
 	FQuestPropertyChange Bogus;
 	Bogus.Property      = TEXT("Rewards[9].Nope");
 	Bogus.IncomingValue = FQuestDataValue::MakeNumber(TEXT("1"));
-	TestEqual(TEXT("An unresolvable path writes nothing"), QuestBundle_ApplyChangesToObject(Owner, TEXT("n_reward"), { Bogus }, Skipped), 0);
+	TestEqual(TEXT("An unresolvable path writes nothing"), ApplyQuestChangesToObject(Owner, TEXT("n_reward"), { Bogus }, Skipped), 0);
 	TestEqual(TEXT("...and is reported"), Skipped.Num(), 1);
 	return true;
 }
@@ -1096,7 +1097,7 @@ bool FQuestResolver_ApplyRefusesUntrustworthyPlan::RunTest(const FString& Parame
 	FQuestDataBundle Bundle;
 	const TMap<FString, const FQuestDataRow*> NoRows;
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NoRows, Result, FQuestApplyOptions());
+	ApplyQuestPlan(*Graph, Plan, Bundle, NoRows, Result, FQuestApplyOptions());
 
 	TestTrue(TEXT("Apply refused the plan"), Result.bRefused);
 	TestEqual(TEXT("...and wrote nothing"), Result.PropertiesWritten, 0);
@@ -1126,7 +1127,7 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 	TestEqual(TEXT("The new row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
 	TestEqual(TEXT("...and it is actually in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
 
@@ -1166,7 +1167,7 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The edge plans as an addition"), Plan.AddedEdges.Num(), 1);
 
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	TestEqual(TEXT("The node was created"), Result.NodesCreated, 1);
 	TestEqual(TEXT("The edge was wired"), Result.EdgesChanged, 1);
 
@@ -1205,7 +1206,7 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 	{
 		FQuestApplyResult Result;
 		FQuestApplyOptions Options;   // bDeleteOrphanedNodes stays false
-		QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, Options);
+		ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, Options);
 		TestEqual(TEXT("Nothing is deleted without permission"), Result.NodesDeleted, 0);
 		TestTrue(TEXT("The orphan is still in the graph"), Graph->QuestlineEdGraph->Nodes.Num() >= NodesBefore);
 	}
@@ -1217,7 +1218,7 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 		FQuestApplyResult Result;
 		FQuestApplyOptions Options;
 		Options.bDeleteOrphanedNodes = true;
-		QuestBundle_ApplyPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
+		ApplyQuestPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
 		TestEqual(TEXT("The orphan is deleted when asked"), Result.NodesDeleted, 1);
 		FQuestInPlacePlan Replanned;
 		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
@@ -1261,7 +1262,7 @@ bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
 	// ApplyPlan deliberately does not own the transaction - its caller does - so the test has to BE the caller.
 	GEditor->BeginTransaction(NSLOCTEXT("QuestResolverTests", "ApplyUndoTest", "Apply Quest Import"));
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	GEditor->EndTransaction();
 
 	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
@@ -1351,7 +1352,7 @@ bool FQuestResolver_UndoRestoresAMovedNode::RunTest(const FString& Parameters)
 
 	GEditor->BeginTransaction(NSLOCTEXT("QuestResolverTests", "MoveUndoTest", "Apply Quest Import"));
 	FQuestApplyResult Result;
-	QuestBundle_ApplyPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
+	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	GEditor->EndTransaction();
 
 	TestEqual(TEXT("One node moved"), Result.NodesMoved, 1);

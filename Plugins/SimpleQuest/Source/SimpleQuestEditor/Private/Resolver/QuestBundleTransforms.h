@@ -37,12 +37,6 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 /** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
 void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 
-/** Write a plan's property changes onto one object and its instanced descendants. Returns the count actually written. */
-int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped);
-
-/** Execute a plan against the asset it was computed for. Caller owns the transaction. */
-void QuestBundle_ApplyPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, FQuestApplyResult& OutResult, const FQuestApplyOptions& Options = FQuestApplyOptions());
-
 /**
  * Structural check on a read bundle: every row keyed, every class resolvable, every graph cell reachable, no duplicate
  * or contested keys. Refuses on any inconsistency rather than letting a partial asset be built from a malformed source.

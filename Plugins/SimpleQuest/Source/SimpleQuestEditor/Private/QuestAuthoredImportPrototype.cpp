@@ -1654,7 +1654,38 @@ namespace
 				OutResult.Skipped.Add(FString::Printf(TEXT("entry '%s' no longer resolves to an object"), *Entry.Key));
 				continue;
 			}
-			OutResult.PropertiesWritten += ApplyChangesToObject(Object, Entry.Key, Entry.Changes, OutResult.Skipped);
+			
+			// CHILD TOPOLOGY BEFORE VALUES. ApplyChangesToObject writes into objects that already exist; a change whose
+			// Kind is ChildAdded names one that does not yet, and ChildRemoved names one that should stop existing.
+			// Neither is a property write, which is why Kind was ignored here and those changes were planned, displayed,
+			// and silently never performed.
+			// ReattachInstanced is the operation, unchanged from the fresh path: it rebuilds a property's instanced
+			// contents from the rows, and it ALREADY carries the contract the planner used to decide there was a change
+			// at all - a property the source says nothing about is left alone, and one it describes is replaced
+			// wholesale. Running it first means the value writes below land on the children that will actually survive.
+			const bool bChildTopologyChanged = Entry.Changes.ContainsByPredicate([](const FQuestPropertyChange& C)
+			{
+				return C.Kind != EQuestPropertyChangeKind::Edit;
+			});
+			if (bChildTopologyChanged)
+			{
+				Object->Modify();
+				TSet<FString> Consumed;
+				TArray<FString> ChildWarnings;
+				ReattachInstanced(Object, Entry.Key, Bundle, Consumed, ChildWarnings);
+				OutResult.Skipped.Append(ChildWarnings);
+				++OutResult.PropertiesWritten;   // the rebuild IS a write; counting zero would report a no-op run
+			}
+
+			// ONLY Edit changes are property writes. A topology change was already performed by the rebuild above, and
+			// passing it here asks ApplyChangesToObject to resolve a path naming a child the rebuild just created or
+			// destroyed - which it correctly cannot, and reports as "names no property reachable". The change is not
+			// unreachable; it was never a property write in the first place.
+			TArray<FQuestPropertyChange> ValueChanges = Entry.Changes.FilterByPredicate([](const FQuestPropertyChange& C)
+			{
+				return C.Kind == EQuestPropertyChangeKind::Edit;
+			});
+			OutResult.PropertiesWritten += ApplyChangesToObject(Object, Entry.Key, ValueChanges, OutResult.Skipped);
 		}
 
 		// ONE notify for the whole apply, rather than one per pass. Only AddNode / RemoveNode tell the editor anything on

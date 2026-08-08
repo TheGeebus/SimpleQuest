@@ -43,8 +43,8 @@ CLAUDE.md
 # Dev notes and reference files
 Notes/
 
-# Dev notes and reference files
-Notes/
+# Python bytecode from Scripts/
+__pycache__/
 
 # OS
 .DS_Store

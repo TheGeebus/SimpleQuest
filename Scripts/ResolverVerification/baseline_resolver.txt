@@ -1,0 +1,33 @@
+===== PlanSplit_Control =====
+Cmd: SimpleQuest.ImportQuestline E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_Control --in-place=/Game/SplitTest/QL_SplitProbe
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN (read-only) - source 'E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_Control', absent-field policy Preserve.
+LogSimpleQuestResolver: Warning: QuestData: StructLiteral fallback for InstancedStruct::Payload (struct 'InstancedStruct') — opaque to structured providers; structure-me-later candidate.
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN for '/Game/SplitTest/QL_SplitProbe.QL_SplitProbe' - 33 update(s) (1 with changes), 0 create(s), 1 orphan(s), 0 node(s) outside the levels this source declares, 0 contested key(s), 2 wire edge(s) added, 4 removed. Nothing was modified.
+LogSimpleQuestResolver:   [WIRE-] 9856BE0744F0BC8CA9286FA075636EFF|outcome(SimpleQuest.Outcome.Reached)|A2E70194427C55AD9246D8A3E8A938BB
+LogSimpleQuestResolver:   [WIRE-] A8925E824B49F6DD8B2DF69958CC5D22|activates(Entered)|9856BE0744F0BC8CA9286FA075636EFF
+LogSimpleQuestResolver:   [WIRE-] EEC37AE94B181E668C5D239F52739203|outcome(SimpleQuest.Outcome.Reached)|FEEDFACE000040008000000000000001
+LogSimpleQuestResolver:   [WIRE-] FC7376F7435B352CDE269EB8561FF2DA|activates(Entered)|EEC37AE94B181E668C5D239F52739203
+LogSimpleQuestResolver:   [WIRE+] A8925E824B49F6DD8B2DF69958CC5D22|activates(Entered)|EEC37AE94B181E668C5D239F52739203
+LogSimpleQuestResolver:   [WIRE+] EEC37AE94B181E668C5D239F52739203|outcome(SimpleQuest.Outcome.Reached)|A2E70194427C55AD9246D8A3E8A938BB
+LogSimpleQuestResolver:   [UPDATE] EEC37AE94B181E668C5D239F52739203 (QuestlineNode_Step) - graph 'root'  ** moves to a different container **
+LogSimpleQuestResolver:       graph: 9856BE0744F0BC8CA9286FA075636EFF -> root
+LogSimpleQuestResolver:   [ORPHAN] FEEDFACE000040008000000000000001 (QuestlineNode_Exit) - graph '9856BE0744F0BC8CA9286FA075636EFF'
+
+===== PlanSplit_MoveLegal =====
+Cmd: SimpleQuest.ImportQuestline E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_MoveLegal --in-place=/Game/SplitTest/QL_SplitProbe
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN (read-only) - source 'E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_MoveLegal', absent-field policy Preserve.
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN for '/Game/SplitTest/QL_SplitProbe.QL_SplitProbe' - 34 update(s) (0 with changes), 0 create(s), 0 orphan(s), 0 node(s) outside the levels this source declares, 0 contested key(s), 0 wire edge(s) added, 0 removed. Nothing was modified.
+LogSimpleQuestResolver: ImportQuestline: the asset already matches the source - a re-import would change nothing.
+
+===== PlanSplit_ClassChange =====
+Cmd: SimpleQuest.ImportQuestline E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_ClassChange --in-place=/Game/SplitTest/QL_SplitProbe
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN (read-only) - source 'E:/Unreal Projects/SimpleQuest/SimpleQuestDemo/Saved/QuestExport/PlanSplit_ClassChange', absent-field policy Preserve.
+LogSimpleQuestResolver: ImportQuestline: in-place PLAN for '/Game/SplitTest/QL_SplitProbe.QL_SplitProbe' - 32 update(s) (0 with changes), 0 create(s), 1 orphan(s), 0 node(s) outside the levels this source declares, 0 contested key(s), 2 wire edge(s) added, 4 removed. Nothing was modified.
+LogSimpleQuestResolver:   [WIRE-] 9856BE0744F0BC8CA9286FA075636EFF|outcome(SimpleQuest.Outcome.Reached)|A2E70194427C55AD9246D8A3E8A938BB
+LogSimpleQuestResolver:   [WIRE-] A8925E824B49F6DD8B2DF69958CC5D22|activates(Entered)|9856BE0744F0BC8CA9286FA075636EFF
+LogSimpleQuestResolver:   [WIRE-] EEC37AE94B181E668C5D239F52739203|outcome(SimpleQuest.Outcome.Reached)|FEEDFACE000040008000000000000001
+LogSimpleQuestResolver:   [WIRE-] FC7376F7435B352CDE269EB8561FF2DA|activates(Entered)|EEC37AE94B181E668C5D239F52739203
+LogSimpleQuestResolver:   [WIRE+] A8925E824B49F6DD8B2DF69958CC5D22|activates(Entered)|EEC37AE94B181E668C5D239F52739203
+LogSimpleQuestResolver:   [WIRE+] EEC37AE94B181E668C5D239F52739203|outcome(SimpleQuest.Outcome.Reached)|A2E70194427C55AD9246D8A3E8A938BB
+LogSimpleQuestResolver: Warning:   [REFUSED] row 'EEC37AE94B181E668C5D239F52739203' names class 'QuestlineNode_Quest' but matches a node of class 'QuestlineNode_Step'. A node cannot change class - to replace it, give the row a new key so the old node orphans and a new one is created
+LogSimpleQuestResolver:   [ORPHAN] FEEDFACE000040008000000000000001 (QuestlineNode_Exit) - graph '9856BE0744F0BC8CA9286FA075636EFF'

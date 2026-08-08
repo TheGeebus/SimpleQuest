@@ -427,15 +427,111 @@ namespace
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: synthesized %d edge(s) from wire binding(s)."), Synthesized);
 	}
 
-	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);   // fwd decl (Array recurses)
+	bool RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);
+	
+	/**
+	 * Returns whether it actually WROTE. Void was the bug: ApplyChangesToObject did Modify() -> RestoreCell() ->
+	 * ++Written with nothing between, so every decline below still dirtied the package and counted a change that did
+	 * not happen. A plan/apply pipeline reporting work it did not do is the failure this whole arc exists to prevent.
+	 * The Array arm reports through RestoreArrayCell, which fails the whole call if any element declined - a container
+	 * rebuilt into something other than what the source asked for is not a clean write.
+	 */
+	bool RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
+	{
+		switch (Value.Kind)
+		{
+		case EQuestDataValueKind::Empty:
+			return false;   // leave the constructed default (Q6 symmetry). Not a failure - the source said nothing.
 
-	// Restore a Kind=Array cell into the destination container. The Kind erases container type (TArray vs TSet), so branch
-	// on the destination Prop. Each element recurses through RestoreCell by ITS own Kind. NOTE: this path is exercised only
-	// by a STRUCTURED provider (JSON); TSV delivers arrays as a single Kind=Scalar cell (the "(a,b)" literal -> ImportText),
-	// so TSV never reaches here - no regression risk. FGameplayTagContainer arriving as an Array (a JSON tag list) is also
-	// handled: a TagContainer destination isn't an FArray/FSetProperty, so it falls to the ImportText fallback on the
-	// element-joined literal - but in practice JSON emits FGameplayTagContainer as Kind=TagContainer, not Array.
-	void RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
+		case EQuestDataValueKind::Tag:
+			// A cell's Kind and its destination are paired by NAME alone - a mapping binds any column onto any property and
+			// nothing type-checks the pair - so "it is a struct" does not justify the cast. Writing a tag over an unrelated
+			// struct is type confusion, and a caller restoring onto an exactly-sized buffer turns the larger write into a heap
+			// overflow. Same identity test the array path applies. A mismatch is an authoring error: report it, change nothing.
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				if (StructProp->Struct == TBaseStructure<FGameplayTag>::Get())
+				{
+					*static_cast<FGameplayTag*>(ValuePtr) = Value.Tag;   // typed; inverse of the export reinterpret read
+					return true;
+				}
+			}
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag - left at its default."),
+				*Prop->GetName());
+			return false;
+
+		case EQuestDataValueKind::TagContainer:
+			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+			{
+				if (StructProp->Struct == TBaseStructure<FGameplayTagContainer>::Get())
+				{
+					*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
+					return true;
+				}
+			}
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer - left at its default."),
+				*Prop->GetName());
+			return false;
+
+		case EQuestDataValueKind::Text:
+			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+			{
+				TextProp->SetPropertyValue(ValuePtr, Value.Text);   // typed - carries loc ns/key, no buffer round-trip
+				return true;
+			}
+			return false;
+
+		case EQuestDataValueKind::Bool:
+			if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
+			{
+				BoolProp->SetPropertyValue(ValuePtr, Value.bBool);
+				return true;
+			}
+			return false;
+
+		case EQuestDataValueKind::Array:
+			// container-type branch handled inside (array/set); recurses, and reports a partial element write as failure
+			return RestoreArrayCell(Prop, ValuePtr, Value);
+
+		case EQuestDataValueKind::Number:
+		case EQuestDataValueKind::String:
+		case EQuestDataValueKind::Enum:
+		case EQuestDataValueKind::Reference:
+		case EQuestDataValueKind::StructLiteral:
+		default:
+			{
+			// String-carrying Kinds - all route through StringForm -> ImportText, which types against the property (a
+			// numeric property parses "3" fine; the Number/String distinction is a provider-render concern, not a
+			// restore concern). Value.StringForm holds the cell string (== today's CellText for the TSV path). The FText
+			// special-case is PRESERVED here because TSV delivers FText cells as Kind=Scalar (a Scalar holding NSLOCTEXT);
+			// routing them to ImportText instead of ReadFromBuffer would regress TSV. JSON never lands here for FText (it
+			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar - exactly the old behavior.
+			if (Value.StringForm.IsEmpty()) return false;
+			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
+			{
+				FText Parsed;
+				const TCHAR* Buffer = *Value.StringForm;
+				if (FTextStringHelper::ReadFromBuffer(Buffer, Parsed))
+				{
+					TextProp->SetPropertyValue(ValuePtr, Parsed);
+					return true;
+				}
+				return false;
+			}
+			// ImportText_Direct returns null when it could not parse the string against this property - the one decline
+			// on this path that was previously indistinguishable from a successful write.
+			return Prop->ImportText_Direct(*Value.StringForm, ValuePtr, /*OwnerObject*/ nullptr, PPF_None) != nullptr;
+		}
+		}
+	}
+
+	/**
+	 * Returns whether it wrote. An element that declines makes the whole call report FALSE even though the container was
+	 * structurally rebuilt: the array did change, but not into what the source asked for, and a caller that counted it as
+	 * a clean write would be reporting a value it does not hold. Over-reporting failure is the safe direction for a
+	 * signal whose entire job is to stop silent partial success.
+	 */
+	bool RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 	{
 		// A structured provider (JSON) delivers an FGameplayTagContainer as a Kind=Array of tag-string elements. The
 		// destination property's type decides: a container gets the elements requested as tags + assigned directly (the
@@ -451,124 +547,36 @@ namespace
 					if (Tag.IsValid()) Container.AddTag(Tag);
 				}
 				*static_cast<FGameplayTagContainer*>(ValuePtr) = Container;
-				return;
+				return true;
 			}
 		}
 		if (const FArrayProperty* ArrProp = CastField<FArrayProperty>(Prop))
 		{
 			FScriptArrayHelper Helper(ArrProp, ValuePtr);
 			Helper.EmptyValues();
+			bool bAllWrote = true;
 			for (const FQuestDataValue& Elem : Value.Elements)
 			{
 				const int32 Idx = Helper.AddValue();
-				RestoreCell(ArrProp->Inner, Helper.GetRawPtr(Idx), Elem);
+				bAllWrote &= RestoreCell(ArrProp->Inner, Helper.GetRawPtr(Idx), Elem);
 			}
-			return;
+			return bAllWrote;
 		}
 		if (const FSetProperty* SetProp = CastField<FSetProperty>(Prop))
 		{
 			FScriptSetHelper Helper(SetProp, ValuePtr);
 			Helper.EmptyElements();
+			bool bAllWrote = true;
 			for (const FQuestDataValue& Elem : Value.Elements)
 			{
 				const int32 Idx = Helper.AddDefaultValue_Invalid_NeedsRehash();
-				RestoreCell(SetProp->ElementProp, Helper.GetElementPtr(Idx), Elem);
+				bAllWrote &= RestoreCell(SetProp->ElementProp, Helper.GetElementPtr(Idx), Elem);
 			}
 			Helper.Rehash();
-			return;
+			return bAllWrote;
 		}
 		// Unexpected destination for an Array Kind - leave default (defensive; a structured provider shouldn't emit this).
-	}
-
-	// Restore one property from a structured cell value. switch(Kind): a STRUCTURED provider (JSON) delivers typed Kinds
-	// (Tag/Text/Bool/Array) that write directly to the property from the typed field; the string-carrying Kinds (Scalar/
-	// Enum/Reference/StructLiteral) go through ImportText from Value.StringForm. The TSV provider produces Kind=Scalar for
-	// EVERY cell (including FText cells, which arrive as a Scalar holding the NSLOCTEXT string), so the Scalar arm MUST
-	// preserve the property-type FText branch (ReadFromBuffer) that the pre-Stage-3 code used - otherwise TSV FText cells
-	// regress from ReadFromBuffer to ImportText. This keeps the refactor byte-identical for TSV (the B2 no-regression gate).
-	void RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
-	{
-		switch (Value.Kind)
-		{
-		case EQuestDataValueKind::Empty:
-			return;   // leave the constructed default (Q6 symmetry - replaces the old CellText.IsEmpty() skip)
-
-		case EQuestDataValueKind::Tag:
-			// A cell's Kind and its destination are paired by NAME alone - a mapping binds any column onto any property and
-			// nothing type-checks the pair - so "it is a struct" does not justify the cast. Writing a tag over an unrelated
-			// struct is type confusion, and a caller restoring onto an exactly-sized buffer turns the larger write into a heap
-			// overflow. Same identity test the array path applies. A mismatch is an authoring error: report it, change nothing.
-			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
-			{
-				if (StructProp->Struct == TBaseStructure<FGameplayTag>::Get())
-				{
-					*static_cast<FGameplayTag*>(ValuePtr) = Value.Tag;   // typed; inverse of the export reinterpret read
-					return;
-				}
-			}
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag value was bound to '%s', which is not an FGameplayTag - left at its default."),
-				*Prop->GetName());
-			return;
-
-		case EQuestDataValueKind::TagContainer:
-			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
-			{
-				if (StructProp->Struct == TBaseStructure<FGameplayTagContainer>::Get())
-				{
-					*static_cast<FGameplayTagContainer*>(ValuePtr) = Value.TagContainer;
-					return;
-				}
-			}
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RestoreCell: a tag-container value was bound to '%s', which is not an FGameplayTagContainer - left at its default."),
-				*Prop->GetName());
-			return;
-
-		case EQuestDataValueKind::Text:
-			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
-			{
-				TextProp->SetPropertyValue(ValuePtr, Value.Text);   // typed - carries loc ns/key, no buffer round-trip
-			}
-			return;
-
-		case EQuestDataValueKind::Bool:
-			if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
-			{
-				BoolProp->SetPropertyValue(ValuePtr, Value.bBool);
-			}
-			return;
-
-		case EQuestDataValueKind::Array:
-			RestoreArrayCell(Prop, ValuePtr, Value);   // container-type branch handled inside (array/set); recurses
-			return;
-
-		case EQuestDataValueKind::Number:
-		case EQuestDataValueKind::String:
-		case EQuestDataValueKind::Enum:
-		case EQuestDataValueKind::Reference:
-		case EQuestDataValueKind::StructLiteral:
-		default:
-			{
-			// String-carrying Kinds - all route through StringForm -> ImportText, which types against the property (a
-			// numeric property parses "3" fine; the Number/String distinction is a provider-render concern, not a
-			// restore concern). Value.StringForm holds the cell string (== today's CellText for the TSV path). The FText
-			// special-case is PRESERVED here because TSV delivers FText cells as Kind=Scalar (a Scalar holding NSLOCTEXT);
-			// routing them to ImportText instead of ReadFromBuffer would regress TSV. JSON never lands here for FText (it
-			// uses Kind=Text above), so this branch only ever sees TSV's FText-as-Scalar - exactly the old behavior.
-			if (Value.StringForm.IsEmpty()) return;
-			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
-			{
-				FText Parsed;
-				const TCHAR* Buffer = *Value.StringForm;
-				if (FTextStringHelper::ReadFromBuffer(Buffer, Parsed))
-				{
-					TextProp->SetPropertyValue(ValuePtr, Parsed);
-				}
-				return;
-			}
-			Prop->ImportText_Direct(*Value.StringForm, ValuePtr, /*OwnerObject*/ nullptr, PPF_None);
-			return;
-		}
-		}
+		return false;
 	}
 
 	// Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns (key/class/graph)
@@ -1392,7 +1400,15 @@ namespace
 			Target->Modify();   // per-object, so undo restores instanced children as well as the node
 			// Write the value the PLAN computed, not a re-reading of the row. Once the restore path can decline to write,
 			// those are different questions, and answering the second one here is how an apply drifts from its own preview.
-			RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Change.IncomingValue);
+			if (!RestoreCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Change.IncomingValue))
+			{
+				// Counting this would report a change that did not happen, and the plan already promised it would. Named
+				// rather than merely uncounted - a value the source states and the asset refuses is a source the author
+				// needs to fix, not a silent no-op.
+				OutSkipped.Add(FString::Printf(TEXT("'%s' could not be written to '%s' - the value does not fit that property"),
+					*Change.Property, *OwnerKey));
+				continue;
+			}
 			++Written;
 		}
 		return Written;
@@ -2332,9 +2348,9 @@ bool QuestBundle_Validate(const FQuestDataBundle& Bundle, TMap<FString, const FQ
 	return ValidateBundle(Bundle, NodeRowsByKey, AllRowKeys, OutError);
 }
 
-void QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
+bool QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value)
 {
-	RestoreCell(Prop, ValuePtr, Value);
+	return RestoreCell(Prop, ValuePtr, Value);
 }
 
 void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)

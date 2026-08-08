@@ -409,7 +409,11 @@ bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Paramete
 	Cell.Kind = EQuestDataValueKind::TagContainer;
 	Cell.TagContainer.AddTag(TestTag);
 
-	QuestBundle_RestoreCell(GuidProp, ValuePtr, Cell);
+	// The RETURN is now the contract, not just the absence of a write. Before RestoreCell reported failure, a caller
+	// could refuse a value, dirty the package and count it as a change that happened - and the assertions below could
+	// not tell that apart from a clean refusal, because both leave the bytes alone.
+	const bool bWrote = QuestBundle_RestoreCell(GuidProp, ValuePtr, Cell);
+	TestFalse(TEXT("A refused restore reports that it did not write"), bWrote);
 
 	// Nothing may be written beyond the destination property's own footprint.
 	bool bSlackClean = true;

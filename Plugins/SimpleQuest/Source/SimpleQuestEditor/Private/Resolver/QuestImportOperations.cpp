@@ -4,6 +4,7 @@
 #include "QuestImportOperations.h"
 
 #include "QuestBundleTransforms.h"
+#include "QuestFlowConventions.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestImportMapping.h"
 
@@ -26,7 +27,7 @@ bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint, const UQues
 		}
 		QuestBundle_ApplyWireBindings(OutBundle, *Mapping, OutWarnings);
 	}
-	QuestBundle_ApplyFlowConventions(OutBundle, OutWarnings);
+	ApplyQuestFlowConventions(OutBundle, OutWarnings);
 
 	FString ValidateError;
 	if (!QuestBundle_Validate(OutBundle, OutNodeRowsByKey, OutAllRowKeys, ValidateError))

@@ -18,6 +18,7 @@
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/TsvQuestDataFormat.h"
@@ -637,7 +638,7 @@ bool FQuestResolver_BlankGateColumnsAreSilent::RunTest(const FString& Parameters
 	const int32 RowsBefore = CountRows();
 
 	TArray<FString> Warnings;
-	QuestBundle_ApplyFlowConventions(Bundle, Warnings);
+	ApplyQuestFlowConventions(Bundle, Warnings);
 
 	// The regression: one gate per row, three rows gated, and NOTHING to say about the blanks.
 	for (const FString& W : Warnings) { AddInfo(FString::Printf(TEXT("unexpected warning: %s"), *W)); }

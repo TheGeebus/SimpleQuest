@@ -21,6 +21,7 @@
 #include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestNodeIdentity.h"
+#include "Resolver/QuestRowRestore.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
 
@@ -413,7 +414,7 @@ bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Paramete
 	// The RETURN is now the contract, not just the absence of a write. Before RestoreCell reported failure, a caller
 	// could refuse a value, dirty the package and count it as a change that happened - and the assertions below could
 	// not tell that apart from a clean refusal, because both leave the bytes alone.
-	const bool bWrote = QuestBundle_RestoreCell(GuidProp, ValuePtr, Cell);
+	const bool bWrote = RestoreQuestCell(GuidProp, ValuePtr, Cell);
 	TestFalse(TEXT("A refused restore reports that it did not write"), bWrote);
 
 	// Nothing may be written beyond the destination property's own footprint.
@@ -749,13 +750,13 @@ bool FQuestResolver_ScratchSeedIsTheAbsentPolicy::RunTest(const FString& Paramet
 
 	// An EMPTY cell says nothing, so the property keeps what it had.
 	FQuestDataValue Blank;   // Kind::Empty
-	const FQuestDataValue Preserved = QuestBundle_TypeIncomingLikeProperty(Prop, Blank, Live);
+	const FQuestDataValue Preserved = TypeQuestCellLikeProperty(Prop, Blank, Live);
 	TestEqual(TEXT("An empty cell preserves the property's current value"), Preserved.Tag.ToString(),
 		FString(TEXT("SimpleQuest.Outcome.Solved")));
 
 	// A populated cell overrides it, seed or no seed — otherwise the seed would swallow real edits.
 	const FQuestDataValue Populated = FQuestDataValue::MakeString(TEXT("(TagName=\"SimpleQuest.Outcome.Triumph\")"));
-	const FQuestDataValue Overridden = QuestBundle_TypeIncomingLikeProperty(Prop, Populated, Live);
+	const FQuestDataValue Overridden = TypeQuestCellLikeProperty(Prop, Populated, Live);
 	TestEqual(TEXT("A populated cell still overrides the seed"), Overridden.Tag.ToString(),
 		FString(TEXT("SimpleQuest.Outcome.Triumph")));
 	return true;

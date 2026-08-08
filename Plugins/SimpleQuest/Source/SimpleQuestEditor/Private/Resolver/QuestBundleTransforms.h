@@ -34,14 +34,8 @@ void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportM
 /** Canonical bundle -> studio-shaped: the same recipe read backwards. Pass empty maps to exercise it without a graph. */
 void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, const TMap<FString, FString>& SourceKeyByGuid, const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings);
 
-/** Returns whether it actually wrote. A caller that counts or dirties on the strength of a restore must check this. */
-bool QuestBundle_RestoreCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);
-
 /** Rebuild an owner's instanced children from the bundle's child rows. Exposed so the declare-versus-silence rule is testable. */
 void QuestBundle_ReattachInstanced(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
-
-/** Re-express a bundle cell in the typed form a live property produces, starting from SeedPtr. Exposed to pin the seed rule. */
-FQuestDataValue QuestBundle_TypeIncomingLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr);
 
 /** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
 void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());

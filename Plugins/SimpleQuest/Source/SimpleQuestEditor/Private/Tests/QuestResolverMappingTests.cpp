@@ -22,6 +22,7 @@
 #include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestInPlaceApply.h"
 #include "Resolver/QuestInPlacePlan.h"
+#include "Resolver/QuestInPlacePlanner.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestRowRestore.h"
@@ -783,7 +784,7 @@ bool FQuestResolver_SelfRowIsPlanned::RunTest(const FString& Parameters)
 
 	const TMap<FString, const FQuestDataRow*> NoNodes;
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NoNodes, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NoNodes, {}, Plan);
 
 	const FQuestNodePlanEntry* SelfEntry = nullptr;
 	for (const FQuestNodePlanEntry& E : Plan.Entries) { if (E.bIsQuestlineSelf) { SelfEntry = &E; break; } }
@@ -819,7 +820,7 @@ bool FQuestResolver_SynthesizedSelfRowAssertsNothing::RunTest(const FString& Par
 
 	const TMap<FString, const FQuestDataRow*> NoNodes;
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NoNodes, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NoNodes, {}, Plan);
 
 	for (const FQuestNodePlanEntry& E : Plan.Entries)
 	{
@@ -944,7 +945,7 @@ bool FQuestResolver_PlanRefusesUndeliverableRows::RunTest(const FString& Paramet
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 
 	TestEqual(TEXT("Neither undeliverable row is promised as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 0);
 	TestEqual(TEXT("Both are refused instead"), Plan.Refusals.Num(), 2);
@@ -1033,7 +1034,7 @@ bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameter
 		FQuestAbsentPolicyResolver Policies;   // Preserve is the default default
 		FQuestInPlacePlan Plan;
 		const FQuestDataBundle Bundle = MakeBundle();
-		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		PlanQuestInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
 		TestEqual(TEXT("Preserve: a blank cell proposes no change"), SelfChanges(Plan), 0);
 		TestEqual(TEXT("Preserve: and refuses nothing"), Plan.Refusals.Num(), 0);
 	}
@@ -1042,7 +1043,7 @@ bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameter
 		Policies.Default = EQuestAbsentFieldPolicy::Reset;
 		FQuestInPlacePlan Plan;
 		const FQuestDataBundle Bundle = MakeBundle();
-		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		PlanQuestInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
 		TestEqual(TEXT("Reset: a blank cell proposes the default"), SelfChanges(Plan), 1);
 	}
 	{
@@ -1050,7 +1051,7 @@ bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameter
 		Policies.Default = EQuestAbsentFieldPolicy::Require;
 		FQuestInPlacePlan Plan;
 		const FQuestDataBundle Bundle = MakeBundle();
-		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		PlanQuestInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
 		TestEqual(TEXT("Require: a blank cell is refused"), Plan.Refusals.Num(), 1);
 		TestEqual(TEXT("Require: and nothing is proposed"), SelfChanges(Plan), 0);
 	}
@@ -1062,7 +1063,7 @@ bool FQuestResolver_AbsentPolicySelectsTheSeed::RunTest(const FString& Parameter
 		Policies.ByProperty.Add(TEXT("QuestlineID"), EQuestAbsentFieldPolicy::Preserve);
 		FQuestInPlacePlan Plan;
 		const FQuestDataBundle Bundle = MakeBundle();
-		QuestBundle_PlanInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
+		PlanQuestInPlace(*MakeGraph(), Bundle, NoNodes, {}, Plan, Policies);
 		TestEqual(TEXT("A per-property override wins over the default"), SelfChanges(Plan), 0);
 	}
 	return true;
@@ -1123,7 +1124,7 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("The new row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 
 	FQuestApplyResult Result;
@@ -1132,7 +1133,7 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 	TestEqual(TEXT("...and it is actually in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
 
 	FQuestInPlacePlan Replanned;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
 	return true;
 }
@@ -1162,7 +1163,7 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("The step plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 	TestEqual(TEXT("The edge plans as an addition"), Plan.AddedEdges.Num(), 1);
 
@@ -1172,7 +1173,7 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 	TestEqual(TEXT("The edge was wired"), Result.EdgesChanged, 1);
 
 	FQuestInPlacePlan Replanned;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 	TestEqual(TEXT("Re-planning has nothing left to create"), Replanned.CountOf(EQuestNodePlanAction::Create), 0);
 	TestEqual(TEXT("Re-planning has no wiring delta"), Replanned.AddedEdges.Num(), 0);
 	TestEqual(TEXT("...in either direction"), Replanned.RemovedEdges.Num(), 0);
@@ -1199,7 +1200,7 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("The unmentioned node plans as an orphan"), Plan.CountOf(EQuestNodePlanAction::Orphan), 1);
 
 	// Not permitted: the orphan is reported and left exactly where it is.
@@ -1214,14 +1215,14 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 	// Permitted: it goes, and re-planning no longer sees an orphan.
 	{
 		FQuestInPlacePlan Fresh;
-		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Fresh);
+		PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Fresh);
 		FQuestApplyResult Result;
 		FQuestApplyOptions Options;
 		Options.bDeleteOrphanedNodes = true;
 		ApplyQuestPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
 		TestEqual(TEXT("The orphan is deleted when asked"), Result.NodesDeleted, 1);
 		FQuestInPlacePlan Replanned;
-		QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
+		PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 		TestEqual(TEXT("Re-planning reports no orphan"), Replanned.CountOf(EQuestNodePlanAction::Orphan), 0);
 	}
 	return true;
@@ -1256,7 +1257,7 @@ bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("The row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 
 	// ApplyPlan deliberately does not own the transaction - its caller does - so the test has to BE the caller.
@@ -1341,7 +1342,7 @@ bool FQuestResolver_UndoRestoresAMovedNode::RunTest(const FString& Parameters)
 	for (const FQuestDataRow& Row : Bundle.TablesByType[TEXT("content")].Rows) { NodeRowsByKey.Add(Row.Key, &Row); }
 
 	FQuestInPlacePlan Plan;
-	QuestBundle_PlanInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
+	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("Nothing is refused - the source declares no wiring to cross a boundary"), Plan.Refusals.Num(), 0);
 
 	const FQuestNodePlanEntry* Entry = Plan.Entries.FindByPredicate(

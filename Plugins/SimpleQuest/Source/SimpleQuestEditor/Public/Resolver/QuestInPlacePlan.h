@@ -77,7 +77,7 @@ struct FQuestNodePlanEntry
 	 * True when the node belongs in a different container than the one it currently sits in. A MOVE, not a rebuild: the
 	 * node keeps its identity, its properties, its position and - if it is a container - its inner graph and everything
 	 * inside it. A class difference is deliberately NOT recorded here. A node whose class differs is a different node,
-	 * so it is refused rather than described; see the refusal in PlanInPlace.
+	 * so it is refused rather than described; see the refusal in PlanQuestInPlace.
 	 */
 	bool bMoved = false;
 

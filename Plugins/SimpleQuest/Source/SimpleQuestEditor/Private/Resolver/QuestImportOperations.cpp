@@ -6,6 +6,7 @@
 #include "QuestBundleTransforms.h"
 #include "QuestFlowConventions.h"
 #include "QuestInPlaceApply.h"
+#include "QuestInPlacePlanner.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestImportMapping.h"
 
@@ -74,7 +75,7 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 		return false;
 	}
 
-	QuestBundle_PlanInPlace(Target, Bundle, NodeRowsByKey, Out.Warnings, Out.Plan, Request.Policies);
+	PlanQuestInPlace(Target, Bundle, NodeRowsByKey, Out.Warnings, Out.Plan, Request.Policies);
 	Out.bPlanned = true;
 
 	if (!bApply) { return true; }

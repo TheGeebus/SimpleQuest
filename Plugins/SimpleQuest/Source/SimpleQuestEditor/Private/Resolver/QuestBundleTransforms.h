@@ -34,9 +34,6 @@ void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportM
 /** Canonical bundle -> studio-shaped: the same recipe read backwards. Pass empty maps to exercise it without a graph. */
 void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, const TMap<FString, FString>& SourceKeyByGuid, const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FString>& Warnings);
 
-/** Compare a bundle against an existing questline asset and describe what a re-import would change. Mutates nothing. */
-void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
-
 /**
  * Structural check on a read bundle: every row keyed, every class resolvable, every graph cell reachable, no duplicate
  * or contested keys. Refuses on any inconsistency rather than letting a partial asset be built from a malformed source.

@@ -100,7 +100,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
     QuestlineGraph = InQuestlineGraph;    
     ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
     
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v10")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v11")
         ->AddArea
         (
             FTabManager::NewPrimaryArea()
@@ -132,9 +132,25 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
             )
             ->Split
             (
-                FTabManager::NewStack()
+                // The plan sits UNDER the graph rather than in the left column. Its data is landscape - three columns
+                // where one carries before-and-after values - and it is a read-then-act-then-dismiss surface, which is
+                // where every UE editor puts the Message Log. The left column holds things you keep an eye on, and
+                // stacking there would evict the Details panel you want open WHILE reviewing a plan.
+                FTabManager::NewSplitter()
+                ->SetOrientation(Orient_Vertical)
                 ->SetSizeCoefficient(0.80f)
-                ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
+                ->Split
+                (
+                    FTabManager::NewStack()
+                    ->SetSizeCoefficient(0.72f)
+                    ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
+                )
+                ->Split
+                (
+                    FTabManager::NewStack()
+                    ->SetSizeCoefficient(0.28f)
+                    ->AddTab(PlanTabId, ETabState::ClosedTab)
+                )
             )
         );
     
@@ -408,8 +424,8 @@ void FQuestlineGraphEditor::BindGraphCommands()
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
 
     GraphEditorCommands->MapAction(
-    FQuestlineGraphEditorCommands::Get().BuildImportPlan,
-    FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::BuildImportPlan));
+        FQuestlineGraphEditorCommands::Get().OpenImportPlan,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::OpenImportPlan));
 
     GraphEditorCommands->MapAction(
         FQuestlineGraphEditorCommands::Get().ApplyImportPlan,
@@ -856,19 +872,11 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
     ToolbarBuilder.BeginSection("Resolver");
 
     ToolbarBuilder.AddToolBarButton(
-        FQuestlineGraphEditorCommands::Get().BuildImportPlan,
+        FQuestlineGraphEditorCommands::Get().OpenImportPlan,
         NAME_None,
-        NSLOCTEXT("SimpleQuestEditor", "BuildPlan_Label", "Build Plan"),
+        NSLOCTEXT("SimpleQuestEditor", "ImportPlan_Label", "Import Plan"),
         TAttribute<FText>(),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
-
-    ToolbarBuilder.AddComboButton(
-        FUIAction(),
-        FOnGetContent::CreateSP(this, &FQuestlineGraphEditor::GenerateImportOptionsMenu),
-        TAttribute<FText>(),
-        NSLOCTEXT("SimpleQuestEditor", "ImportOptions_Tooltip", "Import options"),
-        TAttribute<FSlateIcon>(),
-        true);
 
     ToolbarBuilder.EndSection();
 
@@ -1126,7 +1134,12 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         // renders here. GetPathName gives the same spelling the console command resolves --in-place to.
         PlanPanel = SNew(SQuestPlanPanel)
             .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString())
-            .Questline(QuestlineGraph);
+            .Questline(QuestlineGraph)
+            .OnRebuildRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::RebuildImportPlan))
+            .OnApplyRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan))
+            .CanApply(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan))
+            .OnChooseSourceRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ChooseImportSource))
+            .SourceLabel(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetImportSourceLabel));
     }
 
     return SNew(SDockTab)
@@ -1163,11 +1176,19 @@ bool FQuestlineGraphEditor::RunImportFromFolder(bool bApply)
     }
 
     Outcome.Plan.TargetAssetPath = QuestlineGraph->GetPathName();
-    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan);
+    FQuestPlanSource PlanSource;
+    PlanSource.Folder     = Request.Endpoint.Folder;
+    PlanSource.FormatName = Request.Endpoint.FormatName;
+    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, PlanSource);
     return true;
 }
 
-void FQuestlineGraphEditor::BuildImportPlan()
+void FQuestlineGraphEditor::OpenImportPlan()
+{
+    if (TabManager.IsValid()) { TabManager->TryInvokeTab(PlanTabId); }
+}
+
+void FQuestlineGraphEditor::ChooseImportSource()
 {
     IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
     if (!Desktop) { return; }
@@ -1175,41 +1196,60 @@ void FQuestlineGraphEditor::BuildImportPlan()
     const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
     FString Chosen;
     if (!Desktop->OpenDirectoryDialog(ParentWindow,
-            NSLOCTEXT("SimpleQuestEditor", "BuildPlanBrowseTitle", "Choose a folder of source data").ToString(),
+            NSLOCTEXT("SimpleQuestEditor", "ChooseSourceTitle", "Choose a folder of source data").ToString(),
             LastImportFolder, Chosen))
     {
         return;   // cancelled; nothing to say
     }
 
     LastImportFolder = Chosen;
-    if (RunImportFromFolder(false) && TabManager.IsValid())
-    {
-        // Bring the plan into view. Building one and leaving it in a closed tab is the same as not building it.
-        TabManager->TryInvokeTab(PlanTabId);
-    }
+    RunImportFromFolder(/*bApply*/ false);
+}
+
+FText FQuestlineGraphEditor::GetImportSourceLabel() const
+{
+    if (!QuestlineGraph) { return FText::GetEmpty(); }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    return (Record && !Record->Source.Folder.IsEmpty())
+        ? FText::FromString(Record->Source.Folder)
+        : NSLOCTEXT("SimpleQuestEditor", "NoSourceChosen", "No source chosen");
 }
 
 void FQuestlineGraphEditor::ApplyImportPlan()
 {
+    if (!QuestlineGraph) { return; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    if (!Record || !Record->Source.IsValid()) { return; }
+
+    // Apply the source the PLAN came from, whoever produced it - a plan built from the console is appliable here.
+    LastImportFolder = Record->Source.Folder;
     RunImportFromFolder(true);
+}
+
+void FQuestlineGraphEditor::RebuildImportPlan()
+{
+    // Re-run the source the current plan came from, without asking for a folder again - the distinction from the
+    // toolbar's Build Plan, which is the entry point and always asks.
+    if (!QuestlineGraph) { return; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    if (!Record || !Record->Source.IsValid()) { return; }
+
+    LastImportFolder = Record->Source.Folder;
+    RunImportFromFolder(false);
 }
 
 bool FQuestlineGraphEditor::CanApplyImportPlan() const
 {
-    // Greyed unless there is something to apply. Deliberately gated on the PLAN rather than on a folder being chosen:
-    // a plan carrying refusals applies nothing, and offering the action anyway teaches people to ignore the greying.
-    if (LastImportFolder.IsEmpty() || !QuestlineGraph) { return false; }
-    const FQuestInPlacePlan* Plan = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    return Plan && Plan->Refusals.IsEmpty() && Plan->AmbiguousKeys.IsEmpty() && !Plan->IsNoOp();
-}
-
-TSharedRef<SWidget> FQuestlineGraphEditor::GenerateImportOptionsMenu()
-{
-    FMenuBuilder MenuBuilder(true, GraphEditorCommands);
-    MenuBuilder.BeginSection(NAME_None, NSLOCTEXT("SimpleQuestEditor", "ImportOptionsSection", "Import"));
-    MenuBuilder.AddMenuEntry(FQuestlineGraphEditorCommands::Get().ApplyImportPlan);
-    MenuBuilder.EndSection();
-    return MenuBuilder.MakeWidget();
+    // Gated on the BROKER, not on a folder this editor session happens to remember. The panel reads the broker too, so
+    // the two can no longer disagree - which they did: reopening an asset left a plan visibly displayed while Apply sat
+    // greyed out, because the folder lived only in this object. A plan carrying refusals still applies nothing.
+    if (!QuestlineGraph) { return false; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    return Record
+        && Record->Source.IsValid()
+        && Record->Plan.Refusals.IsEmpty()
+        && Record->Plan.AmbiguousKeys.IsEmpty()
+        && !Record->Plan.IsNoOp();
 }
 
 void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const

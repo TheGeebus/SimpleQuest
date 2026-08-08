@@ -177,10 +177,12 @@ private:
 	TSharedPtr<SQuestPlanPanel> PlanPanel;
 	static const FName PlanTabId;
 
-	void BuildImportPlan();
+	void OpenImportPlan();
+	void ChooseImportSource();
+	FText GetImportSourceLabel() const;
 	void ApplyImportPlan();
+	void RebuildImportPlan();
 	bool CanApplyImportPlan() const;
-	TSharedRef<SWidget> GenerateImportOptionsMenu();
 	bool RunImportFromFolder(bool bApply);
 
 	/** The folder the last Build Plan read, so Apply re-reads the same source without asking again. */

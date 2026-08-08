@@ -9,19 +9,20 @@ FQuestPlanBroker& FQuestPlanBroker::Get()
 	return Instance;
 }
 
-void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan)
+void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanSource& Source)
 {
-	PlanByAsset.Add(TargetAssetPath, Plan);
-	PlanPublished.Broadcast(TargetAssetPath, Plan);
+	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
+	Record.Plan = Plan;
+	Record.Source = Source;
+	PlanPublished.Broadcast(TargetAssetPath, Record.Plan);
 }
 
-const FQuestInPlacePlan* FQuestPlanBroker::Find(const FString& TargetAssetPath) const
+const FQuestPlanRecord* FQuestPlanBroker::Find(const FString& TargetAssetPath) const
 {
-	return PlanByAsset.Find(TargetAssetPath);
+	return RecordByAsset.Find(TargetAssetPath);
 }
 
 void FQuestPlanBroker::Clear(const FString& TargetAssetPath)
 {
-	PlanByAsset.Remove(TargetAssetPath);
+	RecordByAsset.Remove(TargetAssetPath);
 }
-

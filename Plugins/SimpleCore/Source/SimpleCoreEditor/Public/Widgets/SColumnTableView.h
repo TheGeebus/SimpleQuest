@@ -285,6 +285,7 @@ public:
 		: _SelectionMode(ESelectionMode::Single)
 		, _AllowClipboardCopy(true)
 		, _bDistinctHeader(false)
+		, _bIndentUnderTitle(false)
 	{}
 		SLATE_ARGUMENT(TArray<FTableColumnDef<ItemType>>, Columns)
 
@@ -333,6 +334,13 @@ public:
 		 * Leave it off for a table under its own tab, where nothing alternates behind it.
 		 */
 		SLATE_ARGUMENT(bool, bDistinctHeader)
+		
+		/**
+		 * Indent everything below the title. Opt-in and NOT inferred from Title being set, because those are different
+		 * questions: a title says "this table needs naming", an indent says "this table is nested inside a host that
+		 * already has its own left edge". A details panel wants both; a docked tab wants the title alone.
+		 */
+		SLATE_ARGUMENT(bool, bIndentUnderTitle)
 
 		/** Extra controls beside the search box: a filter menu, a bulk action. Keeps table-specific vocabulary out of here. */
 		SLATE_NAMED_SLOT(FArguments, Toolbar)
@@ -429,7 +437,7 @@ public:
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 				.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 			]
-			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(FMargin(InArgs._Title.IsEmpty() ? 0.f : 12.0f, 0.0f, 0.0f, 0.0f))
+			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(FMargin(InArgs._bIndentUnderTitle ? 12.f : 0.0f, 0.0f, 0.0f, 0.0f))
 			[
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))

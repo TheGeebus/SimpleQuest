@@ -133,6 +133,7 @@ void SQuestMappingBindingList::Construct(const FArguments& InArgs)
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(PersistKey)
 			.Title(LOCTEXT("TableTitle", "Column Bindings"))
+			.bIndentUnderTitle(true)
 			// Embedded in a details row, which tints its whole background on hover - see bOpaqueHeader.
 			.bDistinctHeader(true)
 			.FilterHintText(LOCTEXT("FilterHint", "Filter properties and columns..."))

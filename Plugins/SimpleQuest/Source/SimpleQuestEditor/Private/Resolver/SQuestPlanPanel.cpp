@@ -38,6 +38,11 @@ namespace
 void SQuestPlanPanel::Construct(const FArguments& InArgs)
 {
 	TargetAssetPath = InArgs._TargetAssetPath;
+	OnRebuildRequested = InArgs._OnRebuildRequested;
+	OnApplyRequested = InArgs._OnApplyRequested;
+	CanApply = InArgs._CanApply;
+	OnChooseSourceRequested = InArgs._OnChooseSourceRequested;
+	SourceLabel = InArgs._SourceLabel;
 
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
@@ -103,12 +108,47 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			[
 				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetSummaryText)
 			]
+			.Title(FText::FromString(FPaths::GetBaseFilename(TargetAssetPath)))
+			.Toolbar()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("PlanChooseSource", "Choose Source..."))
+					.ToolTipText(LOCTEXT("PlanChooseSourceTip", "Pick a folder of source data and build a plan from it."))
+					.OnClicked_Lambda([this]() { OnChooseSourceRequested.ExecuteIfBound(); return FReply::Handled(); })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("PlanRebuild", "Rebuild"))
+					.ToolTipText(LOCTEXT("PlanRebuildTip", "Re-read the same source and recompute this plan."))
+					.IsEnabled_Lambda([this]() { return !SourceLabel.Get(FText::GetEmpty()).IsEmpty() && bHasPlan; })
+					.OnClicked_Lambda([this]() { OnRebuildRequested.ExecuteIfBound(); return FReply::Handled(); })
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 12.0f, 0.0f)
+				[
+					SNew(SButton)
+					.Text(LOCTEXT("PlanApply", "Apply"))
+					.ToolTipText(LOCTEXT("PlanApplyTip", "Perform these changes. Re-reads and re-plans first, so what runs is what you see."))
+					.IsEnabled_Lambda([this]() { return CanApply.Get(false); })
+					.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
+				]
+				// Named, because Rebuild is otherwise a promise about a folder the panel never showed you.
+				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
+				[
+					SNew(STextBlock)
+					.Text(SourceLabel)
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
+				]
+			]
 		]
 	];
 
-	if (const FQuestInPlacePlan* Existing = FQuestPlanBroker::Get().Find(TargetAssetPath))
+	if (const FQuestPlanRecord* Existing = FQuestPlanBroker::Get().Find(TargetAssetPath))
 	{
-		HandlePlanPublished(TargetAssetPath, *Existing);
+		HandlePlanPublished(TargetAssetPath, Existing->Plan);
 	}
 }
 

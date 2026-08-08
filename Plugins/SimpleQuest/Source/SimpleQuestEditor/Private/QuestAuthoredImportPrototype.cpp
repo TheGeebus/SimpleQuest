@@ -2135,7 +2135,11 @@ namespace
 			LogInPlacePlan(Outcome.Plan);
 			// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 			// about to be applied, so the panel always shows what the run actually decided.
-			FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan);
+			FQuestPlanSource PlanSource;
+			PlanSource.Folder     = Endpoint.Folder;
+			PlanSource.FormatName = Endpoint.FormatName;
+			PlanSource.Table      = Endpoint.Table.ToSoftObjectPath();
+			FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, PlanSource);
 
 			if (!bApply)
 			{

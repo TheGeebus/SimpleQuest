@@ -47,6 +47,22 @@ public:
 		 * is worse than an empty one because it looks authoritative.
 		 */
 		SLATE_ARGUMENT(TWeakObjectPtr<UQuestlineGraph>, Questline)
+
+		/** Raised when the panel's own Rebuild button is pressed. The panel does not import; it asks its owner to. */
+		SLATE_EVENT(FSimpleDelegate, OnRebuildRequested)
+
+		/** Raised by Apply. Same reason - the toolkit owns the transaction and the source, the panel owns the display. */
+		SLATE_EVENT(FSimpleDelegate, OnApplyRequested)
+		
+		/** Raised when the user asks to pick a source folder. The panel displays; the toolkit browses and imports. */
+		SLATE_EVENT(FSimpleDelegate, OnChooseSourceRequested)
+
+		/** What Rebuild would re-read, so the button is not a promise about an unnamed folder. */
+		SLATE_ATTRIBUTE(FText, SourceLabel)
+
+		/** Whether Apply is currently permitted. Bound rather than pushed, so it re-evaluates as plans come and go. */
+		SLATE_ATTRIBUTE(bool, CanApply)
+		
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -67,6 +83,13 @@ private:
 	TWeakObjectPtr<UQuestlineGraph> Questline;
 	FDelegateHandle PublishHandle;
 	FDelegateHandle ModifiedHandle;
+
+	FSimpleDelegate OnRebuildRequested;
+	FSimpleDelegate OnApplyRequested;
+	TAttribute<bool> CanApply;
+
+	FSimpleDelegate OnChooseSourceRequested;
+	TAttribute<FText> SourceLabel;
 
 	FText Summary;
 	FText Blockers;

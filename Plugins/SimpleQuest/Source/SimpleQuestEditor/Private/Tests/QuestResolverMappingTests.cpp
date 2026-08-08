@@ -20,6 +20,7 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestInPlacePlan.h"
+#include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestRowRestore.h"
 #include "Resolver/TsvQuestDataFormat.h"
@@ -451,7 +452,7 @@ bool FQuestResolver_ReattachSilenceIsNotEmptiness::RunTest(const FString& Parame
 	FQuestDataBundle Bundle;   // says nothing about this owner at all
 	TSet<FString> Consumed;
 	TArray<FString> Warnings;
-	QuestBundle_ReattachInstanced(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+	ReattachQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
 
 	TestEqual(TEXT("A source that never mentions the property leaves its children alone"), Owner->Rewards.Num(), 1);
 	return true;
@@ -473,7 +474,7 @@ bool FQuestResolver_ReattachDeclaredChildrenStillRebuild::RunTest(const FString&
 
 	TSet<FString> Consumed;
 	TArray<FString> Warnings;
-	QuestBundle_ReattachInstanced(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+	ReattachQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
 
 	TestEqual(TEXT("Declared children rebuild the container"), Owner->Rewards.Num(), 1);
 	if (Owner->Rewards.Num() == 1)

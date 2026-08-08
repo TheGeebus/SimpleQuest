@@ -57,3 +57,6 @@ Packaged/
 # Stale-tag scan commandlet outputs (run via Scripts/RunStaleQuestTagsScan.bat)
 scan.log
 stale-tags.json
+
+# Keeps being created by some tool. Ignore it until it can be diagnosed conclusively
+dev/

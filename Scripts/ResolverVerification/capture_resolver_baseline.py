@@ -55,6 +55,16 @@ for f in FIXTURES:
         sys.exit(1)
     blocks[f] = b
 
+if not any("already matches the source" in l for l in blocks["PlanSplit_Control"]):
+    print("FAIL - PlanSplit_Control planned changes, so QL_SplitProbe is not in its pristine state.\n"
+          "       Run PlanSplit_Control with --apply --delete-orphans, then re-run the three plans.")
+    sys.exit(1)
+
+if any("StructLiteral fallback" in l for l in blocks[FIXTURES[0]]):
+    print("FAIL - the first block carries the once-per-process StructLiteral guard-log.\n"
+          "       Run the reset apply first so it absorbs that line, then re-run the three plans.")
+    sys.exit(1)
+
 rendered = []
 for f in FIXTURES:
     rendered.append(f"===== {f} =====")

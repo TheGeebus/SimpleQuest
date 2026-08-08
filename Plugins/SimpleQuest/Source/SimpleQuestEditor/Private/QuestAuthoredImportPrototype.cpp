@@ -29,6 +29,7 @@
 #include "Nodes/QuestlineNode_LinkedQuestline.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestBundleDiff.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataValueBuilder.h"
@@ -565,183 +566,6 @@ namespace
 		}
 		return In;
 	}
-
-	// One-line human-readable form of a cell, for the plan's before/after columns.
-	FString DescribeValue(const FQuestDataValue& Value)
-	{
-		switch (Value.Kind)
-		{
-		case EQuestDataValueKind::Empty:        return TEXT("<default>");
-		case EQuestDataValueKind::Tag:          return Value.Tag.IsValid() ? Value.Tag.ToString() : TEXT("<none>");
-		case EQuestDataValueKind::TagContainer: return Value.TagContainer.ToStringSimple();
-		case EQuestDataValueKind::Text:         return Value.Text.ToString();
-		case EQuestDataValueKind::Bool:         return Value.bBool ? TEXT("true") : TEXT("false");
-		case EQuestDataValueKind::Array:
-		{
-			TArray<FString> Parts;
-			for (const FQuestDataValue& Element : Value.Elements) Parts.Add(DescribeValue(Element));
-			return FString::Printf(TEXT("[%s]"), *FString::Join(Parts, TEXT(", ")));
-		}
-		default: return Value.StringForm;
-		}
-	}
-
-	// Compare one object's authored properties against one row's cells. Shared by every object a bundle describes - a node,
-	// the questline itself, and (once nested values are described) an instanced child - so the comparison rule has exactly
-	// one definition and cannot drift between them. PathPrefix names where this object sits under its owner, empty at the top.
-	void DiffObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
-	                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
-	{
-		for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
-		{
-			const FString& Column = Cell.Key;
-			if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural - describes the row, not a property
-
-			FProperty* Prop = Object->GetClass()->FindPropertyByName(FName(*Column));
-			if (!Prop)
-			{
-				// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a
-				// whole table, so an unbound bookkeeping column would otherwise warn once per ROW instead of once.
-				if (Cell.Value.Kind != EQuestDataValueKind::Empty)
-				{
-					OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s - it would be ignored"),
-						*Row.Key,
-						*Column,
-						*Object->GetClass()->GetName()));
-				}
-				continue;
-			}
-
-			const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
-			
-			// An ABSENT cell is the only place policy applies. The source declared the column and left it blank, which is a
-			// statement about the default - but which default, and whether blank is permitted at all, is the recipe's call.
-			// A cell that CARRIES a value overwrites the seed regardless, so policy never reaches it.
-			const bool bAbsent = (Cell.Value.Kind == EQuestDataValueKind::Empty);
-			const EQuestAbsentFieldPolicy Policy = bAbsent ? Policies.Resolve(FName(*Column)) : EQuestAbsentFieldPolicy::Preserve;
-			if (bAbsent && Policy == EQuestAbsentFieldPolicy::Require)
-			{
-				OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' leaves '%s' blank, and the recipe requires a value for it"),
-					*Row.Key, *Column));
-				continue;
-			}
-
-			// THE SEED IS THE POLICY. From the live value, an absent cell changes nothing; from the class default, it resets.
-			// The comparison below is byte-for-byte the same either way - only its starting point moves.
-			const void* SeedPtr = LivePtr;
-			if (bAbsent && Policy == EQuestAbsentFieldPolicy::Reset)
-			{
-				// The CDO of the class the property was RESOLVED on, not of the incoming class - a property offset is only
-				// meaningful against the layout it belongs to.
-				const UClass* OwnerClass = Prop->GetOwnerClass();
-				if (OwnerClass) { SeedPtr = Prop->ContainerPtrToValuePtr<void>(OwnerClass->GetDefaultObject()); }
-			}
-
-			// Compare through the PROPERTY, not the neutral value: FProperty::Identical knows each type's own equality, where
-			// a value-level comparison must pick one rule for a Kind that deliberately fuses several types.
-			void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
-			Prop->InitializeValue(Scratch);
-			Prop->CopyCompleteValue(Scratch, SeedPtr);
-			RestoreQuestCell(Prop, Scratch, Cell.Value);
-			const bool bIdentical = Prop->Identical(Scratch, LivePtr, PPF_None);
-			const FQuestDataValue Incoming = BuildQuestDataValue(Prop, Scratch, nullptr);
-			Prop->DestroyValue(Scratch);
-			FMemory::Free(Scratch);
-			if (bIdentical) continue;
-
-			// A reset says WHY the value is what it is, not just what it is. Without that, "the source blanked this field"
-			// and "the policy is resetting it to a default that happens to be blank" print identically - and they are
-			// different decisions a designer might want to question. The VALUE is untouched; only its description changes.
-			const FString Described = DescribeValue(Incoming);
-			const bool bResetToDefault = bAbsent && Policy == EQuestAbsentFieldPolicy::Reset;
-
-			FQuestPropertyChange Change;
-			Change.Property      = PathPrefix.IsEmpty() ? Column : (PathPrefix + TEXT(".") + Column);
-			Change.CurrentText   = DescribeValue(BuildQuestDataValue(Prop, LivePtr, nullptr));
-			Change.IncomingText  = !bResetToDefault ? Described
-								 : (Described.IsEmpty() ? FString(TEXT("<default>"))
-														: FString::Printf(TEXT("<default> (%s)"), *Described));
-			Change.IncomingValue = Incoming;   // what apply writes - never re-derived from the row
-			Entry.Changes.Add(MoveTemp(Change));
-		}
-	}
-	// True when the bundle describes anything under this property - a row keyed exactly "<owner>/<prop>" (a direct instanced
-	// object) or "<owner>/<prop>[..." (a container). This is the SAME rule the restore path applies before it touches a
-	// property: a source declaring no children has said nothing about it, so the property is left alone. The plan has to
-	// agree, or it describes an apply that will not happen.
-	bool BundleDeclaresChildrenUnder(const FQuestDataBundle& Bundle, const FString& PropPrefix)
-	{
-		const FString Indexed = PropPrefix + TEXT("[");
-		for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
-		{
-			for (const FQuestDataRow& Row : Table.Value.Rows)
-			{
-				if (Row.Key == PropPrefix || Row.Key.StartsWith(Indexed)) return true;
-			}
-		}
-		return false;
-	}
-
-	// Compare an owner's instanced children against the rows describing them. The walk that finds the live children is the
-	// SAME one the writer uses to name them, so a row and the object it describes are matched by construction rather than by
-	// a second guess at the naming rule - which is exactly where the two directions have drifted before.
-	void DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
-	                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver())
-	{
-		for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
-		{
-			FProperty* Prop = *It;
-			// The same filter that decided what became a child row on the way out.
-			if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
-			if (!IsQuestInstancedBearing(Prop)) continue;
-
-			const FString PropPrefix = FString::Printf(TEXT("%s/%s"), *OwnerKey, *Prop->GetName());
-			if (!BundleDeclaresChildrenUnder(Bundle, PropPrefix)) continue;   // silence is not emptiness
-
-			TSet<FString> LiveKeys;
-			ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-				[&](const FString& ChildKey, const FString& Path, const UObject* Child)
-				{
-					LiveKeys.Add(ChildKey);
-
-					FString ChildClass;
-					const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
-					if (!ChildRow)
-					{
-						// The source DOES describe this property's contents, and this child is not among them.
-						FQuestPropertyChange Change;
-						Change.Property     = Path;
-						Change.CurrentText  = Child->GetClass()->GetName();
-						Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
-						Change.IncomingText = TEXT("<removed>");
-						Entry.Changes.Add(MoveTemp(Change));
-						return;
-					}
-					DiffObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan, Policies);
-					DiffInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
-				});
-
-			// Rows under this property with no live counterpart are additions.
-			const FString Indexed = PropPrefix + TEXT("[");
-			for (const TPair<FString, FQuestDataTable>& Table : Bundle.TablesByType)
-			{
-				for (const FQuestDataRow& Row : Table.Value.Rows)
-				{
-					if (Row.Key != PropPrefix && !Row.Key.StartsWith(Indexed)) continue;
-					if (LiveKeys.Contains(Row.Key)) continue;
-					// DIRECT children only - a grandchild's key carries a further '/' segment, and belongs to its own owner.
-					if (Row.Key.RightChop(OwnerKey.Len() + 1).Contains(TEXT("/"))) continue;
-
-					FQuestPropertyChange Change;
-					Change.Property     = Row.Key.RightChop(OwnerKey.Len() + 1);
-					Change.Kind         = EQuestPropertyChangeKind::ChildAdded;
-					Change.CurrentText  = TEXT("<absent>");
-					Change.IncomingText = Row.Get(TEXT("class"));
-					Entry.Changes.Add(MoveTemp(Change));
-				}
-			}
-		}
-	}
 	
 	// Every object a change's path could name, keyed by the path that names it: "" for the entity itself, then each instanced
 	// descendant under the path the WRITER gives it. Built by the same walk the plan used, so any path the plan produced
@@ -1170,8 +994,8 @@ namespace
 				// questline rename it. Entered anyway, so the plan still accounts for the questline, but with no changes.
 				if (!Bundle.bSelfRowSynthesized)
 				{
-					DiffObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan, Policies);
-					DiffInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan, Policies);
+					DiffQuestObjectAgainstRow(&Target, SelfTable->Rows[0], FString(), SelfEntry, OutPlan, Policies);
+					DiffQuestInstancedChildren(&Target, SelfTable->Rows[0].Key, Bundle, SelfEntry, OutPlan, Policies);
 				}
 				SelfEntry.Label = Target.GetName();
 				OutPlan.Entries.Add(MoveTemp(SelfEntry));
@@ -1292,8 +1116,8 @@ namespace
 			const FString CurrentLevel  = ResolveQuestLevelToGuid(Entry.CurrentGraphCell, GuidByKey);
 			Entry.bMoved = (IncomingLevel != CurrentLevel);
 
-			DiffObjectAgainstRow(Node, Row, FString(), Entry, OutPlan, Policies);
-			DiffInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan, Policies);
+			DiffQuestObjectAgainstRow(Node, Row, FString(), Entry, OutPlan, Policies);
+			DiffQuestInstancedChildren(Node, Row.Key, Bundle, Entry, OutPlan, Policies);
 
 			// FullTitle, not ListView: ListView is a palette context, and a node that distinguishes them answers it with its
 			// TYPE label - which would give every placement of that class the same name to sort and display by.
@@ -1784,11 +1608,6 @@ bool QuestBundle_Validate(const FQuestDataBundle& Bundle, TMap<FString, const FQ
 void QuestBundle_PlanInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bundle, const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TArray<FString>& ReadWarnings, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	PlanInPlace(Target, Bundle, NodeRowsByKey, ReadWarnings, OutPlan, Policies);
-}
-
-void QuestBundle_DiffInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan)
-{
-	DiffInstancedChildren(Owner, OwnerKey, Bundle, Entry, OutPlan, FQuestAbsentPolicyResolver());
 }
 
 int32 QuestBundle_ApplyChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)

@@ -14,6 +14,7 @@
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "Quests/QuestlineGraph.h"
+#include "Resolver/QuestBundleDiff.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
@@ -849,7 +850,7 @@ bool FQuestResolver_InstancedChildrenAreDiffed::RunTest(const FString& Parameter
 
 	FQuestNodePlanEntry Entry;
 	FQuestInPlacePlan Plan;
-	QuestBundle_DiffInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
+	DiffQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
 
 	TestEqual(TEXT("The reward's changed field is reported"), Entry.Changes.Num(), 1);
 	if (Entry.Changes.Num() == 1)
@@ -875,7 +876,7 @@ bool FQuestResolver_SilentSourceLeavesChildrenAlone::RunTest(const FString& Para
 
 	FQuestNodePlanEntry Entry;
 	FQuestInPlacePlan Plan;
-	QuestBundle_DiffInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
+	DiffQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Entry, Plan);
 
 	TestEqual(TEXT("A source that never mentions the property proposes no change"), Entry.Changes.Num(), 0);
 	return true;

@@ -127,7 +127,7 @@ namespace
 		Out = Val->AsString();
 		return true;
 	}
-	
+
 	FQuestDataValue ParseValueFromJson(const TSharedPtr<FJsonValue>& Json)
 	{
 		FQuestDataValue V;
@@ -374,6 +374,6 @@ bool FJsonQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle
 		const TSharedPtr<FJsonValue> KnotsVal = Root->TryGetField(TEXT("knotsCollapsed"));
 		OutBundle.KnotsCollapsed = (KnotsVal.IsValid() && KnotsVal->Type == EJson::Number)
 			? (int32)KnotsVal->AsNumber() : 0;
-	}	
+	}
 	return true;
 }

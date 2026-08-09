@@ -97,7 +97,7 @@ private:
 
 	/** The table's live search text, so a custom cell can box its matched substring the way the default cell does. */
 	FText GetTableFilterText() const;
-	
+
 	/**
 	 * Row clipboard. The payload carries the class PATH, never the displayed name - a name cannot be resolved back to a
 	 * class and two classes can share one. A magic first line lets a paste refuse clipboard content that is not ours

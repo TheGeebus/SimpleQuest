@@ -144,7 +144,7 @@ void RefreshQuestNodePins(const FQuestDataBundle& Bundle, const TMap<FString, co
 	for (const FString& Key : Keys)
 	{
 		UEdGraphNode* Node = NodeByKey[Key];
-		
+
 		// Optional deactivation pins. AllocateDefaultPins (at spawn) creates the "Deactivated" output only when
 		// bShowDeactivationPins is true - but that ran BEFORE the property restore, so it was skipped. Both content
 		// nodes AND Entry nodes carry this flag (on different classes) and both create the pin the same way. Create
@@ -165,7 +165,7 @@ void RefreshQuestNodePins(const FQuestDataBundle& Bundle, const TMap<FString, co
 				EntryNode->CreatePin(EGPD_Output, TEXT("QuestDeactivated"), TEXT("Deactivated"));
 			}
 		}
-		
+
 		if (UQuestlineNode_Step* Step = Cast<UQuestlineNode_Step>(Node))
 		{
 			Step->RefreshOutcomePins();   // <- DiscoverObjectivePaths(ObjectiveClass), restored from the row

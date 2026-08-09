@@ -32,7 +32,7 @@ bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataVal
 		{
 			return false;   // leave the constructed default (Q6 symmetry). Not a failure - the source said nothing.
 		}
-		
+
 	case EQuestDataValueKind::Tag:
 		{
 			// A cell's Kind and its destination are paired by NAME alone - a mapping binds any column onto any property and
@@ -51,7 +51,7 @@ bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataVal
 				*Prop->GetName());
 			return false;
 		}
-		
+
 	case EQuestDataValueKind::TagContainer:
 		{
 			if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
@@ -66,7 +66,7 @@ bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataVal
 				*Prop->GetName());
 			return false;
 		}
-		
+
 	case EQuestDataValueKind::Text:
 		{
 			if (const FTextProperty* TextProp = CastField<FTextProperty>(Prop))
@@ -76,7 +76,7 @@ bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataVal
 			}
 			return false;
 		}
-		
+
 	case EQuestDataValueKind::Bool:
 		{
 			if (const FBoolProperty* BoolProp = CastField<FBoolProperty>(Prop))
@@ -86,13 +86,13 @@ bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataVal
 			}
 			return false;
 		}
-		
+
 	case EQuestDataValueKind::Array:
 		{
 			// container-type branch handled inside (array/set); recurses, and reports a partial element write as failure
 			return RestoreArrayCell(Prop, ValuePtr, Value);
 		}
-		
+
 	case EQuestDataValueKind::Number:
 	case EQuestDataValueKind::String:
 	case EQuestDataValueKind::Enum:

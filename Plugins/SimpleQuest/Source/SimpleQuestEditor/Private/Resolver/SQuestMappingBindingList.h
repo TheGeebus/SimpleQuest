@@ -77,7 +77,7 @@ public:
 
 private:
 	void NotifyModified();
-	
+
 	TArray<FTableColumnDef<FQuestMappingRowItemPtr>> MakeColumns();
 
 	/**

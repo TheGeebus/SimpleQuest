@@ -83,17 +83,6 @@ FString QuestEdgeVerb(FName PinCategory);
  */
 void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges);
 
-/** Wire-edge verb for a source pin category. Every edge is written output->input, and the verbs read true in that direction. */
-FString QuestEdgeVerb(FName PinCategory);
-
-/**
- * Knot-collapsed wire edges leaving one node, appended to OutEdges. Every output pin's terminals via the traversal policy's
- * forward walk, so a chain of reroutes reads as the single edge it means.
- * Shared for the same reason the child walk is: the reader that wants to know how an asset is CURRENTLY wired must derive
- * edges exactly as the writer does, or the two disagree about wiring that never changed.
- */
-void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges);
-
 /**
  * Which wire edges would a re-import add, and which would it remove? Both sides are canonicalized through the key index
  * first: live edges are always GUID-keyed, while a source's edges carry whatever keys that source uses, so comparing them

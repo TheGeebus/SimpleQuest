@@ -349,7 +349,7 @@ int32 CompareQuestCompiledDumps(const FString& SrcDump, const FString& RtDump, c
 	TArray<FString> SrcLines, RtLines;
 	SrcText.ParseIntoArrayLines(SrcLines, false);
 	RtText.ParseIntoArrayLines(RtLines, false);
-	
+
 	// Util_ keys are internal routing handles keyed on the editor NodeGuid, which a fresh import regenerates —
 	// canonicalize each dump's util GUIDs to positional placeholders (referentially faithful) before comparing.
 	CanonicalizeUtilKeys(SrcLines);

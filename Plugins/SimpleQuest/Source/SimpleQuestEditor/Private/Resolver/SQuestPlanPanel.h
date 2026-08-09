@@ -40,7 +40,7 @@ public:
 	SLATE_BEGIN_ARGS(SQuestPlanPanel) {}
 		/** The asset this panel speaks for. Plans for any other asset are ignored - a plan is about one questline. */
 		SLATE_ARGUMENT(FString, TargetAssetPath)
-		
+
 		/**
 		 * The asset itself, so the panel can notice when it changes underneath a plan. A plan is a COMPARISON against a
 		 * particular asset state; the moment that state moves, the plan stops being true, and a panel still displaying it
@@ -53,7 +53,7 @@ public:
 
 		/** Raised by Apply. Same reason - the toolkit owns the transaction and the source, the panel owns the display. */
 		SLATE_EVENT(FSimpleDelegate, OnApplyRequested)
-		
+
 		/** Raised when the user asks to pick a source folder. The panel displays; the toolkit browses and imports. */
 		SLATE_EVENT(FSimpleDelegate, OnChooseSourceRequested)
 
@@ -62,7 +62,7 @@ public:
 
 		/** Whether Apply is currently permitted. Bound rather than pushed, so it re-evaluates as plans come and go. */
 		SLATE_ATTRIBUTE(bool, CanApply)
-		
+
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);

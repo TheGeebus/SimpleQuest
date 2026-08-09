@@ -34,17 +34,6 @@ static UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const 
 		OutWarnings.Add(FString::Printf(TEXT("could not resolve child class '%s' for key '%s'"), *ClassName, *ChildKey));
 		return nullptr;
 	}
-	if (!Class)
-	{
-		// Blueprint-generated adapters serialize as "<Name>_C"; TryFindTypeSlow handles those too, but a fully
-		// qualified /Game/... path (if a future export writes one) would come through LoadObject.
-		Class = LoadObject<UClass>(nullptr, *ClassName);
-	}
-	if (!Class)
-	{
-		OutWarnings.Add(FString::Printf(TEXT("could not resolve child class '%s' for key '%s'"), *ClassName, *ChildKey));
-		return nullptr;
-	}
 
 	UObject* Sub = NewObject<UObject>(Owner, Class, NAME_None, RF_Transactional);
 	RestoreQuestRowProperties(Sub, *Row);
@@ -55,7 +44,7 @@ static UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const 
 
 // Parse a child key's LAST path segment: "<owner>/<prop>[<pos>]" or "<owner>/<prop>[<mapkey>].<sub>[<pos>]".
 // Returns the leaf property name + the bracketed token; the middle path is already resolved because we arrive here
-// via the property walk, not by parsing the whole path (D2's smaller-parser property). 
+// via the property walk, not by parsing the whole path (D2's smaller-parser property).
 static bool SplitLeafSegment(const FString& ChildKey, FString& OutBracketToken)
 {
 	int32 OpenIdx;
@@ -158,7 +147,7 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 									if (R.Key.StartsWith(ArrPrefix + TEXT("[")))
 									{ FString Tok; SplitLeafSegment(R.Key, Tok); Indexed.Add({ FCString::Atoi(*Tok), R.Key }); }
 							Indexed.Sort([](const auto& A, const auto& B){ return A.Key < B.Key; });
-							
+
 							if (Indexed.IsEmpty()) continue;   // see the array case
 
 							FScriptArrayHelper AH(InnerArr, SIt->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Pair)));

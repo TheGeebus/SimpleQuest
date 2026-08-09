@@ -52,7 +52,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 	NodeByGuid.GetKeys(AllGuids);
 	TMap<FString, FString> GuidByKey;
 	BuildQuestNodeKeyIndex(SourceKeyByGuid, AllGuids, GuidByKey, OutPlan.AmbiguousKeys);
-	
+
 	// A level cell names a container by KEY; a reader wants its NAME. Declared here rather than as a free function
 	// because it needs the identity maps this walk just built, and it is nobody else's business.
 	auto LevelDisplayName = [&NodeByGuid, &GuidByKey](const FString& Cell) -> FString
@@ -62,7 +62,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		const UQuestlineNodeBase* Node = Guid ? NodeByGuid.FindRef(*Guid) : NodeByGuid.FindRef(Cell);
 		return Node ? Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString() : Cell;
 	};
-	
+
 	// Names for every live node, keyed the way rows and edges address them. Done once here rather than per consumer,
 	// because resolving a key to a title needs the identity maps and the panel has neither.
 	for (const TPair<FString, const UQuestlineNodeBase*>& Pair : NodeByGuid)
@@ -72,7 +72,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		OutPlan.LabelByKey.Add(Pair.Key, Title);
 		OutPlan.LabelByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Title);
 	}
-	
+
 	for (const FString& Key : OutPlan.AmbiguousKeys)
 	{
 		OutPlan.Warnings.Add(FString::Printf(TEXT("'%s' names more than one node - that row is not planned, and neither "
@@ -102,7 +102,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		if (!Node)
 		{
 			// Only promise what the spawn path can deliver. A class no loaded module provides, or a level nothing declares,
-			// both make SpawnQuestNodeFromRow / ImportGraphLevel skip the row - so planning a CREATE would report work that
+			// both make SpawnQuestNodeFromRow / ImportQuestGraphLevel skip the row - so planning a CREATE would report work that
 			// silently never happens, which is worse than reporting nothing.
 			if (!ResolveQuestBundleClass(Entry.ClassName))
 			{
@@ -133,7 +133,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		Entry.CurrentClassName	= Node->GetClass()->GetName();
 		Entry.CurrentGraphCell  = GraphCellByGuid.FindRef(*FoundGuid);
 		Entry.CurrentGraphLabel = LevelDisplayName(Entry.CurrentGraphCell);
-		
+
 		// A class difference is not a change to this node - it says the row describes a DIFFERENT node. A Step is not a
 		// mutated Quest, and nothing about one instance can be carried into the other, so there is nothing to apply and
 		// no identity to preserve. A source that genuinely means "replace this" says so by giving the row a NEW KEY,
@@ -201,7 +201,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		}
 		CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, OutPlan.AddedEdges, OutPlan.RemovedEdges);
 	}
-	
+
 	/**
 	 * WIRING MUST NOT CROSS A CONTAINER BOUNDARY. A link joins two nodes in ONE graph - a designer cannot author one
 	 * that leaves a container, because authoring happens inside a single graph at a time. The compiler TOLERATES such
@@ -246,7 +246,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 				*ToLevel));
 		}
 	}
-	
+
 	/**
 	 * Deterministic order, because everything above walks TMaps and two identical plans would otherwise render differently
 	 * - which makes a panel feel broken and makes two screenshots impossible to compare. The questline itself leads, then

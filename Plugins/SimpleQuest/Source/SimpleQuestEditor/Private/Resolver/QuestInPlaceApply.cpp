@@ -168,7 +168,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 		NodeByKey.Add(QuestNodeIdentityKey(Pair.Key, SourceKeyByGuid), Node);
 		NodeByKey.Add(Pair.Key, Node);
 	}
-	
+
 	// Shared by the create and move passes, consumed by the single pin-refresh below. Declared out here because a move
 	// can land in a container a create just made, and both have to reach the same refresh.
 	TMap<FString, UEdGraphNode*> PinRefreshTargets;
@@ -229,7 +229,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 				*Entry->Key, *Entry->GraphCell));
 		}
 	}
-	
+
 	// MOVE, after creation so a destination container this same source declares already exists, and before wiring so the
 	// delta pass sees final placement. A move is a REPARENT, not a rebuild - the node keeps its identity, properties,
 	// position, and, if it is a container, its inner graph and everything in it, because CreateInnerGraph outers that
@@ -265,11 +265,11 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 			if (UEdGraphNode* Container = NodeByKey.FindRef(Entry.GraphCell)) { PinRefreshTargets.Add(Entry.GraphCell, Container); }
 		}
 	}
-	
+
 	// Pin refresh runs ONCE, after both creates and moves and before wiring, because wiring resolves pins that may
 	// not exist until this runs. A container's outcome pins are DERIVED from the Exit nodes in its inner graph, so a
 	// node created or moved INSIDE one changes what the container advertises - which is why the destination
-	// containers are registered alongside the nodes themselves. Deeper-first ordering inside RefreshPinsPass means a
+	// containers are registered alongside the nodes themselves. Deeper-first ordering inside RefreshQuestNodePins means a
 	// container is rebuilt after the inner nodes it reads.
 	if (PinRefreshTargets.Num() > 0)
 	{
@@ -382,7 +382,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 			OutResult.Skipped.Add(FString::Printf(TEXT("entry '%s' no longer resolves to an object"), *Entry.Key));
 			continue;
 		}
-		
+
 		// CHILD TOPOLOGY BEFORE VALUES. ApplyQuestChangesToObject writes into objects that already exist; a change whose
 		// Kind is ChildAdded names one that does not yet, and ChildRemoved names one that should stop existing.
 		// Neither is a property write, which is why Kind was ignored here and those changes were planned, displayed,

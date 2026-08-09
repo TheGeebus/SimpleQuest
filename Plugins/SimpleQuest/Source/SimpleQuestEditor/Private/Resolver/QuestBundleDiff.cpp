@@ -55,7 +55,7 @@ void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, 
 		}
 
 		const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
-		
+
 		// An ABSENT cell is the only place policy applies. The source declared the column and left it blank, which is a
 		// statement about the default - but which default, and whether blank is permitted at all, is the recipe's call.
 		// A cell that CARRIES a value overwrites the seed regardless, so policy never reaches it.

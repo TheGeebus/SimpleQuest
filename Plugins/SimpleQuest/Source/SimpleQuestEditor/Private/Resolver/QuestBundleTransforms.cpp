@@ -302,7 +302,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 	TSet<FString> FlatCols;
 	auto AddCol = [&](const FString& Col) { if (!FlatCols.Contains(Col)) { FlatCols.Add(Col); Flat.Columns.Add(Col); } };
 	AddCol(DiscCol);   // the discriminator leads, as it does in a studio's own table
-	
+
 	// Claimed edges are recorded but NOT removed yet — the removal happens only after every one of them has actually
 	// become a cell (see the invariant after the row walk). Removing up front would make a mismatch unrecoverable.
 	TMap<FString, TMap<FString, TArray<FString>>> WireCellsByRow;   // from-guid -> column -> target keys
@@ -316,7 +316,6 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 			const FQuestDataEdge& Edge = Bundle.Edges[i];
 			const FQuestWireBinding* Claim = FindClaimingWireBinding(Edge, Mapping, NodeByGuid);
 			if (!Claim) continue;
-			const FString* MappedTo = SourceKeyByGuid.Find(Edge.To);
 			WireCellsByRow.FindOrAdd(Edge.From)
 						  .FindOrAdd(Claim->SourceColumn.ToString())
 						  .Add(RestateKey(Edge.To, SourceKeyByGuid));
@@ -324,7 +323,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 			++WiresClaimed;
 		}
 	}
-	
+
 	int32 Restated = 0;
 	TMap<FString, FQuestDataTable> RetainedChildTables;   // instanced children keep their own tables; only node rows flatten
 	for (TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
@@ -347,7 +346,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 				Retained.Rows.Add(MoveTemp(Row));
 				continue;
 			}
-			
+
 			// A. class cell -> their discriminator value. Our "class" marker is not part of their vocabulary.
 			const FString ClassName = Row.Get(TEXT("class"));
 			if (const FString* Value = ValueByClassName.Find(ClassName))
@@ -374,8 +373,8 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 				}
 			}
 
-			// C. Wiring this row declares, written as their column(s). MUST run before C — WireCellsByRow is keyed by the
-			//     exported GUID, and C is about to replace Row.Key with the studio's key. A single target is written bare;
+			// C. Wiring this row declares, written as their column(s). MUST run before D — WireCellsByRow is keyed by the
+			//     exported GUID, and D is about to replace Row.Key with the studio's key. A single target is written bare;
 			//     several use the same paren list the import parses, so the value round-trips through ParseQuestKeyList.
 			if (const TMap<FString, TArray<FString>>* Cols = WireCellsByRow.Find(Row.Key))
 			{
@@ -500,7 +499,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 	{
 		Bundle.TablesByType.Add(Child.Key, MoveTemp(Child.Value));
 	}
-	
+
 	// 5. Edge endpoints reference rows by key, so they must follow the same substitution — otherwise the wiring points at
 	//    GUIDs that no longer appear in any row.
 	for (FQuestDataEdge& Edge : Bundle.Edges)

@@ -90,7 +90,7 @@ void ApplyQuestFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnin
 					Row.Cells.Remove(Conv.Column);
 					continue;
 				}
-				
+
 				if (bRowConsumed)
 				{
 					Warnings.Add(FString::Printf(TEXT("'%s' carries %s in addition to an earlier prerequisite convention - "

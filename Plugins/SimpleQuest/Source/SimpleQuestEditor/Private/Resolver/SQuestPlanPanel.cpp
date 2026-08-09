@@ -76,7 +76,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetBlockersText).AutoWrapText(true)
 			]
 		]
-		
+
 		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
 		[
 			SNew(SBorder)

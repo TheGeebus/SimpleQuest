@@ -519,7 +519,7 @@ void SQuestMappingBindingList::RebuildSourceColumnOptions()
 			SourceColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
 		}
 	}
-	
+
 	// This read parses every file in the sample folder. Logged so an unexpected cadence shows up as a pattern, not just as lag.
 	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Binding list: provider returned %d source column(s)."), SourceColumnOptions.Num() - 1);
 }

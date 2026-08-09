@@ -91,7 +91,7 @@ static void LogInPlacePlan(const FQuestInPlacePlan& Plan)
 	{
 		// Unchanged matches are the common case on a healthy re-import; listing them would bury the ones that matter.
 		if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bMoved) continue;
-		
+
 		// An orphan has no incoming row, so its level is only known from the asset side; the questline itself sits in no
 		// level at all, being the thing levels belong to.
 		const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
@@ -348,7 +348,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: asset creation failed at '%s/%s'."), *DestPackagePath, *AssetName);
 		return;
 	}
-	
+
 	TSet<FString> Consumed;
 
 	// Self-row properties onto the graph object (QuestlineID gets _RT; instanced QuestlineRewards rebuilt).
@@ -436,7 +436,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	// Keyed by the SANITIZED EffectiveID — the same segment form compiled tags use, so the export key aligns with
 	// tag identity and stays interchange-safe (no spaces/punctuation in keys or folder names).
 	const FString SelfKey = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
-	
+
 	// The key can come out EMPTY from input a designer can type: a whitespace-only QuestlineID is not IsEmpty(), so the
 	// asset-name fallback never fires, and the sanitizer trims it to nothing. An empty segment appends only a separator,
 	// so the destination would collapse to the export ROOT and scatter this export across every other questline's output.
@@ -464,7 +464,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		QuestBundle_ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
 	}
 	for (const FString& W : Warnings) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: %s"), *W); }
-	
+
 	// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
 	// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
 	const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));

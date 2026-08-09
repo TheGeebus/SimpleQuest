@@ -124,6 +124,12 @@ private:
 	FText Blockers;
 	bool  bHasPlan = false;
 	bool  bStale   = false;
+	FString LastError;
+	/**
+	 * Format the FAILED read used. Kept separately because the combo may since have moved, and a console run has its
+	 * own format selection entirely - so the panel must report what was tried, not what it currently shows.
+	 */
+	FString LastFailedFormat;
 
 	TArray<FQuestPlanRowPtr> Rows;
 	TSharedPtr<SColumnTableView<FQuestPlanRowPtr>> Table;

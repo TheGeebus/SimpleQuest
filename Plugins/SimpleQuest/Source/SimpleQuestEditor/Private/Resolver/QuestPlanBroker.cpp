@@ -14,6 +14,17 @@ void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPla
 	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
 	Record.Plan = Plan;
 	Record.Source = Source;
+	Record.Error.Empty();
+	PlanPublished.Broadcast(TargetAssetPath, Record.Plan);
+}
+
+void FQuestPlanBroker::PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanSource& Source)
+{
+	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
+	Record.Source = Source;
+	Record.Error  = Reason;
+	// The previous plan is deliberately left in place but is no longer the current answer - consumers gate on Error
+	// first. Discarding it would lose a plan the designer may still be reading while they fix the source.
 	PlanPublished.Broadcast(TargetAssetPath, Record.Plan);
 }
 

@@ -208,7 +208,22 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 	FString ReadError;
 	if (!QuestImport_ReadAndValidate(Endpoint, LoadQuestMappingArg(Args), Bundle, NodeRowsByKey, AllRowKeys, Warnings, ReadError))
 	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. No asset created."), *ReadError);
+		// "No asset created" is fresh-create wording and is a lie on an --in-place run, which was never going to create
+		// one. Same failure, two modes, two accurate endings.
+		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. %s"), *ReadError,
+			bInPlace ? TEXT("Nothing was modified.") : TEXT("No asset created."));
+
+		// Published from HERE as well as from the in-place branch below, because THIS is where the common failure
+		// lands: an unreadable source never reaches the branch that knows it is in-place. A publish only at the later
+		// site would surface mapping and validation failures and silently miss the one a designer hits most.
+		if (bInPlace)
+		{
+			FQuestPlanSource FailedSource;
+			FailedSource.Folder     = Endpoint.Folder;
+			FailedSource.FormatName = Endpoint.FormatName;
+			FailedSource.Table      = Endpoint.Table.ToSoftObjectPath();
+			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, FailedSource);
+		}
 		return;
 	}
 
@@ -260,6 +275,13 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		FQuestImportOutcome Outcome;
 		if (!QuestImport_RunInPlace(*TargetGraph, Request, bApply, Outcome))
 		{
+			// Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
+			// log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
+			// failed. The notification catches the eye; the panel is where the reason stays.
+			FQuestPlanSource FailedSource;
+			FailedSource.Folder = Request.Endpoint.Folder;
+			FailedSource.FormatName = Request.Endpoint.FormatName;
+			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, FailedSource);
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. Nothing was modified."), *Outcome.Error);
 			return;
 		}

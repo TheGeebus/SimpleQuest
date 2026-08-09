@@ -259,8 +259,28 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 {
 	if (InAssetPath != TargetAssetPath) { return; }
 
-	bHasPlan = true;
-	bStale = false;   // a fresh plan is by definition current
+	bStale = false;   // a fresh publish is by definition current
+	if (const FQuestPlanRecord* Rec = FQuestPlanBroker::Get().Find(InAssetPath))
+	{
+		LastError = Rec->Error;
+		LastFailedFormat = Rec->Source.FormatName;
+	}
+	// A FAILURE also arrives here - PublishFailure broadcasts through the same delegate - and it did not produce a
+	// plan. Setting bHasPlan unconditionally would leave the panel rendering the previous plan's rows underneath a
+	// message saying the source could not be read.
+	bHasPlan = LastError.IsEmpty();
+
+	if (!LastError.IsEmpty())
+	{
+		// A failure produced no plan, so there is nothing to summarize and no refusals to report. Both are derived from
+		// the STALE plan PublishFailure preserved, and rendering either would attach the previous run's blockers to
+		// this run's error message.
+		Summary = FText::GetEmpty();
+		Blockers = FText::GetEmpty();
+		Rows.Reset();
+		if (Table.IsValid()) { Table->SetRootItems(Rows); }
+		return;
+	}
 
 	Summary = FText::FromString(FString::Printf(
 	TEXT("%d update(s), %d with changes  |  %d created  |  %d orphaned  |  %d connections added, %d removed  |  %d untouched"),
@@ -281,7 +301,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 		Lines.Insert(TEXT("This plan cannot be applied until these are resolved. Nothing would be written."), 0);
 	}
 	Blockers = FText::FromString(FString::Join(Lines, TEXT("\n")));
-
+	
 	RebuildRows(Plan);
 }
 
@@ -374,6 +394,15 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 
 FText SQuestPlanPanel::GetSummaryText() const
 {
+	if (!LastError.IsEmpty())
+	{
+		// Names the format that FAILED, not the one the combo currently shows. A console run has its own format
+		// selection, so the two can legitimately disagree - and a panel reporting its own combo's format for someone
+		// else's failure would send a designer looking for a bug in the wrong reading.
+		return FText::Format(LOCTEXT("PlanFailed", "Could not read the source as {0} — {1}. Nothing was changed."),
+			FText::FromString(LastFailedFormat.IsEmpty() ? TEXT("?") : LastFailedFormat),
+			FText::FromString(LastError));
+	}
 	if (!bHasPlan)
 	{
 		return LOCTEXT("NoPlanYet", "No plan has been computed for this questline. Choose a source above to build one.");

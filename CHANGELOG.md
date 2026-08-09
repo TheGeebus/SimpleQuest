@@ -73,6 +73,15 @@ tenth time, into a questline someone has since edited by hand.
   created, what the source no longer mentions, and how the wiring would differ.
   Nested values are named by path, so you see *`Rewards[0].Amount` 42 → 99*,
   not "something in this node changed."
+- **Choose the format and the recipe from the panel.** The preview reads whichever
+  format you pick - the list is every provider registered with the plugin,
+  including any that your own module adds - and applies an optional recipe chosen
+  the same way. Changing either re-previews immediately, so what you're looking at
+  is always the reading you selected.
+- **A source that can't be read says so, in the panel.** An unreadable folder, a
+  refused recipe or an incoherent source all report where you're looking rather
+  than only in the log, naming the format that was actually tried - which isn't
+  always the one the panel is set to, since a console import carries its own.
 - **Nothing is written until you ask.** Previewing is the default; applying is a
   separate, deliberate step.
 - **Decide what a blank cell means.** A column your source declares but leaves
@@ -107,8 +116,10 @@ tenth time, into a questline someone has since edited by hand.
   moved into a different container, can't be edited in place, so it's reported
   rather than partially updated.
 - **Exports won't overwrite a folder they didn't write.** An export claims its
-  destination and refuses one belonging to something else, so pointing it at
-  the wrong directory costs you nothing.
+  destination and refuses one belonging to something else, so pointing it at the
+  wrong directory costs you nothing. It also refuses to *convert* one: exporting
+  in a different format than the folder already holds would delete every file the
+  previous format wrote, so it stops and says so rather than doing it quietly.
 
 ### Fixes
 
@@ -120,6 +131,13 @@ tenth time, into a questline someone has since edited by hand.
   target's compiled data, so recompiling only the target would fix one asset and
   leave its neighbours describing nodes that no longer exist. Nothing is
   recompiled when an apply changes nothing.
+- **Re-exporting no longer refuses over how you typed the path.** The console
+  accepts a questline as `/Game/Path/Asset` or `/Game/Path/Asset.Asset`, but an
+  export recorded whichever form it was given and compared the next one
+  literally. Using the other spelling read as a *different questline* and the
+  export refused, advising you to change the questline's ID - which would have
+  been the wrong fix for a difference that was never real. Both sides are
+  normalized now, and markers already written keep working.
 - **`OnObjectiveDeactivated` now reports why it fired.** The hook has always run
   on both the completion path and the interruption paths, but couldn't tell them
   apart - an Objective wanting to release a reservation on abandon but not on

@@ -1183,6 +1183,21 @@ bool FQuestlineGraphEditor::RunImportFromFolder(bool bApply)
     if (!QuestImport_RunInPlace(*QuestlineGraph, Request, bApply, Outcome))
     {
         UE_LOG(LogSimpleQuestResolver, Error, TEXT("Build Plan: %s. Nothing was modified."), *Outcome.Error);
+
+        // Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
+        // log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
+        // failed. The notification catches the eye; the panel is where the reason stays.
+        FQuestPlanSource FailedSource;
+        FailedSource.Folder     = Request.Endpoint.Folder;
+        FailedSource.FormatName = Request.Endpoint.FormatName;
+        FQuestPlanBroker::Get().PublishFailure(QuestlineGraph->GetPathName(), Outcome.Error, FailedSource);
+
+        FNotificationInfo Info(FText::Format(
+            NSLOCTEXT("SimpleQuestEditor", "ImportReadFailed", "Could not read the source — {0}"),
+            FText::FromString(Outcome.Error)));
+        Info.ExpireDuration = 6.f;
+        Info.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
         return false;
     }
 

@@ -31,6 +31,14 @@ struct FQuestPlanRecord
 {
 	FQuestInPlacePlan Plan;
 	FQuestPlanSource Source;
+	
+	/**
+	 * Non-empty when the last attempt on this asset FAILED TO PRODUCE A PLAN at all - an unreadable source, a refused
+	 * mapping, an incoherent bundle. Distinct from a plan that found nothing: one says the questline matches its
+	 * source, the other says we never got far enough to know. Plan is left at its previous value and must not be read
+	 * while this is set.
+	 */
+	FString Error;
 };
 
 class SIMPLEQUESTEDITOR_API FQuestPlanBroker
@@ -42,6 +50,14 @@ public:
 
 	/** Record a plan and what produced it, then tell anyone listening. Replaces any previous plan for the asset. */
 	void Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanSource& Source);
+
+	/**
+	 * Record that an attempt produced NO plan, and why. Goes through the same channel for the same reason a plan does:
+	 * a producer that fails and a producer that succeeds should not need different consumers, and a panel that shows
+	 * "no plan yet" when the truth is "the source could not be read" is telling a designer to try the thing that just
+	 * failed. Reason reaches every listener, so a console failure surfaces in the panel too.
+	 */
+	void PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanSource& Source);
 
 	/** The last plan computed for an asset, with its source, or null. */
 	const FQuestPlanRecord* Find(const FString& TargetAssetPath) const;

@@ -102,7 +102,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		if (!Node)
 		{
 			// Only promise what the spawn path can deliver. A class no loaded module provides, or a level nothing declares,
-			// both make SpawnNodeFromRow / ImportGraphLevel skip the row - so planning a CREATE would report work that
+			// both make SpawnQuestNodeFromRow / ImportGraphLevel skip the row - so planning a CREATE would report work that
 			// silently never happens, which is worse than reporting nothing.
 			if (!ResolveQuestBundleClass(Entry.ClassName))
 			{

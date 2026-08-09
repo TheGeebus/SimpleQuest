@@ -65,6 +65,6 @@ FQuestAbsentPolicyResolver QuestImport_ResolvePolicies(const UQuestImportMapping
  * Read, plan against Target, and optionally apply - the whole in-place operation as one call. ALWAYS re-reads: apply
  * needs the bundle a plan describes, and a source can move between a plan being reviewed and being run, so re-planning
  * is the only honest way to promise that what was reviewed is what executes.
- * The caller owns the transaction; ApplyPlan deliberately does not open one.
+ * The caller owns the transaction; ApplyQuestPlan deliberately does not open one.
  */
 bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& Request, bool bApply, FQuestImportOutcome& Out);

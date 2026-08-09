@@ -280,7 +280,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		}
 
 		// A plan carrying refusals or contested keys is not trustworthy in ANY part - those say the planner could not
-		// describe the source, not merely that one row is odd. ApplyPlan already declined; this reports why.
+		// describe the source, not merely that one row is odd. ApplyQuestPlan already declined; this reports why.
 		if (Outcome.ApplyResult.bRefused)
 		{
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: --apply refused - the plan carries %d refusal(s) and %d contested key(s). "

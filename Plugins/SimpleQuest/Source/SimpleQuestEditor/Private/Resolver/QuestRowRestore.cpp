@@ -18,7 +18,7 @@
 static bool RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);
 
 /**
- * Returns whether it actually WROTE. Void was the bug: ApplyChangesToObject did Modify() -> RestoreCell() ->
+ * Returns whether it actually WROTE. Void was the bug: ApplyQuestChangesToObject did Modify() -> RestoreQuestCell() ->
  * ++Written with nothing between, so every decline below still dirtied the package and counted a change that did
  * not happen. A plan/apply pipeline reporting work it did not do is the failure this whole arc exists to prevent.
  * The Array arm reports through RestoreArrayCell, which fails the whole call if any element declined - a container
@@ -189,8 +189,8 @@ void RestoreQuestRowProperties(UObject* Target, const FQuestDataRow& Row)
 		if (Col == TEXT("class") || Col == TEXT("graph")) continue;
 		FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*Col));
 		if (!Prop) continue;
-		// RestoreCell types the value against the property (structured providers write typed fields directly; string-
-		// carrying Kinds route through ImportText on Scalar) - see the switch(Kind) in RestoreCell.
+		// RestoreQuestCell types the value against the property (structured providers write typed fields directly; string-
+		// carrying Kinds route through ImportText on Scalar) - see the switch(Kind) in RestoreQuestCell.
 		RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
 	}
 }
@@ -230,7 +230,7 @@ FQuestDataValue TypeQuestCellLikeProperty(const FProperty* Prop, const FQuestDat
 {
 	void* Scratch = FMemory::Malloc(Prop->GetSize(), Prop->GetMinAlignment());
 	Prop->InitializeValue(Scratch);
-	// Start from what the apply step would start from. RestoreCell's non-writing arms leave the seed in place, which is
+	// Start from what the apply step would start from. RestoreQuestCell's non-writing arms leave the seed in place, which is
 	// what makes an absent cell mean "unchanged" rather than "reset to zero" - and zero is not even the right default,
 	// since a property with an in-class initializer is non-zero on a freshly constructed object.
 	// CopyCompleteValue, not CopySingleValue: the buffer is sized at GetSize(), which includes ArrayDim.

@@ -273,7 +273,7 @@ void WireQuestEdges(const FQuestDataBundle& Bundle, const TMap<FString, UEdGraph
 		{
 			// Two distinct "contains" kinds share the verb: contains(InnerGraph) is a container->inner-NODE edge
 			// (those nodes are spawned by ImportQuestGraphLevel, not reattached), while contains(<prop>[i]) is an
-			// instanced sub-object child (reattached by ReattachInstanced -> ConsumedChildKeys). The cross-check
+			// instanced sub-object child (reattached by ReattachQuestInstancedChildren -> ConsumedChildKeys). The cross-check
 			// only applies to the latter; InnerGraph edges are handled by the graph-level spawn and must be skipped.
 			const bool bInstancedChild = !E.Type.Contains(TEXT("contains(InnerGraph)"));
 			if (bInstancedChild && !ConsumedChildKeys.Contains(E.To))

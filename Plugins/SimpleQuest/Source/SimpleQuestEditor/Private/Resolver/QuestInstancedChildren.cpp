@@ -94,7 +94,7 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 			Indexed.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
 
 			// SILENCE IS NOT AN ASSERTION OF EMPTINESS. A source that declares no children for this property has said
-			// nothing about it - the same contract a missing scalar cell carries, where RestoreCell's Empty arm leaves the
+			// nothing about it - the same contract a missing scalar cell carries, where RestoreQuestCell's Empty arm leaves the
 			// constructed value alone. Clearing here would make silence destructive: restoring onto an owner that already
 			// holds authored children would discard them for no reason the source ever gave. Declaring children still
 			// replaces the contents wholesale, which is the source stating what they are.

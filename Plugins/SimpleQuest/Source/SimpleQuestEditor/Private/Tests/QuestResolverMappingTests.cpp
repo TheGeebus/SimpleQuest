@@ -415,7 +415,7 @@ bool FQuestResolver_TagCellRejectsForeignStruct::RunTest(const FString& Paramete
 	Cell.Kind = EQuestDataValueKind::TagContainer;
 	Cell.TagContainer.AddTag(TestTag);
 
-	// The RETURN is now the contract, not just the absence of a write. Before RestoreCell reported failure, a caller
+	// The RETURN is now the contract, not just the absence of a write. Before RestoreQuestCell reported failure, a caller
 	// could refuse a value, dirty the package and count it as a change that happened - and the assertions below could
 	// not tell that apart from a clean refusal, because both leave the bytes alone.
 	const bool bWrote = RestoreQuestCell(GuidProp, ValuePtr, Cell);
@@ -740,7 +740,7 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ScratchSeedIsTheAbsentPolicy, "S
 bool FQuestResolver_ScratchSeedIsTheAbsentPolicy::RunTest(const FString& Parameters)
 {
 	// The plan's contract is to SIMULATE the apply, and the apply starts from the property's live value — so the simulation
-	// must too. RestoreCell deliberately leaves some cells unwritten (an Empty one above all), and whatever the scratch was
+	// must too. RestoreQuestCell deliberately leaves some cells unwritten (an Empty one above all), and whatever the scratch was
 	// seeded with is what survives that. Seeding from zero therefore reports a change to nothing-in-particular for every
 	// declared-but-blank column. Seeding from the current value makes an absent cell mean "leave it alone" — which is
 	// precisely Preserve, and seeding from the class default instead would be Reset. The seed IS the policy.
@@ -1233,11 +1233,11 @@ bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
 {
 	/**
 	 * "One undo reverses an entire apply" is a promise the resolver makes and, until this test, nothing checked. Every other
-	 * apply test runs with no transaction open, so GUndo is null and every Modify() inside ApplyPlan is a no-op - the whole
+	 * apply test runs with no transaction open, so GUndo is null and every Modify() inside ApplyQuestPlan is a no-op - the whole
 	 * lot could be deleted and the suite would stay green.
 	 * TWO conditions gate SaveToTransactionBuffer, not one: an open transaction AND RF_Transactional on the object. A test
 	 * that opens a transaction over objects lacking the flag proves nothing, so this leans on MakeTransientQuestlineGraph
-	 * setting it on the inner UEdGraph and on SpawnNodeFromRow setting it on every node it creates.
+	 * setting it on the inner UEdGraph and on SpawnQuestNodeFromRow setting it on every node it creates.
 	 */
 	if (!GEditor)
 	{
@@ -1260,7 +1260,7 @@ bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
 	PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Plan);
 	TestEqual(TEXT("The row plans as a create"), Plan.CountOf(EQuestNodePlanAction::Create), 1);
 
-	// ApplyPlan deliberately does not own the transaction - its caller does - so the test has to BE the caller.
+	// ApplyQuestPlan deliberately does not own the transaction - its caller does - so the test has to BE the caller.
 	GEditor->BeginTransaction(NSLOCTEXT("QuestResolverTests", "ApplyUndoTest", "Apply Quest Import"));
 	FQuestApplyResult Result;
 	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());

@@ -4,7 +4,7 @@
 #pragma once
 
 // The recipe applied to a bundle, both directions. QuestBundle_ApplyMapping routes a flat studio table's rows to classes by the
-// discriminator and renames bound columns; ApplyWireBindings turns row-adjacent target columns into edges;
+// discriminator and renames bound columns; QuestBundle_ApplyWireBindings turns row-adjacent target columns into edges;
 // QuestBundle_ApplyReverseMapping reads the identical recipe backwards to restate a canonical bundle in the studio's vocabulary; and
 // Validate refuses anything structurally incoherent before a partial asset can exist. Forward and reverse live together
 // because they are ONE RECIPE READ TWO WAYS, and drift between them is the failure this file exists to prevent. Every one

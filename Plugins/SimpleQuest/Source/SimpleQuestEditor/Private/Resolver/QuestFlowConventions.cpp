@@ -120,7 +120,7 @@ void ApplyQuestFlowConventions(FQuestDataBundle& Bundle, TArray<FString>& Warnin
 				}
 
 				// Combinator key: derived from the GATED row + column so re-imports are stable and two gates never
-				// collide. Needn't be a GUID - SpawnNodeFromRow mints a deterministic FGuid from any non-GUID key.
+				// collide. Needn't be a GUID - SpawnQuestNodeFromRow mints a deterministic FGuid from any non-GUID key.
 				const FString CombKey = Row.Key + TEXT("__") + FString(Conv.Column);
 				const FString GraphCell = Row.Get(TEXT("graph"));   // same graph level as the gated node
 

@@ -150,7 +150,7 @@ namespace
 		case EJson::Array:
 		{
 			// EVERY array -> Kind=Array (dumb — no type guess). The destination property decides array-vs-tag-container
-			// at restore time (RestoreArrayCell branches on FGameplayTagContainer vs FArray/FSetProperty).
+			// at restore time (RestoreQuestCell's array arm branches on FGameplayTagContainer vs FArray/FSetProperty).
 			V.Kind = EQuestDataValueKind::Array;
 			for (const TSharedPtr<FJsonValue>& Elem : Json->AsArray())
 			{

@@ -192,8 +192,8 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 {
 	const int32 ErrorsBefore = OutErrors.Num();
 
-	// The class map: catches unresolvable-class + normalized-key-collision, and gives the accepted normalized-value set
-	// that EXACTLY matches what ApplyMapping will route (same builder, no drift). Its errors accumulate into OutErrors.
+	// The class map: catches unresolvable-class + normalized-key-collision, and gives the accepted normalized-value set that
+	// EXACTLY matches what QuestBundle_ApplyMapping will route (same builder, no drift). Its errors accumulate into OutErrors.
 	TMap<FString, UClass*> ClassByNormValue;
 	BuildDiscriminatorClassMap(Mapping, ClassByNormValue, OutErrors);
 

@@ -171,7 +171,7 @@ bool QuestBundle_ApplyMapping(FQuestDataBundle& Bundle, const UQuestImportMappin
 // A studio's flat source expresses flow as a COLUMN of target keys ("next": n_exit) rather than an edge table. Each
 // wire-binding names such a column plus the edge kind it means; we synthesize the identical {From,Type,To} edges the
 // edge table would have carried, then STRIP the cell so it never reaches RestoreQuestCell as a bogus property (same
-// contract as the flow conventions below). An EMPTY qualifier emits "verb()", which ResolveSourcePin reads as "this
+// contract as the flow conventions below). An EMPTY qualifier emits "verb()", which ResolveQuestSourcePin reads as "this
 // node's default output of that kind" - so one binding wires Entry, Step and Exit alike. Mapping-only: it's studio
 // vocabulary translation, so it never runs on our own round-trip.
 void QuestBundle_ApplyWireBindings(FQuestDataBundle& Bundle, const UQuestImportMapping& Mapping, TArray<FString>& Warnings)
@@ -376,7 +376,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 
 			// C. Wiring this row declares, written as their column(s). MUST run before C — WireCellsByRow is keyed by the
 			//     exported GUID, and C is about to replace Row.Key with the studio's key. A single target is written bare;
-			//     several use the same paren list the import parses, so the value round-trips through ParseFlowKeyList.
+			//     several use the same paren list the import parses, so the value round-trips through ParseQuestKeyList.
 			if (const TMap<FString, TArray<FString>>* Cols = WireCellsByRow.Find(Row.Key))
 			{
 				for (const TPair<FString, TArray<FString>>& ColPair : *Cols)

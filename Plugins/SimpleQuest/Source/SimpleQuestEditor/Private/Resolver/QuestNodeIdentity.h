@@ -77,7 +77,9 @@ FString QuestEdgeVerb(FName PinCategory);
 
 /**
  * Knot-collapsed wire edges leaving one node, appended to OutEdges. Every output pin's terminals via the traversal policy's
- * forward walk, so a chain of reroutes reads as the single edge it means.
+ * forward walk, so a chain of reroutes reads as the single edge it means (the zero-knot case degenerates to the direct link).
+ * Uses a FRESH visited set per source pin: the walker's set is node-granular, so sharing one across pins would suppress
+ * legitimate edges from later pins.
  * Shared for the same reason the child walk is: the reader that wants to know how an asset is CURRENTLY wired must derive
  * edges exactly as the writer does, or the two disagree about wiring that never changed.
  */

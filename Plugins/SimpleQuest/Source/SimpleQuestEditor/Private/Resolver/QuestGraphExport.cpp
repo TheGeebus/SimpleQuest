@@ -43,16 +43,6 @@ static FString NodeKeyOf(const UQuestlineNodeBase* Node)
 }
 
 /**
- * True when a property's value(s) are Instanced UObjects — the shapes that must explode to child rows instead of
- * serializing as a dangling object path. Recurses array inners, map values, and struct fields so container-wrapped
- * instanced data (e.g. TMap<FGameplayTag, FQuestRewardSet> wrapping an instanced array) classifies correctly.
- */
-static bool IsInstancedBearing(const FProperty* Prop)
-{
-	return IsQuestInstancedBearing(Prop);   // one definition, shared with the reader that must agree about what a child IS
-}
-
-/**
  * Emit child rows + contains edges for every instanced object reachable from Prop on the entity keyed OwnerKey.
  * PathPrefix is the property path so far relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards");
  * it becomes both the contains-edge qualifier and the child row's synthetic key suffix, so edge and key corroborate.
@@ -84,7 +74,7 @@ void CollectQuestEntityRow(const UObject* Entity, const FString& Key, const TMap
 		}
 		for (TFieldIterator<FProperty> It(Class); It; ++It)
 		{
-			if (!IsAuthoredConfigProperty(*It) || IsInstancedBearing(*It))
+			if (!IsAuthoredConfigProperty(*It) || IsQuestInstancedBearing(*It))
 			{
 				continue;
 			}
@@ -120,7 +110,7 @@ void CollectQuestEntityRow(const UObject* Entity, const FString& Key, const TMap
 			continue;
 		}
 		const void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Entity);
-		if (IsInstancedBearing(Prop))
+		if (IsQuestInstancedBearing(Prop))
 		{
 			RecurseInstanced(Prop, ValuePtr, Key, Prop->GetName(), Bundle);
 			continue;
@@ -129,16 +119,6 @@ void CollectQuestEntityRow(const UObject* Entity, const FString& Key, const TMap
 		Row.Cells.Add(Prop->GetName(), BuildQuestDataValue(Prop, ValuePtr, DefaultPtr));
 	}
 	Table.Rows.Add(MoveTemp(Row));
-}
-
-/**
- * Emit knot-collapsed wire edges for one node: every output pin's terminals via the traversal policy's forward walk
- * (works for any output pin — the zero-knot case degenerates to the direct link). Fresh Visited per source pin: the
- * walker's visited set is node-granular, so sharing one across pins would suppress legitimate edges from later pins.
- */
-static void CollectEdgesForNode(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle)
-{
-	CollectQuestWireEdges(Node, Policy, Bundle.Edges);
 }
 
 void CollectQuestGraphBundle(const UEdGraph* Graph, const FString& GraphCell, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle)
@@ -164,7 +144,7 @@ void CollectQuestGraphBundle(const UEdGraph* Graph, const FString& GraphCell, co
 		TMap<FString, FString> Extra;
 		Extra.Add(TEXT("graph"), GraphCell);
 		CollectQuestEntityRow(Node, Key, Extra, Bundle);
-		CollectEdgesForNode(Node, Policy, Bundle);
+		CollectQuestWireEdges(Node, Policy, Bundle.Edges);
 
 		// Quest container: contains edge to each inner node, then recurse. Emitted here (not inside the recursion)
 		// so the edge's from-side is unambiguous.

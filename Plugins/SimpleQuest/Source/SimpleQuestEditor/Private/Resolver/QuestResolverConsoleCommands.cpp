@@ -20,6 +20,7 @@
 #include "Factories/QuestlineGraphFactory.h"
 #include "IAssetTools.h"
 #include "ISimpleQuestEditorModule.h"
+#include "QuestExportOperations.h"
 #include "Internationalization/Text.h"
 #include "Misc/Paths.h"
 #include "Nodes/QuestlineNodeBase.h"
@@ -461,185 +462,45 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		return;
 	}
 
-	FQuestDataBundle Bundle;
-	const TUniquePtr<FQuestlineGraphTraversalPolicy> Policy = MakeUnique<FQuestlineGraphTraversalPolicy>();
-
-	// Questline-self row: the asset's own authored fields (QuestlineID / DisplayName / Description / DisplayData /
-	// ResettableReplay as columns; QuestlineRewards explodes through the instanced recursion into reward child rows).
-	// Keyed by the SANITIZED EffectiveID — the same segment form compiled tags use, so the export key aligns with
-	// tag identity and stays interchange-safe (no spaces/punctuation in keys or folder names).
-	const FString SelfKey = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
-
-	// The key can come out EMPTY from input a designer can type: a whitespace-only QuestlineID is not IsEmpty(), so the
-	// asset-name fallback never fires, and the sanitizer trims it to nothing. An empty segment appends only a separator,
-	// so the destination would collapse to the export ROOT and scatter this export across every other questline's output.
-	// Refuse rather than write somewhere unintended, and name the field to fix.
-	if (SelfKey.IsEmpty())
-	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: '%s' has a QuestlineID that reduces to an empty export key "
-			"(raw value: '%s'). Give it at least one letter, digit or underscore — or clear the field entirely to fall back "
-			"to the asset name. Nothing exported."),
-			*Args[0],
-			*Graph->GetEffectiveID());
-		return;
-	}
-	CollectQuestEntityRow(Graph, SelfKey, {}, Bundle);
-
-	CollectQuestGraphBundle(Graph->QuestlineEdGraph, TEXT("root"), *Policy, Bundle);
-
-	// Optional studio-shape restatement. Absent = canonical export (our vocabulary), byte-identical to before.
-	TArray<FString> Warnings;
-	if (const UQuestImportMapping* Mapping = LoadQuestMappingArg(Args))
-	{
-		TMap<FString, FString> SourceKeyByGuid;
-		TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
-		CollectQuestNodeIdentity(Graph->QuestlineEdGraph, SourceKeyByGuid, NodeByGuid);
-		QuestBundle_ApplyReverseMapping(Bundle, *Mapping, SourceKeyByGuid, NodeByGuid, Warnings);
-	}
-	for (const FString& W : Warnings) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: %s"), *W); }
-
-	// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
-	// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
-	const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
-	const FString OutDir = FPaths::ConvertRelativePathToFull(ExportRoot / SelfKey);
-	{
-		FString NormRoot = ExportRoot;  FPaths::NormalizeDirectoryName(NormRoot);
-		FString NormOut  = OutDir;      FPaths::NormalizeDirectoryName(NormOut);
-		if (NormOut == NormRoot || FPaths::GetPath(NormOut) != NormRoot)
-		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — destination '%s' is not a direct child of the "
-				"export root '%s' (export key '%s'). Nothing exported."),
-				*NormOut,
-				*NormRoot,
-				*SelfKey);
-			return;
-		}
-	}
-	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: destination '%s'."), *OutDir);
-
-	const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("ExportQuestline"));
-	if (!Format)
+	// Resolved to a NAME here rather than a provider, because the operation takes the name - the console reads it from
+	// --format, a toolbar button will read it from a combo, and neither needs to know the registry exists.
+	const FString FormatName = ResolveQuestFormatNameFromArgs(Args, TEXT("ExportQuestline"));
+	if (FormatName.IsEmpty())
 	{
 		return;   // the unregistered-format error was already logged; nothing exported.
 	}
-	// OWNERSHIP — never replace a folder we didn't write. This is the guard that survives a NAME COLLISION: two
-	// questline IDs can sanitize to one folder, and a hand-authored source folder sitting at that name would otherwise
-	// be overwritten by an export.
-	FQuestExportMarker Previous;
-	const bool bHadMarker = ReadQuestExportMarker(OutDir, Previous);
-	const TArray<FString> Existing = QuestExportFilesIn(OutDir);
-	if (Existing.Num() > 0 && !bHadMarker)
+
+	FQuestExportRequest Request;
+	Request.Graph      = Graph;
+	Request.FormatName = FormatName;
+	Request.Mapping    = LoadQuestMappingArg(Args);
+
+	FQuestExportOutcome Out;
+	const bool bOk = QuestExport_Run(Request, Out);
+
+	// Warnings first either way: a reverse-mapping warning explains the shape of what was written, and on a refusal it
+	// may well explain the refusal.
+	for (const FString& W : Out.Warnings)
 	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' already holds %d file(s) and carries no "
-			"SimpleQuest export marker, so an export did not write it. Exporting would replace its contents. Move or delete "
-			"that folder, or give this questline a different QuestlineID. Nothing written."),
-			*OutDir,
-			Existing.Num());
-		return;
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: %s"), *W);
 	}
-	// Both sides normalized - the marker may predate the normalization above, and "same asset, other spelling" must not
-	// read as "different questline". That refusal tells a designer to change their QuestlineID, which would be wrong.
-	if (bHadMarker && !Previous.SourceAsset.IsEmpty() && NormalizeConsoleAssetPath(Previous.SourceAsset) != NormalizeConsoleAssetPath(Args[0]))
+
+	if (!bOk)
 	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' holds the export of a DIFFERENT questline "
-			"('%s'). Their IDs reduce to the same folder name, so each would overwrite the other. Give one a distinct "
-			"QuestlineID. Nothing written."),
-			*OutDir,
-			*Previous.SourceAsset);
+		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: %s"), *Out.Error);
 		return;
 	}
 
-	// A folder holds ONE export, and its format is part of what it holds - re-exporting the same questline in a
-	// different format does not update this folder, it CONVERTS it, deleting every file the previous format wrote.
-	// The marker has always recorded the format; this is the guard finally reading it. Refused rather than prompted,
-	// for the same reason as the two above: an export that silently replaces a folder's contents is the failure this
-	// whole marker protocol exists to prevent, and "same questline" does not make the replacement harmless.
-	if (bHadMarker && !Previous.Format.IsEmpty() && !Previous.Format.Equals(Format->FormatName(), ESearchCase::IgnoreCase))
-	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' holds a %s export of this questline and "
-			"you asked for %s. Exporting would delete the %s files and replace them. Export to a different folder, or "
-			"delete this one first. Nothing written."),
-			*OutDir,
-			*Previous.Format,
-			*Format->FormatName(),
-			*Previous.Format);
-		return;
-	}
-
-	// STAGE — write the complete new export beside the destination. NOTHING is deleted until it exists on disk, so a
-	// failed, refused or interrupted write leaves the previous export exactly as it was. The sanitizer can never emit a
-	// '.', so this name cannot collide with a real destination.
-	const FString Staging = OutDir + TEXT(".incoming");
-	IFileManager::Get().DeleteDirectory(*Staging, /*RequireExists*/ false, /*Tree*/ true);
-	if (!Format->WriteBundle(Bundle, Staging))
-	{
-		IFileManager::Get().DeleteDirectory(*Staging, false, true);
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: the %s provider failed to write. '%s' is unchanged."),
-			*Format->FormatName(),
-			*OutDir);
-		return;
-	}
-
-	FQuestExportMarker Marker;
-	Marker.Format = Format->FormatName();
-	// Normalized, not verbatim: the console accepts "/Game/Path/Asset" and "/Game/Path/Asset.Asset" for the same asset,
-	// and recording whichever the caller happened to type makes the ownership check depend on spelling.
-	Marker.SourceAsset = NormalizeConsoleAssetPath(Args[0]);
-	Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported — works for any provider, including one that ignores us
-
-	// REPLACE — remove only what the PREVIOUS export recorded. Never a directory, never read-only: a read-only file is
-	// protected on purpose, and a subdirectory can't contribute to the stale-shape problem because the reader doesn't
-	// recurse. Any failure aborts with the finished copy left in place and named.
-	IFileManager::Get().MakeDirectory(*OutDir, /*Tree*/ true);
-	int32 Removed = 0;
-	for (const FString& Old : Previous.Files)
-	{
-		const FString OldPath = OutDir / Old;
-		if (!IFileManager::Get().FileExists(*OldPath)) continue;
-		if (!IFileManager::Get().Delete(*OldPath, /*RequireExists*/ false, /*EvenReadOnly*/ false, /*Quiet*/ false))
-		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: couldn't remove '%s' from the previous export — it may be "
-				"read-only or open elsewhere. '%s' is unchanged; the finished new export is at '%s'."),
-				*OldPath,
-				*OutDir,
-				*Staging);
-			return;
-		}
-		++Removed;
-	}
-	if (bHadMarker) { IFileManager::Get().Delete(*(OutDir / GQuestExportMarkerName), false, false, false); }
-
-	WriteQuestExportMarker(Staging, Marker);
-	for (const FString& New : Marker.Files)
-	{
-		if (!IFileManager::Get().Move(*(OutDir / New), *(Staging / New)))
-		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: couldn't move '%s' into place — '%s' is now PARTIAL and "
-				"should not be imported. The complete export is at '%s'."),
-				*New,
-				*OutDir,
-				*Staging);
-			return;
-		}
-	}
-	IFileManager::Get().Move(*(OutDir / GQuestExportMarkerName), *(Staging / GQuestExportMarkerName));
-	IFileManager::Get().DeleteDirectory(*Staging, false, true);   // scratch only; a failure here is not data loss
-
-	int32 RowTotal = 0;
-	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-	{
-		RowTotal += TablePair.Value.Rows.Num();
-	}
 	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
 		"collapsed. Wrote %d file(s) to '%s'; removed %d from the previous export."),
-		*SelfKey,
-		RowTotal,
-		Bundle.TablesByType.Num(),
-		Bundle.Edges.Num(),
-		Bundle.KnotsCollapsed,
-		Marker.Files.Num(),
-		*OutDir,
-		Removed);
+		*Out.ExportKey,
+		Out.EntityRows,
+		Out.TypeCount,
+		Out.EdgeCount,
+		Out.KnotsCollapsed,
+		Out.FilesWritten,
+		*Out.OutDir,
+		Out.FilesRemoved);
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

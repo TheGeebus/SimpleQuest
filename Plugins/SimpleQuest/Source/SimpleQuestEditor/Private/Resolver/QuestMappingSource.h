@@ -93,6 +93,14 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix);
 
 /**
+ * The format NAME an operation should use, resolved from a --format= argument, then the project default, then TSV.
+ * Empty (and logged under LogPrefix) when a named format isn't registered. Separate from MakeQuestDataFormat because
+ * an operation that takes a name rather than a provider - so its caller need not know the registry exists - still
+ * needs the console's resolution order.
+ */
+FString ResolveQuestFormatNameFromArgs(const TArray<FString>& Args, const TCHAR* LogPrefix);
+
+/**
  * WHERE a source lives — the one concept both provenances answer to. Transient by nature: a console arg or panel state,
  * never stored on the recipe (which describes a SHAPE, not a location). Kind selects which fields are meaningful.
  */

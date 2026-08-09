@@ -247,7 +247,7 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 	return OutErrors.Num() == ErrorsBefore;
 }
 
-TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix)
+FString ResolveQuestFormatNameFromArgs(const TArray<FString>& Args, const TCHAR* LogPrefix)
 {
 	FString ConsoleArgName;
 	for (const FString& Arg : Args)
@@ -265,9 +265,14 @@ TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Ar
 	if (Name.IsEmpty())
 	{
 		UE_LOG(LogSimpleQuestResolver, Error, TEXT("%s: %s"), LogPrefix, *Error);
-		return nullptr;
 	}
-	return FQuestDataFormatRegistry::Get().Create(Name);
+	return Name;
+}
+
+TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Args, const TCHAR* LogPrefix)
+{
+	const FString Name = ResolveQuestFormatNameFromArgs(Args, LogPrefix);
+	return Name.IsEmpty() ? nullptr : FQuestDataFormatRegistry::Get().Create(Name);
 }
 
 namespace

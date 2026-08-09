@@ -1,27 +1,55 @@
 ﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
-
-// PROTOTYPE — Resolver, Phase 2 round-trip harness. One command that runs the full oracle loop on a questline asset:
-// export -> import (_RT) -> dump both -> report the C diff (authored folders) and the B2 diff (compiled dumps), each
-// with the ONE known-benign normalization applied (the _RT identity suffix for C, the tag namespace prefix for B2).
-// The normalization is the point — a raw diff false-fails on every asset. Drives the three existing console commands
-// via GEngine->Exec (same-process), so it needs no refactoring of the export/import/dump prototypes. Editor-only,
-// console-triggered. Not shipped API.
+// The verification tier's console surface: dump a compiled model, run the full round-trip loop, or re-run just the
+// comparators against artifacts already on disk. All three are read-only with respect to the questlines they judge -
+// RoundTrip writes a reconstructed copy, but only ever under the destination package the caller names.
 
 #include "CoreMinimal.h"
 #include "Engine/Engine.h"
-#include "Misc/FileHelper.h"
-#include "Misc/Paths.h"
 #include "HAL/FileManager.h"
-#include "SimpleQuestLog.h"
+#include "Misc/FileHelper.h"
 #include "Quests/QuestlineGraph.h"
+#include "Resolver/Verification/QuestCompiledModelDump.h"
 #include "Resolver/Verification/QuestRoundTripOracle.h"
 #include "Resolver/Verification/QuestVerificationPaths.h"
+#include "SimpleQuestLog.h"
+#include "UObject/UObjectGlobals.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
 {
+	void DumpCompiledCmd(const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: usage 'SimpleQuest.DumpCompiled <QuestlineAssetPath>'."));
+			return;
+		}
+		const UQuestlineGraph* Graph = LoadObject<UQuestlineGraph>(nullptr, *Args[0]);
+		if (!Graph)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: couldn't load questline asset '%s'."), *Args[0]);
+			return;
+		}
+
+		int32 NodeCount = 0;
+		const TArray<FString> Lines = RenderQuestCompiledModel(*Graph, NodeCount);
+
+		IFileManager::Get().MakeDirectory(*QuestExportRootDir(), true);
+		const FString QLID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
+		const FString OutPath = QuestCompiledDumpPathFor(QLID);
+		if (FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *OutPath))
+		{
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("DumpCompiled: '%s' — %d line(s), %d node(s). Wrote '%s'."),
+				*QLID, Lines.Num(), NodeCount, *OutPath);
+		}
+		else
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("DumpCompiled: failed to write '%s'."), *OutPath);
+		}
+	}
+
 	void RoundTripCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 2)
@@ -46,11 +74,11 @@ namespace
 		if (!Src) { UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
 		const FString OriginalID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Src->GetEffectiveID());
 
-		const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
-		const FString SrcFolder  = ExportRoot / OriginalID;
-		const FString RtFolder   = ExportRoot / (OriginalID + GQuestRoundTripSuffix);
-		const FString SrcDump    = ExportRoot / (OriginalID + TEXT("_compiled_dump.tsv"));
-		const FString RtDump     = ExportRoot / (OriginalID + GQuestRoundTripSuffix + TEXT("_compiled_dump.tsv"));
+		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
+		const FString SrcFolder  = QuestExportFolderFor(OriginalID);
+		const FString RtFolder   = QuestExportFolderFor(RtID);
+		const FString SrcDump    = QuestCompiledDumpPathFor(OriginalID);
+		const FString RtDump     = QuestCompiledDumpPathFor(RtID);
 
 		auto Exec = [](const FString& Cmd)
 		{
@@ -66,8 +94,7 @@ namespace
 		Exec(FString::Printf(TEXT("SimpleQuest.ImportQuestline %s %s%s"), *SrcFolder, *DestPackagePath, *FormatArg));
 
 		// 3. Export + dump the imported asset. Its object path: <DestPackagePath>/<ID>_RT.<ID>_RT
-		const FString RtAssetPath = FString::Printf(TEXT("%s/%s%s.%s%s"),
-			*DestPackagePath, *OriginalID, GQuestRoundTripSuffix, *OriginalID, GQuestRoundTripSuffix);
+		const FString RtAssetPath = FString::Printf(TEXT("%s/%s.%s"), *DestPackagePath, *RtID, *RtID);
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *RtAssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
 
@@ -81,11 +108,11 @@ namespace
 			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);
 	}
 
-	// Compare-only: run the C + B2 comparators against artifacts ALREADY on disk, without re-export/re-import. This is
-	// the harness's own smoke-test seam — regenerate ONLY the RT-side artifacts against a deliberately-corrupted _RT
-	// asset (ExportQuestline + DumpCompiled on it), leave the src-side artifacts pristine from the last full RoundTrip,
-	// then call this to confirm the REAL comparators (not a re-implementation) go red on the injected break. Because a
-	// full RoundTrip re-imports and self-heals, corruption can only be observed through this no-regen compare path.
+	// Compare-only: run the comparators against artifacts ALREADY on disk, without re-export/re-import. This is the
+	// harness's own smoke-test seam — regenerate ONLY the RT-side artifacts against a deliberately-corrupted _RT asset
+	// (ExportQuestline + DumpCompiled on it), leave the src-side artifacts pristine from the last full RoundTrip, then
+	// call this to confirm the REAL comparators (not a re-implementation) go red on the injected break. Because a full
+	// RoundTrip re-imports and self-heals, corruption can only be observed through this no-regen compare path.
 	// Args: <OriginalID> — the sanitized questline ID whose <ID>/<ID>_RT folders + <ID>_compiled_dump.tsv /
 	// <ID>_RT_compiled_dump.tsv dumps live under Saved/QuestExport (i.e. the same stems a prior RoundTrip wrote).
 	void RoundTripCompareCmd(const TArray<FString>& Args)
@@ -97,20 +124,23 @@ namespace
 			return;
 		}
 		const FString OriginalID = Args[0];
-		const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
-		const FString SrcFolder  = ExportRoot / OriginalID;
-		const FString RtFolder   = ExportRoot / (OriginalID + GQuestRoundTripSuffix);
-		const FString SrcDump    = ExportRoot / (OriginalID + TEXT("_compiled_dump.tsv"));
-		const FString RtDump     = ExportRoot / (OriginalID + GQuestRoundTripSuffix + TEXT("_compiled_dump.tsv"));
+		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
 
-		const int32 CMiss  = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID);
-		const int32 B2Miss = CompareQuestCompiledDumps(SrcDump, RtDump, OriginalID);
+		const int32 CMiss  = CompareQuestExportFolders(QuestExportFolderFor(OriginalID), QuestExportFolderFor(RtID), OriginalID);
+		const int32 B2Miss = CompareQuestCompiledDumps(QuestCompiledDumpPathFor(OriginalID), QuestCompiledDumpPathFor(RtID), OriginalID);
 		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': C %s (%d), B2 %s (%d) ===="),
 			*OriginalID,
 			CMiss  == 0 ? TEXT("PASS") : TEXT("FAIL"), CMiss,
 			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);
 	}
 }
+
+static FAutoConsoleCommand GDumpCompiledCmd(
+	TEXT("SimpleQuest.DumpCompiled"),
+	TEXT("PROTOTYPE: dump a questline's COMPILED model as deterministic text (per-node reflection dump, sets/maps "
+		"sorted, prereq combinator children order-normalized) to Saved/QuestExport/<QuestlineID>_compiled_dump.tsv. "
+		"The import round-trip's behavioral judge. Arg: the questline asset path."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&DumpCompiledCmd));
 
 static FAutoConsoleCommand GRoundTripCmd(
 	TEXT("SimpleQuest.RoundTrip"),

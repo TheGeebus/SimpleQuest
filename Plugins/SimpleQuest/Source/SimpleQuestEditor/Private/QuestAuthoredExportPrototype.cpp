@@ -23,6 +23,7 @@
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestExportOutput.h"
 #include "Resolver/QuestGraphExport.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
@@ -32,60 +33,6 @@
 
 namespace
 {
-
-	
-	// An export folder holds exactly ONE export, so a re-export must remove what the previous one left. This marker is what
-	// distinguishes our output from a folder a person authored: path derivation is many-to-one (two questline IDs can
-	// sanitize to the same segment), so a name check alone can never be trusted to answer "is this ours to replace?".
-	const TCHAR* GExportMarkerName = TEXT(".simplequest-export");
-
-	struct FExportMarker
-	{
-		FString Format;
-		FString SourceAsset;
-		TArray<FString> Files;   // what the previous export wrote — the ONLY things a replacement may remove
-	};
-
-	bool ReadExportMarker(const FString& Folder, FExportMarker& Out)
-	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *(Folder / GExportMarkerName))) return false;
-		TArray<FString> Lines;
-		Text.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
-		for (const FString& Line : Lines)
-		{
-			FString Key, Value;
-			if (!Line.Split(TEXT("="), &Key, &Value)) continue;   // comment/blank lines have no '='
-			if (Key == TEXT("Format"))           { Out.Format = Value; }
-			else if (Key == TEXT("SourceAsset")) { Out.SourceAsset = Value; }
-			else if (Key == TEXT("File"))        { Out.Files.Add(Value); }
-		}
-		return true;
-	}
-
-	bool WriteExportMarker(const FString& Folder, const FExportMarker& Marker)
-	{
-		TArray<FString> Lines;
-		Lines.Add(TEXT("# Written by SimpleQuest. It marks this folder as export output, which a later export of the same"));
-		Lines.Add(TEXT("# questline will replace. Delete this file if you want your own edits here left alone — SimpleQuest"));
-		Lines.Add(TEXT("# will then refuse to export here rather than overwrite them."));
-		Lines.Add(FString::Printf(TEXT("Format=%s"), *Marker.Format));
-		Lines.Add(FString::Printf(TEXT("SourceAsset=%s"), *Marker.SourceAsset));
-		for (const FString& File : Marker.Files) { Lines.Add(FString::Printf(TEXT("File=%s"), *File)); }
-		// Force UTF-8: SaveStringToFile's AutoDetect silently switches to UTF-16 the moment any non-ASCII character appears
-		// in the text, which would make this adopter-facing file unreadable in a plain editor and inconsistent with the data
-		// files beside it.
-		return FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *(Folder / GExportMarkerName), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
-	}
-
-	/** Filenames directly in a folder (never recursive). Empty when the folder doesn't exist. */
-	TArray<FString> FilesIn(const FString& Folder)
-	{
-		TArray<FString> Found;
-		IFileManager::Get().FindFiles(Found, *(Folder / TEXT("*")), /*Files*/ true, /*Dirs*/ false);
-		return Found;
-	}
-
 	void ExportQuestlineCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)
@@ -164,9 +111,9 @@ namespace
 		// OWNERSHIP — never replace a folder we didn't write. This is the guard that survives a NAME COLLISION: two
 		// questline IDs can sanitize to one folder, and a hand-authored source folder sitting at that name would otherwise
 		// be overwritten by an export.
-		FExportMarker Previous;
-		const bool bHadMarker = ReadExportMarker(OutDir, Previous);
-		const TArray<FString> Existing = FilesIn(OutDir);
+		FQuestExportMarker Previous;
+		const bool bHadMarker = ReadQuestExportMarker(OutDir, Previous);
+		const TArray<FString> Existing = QuestExportFilesIn(OutDir);
 		if (Existing.Num() > 0 && !bHadMarker)
 		{
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' already holds %d file(s) and carries no "
@@ -200,10 +147,10 @@ namespace
 			return;
 		}
 
-		FExportMarker Marker;
+		FQuestExportMarker Marker;
 		Marker.Format = Format->FormatName();
 		Marker.SourceAsset = Args[0];
-		Marker.Files = FilesIn(Staging);   // enumerated, not reported — works for any provider, including one that ignores us
+		Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported — works for any provider, including one that ignores us
 
 		// REPLACE — remove only what the PREVIOUS export recorded. Never a directory, never read-only: a read-only file is
 		// protected on purpose, and a subdirectory can't contribute to the stale-shape problem because the reader doesn't
@@ -225,9 +172,9 @@ namespace
 			}
 			++Removed;
 		}
-		if (bHadMarker) { IFileManager::Get().Delete(*(OutDir / GExportMarkerName), false, false, false); }
+		if (bHadMarker) { IFileManager::Get().Delete(*(OutDir / GQuestExportMarkerName), false, false, false); }
 
-		WriteExportMarker(Staging, Marker);
+		WriteQuestExportMarker(Staging, Marker);
 		for (const FString& New : Marker.Files)
 		{
 			if (!IFileManager::Get().Move(*(OutDir / New), *(Staging / New)))
@@ -240,7 +187,7 @@ namespace
 				return;
 			}
 		}
-		IFileManager::Get().Move(*(OutDir / GExportMarkerName), *(Staging / GExportMarkerName));
+		IFileManager::Get().Move(*(OutDir / GQuestExportMarkerName), *(Staging / GQuestExportMarkerName));
 		IFileManager::Get().DeleteDirectory(*Staging, false, true);   // scratch only; a failure here is not data loss
 
 		int32 RowTotal = 0;

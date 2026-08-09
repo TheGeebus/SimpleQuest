@@ -387,7 +387,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 		// Kind is ChildAdded names one that does not yet, and ChildRemoved names one that should stop existing.
 		// Neither is a property write, which is why Kind was ignored here and those changes were planned, displayed,
 		// and silently never performed.
-		// ReattachInstanced is the operation, unchanged from the fresh path: it rebuilds a property's instanced
+		// ReattachQuestInstancedChildren is the operation, unchanged from the fresh path: it rebuilds a property's instanced
 		// contents from the rows, and it ALREADY carries the contract the planner used to decide there was a change
 		// at all - a property the source says nothing about is left alone, and one it describes is replaced
 		// wholesale. Running it first means the value writes below land on the children that will actually survive.

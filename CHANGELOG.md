@@ -112,6 +112,14 @@ tenth time, into a questline someone has since edited by hand.
 
 ### Fixes
 
+- **Applying a re-import recompiles the questline.** An apply changed the graph but
+  left the compiled model describing it as it was, so the runtime, the state
+  subsystem and the tag registry all read stale data until something else
+  triggered a compile. An apply that changes anything now recompiles the
+  questline *and every questline linked to it* - a linked parent embeds the
+  target's compiled data, so recompiling only the target would fix one asset and
+  leave its neighbours describing nodes that no longer exist. Nothing is
+  recompiled when an apply changes nothing.
 - **`OnObjectiveDeactivated` now reports why it fired.** The hook has always run
   on both the completion path and the interruption paths, but couldn't tell them
   apart - an Objective wanting to release a reservation on abandon but not on

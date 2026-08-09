@@ -3,6 +3,7 @@
 
 #include "QuestImportOperations.h"
 
+#include "ISimpleQuestEditorModule.h"
 #include "QuestBundleTransforms.h"
 #include "QuestFlowConventions.h"
 #include "QuestInPlaceApply.h"
@@ -85,6 +86,16 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 	if (Request.bDeleteOrphans) { Options.bDeleteOrphanedNodes = true; }
 
 	ApplyQuestPlan(Target, Out.Plan, Bundle, NodeRowsByKey, Out.ApplyResult, Options);
+
+	// An apply that changed the graph leaves the COMPILED model describing the graph as it was. Everything downstream
+	// reads that model - the runtime, the state subsystem, the tag registry - so the asset would be quietly
+	// inconsistent with itself until something else triggered a recompile. Skipped when nothing changed, because the
+	// compiled model is already correct and a needless compile costs a tag-tree rebuild.
+	if (Out.ApplyResult.ChangedAnything())
+	{
+		Out.ApplyResult.bCompileSucceeded =	ISimpleQuestEditorModule::Get().CompileQuestlineAndNeighborhood(&Target, Out.ApplyResult.GraphsCompiled);
+	}
+	
 	Out.bApplied = !Out.ApplyResult.bRefused;
 	return true;
 }

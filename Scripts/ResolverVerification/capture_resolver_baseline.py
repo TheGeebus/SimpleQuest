@@ -30,7 +30,7 @@ def latest_block(text, fixture):
     # walk backwards through Cmd lines until we find one naming this fixture
     while start != -1:
         line_end = text.find("\n", start)
-        if fixture in text[start:line_end]:
+        if fixture in text[start:line_end] and "--apply" not in text[start:line_end]:
             break
         start = text.rfind("Cmd: SimpleQuest.ImportQuestline", 0, start)
     if start == -1:

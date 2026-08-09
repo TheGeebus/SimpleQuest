@@ -846,6 +846,54 @@ void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TAr
     }
 }
 
+bool FSimpleQuestEditor::CompileQuestlineAndNeighborhood(UQuestlineGraph* Primary, int32& OutCompiledCount)
+{
+	OutCompiledCount = 0;
+	if (!Primary) { return false; }
+
+	bool bAllSucceeded = true;
+	TMap<FName, FName> AllRenames;
+
+	// Single batch covers the primary + every linked neighbor + the coalesced WriteGameplayTagRedirects call, so the
+	// gameplay-tag tree rebuilds ONCE at EndCompileBatch rather than per graph. ON_SCOPE_EXIT so an early return can
+	// never leave the batch open. Same sequencing as the editor's Compile action and CompileAllQuestlineGraphs.
+	{
+		BeginCompileBatch();
+		ON_SCOPE_EXIT { EndCompileBatch(); };
+
+		auto CompileOne = [&](UQuestlineGraph* Graph)
+		{
+			if (!Graph) { return; }
+			TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
+			const bool bSuccess = Compiler->Compile(Graph);
+
+			// Rename intent is captured regardless of success: renames come from the GUID bridge, a structural property
+			// that holds whether or not unrelated nodes failed validation in the same compile. Gating on success would
+			// register the new tag but never write the redirect, stranding loaded actors on stale tags.
+			AllRenames.Append(Compiler->GetDetectedRenames());
+
+			if (bSuccess) { AccumulateCompiledDisplay(Graph); }
+			else          { bAllSucceeded = false; }
+			++OutCompiledCount;
+		};
+
+		CompileOne(Primary);
+
+		TArray<UQuestlineGraph*> Neighborhood;
+		CollectLinkedNeighborhood(Primary, Neighborhood);
+		for (UQuestlineGraph* Neighbor : Neighborhood) { CompileOne(Neighbor); }
+
+		// Inside the batch scope so EndCompileBatch's RebuildNativeTags fires AFTER the redirect map is written and
+		// rebuilt tags register under the new names rather than the pre-rename ones.
+		if (AllRenames.Num() > 0)
+		{
+			FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(AllRenames);
+		}
+	}
+
+	return bAllSucceeded;
+}
+
 void FSimpleQuestEditor::MigrateLegacyTagsIni()
 {
 	// Two prior locations to clean up on upgrade, both written by older versions of this module before the current

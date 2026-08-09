@@ -1180,6 +1180,36 @@ bool FQuestlineGraphEditor::RunImportFromFolder(bool bApply)
     PlanSource.Folder     = Request.Endpoint.Folder;
     PlanSource.FormatName = Request.Endpoint.FormatName;
     FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, PlanSource);
+
+    // An apply recompiles the target and its linked neighborhood (QuestImport_RunInPlace owns that, so the console gets
+    // it too). Report the outcome here rather than only logging it: this path has a designer watching, and "the change
+    // landed but the asset still needs compiling" is precisely the state they must not walk away from.
+    if (bApply && Outcome.ApplyResult.GraphsCompiled > 0)
+    {
+        if (Outcome.ApplyResult.bCompileSucceeded)
+        {
+            FNotificationInfo Info(FText::Format(
+                NSLOCTEXT("SimpleQuestEditor", "ApplyRecompiled", "Import applied. {0} graph(s) recompiled."),
+                Outcome.ApplyResult.GraphsCompiled));
+            Info.ExpireDuration = 3.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+        }
+        else
+        {
+            // Deliberately NOT rolled back — the writes were correct and reverting them would discard good work to
+            // report a compile problem. The asset is modified and uncompiled, which is a state the compiler log can
+            // explain and a recompile can clear.
+            UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply Plan: the import applied but a recompile FAILED - '%s' is "
+                "modified and needs a manual compile."), *QuestlineGraph->GetPathName());
+
+            FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "ApplyCompileFailed",
+                "Import applied, but the recompile failed. The questline is modified and needs compiling — see the Quest Compiler log."));
+            Info.ExpireDuration = 8.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+        }
+    }
     return true;
 }
 

@@ -142,7 +142,7 @@ struct FQuestInPlacePlan
 	}
 };
 
-/** What an apply actually did. Counts rather than prose, so a caller can report it, assert on it, or render it. */
+/** What an apply action actually did. Counts rather than prose, so a caller can report it, assert on it, or render it. */
 struct FQuestApplyResult
 {
 	int32 PropertiesWritten = 0;
@@ -153,9 +153,21 @@ struct FQuestApplyResult
 	int32 EntriesDeferred   = 0;   // structural work this step does not perform
 	TArray<FString> Skipped;
 	bool  bRefused = false;        // the plan was not trustworthy enough to act on any part of
+	
+	/**
+	 * How many graphs were recompiled after the apply - the target plus its linked neighborhood. Zero when nothing was
+	 * applied, since a no-op apply leaves the compiled model already correct.
+	 */
+	int32 GraphsCompiled = 0;
 
 	/**
-	 * Did the apply actually WRITE anything? Deliberately distinct from "was anything skipped or deferred" - a run can
+	 * False when the apply action succeeded but a recompile did NOT. The writes are correct and are deliberately not rolled
+	 * back; the asset is simply left needing a compilation, and the caller must say so rather than report clean success.
+	 */
+	bool bCompileSucceeded = true;
+
+	/**
+	 * Did the apply action actually WRITE anything? Deliberately distinct from "was anything skipped or deferred" - a run can
 	 * decline work and change nothing, and the two answers drive different decisions: whether to dirty the package,
 	 * whether to redraw open graphs, and whether "already matches the source" is an honest thing to print.
 	 */
@@ -165,7 +177,7 @@ struct FQuestApplyResult
 	}
 };
 
-/** What an apply is permitted to do beyond writing properties. Destructive actions are opt-in, never inferred. */
+/** What an apply action is permitted to do beyond writing properties. Destructive actions are opt-in, never inferred. */
 struct FQuestApplyOptions
 {
 	bool bDeleteOrphanedNodes = false;

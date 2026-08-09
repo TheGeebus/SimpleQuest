@@ -33,6 +33,7 @@ public:
 	
 	virtual void CompileAllQuestlineGraphs() override;
 	virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const override;
+	virtual bool CompileQuestlineAndNeighborhood(UQuestlineGraph* Primary, int32& OutCompiledCount) override;
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }

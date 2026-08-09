@@ -304,6 +304,17 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 			Result.EntriesDeferred,
 			Result.Skipped.Num());
 
+		if (Result.GraphsCompiled > 0)
+		{
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: recompiled %d graph(s) (target + linked neighborhood)."),
+				Result.GraphsCompiled);
+		}
+		if (!Result.bCompileSucceeded)
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: the apply landed but a recompile FAILED - the asset is "
+				"modified and needs a manual compile. See the Quest Compiler log."));
+		}
+
 		// Only dirty the package if something actually happened. A re-import that changes nothing should leave no trace:
 		// marking it regardless makes every no-op run look like a modification, which costs a save and a diff for work
 		// that was not done - and trains a designer to ignore the one signal that says an asset moved.

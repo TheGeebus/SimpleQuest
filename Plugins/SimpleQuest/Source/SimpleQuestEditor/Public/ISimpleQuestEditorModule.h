@@ -89,6 +89,20 @@ public:
      * stay in sync without requiring Compile All.
      */
     virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const = 0;
+
+    /**
+     * Compile Primary and its linked neighborhood as one batch, coalescing the tag-tree rebuild and the redirect write
+     * the way the editor's Compile action does. Returns whether every graph compiled; OutCompiledCount reports how many
+     * were touched, Primary included.
+     *
+     * Exists so a caller that MUTATES a questline can leave it consistent without owning the compiler's sequencing. A
+     * questline that LINKS this one embeds its compiled data (node aliases, entry-step tags), so compiling the target
+     * alone would fix the asset and leave every linked parent describing a graph that no longer exists.
+     *
+     * Reports nothing to the user - no message log, no notification. The caller decides how to say it, which is what
+     * lets the console command, the editor toolbar and a headless commandlet share one definition.
+     */
+    virtual bool CompileQuestlineAndNeighborhood(UQuestlineGraph* Primary, int32& OutCompiledCount) = 0;
     
     virtual void CompileAllQuestlineGraphs() = 0;
     

@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 #include "SQuestPlanPanel.h"
+
+#include "PropertyCustomizationHelpers.h"
 #include "Quests/QuestlineGraph.h"
+#include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Styling/StyleColors.h"
 #include "UObject/UObjectGlobals.h"
@@ -43,6 +47,10 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	CanApply = InArgs._CanApply;
 	OnChooseSourceRequested = InArgs._OnChooseSourceRequested;
 	SourceLabel = InArgs._SourceLabel;
+	FormatName = InArgs._FormatName;
+	OnFormatChanged = InArgs._OnFormatChanged;
+	MappingAsset = InArgs._MappingAsset;
+	OnMappingChanged = InArgs._OnMappingChanged;
 
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
@@ -56,11 +64,6 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	ChildSlot
 	[
 		SNew(SVerticalBox)
-
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 4.0f)
-		[
-			SNew(STextBlock).Text(this, &SQuestPlanPanel::GetSummaryText).AutoWrapText(true)
-		]
 
 		// Refusals and warnings are NOT rows. They belong to no node, and a refusal is whole-plan fatal - nothing at all
 		// applies while one stands - so burying them among the entries would let a designer scroll past the reason the
@@ -109,6 +112,8 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetSummaryText)
 			]
 			.Title(FText::FromString(FPaths::GetBaseFilename(TargetAssetPath)))
+			// Named beneath the asset, because Rebuild is otherwise a promise about a folder the panel never showed you.
+			.Subtitle(TAttribute<FText>::Create([this]() { return SourceLabel.Get(FText::GetEmpty()); }))
 			.Toolbar()
 			[
 				SNew(SHorizontalBox)
@@ -121,26 +126,59 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 				]
 				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 				[
+					SAssignNew(FormatCombo, SComboBox<TSharedPtr<FString>>)
+					.OptionsSource(&FormatOptions)
+					.ToolTipText(LOCTEXT("PlanFormatTip", "Which format provider reads the source folder. The list is every provider registered with the plugin, including any your own module adds."))
+					.OnComboBoxOpening_Lambda([this]()
+					{
+						// Refreshed on open: a provider registered after this panel was built would be missing from a
+						// list snapshotted at construction, and the panel would silently offer fewer formats than exist.
+						RefreshFormatOptions();
+						if (FormatCombo.IsValid()) { FormatCombo->RefreshOptions(); }
+					})
+					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+					{
+						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+					})
+					.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Item, ESelectInfo::Type)
+					{
+						if (Item.IsValid()) { OnFormatChanged.ExecuteIfBound(*Item); }
+					})
+					[
+						SNew(STextBlock).Text(this, &SQuestPlanPanel::GetFormatButtonText)
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				[
+					SNew(SBox).MinDesiredWidth(180.0f)
+					[
+						SNew(SObjectPropertyEntryBox)
+						.AllowedClass(UQuestImportMapping::StaticClass())
+						.AllowClear(true)
+						.DisplayThumbnail(false)
+						.ToolTipText(LOCTEXT("PlanMappingTip", "Optional translation recipe. Leave it empty when the source is already in the plugin's own shape."))
+						.ObjectPath_Lambda([this]() { return MappingAsset.Get(FSoftObjectPath()).ToString(); })
+						.OnObjectChanged_Lambda([this](const FAssetData& Asset)
+						{
+							OnMappingChanged.ExecuteIfBound(Asset.ToSoftObjectPath());
+						})
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.f)
+				[
 					SNew(SButton)
 					.Text(LOCTEXT("PlanRebuild", "Rebuild"))
 					.ToolTipText(LOCTEXT("PlanRebuildTip", "Re-read the same source and recompute this plan."))
 					.IsEnabled_Lambda([this]() { return !SourceLabel.Get(FText::GetEmpty()).IsEmpty() && bHasPlan; })
 					.OnClicked_Lambda([this]() { OnRebuildRequested.ExecuteIfBound(); return FReply::Handled(); })
 				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 12.0f, 0.0f)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 				[
 					SNew(SButton)
 					.Text(LOCTEXT("PlanApply", "Apply"))
 					.ToolTipText(LOCTEXT("PlanApplyTip", "Perform these changes. Re-reads and re-plans first, so what runs is what you see."))
 					.IsEnabled_Lambda([this]() { return CanApply.Get(false); })
 					.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
-				]
-				// Named, because Rebuild is otherwise a promise about a folder the panel never showed you.
-				+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center)
-				[
-					SNew(STextBlock)
-					.Text(SourceLabel)
-					.ColorAndOpacity(FSlateColor(FLinearColor(0.5f, 0.5f, 0.5f)))
 				]
 			]
 		]
@@ -156,6 +194,21 @@ SQuestPlanPanel::~SQuestPlanPanel()
 {
 	FQuestPlanBroker::Get().OnPlanPublished().Remove(PublishHandle);
 	FCoreUObjectDelegates::OnObjectModified.Remove(ModifiedHandle);
+}
+
+void SQuestPlanPanel::RefreshFormatOptions()
+{
+	FormatOptions.Reset();
+	for (const FString& Name : FQuestDataFormatRegistry::Get().GetRegisteredNames())
+	{
+		FormatOptions.Add(MakeShared<FString>(Name));
+	}
+}
+
+FText SQuestPlanPanel::GetFormatButtonText() const
+{
+	const FString Current = FormatName.Get(FString());
+	return Current.IsEmpty() ? LOCTEXT("PlanFormatNone", "Format") : FText::FromString(Current);
 }
 
 TArray<FTableColumnDef<FQuestPlanRowPtr>> SQuestPlanPanel::MakeColumns() const
@@ -323,7 +376,7 @@ FText SQuestPlanPanel::GetSummaryText() const
 {
 	if (!bHasPlan)
 	{
-		return LOCTEXT("NoPlanYet", "No plan has been computed for this questline. Run an in-place import to preview one.");
+		return LOCTEXT("NoPlanYet", "No plan has been computed for this questline. Choose a source above to build one.");
 	}
 	// A plan that exists and finds nothing is a DIFFERENT fact from no plan at all, and only one of them means the
 	// asset matches its source. Saying so is what stops an empty table reading as a broken panel.

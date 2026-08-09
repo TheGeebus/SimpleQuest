@@ -179,6 +179,10 @@ private:
 
 	void OpenImportPlan();
 	void ChooseImportSource();
+	FString GetImportFormatName() const { return LastImportFormat; }
+	void HandleImportFormatChanged(FString NewFormat);
+	FSoftObjectPath GetImportMappingPath() const { return LastImportMapping; }
+	void HandleImportMappingChanged(const FSoftObjectPath& NewMapping);
 	FText GetImportSourceLabel() const;
 	void ApplyImportPlan();
 	void RebuildImportPlan();
@@ -187,6 +191,12 @@ private:
 
 	/** The folder the last Build Plan read, so Apply re-reads the same source without asking again. */
 	FString LastImportFolder;
+
+	/** Format provider for the next read. Defaults to TSV, which is what the console defaults to. */
+	FString LastImportFormat = TEXT("TSV");
+
+	/** Optional translation recipe, empty for none. Held as a path so an unloaded asset doesn't force a load. */
+	FSoftObjectPath LastImportMapping;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

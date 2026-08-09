@@ -4,11 +4,17 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
 
 struct FQuestInPlacePlan;
 class UQuestlineGraph;
+
+
+DECLARE_DELEGATE_OneParam(FOnQuestPlanFormatChanged, FString /*FormatName*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanMappingChanged, const FSoftObjectPath& /*MappingAsset*/);
+
 
 /**
  * One line in the plan tree. A plan has two levels and they are genuinely different things - a NODE that would change,
@@ -60,9 +66,20 @@ public:
 		/** What Rebuild would re-read, so the button is not a promise about an unnamed folder. */
 		SLATE_ATTRIBUTE(FText, SourceLabel)
 
+		/** The format provider the next read will use. Shown in the combo; the list itself comes from the registry. */
+		SLATE_ATTRIBUTE(FString, FormatName)
+
+		/** Raised when the designer picks a different format. The owner re-reads; the panel never reads anything itself. */
+		SLATE_EVENT(FOnQuestPlanFormatChanged, OnFormatChanged)
+
+		/** The translation recipe, or an empty path for none - meaning the source is already in our own shape. */
+		SLATE_ATTRIBUTE(FSoftObjectPath, MappingAsset)
+
+		/** Raised when the designer picks or clears a recipe. */
+		SLATE_EVENT(FOnQuestPlanMappingChanged, OnMappingChanged)
+		
 		/** Whether Apply is currently permitted. Bound rather than pushed, so it re-evaluates as plans come and go. */
 		SLATE_ATTRIBUTE(bool, CanApply)
-
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -90,6 +107,18 @@ private:
 
 	FSimpleDelegate OnChooseSourceRequested;
 	TAttribute<FText> SourceLabel;
+	TAttribute<FString> FormatName;
+	FOnQuestPlanFormatChanged OnFormatChanged;
+	TAttribute<FSoftObjectPath> MappingAsset;
+	FOnQuestPlanMappingChanged OnMappingChanged;
+
+	/** Backing store for the format combo. Refreshed on open rather than at construction, because a provider can be
+	 *  registered after this panel exists and a snapshot would hide it. */
+	TArray<TSharedPtr<FString>> FormatOptions;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> FormatCombo;
+
+	void RefreshFormatOptions();
+	FText GetFormatButtonText() const;
 
 	FText Summary;
 	FText Blockers;

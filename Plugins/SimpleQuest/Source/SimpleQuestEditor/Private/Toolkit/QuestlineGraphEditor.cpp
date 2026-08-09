@@ -1139,7 +1139,11 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .OnApplyRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan))
             .CanApply(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan))
             .OnChooseSourceRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ChooseImportSource))
-            .SourceLabel(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetImportSourceLabel));
+            .SourceLabel(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetImportSourceLabel))
+            .FormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFormatName))
+            .OnFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFormatChanged))
+            .MappingAsset(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportMappingPath))
+            .OnMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportMappingChanged));
     }
 
     return SNew(SDockTab)
@@ -1153,14 +1157,21 @@ bool FQuestlineGraphEditor::RunImportFromFolder(bool bApply)
 {
     if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
 
+    // Loaded here rather than held resolved, so a recipe edited or deleted between runs is picked up rather than
+    // cached. Null is the ordinary case: it means the source is already in our own shape.
+    const UQuestImportMapping* Mapping = Cast<UQuestImportMapping>(LastImportMapping.TryLoad());
+
     FQuestImportRequest Request;
     Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
-    Request.Endpoint.FormatName = TEXT("TSV");
+    Request.Endpoint.FormatName = LastImportFormat;
     Request.Endpoint.Folder = LastImportFolder;
-    Request.Policies = QuestImport_ResolvePolicies(nullptr, /*bResetAbsent*/ false);
+    Request.Mapping = Mapping;
+    Request.Policies = QuestImport_ResolvePolicies(Mapping, /*bResetAbsent*/ false);
 
     // The caller owns the transaction, so an apply driven from the toolbar is ONE undo step covering everything the
-    // plan performs - the same guarantee the console gives.
+    // plan performs - the same guarantee the console gives. Held by SCOPE, not by use: constructing it opens the
+    // transaction and this pointer's destruction closes it, which is why nothing below refers to it again. Conditional,
+    // so a read-only plan opens no transaction at all.
     TUniquePtr<FScopedTransaction> Transaction;
     if (bApply)
     {
@@ -1234,6 +1245,23 @@ void FQuestlineGraphEditor::ChooseImportSource()
 
     LastImportFolder = Chosen;
     RunImportFromFolder(/*bApply*/ false);
+}
+
+void FQuestlineGraphEditor::HandleImportFormatChanged(FString NewFormat)
+{
+    if (NewFormat == LastImportFormat) { return; }
+    LastImportFormat = MoveTemp(NewFormat);
+
+    // Re-plan immediately when a source is already chosen, matching ChooseImportSource. A format change reinterprets
+    // the same folder, so leaving the previous plan on screen would show a reading that is no longer the one selected.
+    if (!LastImportFolder.IsEmpty()) { RunImportFromFolder(/*bApply*/ false); }
+}
+
+void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& NewMapping)
+{
+    if (NewMapping == LastImportMapping) { return; }
+    LastImportMapping = NewMapping;
+    if (!LastImportFolder.IsEmpty()) { RunImportFromFolder(/*bApply*/ false); }
 }
 
 FText FQuestlineGraphEditor::GetImportSourceLabel() const

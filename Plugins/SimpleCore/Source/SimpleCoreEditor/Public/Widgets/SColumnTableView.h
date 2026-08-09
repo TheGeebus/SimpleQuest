@@ -325,6 +325,13 @@ public:
 		 */
 		SLATE_ARGUMENT(FText, Title)
 
+		/**
+		 * Optional second line under the title, dimmed. For the fact a reader needs alongside the heading but that is not
+		 * the heading - which source a view is reading, which session it is pinned to. An ATTRIBUTE rather than an
+		 * argument because that fact usually changes while the view is open, unlike the title.
+		 */
+		SLATE_ATTRIBUTE(FText, Subtitle)
+
 		SLATE_ARGUMENT(bool, AllowClipboardCopy)
 	
 		/**
@@ -436,6 +443,18 @@ public:
 				.Text(InArgs._Title)
 				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 				.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+			]
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
+			[
+				SNew(STextBlock)
+				.Text(InArgs._Subtitle)
+				.ColorAndOpacity(FSlateColor::UseSubduedForeground())
+				// Bound, not sampled: the subtitle tracks state that changes while the view is open, so the collapse has
+				// to be re-evaluated rather than decided once the way the title's is.
+				.Visibility_Lambda([Sub = InArgs._Subtitle]()
+				{
+					return Sub.Get(FText::GetEmpty()).IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+				})
 			]
 			+ SVerticalBox::Slot().FillHeight(1.0f).Padding(FMargin(InArgs._bIndentUnderTitle ? 12.f : 0.0f, 0.0f, 0.0f, 0.0f))
 			[

@@ -110,6 +110,16 @@ tenth time, into a questline someone has since edited by hand.
   destination and refuses one belonging to something else, so pointing it at
   the wrong directory costs you nothing.
 
+### Fixes
+
+- **`OnObjectiveDeactivated` now reports why it fired.** The hook has always run
+  on both the completion path and the interruption paths, but couldn't tell them
+  apart - an Objective wanting to release a reservation on abandon but not on
+  success had to track that itself. `GetDeactivationReason()` now answers it
+  during the call: `Completed` when the Objective reported an outcome,
+  `Interrupted` when it was torn down without one. Non-breaking - the event
+  signature is unchanged, so existing overrides keep working untouched.
+
 ## [0.6.1] — 2026-07-21 — Embedded Questline Rewards Fix
 
 A fix release for questline-level rewards. In 0.6.0, a questline's own

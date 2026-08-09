@@ -3,6 +3,8 @@
 
 #include "Objectives/Examples/GoToQuestObjective.h"
 
+#include "SimpleQuestLog.h"
+
 
 UE_DEFINE_GAMEPLAY_TAG(Tag_Outcome_GoTo_Reached, "SimpleQuest.Outcome.Reached")
 
@@ -22,3 +24,4 @@ void UGoToQuestObjective::OnObjectiveActivated_Implementation(const FQuestObject
 	Super::OnObjectiveActivated_Implementation(Authored, Runtime);
 	EnableQuestTargetActors(true);
 }
+

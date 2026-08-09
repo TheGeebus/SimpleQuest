@@ -270,11 +270,13 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
             // paths (abandon, blocked, cascade-deactivated). Unsubscribe from external event sources, tear
             // down UI handles, stop timers. The Objective is still live at this point — safe to inspect
             // state stored during activation.
-            //
-            // CAVEAT: the hook takes no parameters and receives no reason code, so it cannot currently tell
-            // WHICH of those paths fired. Write teardown that is correct either way. If you need to branch -
-            // to release a reservation on abandon but not on success, say - track it yourself by setting a
-            // flag where you call CompleteObjectiveWithOutcome and reading it here. A reason code is a known gap.
+            Super::OnObjectiveDeactivated_Implementation();
+
+            // GetDeactivationReason() says which path fired, and is only meaningful inside this call.
+            if (GetDeactivationReason() == EQuestObjectiveDeactivationReason::Interrupted)
+            {
+                // Torn down without completing. Release anything you reserved on the assumption of success.
+            }
         }
     };
 ```

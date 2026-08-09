@@ -590,14 +590,14 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 
 static FAutoConsoleCommand GImportQuestlineCmd(
 	TEXT("SimpleQuest.ImportQuestline"),
-	TEXT("PROTOTYPE: reconstruct a questline asset from an interlingua table folder (an ExportQuestline output) and "
+	TEXT("Reconstruct a questline asset from an interlingua table folder (an ExportQuestline output) and "
 		"compile it. Creates a fresh <QuestlineID>_RT asset. Args: <FolderPath> <DestPackagePath> (e.g. "
 		"\"E:/.../Saved/QuestExport/QL_Ch1_BasicTrigger\" /Game/Imported)."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&ImportQuestlineCmd));
 
 static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 	TEXT("SimpleQuest.EnumerateSourceColumns"),
-	TEXT("PROTOTYPE: list the columns a foreign source exposes (proves the source-column provider seam). "
+	TEXT("List the columns a foreign source exposes (proves the source-column provider seam). "
 		"Args: <SourceFolder> [--format=<name>] (default TSV)."),
 	FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
 	{
@@ -638,7 +638,7 @@ static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 
 static FAutoConsoleCommand GExportQuestlineCmd(
 	TEXT("SimpleQuest.ExportQuestline"),
-	TEXT("PROTOTYPE: export a questline's authored model as the interlingua folder — per-type entity tables "
+	TEXT("Export a questline's authored model as the interlingua folder — per-type entity tables "
 		"(reflection-driven, instanced sub-objects as child rows) + one knot-collapsed edge table — to "
 		"Saved/QuestExport/<QuestlineID>/. Arg: the questline asset path."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&ExportQuestlineCmd));

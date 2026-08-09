@@ -99,13 +99,13 @@ namespace
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
 
 		// 4. Compare, normalized.
-		const int32 CMiss  = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID);
-		const int32 B2Miss = CompareQuestCompiledDumps(SrcDump, RtDump, OriginalID);
+		const int32 AuthoredMiss = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID);
+		const int32 CompiledMiss = CompareQuestCompiledDumps(SrcDump, RtDump, OriginalID);
 
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTrip '%s': C %s (%d), B2 %s (%d) ===="),
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTrip '%s': authored %s (%d), compiled %s (%d) ===="),
 			*OriginalID,
-			CMiss  == 0 ? TEXT("PASS") : TEXT("FAIL"), CMiss,
-			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);
+			AuthoredMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), AuthoredMiss,
+			CompiledMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), CompiledMiss);
 	}
 
 	// Compare-only: run the comparators against artifacts ALREADY on disk, without re-export/re-import. This is the
@@ -126,31 +126,32 @@ namespace
 		const FString OriginalID = Args[0];
 		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
 
-		const int32 CMiss  = CompareQuestExportFolders(QuestExportFolderFor(OriginalID), QuestExportFolderFor(RtID), OriginalID);
-		const int32 B2Miss = CompareQuestCompiledDumps(QuestCompiledDumpPathFor(OriginalID), QuestCompiledDumpPathFor(RtID), OriginalID);
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': C %s (%d), B2 %s (%d) ===="),
+		const int32 AuthoredMiss = CompareQuestExportFolders(QuestExportFolderFor(OriginalID), QuestExportFolderFor(RtID), OriginalID);
+		const int32 CompiledMiss = CompareQuestCompiledDumps(QuestCompiledDumpPathFor(OriginalID), QuestCompiledDumpPathFor(RtID), OriginalID);
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': authored %s (%d), compiled %s (%d) ===="),
 			*OriginalID,
-			CMiss  == 0 ? TEXT("PASS") : TEXT("FAIL"), CMiss,
-			B2Miss == 0 ? TEXT("PASS") : TEXT("FAIL"), B2Miss);
+			AuthoredMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), AuthoredMiss,
+			CompiledMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), CompiledMiss);
 	}
 }
 
 static FAutoConsoleCommand GDumpCompiledCmd(
 	TEXT("SimpleQuest.DumpCompiled"),
-	TEXT("PROTOTYPE: dump a questline's COMPILED model as deterministic text (per-node reflection dump, sets/maps "
-		"sorted, prereq combinator children order-normalized) to Saved/QuestExport/<QuestlineID>_compiled_dump.tsv. "
-		"The import round-trip's behavioral judge. Arg: the questline asset path."),
+	TEXT("Dump a questline's COMPILED model as deterministic text (per-node reflection dump, sets/maps sorted, prereq "
+		"combinator children order-normalized) to Saved/QuestExport/<QuestlineID>_compiled_dump.tsv. Two dumps diff "
+		"clean iff the questlines compile to identical behaviour. Arg: the questline asset path."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&DumpCompiledCmd));
 
 static FAutoConsoleCommand GRoundTripCmd(
 	TEXT("SimpleQuest.RoundTrip"),
-	TEXT("PROTOTYPE: full oracle loop on a questline — export, import (_RT), dump both, report the C (authored folder) "
-		"and B2 (compiled dump) diffs, each _RT-normalized. Args: <QuestlineAssetPath> <DestPackagePath>."),
+	TEXT("Full round-trip check on a questline — export, import (_RT), dump both, then report two diffs: AUTHORED "
+		"(the export folders) and COMPILED (the compiled-model dumps), each _RT-normalized. A questline that survives "
+		"the cycle intact reports 0 for both. Args: <QuestlineAssetPath> <DestPackagePath>."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RoundTripCmd));
 
 static FAutoConsoleCommand GRoundTripCompareCmd(
 	TEXT("SimpleQuest.RoundTripCompare"),
-	TEXT("PROTOTYPE / smoke-test: run the C + B2 comparators against the <ID> vs <ID>_RT artifacts a prior RoundTrip "
-		"left on disk, WITHOUT re-export/import. Corrupt the _RT asset, re-run ExportQuestline+DumpCompiled on it, then "
-		"this — the real comparators should go red on the injected break. Args: <OriginalID>."),
+	TEXT("Smoke-test seam: run both comparators against the <ID> vs <ID>_RT artifacts a prior RoundTrip left on disk, "
+		"WITHOUT re-export/import. Corrupt the _RT asset, re-run ExportQuestline+DumpCompiled on it, then this — the "
+		"real comparators should go red on the injected break. Args: <OriginalID>."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RoundTripCompareCmd));

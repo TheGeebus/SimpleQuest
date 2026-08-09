@@ -515,13 +515,32 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 			Existing.Num());
 		return;
 	}
-	if (bHadMarker && !Previous.SourceAsset.IsEmpty() && Previous.SourceAsset != Args[0])
+	// Both sides normalized - the marker may predate the normalization above, and "same asset, other spelling" must not
+	// read as "different questline". That refusal tells a designer to change their QuestlineID, which would be wrong.
+	if (bHadMarker && !Previous.SourceAsset.IsEmpty() && NormalizeConsoleAssetPath(Previous.SourceAsset) != NormalizeConsoleAssetPath(Args[0]))
 	{
 		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' holds the export of a DIFFERENT questline "
 			"('%s'). Their IDs reduce to the same folder name, so each would overwrite the other. Give one a distinct "
 			"QuestlineID. Nothing written."),
 			*OutDir,
 			*Previous.SourceAsset);
+		return;
+	}
+
+	// A folder holds ONE export, and its format is part of what it holds - re-exporting the same questline in a
+	// different format does not update this folder, it CONVERTS it, deleting every file the previous format wrote.
+	// The marker has always recorded the format; this is the guard finally reading it. Refused rather than prompted,
+	// for the same reason as the two above: an export that silently replaces a folder's contents is the failure this
+	// whole marker protocol exists to prevent, and "same questline" does not make the replacement harmless.
+	if (bHadMarker && !Previous.Format.IsEmpty() && !Previous.Format.Equals(Format->FormatName(), ESearchCase::IgnoreCase))
+	{
+		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: refusing — '%s' holds a %s export of this questline and "
+			"you asked for %s. Exporting would delete the %s files and replace them. Export to a different folder, or "
+			"delete this one first. Nothing written."),
+			*OutDir,
+			*Previous.Format,
+			*Format->FormatName(),
+			*Previous.Format);
 		return;
 	}
 
@@ -541,7 +560,9 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 
 	FQuestExportMarker Marker;
 	Marker.Format = Format->FormatName();
-	Marker.SourceAsset = Args[0];
+	// Normalized, not verbatim: the console accepts "/Game/Path/Asset" and "/Game/Path/Asset.Asset" for the same asset,
+	// and recording whichever the caller happened to type makes the ownership check depend on spelling.
+	Marker.SourceAsset = NormalizeConsoleAssetPath(Args[0]);
 	Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported — works for any provider, including one that ignores us
 
 	// REPLACE — remove only what the PREVIOUS export recorded. Never a directory, never read-only: a read-only file is

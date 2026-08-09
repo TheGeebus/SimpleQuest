@@ -3,10 +3,10 @@
 
 #pragma once
 
-// PROTOTYPE — Resolver, Phase 3 Stage 1. The neutral, format-free cell value: a domain tagged-union that carries a leaf
-// authored value STRUCTURALLY (a tag as an FGameplayTag, not the string "(TagName=..)") so a future format provider
-// renders it in ITS representation without un-parsing UE-text. STRUCTURE (instanced objects, containers of them) stays as
-// edges + child rows — NOT a cell value — so the union is leaf-only. See notes-07-phase3-stage1-code-spec.txt §1.
+// The neutral, format-free cell value: a domain tagged-union that carries a leaf authored value STRUCTURALLY (a tag as an
+// FGameplayTag, not the string "(TagName=..)") so a format provider renders it in ITS representation without un-parsing
+// UE-text. STRUCTURE (instanced objects, containers of them) stays as edges + child rows — NOT a cell value — so the
+// union is leaf-only.
 //
 // The value carries ONLY the structured form — every provider (TSV, JSON, an adopter's) renders the on-disk string from
 // the typed fields on write and reconstructs the typed field from its format on read. No format-specific string is

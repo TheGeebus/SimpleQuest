@@ -338,6 +338,27 @@ namespace
 	}
 }
 
+FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint)
+{
+	FQuestPlanSource Source;
+	Source.Folder     = Endpoint.Folder;
+	Source.FormatName = Endpoint.FormatName;
+	Source.Table      = Endpoint.Table.ToSoftObjectPath();
+	return Source;
+}
+
+FQuestDataEndpoint QuestEndpointFromPlanSource(const FQuestPlanSource& Source)
+{
+	FQuestDataEndpoint Endpoint;
+	// The two provenances are exclusive, so the table decides. Deriving Kind here rather than storing it means the
+	// pair can never disagree - which is the failure mode a hand-assembled endpoint kept reintroducing.
+	Endpoint.Kind       = Source.Table.IsValid() ? EQuestEndpointKind::DataTable : EQuestEndpointKind::ForeignFile;
+	Endpoint.Table      = TSoftObjectPtr<UDataTable>(Source.Table);
+	Endpoint.Folder     = Source.Folder;
+	Endpoint.FormatName = Source.FormatName;
+	return Endpoint;
+}
+
 bool ReadEndpointBundle(const FQuestDataEndpoint& Endpoint, FQuestDataBundle& OutBundle, FString& OutError)
 {
 	if (Endpoint.Kind == EQuestEndpointKind::ForeignFile)

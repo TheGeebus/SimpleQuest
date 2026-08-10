@@ -9,6 +9,8 @@
 // discriminator-column dropdowns, so a designer selects from real columns instead of typing — the anti-corruption spine.
 
 #include "CoreMinimal.h"
+#include "Resolver/QuestPlanBroker.h"
+
 
 class ISimpleQuestDataFormat;
 class UDataTable;
@@ -117,6 +119,20 @@ struct FQuestDataEndpoint
 	FString Folder;                      // ForeignFile only
 	TSoftObjectPtr<UDataTable> Table;    // DataTable only
 };
+
+/**
+ * WHERE the data came from has two shapes - FQuestDataEndpoint is private to the resolver, FQuestPlanSource travels in
+ * a Public header - and that split is only safe while the translation between them has ONE definition. Hand-copying it
+ * field by field is what let three of five copy sites silently drop the DataTable, so a table plan published by one
+ * caller could not be re-run by another.
+ */
+FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint);
+
+/**
+ * The reverse. Kind is DERIVED rather than carried, so "a source naming a table IS a table source" is stated once and
+ * a caller can never hand back an endpoint whose Kind disagrees with the fields it filled in.
+ */
+FQuestDataEndpoint QuestEndpointFromPlanSource(const FQuestPlanSource& Source);
 
 /**
  * Read whichever provenance the endpoint names into the neutral bundle — the single entry point the import path uses, so it

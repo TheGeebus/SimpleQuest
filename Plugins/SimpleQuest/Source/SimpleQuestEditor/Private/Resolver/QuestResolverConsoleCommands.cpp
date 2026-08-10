@@ -219,11 +219,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		// site would surface mapping and validation failures and silently miss the one a designer hits most.
 		if (bInPlace)
 		{
-			FQuestPlanSource FailedSource;
-			FailedSource.Folder     = Endpoint.Folder;
-			FailedSource.FormatName = Endpoint.FormatName;
-			FailedSource.Table      = Endpoint.Table.ToSoftObjectPath();
-			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, FailedSource);
+			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, QuestPlanSourceFromEndpoint(Endpoint));
 		}
 		return;
 	}
@@ -279,10 +275,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 			// Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
 			// log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
 			// failed. The notification catches the eye; the panel is where the reason stays.
-			FQuestPlanSource FailedSource;
-			FailedSource.Folder = Request.Endpoint.Folder;
-			FailedSource.FormatName = Request.Endpoint.FormatName;
-			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, FailedSource);
+			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, QuestPlanSourceFromEndpoint(Request.Endpoint));
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. Nothing was modified."), *Outcome.Error);
 			return;
 		}
@@ -291,11 +284,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		LogInPlacePlan(Outcome.Plan);
 		// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 		// about to be applied, so the panel always shows what the run actually decided.
-		FQuestPlanSource PlanSource;
-		PlanSource.Folder     = Endpoint.Folder;
-		PlanSource.FormatName = Endpoint.FormatName;
-		PlanSource.Table      = Endpoint.Table.ToSoftObjectPath();
-		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, PlanSource);
+		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanSourceFromEndpoint(Endpoint));
 
 		if (!bApply)
 		{

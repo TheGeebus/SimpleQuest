@@ -37,6 +37,7 @@
 #include "ScopedTransaction.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestPlanBroker.h"
+#include "Resolver/QuestResolverEditorMemo.h"
 #include "Resolver/SQuestPlanPanel.h"
 
 
@@ -98,9 +99,11 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
 {
     CrossAssetBackEditor.Reset();
     QuestlineGraph = InQuestlineGraph;
-    // Seeded here rather than as a member initializer - see the declaration for why a braced default is a hazard on
-    // this struct. TSV matches what the console defaults to, so both callers start in the same reading.
+    // Seeded before the restore so a questline with no memory still gets a usable format; TSV matches what the console
+    // defaults to, so both callers start in the same reading. Not a member initializer - see the declaration for why a
+    // braced default is a hazard on this struct.
     LastImportSource.FormatName = TEXT("TSV");
+    RestoreImportEndpointFromMemo();
     ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
     
     const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v11")
@@ -1248,6 +1251,36 @@ void FQuestlineGraphEditor::OpenImportPlan()
     if (TabManager.IsValid()) { TabManager->TryInvokeTab(PlanTabId); }
 }
 
+void FQuestlineGraphEditor::RestoreImportEndpointFromMemo()
+{
+    if (!QuestlineGraph) { return; }
+    const FQuestResolverEndpointMemo* Remembered =
+        UQuestResolverEditorMemo::Get()->EndpointByQuestline.Find(QuestlineGraph->GetPathName());
+    if (!Remembered) { return; }
+
+    // Each field is taken only when it says something, so a memo written by an older build - or one whose format was
+    // never chosen - leaves the seeded default standing rather than blanking it.
+    LastImportSource.Folder = Remembered->Folder;
+    if (!Remembered->FormatName.IsEmpty()) { LastImportSource.FormatName = Remembered->FormatName; }
+    LastImportSource.Table = FSoftObjectPath(Remembered->Table);
+    LastImportMapping = FSoftObjectPath(Remembered->Mapping);
+}
+
+void FQuestlineGraphEditor::SaveImportEndpointToMemo() const
+{
+    if (!QuestlineGraph) { return; }
+
+    FQuestResolverEndpointMemo Remembered;
+    Remembered.Folder     = LastImportSource.Folder;
+    Remembered.FormatName = LastImportSource.FormatName;
+    Remembered.Table      = LastImportSource.Table.ToString();
+    Remembered.Mapping    = LastImportMapping.ToString();
+
+    UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
+    Memo->EndpointByQuestline.Add(QuestlineGraph->GetPathName(), Remembered);
+    Memo->SaveConfig();
+}
+
 void FQuestlineGraphEditor::ChooseImportSource()
 {
     IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
@@ -1266,40 +1299,48 @@ void FQuestlineGraphEditor::ChooseImportSource()
     // The two provenances are exclusive. Picking a folder must clear a table the previous plan came from, or the derived
     // Kind keeps reading that table and silently ignores the folder just chosen.
     LastImportSource.Table.Reset();
-    RunImport(/*bApply*/ false);
+    SaveImportEndpointToMemo();
+    RunImport(false);
 }
 
 void FQuestlineGraphEditor::HandleImportFormatChanged(FString NewFormat)
 {
     if (NewFormat == LastImportSource.FormatName) { return; }
     LastImportSource.FormatName = MoveTemp(NewFormat);
+    SaveImportEndpointToMemo();
 
     // Re-plan immediately when a FILE source is already chosen, matching ChooseImportSource. A DataTable has no format -
     // its row struct is the authority - so changing this reinterprets nothing and must not re-read a table.
-    if (!LastImportSource.Folder.IsEmpty() && !LastImportSource.Table.IsValid()) { RunImport(/*bApply*/ false); }
+    if (!LastImportSource.Folder.IsEmpty() && !LastImportSource.Table.IsValid()) { RunImport(false); }
 }
 
 void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& NewMapping)
 {
     if (NewMapping == LastImportMapping) { return; }
     LastImportMapping = NewMapping;
+    SaveImportEndpointToMemo();
     // A recipe applies to EITHER provenance, so this re-plans whatever the current source is.
-    if (LastImportSource.IsValid()) { RunImport(/*bApply*/ false); }
+    if (LastImportSource.IsValid()) { RunImport(false); }
 }
 
 FText FQuestlineGraphEditor::GetImportSourceLabel() const
 {
     if (!QuestlineGraph) { return FText::GetEmpty(); }
+    // A plan's PROVENANCE when there is one - the rows below are a statement about that source, not about whatever is
+    // currently selected. Otherwise the restored SELECTION, which is what Build Plan would read. The broker is
+    // in-memory and empty at editor start, so a label reading only the record announced "No source chosen" beside a
+    // source the memo had just restored, and the persistence looked broken when it was not.
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    if (!Record || !Record->Source.IsValid())
+    const FQuestPlanSource& Shown = (Record && Record->Source.IsValid()) ? Record->Source : LastImportSource;
+    if (!Shown.IsValid())
     {
         return NSLOCTEXT("SimpleQuestEditor", "NoSourceChosen", "No source chosen");
     }
     // A table source has no folder, and reading Folder alone is what made a console-produced table plan render beneath
     // "No source chosen" - a panel disowning a plan it was displaying at the time.
-    return Record->Source.Table.IsValid()
-        ? FText::FromString(Record->Source.Table.ToString())
-        : FText::FromString(Record->Source.Folder);
+    return Shown.Table.IsValid()
+        ? FText::FromString(Shown.Table.ToString())
+        : FText::FromString(Shown.Folder);
 }
 
 void FQuestlineGraphEditor::ApplyImportPlan()
@@ -1312,6 +1353,7 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     // rather than its Folder is the fix: the folder-only assignment discarded a table, then failed complaining about
     // the missing folder it had just created.
     LastImportSource = Record->Source;
+    SaveImportEndpointToMemo();
     RunImport(true);
 }
 
@@ -1326,6 +1368,7 @@ void FQuestlineGraphEditor::RebuildImportPlan()
     // Re-run the source the current plan came from, without asking for a folder again - the distinction from Choose
     // Source, which is the entry point and always asks.
     LastImportSource = Record->Source;
+    SaveImportEndpointToMemo();
     RunImport(false);
 }
 

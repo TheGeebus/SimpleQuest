@@ -189,6 +189,14 @@ private:
 	void RebuildImportPlan();
 	bool CanApplyImportPlan() const;
 	bool RunImport(bool bApply);
+	
+	/**
+	 * Per-user, per-project memory of this questline's source, so a session resumes where the last one ended. Restored
+	 * once at init; saved from every site that moves LastImportSource or LastImportMapping, because a choice that
+	 * survives only until the editor closes is worse than none - it looks remembered right up until it isn't.
+	 */
+	void RestoreImportEndpointFromMemo();
+	void SaveImportEndpointToMemo() const;
 
 	/**
 	 * What the next read will use, and what Apply and Rebuild re-run. Held as the BROKER's source type rather than a

@@ -36,7 +36,7 @@ namespace
 		int32 NodeCount = 0;
 		const TArray<FString> Lines = RenderQuestCompiledModel(*Graph, NodeCount);
 
-		IFileManager::Get().MakeDirectory(*QuestExportRootDir(), true);
+		IFileManager::Get().MakeDirectory(*QuestExport_RootDir(), true);
 		const FString QLID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
 		const FString OutPath = QuestCompiledDumpPathFor(QLID);
 		if (FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *OutPath))
@@ -74,11 +74,11 @@ namespace
 		if (!Src) { UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
 		const FString OriginalID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Src->GetEffectiveID());
 
-		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
-		const FString SrcFolder  = QuestExportFolderFor(OriginalID);
-		const FString RtFolder   = QuestExportFolderFor(RtID);
-		const FString SrcDump    = QuestCompiledDumpPathFor(OriginalID);
-		const FString RtDump     = QuestCompiledDumpPathFor(RtID);
+		const FString RtID			= OriginalID + GQuestRoundTripSuffix;
+		const FString SrcFolder		= QuestExport_FolderForKey(OriginalID);
+		const FString RtFolder		= QuestExport_FolderForKey(RtID);
+		const FString SrcDump		= QuestCompiledDumpPathFor(OriginalID);
+		const FString RtDump		= QuestCompiledDumpPathFor(RtID);
 
 		auto Exec = [](const FString& Cmd)
 		{
@@ -126,7 +126,7 @@ namespace
 		const FString OriginalID = Args[0];
 		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
 
-		const int32 AuthoredMiss = CompareQuestExportFolders(QuestExportFolderFor(OriginalID), QuestExportFolderFor(RtID), OriginalID);
+		const int32 AuthoredMiss = CompareQuestExportFolders(QuestExport_FolderForKey(OriginalID), QuestExport_FolderForKey(RtID), OriginalID);
 		const int32 CompiledMiss = CompareQuestCompiledDumps(QuestCompiledDumpPathFor(OriginalID), QuestCompiledDumpPathFor(RtID), OriginalID);
 		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': authored %s (%d), compiled %s (%d) ===="),
 			*OriginalID,

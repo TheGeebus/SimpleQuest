@@ -17,6 +17,27 @@
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
+FString QuestExport_RootDir()
+{
+	return FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
+}
+
+FString QuestExport_FolderForKey(const FString& SanitizedKey)
+{
+	return FPaths::ConvertRelativePathToFull(QuestExport_RootDir() / SanitizedKey);
+}
+
+FString QuestExport_KeyFor(const UQuestlineGraph& Graph)
+{
+	return FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph.GetEffectiveID());
+}
+
+FString QuestExport_DerivedFolderFor(const UQuestlineGraph& Graph)
+{
+	const FString Key = QuestExport_KeyFor(Graph);
+	return Key.IsEmpty() ? FString() : QuestExport_FolderForKey(Key);
+}
+
 bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Out)
 {
 	const UQuestlineGraph* Graph = Request.Graph;
@@ -33,7 +54,7 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	// ResettableReplay as columns; QuestlineRewards explodes through the instanced recursion into reward child rows).
 	// Keyed by the SANITIZED EffectiveID — the same segment form compiled tags use, so the export key aligns with
 	// tag identity and stays interchange-safe (no spaces/punctuation in keys or folder names).
-	const FString SelfKey = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Graph->GetEffectiveID());
+	const FString SelfKey = QuestExport_KeyFor(*Graph);	
 	Out.ExportKey = SelfKey;
 
 	// The key can come out EMPTY from input a designer can type: a whitespace-only QuestlineID is not IsEmpty(), so the
@@ -64,8 +85,8 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 
 	// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
 	// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
-	const FString ExportRoot = FPaths::ConvertRelativePathToFull(FPaths::ProjectSavedDir() / TEXT("QuestExport"));
-	const FString OutDir = FPaths::ConvertRelativePathToFull(ExportRoot / SelfKey);
+	const FString ExportRoot = QuestExport_RootDir();
+	const FString OutDir = QuestExport_FolderForKey(SelfKey);
 	// Set BEFORE the guards, so a caller reporting a refusal can still name where it would have gone.
 	Out.OutDir = OutDir;
 	{

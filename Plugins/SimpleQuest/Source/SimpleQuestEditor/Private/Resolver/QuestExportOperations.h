@@ -41,13 +41,39 @@ struct FQuestExportOutcome
 
 	TArray<FString> Warnings;    // reverse-mapping warnings; never fatal
 
-	/** Non-empty when nothing was written - a refused destination, an unowned folder, a format conversion, a failed
-	 *  provider write. Phrased as the caller will present it, because the refusals read differently from each other
-	 *  and collapsing them into one call must not collapse the messages. */
+	/**
+	 * Non-empty when nothing was written - a refused destination, an unowned folder, a format conversion, a failed
+	 * provider write. Phrased as the caller will present it, because the refusals read differently from each other
+	 * and collapsing them into one call must not collapse the messages.
+	 */
 	FString Error;
 
 	bool bExported = false;
 };
+
+/**
+ * WHERE exports go. One definition, because the derivation is about to become a DEFAULT rather than a constraint: the
+ * panel seeds its destination field from it, the operation falls back to it when nothing is chosen, and the
+ * verification tier addresses the same folders. It has existed TWICE - inline in the run, and in the verification
+ * tier's own paths header, whose comment already records its copies drifting once.
+ */
+FString QuestExport_RootDir();
+
+/** The export folder for an ALREADY-SANITIZED questline key. */
+FString QuestExport_FolderForKey(const FString& SanitizedKey);
+
+/**
+ * A questline's export KEY - its sanitized effective ID. This string does TWO jobs: it names the destination folder,
+ * and it is the questline-self ROW KEY inside the bundle. Only the first becomes chooseable; identity is not a
+ * location, which is why the empty-key refusal survives a chosen destination.
+ */
+FString QuestExport_KeyFor(const UQuestlineGraph& Graph);
+
+/**
+ * Where this questline exports when no destination is chosen. EMPTY when the ID reduces to an empty key - callers
+ * refuse rather than collapsing onto the export root.
+ */
+FString QuestExport_DerivedFolderFor(const UQuestlineGraph& Graph);
 
 /**
  * Walk the questline into a bundle, optionally restate it through a recipe, and write it to its export folder -

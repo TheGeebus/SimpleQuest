@@ -9,6 +9,7 @@
 // to. The mirror of QuestImportOperations.
 
 #include "CoreMinimal.h"
+#include "QuestMappingSource.h"
 
 class ISimpleQuestDataFormat;
 class UQuestImportMapping;
@@ -19,8 +20,14 @@ struct FQuestExportRequest
 	/** The questline to write out. */
 	const UQuestlineGraph* Graph = nullptr;
 
-	/** Registered provider name. Resolved through the registry inside the run, so a caller never holds a provider. */
-	FString FormatName;
+	/**
+	 * WHERE it goes, and in what encoding. An EMPTY Folder means the DERIVED destination, which is what keeps every
+	 * existing caller byte-identical - the console, the round-trip harness and the fixture chain all pass none.
+	 * The DataTable kind is REFUSED rather than ignored: writing into a studio's own table updates rows in an asset we
+	 * do not own, which is a plan-and-apply operation rather than a wholesale replacement. This field is shared with
+	 * the import direction, so it can legitimately arrive naming a table, and saying so is better than writing nothing.
+	 */
+	FQuestDataEndpoint Endpoint;
 
 	/** Optional studio-shape restatement. Absent means a canonical export in the plugin's own vocabulary. */
 	const UQuestImportMapping* Mapping = nullptr;
@@ -31,6 +38,12 @@ struct FQuestExportOutcome
 	/** Where it went. Set even on most refusals, because naming the folder is half of explaining the refusal. */
 	FString OutDir;
 	FString ExportKey;
+
+	/**
+	 * True when the request named no folder and the destination came from the questline's ID. Callers word the receipt
+	 * differently: a derived destination is somewhere the user has never navigated to, and worth naming in full.
+	 */
+	bool bDestinationDerived = false;
 
 	int32 EntityRows = 0;
 	int32 TypeCount = 0;

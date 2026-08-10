@@ -38,6 +38,64 @@ FString QuestExport_DerivedFolderFor(const UQuestlineGraph& Graph)
 	return Key.IsEmpty() ? FString() : QuestExport_FolderForKey(Key);
 }
 
+// Guards a destination the USER chose. The containment guard cannot serve here - it exists to prove a DERIVATION, and
+// there is no derivation to prove - so this asks the questions that actually matter about an arbitrary path. Every one
+// of them matters because this operation DELETES what a previous export left in whatever folder it is handed.
+static FString RefuseChosenDestination(const FString& OutDir)
+{
+	// A relative path resolves against the process working directory - the engine binary folder - which is never what
+	// the user meant and is impossible to explain after the fact.
+	if (FPaths::IsRelative(OutDir))
+	{
+		return FString::Printf(TEXT("refusing — destination '%s' is a relative path. Give an absolute one. "
+			"Nothing exported."), *OutDir);
+	}
+
+	// CONTENT DIRECTORIES, tested as folders on disk. The asset registry scans these, so a folder of interchange tables
+	// inside one becomes something the editor tries to read as assets.
+	// DELIBERATELY NOT TryConvertFilenameToLongPackageName, which was the first attempt and was WRONG IN THE WORST
+	// DIRECTION: the engine mounts /Temp at the project's Saved/ directory, so that call answers TRUE for the whole of
+	// Saved/ - including Saved/QuestExport, which is where exports are SUPPOSED to go. It refused the one destination
+	// this operation exists to write to. Naming the directories says what is actually meant and cannot drift into
+	// covering unrelated mounts.
+	const FString ContentDirs[] =
+	{
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()),
+		FPaths::ConvertRelativePathToFull(FPaths::EngineContentDir()),
+		FPaths::ConvertRelativePathToFull(FPaths::ProjectPluginsDir()),
+		FPaths::ConvertRelativePathToFull(FPaths::EnginePluginsDir()),
+	};
+	for (const FString& ContentDir : ContentDirs)
+	{
+		if (!ContentDir.IsEmpty() && FPaths::IsUnderDirectory(OutDir, ContentDir))
+		{
+			return FString::Printf(TEXT("refusing — '%s' is inside '%s', where the asset registry scans. Export data "
+				"belongs outside the project's content. Choose a folder elsewhere. Nothing exported."),
+				*OutDir,
+				*ContentDir);
+		}
+	}
+
+	FString NormRoot = QuestExport_RootDir();  FPaths::NormalizeDirectoryName(NormRoot);
+	FString NormOut  = OutDir;                 FPaths::NormalizeDirectoryName(NormOut);
+
+	// The export ROOT itself holds every questline's folder. Writing here would mix this export's files among them, and
+	// the marker protocol keys ownership per folder - one folder, one export.
+	if (NormOut == NormRoot)
+	{
+		return FString::Printf(TEXT("refusing — '%s' is the export root itself. A folder holds ONE export; writing here "
+			"would mix this questline's files with every other export's. Choose a subfolder. Nothing exported."), *NormOut);
+	}
+
+	// A drive root has no parent, and is the shape a mistyped destination usually takes.
+	if (FPaths::GetPath(NormOut).IsEmpty())
+	{
+		return FString::Printf(TEXT("refusing — '%s' has no parent directory. Nothing exported."), *NormOut);
+	}
+
+	return FString();
+}
+
 bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Out)
 {
 	const UQuestlineGraph* Graph = Request.Graph;
@@ -83,13 +141,33 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 		QuestBundle_ApplyReverseMapping(Bundle, *Request.Mapping, SourceKeyByGuid, NodeByGuid, Out.Warnings);
 	}
 
-	// Prove containment structurally instead of trusting the string that produced it — the destination must be exactly one
-	// level below the export root. Holds even if the key derivation changes or is later fed from somewhere new.
-	const FString ExportRoot = QuestExport_RootDir();
-	const FString OutDir = QuestExport_FolderForKey(SelfKey);
+	// A Data Table cannot be an export destination, and this is where that boundary is STATED rather than assumed - the
+	// endpoint is shared with the import direction, so one can arrive here.
+	if (Request.Endpoint.Kind == EQuestEndpointKind::DataTable)
+	{
+		Out.Error = TEXT("refusing — a Data Table is not an export destination. Writing into a studio's own table "
+			"updates rows in an asset we do not own, which is a plan-and-apply operation rather than the wholesale "
+			"replacement an export performs. Choose a folder, or clear the destination to use the default one. "
+			"Nothing exported.");
+		return false;
+	}
+
+	// WHERE. An endpoint naming no folder falls back to the derivation, which is what keeps the console, the round-trip
+	// harness and the fixture chain writing exactly where they always did.
+	const bool bDerived = Request.Endpoint.Folder.IsEmpty();
+	const FString OutDir = bDerived
+		? QuestExport_FolderForKey(SelfKey)
+		: FPaths::ConvertRelativePathToFull(Request.Endpoint.Folder);
 	// Set BEFORE the guards, so a caller reporting a refusal can still name where it would have gone.
 	Out.OutDir = OutDir;
+	Out.bDestinationDerived = bDerived;
+
+	if (bDerived)
 	{
+		// Prove containment structurally instead of trusting the string that produced it — a DERIVED destination must be
+		// exactly one level below the export root. This guard polices the DERIVATION and has nothing to say about a path
+		// the user typed, which is precisely why it no longer runs for one.
+		const FString ExportRoot = QuestExport_RootDir();
 		FString NormRoot = ExportRoot;  FPaths::NormalizeDirectoryName(NormRoot);
 		FString NormOut  = OutDir;      FPaths::NormalizeDirectoryName(NormOut);
 		if (NormOut == NormRoot || FPaths::GetPath(NormOut) != NormRoot)
@@ -102,31 +180,44 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 			return false;
 		}
 	}
+	else
+	{
+		const FString Refusal = RefuseChosenDestination(OutDir);
+		if (!Refusal.IsEmpty())
+		{
+			Out.Error = Refusal;
+			return false;
+		}
+	}
 
 	// Resolved from a NAME rather than handed in as a provider, so a caller never holds one - the console reads it from
 	// --format, the toolbar from a combo, and neither has to know the registry exists.
-	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(Request.FormatName);
+	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(Request.Endpoint.FormatName);
 	if (!Format)
 	{
 		Out.Error = FString::Printf(TEXT("no data format named '%s' is registered. Registered: %s. Nothing exported."),
-			*Request.FormatName,
+			*Request.Endpoint.FormatName,
 			*FString::Join(FQuestDataFormatRegistry::Get().GetRegisteredNames(), TEXT(", ")));
 		return false;
 	}
 
-	// OWNERSHIP — never replace a folder we didn't write. This is the guard that survives a NAME COLLISION: two
-	// questline IDs can sanitize to one folder, and a hand-authored source folder sitting at that name would otherwise
-	// be overwritten by an export.
+	// OWNERSHIP — never replace a folder we didn't write. Path-independent by design, which is what lets it serve a
+	// DERIVED and a CHOSEN destination alike: it reads the marker, never the path. It survives a NAME COLLISION (two
+	// questline IDs sanitizing to one folder) and equally a mistyped destination pointed at someone else's data.
 	FQuestExportMarker Previous;
 	const bool bHadMarker = ReadQuestExportMarker(OutDir, Previous);
 	const TArray<FString> Existing = QuestExportFilesIn(OutDir);
 	if (Existing.Num() > 0 && !bHadMarker)
 	{
+		// The advice must match how the destination was DECIDED. "Give this questline a different QuestlineID" is
+		// correct when the folder was derived from that ID, and actively misleading when the user typed the path.
 		Out.Error = FString::Printf(TEXT("refusing — '%s' already holds %d file(s) and carries no SimpleQuest export "
-			"marker, so an export did not write it. Exporting would replace its contents. Move or delete that folder, "
-			"or give this questline a different QuestlineID. Nothing written."),
+			"marker, so an export did not write it. Exporting would replace its contents. %s Nothing written."),
 			*OutDir,
-			Existing.Num());
+			Existing.Num(),
+			bDerived
+				? TEXT("Move or delete that folder, or give this questline a different QuestlineID.")
+				: TEXT("Choose a different destination, or move or delete that folder."));
 		return false;
 	}
 	// The marker may predate the normalization below, and "same asset, other spelling" must not read as "different
@@ -134,11 +225,17 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	if (bHadMarker && !Previous.SourceAsset.IsEmpty()
 		&& FSoftObjectPath(Previous.SourceAsset).GetAssetPathString() != Graph->GetPathName())
 	{
-		Out.Error = FString::Printf(TEXT("refusing — '%s' holds the export of a DIFFERENT questline ('%s'). Their IDs "
-			"reduce to the same folder name, so each would overwrite the other. Give one a distinct QuestlineID. "
+		// Branches on bDerived for the same reason its neighbour above does, and it was missed when that one was fixed:
+		// "their IDs reduce to the same folder name" is a statement about the DERIVATION, and simply untrue of a path
+		// the user typed - as is the advice that follows from it.
+		Out.Error = FString::Printf(TEXT("refusing — '%s' holds the export of a DIFFERENT questline ('%s'). %s "
 			"Nothing written."),
 			*OutDir,
-			*Previous.SourceAsset);
+			*Previous.SourceAsset,
+			bDerived
+				? TEXT("Their IDs reduce to the same folder name, so each would overwrite the other. Give one a "
+					   "distinct QuestlineID.")
+				: TEXT("Exporting here would replace that questline's data. Choose a different destination."));
 		return false;
 	}
 

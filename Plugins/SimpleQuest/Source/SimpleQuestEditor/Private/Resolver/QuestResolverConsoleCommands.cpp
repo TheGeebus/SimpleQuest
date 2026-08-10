@@ -437,6 +437,20 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		bCompiled ? TEXT("OK") : TEXT("FAILED"));
 }
 
+// The destination folder, or empty for the derived one. POSITIONAL rather than a --out= flag because the console
+// tokenizes on whitespace and does not honor quotes, and this project's own paths contain spaces - the same reason
+// ImportQuestline takes its source folder positionally and rejoins it. Everything after the asset path that is not a
+// flag belongs to the folder.
+static FString ResolveQuestExportDestinationFromArgs(const TArray<FString>& Args)
+{
+	TArray<FString> Parts;
+	for (int32 Index = 1; Index < Args.Num(); ++Index)
+	{
+		if (!Args[Index].StartsWith(TEXT("--"))) { Parts.Add(Args[Index]); }
+	}
+	return FString::Join(Parts, TEXT(" ")).TrimStartAndEnd().TrimQuotes();
+}
+
 void ExportQuestlineCmd(const TArray<FString>& Args)
 {
 	if (Args.Num() < 1)
@@ -460,9 +474,11 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	}
 
 	FQuestExportRequest Request;
-	Request.Graph      = Graph;
-	Request.FormatName = FormatName;
-	Request.Mapping    = LoadQuestMappingArg(Args);
+	Request.Graph = Graph;
+	Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
+	Request.Endpoint.FormatName = FormatName;
+	Request.Endpoint.Folder = ResolveQuestExportDestinationFromArgs(Args);   // empty => derived
+	Request.Mapping = LoadQuestMappingArg(Args);
 
 	FQuestExportOutcome Out;
 	const bool bOk = QuestExport_Run(Request, Out);
@@ -481,7 +497,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	}
 
 	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
-		"collapsed. Wrote %d file(s) to '%s'; removed %d from the previous export."),
+		"collapsed. Wrote %d file(s) to '%s'%s; removed %d from the previous export."),
 		*Out.ExportKey,
 		Out.EntityRows,
 		Out.TypeCount,
@@ -489,6 +505,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		Out.KnotsCollapsed,
 		Out.FilesWritten,
 		*Out.OutDir,
+		Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""),
 		Out.FilesRemoved);
 }
 
@@ -543,7 +560,8 @@ static FAutoConsoleCommand GEnumerateSourceColumnsCmd(
 static FAutoConsoleCommand GExportQuestlineCmd(
 	TEXT("SimpleQuest.ExportQuestline"),
 	TEXT("Export a questline's authored model as the interlingua folder — per-type entity tables "
-		"(reflection-driven, instanced sub-objects as child rows) + one knot-collapsed edge table — to "
-		"Saved/QuestExport/<QuestlineID>/. Arg: the questline asset path."),
+		"(reflection-driven, instanced sub-objects as child rows) + one knot-collapsed edge table. Args: the questline "
+		"asset path, then optionally a destination folder — omit it for Saved/QuestExport/<QuestlineID>/. "
+		"[--format=<name>] [--mapping=<asset>]."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&ExportQuestlineCmd));
 

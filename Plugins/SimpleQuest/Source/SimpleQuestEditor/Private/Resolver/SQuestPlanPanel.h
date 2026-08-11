@@ -102,9 +102,18 @@ public:
 		/** Whether Apply is currently permitted. Bound rather than pushed, so it re-evaluates as plans come and go. */
 		SLATE_ATTRIBUTE(bool, CanApply)
 
-		/** True when the SELECTION has moved away from what the displayed plan was built from. A second staleness
-		 *  reason alongside the asset having changed, and it wants its own sentence. */
+		/**
+		 * True when the SELECTION has moved away from what the displayed plan was built from. A second staleness
+		 * reason alongside the asset having changed, and it wants its own sentence.
+		 */
 		SLATE_ATTRIBUTE(bool, SourceStale)
+
+		
+		/** Raised by Export. The panel displays; the toolkit owns the operation and the destination. */
+		SLATE_EVENT(FSimpleDelegate, OnExportRequested)
+
+		/** Whether Export applies. False for a Data Table source - that direction is a reverse-apply, not an export. */
+		SLATE_ATTRIBUTE(bool, CanExport)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -135,6 +144,20 @@ private:
 	TAttribute<bool> CanBuildPlan;
 	TAttribute<bool> CanApply;
 	TAttribute<bool> SourceStale;
+
+	FSimpleDelegate OnExportRequested;
+	TAttribute<bool> CanExport;
+
+	void HandleExportCompleted(const FString& InAssetPath, const FString& InSummary, const FString& Error);
+	FDelegateHandle ExportHandle;
+
+	/**
+	 * The last export attempt, shown until the next action replaces it. TRANSIENT by design - a receipt is consumed by
+	 * whoever asked for it, so nothing stores it. The error shares the blockers banner rather than adding a third bar:
+	 * both answer "why can I not get on with this", and a panel that grows a bar per failure kind loses the plan.
+	 */
+	FString LastExportSummary;
+	FString LastExportError;
 
 	TAttribute<FText> PlanProvenance;
 	TAttribute<FString> SourceFolder;

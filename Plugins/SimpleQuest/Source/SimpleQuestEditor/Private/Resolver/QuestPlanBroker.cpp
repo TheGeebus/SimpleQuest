@@ -20,6 +20,14 @@ void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPla
 
 void FQuestPlanBroker::PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanSource& Source)
 {
+	// A failure with NO REASON is not expressible on purpose: Error is what every consumer gates on. An empty one
+	// silently turns a success into "no plan" and clears the rows. Guarded here.
+	if (!ensureMsgf(!Reason.IsEmpty(), TEXT("PublishFailure('%s') with an empty reason - did a SUCCESS path call this "
+		"instead of Publish?"), *TargetAssetPath))
+	{
+		return;
+	}
+
 	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
 	Record.Source = Source;
 	Record.Error  = Reason;
@@ -37,3 +45,10 @@ void FQuestPlanBroker::Clear(const FString& TargetAssetPath)
 {
 	RecordByAsset.Remove(TargetAssetPath);
 }
+
+void FQuestPlanBroker::PublishExport(const FString& TargetAssetPath, const FString& Summary, const FString& Error)
+{
+	// Nothing recorded - see the header for why an export receipt is transient where a plan is not.
+	ExportCompleted.Broadcast(TargetAssetPath, Summary, Error);
+}
+

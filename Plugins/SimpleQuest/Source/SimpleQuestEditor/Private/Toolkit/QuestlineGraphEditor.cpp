@@ -35,6 +35,7 @@
 #include "GraphEditorActions.h"
 #include "IDesktopPlatform.h"
 #include "ScopedTransaction.h"
+#include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Resolver/QuestResolverEditorMemo.h"
@@ -1156,7 +1157,9 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .FormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFormatName))
             .OnFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFormatChanged))
             .MappingAsset(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportMappingPath))
-            .OnMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportMappingChanged));
+            .OnMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportMappingChanged))
+            .OnExportRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ExportQuestlineData))
+            .CanExport(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanExportQuestlineData));
     }
 
     return SNew(SDockTab)
@@ -1420,6 +1423,62 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     // promise, and the two can now legitimately differ. Deliberately does NOT write LastImportSource: doing so would
     // silently revert a field the designer edited after building the plan.
     RunImport(Record->Source, true);
+}
+
+void FQuestlineGraphEditor::ExportQuestlineData()
+{
+    if (!CanExportQuestlineData()) { return; }
+
+    FQuestExportRequest Request;
+    Request.Graph = QuestlineGraph;
+    // The SAME endpoint the import half reads, minus the table arm - an empty folder means the derived destination,
+    // which is what makes Export work out of the box before anyone has chosen anywhere.
+    Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
+    Request.Endpoint.FormatName = LastImportSource.FormatName;
+    Request.Endpoint.Folder = LastImportSource.Folder;
+    Request.Mapping = Cast<UQuestImportMapping>(LastImportSource.Mapping.TryLoad());
+
+    FQuestExportOutcome Out;
+    const bool bOk = QuestExport_Run(Request, Out);
+
+    for (const FString& W : Out.Warnings)
+    {
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Export: %s"), *W);
+    }
+
+    if (!bOk)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Export: %s"), *Out.Error);
+        FQuestPlanBroker::Get().PublishExport(QuestlineGraph->GetPathName(), FString(), Out.Error);
+        return;
+    }
+
+    const FString Summary = FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
+        Out.FilesWritten,
+        *Out.OutDir,
+        Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""));
+
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Export: '%s' - %d entity row(s) across %d type(s), %d edge(s). %s; "
+        "removed %d from the previous export."),
+        *Out.ExportKey, Out.EntityRows, Out.TypeCount, Out.EdgeCount, *Summary, Out.FilesRemoved);
+
+    FQuestPlanBroker::Get().PublishExport(QuestlineGraph->GetPathName(), Summary, FString());
+
+    // A notification as well as the panel line, because the designer who pressed the button may have the tab covered -
+    // and unlike a refusal, a success does not need to persist anywhere.
+    FNotificationInfo Info(FText::FromString(Summary));
+    Info.ExpireDuration = 4.f;
+    Info.bUseSuccessFailIcons = true;
+    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+}
+
+bool FQuestlineGraphEditor::CanExportQuestlineData() const
+{
+    // GREYED for a Data Table source rather than hidden: writing into a studio's own table is a reverse-apply, not an
+    // export, so it does not apply HERE - but switching the source back to Folder makes it apply again, which is the
+    // line between greying and collapsing.
+    return QuestlineGraph != nullptr && QuestlineGraph->QuestlineEdGraph != nullptr
+        && !LastImportSource.Table.IsValid();
 }
 
 void FQuestlineGraphEditor::BuildImportPlan()

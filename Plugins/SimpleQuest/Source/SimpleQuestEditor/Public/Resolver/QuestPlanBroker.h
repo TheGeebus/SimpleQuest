@@ -60,11 +60,13 @@ struct FQuestPlanRecord
 	FString Error;
 };
 
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlanPublished, const FString& /*TargetAssetPath*/, const FQuestInPlacePlan& /*Plan*/);
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnExportCompleted, const FString& /*TargetAssetPath*/, const FString& /*Summary*/, const FString& /*Error*/);
+
 class SIMPLEQUESTEDITOR_API FQuestPlanBroker
 {
+	
 public:
-	DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlanPublished, const FString& /*TargetAssetPath*/, const FQuestInPlacePlan& /*Plan*/);
-
 	static FQuestPlanBroker& Get();
 
 	/** Record a plan and what produced it, then tell anyone listening. Replaces any previous plan for the asset. */
@@ -86,7 +88,20 @@ public:
 
 	FOnPlanPublished& OnPlanPublished() { return PlanPublished; }
 
+
+	/**
+	 * Report an export attempt. Exactly one of Summary and Error is non-empty.
+	 * BROADCAST ONLY, deliberately unlike a plan - and the asymmetry is the point rather than an oversight. A plan is
+	 * REVIEWED THEN ACTED ON, so it is stored and a consumer arriving late still finds it; an export receipt is
+	 * consumed by whoever asked for it, and "exported forty minutes ago" is stale noise on a panel. It goes through the
+	 * broker at all so a CONSOLE refusal reaches an open panel, which is the same reason plan failures do.
+	 */
+	void PublishExport(const FString& TargetAssetPath, const FString& Summary, const FString& Error);
+
+	FOnExportCompleted& OnExportCompleted() { return ExportCompleted; }
+
 private:
 	TMap<FString, FQuestPlanRecord> RecordByAsset;
 	FOnPlanPublished PlanPublished;
+	FOnExportCompleted ExportCompleted;
 };

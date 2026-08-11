@@ -196,6 +196,14 @@ private:
 	bool CanBuildImportPlan() const;
 	void ApplyImportPlan();
 	bool CanApplyImportPlan() const;
+	
+	/**
+	 * Writes this questline out through the endpoint the panel is showing. Shares the SELECTION with the import
+	 * direction - one questline has one text form, and two independent format pickers is a machine for producing the
+	 * conversion refusal by accident.
+	 */
+	void ExportQuestlineData();
+	bool CanExportQuestlineData() const;
 
 	/** PROVENANCE - what the displayed plan was built from. EMPTY when there is no plan, so the slot collapses. */
 	FText GetPlanProvenanceLabel() const;

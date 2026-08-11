@@ -496,6 +496,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	if (!bOk)
 	{
 		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: %s"), *Out.Error);
+		FQuestPlanBroker::Get().PublishExport(Graph->GetPathName(), FString(), Out.Error);
 		return;
 	}
 
@@ -510,6 +511,12 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		*Out.OutDir,
 		Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""),
 		Out.FilesRemoved);
+
+	FQuestPlanBroker::Get().PublishExport(Graph->GetPathName(), FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
+		Out.FilesWritten,
+		*Out.OutDir,
+		Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT("")),
+	FString());
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

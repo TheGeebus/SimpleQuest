@@ -74,6 +74,8 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnFormatChanged = InArgs._OnFormatChanged;
 	MappingAsset = InArgs._MappingAsset;
 	OnMappingChanged = InArgs._OnMappingChanged;
+	OnExportRequested = InArgs._OnExportRequested;
+	CanExport = InArgs._CanExport;
 	
 	ShownSourceKind = SourceTable.Get(FSoftObjectPath()).IsValid()
 		? EQuestPlanSourceKind::DataTable
@@ -82,6 +84,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
 	PublishHandle = FQuestPlanBroker::Get().OnPlanPublished().AddSP(this, &SQuestPlanPanel::HandlePlanPublished);
+	ExportHandle = FQuestPlanBroker::Get().OnExportCompleted().AddSP(this, &SQuestPlanPanel::HandleExportCompleted);
 	Questline = InArgs._Questline;
 	// UObject::Modify broadcasts this, so it catches edits anywhere in the asset - including inside a container's INNER
 	// graph, which subscribing to the root UEdGraph's OnGraphChanged would miss entirely. Cheap: it only sets a bool, and
@@ -337,6 +340,26 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
 						SNew(SButton)
+						.Text(LOCTEXT("PlanExport", "Export"))
+						.ToolTipText(LOCTEXT("PlanExportTip", "Write this questline out as data tables you can read, diff and edit. Goes to the folder above, or to the default location when none is set."))
+						// TWO halves, because neither side knows the whole answer. The toolkit says whether the
+						// operation can run at all; the PANEL owns which provenance is on screen, and it can sit on
+						// Data Table with nothing picked - a state no source can hold, so the toolkit cannot see it.
+						.IsEnabled_Lambda([this]()
+						{
+							return CanExport.Get(false) && ShownSourceKind != EQuestPlanSourceKind::DataTable;
+						})
+						.OnClicked_Lambda([this]() { OnExportRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					// Export crosses the boundary the OTHER way, so it sits apart from the two plan verbs rather than
+					// reading as the first step of them.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0.0f, 2.0f, 8.0f, 2.0f)
+					[
+						SNew(SSeparator).Orientation(Orient_Vertical).Thickness(1.0f)
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SButton)
 						.Text(LOCTEXT("PlanBuild", "Build Plan"))
 						.ToolTipText(LOCTEXT("PlanBuildTip", "Read the source above and work out what re-importing would change. Nothing is written."))
 						.IsEnabled_Lambda([this]() { return CanBuildPlan.Get(false); })
@@ -380,6 +403,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 SQuestPlanPanel::~SQuestPlanPanel()
 {
 	FQuestPlanBroker::Get().OnPlanPublished().Remove(PublishHandle);
+	FQuestPlanBroker::Get().OnExportCompleted().Remove(ExportHandle);
 	FCoreUObjectDelegates::OnObjectModified.Remove(ModifiedHandle);
 }
 
@@ -446,6 +470,11 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 {
 	if (InAssetPath != TargetAssetPath) { return; }
 
+	// A new plan supersedes the last export receipt: it was a statement about an action two actions ago, and leaving it
+	// beside fresh rows invites reading it as commentary on them.
+	LastExportSummary.Empty();
+	LastExportError.Empty();
+
 	bStale = false;   // a fresh publish is by definition current
 	if (const FQuestPlanRecord* Rec = FQuestPlanBroker::Get().Find(InAssetPath))
 	{
@@ -490,6 +519,13 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 	Blockers = FText::FromString(FString::Join(Lines, TEXT("\n")));
 	
 	RebuildRows(Plan);
+}
+
+void SQuestPlanPanel::HandleExportCompleted(const FString& InAssetPath, const FString& InSummary, const FString& Error)
+{
+	if (InAssetPath != TargetAssetPath) { return; }
+	LastExportSummary = InSummary;
+	LastExportError = Error;
 }
 
 void SQuestPlanPanel::HandleObjectModified(UObject* Modified)
@@ -604,6 +640,12 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 
 FText SQuestPlanPanel::GetSummaryText() const
 {
+	// Shown ahead of everything because it describes the most recent action. Cleared by the next Build Plan, which is
+	// what keeps a receipt from reading as a statement about rows that arrived after it.
+	if (!LastExportSummary.IsEmpty() && Rows.IsEmpty())
+	{
+		return FText::FromString(LastExportSummary);
+	}
 	if (!LastError.IsEmpty())
 	{
 		// Names the format that FAILED, not the one the combo currently shows. A console run has its own format
@@ -625,11 +667,17 @@ FText SQuestPlanPanel::GetSummaryText() const
 		: Summary;
 }
 
-FText SQuestPlanPanel::GetBlockersText() const { return Blockers; }
+FText SQuestPlanPanel::GetBlockersText() const
+{
+	// An export refusal outranks the plan's blockers: it describes the action just taken, and its messages are three
+	// paragraphs of what-to-do that must not be scrollable-past. The plan's blockers are still there underneath once
+	// the next Build Plan clears this.
+	return LastExportError.IsEmpty() ? Blockers : FText::FromString(LastExportError);
+}
 
 EVisibility SQuestPlanPanel::GetBlockersVisibility() const
 {
-	return Blockers.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible;
+	return (Blockers.IsEmpty() && LastExportError.IsEmpty()) ? EVisibility::Collapsed : EVisibility::Visible;
 }
 
 #undef LOCTEXT_NAMESPACE

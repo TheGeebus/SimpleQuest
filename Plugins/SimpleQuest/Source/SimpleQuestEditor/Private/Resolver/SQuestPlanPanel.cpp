@@ -3,15 +3,22 @@
 
 #include "SQuestPlanPanel.h"
 
+#include "Engine/DataTable.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "PropertyCustomizationHelpers.h"
+#include "SWarningOrErrorBox.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Styling/StyleColors.h"
+#include "Styling/SlateStyleRegistry.h"
 #include "UObject/UObjectGlobals.h"
+#include "Widgets/Input/SComboButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SBoxPanel.h"
+#include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 
 #define LOCTEXT_NAMESPACE "SimpleQuestEditor"
@@ -37,20 +44,40 @@ namespace
 		const FString* Label = Plan.LabelByKey.Find(Key);
 		return Label ? *Label : Key;
 	}
+
+	// Reached by NAME through the registry, matching how the class icon is looked up, so the panel needs no handle on
+	// the editor module. Null is survivable: SBorder just draws nothing, which degrades to the outline-only look
+	// rather than crashing if the style set ever stops registering.
+	const FSlateBrush* BannerFillBrush(const FName BrushName)
+	{
+		const ISlateStyle* Style = FSlateStyleRegistry::FindSlateStyle(TEXT("SimpleQuestStyle"));
+		return Style ? Style->GetBrush(BrushName) : nullptr;
+	}
 }
 
 void SQuestPlanPanel::Construct(const FArguments& InArgs)
 {
 	TargetAssetPath = InArgs._TargetAssetPath;
-	OnRebuildRequested = InArgs._OnRebuildRequested;
+	OnBuildPlanRequested = InArgs._OnBuildPlanRequested;
 	OnApplyRequested = InArgs._OnApplyRequested;
+	OnBrowseRequested = InArgs._OnBrowseRequested;
+	CanBuildPlan = InArgs._CanBuildPlan;
 	CanApply = InArgs._CanApply;
-	OnChooseSourceRequested = InArgs._OnChooseSourceRequested;
-	SourceLabel = InArgs._SourceLabel;
+	SourceStale = InArgs._SourceStale;
+	PlanProvenance = InArgs._PlanProvenance;
+	SourceFolder = InArgs._SourceFolder;
+	OnFolderChanged = InArgs._OnFolderChanged;
+	SourceTable = InArgs._SourceTable;
+	OnTableChanged = InArgs._OnTableChanged;
+	OnSourceKindChanged = InArgs._OnSourceKindChanged;
 	FormatName = InArgs._FormatName;
 	OnFormatChanged = InArgs._OnFormatChanged;
 	MappingAsset = InArgs._MappingAsset;
 	OnMappingChanged = InArgs._OnMappingChanged;
+	
+	ShownSourceKind = SourceTable.Get(FSoftObjectPath()).IsValid()
+		? EQuestPlanSourceKind::DataTable
+		: EQuestPlanSourceKind::Folder;
 
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
@@ -65,35 +92,38 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	[
 		SNew(SVerticalBox)
 
-		// Refusals and warnings are NOT rows. They belong to no node, and a refusal is whole-plan fatal - nothing at all
-		// applies while one stands - so burying them among the entries would let a designer scroll past the reason the
-		// plan cannot run.
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 0.0f)
 		[
 			SNew(SBorder)
 			.Visibility(this, &SQuestPlanPanel::GetBlockersVisibility)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.BorderBackgroundColor(FStyleColors::Warning)
-			.Padding(6.0f)
+			.BorderImage(BannerFillBrush(TEXT("SimpleQuest.Banner.ErrorFill")))
+			.Padding(0.0f)   // zero, so the fill's rounded edge sits exactly under the widget's outline
 			[
-				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetBlockersText).AutoWrapText(true)
-			]
+				SNew(SWarningOrErrorBox)
+				.MessageStyle(EMessageStyle::Error)
+				.Message(this, &SQuestPlanPanel::GetBlockersText)
+				.AutoWrapText(true)
+				.Padding(FMargin(16.0f, 6.0f, 8.0f, 6.f))
+				.IconSize(FVector2D(20.0f, 20.0f))
+			]		
 		]
 
-		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 0.0f, 8.0f, 4.0f)
+		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 0.0f)
 		[
 			SNew(SBorder)
 			.Visibility(this, &SQuestPlanPanel::GetStaleVisibility)
-			.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-			.BorderBackgroundColor(FStyleColors::AccentYellow)
-			.Padding(6.0f)
+			.BorderImage(BannerFillBrush(TEXT("SimpleQuest.Banner.WarningFill")))
+			.Padding(0.0f)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("PlanStale", "This questline has changed since this plan was computed. Re-run the import to refresh it."))
+				SNew(SWarningOrErrorBox)
+				.MessageStyle(EMessageStyle::Warning)
+				.Message(this, &SQuestPlanPanel::GetStaleText)
 				.AutoWrapText(true)
+				.Padding(FMargin(16.0f, 6.0f, 8.0f, 6.f))
+				.IconSize(FVector2D(20.0f, 20.0f))
 			]
 		]
-
+		// User Controls - both rows
 		+ SVerticalBox::Slot().FillHeight(1.0f).Padding(4.0f)
 		[
 			SAssignNew(Table, SColumnTableView<FQuestPlanRowPtr>)
@@ -107,78 +137,235 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(TEXT("QuestPlanPanel"))
 			.FilterHintText(LOCTEXT("PlanFilterHint", "Filter nodes and properties..."))
+			.bShowSearchBox(false)
 			.EmptyState()
 			[
 				SNew(STextBlock).Text(this, &SQuestPlanPanel::GetSummaryText)
 			]
 			.Title(FText::FromString(FPaths::GetBaseFilename(TargetAssetPath)))
 			// Named beneath the asset, because Rebuild is otherwise a promise about a folder the panel never showed you.
-			.Subtitle(TAttribute<FText>::Create([this]() { return SourceLabel.Get(FText::GetEmpty()); }))
+			// Provenance, not selection: what the rows below are a statement about. Collapses when no plan exists.
+			.Subtitle(TAttribute<FText>::Create([this]() { return PlanProvenance.Get(FText::GetEmpty()); }))
 			.Toolbar()
 			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+				SNew(SVerticalBox)
+
+				// ROW ONE - WHERE THE DATA IS, ordered coarse to fine: which provenance, how it parses, what its
+				// columns mean, then the one specific artifact. The location goes last because it is the only
+				// variable-width control and can absorb the slack out to the right edge.
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.f, 8.f, 0.0f)
 				[
-					SNew(SButton)
-					.Text(LOCTEXT("PlanChooseSource", "Choose Source..."))
-					.ToolTipText(LOCTEXT("PlanChooseSourceTip", "Pick a folder of source data and build a plan from it."))
-					.OnClicked_Lambda([this]() { OnChooseSourceRequested.ExecuteIfBound(); return FReply::Handled(); })
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SAssignNew(FormatCombo, SComboBox<TSharedPtr<FString>>)
-					.OptionsSource(&FormatOptions)
-					.ToolTipText(LOCTEXT("PlanFormatTip", "Which format provider reads the source folder. The list is every provider registered with the plugin, including any your own module adds."))
-					.OnComboBoxOpening_Lambda([this]()
-					{
-						// Refreshed on open: a provider registered after this panel was built would be missing from a
-						// list snapshotted at construction, and the panel would silently offer fewer formats than exist.
-						RefreshFormatOptions();
-						if (FormatCombo.IsValid()) { FormatCombo->RefreshOptions(); }
-					})
-					.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-					{
-						return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
-					})
-					.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Item, ESelectInfo::Type)
-					{
-						if (Item.IsValid()) { OnFormatChanged.ExecuteIfBound(*Item); }
-					})
+					SNew(SHorizontalBox)
+
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
-						SNew(STextBlock).Text(this, &SQuestPlanPanel::GetFormatButtonText)
+						SNew(STextBlock).Text(LOCTEXT("SourceKindLabel", "Source"))
 					]
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SBox).MinDesiredWidth(180.0f)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
 					[
-						SNew(SObjectPropertyEntryBox)
-						.AllowedClass(UQuestImportMapping::StaticClass())
-						.AllowClear(true)
-						.DisplayThumbnail(false)
-						.ToolTipText(LOCTEXT("PlanMappingTip", "Optional translation recipe. Leave it empty when the source is already in the plugin's own shape."))
-						.ObjectPath_Lambda([this]() { return MappingAsset.Get(FSoftObjectPath()).ToString(); })
-						.OnObjectChanged_Lambda([this](const FAssetData& Asset)
+						SNew(SComboButton)
+						.ToolTipText(LOCTEXT("SourceKindTip", "Where this questline's data lives - a folder of files, or an in-engine Data Table."))
+						.OnGetMenuContent_Lambda([this]()
 						{
-							OnMappingChanged.ExecuteIfBound(Asset.ToSoftObjectPath());
+							FMenuBuilder Menu(true, nullptr);
+							auto AddKind = [this, &Menu](EQuestPlanSourceKind Kind, const FText& Label)
+							{
+								Menu.AddMenuEntry(Label, FText::GetEmpty(), FSlateIcon(),
+									FUIAction(FExecuteAction::CreateLambda([this, Kind]()
+									{
+										ShownSourceKind = Kind;
+										OnSourceKindChanged.ExecuteIfBound(Kind);
+									})));
+							};
+							AddKind(EQuestPlanSourceKind::Folder, LOCTEXT("SourceKindFolder", "Folder"));
+							AddKind(EQuestPlanSourceKind::DataTable, LOCTEXT("SourceKindTable", "Data Table"));
+							return Menu.MakeWidget();
+						})
+						.ButtonContent()
+						[
+							// FIXED width: "Folder" and "Data Table" are different lengths, so an auto-sized combo shifts
+							// every control after it on a kind switch. Pinning it means the stable half of the row stays
+							// put and only the varying half reflows.
+							SNew(SBox).WidthOverride(78.0f).VAlign(VAlign_Center)
+							[
+								SNew(STextBlock).Text_Lambda([this]()
+								{
+									return ShownSourceKind == EQuestPlanSourceKind::DataTable
+										? LOCTEXT("SourceKindTable", "Data Table")
+										: LOCTEXT("SourceKindFolder", "Folder");
+								})
+							]
+						]
+					]
+
+					// SEPARATORS DELIMIT GROUPS, not every control. Source and Mapping are each their own thing; Format
+					// and the location are ONE group, because they appear, vanish and swap together with the kind - so no
+					// rule runs between them.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0.0f, 2.0f, 8.0f, 2.0f)
+					[
+						SNew(SSeparator).Orientation(Orient_Vertical).Thickness(1.0f)
+					]
+
+					// MAPPING SECOND, ahead of Format, which inverts the coarse-to-fine reading of those two on purpose:
+					// what matters more in a row with a toggle is a STABLE PREFIX and a VARYING SUFFIX. Mapping applies to
+					// either provenance and never changes shape, so it belongs with the stable half.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(STextBlock).Text(LOCTEXT("MappingLabel", "Mapping"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+					[
+						SNew(SBox).MinDesiredWidth(180.0f)
+						[
+							SNew(SObjectPropertyEntryBox)
+							.AllowedClass(UQuestImportMapping::StaticClass())
+							.AllowClear(true)
+							.DisplayThumbnail(false)
+							.ToolTipText(LOCTEXT("PlanMappingTip", "Optional translation mapping. Leave it empty when the source is already in the plugin's own shape."))
+							.ObjectPath_Lambda([this]() { return MappingAsset.Get(FSoftObjectPath()).ToString(); })
+							.OnObjectChanged_Lambda([this](const FAssetData& Asset)
+							{
+								OnMappingChanged.ExecuteIfBound(Asset.ToSoftObjectPath());
+							})
+						]
+					]
+
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0.0f, 2.0f, 8.0f, 2.0f)
+					[
+						SNew(SSeparator).Orientation(Orient_Vertical).Thickness(1.0f)
+					]
+
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(STextBlock)
+						.Visibility(this, &SQuestPlanPanel::GetFolderRowVisibility)
+						.Text(LOCTEXT("FormatLabel", "Format"))
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+					[
+						SAssignNew(FormatCombo, SComboBox<TSharedPtr<FString>>)
+						.OptionsSource(&FormatOptions)
+						// COLLAPSED for a table, not greyed. Grey means "unavailable for now"; a Data Table's row struct
+						// is not a format you could pick differently, so the control is meaningless rather than
+						// unavailable - and the row reflows on a kind switch regardless, so hiding it costs no stability
+						// and returns the width to the controls that do apply.
+						.Visibility(this, &SQuestPlanPanel::GetFolderRowVisibility)
+						.ToolTipText(LOCTEXT("PlanFormatTip", "Which format provider reads the source folder. The list is every provider registered with the plugin, including any your own module adds."))
+						.OnComboBoxOpening_Lambda([this]()
+						{
+							// Refreshed on open: a provider registered after this panel was built would be missing from a
+							// list snapshotted at construction, and the panel would silently offer fewer formats than exist.
+							RefreshFormatOptions();
+							if (FormatCombo.IsValid()) { FormatCombo->RefreshOptions(); }
+						})
+						.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+						{
+							return SNew(STextBlock).Text(FText::FromString(Item.IsValid() ? *Item : FString()));
+						})
+						.OnSelectionChanged_Lambda([this](TSharedPtr<FString> Item, ESelectInfo::Type)
+						{
+							if (Item.IsValid()) { OnFormatChanged.ExecuteIfBound(*Item); }
+						})
+						[
+							SNew(STextBlock).Text(this, &SQuestPlanPanel::GetFormatButtonText)
+						]
+					]
+
+					// THE LOCATION - one of two widgets, never both, and sized differently: the path stretches because
+					// it is arbitrarily long, the asset picker does not because a name does not get more readable wide.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						// Named like its neighbours, but the only label whose WORD depends on the kind - everything else in
+						// this row means the same thing whichever provenance is selected. "Asset" rather than "Table"
+						// deliberately: it stays true for any asset-based provenance a third kind might add, and the kind
+						// combo two controls to the left already says which one.
+						SNew(STextBlock)
+						.Text_Lambda([this]()
+						{
+							return ShownSourceKind == EQuestPlanSourceKind::DataTable
+								? LOCTEXT("LocationLabelAsset", "Asset")
+								: LOCTEXT("LocationLabelPath", "Path");
 						})
 					]
+					+ SHorizontalBox::Slot().FillWidth(1.0f).VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SEditableTextBox)
+						.Visibility(this, &SQuestPlanPanel::GetFolderRowVisibility)
+						.HintText(LOCTEXT("SourceFolderHint", "Path to a folder of source data..."))
+						.ToolTipText(LOCTEXT("SourceFolderTip", "The folder Build Plan will read. Type it or browse; both converge on one write."))
+						.Text_Lambda([this]() { return FText::FromString(SourceFolder.Get(FString())); })
+						.OnTextCommitted_Lambda([this](const FText& NewText, ETextCommit::Type)
+						{
+							OnFolderChanged.ExecuteIfBound(NewText.ToString().TrimStartAndEnd().TrimQuotes());
+						})
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SButton)
+						.Visibility(this, &SQuestPlanPanel::GetFolderRowVisibility)
+						.Text(LOCTEXT("SourceBrowse", "Browse..."))
+						.ToolTipText(LOCTEXT("SourceBrowseTip", "Pick the folder Build Plan will read."))
+						.OnClicked_Lambda([this]() { OnBrowseRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					// AutoWidth, unlike the path beside it: an asset reference is a NAME and reads fine at a fixed size,
+					// while a path is arbitrarily long and benefits from every pixel. The two never show together, so
+					// they can be sized to what each actually needs rather than sharing one rule.
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SBox).MinDesiredWidth(240.0f)
+						[
+							SNew(SObjectPropertyEntryBox)
+							.Visibility(this, &SQuestPlanPanel::GetTableRowVisibility)
+							.AllowedClass(UDataTable::StaticClass())
+							.AllowClear(true)
+							.DisplayThumbnail(false)
+							.ToolTipText(LOCTEXT("SourceTableTip", "The Data Table Build Plan will read. Its row struct supplies the columns, so no format is needed."))
+							.ObjectPath_Lambda([this]() { return SourceTable.Get(FSoftObjectPath()).ToString(); })
+							.OnObjectChanged_Lambda([this](const FAssetData& Asset)
+							{
+								OnTableChanged.ExecuteIfBound(Asset.ToSoftObjectPath());
+							})
+						]
+					]
 				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.f)
+
+				// ROW TWO - WHAT TO DO ABOUT IT, in workflow order: read it, then commit.
+				// Export joins this row to the left of a separator once it exists.
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.f, 8.f, 0.f)
 				[
-					SNew(SButton)
-					.Text(LOCTEXT("PlanRebuild", "Rebuild"))
-					.ToolTipText(LOCTEXT("PlanRebuildTip", "Re-read the same source and recompute this plan."))
-					.IsEnabled_Lambda([this]() { return !SourceLabel.Get(FText::GetEmpty()).IsEmpty() && bHasPlan; })
-					.OnClicked_Lambda([this]() { OnRebuildRequested.ExecuteIfBound(); return FReply::Handled(); })
-				]
-				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
-				[
-					SNew(SButton)
-					.Text(LOCTEXT("PlanApply", "Apply"))
-					.ToolTipText(LOCTEXT("PlanApplyTip", "Perform these changes. Re-reads and re-plans first, so what runs is what you see."))
-					.IsEnabled_Lambda([this]() { return CanApply.Get(false); })
-					.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("PlanBuild", "Build Plan"))
+						.ToolTipText(LOCTEXT("PlanBuildTip", "Read the source above and work out what re-importing would change. Nothing is written."))
+						.IsEnabled_Lambda([this]() { return CanBuildPlan.Get(false); })
+						.OnClicked_Lambda([this]() { OnBuildPlanRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SButton)
+						.Text(LOCTEXT("PlanApply", "Apply"))
+						.ToolTipText(LOCTEXT("PlanApplyTip", "Perform these changes. Re-reads and re-plans first, so what runs is what you see."))
+						.IsEnabled_Lambda([this]() { return CanApply.Get(false); })
+						.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					// Proportional spacer plus a fixed box: the filter grows with the panel instead of
+					// sitting at one size and stranding whitespace beside it. 0.35 / 0.65 leaves the verbs a gap without
+					// letting the filter run the full width on a wide panel.
+					+ SHorizontalBox::Slot().FillWidth(0.35f)[ SNullWidget::NullWidget ]
+					+ SHorizontalBox::Slot().FillWidth(0.65f).VAlign(VAlign_Center)
+					[
+						SNew(SBox).MinDesiredWidth(200.0f)
+						[
+							SNew(SSearchBox)
+							.HintText(LOCTEXT("PlanFilterHint", "Filter nodes and properties..."))
+							.OnTextChanged_Lambda([this](const FText& InText)
+							{
+								if (Table.IsValid()) { Table->SetFilterText(InText); }
+							})
+						]
+					]
 				]
 			]
 		]
@@ -317,7 +504,30 @@ void SQuestPlanPanel::HandleObjectModified(UObject* Modified)
 
 EVisibility SQuestPlanPanel::GetStaleVisibility() const
 {
-	return bStale ? EVisibility::Visible : EVisibility::Collapsed;
+	// Two independent reasons a plan stops being true: the ASSET moved under it, or the SELECTION moved away from what
+	// it was built against. Either one makes what is on screen a statement about a state that no longer exists.
+	return (bStale || SourceStale.Get(false)) ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+FText SQuestPlanPanel::GetStaleText() const
+{
+	// Named separately because the fix differs: one wants a re-plan, the other wants you to notice you changed the
+	// source. A single sentence covering both would send half the readers looking in the wrong place.
+	if (bStale)
+	{
+		return LOCTEXT("PlanStaleAsset", "This questline has changed since this plan was computed. Build Plan again to refresh it.");
+	}
+	return LOCTEXT("PlanStaleSource", "The source above has changed since this plan was computed. Build Plan again to refresh it.");
+}
+
+EVisibility SQuestPlanPanel::GetFolderRowVisibility() const
+{
+	return ShownSourceKind == EQuestPlanSourceKind::Folder ? EVisibility::Visible : EVisibility::Collapsed;
+}
+
+EVisibility SQuestPlanPanel::GetTableRowVisibility() const
+{
+	return ShownSourceKind == EQuestPlanSourceKind::DataTable ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)

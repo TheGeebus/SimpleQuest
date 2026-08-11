@@ -283,6 +283,7 @@ public:
 
 	SLATE_BEGIN_ARGS(SColumnTableView<ItemType>)
 		: _SelectionMode(ESelectionMode::Single)
+		, _bShowSearchBox(true)
 		, _AllowClipboardCopy(true)
 		, _bDistinctHeader(false)
 		, _bIndentUnderTitle(false)
@@ -316,6 +317,16 @@ public:
 		SLATE_ARGUMENT(FString, PersistenceKey)
 
 		SLATE_ARGUMENT(FText, FilterHintText)
+
+		/**
+		 * False suppresses the built-in search box and gives the Toolbar slot the whole band, so a consumer can place its
+		 * own SSearchBox wherever it belongs and wire it to SetFilterText.
+		 * WHY THIS EXISTS: the built-in box is a SIBLING of the Toolbar slot, so nothing a consumer puts in that slot can
+		 * share a horizontal box with it. That is fine for a one-row toolbar and wrong for a multi-row one, where the
+		 * search ends up spanning every row and belonging to none - and every workaround (vertical alignment, fill
+		 * fractions, capping whatever inflates the toolbar) treats the symptom.
+		 */
+		SLATE_ARGUMENT(bool, bShowSearchBox)
 		
 		/**
 		 * Optional heading. Supply it when the table sits among other content that names itself - a details panel row is
@@ -431,18 +442,57 @@ public:
 			}
 			Header->AddColumn(Args);
 		}
+		
+		// Built imperatively because the toolbar's SIZING depends on whether the built-in search is present, and that
+		// cannot be expressed in the declarative chain: AutoWidth() and FillWidth() each return a reference into a
+		// per-branch temporary, so a ternary over them is fragile. AddSlot is the engine's own idiom for a slot that
+		// only sometimes exists.
+		TSharedRef<SHorizontalBox> ToolbarBand = SNew(SHorizontalBox);
+		if (InArgs._bShowSearchBox)
+		{
+			// Toolbar leads and the search fills the remainder, matching the existing facts views - where that order is
+			// load-bearing, because their search boxes are aligned to land on identical y across views.
+			ToolbarBand->AddSlot().AutoWidth()
+			[
+				InArgs._Toolbar.Widget
+			];
+			ToolbarBand->AddSlot().FillWidth(1.0f).Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
+			[
+				// The table brings its own search because it cannot borrow one: a details panel's filter never reaches
+				// inside an embedded widget, and a dockable tab has none to borrow.
+				SNew(SSearchBox)
+				.HintText(InArgs._FilterHintText.IsEmpty()
+					? NSLOCTEXT("SimpleCore", "TableFilterHint", "Search...")
+					: InArgs._FilterHintText)
+				.OnTextChanged(this, &SColumnTableView::OnFilterTextChanged)
+			];
+		}
+		else
+		{
+			// The consumer owns the search and places it in its own layout, so the toolbar takes the whole band - it
+			// needs real width to distribute, which an AutoWidth slot would never give it.
+			ToolbarBand->AddSlot().FillWidth(1.0f)
+			[
+				InArgs._Toolbar.Widget
+			];
+		}
 
 		ChildSlot
 		[
 			SNew(SVerticalBox)
 			// Collapsed outright when no title is given, so the option existing costs nothing - no stray padding above a
 			// table that already sits under a heading.
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 4.0f, 0.0f, 4.0f))
+			+ SVerticalBox::Slot().AutoHeight()
 			[
-				SNew(STextBlock)
-				.Text(InArgs._Title)
-				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-				.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				SNew(SBorder)
+				.Padding(FMargin(20.f, 4.f, 0.f, 4.f))
+				.BorderBackgroundColor(FLinearColor::Transparent)
+				[
+					SNew(STextBlock)
+					.Text(InArgs._Title)
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+					.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
+				]
 			]
 			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
 			[
@@ -461,23 +511,7 @@ public:
 				SNew(SVerticalBox)
 				+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
 				[
-					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().Padding(FMargin(0.0f, 0.0f, 0.0f, 0.0f))
-					[
-						// Toolbar leads and the search fills the remainder, matching the existing facts views - where that
-						// order is load-bearing, because their search boxes are aligned to land on identical y across views.
-						InArgs._Toolbar.Widget
-					]
-					+ SHorizontalBox::Slot().FillWidth(1.0f).Padding(FMargin(8.0f, 0.0f, 0.0f, 0.0f))
-					[
-						// The table brings its own search because it cannot borrow one: a details panel's filter never reaches
-						// inside an embedded widget, and a dockable tab has none to borrow.
-						SNew(SSearchBox)
-						.HintText(InArgs._FilterHintText.IsEmpty()
-							? NSLOCTEXT("SimpleCore", "TableFilterHint", "Search...")
-							: InArgs._FilterHintText)
-						.OnTextChanged(this, &SColumnTableView::OnFilterTextChanged)
-					]
+					ToolbarBand
 				]
 				+ SVerticalBox::Slot().FillHeight(1.0f)
 				[
@@ -605,6 +639,9 @@ public:
 
 	/** The active filter string, so a caller can name it in its own empty-state wording. */
 	FText GetFilterText() const { return FText::FromString(FilterText); }
+
+	/** Public entry point for a consumer-owned search box. Same path the built-in one takes. */
+	void SetFilterText(const FText& InText) { OnFilterTextChanged(InText); }
 
 	/**
 	 * Selected rows in VISIBLE order rather than selection order. A clipboard copy should follow what the user sees;

@@ -207,7 +207,10 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 	TSet<FString> AllRowKeys;
 	TArray<FString> Warnings;
 	FString ReadError;
-	if (!QuestImport_ReadAndValidate(Endpoint, LoadQuestMappingArg(Args), Bundle, NodeRowsByKey, AllRowKeys, Warnings, ReadError))
+	// Loaded once and shared: the three publish sites below all have to report the SAME mapping, and calling the loader
+	// per site is how two of them would eventually disagree.
+	const UQuestImportMapping* ArgMapping = LoadQuestMappingArg(Args);
+	if (!QuestImport_ReadAndValidate(Endpoint, ArgMapping, Bundle, NodeRowsByKey, AllRowKeys, Warnings, ReadError))
 	{
 		// "No asset created" is fresh-create wording and is a lie on an --in-place run, which was never going to create
 		// one. Same failure, two modes, two accurate endings.
@@ -219,7 +222,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		// site would surface mapping and validation failures and silently miss the one a designer hits most.
 		if (bInPlace)
 		{
-			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, QuestPlanSourceFromEndpoint(Endpoint));
+			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, QuestPlanSourceFromEndpoint(Endpoint, ArgMapping));
 		}
 		return;
 	}
@@ -241,7 +244,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		FQuestInPlacePlan Plan;
 		FQuestImportRequest Request;
 		Request.Endpoint = Endpoint;
-		Request.Mapping = LoadQuestMappingArg(Args);
+		Request.Mapping = ArgMapping;
 		Request.bDeleteOrphans = bDeleteOrphans;
 		// Resolved out here rather than inside the run, because the mode has to be REPORTED before any work happens:
 		// a plan is only interpretable against the policy that produced it, and the same source and asset yield
@@ -275,7 +278,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 			// Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
 			// log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
 			// failed. The notification catches the eye; the panel is where the reason stays.
-			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, QuestPlanSourceFromEndpoint(Request.Endpoint));
+			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. Nothing was modified."), *Outcome.Error);
 			return;
 		}
@@ -284,7 +287,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		LogInPlacePlan(Outcome.Plan);
 		// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 		// about to be applied, so the panel always shows what the run actually decided.
-		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanSourceFromEndpoint(Endpoint));
+		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanSourceFromEndpoint(Endpoint, ArgMapping));
 
 		if (!bApply)
 		{

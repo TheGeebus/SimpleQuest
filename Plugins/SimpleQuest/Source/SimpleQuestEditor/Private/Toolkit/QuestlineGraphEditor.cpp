@@ -1141,11 +1141,18 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         PlanPanel = SNew(SQuestPlanPanel)
             .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString())
             .Questline(QuestlineGraph)
-            .OnRebuildRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::RebuildImportPlan))
+            .OnBuildPlanRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BuildImportPlan))
             .OnApplyRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan))
+            .OnBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForImportFolder))
+            .CanBuildPlan(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanBuildImportPlan))
             .CanApply(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan))
-            .OnChooseSourceRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ChooseImportSource))
-            .SourceLabel(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetImportSourceLabel))
+            .SourceStale(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::IsPlanSourceStale))
+            .PlanProvenance(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetPlanProvenanceLabel))
+            .SourceFolder(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFolder))
+            .OnFolderChanged(FOnQuestPlanFolderChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFolderChanged))
+            .SourceTable(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportTable))
+            .OnTableChanged(FOnQuestPlanTableChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportTableChanged))
+            .OnSourceKindChanged(FOnQuestPlanSourceKindChanged::CreateSP(this, &FQuestlineGraphEditor::HandleSourceKindChanged))
             .FormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFormatName))
             .OnFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFormatChanged))
             .MappingAsset(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportMappingPath))
@@ -1159,18 +1166,18 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         ];
 }
 
-bool FQuestlineGraphEditor::RunImport(bool bApply)
+bool FQuestlineGraphEditor::RunImport(const FQuestPlanSource& Source, bool bApply)
 {
     if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
 
-    // Loaded here rather than held resolved, so a recipe edited or deleted between runs is picked up rather than
-    // cached. Null is the ordinary case: it means the source is already in our own shape.
-    const UQuestImportMapping* Mapping = Cast<UQuestImportMapping>(LastImportMapping.TryLoad());
+    // From the SOURCE, not the held selection: an Apply re-running a reviewed plan must use the mapping that plan was
+    // built with, even if the picker has moved since.
+    const UQuestImportMapping* Mapping = Cast<UQuestImportMapping>(Source.Mapping.TryLoad());
 
     FQuestImportRequest Request;
     // Kind comes from the source rather than being assumed. Hardcoding ForeignFile here is what made a DataTable plan
     // un-runnable from this editor even when the record it came from named the table perfectly well.
-    Request.Endpoint = QuestEndpointFromPlanSource(LastImportSource);
+    Request.Endpoint = QuestEndpointFromPlanSource(Source);
     Request.Mapping = Mapping;
     Request.Policies = QuestImport_ResolvePolicies(Mapping, false);
 
@@ -1212,8 +1219,24 @@ bool FQuestlineGraphEditor::RunImport(bool bApply)
     }
 
     Outcome.Plan.TargetAssetPath = QuestlineGraph->GetPathName();
-    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, LastImportSource);
 
+    // The panel path reported NOTHING on success while the console printed a full summary, so a designer working only
+    // in the panel had no trail at all - and it made this surface undiagnosable from a log. One line, matching the
+    // console's counts. The full itemised rendering is LogInPlacePlan, which still lives with the console; a second
+    // caller wanting it is exactly the condition R4 recorded for hoisting it into a shared report.
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: %d update(s) (%d with changes), %d created, %d orphaned, "
+        "%d connection(s) added, %d removed, %d refusal(s)."),
+        bApply ? TEXT("Apply Plan") : TEXT("Build Plan"),
+        Outcome.Plan.CountOf(EQuestNodePlanAction::Update),
+        Outcome.Plan.ChangedNodeCount(),
+        Outcome.Plan.CountOf(EQuestNodePlanAction::Create),
+        Outcome.Plan.CountOf(EQuestNodePlanAction::Orphan),
+        Outcome.Plan.AddedEdges.Num(),
+        Outcome.Plan.RemovedEdges.Num(),
+        Outcome.Plan.Refusals.Num());
+    
+    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, Source);
+    
     // An apply recompiles the target and its linked neighborhood (QuestImport_RunInPlace owns that, so the console gets
     // it too). Report the outcome here rather than only logging it: this path has a designer watching, and "the change
     // landed but the asset still needs compiling" is precisely the state they must not walk away from.
@@ -1263,7 +1286,7 @@ void FQuestlineGraphEditor::RestoreImportEndpointFromMemo()
     LastImportSource.Folder = Remembered->Folder;
     if (!Remembered->FormatName.IsEmpty()) { LastImportSource.FormatName = Remembered->FormatName; }
     LastImportSource.Table = FSoftObjectPath(Remembered->Table);
-    LastImportMapping = FSoftObjectPath(Remembered->Mapping);
+    LastImportSource.Mapping = FSoftObjectPath(Remembered->Mapping);
 }
 
 void FQuestlineGraphEditor::SaveImportEndpointToMemo() const
@@ -1274,14 +1297,14 @@ void FQuestlineGraphEditor::SaveImportEndpointToMemo() const
     Remembered.Folder     = LastImportSource.Folder;
     Remembered.FormatName = LastImportSource.FormatName;
     Remembered.Table      = LastImportSource.Table.ToString();
-    Remembered.Mapping    = LastImportMapping.ToString();
+    Remembered.Mapping    = LastImportSource.Mapping.ToString();
 
     UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
     Memo->EndpointByQuestline.Add(QuestlineGraph->GetPathName(), Remembered);
     Memo->SaveConfig();
 }
 
-void FQuestlineGraphEditor::ChooseImportSource()
+void FQuestlineGraphEditor::BrowseForImportFolder()
 {
     IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
     if (!Desktop) { return; }
@@ -1295,12 +1318,35 @@ void FQuestlineGraphEditor::ChooseImportSource()
         return;   // cancelled; nothing to say
     }
 
-    LastImportSource.Folder = Chosen;
-    // The two provenances are exclusive. Picking a folder must clear a table the previous plan came from, or the derived
-    // Kind keeps reading that table and silently ignores the folder just chosen.
+    // Routed through the same write typing uses, so browsing and typing cannot diverge.
+    HandleImportFolderChanged(Chosen);
+}
+
+void FQuestlineGraphEditor::HandleImportFolderChanged(const FString& NewFolder)
+{
+    if (NewFolder == LastImportSource.Folder) { return; }
+    LastImportSource.Folder = NewFolder;
+    // The two provenances are exclusive; naming a folder means this is no longer a table source.
     LastImportSource.Table.Reset();
     SaveImportEndpointToMemo();
-    RunImport(false);
+}
+
+void FQuestlineGraphEditor::HandleImportTableChanged(const FSoftObjectPath& NewTable)
+{
+    if (NewTable == LastImportSource.Table) { return; }
+    LastImportSource.Table = NewTable;
+    LastImportSource.Folder.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleSourceKindChanged(EQuestPlanSourceKind NewKind)
+{
+    // Clears the side no longer in play rather than leaving both set, so the endpoint's derived kind always agrees with
+    // what the panel is showing. The panel keeps its own notion of which control is visible, because it can sit on
+    // Data Table with nothing picked - a state no source can hold.
+    if (NewKind == EQuestPlanSourceKind::DataTable) { LastImportSource.Folder.Reset(); }
+    else                                            { LastImportSource.Table.Reset(); }
+    SaveImportEndpointToMemo();
 }
 
 void FQuestlineGraphEditor::HandleImportFormatChanged(FString NewFormat)
@@ -1308,39 +1354,48 @@ void FQuestlineGraphEditor::HandleImportFormatChanged(FString NewFormat)
     if (NewFormat == LastImportSource.FormatName) { return; }
     LastImportSource.FormatName = MoveTemp(NewFormat);
     SaveImportEndpointToMemo();
-
-    // Re-plan immediately when a FILE source is already chosen, matching ChooseImportSource. A DataTable has no format -
-    // its row struct is the authority - so changing this reinterprets nothing and must not re-read a table.
-    if (!LastImportSource.Folder.IsEmpty() && !LastImportSource.Table.IsValid()) { RunImport(false); }
 }
 
 void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& NewMapping)
 {
-    if (NewMapping == LastImportMapping) { return; }
-    LastImportMapping = NewMapping;
+    if (NewMapping == LastImportSource.Mapping) { return; }
+    LastImportSource.Mapping = NewMapping;
     SaveImportEndpointToMemo();
-    // A recipe applies to EITHER provenance, so this re-plans whatever the current source is.
-    if (LastImportSource.IsValid()) { RunImport(false); }
 }
 
-FText FQuestlineGraphEditor::GetImportSourceLabel() const
+FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
 {
     if (!QuestlineGraph) { return FText::GetEmpty(); }
-    // A plan's PROVENANCE when there is one - the rows below are a statement about that source, not about whatever is
-    // currently selected. Otherwise the restored SELECTION, which is what Build Plan would read. The broker is
-    // in-memory and empty at editor start, so a label reading only the record announced "No source chosen" beside a
-    // source the memo had just restored, and the persistence looked broken when it was not.
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    const FQuestPlanSource& Shown = (Record && Record->Source.IsValid()) ? Record->Source : LastImportSource;
-    if (!Shown.IsValid())
+    if (!Record || !Record->Source.IsValid()) { return FText::GetEmpty(); }   // no plan - the subtitle slot collapses
+
+    // Names what the ROWS are a statement about, which is no longer the same fact as what the fields above show. The
+    // format is part of it: one folder read as TSV and the same folder read as JSON are different sources.
+    return Record->Source.Kind() == EQuestPlanSourceKind::DataTable
+        ? FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromTable", "Plan built from {0}"),
+            FText::FromString(Record->Source.Table.ToString()))
+        : FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromFolder", "Plan built from {0} as {1}"),
+            FText::FromString(Record->Source.Folder),
+            FText::FromString(Record->Source.FormatName));
+}
+
+bool FQuestlineGraphEditor::IsPlanSourceStale() const
+{
+    if (!QuestlineGraph) { return false; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    // A failure record describes no plan, so there is nothing for the selection to have drifted away from.
+    if (!Record || !Record->Source.IsValid() || !Record->Error.IsEmpty()) { return false; }
+
+    if (Record->Source.Mapping != LastImportSource.Mapping) { return true; }
+    if (Record->Source.Kind() != LastImportSource.Kind()) { return true; }
+    // Compared per field rather than by whole-struct equality, because FormatName is meaningless for a table and would
+    // otherwise report every table plan stale the moment the combo held anything.
+    if (LastImportSource.Kind() == EQuestPlanSourceKind::DataTable)
     {
-        return NSLOCTEXT("SimpleQuestEditor", "NoSourceChosen", "No source chosen");
+        return Record->Source.Table != LastImportSource.Table;
     }
-    // A table source has no folder, and reading Folder alone is what made a console-produced table plan render beneath
-    // "No source chosen" - a panel disowning a plan it was displaying at the time.
-    return Shown.Table.IsValid()
-        ? FText::FromString(Shown.Table.ToString())
-        : FText::FromString(Shown.Folder);
+    return Record->Source.Folder != LastImportSource.Folder
+        || Record->Source.FormatName != LastImportSource.FormatName;
 }
 
 void FQuestlineGraphEditor::ApplyImportPlan()
@@ -1349,27 +1404,42 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
     if (!Record || !Record->Source.IsValid()) { return; }
 
-    // Apply the source the PLAN came from, whoever produced it and whatever its provenance. Taking the WHOLE record
-    // rather than its Folder is the fix: the folder-only assignment discarded a table, then failed complaining about
-    // the missing folder it had just created.
-    LastImportSource = Record->Source;
-    SaveImportEndpointToMemo();
-    RunImport(true);
+    // Applies what the REVIEWED PLAN came from, not the current selection - "what runs is what you reviewed" is the
+    // promise, and the two can now legitimately differ. Deliberately does NOT write LastImportSource: doing so would
+    // silently revert a field the designer edited after building the plan.
+    RunImport(Record->Source, true);
 }
 
-void FQuestlineGraphEditor::RebuildImportPlan()
+void FQuestlineGraphEditor::BuildImportPlan()
 {
-    // Re-run the source the current plan came from, without asking for a folder again - the distinction from the
-    // toolbar's Build Plan, which is the entry point and always asks.
-    if (!QuestlineGraph) { return; }
-    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    if (!Record || !Record->Source.IsValid()) { return; }
+    // Reads the SELECTION. Rebuild used to re-run whatever the last plan came from, which meant an edited folder could
+    // not be acted on without going back through a file dialog.
+    if (!CanBuildImportPlan())
+    {
+        // Says WHY rather than doing nothing. A greyed button explains itself only if you already know the rule, and a
+        // handler that returns silently is indistinguishable from one that is not wired at all.
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Build Plan: nothing to read - %s. Target '%s'."),
+            LastImportSource.Table.IsValid() ? TEXT("no Data Table is set")
+                                             : TEXT("a folder and a format are both required"),
+            QuestlineGraph ? *QuestlineGraph->GetPathName() : TEXT("<none>"));
+        return;
+    }
 
-    // Re-run the source the current plan came from, without asking for a folder again - the distinction from Choose
-    // Source, which is the entry point and always asks.
-    LastImportSource = Record->Source;
-    SaveImportEndpointToMemo();
-    RunImport(false);
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Build Plan: reading '%s'%s for '%s'."),
+        LastImportSource.Table.IsValid() ? *LastImportSource.Table.ToString() : *LastImportSource.Folder,
+        LastImportSource.Table.IsValid() ? TEXT("") : *FString::Printf(TEXT(" as %s"), *LastImportSource.FormatName),
+        *QuestlineGraph->GetPathName());
+
+    RunImport(LastImportSource, false);
+}
+
+bool FQuestlineGraphEditor::CanBuildImportPlan() const
+{
+    // A source that RESOLVES, not merely one that is non-empty: a folder needs a format to be read through, a table
+    // carries its own in the row struct.
+    if (!QuestlineGraph) { return false; }
+    if (LastImportSource.Table.IsValid()) { return true; }
+    return !LastImportSource.Folder.IsEmpty() && !LastImportSource.FormatName.IsEmpty();
 }
 
 bool FQuestlineGraphEditor::CanApplyImportPlan() const

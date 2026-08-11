@@ -48,6 +48,8 @@
 #include "Styling/SlateStyle.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Brushes/SlateImageBrush.h"
+#include "Brushes/SlateRoundedBoxBrush.h"
+#include "Styling/StyleColors.h"
 #include "Debug/QuestPIEDebugChannel.h"
 #include "DetailCustomizations/QuestlineNodeEntryDetailsCustomization.h"
 #include "Nodes/QuestlineNode_Entry.h"
@@ -311,6 +313,13 @@ void FSimpleQuestEditor::StartupModule()
 	new FSlateBoxBrush(
 		StyleSet->RootToContentDir(TEXT("SimpleQuestHoverHalo64"), TEXT(".png")),
 		FMargin(18.0f / 64.0f)));
+
+	// Fills for the Source Data panel's banners. The engine's RoundedWarning / RoundedError are OUTLINE ONLY over a
+	// transparent fill (StarshipStyle.cpp:511-512), which reads muted against a dark panel. These sit BEHIND
+	// SWarningOrErrorBox at the SAME 4px radius so the corners agree, and carry no outline of their own - the widget
+	// still draws that, so the engine keeps ownership of the line colour and we only add what it left transparent.
+	StyleSet->Set("SimpleQuest.Banner.WarningFill",	new FSlateRoundedBoxBrush(FStyleColors::Warning.GetSpecifiedColor().CopyWithNewOpacity(0.10f), 4.0f));
+	StyleSet->Set("SimpleQuest.Banner.ErrorFill", new FSlateRoundedBoxBrush(FStyleColors::Error.GetSpecifiedColor().CopyWithNewOpacity(0.10f), 4.0f));
 
 	FSlateStyleRegistry::RegisterSlateStyle(*StyleSet);
 

@@ -179,16 +179,36 @@ private:
 	static const FName PlanTabId;
 
 	void OpenSourceData();
-	void ChooseImportSource();
+
+	/** SELECTION - what the next Build Plan will read. A different fact from the displayed plan's provenance. */
+	FString GetImportFolder() const { return LastImportSource.Folder; }
+	void HandleImportFolderChanged(const FString& NewFolder);
+	FSoftObjectPath GetImportTable() const { return LastImportSource.Table; }
+	void HandleImportTableChanged(const FSoftObjectPath& NewTable);
+	void HandleSourceKindChanged(EQuestPlanSourceKind NewKind);
 	FString GetImportFormatName() const { return LastImportSource.FormatName; }
 	void HandleImportFormatChanged(FString NewFormat);
-	FSoftObjectPath GetImportMappingPath() const { return LastImportMapping; }
+	FSoftObjectPath GetImportMappingPath() const { return LastImportSource.Mapping; }
 	void HandleImportMappingChanged(const FSoftObjectPath& NewMapping);
-	FText GetImportSourceLabel() const;
+
+	void BrowseForImportFolder();
+	void BuildImportPlan();
+	bool CanBuildImportPlan() const;
 	void ApplyImportPlan();
-	void RebuildImportPlan();
 	bool CanApplyImportPlan() const;
-	bool RunImport(bool bApply);
+
+	/** PROVENANCE - what the displayed plan was built from. EMPTY when there is no plan, so the slot collapses. */
+	FText GetPlanProvenanceLabel() const;
+
+	/** True when the selection has moved away from what the displayed plan was built from. */
+	bool IsPlanSourceStale() const;
+
+	/**
+	 * Runs against the source it is GIVEN rather than the held selection, because the two callers legitimately want
+	 * different ones: Build Plan reads the current selection, Apply re-runs what the reviewed plan came from and must
+	 * not overwrite a field the designer has edited since. Assign-then-run is how a table provenance got dropped once.
+	 */
+	bool RunImport(const FQuestPlanSource& Source, bool bApply);
 	
 	/**
 	 * Per-user, per-project memory of this questline's source, so a session resumes where the last one ended. Restored
@@ -206,12 +226,6 @@ private:
 	 * are both FStrings, so a positional default would mis-assign silently if they were ever reordered.
 	 */
 	FQuestPlanSource LastImportSource;
-
-	/**
-	 * Optional translation recipe, empty for none. Held as a path so an unloaded asset doesn't force a load. Deliberately
-	 * NOT part of the source: a recipe describes a SHAPE rather than a location, and one recipe serves either provenance.
-	 */
-	FSoftObjectPath LastImportMapping;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

@@ -126,7 +126,7 @@ struct FQuestDataEndpoint
  * field by field is what let three of five copy sites silently drop the DataTable, so a table plan published by one
  * caller could not be re-run by another.
  */
-FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint);
+FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping);
 
 /**
  * The reverse. Kind is DERIVED rather than carried, so "a source naming a table IS a table source" is stated once and

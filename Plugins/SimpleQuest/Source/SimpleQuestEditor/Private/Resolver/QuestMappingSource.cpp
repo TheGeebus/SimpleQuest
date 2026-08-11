@@ -338,12 +338,13 @@ namespace
 	}
 }
 
-FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint)
+FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping)
 {
 	FQuestPlanSource Source;
 	Source.Folder     = Endpoint.Folder;
 	Source.FormatName = Endpoint.FormatName;
 	Source.Table      = Endpoint.Table.ToSoftObjectPath();
+	Source.Mapping    = Mapping ? FSoftObjectPath(Mapping) : FSoftObjectPath();
 	return Source;
 }
 

@@ -13,6 +13,16 @@
 #include "UObject/SoftObjectPath.h"
 
 /**
+ * WHICH PROVENANCE a source is. Lives beside FQuestPlanSource because that is what it describes; the resolver's private
+ * FQuestDataEndpoint derives its own kind from the same fact, through one helper, so the two cannot disagree.
+ */
+enum class EQuestPlanSourceKind : uint8
+{
+	Folder,
+	DataTable,
+};
+
+/**
  * Where a plan's data came from, as plain fields rather than an FQuestDataEndpoint - that type is private to the
  * resolver and this header is public. Carried WITH the plan because applying re-reads the source, so a consumer that
  * can see a plan must also be able to name what produced it; otherwise the surface showing a plan and the surface
@@ -23,6 +33,15 @@ struct FQuestPlanSource
 	FString Folder;          // empty when the source was a DataTable
 	FString FormatName;      // meaningful only for a folder
 	FSoftObjectPath Table;   // invalid when the source was a folder
+	FSoftObjectPath Mapping; // the translation mapping in force, invalid for none	
+
+	/**
+	 * ONE derivation of the kind, so no caller re-implements "a source naming a table is a table source". Note this is
+	 * a statement about a RECORD, which always has one or the other; a UI may legitimately sit on DataTable with
+	 * nothing picked yet, which is a state no record can hold and which the panel therefore tracks itself.
+	 */
+	EQuestPlanSourceKind Kind() const { return Table.IsValid() ? EQuestPlanSourceKind::DataTable : EQuestPlanSourceKind::Folder; }
+
 
 	bool IsValid() const { return !Folder.IsEmpty() || Table.IsValid(); }
 };

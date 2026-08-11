@@ -4,6 +4,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Resolver/QuestPlanBroker.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
@@ -14,6 +15,9 @@ class UQuestlineGraph;
 
 DECLARE_DELEGATE_OneParam(FOnQuestPlanFormatChanged, FString /*FormatName*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanMappingChanged, const FSoftObjectPath& /*MappingAsset*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanSourceKind /*Kind*/);
 
 
 /**
@@ -54,32 +58,53 @@ public:
 		 */
 		SLATE_ARGUMENT(TWeakObjectPtr<UQuestlineGraph>, Questline)
 
-		/** Raised when the panel's own Rebuild button is pressed. The panel does not import; it asks its owner to. */
-		SLATE_EVENT(FSimpleDelegate, OnRebuildRequested)
+		SLATE_EVENT(FSimpleDelegate, OnBuildPlanRequested)
 
 		/** Raised by Apply. Same reason - the toolkit owns the transaction and the source, the panel owns the display. */
 		SLATE_EVENT(FSimpleDelegate, OnApplyRequested)
 
-		/** Raised when the user asks to pick a source folder. The panel displays; the toolkit browses and imports. */
-		SLATE_EVENT(FSimpleDelegate, OnChooseSourceRequested)
+		/** Raised by the Browse button. The panel displays a path; the toolkit owns the dialog. */
+		SLATE_EVENT(FSimpleDelegate, OnBrowseRequested)
 
-		/** What Rebuild would re-read, so the button is not a promise about an unnamed folder. */
-		SLATE_ATTRIBUTE(FText, SourceLabel)
+		/**
+		 * PROVENANCE - what the displayed plan was built from, which is NOT the same fact as what is currently selected.
+		 * Empty when no plan exists, and the subtitle slot collapses. The selection lives in the fields below, and the
+		 * two disagreeing is what SourceStale reports.
+		 */
+		SLATE_ATTRIBUTE(FText, PlanProvenance)
+
+		/** SELECTION - the folder the next Build Plan will read. Editable; typing and browsing converge on one write. */
+		SLATE_ATTRIBUTE(FString, SourceFolder)
+		SLATE_EVENT(FOnQuestPlanFolderChanged, OnFolderChanged)
+
+		/** SELECTION - the Data Table the next Build Plan will read. Mutually exclusive with the folder. */
+		SLATE_ATTRIBUTE(FSoftObjectPath, SourceTable)
+		SLATE_EVENT(FOnQuestPlanTableChanged, OnTableChanged)
+
+		/** Raised when the designer switches provenance. The owner clears whichever side is no longer in play. */
+		SLATE_EVENT(FOnQuestPlanSourceKindChanged, OnSourceKindChanged)
 
 		/** The format provider the next read will use. Shown in the combo; the list itself comes from the registry. */
 		SLATE_ATTRIBUTE(FString, FormatName)
 
-		/** Raised when the designer picks a different format. The owner re-reads; the panel never reads anything itself. */
+		/** Raised when the designer picks a different format. Changes a SELECTION only - nothing is read until Build Plan. */
 		SLATE_EVENT(FOnQuestPlanFormatChanged, OnFormatChanged)
 
-		/** The translation recipe, or an empty path for none - meaning the source is already in our own shape. */
+		/** The translation mapping, or an empty path for none - meaning the source is already in our own shape. */
 		SLATE_ATTRIBUTE(FSoftObjectPath, MappingAsset)
 
-		/** Raised when the designer picks or clears a recipe. */
+		/** Raised when the designer picks or clears a mapping. */
 		SLATE_EVENT(FOnQuestPlanMappingChanged, OnMappingChanged)
-		
+
+		/** Whether Build Plan can run - a source that resolves. Distinct from CanApply, which needs a clean plan. */
+		SLATE_ATTRIBUTE(bool, CanBuildPlan)
+
 		/** Whether Apply is currently permitted. Bound rather than pushed, so it re-evaluates as plans come and go. */
 		SLATE_ATTRIBUTE(bool, CanApply)
+
+		/** True when the SELECTION has moved away from what the displayed plan was built from. A second staleness
+		 *  reason alongside the asset having changed, and it wants its own sentence. */
+		SLATE_ATTRIBUTE(bool, SourceStale)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -94,6 +119,9 @@ private:
 	FText GetBlockersText() const;
 	EVisibility GetBlockersVisibility() const;
 	EVisibility GetStaleVisibility() const;
+	FText GetStaleText() const;
+	EVisibility GetFolderRowVisibility() const;
+	EVisibility GetTableRowVisibility() const;
 	void HandleObjectModified(UObject* Modified);
 
 	FString TargetAssetPath;
@@ -101,16 +129,29 @@ private:
 	FDelegateHandle PublishHandle;
 	FDelegateHandle ModifiedHandle;
 
-	FSimpleDelegate OnRebuildRequested;
+	FSimpleDelegate OnBuildPlanRequested;
 	FSimpleDelegate OnApplyRequested;
+	FSimpleDelegate OnBrowseRequested;
+	TAttribute<bool> CanBuildPlan;
 	TAttribute<bool> CanApply;
+	TAttribute<bool> SourceStale;
 
-	FSimpleDelegate OnChooseSourceRequested;
-	TAttribute<FText> SourceLabel;
+	TAttribute<FText> PlanProvenance;
+	TAttribute<FString> SourceFolder;
+	FOnQuestPlanFolderChanged OnFolderChanged;
+	TAttribute<FSoftObjectPath> SourceTable;
+	FOnQuestPlanTableChanged OnTableChanged;
+	FOnQuestPlanSourceKindChanged OnSourceKindChanged;
 	TAttribute<FString> FormatName;
 	FOnQuestPlanFormatChanged OnFormatChanged;
 	TAttribute<FSoftObjectPath> MappingAsset;
 	FOnQuestPlanMappingChanged OnMappingChanged;
+
+	/**
+	 * Which provenance the row is SHOWING. Panel state, not the toolkit's: a record always has one or the other, but
+	 * the UI has to be able to sit on Data Table with nothing picked yet. Seeded from whatever is bound at construction.
+	 */
+	EQuestPlanSourceKind ShownSourceKind = EQuestPlanSourceKind::Folder;
 
 	/** Backing store for the format combo. Refreshed on open rather than at construction, because a provider can be
 	 *  registered after this panel exists and a snapshot would hide it. */

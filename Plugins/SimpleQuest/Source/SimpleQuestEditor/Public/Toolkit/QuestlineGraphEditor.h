@@ -178,7 +178,7 @@ private:
 	TSharedPtr<SQuestPlanPanel> PlanPanel;
 	static const FName PlanTabId;
 
-	void OpenImportPlan();
+	void OpenSourceData();
 	void ChooseImportSource();
 	FString GetImportFormatName() const { return LastImportSource.FormatName; }
 	void HandleImportFormatChanged(FString NewFormat);

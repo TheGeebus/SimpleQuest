@@ -250,7 +250,7 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint"));
     InTabManager->RegisterTabSpawner(PlanTabId,
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPlanTab))
-        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "PlanTabLabel", "Import Plan"))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "SourceDataTabLabel", "Source Data"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef())
         .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.AssetActions.Duplicate"));
 }
@@ -430,8 +430,8 @@ void FQuestlineGraphEditor::BindGraphCommands()
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
 
     GraphEditorCommands->MapAction(
-        FQuestlineGraphEditorCommands::Get().OpenImportPlan,
-        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::OpenImportPlan));
+        FQuestlineGraphEditorCommands::Get().OpenSourceData,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::OpenSourceData));
 
     GraphEditorCommands->MapAction(
         FQuestlineGraphEditorCommands::Get().ApplyImportPlan,
@@ -878,9 +878,9 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
     ToolbarBuilder.BeginSection("Resolver");
 
     ToolbarBuilder.AddToolBarButton(
-        FQuestlineGraphEditorCommands::Get().OpenImportPlan,
+        FQuestlineGraphEditorCommands::Get().OpenSourceData,
         NAME_None,
-        NSLOCTEXT("SimpleQuestEditor", "ImportPlan_Label", "Import Plan"),
+        NSLOCTEXT("SimpleQuestEditor", "SourceData_Label", "Source Data"),
         TAttribute<FText>(),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
 
@@ -1153,7 +1153,7 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
     }
 
     return SNew(SDockTab)
-        .Label(NSLOCTEXT("SimpleQuestEditor", "PlanTabLabel", "Import Plan"))
+        .Label(NSLOCTEXT("SimpleQuestEditor", "SourceDataTabLabel", "Source Data"))
         [
             PlanPanel.ToSharedRef()
         ];
@@ -1246,7 +1246,7 @@ bool FQuestlineGraphEditor::RunImport(bool bApply)
     return true;
 }
 
-void FQuestlineGraphEditor::OpenImportPlan()
+void FQuestlineGraphEditor::OpenSourceData()
 {
     if (TabManager.IsValid()) { TabManager->TryInvokeTab(PlanTabId); }
 }

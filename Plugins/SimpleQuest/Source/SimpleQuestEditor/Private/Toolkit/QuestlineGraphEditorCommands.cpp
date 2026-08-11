@@ -26,15 +26,16 @@ void FQuestlineGraphEditorCommands::RegisterCommands()
 		"Warnings are typically harmless leftovers; errors indicate wiring that will fail at runtime.",
 		EUserInterfaceActionType::Button, FInputChord());
 	
-	UI_COMMAND(OpenImportPlan, "Import Plan",
-		"Open the Import Plan panel.\n\n"
-		"From there you can point it at a folder of source data and see what re-importing WOULD change in this "
-		"questline - every node, every property, every connection, and anything the import would refuse to do.\n\n"
+	UI_COMMAND(OpenSourceData, "Source Data",
+		"Open the Source Data panel - this questline's relationship with its text form.\n\n"
+		"Point it at a folder or a Data Table to see what re-importing WOULD change in this questline: every node, "
+		"every property, every connection, and anything the import would refuse to do. Export writes the questline "
+		"back out in the same shape.\n\n"
 		"Nothing is written until you apply.",
 		EUserInterfaceActionType::Button, FInputChord());
 
 	UI_COMMAND(ApplyImportPlan, "Apply Plan...",
-		"Perform the changes described by the current Import Plan.\n\n"
+		"Perform the changes described by the current plan.\n\n"
 		"Re-reads the source and re-plans first, so what runs is what you reviewed - if the source moved in between, the "
 		"refreshed plan is what applies. The whole thing is one undo step.",
 		EUserInterfaceActionType::Button, FInputChord());

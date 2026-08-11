@@ -153,7 +153,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 				// ROW ONE - WHERE THE DATA IS, ordered coarse to fine: which provenance, how it parses, what its
 				// columns mean, then the one specific artifact. The location goes last because it is the only
 				// variable-width control and can absorb the slack out to the right edge.
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.f, 8.f, 0.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 0.0f, 8.0f, 0.0f)
 				[
 					SNew(SHorizontalBox)
 
@@ -615,7 +615,8 @@ FText SQuestPlanPanel::GetSummaryText() const
 	}
 	if (!bHasPlan)
 	{
-		return LOCTEXT("NoPlanYet", "No plan has been computed for this questline. Choose a source above to build one.");
+		// The status line above already states that no plan exists; this says what to DO about it.
+		return LOCTEXT("NoPlanYet", "Choose a source above, then press Build Plan.");
 	}
 	// A plan that exists and finds nothing is a DIFFERENT fact from no plan at all, and only one of them means the
 	// asset matches its source. Saying so is what stops an empty table reading as a broken panel.

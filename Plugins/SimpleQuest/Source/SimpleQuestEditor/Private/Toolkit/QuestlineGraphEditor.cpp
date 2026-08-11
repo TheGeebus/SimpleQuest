@@ -1366,8 +1366,20 @@ void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& Ne
 FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
 {
     if (!QuestlineGraph) { return FText::GetEmpty(); }
+
+    // ALWAYS says something. A line that collapses when there is no plan makes the row jump, and its absence carries
+    // no information - "there is no plan" is a fact worth stating plainly.
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    if (!Record || !Record->Source.IsValid()) { return FText::GetEmpty(); }   // no plan - the subtitle slot collapses
+    if (!Record || !Record->Source.IsValid())
+    {
+        return NSLOCTEXT("SimpleQuestEditor", "PlanNone", "No plan built");
+    }
+    // A FAILURE record carries a source as well, so testing Source.IsValid() alone announced "Plan built from ..." for
+    // a read that produced nothing. The reason belongs to the summary; this line only names which state we are in.
+    if (!Record->Error.IsEmpty())
+    {
+        return NSLOCTEXT("SimpleQuestEditor", "PlanReadFailed", "No plan — the last read failed");
+    }
 
     // Names what the ROWS are a statement about, which is no longer the same fact as what the fields above show. The
     // format is part of it: one folder read as TSV and the same folder read as JSON are different sources.

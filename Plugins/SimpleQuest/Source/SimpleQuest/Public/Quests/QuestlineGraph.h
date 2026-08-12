@@ -115,12 +115,6 @@ private:
     TArray<FQuestCompiledNodeAlias> CompiledNodeAliases;
 
     /**
-     * Tag renames detected during compilation, persisted for deferred propagation to unloaded actors. Chain-collapsed across compiles.
-     */
-    UPROPERTY()
-    TArray<FQuestTagRename> PendingTagRenames;
-
-    /**
      * Tags of all content nodes directly reachable from this questline's Entry node. Populated by the compiler. Used by the
      * subsystem to know which nodes to activate when starting this questline. This is created at graph compilation time, so we
      * use FName because FGameplayTag is unreliable in an editor context. 
@@ -223,8 +217,6 @@ public:
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
     const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
-    const TArray<FQuestTagRename>& GetPendingTagRenames() const { return PendingTagRenames; }
-    void ClearPendingTagRenames() { PendingTagRenames.Empty(); }
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }

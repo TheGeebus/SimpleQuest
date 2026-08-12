@@ -206,8 +206,6 @@ TArray<FString> RenderQuestCompiledModel(const UQuestlineGraph& Graph, int32& Ou
 	// Unordered containers render sorted via DumpProperty; sorted arrays are handled per-property where order is
 	// insertion noise.
 	{
-		// PendingTagRenames deliberately absent: it's rename HISTORY, not behavior — a fresh round-tripped asset
-		// has an empty ledger, so including it would guarantee a benign diff on every asset with authoring history.
 		static const TSet<FName> CompilerStampedGraphProps = {
 			TEXT("CompiledQuestTags"), TEXT("EntryNodeTags"), TEXT("CompiledNodeAliases"),
 			TEXT("CompiledQuestlineRewards"), TEXT("ListenerGroupTags"), TEXT("OutwardSetterGroupTags")

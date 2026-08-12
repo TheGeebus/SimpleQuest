@@ -1425,42 +1425,15 @@ void FQuestlineGraphCompiler::DetectAndRecordTagRenames(UQuestlineGraph* InGraph
 
     if (DetectedTagRenames.Num() == 0) return;
 
-    // Chain-collapse the persistent ledger
-    for (FQuestTagRename& Existing : InGraph->PendingTagRenames)
-    {
-        if (const FName* ChainedNew = DetectedTagRenames.Find(Existing.NewTag))
-        {
-            Existing.NewTag = *ChainedNew;
-        }
-    }
-
-    // Add new entries not already covered by chain collapse
-    TSet<FName> ExistingOldTags;
-    for (const FQuestTagRename& Existing : InGraph->PendingTagRenames)
-    {
-        ExistingOldTags.Add(Existing.OldTag);
-    }
-    for (const auto& [OldTag, NewTag] : DetectedTagRenames)
-    {
-        if (!ExistingOldTags.Contains(OldTag))
-        {
-            InGraph->PendingTagRenames.Add({ OldTag, NewTag });
-        }
-    }
-
-    // Prune identity entries (rename then rename back)
-    InGraph->PendingTagRenames.RemoveAll([](const FQuestTagRename& E)
-    {
-        return E.OldTag == E.NewTag;
-    });
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Compiler: %d tag rename(s) detected, ledger: %d pending"),
-		DetectedTagRenames.Num(), InGraph->PendingTagRenames.Num());
-
-	/**
-	 * Per-rename detail — walks the new CompiledNodes to recover the GUID and DisplayName of each renamed node so the
-	 * Output Log identifies exactly which node is drifting. Intended for diagnosing stale or persistent renames where
-	 * the same tag flips every compile without a designer-visible reason.
-	 */
+	// No persistent ledger: the redirects written from DetectedTagRenames are what actually carries a rename to
+	// content that isn't loaded, and they heal on deserialize. A second record of the same renames was kept here for
+	// years without a reader, and its stored OLD names are indistinguishable from live ones to anything scanning
+	// packages - which is precisely what blocks a spent redirect from ever being provably retirable.
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("Compiler: %d tag rename(s) detected"), DetectedTagRenames.Num());
+	
+	// Per-rename detail — walks the new CompiledNodes to recover the GUID and DisplayName of each renamed node so the
+	// Output Log identifies exactly which node is drifting. Intended for diagnosing stale or persistent renames where
+	// the same tag flips every compile without a designer-visible reason.
 	for (const auto& [OldTag, NewTag] : DetectedTagRenames)
 	{
 		FGuid OffendingGuid;

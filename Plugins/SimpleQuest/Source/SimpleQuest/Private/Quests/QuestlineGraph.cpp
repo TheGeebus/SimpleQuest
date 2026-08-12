@@ -48,9 +48,7 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 		}
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledNodeAliases"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
 	}
-
-	Context.AddTag(FAssetRegistryTag(TEXT("HasPendingRenames"), PendingTagRenames.Num() > 0 ? TEXT("true") : TEXT("false"), FAssetRegistryTag::TT_Hidden));
-
+	
 	// ListenerGroupTags + OutwardSetterGroupTags drive the manager's reachability-walked async-load. Manager builds
 	// an inverted GroupTag→graphs index from ListenerGroupTags at startup; when a graph registers, the manager walks
 	// the graph's OutwardSetterGroupTags and async-loads matching listener graphs. Pipe-separated tag-name lists,

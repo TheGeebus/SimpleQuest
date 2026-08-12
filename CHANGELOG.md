@@ -121,8 +121,41 @@ tenth time, into a questline someone has since edited by hand.
   in a different format than the folder already holds would delete every file the
   previous format wrote, so it stops and says so rather than doing it quietly.
 
+### Keeping gameplay tags tidy
+
+Renaming a quest node writes a gameplay tag redirect so existing content keeps
+working. Those pile up, and nothing in the engine tells you when one has
+outlived its purpose - or when one has quietly turned harmful.
+
+- **Find out which redirects are still doing something.**
+  `SimpleQuest.ScanTagRedirects` reads every package on disk and reports each
+  redirect as retirable, still in use (naming the packages holding it), or
+  *inverted*. `--prune` then deletes the retirable ones from your project
+  config.
+- **Inverted redirects are the ones worth knowing about.** Move a node into a
+  container and back out again and you can be left with a redirect pointing
+  *away* from a tag that is still live, toward one that no longer exists. Every
+  reference to that node then resolves to an invalid tag: it still activates,
+  but stops writing state facts and never registers for deactivation - silently.
+  The engine never checks that a redirect's target exists, and a stale redirect
+  actually suppresses the warning that would otherwise surface it. The scan
+  names them, and tells you to delete the line rather than resave anything.
+- **`SimpleCore.TraceAssetDirty`** logs a callstack whenever a matching package
+  is marked dirty, by either of the two routes that can do it - so "why does
+  this asset keep asking to be saved?" becomes a question you can answer.
+
 ### Fixes
 
+- **An asset marked dirty after a tag rename now says why.** Loading an asset
+  that holds a redirected tag marks it dirty so a save can persist the healed
+  value - but it did so silently, and an asset that had *always* held that tag
+  got marked too. The log now names the tag and the property that matched, which
+  is the difference between one restart and an afternoon.
+- **Questlines no longer carry a rename ledger nothing read.** Every compile
+  recorded old tag names into the asset, for a deferred-propagation feature that
+  was never built. They were dead weight, and they made it impossible to tell a
+  tag still awaiting migration from a historical record of one that had already
+  happened. Removed - assets shed the field on their next save.
 - **Applying a re-import recompiles the questline.** An apply changed the graph but
   left the compiled model describing it as it was, so the runtime, the state
   subsystem and the tag registry all read stale data until something else

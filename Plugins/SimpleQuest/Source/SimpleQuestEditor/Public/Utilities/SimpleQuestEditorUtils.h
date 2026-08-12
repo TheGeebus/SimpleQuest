@@ -307,6 +307,20 @@ public:
 	static int32 WriteGameplayTagRedirects(const TMap<FName, FName>& Renames);
 	
 	/**
+	 * Remove redirect entries by OldTagName, preserving every other line in the file verbatim. The inverse of
+	 * WriteGameplayTagRedirects and deliberately beside it: the file path, section header, line prefix and quoted-value
+	 * conventions are shared, and a second parser of the same format would be one drift away from disagreeing with the
+	 * writer about what a redirect line is.
+	 *
+	 * THE CALLER OWNS THE DECISION. This performs no analysis - it removes what it is told to, on the caller's proof
+	 * that those redirects are spent. Deleting a live redirect silently un-heals every asset still holding its old
+	 * name, so nothing here should be invoked on a guess.
+	 *
+	 * @return how many redirect lines were removed.
+	 */
+	static int32 RemoveGameplayTagRedirects(const TSet<FName>& OldTagNames);
+	
+	/**
 	 * Walks every loaded UBlueprint's generated-class CDO and rewrites any FGameplayTag or FGameplayTagContainer field whose stored
 	 * tag name appears as an OldTagName in Renames. Required because UE's GameplayTagRedirects heals values at deserialization time —
 	 * an already-loaded CDO retains its old value in memory until the class is reloaded. Variables that aren't Instance Editable are

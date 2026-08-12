@@ -924,6 +924,60 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 	return Added;
 }
 
+int32 FSimpleQuestEditorUtilities::RemoveGameplayTagRedirects(const TSet<FName>& OldTagNames)
+{
+	if (OldTagNames.Num() == 0) return 0;
+
+	const FString ConfigFile = FPaths::ProjectConfigDir() / TEXT("DefaultGameplayTags.ini");
+	static const FString RedirectLinePrefix = TEXT("+GameplayTagRedirects=");
+	static const FString OldNameMarker = TEXT("OldTagName=\"");
+
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("RemoveGameplayTagRedirects: could not read '%s'."), *ConfigFile);
+		return 0;
+	}
+
+	// LINE-WISE, keeping everything that is not a targeted redirect exactly as written. Comments, blank lines, other
+	// keys and other sections all survive byte-for-byte - a config file is hand-edited, and a rewrite that reformats
+	// it costs the reader their own annotations.
+	TArray<FString> Lines;
+	FileContents.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
+
+	FString Rebuilt;
+	int32 Removed = 0;
+	for (const FString& Line : Lines)
+	{
+		const FString Trimmed = Line.TrimStartAndEnd();
+		if (Trimmed.StartsWith(RedirectLinePrefix))
+		{
+			const int32 Pos = Trimmed.Find(OldNameMarker);
+			if (Pos != INDEX_NONE)
+			{
+				const int32 Start = Pos + OldNameMarker.Len();
+				const int32 End = Trimmed.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+				if (End != INDEX_NONE && OldTagNames.Contains(FName(*Trimmed.Mid(Start, End - Start))))
+				{
+					++Removed;
+					UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("RemoveGameplayTagRedirects: dropped %s"), *Trimmed);
+					continue;
+				}
+			}
+		}
+		Rebuilt += Line;
+		Rebuilt += LINE_TERMINATOR;
+	}
+
+	if (Removed > 0 && !FFileHelper::SaveStringToFile(Rebuilt, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Error, TEXT("RemoveGameplayTagRedirects: removed %d entr(ies) in memory but could "
+			"not write '%s' - the file is unchanged."), Removed, *ConfigFile);
+		return 0;
+	}
+	return Removed;
+}
+
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames)
 {
 	if (Renames.Num() == 0) return 0;

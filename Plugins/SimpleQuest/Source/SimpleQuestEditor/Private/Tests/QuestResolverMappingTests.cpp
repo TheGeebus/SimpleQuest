@@ -4,6 +4,7 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Editor.h"
+#include "Engine/DataTable.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "HAL/FileManager.h"
 #include "Misc/AutomationTest.h"
@@ -28,6 +29,9 @@
 #include "Resolver/QuestRowRestore.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
+#include "Tests/QuestResolverTestRow.h"
+#include "Utilities/SimpleQuestEditorUtils.h"
+
 
 
 // The mapping guard is the one place a drifted source is refused instead of silently dropping rows, so its REFUSALS are the
@@ -1365,6 +1369,129 @@ bool FQuestResolver_UndoRestoresAMovedNode::RunTest(const FString& Parameters)
 	// BOTH sides, deliberately. "Gone from the container" is equally true of a node that ended up nowhere.
 	TestTrue(TEXT("Undo returned the Step to the graph it came from"), Root->Nodes.Contains(Step));
 	TestFalse(TEXT("...and took it back out of the container"), Inner->Nodes.Contains(Step));
+	return true;
+}
+
+// THE ENDPOINT -> BUNDLE SEAM, EXERCISED FOR REAL. Every other test in this file hand-builds its FQuestDataBundle, so the
+// suite pins bundle -> plan -> apply and takes the READER on faith. A divergence there — a different key spelling, a cell
+// degraded to a string, a missing self row — passes all 37 while the system is wrong. This is the only test that can
+// contradict the shape the others assume, and it is the arm reverse-apply will be built on top of.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_DataTableReadProducesTypedBundle,
+	"SimpleQuest.Resolver.DataTableReadProducesTypedBundle", TestFlags)
+bool FQuestResolver_DataTableReadProducesTypedBundle::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_ResolverReadProbe"));
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();   // the soft pointer below resolves through the live object; don't let GC race the assertions
+
+	FQuestResolverTestRow Boss;
+	Boss.type   = TEXT("step");
+	Boss.label  = TEXT("Kill the boss");
+	Boss.amount = 5;
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	// Left at struct defaults deliberately. A DataTable row HAS a value for every field — absence is not expressible —
+	// so these must arrive as cells that are PRESENT with Kind::Empty, never as missing cells.
+	FQuestResolverTestRow Talk;
+	Talk.type  = TEXT("step");
+	Talk.label = TEXT("Talk to the smith");
+	Table->AddRow(TEXT("talk_smith"), Talk);
+
+	FQuestDataEndpoint Endpoint;
+	Endpoint.Kind  = EQuestEndpointKind::DataTable;
+	Endpoint.Table = TSoftObjectPtr<UDataTable>(Table);
+
+	FQuestDataBundle Bundle;
+	FString Error;
+	const bool bRead = ReadEndpointBundle(Endpoint, Bundle, Error);
+	if (!TestTrue(TEXT("A loadable table with rows reads"), bRead))
+	{
+		AddError(FString::Printf(TEXT("ReadEndpointBundle failed: %s"), *Error));
+		Table->RemoveFromRoot();
+		return false;
+	}
+
+	const FQuestDataTable* Content = Bundle.TablesByType.Find(TEXT("content"));
+	const FQuestDataTable* Self    = Bundle.TablesByType.Find(TEXT("questline_graph"));
+	TestNotNull(TEXT("The flat content table is stemmed 'content'"), Content);
+	TestNotNull(TEXT("A self-row table is synthesized"), Self);
+	TestTrue(TEXT("bSelfRowSynthesized marks that identity as ours, not the author's"), Bundle.bSelfRowSynthesized);
+	if (!Content || !Self) { Table->RemoveFromRoot(); return false; }
+
+	// Columns are the row struct's AUTHORED field names — the spelling reverse-apply must write back.
+	TestEqual(TEXT("One column per row-struct field"), Content->Columns.Num(), 4);
+	TestTrue(TEXT("Columns carry authored names"),
+		Content->Columns.Contains(TEXT("type"))   && Content->Columns.Contains(TEXT("label")) &&
+		Content->Columns.Contains(TEXT("amount")) && Content->Columns.Contains(TEXT("outcome")));
+
+	// Row.Key is the row NAME. This is the convention a CLAIM is expressed in, so reverse-apply addresses rows the same way.
+	const FQuestDataRow* BossRow = Content->Rows.FindByPredicate([](const FQuestDataRow& R){ return R.Key == TEXT("kill_boss"); });
+	const FQuestDataRow* TalkRow = Content->Rows.FindByPredicate([](const FQuestDataRow& R){ return R.Key == TEXT("talk_smith"); });
+	TestNotNull(TEXT("Row.Key is the row NAME"), BossRow);
+	TestNotNull(TEXT("Every row is read"), TalkRow);
+
+	if (BossRow)
+	{
+		const FQuestDataValue* Label  = BossRow->Cells.Find(TEXT("label"));
+		const FQuestDataValue* Amount = BossRow->Cells.Find(TEXT("amount"));
+		if (TestNotNull(TEXT("A string column produces a cell"), Label))
+		{
+			TestEqual(TEXT("A string field is Kind::String"), (int32)Label->Kind, (int32)EQuestDataValueKind::String);
+			TestEqual(TEXT("...carrying its value"), Label->StringForm, FString(TEXT("Kill the boss")));
+		}
+		// TYPED, not degraded. This arm has the FProperty in hand, so a number must NOT arrive as a String the way a
+		// text provider would deliver it — that difference is the whole reason the DataTable arm is not a format provider.
+		if (TestNotNull(TEXT("A numeric column produces a cell"), Amount))
+		{
+			TestEqual(TEXT("A numeric field is Kind::Number, not String"), (int32)Amount->Kind, (int32)EQuestDataValueKind::Number);
+			TestEqual(TEXT("...carrying its value"), Amount->StringForm, FString(TEXT("5")));
+		}
+	}
+
+	if (TalkRow)
+	{
+		const FQuestDataValue* Amount  = TalkRow->Cells.Find(TEXT("amount"));
+		const FQuestDataValue* Outcome = TalkRow->Cells.Find(TEXT("outcome"));
+		if (TestNotNull(TEXT("An at-default numeric field is still PRESENT as a cell"), Amount))
+		{
+			TestEqual(TEXT("...with Kind::Empty"), (int32)Amount->Kind, (int32)EQuestDataValueKind::Empty);
+		}
+		if (TestNotNull(TEXT("An unset tag field is present too"), Outcome))
+		{
+			TestEqual(TEXT("...and Empty"), (int32)Outcome->Kind, (int32)EQuestDataValueKind::Empty);
+		}
+	}
+
+	// The synthesized identity is the sanitized ASSET NAME — the analogue of the folder name a file source is read from.
+	if (Self->Rows.Num() == 1)
+	{
+		const FString Expected = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Table->GetName());
+		TestEqual(TEXT("Self-row key is the sanitized asset name"), Self->Rows[0].Key, Expected);
+		TestEqual(TEXT("Self row declares the graph class"), Self->Rows[0].Get(TEXT("class")), FString(TEXT("QuestlineGraph")));
+		TestEqual(TEXT("Self row carries QuestlineID"), Self->Rows[0].Get(TEXT("QuestlineID")), Expected);
+	}
+	else
+	{
+		AddError(FString::Printf(TEXT("Expected exactly one synthesized self row, got %d"), Self->Rows.Num()));
+	}
+
+	// THE PAIRED KNOWN-BAD, matching this file's stated discipline: green is only trustworthy once the reader has gone red.
+	// An empty table must REFUSE rather than yield an empty bundle, which a planner would read as "delete everything".
+	UDataTable* EmptyTable = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_ResolverReadProbeEmpty"));
+	EmptyTable->RowStruct = FQuestResolverTestRow::StaticStruct();
+	EmptyTable->AddToRoot();
+
+	FQuestDataEndpoint EmptyEndpoint;
+	EmptyEndpoint.Kind  = EQuestEndpointKind::DataTable;
+	EmptyEndpoint.Table = TSoftObjectPtr<UDataTable>(EmptyTable);
+
+	FQuestDataBundle EmptyBundle;
+	FString EmptyError;
+	TestFalse(TEXT("A table with no rows is refused"), ReadEndpointBundle(EmptyEndpoint, EmptyBundle, EmptyError));
+	TestTrue(TEXT("...with a stated reason"), !EmptyError.IsEmpty());
+
+	EmptyTable->RemoveFromRoot();
+	Table->RemoveFromRoot();
 	return true;
 }
 

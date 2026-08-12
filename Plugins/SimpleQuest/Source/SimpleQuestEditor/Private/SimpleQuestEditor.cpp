@@ -1075,10 +1075,11 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 
 namespace
 {
-	// Recursive detection walk — returns true on first field whose value is in RedirectTargets. Recurses into nested
-	// USTRUCT fields. Cycle-free (no by-value struct self-references in UE). Mirrors ApplyTagRenamesToStructLayout in
-	// shape — the apply path and the detect path walk the same structural territory.
-	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets)
+	// Recursive detection walk — returns true on the first field whose value is in RedirectTargets, and reports WHICH tag on which
+	// field so the log can name it. Recurses into nested USTRUCT fields. Cycle-free (no by-value struct self-references in UE).
+	// Mirrors ApplyTagRenamesToStructLayout in shape — the apply path and the detect path walk the same structural territory.
+	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets,
+		FName& OutMatchedTag, FString& OutMatchedField)
 	{
 		if (!Struct || !ContainerPtr) return false;
 
@@ -1089,7 +1090,12 @@ namespace
 			if (StructProp->Struct == FGameplayTag::StaticStruct())
 			{
 				const FGameplayTag* TagPtr = StructProp->ContainerPtrToValuePtr<FGameplayTag>(ContainerPtr);
-				if (TagPtr && RedirectTargets.Contains(TagPtr->GetTagName())) return true;
+				if (TagPtr && RedirectTargets.Contains(TagPtr->GetTagName()))
+				{
+					OutMatchedTag = TagPtr->GetTagName();
+					OutMatchedField = StructProp->GetName();
+					return true;
+				}
 			}
 			else if (StructProp->Struct == FGameplayTagContainer::StaticStruct())
 			{
@@ -1098,14 +1104,23 @@ namespace
 				{
 					for (const FGameplayTag& Tag : *ContainerProp)
 					{
-						if (RedirectTargets.Contains(Tag.GetTagName())) return true;
+						if (RedirectTargets.Contains(Tag.GetTagName()))
+						{
+							OutMatchedTag = Tag.GetTagName();
+							OutMatchedField = StructProp->GetName();
+							return true;
+						}
 					}
 				}
 			}
 			else
 			{
 				const void* NestedPtr = StructProp->ContainerPtrToValuePtr<void>(ContainerPtr);
-				if (HasFieldMatchingRedirectTarget(StructProp->Struct, NestedPtr, RedirectTargets)) return true;
+				if (HasFieldMatchingRedirectTarget(StructProp->Struct, NestedPtr, RedirectTargets, OutMatchedTag, OutMatchedField))
+				{
+					OutMatchedField = StructProp->GetName() + TEXT(".") + OutMatchedField;   // build the path as the stack unwinds
+					return true;
+				}
 			}
 		}
 		return false;
@@ -1141,8 +1156,10 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 		RedirectTargets.Add(Entry.NewTagName);
 	}
 
-	bool bMatched = HasFieldMatchingRedirectTarget(InspectionTarget->GetClass(), InspectionTarget, RedirectTargets);
-
+	FName MatchedTag = NAME_None;
+	FString MatchedField;
+	bool bMatched = HasFieldMatchingRedirectTarget(InspectionTarget->GetClass(), InspectionTarget, RedirectTargets, MatchedTag, MatchedField);
+	
 	// UDataTable special case: rows live in TMap<FName, uint8*> RowMap with layout described by RowStruct. The walk above
 	// only sees UDataTable's own UPROPERTYs, not the row data behind the map.
 	if (!bMatched)
@@ -1154,8 +1171,10 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 				for (const TPair<FName, uint8*>& RowPair : DataTable->GetRowMap())
 				{
 					if (!RowPair.Value) continue;
-					if (HasFieldMatchingRedirectTarget(RowStruct, RowPair.Value, RedirectTargets))
+					if (HasFieldMatchingRedirectTarget(RowStruct, RowPair.Value, RedirectTargets, MatchedTag, MatchedField))
 					{
+						// Name the row as well — a row match is otherwise indistinguishable from a match on the table's own fields.
+						MatchedField = FString::Printf(TEXT("Row[%s].%s"), *RowPair.Key.ToString(), *MatchedField);
 						bMatched = true;
 						break;
 					}
@@ -1171,14 +1190,17 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 		// the next tick to escape the routing context. The mark goes on the loaded asset (what UE will serialize), regardless of
 		// whether the matching field lived on the asset directly or on its generated-class CDO.
 		TWeakObjectPtr<UObject> WeakAsset(LoadedAsset);
-		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAsset](float)
+		FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda([WeakAsset, MatchedTag, MatchedField](float)
 		{
 			if (UObject* DeferredAsset = WeakAsset.Get())
 			{
 				DeferredAsset->MarkPackageDirty();
-				UE_LOG(LogSimpleQuestCompiler, Verbose,
-					TEXT("MarkDirtyOnRedirectedTagLoad: deferred dirty mark fired for '%s' (%s) — Save All will now catch the healed FGameplayTag value(s)"),
-					*DeferredAsset->GetName(), *DeferredAsset->GetClass()->GetName());
+				// Display, not Verbose: this is the only account of why an asset the designer never touched is asking to be saved.
+				// Naming the tag AND the field is what separates "a rename landed here" from the known false positive.
+				UE_LOG(LogSimpleQuestCompiler, Display,
+					TEXT("MarkDirtyOnRedirectedTagLoad: '%s' (%s) holds redirect TARGET '%s' on field '%s' — marked dirty so a save persists the "
+						"healed value. If that asset never held the OLD name, this is the known false positive and only retiring the redirect ends it."),
+					*DeferredAsset->GetName(), *DeferredAsset->GetClass()->GetName(), *MatchedTag.ToString(), *MatchedField);
 			}
 			return false; // one-shot — unregister after firing
 		}), 0.0f);

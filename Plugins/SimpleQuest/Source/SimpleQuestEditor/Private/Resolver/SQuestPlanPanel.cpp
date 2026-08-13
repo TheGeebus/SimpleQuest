@@ -342,12 +342,14 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 						SNew(SButton)
 						.Text(LOCTEXT("PlanExport", "Export"))
 						.ToolTipText(LOCTEXT("PlanExportTip", "Write this questline out as data tables you can read, diff and edit. Goes to the folder above, or to the default location when none is set."))
-						// TWO halves, because neither side knows the whole answer. The toolkit says whether the
-						// operation can run at all; the PANEL owns which provenance is on screen, and it can sit on
-						// Data Table with nothing picked - a state no source can hold, so the toolkit cannot see it.
+						// ONE half, for now. The kind selector above describes the SOURCE, and the source has nothing
+						// to say about whether writing OUT applies - that question reads the DESTINATION, which the
+						// toolkit owns. The panel's half earns its place back with the destination row, for the reason
+						// it existed originally: the panel can sit on a kind with nothing picked, which is a state no
+						// endpoint can hold and the toolkit therefore cannot see.
 						.IsEnabled_Lambda([this]()
 						{
-							return CanExport.Get(false) && ShownSourceKind != EQuestPlanSourceKind::DataTable;
+							return CanExport.Get(false);
 						})
 						.OnClicked_Lambda([this]() { OnExportRequested.ExecuteIfBound(); return FReply::Handled(); })
 					]

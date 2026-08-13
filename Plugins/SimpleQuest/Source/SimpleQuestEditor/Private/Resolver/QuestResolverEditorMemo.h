@@ -61,5 +61,14 @@ public:
 	UPROPERTY(config)
 	TMap<FString, FQuestResolverEndpointMemo> EndpointByQuestline;
 
+	/**
+	 * Questline asset path -> where its data is WRITTEN. Separate from the source above because "read from here" and
+	 * "write to there" are different questions a designer can legitimately answer differently - importing a studio's
+	 * table and exporting readable files is a real workflow, and one endpoint per questline cannot express it.
+	 * Same struct: a destination has exactly the shape a source does.
+	 */
+	UPROPERTY(config)
+	TMap<FString, FQuestResolverEndpointMemo> DestinationByQuestline;
+
 	static UQuestResolverEditorMemo* Get() { return GetMutableDefault<UQuestResolverEditorMemo>(); }
 };

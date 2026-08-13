@@ -241,6 +241,12 @@ private:
 	 * are both FStrings, so a positional default would mis-assign silently if they were ever reordered.
 	 */
 	FQuestPlanSource LastImportSource;
+
+	/**
+	 * WHERE this questline's data is written. FQuestPlanSource describes an ENDPOINT - its name predates there being
+	 * two of them, and is worth revisiting rather than working around.
+	 */
+	FQuestPlanSource LastExportDestination;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

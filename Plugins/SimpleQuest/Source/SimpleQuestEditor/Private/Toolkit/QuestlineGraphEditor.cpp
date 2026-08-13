@@ -1281,30 +1281,58 @@ void FQuestlineGraphEditor::OpenSourceData()
 void FQuestlineGraphEditor::RestoreImportEndpointFromMemo()
 {
     if (!QuestlineGraph) { return; }
-    const FQuestResolverEndpointMemo* Remembered =
-        UQuestResolverEditorMemo::Get()->EndpointByQuestline.Find(QuestlineGraph->GetPathName());
-    if (!Remembered) { return; }
+    const UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
+    const FString Path = QuestlineGraph->GetPathName();
 
-    // Each field is taken only when it says something, so a memo written by an older build - or one whose format was
-    // never chosen - leaves the seeded default standing rather than blanking it.
-    LastImportSource.Folder = Remembered->Folder;
-    if (!Remembered->FormatName.IsEmpty()) { LastImportSource.FormatName = Remembered->FormatName; }
-    LastImportSource.Table = FSoftObjectPath(Remembered->Table);
-    LastImportSource.Mapping = FSoftObjectPath(Remembered->Mapping);
+    if (const FQuestResolverEndpointMemo* Remembered = Memo->EndpointByQuestline.Find(Path))
+    {
+        // Each field is taken only when it says something, so a memo written by an older build - or one whose format
+        // was never chosen - leaves the seeded default standing rather than blanking it.
+        LastImportSource.Folder = Remembered->Folder;
+        if (!Remembered->FormatName.IsEmpty()) { LastImportSource.FormatName = Remembered->FormatName; }
+        LastImportSource.Table = FSoftObjectPath(Remembered->Table);
+        LastImportSource.Mapping = FSoftObjectPath(Remembered->Mapping);
+    }
+
+    if (const FQuestResolverEndpointMemo* Dest = Memo->DestinationByQuestline.Find(Path))
+    {
+        LastExportDestination.Folder = Dest->Folder;
+        if (!Dest->FormatName.IsEmpty()) { LastExportDestination.FormatName = Dest->FormatName; }
+        LastExportDestination.Table = FSoftObjectPath(Dest->Table);
+        LastExportDestination.Mapping = FSoftObjectPath(Dest->Mapping);
+    }
+    else if (const FQuestResolverEndpointMemo* Remembered = Memo->EndpointByQuestline.Find(Path))
+    {
+        // MIGRATION, once. A questline remembered before the split has no destination memo, and export used to read the
+        // SOURCE's folder and format - so seeding from those puts it back exactly where it used to write. The TABLE is
+        // deliberately not carried across: export refused a table outright, so no questline ever wrote to one, and
+        // inheriting it would silently turn a folder export into a write into the table it was imported from.
+        LastExportDestination.Folder = Remembered->Folder;
+        if (!Remembered->FormatName.IsEmpty()) { LastExportDestination.FormatName = Remembered->FormatName; }
+        LastExportDestination.Mapping = FSoftObjectPath(Remembered->Mapping);
+    }
 }
 
 void FQuestlineGraphEditor::SaveImportEndpointToMemo() const
 {
     if (!QuestlineGraph) { return; }
+    const FString Path = QuestlineGraph->GetPathName();
 
-    FQuestResolverEndpointMemo Remembered;
-    Remembered.Folder     = LastImportSource.Folder;
-    Remembered.FormatName = LastImportSource.FormatName;
-    Remembered.Table      = LastImportSource.Table.ToString();
-    Remembered.Mapping    = LastImportSource.Mapping.ToString();
+    FQuestResolverEndpointMemo Source;
+    Source.Folder     = LastImportSource.Folder;
+    Source.FormatName = LastImportSource.FormatName;
+    Source.Table      = LastImportSource.Table.ToString();
+    Source.Mapping    = LastImportSource.Mapping.ToString();
+
+    FQuestResolverEndpointMemo Destination;
+    Destination.Folder     = LastExportDestination.Folder;
+    Destination.FormatName = LastExportDestination.FormatName;
+    Destination.Table      = LastExportDestination.Table.ToString();
+    Destination.Mapping    = LastExportDestination.Mapping.ToString();
 
     UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
-    Memo->EndpointByQuestline.Add(QuestlineGraph->GetPathName(), Remembered);
+    Memo->EndpointByQuestline.Add(Path, Source);
+    Memo->DestinationByQuestline.Add(Path, Destination);
     Memo->SaveConfig();
 }
 
@@ -1498,12 +1526,11 @@ void FQuestlineGraphEditor::ExportQuestlineData()
 
     FQuestExportRequest Request;
     Request.Graph = QuestlineGraph;
-    // The SAME endpoint the import half reads, minus the table arm - an empty folder means the derived destination,
-    // which is what makes Export work out of the box before anyone has chosen anywhere.
-    Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
-    Request.Endpoint.FormatName = LastImportSource.FormatName;
-    Request.Endpoint.Folder = LastImportSource.Folder;
-    Request.Mapping = Cast<UQuestImportMapping>(LastImportSource.Mapping.TryLoad());
+    // The DESTINATION, which is now its own memory rather than the source's folder borrowed. Kind is derived from
+    // whether a table is named, so the pair can never disagree. An empty folder still means the derived destination,
+    // which is what makes Export work before anyone has pointed it anywhere.
+    Request.Endpoint = QuestEndpointFromPlanSource(LastExportDestination);
+    Request.Mapping = Cast<UQuestImportMapping>(LastExportDestination.Mapping.TryLoad());
 
     FQuestExportOutcome Out;
     const bool bOk = QuestExport_Run(Request, Out);
@@ -1541,11 +1568,12 @@ void FQuestlineGraphEditor::ExportQuestlineData()
 
 bool FQuestlineGraphEditor::CanExportQuestlineData() const
 {
-    // GREYED for a Data Table source rather than hidden: writing into a studio's own table is a reverse-apply, not an
-    // export, so it does not apply HERE - but switching the source back to Folder makes it apply again, which is the
-    // line between greying and collapsing.
+    // GREYED for a Data Table DESTINATION rather than hidden: writing into a studio's table is a plan-and-apply, not
+    // the wholesale replacement this button performs, so it does not apply HERE - but switching the destination back to
+    // a folder makes it apply again, which is the line between greying and collapsing. The verb itself is what should
+    // change here rather than the button greying; that lands with the second endpoint row.
     return QuestlineGraph != nullptr && QuestlineGraph->QuestlineEdGraph != nullptr
-        && !LastImportSource.Table.IsValid();
+        && !LastExportDestination.Table.IsValid();
 }
 
 void FQuestlineGraphEditor::BuildImportPlan()

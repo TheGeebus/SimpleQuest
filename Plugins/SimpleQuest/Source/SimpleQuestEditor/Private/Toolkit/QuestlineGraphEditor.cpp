@@ -1530,6 +1530,17 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     RunImport(Record->Source, true);
 }
 
+/**
+ * A last look before something outside this questline changes. Defaults to NO when unattended, so a commandlet or an
+ * automation run never silently performs a write a human would have been asked about - the default has to be the safe
+ * answer, because nobody is there to give the unsafe one.
+ */
+static bool ConfirmMutation(const FText& Title, const FText& Message)
+{
+    return FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::YesNo, EAppReturnType::No, Message, Title)
+        == EAppReturnType::Yes;
+}
+
 void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
 {
     if (!QuestlineGraph) { return; }
@@ -1563,6 +1574,30 @@ void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
         for (const FQuestDataRow& R : Content->Rows) { RowsByKey.Add(R.Key, &R); }
     }
 
+    // Asked AFTER the re-plan, so the numbers are the ones about to happen rather than the ones last reviewed. A no-op
+    // needs no permission - and asking for it would train the answer.
+    if (Out.RowPlan.CountOf(EQuestNodePlanAction::Create) > 0 || Out.RowPlan.ChangedNodeCount() > 0)
+    {
+        if (!ConfirmMutation(
+            NSLOCTEXT("SimpleQuestEditor", "ConfirmRowWriteTitle", "Write rows into a data table"),
+            FText::Format(NSLOCTEXT("SimpleQuestEditor", "ConfirmRowWriteBody",
+                "Write into '{0}':\n\n"
+                "    {1} row(s) created\n"
+                "    {2} row(s) updated\n"
+                "    {3} row(s) left untouched - this questline claims none of them\n\n"
+                "This modifies an asset this questline does not own. Undo restores the ENTIRE table to its current "
+                "state, not only these rows - so any other edit made to it meanwhile would be reverted with them.\n\n"
+                "Continue?"),
+                FText::FromString(Destination->GetName()),
+                Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
+                Out.RowPlan.ChangedNodeCount(),
+                Out.RowPlan.UnclaimedRowCount)))
+        {
+            UE_LOG(LogSimpleQuestResolver, Log, TEXT("Apply: cancelled at the confirmation. Nothing written."));
+            return;
+        }
+    }
+
     // The CALLER owns the transaction, so the write and everything around it undo as one unit.
     FScopedTransaction Transaction(NSLOCTEXT("SimpleQuest", "ApplyRowPlan", "Write questline rows into a data table"));
     FQuestApplyResult Result;
@@ -1591,6 +1626,30 @@ void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
 void FQuestlineGraphEditor::ExportQuestlineData()
 {
     if (!CanExportQuestlineData()) { return; }
+
+    // Only the FOLDER direction asks here. A table destination PLANS - its confirmation belongs on the apply, where
+    // there is an exact summary to show rather than a guess.
+    if (!LastExportDestination.Table.IsValid())
+    {
+        const bool bDerived = LastExportDestination.Folder.IsEmpty();
+        const FString Where = bDerived ? QuestExport_DerivedFolderFor(*QuestlineGraph) : LastExportDestination.Folder;
+
+        if (!ConfirmMutation(
+            NSLOCTEXT("SimpleQuestEditor", "ConfirmExportTitle", "Export questline data"),
+            FText::Format(NSLOCTEXT("SimpleQuestEditor", "ConfirmExportBody",
+                "Write '{0}' as {1} files into:\n\n{2}{3}\n\n"
+                "Files recorded by a previous export there will be DELETED and replaced.\n\n"
+                "This writes to disk, outside the project's asset system, and CANNOT BE UNDONE from the editor.\n\n"
+                "Continue?"),
+                FText::FromString(QuestlineGraph->GetName()),
+                FText::FromString(LastExportDestination.FormatName.IsEmpty() ? TEXT("TSV") : LastExportDestination.FormatName),
+                FText::FromString(Where),
+                bDerived ? NSLOCTEXT("SimpleQuestEditor", "ConfirmExportDerived", "  (default destination)") : FText::GetEmpty())))
+        {
+            UE_LOG(LogSimpleQuestResolver, Log, TEXT("Export: cancelled at the confirmation. Nothing written."));
+            return;
+        }
+    }
 
     FQuestExportRequest Request;
     Request.Graph = QuestlineGraph;

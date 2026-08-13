@@ -138,10 +138,28 @@ void PlanQuestRowsIntoTable(const FQuestDataBundle& Bundle, const UDataTable& De
 		OutPlan.Warnings.Add(FString::Printf(TEXT("%d nested object row(s) have no destination in a flat row struct and "
 			"would be lost"), ChildTables));
 	}
-	if (Bundle.TablesByType.Contains(TEXT("questline_graph")))
+	
+	// Only when something would ACTUALLY be lost. A table always lacks a home for the questline's own row, so warning
+	// on the row's mere existence fires every single time - and a warning that always fires is furniture, which costs
+	// more than it saves the first time the banner carries something real. Cells are Empty at their default by
+	// contract, so a self row of nothing-but-defaults has nothing to lose.
+	if (const FQuestDataTable* Self = Bundle.TablesByType.Find(TEXT("questline_graph")))
 	{
-		OutPlan.Warnings.Add(TEXT("the questline's own properties have no row to be written into - a table describes "
-			"nodes, not the asset holding them"));
+		int32 Authored = 0;
+		for (const FQuestDataRow& Row : Self->Rows)
+		{
+			for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
+			{
+				if (Cell.Key == TEXT("class")) continue;   // structural - describes the row, not authored content
+				if (Cell.Value.Kind != EQuestDataValueKind::Empty) { ++Authored; }
+			}
+		}
+		if (Authored > 0)
+		{
+			OutPlan.Warnings.Add(FString::Printf(TEXT("%d authored questline propert(ies) - QuestlineID, display data, "
+				"questline rewards - have no row to be written into and would not reach that table. A table describes "
+				"nodes, not the asset holding them."), Authored));
+		}
 	}
 }
 

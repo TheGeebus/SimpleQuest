@@ -19,6 +19,33 @@ DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanSourceKind /*Kind*/);
 
+/**
+ * Everything one endpoint row needs to describe a place data lives. It exists so the SOURCE row and the DESTINATION row
+ * can be the SAME row rather than a copy of it - the layout decisions inside were each argued once and should not have
+ * to be argued again per direction.
+ *
+ * Kind and FormatCombo are POINTERS to the owning panel's members, because a row drives LIVE panel state rather than
+ * holding its own: the panel seeds the kind at construction and reads it back when deciding what to show.
+ */
+struct FQuestEndpointRowArgs
+{
+	FText Label;
+
+	EQuestPlanSourceKind* Kind = nullptr;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>>* FormatCombo = nullptr;
+
+	TAttribute<FString>         Folder;
+	TAttribute<FSoftObjectPath> Table;
+	TAttribute<FString>         FormatName;
+	TAttribute<FSoftObjectPath> Mapping;
+
+	FOnQuestPlanFolderChanged     OnFolderChanged;
+	FOnQuestPlanTableChanged      OnTableChanged;
+	FOnQuestPlanSourceKindChanged OnKindChanged;
+	FOnQuestPlanFormatChanged     OnFormatChanged;
+	FOnQuestPlanMappingChanged    OnMappingChanged;
+	FSimpleDelegate               OnBrowseRequested;
+};
 
 /**
  * One line in the plan tree. A plan has two levels and they are genuinely different things - a NODE that would change,
@@ -129,8 +156,8 @@ private:
 	EVisibility GetBlockersVisibility() const;
 	EVisibility GetStaleVisibility() const;
 	FText GetStaleText() const;
-	EVisibility GetFolderRowVisibility() const;
-	EVisibility GetTableRowVisibility() const;
+	/** One endpoint row, built from bindings rather than from members, so it can be built more than once. */
+	TSharedRef<SWidget> MakeEndpointRow(const FQuestEndpointRowArgs& Args);
 	void HandleObjectModified(UObject* Modified);
 
 	FString TargetAssetPath;
@@ -182,7 +209,6 @@ private:
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> FormatCombo;
 
 	void RefreshFormatOptions();
-	FText GetFormatButtonText() const;
 
 	FText Summary;
 	FText Blockers;

@@ -76,8 +76,22 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnMappingChanged = InArgs._OnMappingChanged;
 	OnExportRequested = InArgs._OnExportRequested;
 	CanExport = InArgs._CanExport;
+	DestinationFolder = InArgs._DestinationFolder;
+	OnDestinationFolderChanged = InArgs._OnDestinationFolderChanged;
+	DestinationTable = InArgs._DestinationTable;
+	OnDestinationTableChanged = InArgs._OnDestinationTableChanged;
+	OnDestinationKindChanged = InArgs._OnDestinationKindChanged;
+	DestinationFormatName = InArgs._DestinationFormatName;
+	OnDestinationFormatChanged = InArgs._OnDestinationFormatChanged;
+	DestinationMapping = InArgs._DestinationMapping;
+	OnDestinationMappingChanged = InArgs._OnDestinationMappingChanged;
+	OnDestinationBrowseRequested = InArgs._OnDestinationBrowseRequested;
 	
 	ShownSourceKind = SourceTable.Get(FSoftObjectPath()).IsValid()
+		? EQuestPlanSourceKind::DataTable
+		: EQuestPlanSourceKind::Folder;
+
+	ShownDestinationKind = DestinationTable.Get(FSoftObjectPath()).IsValid()
 		? EQuestPlanSourceKind::DataTable
 		: EQuestPlanSourceKind::Folder;
 
@@ -107,6 +121,20 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	SourceRowArgs.OnFormatChanged	= OnFormatChanged;
 	SourceRowArgs.OnMappingChanged	= OnMappingChanged;
 	SourceRowArgs.OnBrowseRequested	= OnBrowseRequested;
+	FQuestEndpointRowArgs DestRowArgs;
+	DestRowArgs.Label              = LOCTEXT("DestinationKindLabel", "Destination");
+	DestRowArgs.Kind               = &ShownDestinationKind;
+	DestRowArgs.FormatCombo        = &DestinationFormatCombo;
+	DestRowArgs.Folder             = DestinationFolder;
+	DestRowArgs.Table              = DestinationTable;
+	DestRowArgs.FormatName         = DestinationFormatName;
+	DestRowArgs.Mapping            = DestinationMapping;
+	DestRowArgs.OnFolderChanged    = OnDestinationFolderChanged;
+	DestRowArgs.OnTableChanged     = OnDestinationTableChanged;
+	DestRowArgs.OnKindChanged      = OnDestinationKindChanged;
+	DestRowArgs.OnFormatChanged    = OnDestinationFormatChanged;
+	DestRowArgs.OnMappingChanged   = OnDestinationMappingChanged;
+	DestRowArgs.OnBrowseRequested  = OnDestinationBrowseRequested;
 	
 	ChildSlot
 	[
@@ -170,59 +198,129 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			[
 				SNew(SVerticalBox)
 
-				// ROW ONE - WHERE THE DATA IS. Built through MakeEndpointRow so the destination row can be the SAME row
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 8.0f, 6.0f)
+				[
+					SNew(SSeparator).Orientation(Orient_Horizontal).Thickness(2.0f)
+				]
+
+				// THE SOURCE - WHERE THE DATA COMES FROM. Built through MakeEndpointRow so the destination row can be the SAME row
 				// rather than a copy; every layout decision now lives there, stated once.
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 0.0f, 8.0f, 0.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 0.0f, 8.0f, 0.0f)
 				[
 					MakeEndpointRow(SourceRowArgs)
 				]
 
-				// ROW TWO - WHAT TO DO ABOUT IT, in workflow order: read it, then commit.
-				// Export joins this row to the left of a separator once it exists.
-				+ SVerticalBox::Slot().AutoHeight().Padding(4.0f, 4.f, 8.f, 0.f)
+				// THE SOURCE'S VERBS, directly beneath the endpoint they act on. All four used to share one row, which
+				// read as a SEQUENCE - do this, then that - when import and export are opposite directions.
+				+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 4.0f, 8.0f, 0.0f)
 				[
 					SNew(SHorizontalBox)
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
-					[
-						SNew(SButton)
-						.Text(LOCTEXT("PlanExport", "Export"))
-						.ToolTipText(LOCTEXT("PlanExportTip", "Write this questline out as data tables you can read, diff and edit. Goes to the folder above, or to the default location when none is set."))
-						// ONE half, for now. The kind selector above describes the SOURCE, and the source has nothing
-						// to say about whether writing OUT applies - that question reads the DESTINATION, which the
-						// toolkit owns. The panel's half earns its place back with the destination row, for the reason
-						// it existed originally: the panel can sit on a kind with nothing picked, which is a state no
-						// endpoint can hold and the toolkit therefore cannot see.
-						.IsEnabled_Lambda([this]()
-						{
-							return CanExport.Get(false);
-						})
-						.OnClicked_Lambda([this]() { OnExportRequested.ExecuteIfBound(); return FReply::Handled(); })
-					]
-					// Export crosses the boundary the OTHER way, so it sits apart from the two plan verbs rather than
-					// reading as the first step of them.
-					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Fill).Padding(0.0f, 2.0f, 8.0f, 2.0f)
-					[
-						SNew(SSeparator).Orientation(Orient_Vertical).Thickness(1.0f)
-					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 					[
 						SNew(SButton)
-						.Text(LOCTEXT("PlanBuild", "Build Plan"))
-						.ToolTipText(LOCTEXT("PlanBuildTip", "Read the source above and work out what re-importing would change. Nothing is written."))
+						.Text(LOCTEXT("BuildImportPlan", "Build Import Plan"))
+						.ToolTipText(LOCTEXT("BuildImportPlanTip", "Read the source above and work out what importing it would change in this questline. Nothing is written."))
 						.IsEnabled_Lambda([this]() { return CanBuildPlan.Get(false); })
 						.OnClicked_Lambda([this]() { OnBuildPlanRequested.ExecuteIfBound(); return FReply::Handled(); })
 					]
 					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
 					[
 						SNew(SButton)
-						.Text(LOCTEXT("PlanApply", "Apply"))
-						.ToolTipText(LOCTEXT("PlanApplyTip", "Perform these changes. Re-reads and re-plans first, so what runs is what you see."))
-						.IsEnabled_Lambda([this]() { return CanApply.Get(false); })
+						.Text(LOCTEXT("ApplyImportPlan", "Apply Import Plan"))
+						.ToolTipText(LOCTEXT("ApplyImportPlanTip", "Write these changes into this questline. Re-reads and re-plans first, so what runs is what you see."))
+						// MUTUALLY EXCLUSIVE with its export counterpart, because there is ONE plan record per questline
+						// and it points one way. Two buttons that each do one thing, rather than one whose meaning
+						// depends on state nobody can see.
+						.IsEnabled_Lambda([this]()
+						{
+							return CanApply.Get(false) && PlanDirection == EQuestPlanDirection::IntoGraph;
+						})
 						.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
 					]
-					// Proportional spacer plus a fixed box: the filter grows with the panel instead of
-					// sitting at one size and stranding whitespace beside it. 0.35 / 0.65 leaves the verbs a gap without
-					// letting the filter run the full width on a wide panel.
+				]
+
+				// A RULE between the two blocks, not merely a gap. Each block is an endpoint plus the verbs that act on
+				// it, and spacing alone left four rows reading as one list of controls. Same reasoning the vertical
+				// separators follow inside a row: a line delimits GROUPS, and these are two.
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 8.0f, 6.0f)
+				[
+					SNew(SSeparator).Orientation(Orient_Horizontal).Thickness(2.0f)
+				]
+
+				// THE DESTINATION - WHERE IT GOES. The same row, other direction: "read from A, write to B" becomes a standing
+				// configuration you can SEE rather than a mode you flip.
+				+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 0.0f, 8.0f, 0.0f)
+				[
+					MakeEndpointRow(DestRowArgs)
+				]
+
+				// THE DESTINATION'S VERBS.
+				+ SVerticalBox::Slot().AutoHeight().Padding(6.0f, 4.0f, 8.0f, 0.0f)
+				[
+					SNew(SHorizontalBox)
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
+					[
+						SNew(SButton)
+						.Text_Lambda([this]()
+						{
+							// ASYMMETRIC WITH THE SOURCE, and honestly so: a folder is OURS, so writing it is
+							// fire-and-forget and there is no plan to build. A studio's table is THEIRS, so it plans.
+							return ShownDestinationKind == EQuestPlanSourceKind::DataTable
+								? LOCTEXT("BuildExportPlan", "Build Export Plan")
+								: LOCTEXT("PlanExport", "Export");
+						})
+						.ToolTipText_Lambda([this]()
+						{
+							if (ShownDestinationKind != EQuestPlanSourceKind::DataTable)
+							{
+								return LOCTEXT("PlanExportTip", "Write this questline out as data tables you can read, diff and edit. Goes to the destination folder above, or to the default location when none is set.");
+							}
+							// Names the missing half specifically. "This is unavailable" is the failure a greyed control
+							// makes easy, and the whole point of greying here was to stop a guaranteed-failed press.
+							if (!DestinationTable.Get(FSoftObjectPath()).IsValid())
+							{
+								return LOCTEXT("BuildExportNoTable", "Pick the Data Table to write into.");
+							}
+							if (!DestinationMapping.Get(FSoftObjectPath()).IsValid())
+							{
+								return LOCTEXT("BuildExportNoMapping", "Pick a Mapping. Writing into a Data Table needs a recipe saying which of that table's fields this questline's properties belong in.");
+							}
+							return LOCTEXT("BuildExportPlanTip", "Work out what writing this questline into that Data Table would change. Nothing is written - review it below, then apply.");
+						})
+						.IsEnabled_Lambda([this]()
+						{
+							if (!CanExport.Get(false)) { return false; }
+							if (ShownDestinationKind != EQuestPlanSourceKind::DataTable) { return true; }
+							// A table write needs BOTH: somewhere to write, and a recipe saying which of that table's
+							// fields this questline's properties belong in. Without either it refuses every time, so
+							// the button could only ever fail - and a button that can only fail is not an affordance.
+							return DestinationTable.Get(FSoftObjectPath()).IsValid()
+								&& DestinationMapping.Get(FSoftObjectPath()).IsValid();
+						})
+						.OnClicked_Lambda([this]() { OnExportRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+					[
+						SNew(SButton)
+						// COLLAPSED, not greyed. A folder export is ONE step - there is nothing to apply, ever, in that
+						// mode - so a permanently dead button would read as broken. Grey what is temporarily
+						// unavailable; collapse what is meaningless here. Same rule the format combo follows.
+						.Visibility_Lambda([this]()
+						{
+							return ShownDestinationKind == EQuestPlanSourceKind::DataTable
+								? EVisibility::Visible : EVisibility::Collapsed;
+						})
+						.Text(LOCTEXT("ApplyExportPlan", "Apply Export Plan"))
+						.ToolTipText(LOCTEXT("ApplyExportPlanTip", "Write these rows into that Data Table. Re-plans first, so what runs is what you see."))
+						.IsEnabled_Lambda([this]()
+						{
+							return CanApply.Get(false) && PlanDirection == EQuestPlanDirection::IntoTable;
+						})
+						.OnClicked_Lambda([this]() { OnApplyRequested.ExecuteIfBound(); return FReply::Handled(); })
+					]
+					// The filter rides the LAST verb row so it stays adjacent to the table it filters. Proportional
+					// spacer plus a fixed box: it grows with the panel instead of sitting at one size and stranding
+					// whitespace beside it.
 					+ SHorizontalBox::Slot().FillWidth(0.35f)[ SNullWidget::NullWidget ]
 					+ SHorizontalBox::Slot().FillWidth(0.65f).VAlign(VAlign_Center)
 					[
@@ -258,6 +356,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 {
 	// A pointer to the panel's member, not a copy: this row drives live state that other controls read back.
 	EQuestPlanSourceKind* Kind = Args.Kind;
+	const bool bDest = (Args.Role == EQuestEndpointRole::Destination);
 	TSharedPtr<SComboBox<TSharedPtr<FString>>>* ComboSlot = Args.FormatCombo;
 
 	// One definition each, reused by every control that follows the kind - four folder-visible controls and one table.
@@ -268,12 +367,14 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 4.0f, 0.0f)
 		[
-			SNew(STextBlock).Text(Args.Label)
+			SNew(STextBlock).Text(Args.Label).Font(FCoreStyle::GetDefaultFontStyle("Bold", 10.f))
 		]
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
 		[
 			SNew(SComboButton)
-			.ToolTipText(LOCTEXT("SourceKindTip", "Where this questline's data lives - a folder of files, or an in-engine Data Table."))
+			.ToolTipText(bDest
+				? LOCTEXT("DestKindTip", "Where this questline's data is written - a folder of files, or an in-engine Data Table.")
+				: LOCTEXT("SourceKindTip", "Where this questline's data lives - a folder of files, or an in-engine Data Table."))
 			.OnGetMenuContent_Lambda([Kind, OnKindChanged = Args.OnKindChanged]()
 			{
 				FMenuBuilder Menu(true, nullptr);
@@ -321,7 +422,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 		[
 			SNew(STextBlock).Text(LOCTEXT("MappingLabel", "Mapping"))
 		]
-		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 8.0f, 0.0f)
+		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.0f, 0.0f, 2.0f, 0.0f)
 		[
 			SNew(SBox).MinDesiredWidth(180.0f)
 			[
@@ -329,7 +430,9 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 				.AllowedClass(UQuestImportMapping::StaticClass())
 				.AllowClear(true)
 				.DisplayThumbnail(false)
-				.ToolTipText(LOCTEXT("PlanMappingTip", "Optional translation mapping. Leave it empty when the source is already in the plugin's own shape."))
+				.ToolTipText(bDest
+					? LOCTEXT("DestMappingTip", "Translation mapping. REQUIRED when writing into a Data Table - it says which of that table's fields this questline's properties belong in.")
+					: LOCTEXT("PlanMappingTip", "Optional translation mapping. Leave it empty when the source is already in the plugin's own shape."))
 				.ObjectPath_Lambda([Mapping = Args.Mapping]() { return Mapping.Get(FSoftObjectPath()).ToString(); })
 				.OnObjectChanged_Lambda([OnMappingChanged = Args.OnMappingChanged](const FAssetData& Asset)
 				{
@@ -358,8 +461,9 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 			// reflows on a kind switch regardless, so hiding it costs no stability and returns the width to the
 			// controls that do apply.
 			.Visibility_Lambda(FolderVisibility)
-			.ToolTipText(LOCTEXT("PlanFormatTip", "Which format provider reads the source folder. The list is every provider registered with the plugin, including any your own module adds."))
-			.OnComboBoxOpening_Lambda([this, ComboSlot]()
+			.ToolTipText(bDest
+				? LOCTEXT("DestFormatTip", "Which format provider writes the destination folder.")
+				: LOCTEXT("PlanFormatTip", "Which format provider reads the source folder. The list is every provider registered with the plugin, including any your own module adds."))			.OnComboBoxOpening_Lambda([this, ComboSlot]()
 			{
 				// Refreshed on open: a provider registered after this panel was built would be missing from a list
 				// snapshotted at construction, and the panel would silently offer fewer formats than exist.
@@ -402,8 +506,10 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 		[
 			SNew(SEditableTextBox)
 			.Visibility_Lambda(FolderVisibility)
-			.HintText(LOCTEXT("SourceFolderHint", "Path to a folder of source data..."))
-			.ToolTipText(LOCTEXT("SourceFolderTip", "The folder Build Plan will read. Type it or browse; both converge on one write."))
+			.HintText(bDest ? LOCTEXT("DestFolderHint", "Path to write into...") : LOCTEXT("SourceFolderHint", "Path to a folder of source data..."))
+			.ToolTipText(bDest
+				? LOCTEXT("DestFolderTip", "The folder Export writes into. Leave it empty for this questline's default location.")
+				: LOCTEXT("SourceFolderTip", "The folder Build Plan will read. Type it or browse; both converge on one write."))
 			.Text_Lambda([Folder = Args.Folder]() { return FText::FromString(Folder.Get(FString())); })
 			.OnTextCommitted_Lambda([OnFolderChanged = Args.OnFolderChanged](const FText& NewText, ETextCommit::Type)
 			{
@@ -415,8 +521,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 			SNew(SButton)
 			.Visibility_Lambda(FolderVisibility)
 			.Text(LOCTEXT("SourceBrowse", "Browse..."))
-			.ToolTipText(LOCTEXT("SourceBrowseTip", "Pick the folder Build Plan will read."))
-			.OnClicked_Lambda([OnBrowseRequested = Args.OnBrowseRequested]() { OnBrowseRequested.ExecuteIfBound(); return FReply::Handled(); })
+			.ToolTipText(bDest ? LOCTEXT("DestBrowseTip", "Pick the folder Export writes into.") : LOCTEXT("SourceBrowseTip", "Pick the folder Build Plan will read."))			.OnClicked_Lambda([OnBrowseRequested = Args.OnBrowseRequested]() { OnBrowseRequested.ExecuteIfBound(); return FReply::Handled(); })
 		]
 		// AutoWidth, unlike the path beside it: an asset reference is a NAME and reads fine at a fixed size, while a
 		// path is arbitrarily long and benefits from every pixel. The two never show together, so they can be sized to
@@ -430,8 +535,9 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 				.AllowedClass(UDataTable::StaticClass())
 				.AllowClear(true)
 				.DisplayThumbnail(false)
-				.ToolTipText(LOCTEXT("SourceTableTip", "The Data Table Build Plan will read. Its row struct supplies the columns, so no format is needed."))
-				.ObjectPath_Lambda([Table = Args.Table]() { return Table.Get(FSoftObjectPath()).ToString(); })
+				.ToolTipText(bDest
+					? LOCTEXT("DestTableTip", "The Data Table this questline's rows are written into. Its row struct decides the columns, so no format is needed.")
+					: LOCTEXT("SourceTableTip", "The Data Table Build Plan will read. Its row struct supplies the columns, so no format is needed."))				.ObjectPath_Lambda([Table = Args.Table]() { return Table.Get(FSoftObjectPath()).ToString(); })
 				.OnObjectChanged_Lambda([OnTableChanged = Args.OnTableChanged](const FAssetData& Asset)
 				{
 					OnTableChanged.ExecuteIfBound(Asset.ToSoftObjectPath());
@@ -508,10 +614,12 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 		LastError = Rec->Error;
 		LastFailedFormat = Rec->Source.FormatName;
 	}
+	
 	// A FAILURE also arrives here - PublishFailure broadcasts through the same delegate - and it did not produce a
 	// plan. Setting bHasPlan unconditionally would leave the panel rendering the previous plan's rows underneath a
 	// message saying the source could not be read.
 	bHasPlan = LastError.IsEmpty();
+	PlanDirection = Plan.Direction;
 
 	if (!LastError.IsEmpty())
 	{

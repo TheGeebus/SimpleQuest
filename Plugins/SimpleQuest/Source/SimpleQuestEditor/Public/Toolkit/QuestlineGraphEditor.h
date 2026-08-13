@@ -182,14 +182,25 @@ private:
 
 	/** SELECTION - what the next Build Plan will read. A different fact from the displayed plan's provenance. */
 	FString GetImportFolder() const { return LastImportSource.Folder; }
-	void HandleImportFolderChanged(const FString& NewFolder);
 	FSoftObjectPath GetImportTable() const { return LastImportSource.Table; }
+	FString GetImportFormatName() const { return LastImportSource.FormatName; }
+	FSoftObjectPath GetImportMappingPath() const { return LastImportSource.Mapping; }
+	FString GetExportFolder() const { return LastExportDestination.Folder; }
+	FSoftObjectPath GetExportTable() const { return LastExportDestination.Table; }
+	FString GetExportFormatName() const { return LastExportDestination.FormatName; }
+	FSoftObjectPath GetExportMappingPath() const { return LastExportDestination.Mapping; }
+	
+	void HandleImportFolderChanged(const FString& NewFolder);
 	void HandleImportTableChanged(const FSoftObjectPath& NewTable);
 	void HandleSourceKindChanged(EQuestPlanSourceKind NewKind);
-	FString GetImportFormatName() const { return LastImportSource.FormatName; }
 	void HandleImportFormatChanged(FString NewFormat);
-	FSoftObjectPath GetImportMappingPath() const { return LastImportSource.Mapping; }
 	void HandleImportMappingChanged(const FSoftObjectPath& NewMapping);
+	void HandleExportFolderChanged(const FString& NewFolder);
+	void HandleExportTableChanged(const FSoftObjectPath& NewTable);
+	void HandleDestinationKindChanged(EQuestPlanSourceKind NewKind);
+	void HandleExportFormatChanged(FString NewFormat);
+	void HandleExportMappingChanged(const FSoftObjectPath& NewMapping);
+	void BrowseForExportFolder();
 
 	void BrowseForImportFolder();
 	void BuildImportPlan();

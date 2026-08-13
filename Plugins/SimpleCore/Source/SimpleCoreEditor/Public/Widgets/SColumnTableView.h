@@ -485,7 +485,7 @@ public:
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(SBorder)
-				.Padding(FMargin(20.f, 4.f, 0.f, 4.f))
+				.Padding(FMargin(0.f, 4.f, 0.f, 4.f))
 				.BorderBackgroundColor(FLinearColor::Transparent)
 				[
 					SNew(STextBlock)
@@ -494,7 +494,7 @@ public:
 					.Visibility(InArgs._Title.IsEmpty() ? EVisibility::Collapsed : EVisibility::Visible)
 				]
 			]
-			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(0.0f, 0.0f, 0.0f, 4.0f))
+			+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(12.0f, 0.0f, 0.0f, 4.0f))
 			[
 				SNew(STextBlock)
 				.Text(InArgs._Subtitle)

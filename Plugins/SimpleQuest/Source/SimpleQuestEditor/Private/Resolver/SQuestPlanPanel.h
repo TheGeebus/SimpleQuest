@@ -4,12 +4,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
 
-struct FQuestInPlacePlan;
 class UQuestlineGraph;
 
 
@@ -18,6 +18,9 @@ DECLARE_DELEGATE_OneParam(FOnQuestPlanMappingChanged, const FSoftObjectPath& /*M
 DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanSourceKind /*Kind*/);
+
+/** Which end of the pipeline a row describes. The controls are identical; the WORDS are not. */
+enum class EQuestEndpointRole : uint8 { Source, Destination };
 
 /**
  * Everything one endpoint row needs to describe a place data lives. It exists so the SOURCE row and the DESTINATION row
@@ -33,6 +36,7 @@ struct FQuestEndpointRowArgs
 
 	EQuestPlanSourceKind* Kind = nullptr;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>>* FormatCombo = nullptr;
+	EQuestEndpointRole Role = EQuestEndpointRole::Source;
 
 	TAttribute<FString>         Folder;
 	TAttribute<FSoftObjectPath> Table;
@@ -141,6 +145,27 @@ public:
 
 		/** Whether Export applies. False for a Data Table source - that direction is a reverse-apply, not an export. */
 		SLATE_ATTRIBUTE(bool, CanExport)
+
+		/**
+		 * THE DESTINATION - where writing OUT goes, which is a genuinely different question from where reading comes
+		 * FROM. One endpoint could not express "import a studio's table, export readable files", and that is a real
+		 * workflow. Same shape as the source bindings above, because a destination IS an endpoint.
+		 */
+		SLATE_ATTRIBUTE(FString, DestinationFolder)
+		SLATE_EVENT(FOnQuestPlanFolderChanged, OnDestinationFolderChanged)
+
+		SLATE_ATTRIBUTE(FSoftObjectPath, DestinationTable)
+		SLATE_EVENT(FOnQuestPlanTableChanged, OnDestinationTableChanged)
+
+		SLATE_EVENT(FOnQuestPlanSourceKindChanged, OnDestinationKindChanged)
+
+		SLATE_ATTRIBUTE(FString, DestinationFormatName)
+		SLATE_EVENT(FOnQuestPlanFormatChanged, OnDestinationFormatChanged)
+
+		SLATE_ATTRIBUTE(FSoftObjectPath, DestinationMapping)
+		SLATE_EVENT(FOnQuestPlanMappingChanged, OnDestinationMappingChanged)
+
+		SLATE_EVENT(FSimpleDelegate, OnDestinationBrowseRequested)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -196,6 +221,22 @@ private:
 	FOnQuestPlanFormatChanged OnFormatChanged;
 	TAttribute<FSoftObjectPath> MappingAsset;
 	FOnQuestPlanMappingChanged OnMappingChanged;
+	TAttribute<FString> DestinationFolder;
+	FOnQuestPlanFolderChanged OnDestinationFolderChanged;
+	TAttribute<FSoftObjectPath> DestinationTable;
+	FOnQuestPlanTableChanged OnDestinationTableChanged;
+	FOnQuestPlanSourceKindChanged OnDestinationKindChanged;
+	TAttribute<FString> DestinationFormatName;
+	FOnQuestPlanFormatChanged OnDestinationFormatChanged;
+	TAttribute<FSoftObjectPath> DestinationMapping;
+	FOnQuestPlanMappingChanged OnDestinationMappingChanged;
+	FSimpleDelegate OnDestinationBrowseRequested;
+
+	/** Which provenance the DESTINATION row is showing - its own state, for the same reason the source's is. */
+	EQuestPlanSourceKind ShownDestinationKind = EQuestPlanSourceKind::Folder;
+
+	/** Per-row, because there are two combos now. FormatOptions stays SHARED - the registry is one list. */
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> DestinationFormatCombo;
 
 	/**
 	 * Which provenance the row is SHOWING. Panel state, not the toolkit's: a record always has one or the other, but
@@ -213,6 +254,13 @@ private:
 	FText Summary;
 	FText Blockers;
 	bool  bHasPlan = false;
+
+	/**
+	 * Which way the displayed plan points. One plan record per questline, so this is what makes the two Apply buttons
+	 * mutually exclusive - and whichever is live states the direction spatially, rather than in a label to be read.
+	 */
+	EQuestPlanDirection PlanDirection = EQuestPlanDirection::IntoGraph;
+	
 	bool  bStale   = false;
 	FString LastError;
 	/**

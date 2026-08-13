@@ -1160,7 +1160,17 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .MappingAsset(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportMappingPath))
             .OnMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportMappingChanged))
             .OnExportRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ExportQuestlineData))
-            .CanExport(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanExportQuestlineData));
+            .CanExport(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanExportQuestlineData))
+            .DestinationFolder(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetExportFolder))
+            .OnDestinationFolderChanged(FOnQuestPlanFolderChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportFolderChanged))
+            .DestinationTable(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportTable))
+            .OnDestinationTableChanged(FOnQuestPlanTableChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportTableChanged))
+            .OnDestinationKindChanged(FOnQuestPlanSourceKindChanged::CreateSP(this, &FQuestlineGraphEditor::HandleDestinationKindChanged))
+            .DestinationFormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetExportFormatName))
+            .OnDestinationFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportFormatChanged))
+            .DestinationMapping(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportMappingPath))
+            .OnDestinationMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportMappingChanged))
+            .OnDestinationBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForExportFolder));
     }
 
     return SNew(SDockTab)
@@ -1395,6 +1405,64 @@ void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& Ne
     SaveImportEndpointToMemo();
 }
 
+// The destination half. Deliberately the same shape as the import handlers above rather than something cleverer: they
+// answer the same questions about a different endpoint, and a reader who has understood one has understood both.
+void FQuestlineGraphEditor::HandleExportFolderChanged(const FString& NewFolder)
+{
+    if (NewFolder == LastExportDestination.Folder) { return; }
+    LastExportDestination.Folder = NewFolder;
+    // The two provenances are exclusive; naming a folder means this is no longer a table destination.
+    LastExportDestination.Table.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportTableChanged(const FSoftObjectPath& NewTable)
+{
+    if (NewTable == LastExportDestination.Table) { return; }
+    LastExportDestination.Table = NewTable;
+    LastExportDestination.Folder.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleDestinationKindChanged(EQuestPlanSourceKind NewKind)
+{
+    if (NewKind == EQuestPlanSourceKind::DataTable) { LastExportDestination.Folder.Reset(); }
+    else                                            { LastExportDestination.Table.Reset(); }
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportFormatChanged(FString NewFormat)
+{
+    if (NewFormat == LastExportDestination.FormatName) { return; }
+    LastExportDestination.FormatName = MoveTemp(NewFormat);
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportMappingChanged(const FSoftObjectPath& NewMapping)
+{
+    if (NewMapping == LastExportDestination.Mapping) { return; }
+    LastExportDestination.Mapping = NewMapping;
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::BrowseForExportFolder()
+{
+    IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+    if (!Desktop) { return; }
+
+    const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+    FString Chosen;
+    if (!Desktop->OpenDirectoryDialog(ParentWindow,
+            NSLOCTEXT("SimpleQuestEditor", "ChooseDestinationTitle", "Choose a folder to write this questline into").ToString(),
+            LastExportDestination.Folder, Chosen))
+    {
+        return;   // cancelled; nothing to say
+    }
+
+    // Routed through the same write typing uses, so browsing and typing cannot diverge.
+    HandleExportFolderChanged(Chosen);
+}
+
 FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
 {
     if (!QuestlineGraph) { return FText::GetEmpty(); }
@@ -1547,6 +1615,20 @@ void FQuestlineGraphEditor::ExportQuestlineData()
         return;
     }
 
+    // A table destination PLANNED rather than wrote. Published so the panel shows it, and Apply - which dispatches on
+    // the plan's direction - can act on it. Mirrors what the console does, deliberately: two surfaces, one behavior.
+    if (Out.bPlanned)
+    {
+        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+
+        UE_LOG(LogSimpleQuestResolver, Log, TEXT("Plan Write: %d row(s) to create, %d to update. %d row(s) in that table "
+            "are claimed by nothing here and were left alone."),
+            Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
+            Out.RowPlan.ChangedNodeCount(),
+            Out.RowPlan.UnclaimedRowCount);
+        return;
+    }
+
     const FString Summary = FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
         Out.FilesWritten,
         *Out.OutDir,
@@ -1568,12 +1650,7 @@ void FQuestlineGraphEditor::ExportQuestlineData()
 
 bool FQuestlineGraphEditor::CanExportQuestlineData() const
 {
-    // GREYED for a Data Table DESTINATION rather than hidden: writing into a studio's table is a plan-and-apply, not
-    // the wholesale replacement this button performs, so it does not apply HERE - but switching the destination back to
-    // a folder makes it apply again, which is the line between greying and collapsing. The verb itself is what should
-    // change here rather than the button greying; that lands with the second endpoint row.
-    return QuestlineGraph != nullptr && QuestlineGraph->QuestlineEdGraph != nullptr
-        && !LastExportDestination.Table.IsValid();
+    return QuestlineGraph != nullptr && QuestlineGraph->QuestlineEdGraph != nullptr;
 }
 
 void FQuestlineGraphEditor::BuildImportPlan()

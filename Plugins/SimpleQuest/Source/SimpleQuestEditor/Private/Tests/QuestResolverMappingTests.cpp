@@ -33,9 +33,9 @@
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
 #include "ScopedTransaction.h"
+#include "Kismet2/StructureEditorUtils.h"
 #include "Tests/QuestResolverTestRow.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
-
 
 
 // The mapping guard is the one place a drifted source is refused instead of silently dropping rows, so its REFUSALS are the
@@ -1872,6 +1872,107 @@ bool FQuestResolver_RowApplyRefusesWholesale::RunTest(const FString& Parameters)
 	}
 
 	Table->RemoveFromRoot();
+	return true;
+}
+
+// THE AUTHORED-NAME PATH, which every other test in this file is structurally incapable of reaching. FQuestResolverTestRow
+// is NATIVE, and for a C++ struct GetAuthoredNameForField and GetFName are identical - so a resolver that looked columns
+// up by the wrong one passed the entire suite and was caught only by a hand-run against the single UserDefinedStruct
+// fixture in the repo. That fixture is untracked and cannot be regenerated. This is its replacement.
+//
+// A Blueprint-authored struct mangles member names with a GUID suffix ("label_2_A1B2..."), while every bundle column
+// carries the AUTHORED name. The failure mode is silent: a miss reads as "this column matches no property", which is a
+// legitimate thing to say about a column that genuinely has none - so the differ compared NOTHING and reported no
+// changes, which looks exactly like agreement.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ColumnsResolveByAuthoredNameOnBlueprintStructs,
+	"SimpleQuest.Resolver.ColumnsResolveByAuthoredNameOnBlueprintStructs", TestFlags)
+bool FQuestResolver_ColumnsResolveByAuthoredNameOnBlueprintStructs::RunTest(const FString& Parameters)
+{
+	UUserDefinedStruct* Struct = FStructureEditorUtils::CreateUserDefinedStruct(
+		GetTransientPackage(), TEXT("S_ResolverAuthoredNameProbe"), RF_Transient);
+	if (!TestNotNull(TEXT("A Blueprint struct can be created"), Struct)) { return false; }
+	Struct->AddToRoot();
+
+	FEdGraphPinType StringType;
+	StringType.PinCategory = UEdGraphSchema_K2::PC_String;
+	TestTrue(TEXT("A string member can be added"), FStructureEditorUtils::AddVariable(Struct, StringType));
+
+	// Found by TYPE rather than by name, so this depends on nothing about how UE names a fresh member.
+	FStrProperty* StringProp = nullptr;
+	for (TFieldIterator<FProperty> It(Struct); It; ++It)
+	{
+		if (FStrProperty* S = CastField<FStrProperty>(*It)) { StringProp = S; break; }
+	}
+	if (!TestNotNull(TEXT("The string member is reflected"), StringProp)) { Struct->RemoveFromRoot(); return false; }
+
+	const FString Authored = Struct->GetAuthoredNameForField(StringProp);
+
+	// THE FIXTURE'S OWN PRECONDITION, asserted rather than assumed. If UE ever stops mangling, every assertion below
+	// would still pass while testing nothing at all - which is precisely the failure this test exists to prevent.
+	if (!TestNotEqual(TEXT("A Blueprint struct's property name differs from its authored name"),
+		StringProp->GetName(), Authored))
+	{
+		AddError(TEXT("This fixture no longer exhibits the divergence it was built to cover - the test is inert, not passing."));
+		Struct->RemoveFromRoot();
+		return false;
+	}
+
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_AuthoredNameProbe"), RF_Transactional);
+	Table->RowStruct = Struct;
+	Table->AddToRoot();
+
+	{
+		FStructOnScope Seed(Struct);
+		StringProp->SetPropertyValue(StringProp->ContainerPtrToValuePtr<void>(Seed.GetStructMemory()), TEXT("before"));
+		Table->AddRow(TEXT("r_one"), Seed.GetStructMemory(), Struct);
+	}
+
+	// The bundle names its column the way a SOURCE does - the authored name. Resolving that against the struct is the
+	// whole behaviour under test.
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	FQuestDataRow Row;
+	Row.Key = TEXT("r_one");
+	Row.Cells.Add(Authored, FQuestDataValue::MakeString(TEXT("after")));
+	Content.Columns.Add(Authored);
+	Content.Rows.Add(MoveTemp(Row));
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	UQuestImportMapping* Mapping = MakeMapping();
+
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+
+	TestTrue(TEXT("Nothing is refused"), Plan.Refusals.IsEmpty());
+	// The bug's signature was a WARNING here plus zero changes. Both halves are asserted: an unmatched column would
+	// warn, and comparing nothing would report no change.
+	TestTrue(TEXT("No column is reported unmatched"), Plan.Warnings.IsEmpty());
+	if (TestEqual(TEXT("The row is planned"), Plan.Entries.Num(), 1))
+	{
+		TestEqual(TEXT("...as an Update"), (int32)Plan.Entries[0].Action, (int32)EQuestNodePlanAction::Update);
+		if (TestEqual(TEXT("...with the differing cell detected"), Plan.Entries[0].Changes.Num(), 1))
+		{
+			TestEqual(TEXT("...named by its AUTHORED name"), Plan.Entries[0].Changes[0].Property, Authored);
+			TestEqual(TEXT("...showing what the table holds"), Plan.Entries[0].Changes[0].CurrentText, FString(TEXT("before")));
+		}
+	}
+
+	// And the applier resolves the same way - it had the identical bug in both of its loops.
+	TMap<FString, const FQuestDataRow*> RowsByKey;
+	for (const FQuestDataRow& R : Bundle.TablesByType[TEXT("content")].Rows) { RowsByKey.Add(R.Key, &R); }
+
+	FQuestApplyResult Result;
+	ApplyQuestRowPlan(*Table, Plan, RowsByKey, Result);
+	TestEqual(TEXT("The write lands"), Result.PropertiesWritten, 1);
+
+	if (uint8* const* Written = Table->GetRowMap().Find(TEXT("r_one")))
+	{
+		TestEqual(TEXT("...into the mangled property behind the authored name"),
+			StringProp->GetPropertyValue(StringProp->ContainerPtrToValuePtr<void>(*Written)), FString(TEXT("after")));
+	}
+
+	Table->RemoveFromRoot();
+	Struct->RemoveFromRoot();
 	return true;
 }
 

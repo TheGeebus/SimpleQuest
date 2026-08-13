@@ -145,16 +145,23 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 		[
 			SNew(SBorder)
 			.Visibility(this, &SQuestPlanPanel::GetBlockersVisibility)
-			.BorderImage(BannerFillBrush(TEXT("SimpleQuest.Banner.ErrorFill")))
+			// The FILL follows the style. Leaving it fixed would put an amber-outlined warning on a red ground, which
+			// reads as an error with a decoration problem rather than as a warning.
+			.BorderImage_Lambda([this]()
+			{
+				return BannerFillBrush(GetBlockersStyle() == EMessageStyle::Error
+					? TEXT("SimpleQuest.Banner.ErrorFill")
+					: TEXT("SimpleQuest.Banner.WarningFill"));
+			})
 			.Padding(0.0f)   // zero, so the fill's rounded edge sits exactly under the widget's outline
 			[
 				SNew(SWarningOrErrorBox)
-				.MessageStyle(EMessageStyle::Error)
+				.MessageStyle(this, &SQuestPlanPanel::GetBlockersStyle)
 				.Message(this, &SQuestPlanPanel::GetBlockersText)
 				.AutoWrapText(true)
 				.Padding(FMargin(16.0f, 6.0f, 8.0f, 6.f))
 				.IconSize(FVector2D(20.0f, 20.0f))
-			]		
+			]
 		]
 
 		+ SVerticalBox::Slot().AutoHeight().Padding(8.0f, 8.0f, 8.0f, 0.0f)
@@ -199,7 +206,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			[
 				SNew(SVerticalBox)
 
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 8.0f, 6.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 2.0f, 0.0f, 6.0f)
 				[
 					SNew(SSeparator).Orientation(Orient_Horizontal).Thickness(2.0f)
 				]
@@ -243,7 +250,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 				// A RULE between the two blocks, not merely a gap. Each block is an endpoint plus the verbs that act on
 				// it, and spacing alone left four rows reading as one list of controls. Same reasoning the vertical
 				// separators follow inside a row: a line delimits GROUPS, and these are two.
-				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 8.0f, 6.0f)
+				+ SVerticalBox::Slot().AutoHeight().Padding(0.0f, 6.0f, 0.0f, 6.0f)
 				[
 					SNew(SSeparator).Orientation(Orient_Horizontal).Thickness(2.0f)
 				]
@@ -612,10 +619,12 @@ void SQuestPlanPanel::HandlePlanCleared(const FString& InAssetPath)
 
 	Summary = FText::GetEmpty();
 	Blockers = FText::GetEmpty();
+	bBlocking = false;
 	LastError.Empty();
 	LastFailedFormat.Empty();
 	bHasPlan = false;
 	bStale = false;
+	bTableStale = false;
 
 	// The export receipt SURVIVES: it reports the action that just happened, which is the one thing still true here.
 }
@@ -630,6 +639,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 	LastExportError.Empty();
 
 	bStale = false;   // a fresh publish is by definition current
+	bTableStale = false;
 	if (const FQuestPlanRecord* Rec = FQuestPlanBroker::Get().Find(InAssetPath))
 	{
 		LastError = Rec->Error;
@@ -649,6 +659,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 		// this run's error message.
 		Summary = FText::GetEmpty();
 		Blockers = FText::GetEmpty();
+		bBlocking = false;
 		Rows.Reset();
 		if (Table.IsValid()) { Table->SetRootItems(Rows); }
 		return;
@@ -673,6 +684,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 		Lines.Insert(TEXT("This plan cannot be applied until these are resolved. Nothing would be written."), 0);
 	}
 	Blockers = FText::FromString(FString::Join(Lines, TEXT("\n")));
+	bBlocking = !Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty();
 	
 	RebuildRows(Plan);
 }
@@ -686,30 +698,51 @@ void SQuestPlanPanel::HandleExportCompleted(const FString& InAssetPath, const FS
 
 void SQuestPlanPanel::HandleObjectModified(UObject* Modified)
 {
-	if (!bHasPlan || bStale || !Modified || !Questline.IsValid()) { return; }
-	// The asset itself, or anything living inside it - a node, an inner graph, an instanced reward.
-	if (Modified == Questline.Get() || Modified->IsIn(Questline.Get()))
+	if (!bHasPlan || !Modified) { return; }
+
+	// The questline itself, or anything living inside it - a node, an inner graph, an instanced reward.
+	if (!bStale && Questline.IsValid() && (Modified == Questline.Get() || Modified->IsIn(Questline.Get())))
 	{
 		bStale = true;
+	}
+
+	// EITHER TABLE this panel names. An inbound plan READS one and an outbound plan WRITES the other, and a plan stops
+	// being true the moment the table it concerns is touched - which nothing watched for until now. Row edits reach
+	// here because FDataTableEditorUtils goes through UDataTable::Modify(), which broadcasts this delegate.
+	if (!bTableStale)
+	{
+		const UObject* Src  = SourceTable.Get(FSoftObjectPath()).ResolveObject();
+		const UObject* Dest = DestinationTable.Get(FSoftObjectPath()).ResolveObject();
+		if ((Src && Modified == Src) || (Dest && Modified == Dest)) { bTableStale = true; }
 	}
 }
 
 EVisibility SQuestPlanPanel::GetStaleVisibility() const
 {
-	// Two independent reasons a plan stops being true: the ASSET moved under it, or the SELECTION moved away from what
-	// it was built against. Either one makes what is on screen a statement about a state that no longer exists.
-	return (bStale || SourceStale.Get(false)) ? EVisibility::Visible : EVisibility::Collapsed;
+	// Three independent reasons a plan stops being true: the ASSET moved under it, the DATA it concerns moved, or the
+	// SELECTION moved away from what it was built against. Any one makes what is on screen a statement about a state
+	// that no longer exists.
+	return (bStale || bTableStale || SourceStale.Get(false)) ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 FText SQuestPlanPanel::GetStaleText() const
 {
-	// Named separately because the fix differs: one wants a re-plan, the other wants you to notice you changed the
-	// source. A single sentence covering both would send half the readers looking in the wrong place.
+	// Named separately because the FIX differs. One sentence covering all three would send two thirds of readers
+	// looking in the wrong place.
 	if (bStale)
 	{
-		return LOCTEXT("PlanStaleAsset", "This questline has changed since this plan was computed. Build Plan again to refresh it.");
+		return LOCTEXT("PlanStaleAsset", "This questline has changed since this plan was computed. Build the plan again to refresh it.");
 	}
-	return LOCTEXT("PlanStaleSource", "The source above has changed since this plan was computed. Build Plan again to refresh it.");
+	if (bTableStale)
+	{
+		return PlanDirection == EQuestPlanDirection::IntoTable
+			? LOCTEXT("PlanStaleDest", "The data table this plan writes into has changed since the plan was computed. Build the plan again to see what would happen now.")
+			: LOCTEXT("PlanStaleSrc",  "The data table this plan was read from has changed since the plan was computed. Build the plan again to refresh it.");
+	}
+	// NOT "the source above has changed". The selection and the plan also disagree when the plan was published by
+	// ANOTHER SURFACE whose source this panel never adopted - which a console-built plan does every time. Nothing
+	// changed; they simply differ, and saying otherwise sends someone hunting for an edit they never made.
+	return LOCTEXT("PlanStaleSource", "The selection above no longer matches what this plan was built from. Build the plan again to use it.");
 }
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
@@ -819,6 +852,17 @@ FText SQuestPlanPanel::GetBlockersText() const
 	// paragraphs of what-to-do that must not be scrollable-past. The plan's blockers are still there underneath once
 	// the next Build Plan clears this.
 	return LastExportError.IsEmpty() ? Blockers : FText::FromString(LastExportError);
+}
+
+EMessageStyle SQuestPlanPanel::GetBlockersStyle() const
+{
+	// An export ERROR is a failure whatever the plan holds, and it outranks here for the same reason it outranks in
+	// GetBlockersText: it describes the action just taken.
+	if (!LastExportError.IsEmpty()) { return EMessageStyle::Error; }
+
+	// Warnings are informational. A plan that carries only warnings is APPLYABLE, and painting it the same red as one
+	// that cannot run teaches people to dismiss the bar - at which point the refusals stop being read either.
+	return bBlocking ? EMessageStyle::Error : EMessageStyle::Warning;
 }
 
 EVisibility SQuestPlanPanel::GetBlockersVisibility() const

@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestPlanBroker.h"
+#include "SWarningOrErrorBox.h"
 #include "Widgets/Input/SComboBox.h"
 #include "Widgets/SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
@@ -179,6 +180,7 @@ private:
 
 	FText GetSummaryText() const;
 	FText GetBlockersText() const;
+	EMessageStyle GetBlockersStyle() const;
 	EVisibility GetBlockersVisibility() const;
 	EVisibility GetStaleVisibility() const;
 	FText GetStaleText() const;
@@ -255,6 +257,13 @@ private:
 
 	FText Summary;
 	FText Blockers;
+	/**
+	 * Whether what Blockers holds actually STOPS anything. Refusals and contested keys do; warnings do not, and one
+	 * banner rendering both in red says the two mean the same thing when the whole point of the plan model is that
+	 * they don't.
+	 */
+	bool bBlocking = false;
+	
 	bool  bHasPlan = false;
 
 	/**
@@ -264,6 +273,13 @@ private:
 	EQuestPlanDirection PlanDirection = EQuestPlanDirection::IntoGraph;
 	
 	bool  bStale   = false;
+	
+	/**
+	 * A table this plan concerns has been edited. Separate from bStale because the FIX differs and so does the
+	 * sentence: the questline moving and the data moving are different problems with the same remedy.
+	 */
+	bool bTableStale = false;
+	
 	FString LastError;
 	/**
 	 * Format the FAILED read used. Kept separately because the combo may since have moved, and a console run has its

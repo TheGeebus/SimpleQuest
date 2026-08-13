@@ -26,6 +26,7 @@
 #include "Resolver/QuestInPlacePlanner.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
+#include "Resolver/QuestRowPlanner.h"
 #include "Resolver/QuestRowRestore.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
@@ -1491,6 +1492,151 @@ bool FQuestResolver_DataTableReadProducesTypedBundle::RunTest(const FString& Par
 	TestTrue(TEXT("...with a stated reason"), !EmptyError.IsEmpty());
 
 	EmptyTable->RemoveFromRoot();
+	Table->RemoveFromRoot();
+	return true;
+}
+
+// THE OUTBOUND PLANNER'S DISPOSITIONS. Territory here is not a policy the test configures - it is the incoming key set,
+// because reverse mapping keys every row by the node's claim. So this also pins the claim model itself: a row nothing
+// claims must be COUNTED and never entered, which is what stops a graph describing two rows from proposing anything
+// about the rest of a studio's table.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RowPlanClaimsOnlyWhatItKeys,
+	"SimpleQuest.Resolver.RowPlanClaimsOnlyWhatItKeys", TestFlags)
+bool FQuestResolver_RowPlanClaimsOnlyWhatItKeys::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowPlanProbe"));
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Boss;
+	Boss.type  = TEXT("step");
+	Boss.label = TEXT("Slay the boss");
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	FQuestResolverTestRow Patrol;
+	Patrol.type  = TEXT("step");
+	Patrol.label = TEXT("Walk the wall");
+	Table->AddRow(TEXT("patrol"), Patrol);
+
+	// Belongs to the studio. No node claims it, so the plan must not mention it beyond the count.
+	FQuestResolverTestRow Theirs;
+	Theirs.type  = TEXT("step");
+	Theirs.label = TEXT("Not ours");
+	Table->AddRow(TEXT("studio_only"), Theirs);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("kill_boss"),  { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Kill the boss") } });
+	AddRow(Content, TEXT("patrol"),     { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Walk the wall") } });
+	AddRow(Content, TEXT("talk_smith"), { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Talk to the smith") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	UQuestImportMapping* Mapping = MakeMapping();   // discriminator "type"; no bindings, so nothing can be unwritable
+
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+
+	TestEqual(TEXT("The plan states which way it points"), (int32)Plan.Direction, (int32)EQuestPlanDirection::IntoTable);
+	TestTrue(TEXT("Nothing is refused"), Plan.Refusals.IsEmpty());
+	TestEqual(TEXT("One entry per claimed row, and only those"), Plan.Entries.Num(), 3);
+
+	// A row in the table that no node claims: counted, never entered. This is the whole territory rule in one assertion.
+	TestEqual(TEXT("An unclaimed row is counted"), Plan.UnclaimedRowCount, 1);
+	TestFalse(TEXT("...and never entered"),
+		Plan.Entries.ContainsByPredicate([](const FQuestNodePlanEntry& E){ return E.Key == TEXT("studio_only"); }));
+
+	const FQuestNodePlanEntry* Boss2   = Plan.Entries.FindByPredicate([](const FQuestNodePlanEntry& E){ return E.Key == TEXT("kill_boss"); });
+	const FQuestNodePlanEntry* Patrol2 = Plan.Entries.FindByPredicate([](const FQuestNodePlanEntry& E){ return E.Key == TEXT("patrol"); });
+	const FQuestNodePlanEntry* Smith   = Plan.Entries.FindByPredicate([](const FQuestNodePlanEntry& E){ return E.Key == TEXT("talk_smith"); });
+
+	if (TestNotNull(TEXT("A claimed row the table already has is an Update"), Boss2))
+	{
+		TestEqual(TEXT("...Update"), (int32)Boss2->Action, (int32)EQuestNodePlanAction::Update);
+		TestEqual(TEXT("...with exactly the differing cell"), Boss2->Changes.Num(), 1);
+		if (Boss2->Changes.Num() == 1)
+		{
+			TestEqual(TEXT("...naming the column"), Boss2->Changes[0].Property, FString(TEXT("label")));
+			TestEqual(TEXT("...showing what the table holds"), Boss2->Changes[0].CurrentText, FString(TEXT("Slay the boss")));
+		}
+	}
+	// A cell the graph and the table agree on is not a change. Without this, every apply would rewrite every row and
+	// "already matches" could never be said honestly.
+	if (TestNotNull(TEXT("A row that already agrees still plans"), Patrol2))
+	{
+		TestEqual(TEXT("...as an Update"), (int32)Patrol2->Action, (int32)EQuestNodePlanAction::Update);
+		TestEqual(TEXT("...carrying no changes"), Patrol2->Changes.Num(), 0);
+	}
+	if (TestNotNull(TEXT("A claimed row the table lacks is a Create"), Smith))
+	{
+		TestEqual(TEXT("...Create"), (int32)Smith->Action, (int32)EQuestNodePlanAction::Create);
+	}
+
+	// Columns the bundle never mentions are untouched: amount and outcome are absent from every row above, and the
+	// declare-versus-silence contract says a source that omits a property is not asserting anything about it.
+	TestTrue(TEXT("An omitted column produces no change anywhere"),
+		!Plan.Entries.ContainsByPredicate([](const FQuestNodePlanEntry& E)
+		{
+			return E.Changes.ContainsByPredicate([](const FQuestPropertyChange& C)
+			{
+				return C.Property == TEXT("amount") || C.Property == TEXT("outcome");
+			});
+		}));
+
+	Table->RemoveFromRoot();
+	return true;
+}
+
+// THE REFUSALS, because a planner that has stopped refusing looks exactly like one with nothing to refuse. Each case
+// here is a way an outbound write could quietly lose data in an asset we do not own.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RowPlanRefusesUnwritableAndAmbiguous,
+	"SimpleQuest.Resolver.RowPlanRefusesUnwritableAndAmbiguous", TestFlags)
+bool FQuestResolver_RowPlanRefusesUnwritableAndAmbiguous::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowPlanRefuseProbe"));
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Boss;
+	Boss.type = TEXT("step");
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	// A column the RECIPE binds that the destination has no field for. Inbound this is a warning - the graph ignores it.
+	// Outbound it is data loss into someone else's table, so it must refuse.
+	UQuestImportMapping* Mapping = MakeMapping();
+	AddBinding(*Mapping, TEXT("reward_gold"), TEXT("Amount"));
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("kill_boss"), { { TEXT("type"), TEXT("step") }, { TEXT("reward_gold"), TEXT("50") } });
+	// Two rows answering to one key: neither is planned, and neither claimant is picked by iteration order.
+	AddRow(Content, TEXT("twin"), { { TEXT("type"), TEXT("step") } });
+	AddRow(Content, TEXT("twin"), { { TEXT("type"), TEXT("step") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+
+	TestTrue(TEXT("A bound column with no destination field is refused"),
+		Plan.Refusals.ContainsByPredicate([](const FString& R){ return R.Contains(TEXT("reward_gold")); }));
+	TestTrue(TEXT("A duplicated key is reported ambiguous"), Plan.AmbiguousKeys.Contains(TEXT("twin")));
+	TestFalse(TEXT("...and neither claimant is planned"),
+		Plan.Entries.ContainsByPredicate([](const FQuestNodePlanEntry& E){ return E.Key == TEXT("twin"); }));
+
+	// A table with no row struct has no layout to write into at all - refused before any row is examined.
+	UDataTable* NoStruct = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowPlanNoStruct"));
+	NoStruct->AddToRoot();
+	FQuestInPlacePlan StructlessPlan;
+	PlanQuestRowsIntoTable(Bundle, *NoStruct, *Mapping, StructlessPlan);
+	TestFalse(TEXT("A table with no row struct is refused"), StructlessPlan.Refusals.IsEmpty());
+	TestEqual(TEXT("...before planning anything"), StructlessPlan.Entries.Num(), 0);
+
+	// And the bundle-shape guard: no flat content table means reverse mapping never ran.
+	FQuestDataBundle Unmapped;
+	FQuestInPlacePlan UnmappedPlan;
+	PlanQuestRowsIntoTable(Unmapped, *Table, *Mapping, UnmappedPlan);
+	TestFalse(TEXT("A bundle with no content table is refused"), UnmappedPlan.Refusals.IsEmpty());
+
+	NoStruct->RemoveFromRoot();
 	Table->RemoveFromRoot();
 	return true;
 }

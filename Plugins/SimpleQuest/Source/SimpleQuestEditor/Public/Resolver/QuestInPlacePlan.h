@@ -85,6 +85,17 @@ struct FQuestNodePlanEntry
 	bool bIsQuestlineSelf = false;
 };
 
+/**
+ * Which way a plan points. Carried on the PLAN rather than on the broker's record because FOnPlanPublished broadcasts
+ * the plan alone - an observer that had to go re-find the record to learn the direction is one that can render a plan
+ * the wrong way round, and the panel subscribes to exactly that delegate.
+ */
+enum class EQuestPlanDirection : uint8
+{
+	IntoGraph,   // rows from a source describe changes to a questline asset
+	IntoTable,   // a questline describes changes to rows in someone else's Data Table
+};
+
 /** The whole comparison. */
 struct FQuestInPlacePlan
 {
@@ -100,6 +111,16 @@ struct FQuestInPlacePlan
 
 	/** Nodes outside every level the source declares. Counted, never entered: a narrow source must not orphan the whole asset. */
 	int32 UntouchedNodeCount = 0;
+
+	EQuestPlanDirection Direction = EQuestPlanDirection::IntoGraph;
+
+	/**
+	 * Rows in the destination table this graph holds no claim on. Counted, never entered - a graph describing some rows
+	 * says nothing about the rest of someone else's table. Deliberately NOT UntouchedNodeCount: "outside every level the
+	 * source declares" and "unclaimed by any node" are different statements, and sharing the name is how the next reader
+	 * conflates them.
+	 */
+	int32 UnclaimedRowCount = 0;
 
 	/**
 	 * Canonicalized wiring deltas, as DATA rather than display text — apply needs the endpoints and the pin, and re-parsing

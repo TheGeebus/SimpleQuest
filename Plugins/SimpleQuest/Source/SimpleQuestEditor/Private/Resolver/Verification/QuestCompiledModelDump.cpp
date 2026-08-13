@@ -249,6 +249,14 @@ TArray<FString> RenderQuestCompiledModel(const UQuestlineGraph& Graph, int32& Ou
 	TArray<FName> NodeTags;
 	Graph.GetCompiledNodes().GetKeys(NodeTags);
 	NodeTags.Sort(FNameLexicalLess());
+
+	// The node COUNT as a graph-level line. This render DELIBERATELY destroys incidental identity - loc namespaces,
+	// container order, object paths - which is what makes two behaviourally-identical assets produce identical text,
+	// and also what makes it lossy. A count is the one non-lossy invariant over it: two dumps whose blocks all
+	// normalize alike while describing a different NUMBER of nodes now differ on a line instead of agreeing. It was
+	// previously reported only to the caller's log, where no file comparison could ever see it.
+	Lines.Add(FString::Printf(TEXT("GRAPH\tNodeCount\t%d"), NodeTags.Num()));
+
 	for (const FName& Tag : NodeTags)
 	{
 		const UQuestNodeBase* Node = Graph.GetCompiledNodes()[Tag];

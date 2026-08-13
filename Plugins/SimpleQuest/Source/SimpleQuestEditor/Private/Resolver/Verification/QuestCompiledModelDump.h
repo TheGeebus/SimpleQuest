@@ -16,8 +16,9 @@ class UQuestlineGraph;
 /**
  * Render Graph's compiled model as one line per (scope, field, value), graph-level properties first, then one block per
  * compiled node with tags sorted and properties in declaration order.
- * OutNodeCount receives how many compiled nodes were visited. It comes back separately because the dump FILE never
- * carries that number - only the caller's log line does - so returning just the lines would lose it.
+ * OutNodeCount receives how many compiled nodes were visited, for the caller's log line. The count is ALSO emitted
+ * into the dump as a GRAPH line, because a comparison that cannot see it cannot catch a node-count change that
+ * happens to normalize away everywhere else.
  */
 TArray<FString> RenderQuestCompiledModel(const UQuestlineGraph& Graph, int32& OutNodeCount);
 

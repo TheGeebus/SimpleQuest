@@ -13,11 +13,22 @@
 
 struct FQuestDataBundle;
 struct FQuestDataRow;
+class UStruct;
 
 /**
- * Compare one object's authored properties against one row's cells. Shared by every object a bundle describes - a node,
- * the questline itself, and an instanced child - so the comparison rule has exactly one definition and cannot drift
- * between them. PathPrefix names where this object sits under its owner, empty at the top.
+ * Compare one reflected container's properties against one row's cells - the general form, over any UStruct layout. A
+ * UObject passes its UClass and itself; a Data Table row passes its row struct and the row's memory. ONE definition
+ * matters more here than anywhere else in the resolver: it is what makes "a change" mean the same thing reading a table
+ * into a graph and writing a graph back out into one, instead of two rules free to drift apart.
+ * PathPrefix names where this container sits under its owner, empty at the top.
+ */
+void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, const FQuestDataRow& Row,
+								  const FString& PathPrefix, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan,
+								  const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
+
+/**
+ * The UObject case - every caller today, and the one worth keeping legible: a node, the questline itself, an instanced
+ * child. Forwards to the general form so no existing call site changes and neither does the rule it runs.
  */
 void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
 							   FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan,

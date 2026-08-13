@@ -8,6 +8,7 @@
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestRowRestore.h"
+#include "UObject/StructOnScope.h"
 #include "UObject/UnrealType.h"
 
 
@@ -31,15 +32,21 @@ static FString DescribeValue(const FQuestDataValue& Value)
 	}
 }
 
-void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
-                          FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, const FQuestDataRow& Row,
+						  const FString& PathPrefix, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan,
+						  const FQuestAbsentPolicyResolver& Policies)
 {
+	if (!Layout || !Container) return;
+
+	// Only materialized if a Reset policy actually fires, which most rows never do.
+	TUniquePtr<FStructOnScope> StructDefaults;
+
 	for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 	{
 		const FString& Column = Cell.Key;
 		if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural - describes the row, not a property
 
-		FProperty* Prop = Object->GetClass()->FindPropertyByName(FName(*Column));
+		FProperty* Prop = Layout->FindPropertyByName(FName(*Column));
 		if (!Prop)
 		{
 			// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a
@@ -49,12 +56,12 @@ void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, 
 				OutPlan.Warnings.Add(FString::Printf(TEXT("row '%s' column '%s' matches no property on %s - it would be ignored"),
 					*Row.Key,
 					*Column,
-					*Object->GetClass()->GetName()));
+					*Layout->GetName()));
 			}
 			continue;
 		}
 
-		const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Object);
+		const void* LivePtr = Prop->ContainerPtrToValuePtr<void>(Container);
 
 		// An ABSENT cell is the only place policy applies. The source declared the column and left it blank, which is a
 		// statement about the default - but which default, and whether blank is permitted at all, is the recipe's call.
@@ -73,10 +80,21 @@ void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, 
 		const void* SeedPtr = LivePtr;
 		if (bAbsent && Policy == EQuestAbsentFieldPolicy::Reset)
 		{
-			// The CDO of the class the property was RESOLVED on, not of the incoming class - a property offset is only
-			// meaningful against the layout it belongs to.
-			const UClass* OwnerClass = Prop->GetOwnerClass();
-			if (OwnerClass) { SeedPtr = Prop->ContainerPtrToValuePtr<void>(OwnerClass->GetDefaultObject()); }
+			// Defaults come from the layout the property was RESOLVED on, not the one passed in - a property offset is
+			// only meaningful against the layout that declares it. The two layout kinds differ in exactly one way and
+			// nowhere else: a class HAS a default object to read from, a struct has to be constructed to produce one.
+			if (const UClass* OwnerClass = Prop->GetOwnerClass())
+			{
+				SeedPtr = Prop->ContainerPtrToValuePtr<void>(OwnerClass->GetDefaultObject());
+			}
+			else if (const UScriptStruct* OwnerStruct = Cast<UScriptStruct>(Prop->GetOwnerStruct()))
+			{
+				// Rebuilt per use rather than cached across the loop: properties on one row struct can be declared by
+				// different owners up an inheritance chain, and a single cached instance would quietly serve the wrong
+				// layout to the second one. It outlives SeedPtr's use below, which is all it has to do.
+				StructDefaults = MakeUnique<FStructOnScope>(OwnerStruct);
+				SeedPtr = Prop->ContainerPtrToValuePtr<void>(StructDefaults->GetStructMemory());
+			}
 		}
 
 		// Compare through the PROPERTY, not the neutral value: FProperty::Identical knows each type's own equality, where
@@ -106,6 +124,14 @@ void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, 
 		Change.IncomingValue = Incoming;   // what apply writes - never re-derived from the row
 		Entry.Changes.Add(MoveTemp(Change));
 	}
+}
+
+void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
+						  FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+{
+	// A UObject IS its own container - the property offsets are relative to the object pointer, exactly as they are
+	// relative to a struct's memory. Only the layout has to be named separately.
+	DiffQuestContainerAgainstRow(Object->GetClass(), Object, Row, PathPrefix, Entry, OutPlan, Policies);
 }
 
 /**

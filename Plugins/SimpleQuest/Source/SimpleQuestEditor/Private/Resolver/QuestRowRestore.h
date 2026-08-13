@@ -39,3 +39,14 @@ void RestoreQuestRowProperties(UObject* Target, const FQuestDataRow& Row);
  */
 FQuestDataValue TypeQuestCellLikeProperty(const FProperty* Prop, const FQuestDataValue& Cell, const void* SeedPtr);
 
+/**
+ * Index a layout's properties by the name a SOURCE calls them. A Blueprint-authored row struct mangles its member names
+ * with a GUID suffix ("type_4_5D85..."), while every bundle column carries the AUTHORED name - so FindPropertyByName,
+ * which wants the real one, misses every column and reports a struct as having no fields at all. Silently: the miss
+ * reads as "this column matches no property", which is a legitimate thing to say about a column that genuinely doesn't.
+ *
+ * Uniform across layout kinds on purpose - for a UClass the two spellings agree, so this costs one map and changes
+ * nothing there.
+ */
+void BuildQuestPropertyIndexByAuthoredName(const UStruct* Layout, TMap<FString, FProperty*>& OutByName);
+

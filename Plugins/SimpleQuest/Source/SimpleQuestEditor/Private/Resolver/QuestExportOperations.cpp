@@ -183,7 +183,10 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	// it is the other verb, and it returns here rather than falling through machinery that does not apply to it.
 	if (Request.Endpoint.Kind == EQuestEndpointKind::DataTable)
 	{
-		return QuestExport_PlanRows(Request, Bundle, Out);
+		const bool bPlanOk = QuestExport_PlanRows(Request, Bundle, Out);
+		// Moved rather than copied, and only on success - a refused plan has nothing worth carrying.
+		if (bPlanOk) { Out.PlannedBundle = MoveTemp(Bundle); }
+		return bPlanOk;
 	}
 
 	// WHERE. An endpoint naming no folder falls back to the derivation, which is what keeps the console, the round-trip

@@ -1419,6 +1419,16 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
     if (!Record || !Record->Source.IsValid()) { return; }
 
+    // An OUTBOUND plan describes rows in someone else's table, and this path re-runs the record's source through the
+    // INBOUND importer - which would read FROM the very table the plan was about to write to. Refused rather than
+    // dispatched until Apply learns both directions: a wrong guess here is silent and destructive in equal measure.
+    if (Record->Plan.Direction != EQuestPlanDirection::IntoGraph)
+    {
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Apply: this plan writes INTO a data table, and applying it from the "
+            "panel is not wired yet. Use 'SimpleQuest.ExportQuestline <asset> --datatable=<table> --apply'."));
+        return;
+    }
+
     // Applies what the REVIEWED PLAN came from, not the current selection - "what runs is what you reviewed" is the
     // promise, and the two can now legitimately differ. Deliberately does NOT write LastImportSource: doing so would
     // silently revert a field the designer edited after building the plan.

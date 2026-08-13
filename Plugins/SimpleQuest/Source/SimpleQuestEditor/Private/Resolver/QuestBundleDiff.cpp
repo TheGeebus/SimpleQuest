@@ -40,13 +40,15 @@ void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, 
 
 	// Only materialized if a Reset policy actually fires, which most rows never do.
 	TUniquePtr<FStructOnScope> StructDefaults;
+	TMap<FString, FProperty*> PropByAuthoredName;
+	BuildQuestPropertyIndexByAuthoredName(Layout, PropByAuthoredName);
 
 	for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 	{
 		const FString& Column = Cell.Key;
 		if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural - describes the row, not a property
 
-		FProperty* Prop = Layout->FindPropertyByName(FName(*Column));
+		FProperty* Prop = PropByAuthoredName.FindRef(Column);
 		if (!Prop)
 		{
 			// Only a column that actually CARRIES something is worth reporting as unmatched. Columns are declared for a

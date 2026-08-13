@@ -23,29 +23,23 @@
 #include "QuestExportOperations.h"
 #include "Internationalization/Text.h"
 #include "Misc/Paths.h"
-#include "Nodes/QuestlineNodeBase.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
-#include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
-#include "Resolver/QuestExportOutput.h"
 #include "Resolver/QuestGraphBuilder.h"
-#include "Resolver/QuestGraphExport.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestInPlacePlan.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestMappingSource.h"
-#include "Resolver/QuestNodeIdentity.h"
 #include "Resolver/QuestPlanBroker.h"
+#include "Resolver/QuestRowApply.h"
 #include "Resolver/QuestRowRestore.h"
 #include "SimpleQuestLog.h"
 #include "UObject/SavePackage.h"
 #include "UObject/UObjectGlobals.h"
 #include "UObject/UnrealType.h"
 #include "Utilities/QuestlineGraphCompiler.h"
-#include "Utilities/QuestlineGraphTraversalPolicy.h"
-#include "Utilities/SimpleQuestEditorUtils.h"
 
 
 /** A console-typed asset path is usually the short form "/Game/Path/Asset"; FSoftObjectPath needs "/Game/Path/Asset.Asset". */
@@ -468,20 +462,39 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		return;
 	}
 
-	// Resolved to a NAME here rather than a provider, because the operation takes the name - the console reads it from
-	// --format, a toolbar button will read it from a combo, and neither needs to know the registry exists.
-	const FString FormatName = ResolveQuestFormatNameFromArgs(Args, TEXT("ExportQuestline"));
-	if (FormatName.IsEmpty())
+	// --datatable=<AssetPath> points this at a studio's table instead of a folder, and destination ownership takes it
+	// from there: a folder is replaced wholesale, a table is PLANNED and then applied.
+	FString DataTablePath;
+	for (const FString& Arg : Args)
 	{
-		return;   // the unregistered-format error was already logged; nothing exported.
+		if (Arg.StartsWith(TEXT("--datatable="))) { DataTablePath = Arg.RightChop(12); }
 	}
+	const bool bApply = Args.ContainsByPredicate([](const FString& A){ return A.Equals(TEXT("--apply"), ESearchCase::IgnoreCase); });
 
 	FQuestExportRequest Request;
 	Request.Graph = Graph;
-	Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
-	Request.Endpoint.FormatName = FormatName;
-	Request.Endpoint.Folder = ResolveQuestExportDestinationFromArgs(Args);   // empty => derived
 	Request.Mapping = LoadQuestMappingArg(Args);
+
+	if (!DataTablePath.IsEmpty())
+	{
+		// A table carries its own layout, so no format is resolved at all - resolving one would invite a --format that
+		// silently does nothing. Normalized so --datatable accepts the same spelling --mapping does.
+		Request.Endpoint.Kind = EQuestEndpointKind::DataTable;
+		Request.Endpoint.Table = TSoftObjectPtr<UDataTable>(FSoftObjectPath(NormalizeConsoleAssetPath(DataTablePath)));
+	}
+	else
+	{
+		// Resolved to a NAME here rather than a provider, because the operation takes the name - the console reads it
+		// from --format, a toolbar button reads it from a combo, and neither needs to know the registry exists.
+		const FString FormatName = ResolveQuestFormatNameFromArgs(Args, TEXT("ExportQuestline"));
+		if (FormatName.IsEmpty())
+		{
+			return;   // the unregistered-format error was already logged; nothing exported.
+		}
+		Request.Endpoint.Kind = EQuestEndpointKind::ForeignFile;
+		Request.Endpoint.FormatName = FormatName;
+		Request.Endpoint.Folder = ResolveQuestExportDestinationFromArgs(Args);   // empty => derived
+	}
 
 	FQuestExportOutcome Out;
 	const bool bOk = QuestExport_Run(Request, Out);
@@ -497,6 +510,62 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	{
 		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: %s"), *Out.Error);
 		FQuestPlanBroker::Get().PublishExport(Graph->GetPathName(), FString(), Out.Error);
+		return;
+	}
+
+	// THE TABLE ARM. Nothing has been written - what came back is a PLAN, reported exactly the way the import direction
+	// reports one so the two read alike, and published so the panel can show it.
+	if (Out.bPlanned)
+	{
+		LogInPlacePlan(Out.RowPlan);
+		FQuestPlanBroker::Get().Publish(Graph->GetPathName(), Out.RowPlan,
+			QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+
+		if (!bApply)
+		{
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: PLANNED for '%s' — %d row(s) to create, %d to update. "
+				"%d row(s) in that table are claimed by nothing here and were left alone. Re-run with --apply to write."),
+				*DataTablePath,
+				Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
+				Out.RowPlan.ChangedNodeCount(),
+				Out.RowPlan.UnclaimedRowCount);
+			return;
+		}
+
+		UDataTable* Destination = Request.Endpoint.Table.LoadSynchronous();
+		if (!Destination)
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: --apply could not load '%s'. Nothing written."), *DataTablePath);
+			return;
+		}
+
+		TMap<FString, const FQuestDataRow*> RowsByKey;
+		if (const FQuestDataTable* Content = Out.PlannedBundle.TablesByType.Find(TEXT("content")))
+		{
+			for (const FQuestDataRow& R : Content->Rows) { RowsByKey.Add(R.Key, &R); }
+		}
+
+		// The CALLER owns the transaction - the applier opens none, so an apply and anything around it undo as one unit.
+		FScopedTransaction Transaction(NSLOCTEXT("SimpleQuest", "ExportRowsApply", "Write questline rows into a data table"));
+		FQuestApplyResult Result;
+		ApplyQuestRowPlan(*Destination, Out.RowPlan, RowsByKey, Result);
+
+		for (const FString& S : Result.Skipped)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ExportQuestline: apply skipped %s"), *S);
+		}
+		if (Result.bRefused)
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ExportQuestline: --apply refused - the plan carries %d refusal(s) and "
+				"%d contested key(s). Nothing was written."), Out.RowPlan.Refusals.Num(), Out.RowPlan.AmbiguousKeys.Num());
+			return;
+		}
+
+		// Dirty only when something actually changed, so a no-op apply leaves the asset genuinely untouched.
+		if (Result.ChangedAnything()) { Destination->MarkPackageDirty(); }
+
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: WROTE into '%s' — %d row(s) created, %d field(s) written, "
+			"%d skipped."), *DataTablePath, Result.EntitiesCreated, Result.PropertiesWritten, Result.Skipped.Num());
 		return;
 	}
 

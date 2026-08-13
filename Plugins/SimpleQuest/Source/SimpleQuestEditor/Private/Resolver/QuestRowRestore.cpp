@@ -242,3 +242,13 @@ FQuestDataValue TypeQuestCellLikeProperty(const FProperty* Prop, const FQuestDat
 	FMemory::Free(Scratch);
 	return Typed;
 }
+
+void BuildQuestPropertyIndexByAuthoredName(const UStruct* Layout, TMap<FString, FProperty*>& OutByName)
+{
+	if (!Layout) { return; }
+	for (TFieldIterator<FProperty> It(Layout); It; ++It)
+	{
+		OutByName.Add(Layout->GetAuthoredNameForField(*It), *It);
+	}
+}
+

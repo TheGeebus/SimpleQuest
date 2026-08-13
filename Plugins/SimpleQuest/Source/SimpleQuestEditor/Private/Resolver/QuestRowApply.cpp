@@ -30,6 +30,9 @@ void ApplyQuestRowPlan(UDataTable& Destination, const FQuestInPlacePlan& Plan,
 		return;
 	}
 
+	TMap<FString, FProperty*> PropByAuthoredName;
+	BuildQuestPropertyIndexByAuthoredName(RowStruct, PropByAuthoredName);
+
 	// MODIFY BEFORE MUTATING. The transaction buffer snapshots the object at the moment Modify is called, so a Modify
 	// AFTER a write records the already-changed state and undo restores nothing - which is exactly the defect in
 	// ApplyTagRenamesToLoadedAssets. Modify(false) because we do not yet know whether anything will change; the caller
@@ -61,7 +64,7 @@ void ApplyQuestRowPlan(UDataTable& Destination, const FQuestInPlacePlan& Plan,
 			for (const TPair<FString, FQuestDataValue>& Cell : (*Incoming)->Cells)
 			{
 				if (Cell.Key == TEXT("class") || Cell.Key == TEXT("graph")) continue;   // structural, never a field
-				FProperty* Prop = RowStruct->FindPropertyByName(FName(*Cell.Key));
+				FProperty* Prop = PropByAuthoredName.FindRef(Cell.Key);
 				if (!Prop) continue;   // the planner already refused or warned about this column, once for the table
 				if (RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(NewRow.GetStructMemory()), Cell.Value))
 				{
@@ -87,7 +90,7 @@ void ApplyQuestRowPlan(UDataTable& Destination, const FQuestInPlacePlan& Plan,
 
 		for (const FQuestPropertyChange& Change : Entry.Changes)
 		{
-			FProperty* Prop = RowStruct->FindPropertyByName(FName(*Change.Property));
+			FProperty* Prop = PropByAuthoredName.FindRef(Change.Property);
 			if (!Prop)
 			{
 				OutResult.Skipped.Add(FString::Printf(TEXT("'%s' resolves to no field on '%s'"),

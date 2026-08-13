@@ -67,6 +67,14 @@ struct FQuestExportOutcome
 	 */
 	FQuestInPlacePlan RowPlan;
 	bool bPlanned = false;   // true when a plan was computed instead of an export being written
+
+	/**
+	 * The reverse-mapped bundle the plan was computed from. Carried because a Create writes the WHOLE row and the plan
+	 * deliberately does not duplicate its cells - so applying needs the very rows the plan was built against. Rebuilding
+	 * them at apply time would risk building something subtly different, which is the drift the plan exists to prevent.
+	 */
+	FQuestDataBundle PlannedBundle;
+	
 	bool bExported = false;
 };
 

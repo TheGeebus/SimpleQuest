@@ -23,9 +23,8 @@ struct FQuestExportRequest
 	/**
 	 * WHERE it goes, and in what encoding. An EMPTY Folder means the DERIVED destination, which is what keeps every
 	 * existing caller byte-identical - the console, the round-trip harness and the fixture chain all pass none.
-	 * The DataTable kind is REFUSED rather than ignored: writing into a studio's own table updates rows in an asset we
-	 * do not own, which is a plan-and-apply operation rather than a wholesale replacement. This field is shared with
-	 * the import direction, so it can legitimately arrive naming a table, and saying so is better than writing nothing.
+	 * DESTINATION OWNERSHIP PICKS THE VERB: a folder is ours and is replaced wholesale; a Data Table is a studio's and
+	 * is PLANNED rather than written, because rows in an asset we do not own are theirs to approve. Both arrive here.
 	 */
 	FQuestDataEndpoint Endpoint;
 
@@ -61,6 +60,13 @@ struct FQuestExportOutcome
 	 */
 	FString Error;
 
+	/**
+	 * What writing this questline into the destination table WOULD change. Populated only when the endpoint named a
+	 * Data Table, and never published from here - this file's contract is that outcomes come back as data and the
+	 * caller decides how to say them, so the broker is the caller's to write to for the same reason the log is.
+	 */
+	FQuestInPlacePlan RowPlan;
+	bool bPlanned = false;   // true when a plan was computed instead of an export being written
 	bool bExported = false;
 };
 

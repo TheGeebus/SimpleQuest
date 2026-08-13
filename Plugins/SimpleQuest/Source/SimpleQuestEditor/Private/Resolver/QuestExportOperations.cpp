@@ -3,6 +3,7 @@
 
 #include "Resolver/QuestExportOperations.h"
 
+#include "Engine/DataTable.h"
 #include "HAL/FileManager.h"
 #include "Misc/Paths.h"
 #include "Quests/QuestlineGraph.h"
@@ -14,8 +15,10 @@
 #include "Resolver/QuestGraphExport.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestNodeIdentity.h"
+#include "Resolver/QuestRowPlanner.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
+
 
 FString QuestExport_RootDir()
 {
@@ -96,6 +99,40 @@ static FString RefuseChosenDestination(const FString& OutDir)
 	return FString();
 }
 
+/**
+ * Destination we do NOT own. Computes what a write would change and touches nothing - the mirror of what the import
+ * direction does to a questline, for the same reason.
+ */
+static bool QuestExport_PlanRows(const FQuestExportRequest& Request, const FQuestDataBundle& Bundle,
+								 FQuestExportOutcome& Out)
+{
+	// A recipe is NOT optional in this direction. A canonical export writes our own vocabulary, which is meaningless
+	// as a destination column set - without a mapping nothing says which of the table's fields our properties belong
+	// in, and every row would refuse one column at a time. Say it once, up front.
+	if (!Request.Mapping)
+	{
+		Out.Error = TEXT("refusing — writing into a Data Table needs a recipe. Without one, nothing says which of "
+			"the table's fields this questline's properties belong in. Choose a mapping. Nothing planned.");
+		return false;
+	}
+
+	UDataTable* Destination = Request.Endpoint.Table.LoadSynchronous();
+	if (!Destination)
+	{
+		Out.Error = TEXT("refusing — the destination Data Table could not be loaded. Nothing planned.");
+		return false;
+	}
+
+	PlanQuestRowsIntoTable(Bundle, *Destination, *Request.Mapping, Out.RowPlan);
+
+	// Keyed by the QUESTLINE, not the table, even though the table is what would change. The broker holds one record
+	// per questline and the panel finds by the asset it is open on, so a plan filed under the table would be a plan
+	// nothing looks for. Direction on the plan is what says which way it points.
+	Out.RowPlan.TargetAssetPath = Request.Graph->GetPathName();
+	Out.bPlanned = true;
+	return true;
+}
+
 bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Out)
 {
 	const UQuestlineGraph* Graph = Request.Graph;
@@ -141,15 +178,12 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 		QuestBundle_ApplyReverseMapping(Bundle, *Request.Mapping, SourceKeyByGuid, NodeByGuid, Out.Warnings);
 	}
 
-	// A Data Table cannot be an export destination, and this is where that boundary is STATED rather than assumed - the
-	// endpoint is shared with the import direction, so one can arrive here.
+	// THE DISPATCH. Everything above this line is what both destinations need; everything below it is about folders,
+	// ownership markers and staged replacement, which a table has no use for. A studio's table is not a lesser export -
+	// it is the other verb, and it returns here rather than falling through machinery that does not apply to it.
 	if (Request.Endpoint.Kind == EQuestEndpointKind::DataTable)
 	{
-		Out.Error = TEXT("refusing — a Data Table is not an export destination. Writing into a studio's own table "
-			"updates rows in an asset we do not own, which is a plan-and-apply operation rather than the wholesale "
-			"replacement an export performs. Choose a folder, or clear the destination to use the default one. "
-			"Nothing exported.");
-		return false;
+		return QuestExport_PlanRows(Request, Bundle, Out);
 	}
 
 	// WHERE. An endpoint naming no folder falls back to the derivation, which is what keeps the console, the round-trip

@@ -20,6 +20,7 @@
 #include "Resolver/QuestMappingSource.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestFlowConventions.h"
 #include "Resolver/QuestInPlaceApply.h"
 #include "Resolver/QuestInPlacePlan.h"
@@ -1637,6 +1638,69 @@ bool FQuestResolver_RowPlanRefusesUnwritableAndAmbiguous::RunTest(const FString&
 	TestFalse(TEXT("A bundle with no content table is refused"), UnmappedPlan.Refusals.IsEmpty());
 
 	NoStruct->RemoveFromRoot();
+	Table->RemoveFromRoot();
+	return true;
+}
+
+// THE DISPATCH - which 67 green tests say nothing about, because nothing reached it. "Destination ownership picks the
+// verb" is the rule this entire direction rests on, and an operation that quietly took the FOLDER path with a table
+// endpoint would be indistinguishable from one that worked, right up until it wrote a marker into someone's content dir.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ExportPlansRatherThanWritesIntoATable,
+	"SimpleQuest.Resolver.ExportPlansRatherThanWritesIntoATable", TestFlags)
+bool FQuestResolver_ExportPlansRatherThanWritesIntoATable::RunTest(const FString& Parameters)
+{
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_ExportDispatchProbe"));
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Theirs;
+	Theirs.type  = TEXT("step");
+	Theirs.label = TEXT("Not ours");
+	Table->AddRow(TEXT("studio_only"), Theirs);
+
+	FQuestExportRequest Request;
+	Request.Graph          = Graph;
+	Request.Endpoint.Kind  = EQuestEndpointKind::DataTable;
+	Request.Endpoint.Table = TSoftObjectPtr<UDataTable>(Table);
+
+	// WITHOUT a recipe. A canonical export writes OUR vocabulary, which is not a destination column set - refused up
+	// front rather than discovered one unmatched column at a time.
+	{
+		FQuestExportOutcome Out;
+		TestFalse(TEXT("A table destination with no recipe is refused"), QuestExport_Run(Request, Out));
+		TestFalse(TEXT("...nothing exported"), Out.bExported);
+		TestFalse(TEXT("...and nothing planned"), Out.bPlanned);
+		TestTrue(TEXT("...with a reason naming the recipe"), Out.Error.Contains(TEXT("recipe")));
+	}
+
+	// WITH one. The same call now PLANS, and must not fall through to folders, ownership markers and staged replacement.
+	{
+		Request.Mapping = MakeMapping();
+
+		FQuestExportOutcome Out;
+		TestTrue(TEXT("A table destination with a recipe succeeds"), QuestExport_Run(Request, Out));
+		TestTrue(TEXT("...error-free"), Out.Error.IsEmpty());
+		TestTrue(TEXT("...having PLANNED"), Out.bPlanned);
+		TestFalse(TEXT("...and explicitly NOT exported"), Out.bExported);
+		TestEqual(TEXT("The plan states its direction"), (int32)Out.RowPlan.Direction, (int32)EQuestPlanDirection::IntoTable);
+
+		// Filed under the QUESTLINE. The broker holds one record per questline and the panel finds by the asset it is
+		// open on, so a plan keyed to the table is a plan nothing ever looks for.
+		TestEqual(TEXT("The plan is filed under the questline"), Out.RowPlan.TargetAssetPath, Graph->GetPathName());
+
+		// The studio's row is theirs. Counted, never entered - the territory rule, reached through the real operation
+		// rather than by calling the planner directly.
+		TestTrue(TEXT("An unclaimed row is counted"), Out.RowPlan.UnclaimedRowCount >= 1);
+		TestFalse(TEXT("...and never entered"), Out.RowPlan.Entries.ContainsByPredicate(
+			[](const FQuestNodePlanEntry& E){ return E.Key == TEXT("studio_only"); }));
+
+		// Proof the folder arm never ran: OutDir is assigned below the dispatch, so it can only be set if we fell through.
+		TestTrue(TEXT("No export folder was resolved"), Out.OutDir.IsEmpty());
+		TestEqual(TEXT("No files were written"), Out.FilesWritten, 0);
+	}
+
 	Table->RemoveFromRoot();
 	return true;
 }

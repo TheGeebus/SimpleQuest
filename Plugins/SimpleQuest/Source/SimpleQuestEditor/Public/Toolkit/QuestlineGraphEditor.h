@@ -217,6 +217,13 @@ private:
 	 * not overwrite a field the designer has edited since. Assign-then-run is how a table provenance got dropped once.
 	 */
 	bool RunImport(const FQuestPlanSource& Source, bool bApply);
+
+	/**
+	 * Apply an OUTBOUND plan: re-run the export the record came from, this time writing. Mirrors RunImport's contract -
+	 * what runs is what you reviewed, so it re-runs the RECORD's source rather than the current selection, and the two
+	 * can legitimately differ once a designer edits a field after building a plan.
+	 */
+	void ApplyRowPlan(const FQuestPlanSource& Source);
 	
 	/**
 	 * Per-user, per-project memory of this questline's source, so a session resumes where the last one ended. Restored

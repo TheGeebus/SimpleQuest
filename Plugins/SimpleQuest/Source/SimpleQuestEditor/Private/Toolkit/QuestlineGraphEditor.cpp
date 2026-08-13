@@ -39,6 +39,7 @@
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestPlanBroker.h"
 #include "Resolver/QuestResolverEditorMemo.h"
+#include "Resolver/QuestRowApply.h"
 #include "Resolver/SQuestPlanPanel.h"
 
 
@@ -1419,20 +1420,76 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
     if (!Record || !Record->Source.IsValid()) { return; }
 
-    // An OUTBOUND plan describes rows in someone else's table, and this path re-runs the record's source through the
-    // INBOUND importer - which would read FROM the very table the plan was about to write to. Refused rather than
-    // dispatched until Apply learns both directions: a wrong guess here is silent and destructive in equal measure.
-    if (Record->Plan.Direction != EQuestPlanDirection::IntoGraph)
+    // ONE Apply, dispatching on the plan itself. This is what putting Direction on the PLAN rather than the broker
+    // record buys: the button does not need to know which endpoint field was last edited, only what it is holding.
+    //
+    // Both arms re-run the RECORD's source rather than the current selection - "what runs is what you reviewed" is the
+    // promise, and the two can legitimately differ once a designer edits a field after building a plan. Neither writes
+    // LastImportSource, for the same reason.
+    if (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
     {
-        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Apply: this plan writes INTO a data table, and applying it from the "
-            "panel is not wired yet. Use 'SimpleQuest.ExportQuestline <asset> --datatable=<table> --apply'."));
+        ApplyRowPlan(Record->Source);
+        return;
+    }
+    RunImport(Record->Source, true);
+}
+
+void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
+{
+    if (!QuestlineGraph) { return; }
+
+    FQuestExportRequest Request;
+    Request.Graph = QuestlineGraph;
+    Request.Endpoint = QuestEndpointFromPlanSource(Source);
+    Request.Mapping = Cast<UQuestImportMapping>(Source.Mapping.TryLoad());
+
+    // Re-planned rather than replayed. The destination is an asset we do not own and nothing watches it, so the plan
+    // reviewed a moment ago may already describe a table that has moved on - recomputing is the only honest way to
+    // write what the CURRENT comparison says rather than what an old one did.
+    FQuestExportOutcome Out;
+    if (!QuestExport_Run(Request, Out) || !Out.bPlanned)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: %s"),
+            Out.Error.IsEmpty() ? TEXT("the plan could not be recomputed. Nothing was written.") : *Out.Error);
         return;
     }
 
-    // Applies what the REVIEWED PLAN came from, not the current selection - "what runs is what you reviewed" is the
-    // promise, and the two can now legitimately differ. Deliberately does NOT write LastImportSource: doing so would
-    // silently revert a field the designer edited after building the plan.
-    RunImport(Record->Source, true);
+    UDataTable* Destination = Request.Endpoint.Table.LoadSynchronous();
+    if (!Destination)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: the destination data table could not be loaded. Nothing written."));
+        return;
+    }
+
+    TMap<FString, const FQuestDataRow*> RowsByKey;
+    if (const FQuestDataTable* Content = Out.PlannedBundle.TablesByType.Find(TEXT("content")))
+    {
+        for (const FQuestDataRow& R : Content->Rows) { RowsByKey.Add(R.Key, &R); }
+    }
+
+    // The CALLER owns the transaction, so the write and everything around it undo as one unit.
+    FScopedTransaction Transaction(NSLOCTEXT("SimpleQuest", "ApplyRowPlan", "Write questline rows into a data table"));
+    FQuestApplyResult Result;
+    ApplyQuestRowPlan(*Destination, Out.RowPlan, RowsByKey, Result);
+
+    for (const FString& S : Result.Skipped)
+    {
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Apply: skipped %s"), *S);
+    }
+    if (Result.bRefused)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: refused - the plan carries %d refusal(s) and %d contested key(s). "
+            "Nothing was written."), Out.RowPlan.Refusals.Num(), Out.RowPlan.AmbiguousKeys.Num());
+        return;
+    }
+
+    if (Result.ChangedAnything()) { Destination->MarkPackageDirty(); }
+
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Apply: wrote into '%s' - %d row(s) created, %d field(s) written, %d skipped."),
+        *Destination->GetName(), Result.EntitiesCreated, Result.PropertiesWritten, Result.Skipped.Num());
+
+    // Republished so the panel reflects what was just done, matching what the inbound arm does after its apply.
+    FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, Source);
 }
 
 void FQuestlineGraphEditor::ExportQuestlineData()

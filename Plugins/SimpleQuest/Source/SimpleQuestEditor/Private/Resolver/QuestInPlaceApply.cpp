@@ -212,7 +212,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 						// The container this landed in advertises outcome pins derived from its inner Exits, so it needs
 						// refreshing too - otherwise an edge out of the container cannot resolve a pin that should exist.
 						if (UEdGraphNode* Container = NodeByKey.FindRef(Entry.GraphCell)) { PinRefreshTargets.Add(Entry.GraphCell, Container); }
-						++OutResult.NodesCreated;
+						++OutResult.EntitiesCreated;
 					}
 					else
 					{
@@ -359,7 +359,7 @@ void ApplyQuestPlan(UQuestlineGraph& Target, const FQuestInPlacePlan& Plan, cons
 			Node->Modify();
 			Node->BreakAllNodeLinks();
 			OwningGraph->RemoveNode(Node);
-			++OutResult.NodesDeleted;
+			++OutResult.EntitiesDeleted;
 		}
 	}
 

@@ -27,10 +27,12 @@
 #include "Resolver/QuestInPlacePlanner.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestNodeIdentity.h"
+#include "Resolver/QuestRowApply.h"
 #include "Resolver/QuestRowPlanner.h"
 #include "Resolver/QuestRowRestore.h"
 #include "Resolver/TsvQuestDataFormat.h"
 #include "Rewards/XPReward.h"
+#include "ScopedTransaction.h"
 #include "Tests/QuestResolverTestRow.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -1135,7 +1137,7 @@ bool FQuestResolver_ApplyCreatesDeclaredNodes::RunTest(const FString& Parameters
 
 	FQuestApplyResult Result;
 	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
-	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("One node was created"), Result.EntitiesCreated, 1);
 	TestEqual(TEXT("...and it is actually in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
 
 	FQuestInPlacePlan Replanned;
@@ -1175,7 +1177,7 @@ bool FQuestResolver_ApplyWiresDeclaredEdges::RunTest(const FString& Parameters)
 
 	FQuestApplyResult Result;
 	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
-	TestEqual(TEXT("The node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("The node was created"), Result.EntitiesCreated, 1);
 	TestEqual(TEXT("The edge was wired"), Result.EdgesChanged, 1);
 
 	FQuestInPlacePlan Replanned;
@@ -1214,7 +1216,7 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 		FQuestApplyResult Result;
 		FQuestApplyOptions Options;   // bDeleteOrphanedNodes stays false
 		ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, Options);
-		TestEqual(TEXT("Nothing is deleted without permission"), Result.NodesDeleted, 0);
+		TestEqual(TEXT("Nothing is deleted without permission"), Result.EntitiesDeleted, 0);
 		TestTrue(TEXT("The orphan is still in the graph"), Graph->QuestlineEdGraph->Nodes.Num() >= NodesBefore);
 	}
 
@@ -1226,7 +1228,7 @@ bool FQuestResolver_ApplyDeletesOrphansOnlyWhenAsked::RunTest(const FString& Par
 		FQuestApplyOptions Options;
 		Options.bDeleteOrphanedNodes = true;
 		ApplyQuestPlan(*Graph, Fresh, Bundle, NodeRowsByKey, Result, Options);
-		TestEqual(TEXT("The orphan is deleted when asked"), Result.NodesDeleted, 1);
+		TestEqual(TEXT("The orphan is deleted when asked"), Result.EntitiesDeleted, 1);
 		FQuestInPlacePlan Replanned;
 		PlanQuestInPlace(*Graph, Bundle, NodeRowsByKey, {}, Replanned);
 		TestEqual(TEXT("Re-planning reports no orphan"), Replanned.CountOf(EQuestNodePlanAction::Orphan), 0);
@@ -1272,7 +1274,7 @@ bool FQuestResolver_ApplyIsOneUndoStep::RunTest(const FString& Parameters)
 	ApplyQuestPlan(*Graph, Plan, Bundle, NodeRowsByKey, Result, FQuestApplyOptions());
 	GEditor->EndTransaction();
 
-	TestEqual(TEXT("One node was created"), Result.NodesCreated, 1);
+	TestEqual(TEXT("One node was created"), Result.EntitiesCreated, 1);
 	TestEqual(TEXT("...and it is in the graph"), Graph->QuestlineEdGraph->Nodes.Num(), NodesBefore + 1);
 
 	// The assertion that earns the test. UEdGraph::AddNode does NOT Modify() - it appends and notifies - so the Level->Modify()
@@ -1699,6 +1701,174 @@ bool FQuestResolver_ExportPlansRatherThanWritesIntoATable::RunTest(const FString
 		// Proof the folder arm never ran: OutDir is assigned below the dispatch, so it can only be set if we fell through.
 		TestTrue(TEXT("No export folder was resolved"), Out.OutDir.IsEmpty());
 		TestEqual(TEXT("No files were written"), Out.FilesWritten, 0);
+	}
+
+	Table->RemoveFromRoot();
+	return true;
+}
+
+// APPLY WRITES WHAT THE PLAN NAMES AND NOTHING ELSE. The declare-versus-silence contract reaching into an asset we do
+// not own: a field the source never mentioned must survive untouched, and a created row must hold the STRUCT's defaults
+// rather than whatever the allocation contained.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RowApplyWritesOnlyWhatThePlanNames,
+	"SimpleQuest.Resolver.RowApplyWritesOnlyWhatThePlanNames", TestFlags)
+bool FQuestResolver_RowApplyWritesOnlyWhatThePlanNames::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowApplyProbe"), RF_Transactional);
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Boss;
+	Boss.type   = TEXT("step");
+	Boss.label  = TEXT("Slay the boss");
+	Boss.amount = 7;                       // never mentioned by the source below - must survive
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("kill_boss"),  { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Kill the boss") } });
+	AddRow(Content, TEXT("talk_smith"), { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Talk to the smith") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	UQuestImportMapping* Mapping = MakeMapping();
+
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+
+	TMap<FString, const FQuestDataRow*> RowsByKey;
+	for (const FQuestDataRow& R : Bundle.TablesByType[TEXT("content")].Rows) { RowsByKey.Add(R.Key, &R); }
+
+	FQuestApplyResult Result;
+	ApplyQuestRowPlan(*Table, Plan, RowsByKey, Result);
+
+	TestFalse(TEXT("A clean plan is not refused"), Result.bRefused);
+	TestEqual(TEXT("One row was created"), Result.EntitiesCreated, 1);
+	TestTrue(TEXT("Something was written"), Result.ChangedAnything());
+
+	FQuestResolverTestRow* Updated = Table->FindRow<FQuestResolverTestRow>(TEXT("kill_boss"), TEXT("test"), false);
+	if (TestNotNull(TEXT("The updated row is still there"), Updated))
+	{
+		TestEqual(TEXT("The named cell was written"), Updated->label, FString(TEXT("Kill the boss")));
+		// The whole point. A source that says nothing about a field is not asserting that it should be cleared.
+		TestEqual(TEXT("A field the source never mentioned is untouched"), Updated->amount, 7);
+	}
+
+	FQuestResolverTestRow* Created = Table->FindRow<FQuestResolverTestRow>(TEXT("talk_smith"), TEXT("test"), false);
+	if (TestNotNull(TEXT("The created row exists"), Created))
+	{
+		TestEqual(TEXT("...carrying what the source gave it"), Created->label, FString(TEXT("Talk to the smith")));
+		// Seeded from FStructOnScope, so an unmentioned field holds the struct default rather than allocation garbage.
+		TestEqual(TEXT("...and struct defaults for everything else"), Created->amount, 0);
+	}
+
+	Table->RemoveFromRoot();
+	return true;
+}
+
+
+// UNDO RESTORES THE TABLE. This exists for exactly one line of the applier: Modify() BEFORE the write rather than after.
+// The transaction buffer snapshots at the moment Modify is called, so the wrong order records the already-changed state
+// and undo silently restores nothing - which is the live defect in ApplyTagRenamesToLoadedAssets. No other assertion in
+// this file would notice a regression putting it back.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RowApplyUndoRestoresTheTable,
+	"SimpleQuest.Resolver.RowApplyUndoRestoresTheTable", TestFlags)
+bool FQuestResolver_RowApplyUndoRestoresTheTable::RunTest(const FString& Parameters)
+{
+	if (!GEditor) { AddError(TEXT("No GEditor - this test cannot verify undo, rather than passing vacuously.")); return false; }
+
+	// RF_Transactional is load-bearing: without it Modify() records nothing and every assertion below would pass for
+	// the wrong reason. MakeTransientQuestlineGraph flags its EdGraph the same way.
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowApplyUndoProbe"), RF_Transactional);
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Boss;
+	Boss.type  = TEXT("step");
+	Boss.label = TEXT("Slay the boss");
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("kill_boss"), { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Kill the boss") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	UQuestImportMapping* Mapping = MakeMapping();
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+
+	TMap<FString, const FQuestDataRow*> RowsByKey;
+	for (const FQuestDataRow& R : Bundle.TablesByType[TEXT("content")].Rows) { RowsByKey.Add(R.Key, &R); }
+
+	{
+		// The CALLER owns the transaction - the applier deliberately opens none, so this mirrors what the toolkit does.
+		FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestTests", "RowApplyUndo", "Write rows"));
+		FQuestApplyResult Result;
+		ApplyQuestRowPlan(*Table, Plan, RowsByKey, Result);
+		TestTrue(TEXT("The apply wrote something"), Result.ChangedAnything());
+	}
+
+	// Asserted BEFORE the undo so the test cannot pass by nothing having happened in the first place.
+	FQuestResolverTestRow* AfterApply = Table->FindRow<FQuestResolverTestRow>(TEXT("kill_boss"), TEXT("test"), false);
+	if (!TestNotNull(TEXT("The row survives the apply"), AfterApply)) { Table->RemoveFromRoot(); return false; }
+	TestEqual(TEXT("The apply changed the value"), AfterApply->label, FString(TEXT("Kill the boss")));
+
+	TestTrue(TEXT("The transaction can be undone"), GEditor->UndoTransaction());
+
+	// FindRow again rather than reusing the pointer: undo restores the row map wholesale, so the old allocation is gone.
+	FQuestResolverTestRow* AfterUndo = Table->FindRow<FQuestResolverTestRow>(TEXT("kill_boss"), TEXT("test"), false);
+	if (TestNotNull(TEXT("The row is back after undo"), AfterUndo))
+	{
+		TestEqual(TEXT("Undo restored the original value"), AfterUndo->label, FString(TEXT("Slay the boss")));
+	}
+
+	Table->RemoveFromRoot();
+	return true;
+}
+
+
+// A PLAN CARRYING REFUSALS WRITES NOTHING AT ALL. Half-applying a description already known to be incomplete is the one
+// outcome that leaves a studio's table in a state no one planned.
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RowApplyRefusesWholesale,
+	"SimpleQuest.Resolver.RowApplyRefusesWholesale", TestFlags)
+bool FQuestResolver_RowApplyRefusesWholesale::RunTest(const FString& Parameters)
+{
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_RowApplyRefuseProbe"), RF_Transactional);
+	Table->RowStruct = FQuestResolverTestRow::StaticStruct();
+	Table->AddToRoot();
+
+	FQuestResolverTestRow Boss;
+	Boss.type  = TEXT("step");
+	Boss.label = TEXT("Slay the boss");
+	Table->AddRow(TEXT("kill_boss"), Boss);
+
+	// A bound column the destination has no field for - the planner refuses, so the apply must decline everything,
+	// including the perfectly writable 'label' change sitting in the same plan.
+	UQuestImportMapping* Mapping = MakeMapping();
+	AddBinding(*Mapping, TEXT("reward_gold"), TEXT("Amount"));
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Content;
+	AddRow(Content, TEXT("kill_boss"), { { TEXT("type"), TEXT("step") }, { TEXT("label"), TEXT("Kill the boss") },
+										 { TEXT("reward_gold"), TEXT("50") } });
+	Bundle.TablesByType.Add(TEXT("content"), MoveTemp(Content));
+
+	FQuestInPlacePlan Plan;
+	PlanQuestRowsIntoTable(Bundle, *Table, *Mapping, Plan);
+	TestFalse(TEXT("The planner did refuse"), Plan.Refusals.IsEmpty());
+
+	TMap<FString, const FQuestDataRow*> RowsByKey;
+	for (const FQuestDataRow& R : Bundle.TablesByType[TEXT("content")].Rows) { RowsByKey.Add(R.Key, &R); }
+
+	FQuestApplyResult Result;
+	ApplyQuestRowPlan(*Table, Plan, RowsByKey, Result);
+
+	TestTrue(TEXT("The apply refuses"), Result.bRefused);
+	TestFalse(TEXT("...having written nothing"), Result.ChangedAnything());
+
+	FQuestResolverTestRow* Untouched = Table->FindRow<FQuestResolverTestRow>(TEXT("kill_boss"), TEXT("test"), false);
+	if (TestNotNull(TEXT("The row is still there"), Untouched))
+	{
+		TestEqual(TEXT("...exactly as it was"), Untouched->label, FString(TEXT("Slay the boss")));
 	}
 
 	Table->RemoveFromRoot();

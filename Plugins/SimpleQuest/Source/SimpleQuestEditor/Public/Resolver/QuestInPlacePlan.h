@@ -167,8 +167,15 @@ struct FQuestInPlacePlan
 struct FQuestApplyResult
 {
 	int32 PropertiesWritten = 0;
-	int32 NodesCreated      = 0;
-	int32 NodesDeleted      = 0;
+
+	/**
+	 * ENTITIES, not nodes: an apply writes a questline's nodes in one direction and a Data Table's rows in the other, so
+	 * a counter named for either one lies half the time. NodesMoved and EdgesChanged keep their names deliberately -
+	 * those are genuinely graph-only, and sitting at zero is an honest statement about a table rather than a lie.
+	 */
+	int32 EntitiesCreated   = 0;
+	int32 EntitiesDeleted   = 0;
+
 	int32 NodesMoved        = 0;
 	int32 EdgesChanged      = 0;
 	int32 EntriesDeferred   = 0;   // structural work this step does not perform
@@ -194,7 +201,7 @@ struct FQuestApplyResult
 	 */
 	bool ChangedAnything() const
 	{
-		return PropertiesWritten > 0 || NodesCreated > 0 || NodesMoved > 0 || EdgesChanged > 0 || NodesDeleted > 0;
+		return PropertiesWritten > 0 || EntitiesCreated > 0 || NodesMoved > 0 || EdgesChanged > 0 || EntitiesDeleted > 0;
 	}
 };
 

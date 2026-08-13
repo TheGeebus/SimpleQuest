@@ -312,10 +312,10 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 			"%d node(s) moved, %d wire edge(s) changed, %d node(s) DELETED. %d entry/entries deferred by policy, %d skipped."),
 			*AssetPath,
 			Result.PropertiesWritten,
-			Result.NodesCreated,
+			Result.EntitiesCreated,
 			Result.NodesMoved,
 			Result.EdgesChanged,
-			Result.NodesDeleted,
+			Result.EntitiesDeleted,
 			Result.EntriesDeferred,
 			Result.Skipped.Num());
 

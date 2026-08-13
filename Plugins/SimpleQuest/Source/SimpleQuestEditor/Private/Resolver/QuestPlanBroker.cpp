@@ -43,7 +43,11 @@ const FQuestPlanRecord* FQuestPlanBroker::Find(const FString& TargetAssetPath) c
 
 void FQuestPlanBroker::Clear(const FString& TargetAssetPath)
 {
+	// Broadcast unconditionally rather than only when something was removed. A consumer displaying a plan the broker
+	// has no record of is precisely the state worth correcting, and "there was nothing to clear" is no reason to leave
+	// it on screen.
 	RecordByAsset.Remove(TargetAssetPath);
+	PlanCleared.Broadcast(TargetAssetPath);
 }
 
 void FQuestPlanBroker::PublishExport(const FString& TargetAssetPath, const FString& Summary, const FString& Error)

@@ -331,6 +331,10 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		if (bChangedAnything)
 		{
 			TargetGraph->GetPackage()->MarkPackageDirty();
+			
+			// The plan has now happened, so it stops being a plan. Same rule the toolkit follows, and it matters more here:
+			// a console apply with a panel open would otherwise leave that panel showing work it just performed.
+			FQuestPlanBroker::Get().Clear(Outcome.Plan.TargetAssetPath);
 		}
 		else if (Result.EntriesDeferred > 0 || Result.Skipped.Num() > 0)
 		{
@@ -566,6 +570,8 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 
 		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: WROTE into '%s' — %d row(s) created, %d field(s) written, "
 			"%d skipped."), *DataTablePath, Result.EntitiesCreated, Result.PropertiesWritten, Result.Skipped.Num());
+
+		FQuestPlanBroker::Get().Clear(Graph->GetPathName());
 		return;
 	}
 

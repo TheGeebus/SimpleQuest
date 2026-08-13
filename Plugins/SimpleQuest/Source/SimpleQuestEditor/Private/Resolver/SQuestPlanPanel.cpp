@@ -98,6 +98,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
 	PublishHandle = FQuestPlanBroker::Get().OnPlanPublished().AddSP(this, &SQuestPlanPanel::HandlePlanPublished);
+	ClearedHandle = FQuestPlanBroker::Get().OnPlanCleared().AddSP(this, &SQuestPlanPanel::HandlePlanCleared);
 	ExportHandle = FQuestPlanBroker::Get().OnExportCompleted().AddSP(this, &SQuestPlanPanel::HandleExportCompleted);
 	Questline = InArgs._Questline;
 	// UObject::Modify broadcasts this, so it catches edits anywhere in the asset - including inside a container's INNER
@@ -348,6 +349,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 SQuestPlanPanel::~SQuestPlanPanel()
 {
 	FQuestPlanBroker::Get().OnPlanPublished().Remove(PublishHandle);
+	FQuestPlanBroker::Get().OnPlanCleared().Remove(ClearedHandle);
 	FQuestPlanBroker::Get().OnExportCompleted().Remove(ExportHandle);
 	FCoreUObjectDelegates::OnObjectModified.Remove(ModifiedHandle);
 }
@@ -597,6 +599,25 @@ TArray<FTableColumnDef<FQuestPlanRowPtr>> SQuestPlanPanel::MakeColumns() const
 	}
 
 	return Columns;
+}
+
+void SQuestPlanPanel::HandlePlanCleared(const FString& InAssetPath)
+{
+	if (InAssetPath != TargetAssetPath) { return; }
+
+	// Everything a plan put on screen leaves together. Clearing the flags while leaving the rows would render work that
+	// has already happened underneath a header saying there is no plan - which is the state this exists to prevent.
+	Rows.Reset();
+	if (Table.IsValid()) { Table->SetRootItems(Rows); }
+
+	Summary = FText::GetEmpty();
+	Blockers = FText::GetEmpty();
+	LastError.Empty();
+	LastFailedFormat.Empty();
+	bHasPlan = false;
+	bStale = false;
+
+	// The export receipt SURVIVES: it reports the action that just happened, which is the one thing still true here.
 }
 
 void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQuestInPlacePlan& Plan)

@@ -172,6 +172,7 @@ public:
 	virtual ~SQuestPlanPanel() override;
 
 private:
+	void HandlePlanCleared(const FString& InAssetPath);	
 	void HandlePlanPublished(const FString& InAssetPath, const FQuestInPlacePlan& Plan);
 	void RebuildRows(const FQuestInPlacePlan& Plan);
 	TArray<FTableColumnDef<FQuestPlanRowPtr>> MakeColumns() const;
@@ -189,6 +190,7 @@ private:
 	TWeakObjectPtr<UQuestlineGraph> Questline;
 	FDelegateHandle PublishHandle;
 	FDelegateHandle ModifiedHandle;
+	FDelegateHandle ClearedHandle;
 
 	FSimpleDelegate OnBuildPlanRequested;
 	FSimpleDelegate OnApplyRequested;

@@ -1250,6 +1250,14 @@ bool FQuestlineGraphEditor::RunImport(const FQuestPlanSource& Source, bool bAppl
         Outcome.Plan.Refusals.Num());
     
     FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, Source);
+
+    // An APPLIED plan describes the past, so it goes once it has run - keeping it leaves Apply lit over work already
+    // done. Published FIRST and cleared after, rather than skipped: an apply that REFUSES has not run, and the plan
+    // together with its refusals is precisely what should still be on screen.
+    if (bApply && !Outcome.ApplyResult.bRefused)
+    {
+        FQuestPlanBroker::Get().Clear(Outcome.Plan.TargetAssetPath);
+    }
     
     // An apply recompiles the target and its linked neighborhood (QuestImport_RunInPlace owns that, so the console gets
     // it too). Report the outcome here rather than only logging it: this path has a designer watching, and "the change
@@ -1611,6 +1619,9 @@ void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
     {
         UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: refused - the plan carries %d refusal(s) and %d contested key(s). "
             "Nothing was written."), Out.RowPlan.Refusals.Num(), Out.RowPlan.AmbiguousKeys.Num());
+
+        // The re-plan is what refused, so publish IT - otherwise the panel keeps showing the older plan that did not.
+        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, Source);
         return;
     }
 
@@ -1619,8 +1630,8 @@ void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
     UE_LOG(LogSimpleQuestResolver, Log, TEXT("Apply: wrote into '%s' - %d row(s) created, %d field(s) written, %d skipped."),
         *Destination->GetName(), Result.EntitiesCreated, Result.PropertiesWritten, Result.Skipped.Num());
 
-    // Republished so the panel reflects what was just done, matching what the inbound arm does after its apply.
-    FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, Source);
+    // Same reason as the inbound apply: the destination has moved, so the plan now describes the past.
+    FQuestPlanBroker::Get().Clear(QuestlineGraph->GetPathName());
 }
 
 void FQuestlineGraphEditor::ExportQuestlineData()

@@ -62,6 +62,7 @@ struct FQuestPlanRecord
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnPlanPublished, const FString& /*TargetAssetPath*/, const FQuestInPlacePlan& /*Plan*/);
 DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnExportCompleted, const FString& /*TargetAssetPath*/, const FString& /*Summary*/, const FString& /*Error*/);
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnPlanCleared, const FString& /*TargetAssetPath*/);
 
 class SIMPLEQUESTEDITOR_API FQuestPlanBroker
 {
@@ -82,9 +83,15 @@ public:
 
 	/** The last plan computed for an asset, with its source, or null. */
 	const FQuestPlanRecord* Find(const FString& TargetAssetPath) const;
-
-	/** Forget a plan. It describes a comparison against an asset state, and stops being true once that state moves. */
+	
+	/**
+	 * Forget a plan, AND SAY SO. A plan describes a comparison against a particular state, so applying it turns it into
+	 * a description of work already done - and a stored plan that has been executed is worse than none, because it
+	 * stays applyable: a second press re-plans, finds nothing, and writes nothing, while the button looked live.
+	 */
 	void Clear(const FString& TargetAssetPath);
+
+	FOnPlanCleared& OnPlanCleared() { return PlanCleared; }
 
 	FOnPlanPublished& OnPlanPublished() { return PlanPublished; }
 
@@ -102,6 +109,7 @@ public:
 
 private:
 	TMap<FString, FQuestPlanRecord> RecordByAsset;
+	FOnPlanCleared PlanCleared;
 	FOnPlanPublished PlanPublished;
 	FOnExportCompleted ExportCompleted;
 };

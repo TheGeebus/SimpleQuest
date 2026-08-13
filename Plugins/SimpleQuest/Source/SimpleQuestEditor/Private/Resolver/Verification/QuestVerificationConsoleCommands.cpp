@@ -80,8 +80,22 @@ namespace
 		const FString SrcDump		= QuestCompiledDumpPathFor(OriginalID);
 		const FString RtDump		= QuestCompiledDumpPathFor(RtID);
 
-		auto Exec = [](const FString& Cmd)
+		// This harness drives itself through the console, and GEngine->Exec returns WITHOUT COMPLAINT for a command
+		// that is not registered - so dropping a registration is indistinguishable from a clean run, and every green
+		// result this harness has ever produced was weaker evidence than it looked. Checked before dispatch rather
+		// than inferred from Exec's return, which answers "was this handled" rather than "does this exist".
+		bool bEveryStepRan = true;
+		auto Exec = [&bEveryStepRan](const FString& Cmd)
 		{
+			FString Name = Cmd;
+			Cmd.Split(TEXT(" "), &Name, nullptr);   // leaves Name as the whole string when there are no arguments
+			if (!IConsoleManager::Get().FindConsoleObject(*Name))
+			{
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: '%s' is not a registered console command - the step "
+					"was skipped."), *Name);
+				bEveryStepRan = false;
+				return;
+			}
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("RoundTrip: > %s"), *Cmd);
 			GEngine->Exec(nullptr, *Cmd);
 		};
@@ -97,6 +111,16 @@ namespace
 		const FString RtAssetPath = FString::Printf(TEXT("%s/%s.%s"), *DestPackagePath, *RtID, *RtID);
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *RtAssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
+
+		// A step that did not run leaves the PREVIOUS run's artifacts on disk, and those compare clean - so a skipped
+		// step does not merely weaken the verdict, it manufactures a passing one. Refuse to report rather than report
+		// something unearned.
+		if (!bEveryStepRan)
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("==== RoundTrip '%s': ABORTED - at least one step did not run, so "
+				"any artifacts on disk are from an earlier run. No verdict. ===="), *OriginalID);
+			return;
+		}
 
 		// 4. Compare, normalized.
 		const int32 AuthoredMiss = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID);

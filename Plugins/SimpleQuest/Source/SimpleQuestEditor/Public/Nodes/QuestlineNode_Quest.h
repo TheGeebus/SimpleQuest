@@ -34,6 +34,17 @@ private:
 	void SubscribeToInnerGraphChanges();
 	void OnInnerGraphChanged(const FEdGraphEditAction& Action);
 
+	/**
+	 * Take ownership of an inner graph that arrived by COPY rather than by creation - paste deserialized it, or object
+	 * duplication carried it across. Re-establishes the things a copy cannot bring with it: the schema, the change
+	 * subscription, the outcome pins derived from the inner Exits, and fresh identity on every descendant.
+	 *
+	 * bClearImportKeys is what separates the two callers. A PASTED node is a new node and must not keep answering to the
+	 * source row its original was imported under - two nodes in one asset claiming one row is unresolvable on re-import.
+	 * A DUPLICATED ASSET is a copy of the whole provenance and keeps it.
+	 */
+	void AdoptCopiedInnerGraph(bool bClearImportKeys);
+
 	UPROPERTY()
 	TObjectPtr<UEdGraph> InnerGraph;
 
@@ -51,5 +62,5 @@ public:
 	 * Called from PostPasteNode after paste deserializes the source's inner graph into this Quest — the deep-copied
 	 * inner nodes still carry the source's identities, which the compiler would reject as duplicate-tag collisions.
 	 */
-	static void RegenerateInnerGraphIdentitiesRecursive(UEdGraph* Graph);
+	static void RegenerateInnerGraphIdentitiesRecursive(UEdGraph* Graph, bool bClearImportKeys);
 };

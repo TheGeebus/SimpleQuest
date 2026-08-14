@@ -212,6 +212,7 @@ private:
 
 public:
     virtual void PostLoad() override;
+    virtual void PostDuplicate(bool bDuplicateForPIE) override;
     const TArray<FName>& GetEntryNodeTags() const { return EntryNodeTags; }
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }

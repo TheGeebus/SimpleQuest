@@ -4,6 +4,7 @@
 #include "Quests/QuestlineGraph.h"
 
 #include "GameplayTagContainer.h"
+#include "SimpleQuestLog.h"
 #include "Display/QuestDisplayData.h"
 #include "Quests/QuestNodeBase.h"
 #include "UObject/AssetRegistryTagsContext.h"
@@ -172,3 +173,52 @@ void UQuestlineGraph::PostLoad()
 		"(incl. state facts)"), *GetName(), RegisteredNativeTags.Num());
 #endif
 }
+
+void UQuestlineGraph::PostDuplicate(bool bDuplicateForPIE)
+{
+	Super::PostDuplicate(bDuplicateForPIE);
+	if (bDuplicateForPIE) { return; }
+
+	// A COPY OF A COMPILED QUESTLINE IS NOT A COMPILED QUESTLINE. Every compiled field is a plain UPROPERTY and the node
+	// instances are outered to this asset, so duplication carries the entire model onto the copy - still keyed by the
+	// SOURCE's tags. Nothing downstream can tell the two apart: the manager keys its instance registry by tag and skips
+	// whichever graph registers second, so one of the two questlines goes silently inert; and starting the copy resolves
+	// the original's entry tags and drives the original's nodes.
+	//
+	// CLEARED rather than recompiled. Uncompiled is a state every consumer already handles - the asset registry skips
+	// empty arrays, editor tag registration has a not-yet-compiled branch, the toolkit reports the compile status as
+	// unknown. A wrong compiled model is a state nothing handles, because everything downstream trusts it.
+	const bool bHadCompiledModel = CompiledQuestTags.Num() > 0 || CompiledNodes.Num() > 0;
+
+	CompiledQuestTags.Reset();
+	CompiledNodeAliases.Reset();
+	EntryNodeTags.Reset();
+	CompiledNodes.Reset();
+	CompiledQuestlineRewards.Reset();
+	ListenerGroupTags.Reset();
+	OutwardSetterGroupTags.Reset();
+#if WITH_EDITORONLY_DATA
+	// Transient keeps this out of the SAVE, not out of a DUPLICATE - only DuplicateTransient would do that. It comes
+	// across pointing at whichever nodes the copy remapped to, which a fresh compile has to repopulate regardless.
+	CompiledEditorNodes.Reset();
+#endif
+
+	if (bHadCompiledModel)
+	{
+		UE_LOG(LogSimpleQuestCompiler, Display,
+			   TEXT("UQuestlineGraph::PostDuplicate [%s] — cleared the compiled model inherited from its source. Recompile before use."),
+			   *GetName());
+	}
+
+	// QuestlineID is deliberately NOT cleared: it is authored identity, and silently dropping it is a worse surprise
+	// than the collision. But an explicit ID arriving on a copy IS a guaranteed tag-namespace clash on the next compile,
+	// so it gets named here rather than discovered as a duplicate-tag rejection later.
+	if (!QuestlineID.IsEmpty())
+	{
+		UE_LOG(LogSimpleQuestCompiler, Warning,
+			   TEXT("UQuestlineGraph::PostDuplicate [%s] — inherited QuestlineID '%s' from its source. Two assets sharing a "
+					"QuestlineID compile into one tag namespace; change one before compiling."),
+			   *GetName(), *QuestlineID);
+	}
+}
+

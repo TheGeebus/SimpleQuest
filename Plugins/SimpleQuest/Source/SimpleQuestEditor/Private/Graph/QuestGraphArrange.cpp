@@ -358,6 +358,181 @@ namespace
 		}
 		return nullptr;
 	}
+
+	// Knot placement works in the same estimated world the node pass does. Width matters here where it did not before:
+	// a wire LEAVES the right edge of a node, so finding where it starts needs a width even though nothing measures one.
+	constexpr float GNodeWidth        = 320.0f;
+	constexpr float GNodeHeader       = 40.0f;   // title bar and content widget, before the first pin row
+	constexpr float GKnotMergeBackoff = 90.0f;   // how far short of its destination a merge knot sits
+	constexpr float GKnotArchHeight   = 110.0f;  // how far above its node a self-loop arch rides
+	constexpr float GKnotArchMargin   = 60.0f;   // how far past the node's sides the arch reaches
+
+	FVector2D EstimatedPinPos(const UEdGraphPin* Pin)
+	{
+		const UEdGraphNode* Owner = Pin ? Pin->GetOwningNode() : nullptr;
+		if (!Owner) { return FVector2D::ZeroVector; }
+
+		// A knot is a dot - no header, no width worth modelling - so its pins are simply where it is.
+		if (IsKnot(Owner)) { return FVector2D(Owner->NodePosX, Owner->NodePosY); }
+
+		const float X = (Pin->Direction == EGPD_Output) ? Owner->NodePosX + GNodeWidth : (float)Owner->NodePosX;
+		return FVector2D(X, Owner->NodePosY + GNodeHeader + PinRow(Pin) * GPinHeight);
+	}
+
+	UEdGraphPin* KnotPin(const UEdGraphNode* Knot, EEdGraphPinDirection Dir)
+	{
+		for (UEdGraphPin* Pin : Knot->Pins)
+		{
+			if (Pin && Pin->Direction == Dir) { return Pin; }
+		}
+		return nullptr;
+	}
+
+	/**
+	 * The real (non-knot) pins on one side of a knot, and the fewest knot hops it took to reach them. Both directions
+	 * are the same walk with the pin direction flipped, so they share one function rather than two that drift apart.
+	 * The visited set is not paranoia: a self-loop arch IS a knot chain that comes back on itself.
+	 */
+	void CollectRealPins(const UEdGraphNode* Knot, EEdGraphPinDirection Side, TSet<const UEdGraphNode*>& Visited,
+						 int32 Hops, TArray<UEdGraphPin*>& OutPins, int32& OutHops)
+	{
+		if (!Knot || Visited.Contains(Knot)) { return; }
+		Visited.Add(Knot);
+
+		const UEdGraphPin* From = KnotPin(Knot, Side);
+		if (!From) { return; }
+
+		for (UEdGraphPin* Linked : From->LinkedTo)
+		{
+			UEdGraphNode* Owner = Linked ? Linked->GetOwningNode() : nullptr;
+			if (!Owner) { continue; }
+
+			if (IsKnot(Owner)) { CollectRealPins(Owner, Side, Visited, Hops + 1, OutPins, OutHops); }
+			else               { OutPins.AddUnique(Linked); OutHops = FMath::Min(OutHops, Hops); }
+		}
+	}
+
+	/**
+	 * Put every knot on the wire it sits on. Knots carry no meaning and are never ranked, but they are KEPT - deleting
+	 * them throws away the designer's tidying, and a self-loop arch needs its two knots to render at all.
+	 */
+	int32 PlaceQuestGraphKnots(UEdGraph& Graph)
+	{
+		struct FKnotPlan
+		{
+			UEdGraphNode* Knot = nullptr;
+			FVector2D SourceAnchor = FVector2D::ZeroVector;
+			FVector2D DestAnchor = FVector2D::ZeroVector;
+			int32 HopsBack = 1;
+			int32 HopsFwd = 1;
+			bool bMerge = false;
+			UEdGraphNode* LoopNode = nullptr;   // set when the wire leaves and re-enters ONE node
+			bool bResolved = false;
+		};
+
+		TArray<FKnotPlan> Plans;
+		for (UEdGraphNode* Node : Graph.Nodes)
+		{
+			if (!Node || !IsKnot(Node)) { continue; }
+
+			FKnotPlan Plan;
+			Plan.Knot = Node;
+
+			TArray<UEdGraphPin*> SrcPins, DstPins;
+			int32 Back = MAX_int32, Fwd = MAX_int32;
+			{ TSet<const UEdGraphNode*> Seen; CollectRealPins(Node, EGPD_Input,  Seen, 1, SrcPins, Back); }
+			{ TSet<const UEdGraphNode*> Seen; CollectRealPins(Node, EGPD_Output, Seen, 1, DstPins, Fwd); }
+
+			// A knot with nothing real on one side is not on a wire anything can reason about - a half-finished tidy-up.
+			// Left exactly where it is: guessing would move something the designer is still in the middle of.
+			if (SrcPins.Num() == 0 || DstPins.Num() == 0) { Plans.Add(Plan); continue; }
+
+			for (const UEdGraphPin* P : SrcPins) { Plan.SourceAnchor += EstimatedPinPos(P); }
+			for (const UEdGraphPin* P : DstPins) { Plan.DestAnchor   += EstimatedPinPos(P); }
+			Plan.SourceAnchor /= SrcPins.Num();
+			Plan.DestAnchor   /= DstPins.Num();
+			Plan.HopsBack = Back;
+			Plan.HopsFwd  = Fwd;
+
+			// MERGE IS READ FROM THE WIRES, not from the pin's flavour. Activations may be combined onto one wire and
+			// prerequisites may not - one signal per wire - so a knot with several things feeding it IS an activation
+			// merge, and asking the data beats asking the category.
+			const UEdGraphPin* In = KnotPin(Node, EGPD_Input);
+			Plan.bMerge = In && In->LinkedTo.Num() > 1;
+
+			TSet<UEdGraphNode*> SrcNodes, DstNodes;
+			for (const UEdGraphPin* P : SrcPins) { SrcNodes.Add(P->GetOwningNode()); }
+			for (const UEdGraphPin* P : DstPins) { DstNodes.Add(P->GetOwningNode()); }
+			if (SrcNodes.Num() == 1 && DstNodes.Num() == 1 && *SrcNodes.CreateIterator() == *DstNodes.CreateIterator())
+			{
+				Plan.LoopNode = *SrcNodes.CreateIterator();
+			}
+
+			Plan.bResolved = true;
+			Plans.Add(Plan);
+		}
+		if (Plans.Num() == 0) { return 0; }
+
+		int32 Moved = 0;
+		auto MoveTo = [&Moved](UEdGraphNode* Node, const FVector2D& P)
+		{
+			const int32 NewX = FMath::RoundToInt(P.X);
+			const int32 NewY = FMath::RoundToInt(P.Y);
+			if (Node->NodePosX != NewX || Node->NodePosY != NewY)
+			{
+				Node->Modify();
+				Node->NodePosX = NewX;
+				Node->NodePosY = NewY;
+				++Moved;
+			}
+		};
+
+		for (const FKnotPlan& Plan : Plans)
+		{
+			if (!Plan.bResolved || Plan.LoopNode) { continue; }
+
+			if (Plan.bMerge)
+			{
+				// A MERGE GOES WHERE IT MEANS SOMETHING. Several wires fold into one here, so the knot belongs just
+				// short of the node they all feed - that is the statement being made - while its height is the centre
+				// of what feeds it, so the incoming fan arrives symmetrically.
+				MoveTo(Plan.Knot, FVector2D(Plan.DestAnchor.X - GKnotMergeBackoff, Plan.SourceAnchor.Y));
+				continue;
+			}
+
+			// A PASS-THROUGH KNOT SITS ON ITS WIRE, and a CHAIN of them spreads along it rather than piling at one
+			// point: the hop counts either side say where in the chain this one falls, so a lone knot lands at the
+			// midpoint and three land on the quarters, with no chain-walking code to get there.
+			const float T = (float)Plan.HopsBack / (float)(Plan.HopsBack + Plan.HopsFwd);
+			MoveTo(Plan.Knot, FMath::Lerp(Plan.SourceAnchor, Plan.DestAnchor, T));
+		}
+
+		// SELF-LOOP ARCHES, placed as a group because there is no "between" to interpolate - the wire leaves a node and
+		// returns to the same node, so a midpoint would drop the knots inside it. They ride above instead, spanning
+		// slightly wider than the node so the wire clears both sides, ordered right to left along the wire's travel.
+		TMap<UEdGraphNode*, TArray<const FKnotPlan*>> Arches;
+		for (const FKnotPlan& Plan : Plans)
+		{
+			if (Plan.bResolved && Plan.LoopNode) { Arches.FindOrAdd(Plan.LoopNode).Add(&Plan); }
+		}
+		for (TPair<UEdGraphNode*, TArray<const FKnotPlan*>>& Arch : Arches)
+		{
+			Arch.Value.Sort([](const FKnotPlan& A, const FKnotPlan& B) { return A.HopsBack < B.HopsBack; });
+
+			const UEdGraphNode* Node = Arch.Key;
+			const float Right = Node->NodePosX + GNodeWidth + GKnotArchMargin;
+			const float Left  = Node->NodePosX - GKnotArchMargin;
+			const float Y     = Node->NodePosY - GKnotArchHeight;
+
+			for (int32 i = 0; i < Arch.Value.Num(); ++i)
+			{
+				const float T = Arch.Value.Num() > 1 ? (float)i / (float)(Arch.Value.Num() - 1) : 0.5f;
+				MoveTo(Arch.Value[i]->Knot, FVector2D(FMath::Lerp(Right, Left, T), Y));
+			}
+		}
+
+		return Moved;
+	}
 }
 
 int32 ArrangeQuestGraph(UEdGraph& Graph, bool bRecurseIntoContainers)
@@ -452,6 +627,9 @@ int32 ArrangeQuestGraph(UEdGraph& Graph, bool bRecurseIntoContainers)
 			Cursor = Y + EstimatedHeight(Node) + GRowGap;
 		}
 	}
+
+	// Knots last. They sit on wires between placed nodes, so the nodes have to have landed before there is a wire.
+	Moved += PlaceQuestGraphKnots(Graph);
 
 	if (bRecurseIntoContainers)
 	{

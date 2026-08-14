@@ -199,7 +199,7 @@ void PlanQuestInPlace(const UQuestlineGraph& Target, const FQuestDataBundle& Bun
 		{
 			CollectQuestWireEdges(Pair.Value, *Policy, LiveEdges);
 		}
-		CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, OutPlan.AddedEdges, OutPlan.RemovedEdges);
+		CompareQuestEdges(Bundle.Edges, LiveEdges, GuidByKey, NodeByGuid, OutPlan.AddedEdges, OutPlan.RemovedEdges);
 	}
 
 	/**

@@ -97,6 +97,7 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
 void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming,
                        const TArray<FQuestDataEdge>& Live,
                        const TMap<FString, FString>& GuidByKey,
+                       const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid,
                        TArray<FQuestDataEdge>& OutAdded,
                        TArray<FQuestDataEdge>& OutRemoved);
 

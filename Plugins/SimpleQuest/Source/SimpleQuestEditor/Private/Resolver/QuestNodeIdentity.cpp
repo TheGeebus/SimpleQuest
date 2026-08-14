@@ -3,6 +3,8 @@
 
 #include "Resolver/QuestNodeIdentity.h"
 
+#include "QuestGraphBuilder.h"
+#include "SimpleQuestLog.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -210,14 +212,42 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
 	}
 }
 
-void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming, const TArray<FQuestDataEdge>& Live, const TMap<FString, FString>& GuidByKey, TArray<FQuestDataEdge>& OutAdded, TArray<FQuestDataEdge>& OutRemoved)
+void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming, const TArray<FQuestDataEdge>& Live, const TMap<FString, FString>& GuidByKey,
+					   const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid, TArray<FQuestDataEdge>& OutAdded, TArray<FQuestDataEdge>& OutRemoved)
 {
-	auto Canonical = [&GuidByKey](const FQuestDataEdge& Edge)
+	auto Canonical = [&GuidByKey, &NodeByGuid](const FQuestDataEdge& Edge)
 	{
 		const FString* From = GuidByKey.Find(Edge.From);
 		const FString* To   = GuidByKey.Find(Edge.To);
-		return FQuestDataEdge{ From ? *From : Edge.From, Edge.Type, To ? *To : Edge.To };
+		const FString FromGuid = From ? *From : Edge.From;
+
+		// RESOLVE THE QUALIFIER THE WAY APPLY WILL. A qualifier is a SELECTOR, not a value: "outcome(Solved)" names a
+		// pin by its authored label and "activates()" names a node's primary forward pin, while an edge read off the
+		// graph carries the pin's real FName - which for an outcome is the full tag. Compared as text those never
+		// agree, so a clean re-import reported every wire-bound edge as a removal AND an addition.
+		// Going through ResolveQuestSourcePin is the point rather than an implementation detail: QuestInPlaceApply
+		// calls that same function to execute both the added and the removed edges, so "the differ sees no change"
+		// and "apply would wire the same pin" cannot come apart. Any normalization written fresh here could.
+		// The verb is recomposed from the RESOLVED pin's category rather than reused from the incoming text, so both
+		// sides land on the byte-identical string CollectQuestWireEdges builds.
+		FString Type = Edge.Type;
+		if (const UQuestlineNodeBase* const* Node = NodeByGuid.Find(FromGuid))
+		{
+			if (const UEdGraphPin* Pin = ResolveQuestSourcePin(const_cast<UQuestlineNodeBase*>(*Node), Edge.Type))
+			{
+				Type = FString::Printf(TEXT("%s(%s)"), *QuestEdgeVerb(Pin->PinType.PinCategory), *Pin->PinName.ToString());
+				if (Type != Edge.Type)
+				{
+					UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("CompareQuestEdges: qualifier '%s' resolved to '%s' on node %s."),
+						*Edge.Type,
+						*Type,
+						*FromGuid);
+				}
+			}
+		}
+		return FQuestDataEdge{ FromGuid, Type, To ? *To : Edge.To };
 	};
+	
 	auto Id       = [](const FQuestDataEdge& E) { return FString::Printf(TEXT("%s|%s|%s"), *E.From, *E.Type, *E.To); };
 	auto IsWiring = [](const FQuestDataEdge& E) { return !E.Type.StartsWith(TEXT("contains(")); };
 

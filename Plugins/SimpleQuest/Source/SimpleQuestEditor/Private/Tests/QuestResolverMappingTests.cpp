@@ -907,25 +907,30 @@ bool FQuestResolver_EdgesCompareAcrossNamespaces::RunTest(const FString& Paramet
 	GuidByKey.Add(GuidA, GuidA);
 	GuidByKey.Add(GuidB, GuidB);
 
+	// No live nodes in this fixture, and the qualifiers here are already in resolved form - nothing to resolve against.
+	// An empty map short-circuits the pin lookup, leaving this test measuring what it has always measured: that
+	// ENDPOINT canonicalization works. The qualifier half is covered separately, against a real graph.
+	const TMap<FString, const UQuestlineNodeBase*> NoNodes;
+
 	TArray<FQuestDataEdge> Incoming = { { TEXT("kill_boss"), TEXT("activates(Any Outcome)"), TEXT("guard_post") } };
 	TArray<FQuestDataEdge> Live     = { { GuidA,             TEXT("activates(Any Outcome)"), GuidB } };
 
 	TArray<FQuestDataEdge> Added, Removed;
-	CompareQuestEdges(Incoming, Live, GuidByKey, Added, Removed);
+	CompareQuestEdges(Incoming, Live, GuidByKey, NoNodes, Added, Removed);
 	TestEqual(TEXT("The same edge in two spellings is not an addition"), Added.Num(), 0);
 	TestEqual(TEXT("...nor a removal"), Removed.Num(), 0);
 
 	// Rewire the target: one edge goes, one arrives.
 	Added.Reset(); Removed.Reset();
 	TArray<FQuestDataEdge> Rewired = { { TEXT("kill_boss"), TEXT("activates(Any Outcome)"), TEXT("somewhere_else") } };
-	CompareQuestEdges(Rewired, Live, GuidByKey, Added, Removed);
+	CompareQuestEdges(Rewired, Live, GuidByKey, NoNodes, Added, Removed);
 	TestEqual(TEXT("A rewire is one addition"), Added.Num(), 1);
 	TestEqual(TEXT("...and one removal"), Removed.Num(), 1);
 
 	// Containment is described elsewhere in the plan; counting it here would double-report.
 	Added.Reset(); Removed.Reset();
 	TArray<FQuestDataEdge> Contains = { { TEXT("kill_boss"), TEXT("contains(Rewards[0])"), TEXT("kill_boss/Rewards[0]") } };
-	CompareQuestEdges(Contains, {}, GuidByKey, Added, Removed);
+	CompareQuestEdges(Contains, {}, GuidByKey, NoNodes, Added, Removed);
 	TestEqual(TEXT("A contains edge is not wiring"), Added.Num(), 0);
 	return true;
 }
@@ -1973,6 +1978,136 @@ bool FQuestResolver_ColumnsResolveByAuthoredNameOnBlueprintStructs::RunTest(cons
 
 	Table->RemoveFromRoot();
 	Struct->RemoveFromRoot();
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_EdgeQualifierResolvesToPin, "SimpleQuest.Resolver.Plan.EdgeQualifierResolvesToPin", TestFlags)
+bool FQuestResolver_EdgeQualifierResolvesToPin::RunTest(const FString& Parameters)
+{
+	/**
+	 * A qualifier is a SELECTOR, not a value. A source authors "activates()" meaning "this node's primary forward pin",
+	 * while an edge read back off the graph carries that pin's actual name - so a clean re-import used to report every
+	 * wire-bound edge as both a removal and an addition. The two must resolve to the same pin before being compared.
+	 * The live edge is built from the pin the node ACTUALLY has rather than from a literal: hard-coding the name would
+	 * make this test agree with a future rename instead of noticing it.
+	 */
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	UEdGraph* Root = Graph->QuestlineEdGraph;
+
+	UQuestlineNode_Step* From = NewObject<UQuestlineNode_Step>(Root, NAME_None, RF_Transactional);
+	From->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(From);
+	From->PostPlacedNewNode();
+	From->AllocateDefaultPins();
+
+	UQuestlineNode_Step* To = NewObject<UQuestlineNode_Step>(Root, NAME_None, RF_Transactional);
+	To->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(To);
+	To->PostPlacedNewNode();
+	To->AllocateDefaultPins();
+
+	const UEdGraphPin* Forward = nullptr;
+	for (const UEdGraphPin* Pin : From->Pins)
+	{
+		if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == TEXT("QuestActivation")) { Forward = Pin; break; }
+	}
+	TestNotNull(TEXT("A content node has a forward activation pin"), Forward);
+	if (!Forward) { return false; }
+
+	const FString FromKey = From->QuestGuid.ToString(EGuidFormats::Digits);
+	const FString ToKey   = To->QuestGuid.ToString(EGuidFormats::Digits);
+
+	TMap<FString, FString> GuidByKey;
+	GuidByKey.Add(FromKey, FromKey);
+	GuidByKey.Add(ToKey, ToKey);
+
+	TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+	NodeByGuid.Add(FromKey, From);
+	NodeByGuid.Add(ToKey, To);
+
+	const TArray<FQuestDataEdge> Live = { { FromKey, FString::Printf(TEXT("activates(%s)"), *Forward->PinName.ToString()), ToKey } };
+
+	TArray<FQuestDataEdge> Added, Removed;
+	const TArray<FQuestDataEdge> Unqualified = { { FromKey, TEXT("activates()"), ToKey } };
+	CompareQuestEdges(Unqualified, Live, GuidByKey, NodeByGuid, Added, Removed);
+	TestEqual(TEXT("An unqualified selector matches the pin it selects, not a literal empty name"), Added.Num(), 0);
+	TestEqual(TEXT("...and reports no removal either"), Removed.Num(), 0);
+
+	// THE DETECTOR HAS TO FAIL ON KNOWN-BAD or the clean result above proves only that the differ went quiet. A wire
+	// that genuinely moved must still report, through the same resolution path that just made an unchanged one silent.
+	Added.Reset(); Removed.Reset();
+	const TArray<FQuestDataEdge> Rewired = { { FromKey, TEXT("activates()"), TEXT("somewhere_else") } };
+	CompareQuestEdges(Rewired, Live, GuidByKey, NodeByGuid, Added, Removed);
+	TestEqual(TEXT("A real rewire is still one addition"), Added.Num(), 1);
+	TestEqual(TEXT("...and one removal"), Removed.Num(), 1);
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_EdgeQualifierMatchesOutcomeLabel, "SimpleQuest.Resolver.Plan.EdgeQualifierMatchesOutcomeLabel", TestFlags)
+bool FQuestResolver_EdgeQualifierMatchesOutcomeLabel::RunTest(const FString& Parameters)
+{
+	/**
+	 * An outcome pin's NAME is the full gameplay tag, but a studio authors - and the mapping panel offers - the
+	 * namespace-stripped label. The differ has to see those as the same wire or a clean re-import reports every
+	 * outcome edge as a removal and an addition.
+	 * The pin is created directly rather than through a Step: outcome pins are discovered from an objective
+	 * BLUEPRINT's K2 nodes, so a real Step needs a content asset, while what the resolver actually reads is just a
+	 * QuestOutcome output pin whose FName is a tag. This builds that exact shape with no asset in the way.
+	 */
+	UQuestlineGraph* Graph = MakeTransientQuestlineGraph();
+	UEdGraph* Root = Graph->QuestlineEdGraph;
+
+	UQuestlineNode_Step* From = NewObject<UQuestlineNode_Step>(Root, NAME_None, RF_Transactional);
+	From->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(From);
+	From->PostPlacedNewNode();
+	From->AllocateDefaultPins();
+
+	UQuestlineNode_Step* To = NewObject<UQuestlineNode_Step>(Root, NAME_None, RF_Transactional);
+	To->QuestGuid = FGuid::NewGuid();
+	Root->AddNode(To);
+	To->PostPlacedNewNode();
+	To->AllocateDefaultPins();
+
+	const FName OutcomeTag(TEXT("SimpleQuest.Outcome.Solved"));
+	const UEdGraphPin* OutcomePin = From->CreatePin(EGPD_Output, TEXT("QuestOutcome"), OutcomeTag);
+	TestNotNull(TEXT("The outcome pin was created"), OutcomePin);
+	if (!OutcomePin) { return false; }
+
+	// The authored form, derived the way the mapping panel derives it. The inequality below is not decoration: if the
+	// label ever equalled the pin name, this test would silently be exercising the EXACT-NAME branch and proving
+	// nothing about the case it exists for.
+	const FString AuthoredLabel = FSimpleQuestEditorUtilities::GetOutcomeLabel(OutcomeTag).ToString();
+	TestNotEqual(TEXT("The authored label really does differ from the pin name"), AuthoredLabel, OutcomeTag.ToString());
+
+	const FString FromKey = From->QuestGuid.ToString(EGuidFormats::Digits);
+	const FString ToKey   = To->QuestGuid.ToString(EGuidFormats::Digits);
+
+	TMap<FString, FString> GuidByKey;
+	GuidByKey.Add(FromKey, FromKey);
+	GuidByKey.Add(ToKey, ToKey);
+
+	TMap<FString, const UQuestlineNodeBase*> NodeByGuid;
+	NodeByGuid.Add(FromKey, From);
+	NodeByGuid.Add(ToKey, To);
+
+	const TArray<FQuestDataEdge> Live     = { { FromKey, FString::Printf(TEXT("outcome(%s)"), *OutcomeTag.ToString()), ToKey } };
+	const TArray<FQuestDataEdge> Authored = { { FromKey, FString::Printf(TEXT("outcome(%s)"), *AuthoredLabel),        ToKey } };
+
+	TArray<FQuestDataEdge> Added, Removed;
+	CompareQuestEdges(Authored, Live, GuidByKey, NodeByGuid, Added, Removed);
+	TestEqual(TEXT("A label-form outcome edge matches the full-tag pin it names"), Added.Num(), 0);
+	TestEqual(TEXT("...and reports no removal either"), Removed.Num(), 0);
+
+	// Known-bad: a label naming no pin on this node must NOT quietly match. Without this the test passes just as well
+	// against a differ that resolved everything to nothing.
+	Added.Reset(); Removed.Reset();
+	const TArray<FQuestDataEdge> Wrong = { { FromKey, TEXT("outcome(Nonexistent)"), ToKey } };
+	CompareQuestEdges(Wrong, Live, GuidByKey, NodeByGuid, Added, Removed);
+	TestEqual(TEXT("An outcome naming no pin is still an addition"), Added.Num(), 1);
+	TestEqual(TEXT("...and the real edge is still a removal"), Removed.Num(), 1);
+
 	return true;
 }
 

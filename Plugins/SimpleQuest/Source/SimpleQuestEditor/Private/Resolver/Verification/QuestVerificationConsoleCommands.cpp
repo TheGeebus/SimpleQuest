@@ -184,6 +184,27 @@ namespace
 				*R.OrderKey);
 		}
 	}
+
+	static void ArrangeGraphCmd(const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ArrangeGraph: usage 'SimpleQuest.ArrangeGraph <QuestlineAssetPath>'."));
+			return;
+		}
+		UQuestlineGraph* Graph = LoadObject<UQuestlineGraph>(nullptr, *Args[0]);
+		if (!Graph || !Graph->QuestlineEdGraph)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ArrangeGraph: couldn't load '%s'."), *Args[0]);
+			return;
+		}
+
+		FScopedTransaction Transaction(NSLOCTEXT("SimpleQuest", "ArrangeGraph", "Arrange questline graph"));
+		const int32 Moved = ArrangeQuestGraph(*Graph->QuestlineEdGraph, /*bRecurseIntoContainers*/ true);
+		if (Moved > 0) { Graph->MarkPackageDirty(); }
+
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ArrangeGraph: '%s' - %d node(s) moved."), *Args[0], Moved);
+	}
 }
 
 static FAutoConsoleCommand GDumpCompiledCmd(
@@ -211,4 +232,9 @@ static FAutoConsoleCommand GLogGraphRanksCmd(
 	TEXT("SimpleQuest.LogGraphRanks"),
 	TEXT("Log the layered rank of every node in a questline's root graph. Computes only - moves nothing."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&LogGraphRanksCmd));
+
+static FAutoConsoleCommand GArrangeGraphCmd(
+	TEXT("SimpleQuest.ArrangeGraph"),
+	TEXT("Lay out a questline's graph left-to-right by rank, including every container's inner graph. Undoable."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&ArrangeGraphCmd));
 

@@ -49,3 +49,16 @@ struct FQuestNodeRank
  */
 void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks);
 
+/**
+ * Lay Graph out left-to-right by rank, writing NodePosX / NodePosY. Anchored on the Entry node's CURRENT position, so
+ * an untouched graph lays out from the origin and one whose Entry a designer moved lays out from wherever they put it.
+ *
+ * Knots are deliberately left alone - they carry no meaning and belong on their wire, which is a separate pass.
+ *
+ * THE CALLER OWNS THE TRANSACTION. This calls Modify() per moved node but opens none, so an arrange invoked from an
+ * import undoes as one unit with the import, and the deliberate action wraps its own.
+ *
+ * @return how many nodes actually moved.
+ */
+int32 ArrangeQuestGraph(UEdGraph& Graph, bool bRecurseIntoContainers);
+

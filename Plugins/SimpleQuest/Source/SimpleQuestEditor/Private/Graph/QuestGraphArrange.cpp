@@ -7,7 +7,8 @@
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "Types/QuestPinRole.h"
+#include "Nodes/QuestlineNode_Entry.h"
+#include "Nodes/QuestlineNode_Quest.h"
 
 
 namespace
@@ -104,86 +105,140 @@ namespace
 		const UQuestlineNodeBase* Quest = Cast<UQuestlineNodeBase>(Node);
 		return Quest && Quest->IsExitNode();
 	}
+
+	/**
+	 * Which row a pin occupies in its own direction's stack, top to bottom - the order SGraphNode draws them in. Inputs
+	 * and outputs stack independently, so a node's third output is row 2 regardless of how many inputs sit beside it.
+	 */
+	int32 PinRow(const UEdGraphPin* Pin)
+	{
+		const UEdGraphNode* Owner = Pin ? Pin->GetOwningNode() : nullptr;
+		if (!Owner) { return 0; }
+
+		int32 Row = 0;
+		for (const UEdGraphPin* Other : Owner->Pins)
+		{
+			if (Other == Pin) { break; }
+			if (Other && Other->Direction == Pin->Direction && !Other->bHidden) { ++Row; }
+		}
+		return Row;
+	}
+
+	/**
+	 * One collapsed edge, carrying WHERE ON EACH NODE it attaches. Ranking ignores the rows; placement cannot, because
+	 * two siblings fed by one node are indistinguishable without them and the ordering falls to the GUID tiebreak.
+	 */
+	struct FQuestGraphEdge
+	{
+		UEdGraphNode* Target = nullptr;
+		int32 SourceRow = 0;   // row among the SOURCE node's output pins
+		int32 TargetRow = 0;   // row among the TARGET node's input pins
+	};
+
+	/**
+	 * At most one edge per node pair, keeping the TOPMOST source row. Parallel wires between the same two nodes are rare
+	 * and the eye follows the upper one; more to the point, ranking counts edges to know when a node's predecessors are
+	 * all resolved, and a back edge is recorded per node pair - so admitting parallel edges would leave a node's counter
+	 * permanently above zero and strand it at its floor rank.
+	 */
+	void AddOrTightenEdge(TArray<FQuestGraphEdge>& Edges, const FQuestGraphEdge& New)
+	{
+		for (FQuestGraphEdge& Existing : Edges)
+		{
+			if (Existing.Target != New.Target) { continue; }
+			if (New.SourceRow < Existing.SourceRow) { Existing = New; }
+			return;
+		}
+		Edges.Add(New);
+	}
+
+	/** The knot-collapsed graph, built once and used by both ranking and placement. */
+	struct FQuestGraphRelation
+	{
+		TArray<UEdGraphNode*> Nodes;                                  // key-ordered; the seed of every traversal
+		TMap<UEdGraphNode*, FString> KeyByNode;
+		TMap<UEdGraphNode*, TArray<FQuestGraphEdge>> Primary;         // ranks
+		TMap<UEdGraphNode*, TArray<FQuestGraphEdge>> Secondary;       // deactivation; never ranks, only clarifies
+		TMap<UEdGraphNode*, int32> InDegree;
+	};
+
+	void BuildQuestGraphRelation(const UEdGraph& Graph, FQuestGraphRelation& Out)
+	{
+		for (UEdGraphNode* Node : Graph.Nodes)
+		{
+			if (!Node || IsKnot(Node)) { continue; }
+			const FString Key = OrderKeyFor(Node);
+			if (Key.IsEmpty()) { continue; }
+			Out.Nodes.Add(Node);
+			Out.KeyByNode.Add(Node, Key);
+		}
+		Out.Nodes.Sort([&Out](const UEdGraphNode& A, const UEdGraphNode& B)
+		{
+			return Out.KeyByNode[const_cast<UEdGraphNode*>(&A)] < Out.KeyByNode[const_cast<UEdGraphNode*>(&B)];
+		});
+
+		for (UEdGraphNode* Node : Out.Nodes) { Out.Primary.Add(Node); Out.Secondary.Add(Node); }
+
+		for (UEdGraphNode* Node : Out.Nodes)
+		{
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (!Pin || Pin->Direction != EGPD_Output) { continue; }
+				TSet<const UEdGraphNode*> VisitedKnots;
+				TArray<UEdGraphPin*> Dests;
+				CollectCollapsedTargets(Pin, VisitedKnots, Dests);
+
+				// The source row comes from THIS pin, not from wherever the knot chain surfaced - a knot is drawn on the
+				// wire, so the wire still leaves the pin the designer plugged it into.
+				const int32 SourceRow = PinRow(Pin);
+
+				for (const UEdGraphPin* Dest : Dests)
+				{
+					UEdGraphNode* DestNode = Dest->GetOwningNode();
+					if (!DestNode || DestNode == Node || !Out.Primary.Contains(DestNode)) { continue; }
+					const FQuestGraphEdge Edge{ DestNode, SourceRow, PinRow(Dest) };
+					if (IsRankingDestination(Dest))           { AddOrTightenEdge(Out.Primary[Node], Edge); }
+					else if (IsDeactivationDestination(Dest)) { AddOrTightenEdge(Out.Secondary[Node], Edge); }
+				}
+			}
+		}
+
+		TSet<UEdGraphNode*> HasPrimary;
+		for (const TPair<UEdGraphNode*, TArray<FQuestGraphEdge>>& Pair : Out.Primary)
+		{
+			if (Pair.Value.Num() > 0)
+			{
+				HasPrimary.Add(Pair.Key);
+				for (const FQuestGraphEdge& E : Pair.Value) { HasPrimary.Add(E.Target); }
+			}
+		}
+		for (UEdGraphNode* Node : Out.Nodes)
+		{
+			if (HasPrimary.Contains(Node)) { continue; }
+			for (const FQuestGraphEdge& E : Out.Secondary[Node])
+			{
+				if (!HasPrimary.Contains(E.Target)) { AddOrTightenEdge(Out.Primary[Node], E); }
+			}
+		}
+
+		for (UEdGraphNode* Node : Out.Nodes) { Out.InDegree.Add(Node, 0); }
+		for (UEdGraphNode* Node : Out.Nodes)
+		{
+			for (const FQuestGraphEdge& E : Out.Primary[Node]) { ++Out.InDegree[E.Target]; }
+		}
+	}
 }
 
 void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks)
 {
 	OutRanks.Reset();
 
-	// Rankable = questline nodes that are not knots. Comment boxes and other furniture carry no OrderKey and are left
-	// out entirely rather than ranked into a column of their own.
-	TArray<UEdGraphNode*> Nodes;
-	TMap<UEdGraphNode*, FString> KeyByNode;
-	for (UEdGraphNode* Node : Graph.Nodes)
-	{
-		if (!Node || IsKnot(Node)) { continue; }
-		const FString Key = OrderKeyFor(Node);
-		if (Key.IsEmpty()) { continue; }
-		Nodes.Add(Node);
-		KeyByNode.Add(Node, Key);
-	}
-	// EVERY later traversal starts from this order, which is what makes the whole pass reproducible. Sorting on the
-	// key rather than on Graph.Nodes matters: that array is TMap hash order on a fresh import.
-	Nodes.Sort([&KeyByNode](const UEdGraphNode& A, const UEdGraphNode& B)
-	{
-		return KeyByNode[const_cast<UEdGraphNode*>(&A)] < KeyByNode[const_cast<UEdGraphNode*>(&B)];
-	});
-
-	// Two relations, built in one walk. Primary is what ranks; Secondary exists only to rescue a node whose ONLY
-	// structure is a teardown wire.
-	TMap<UEdGraphNode*, TArray<UEdGraphNode*>> Primary;
-	TMap<UEdGraphNode*, TArray<UEdGraphNode*>> Secondary;
-	for (UEdGraphNode* Node : Nodes)
-	{
-		Primary.Add(Node);
-		Secondary.Add(Node);
-	}
-
-	for (UEdGraphNode* Node : Nodes)
-	{
-		for (UEdGraphPin* Pin : Node->Pins)
-		{
-			if (!Pin || Pin->Direction != EGPD_Output) { continue; }
-
-			TSet<const UEdGraphNode*> VisitedKnots;
-			TArray<UEdGraphPin*> Dests;
-			CollectCollapsedTargets(Pin, VisitedKnots, Dests);
-
-			for (const UEdGraphPin* Dest : Dests)
-			{
-				UEdGraphNode* DestNode = Dest->GetOwningNode();
-				if (!DestNode || DestNode == Node || !Primary.Contains(DestNode)) { continue; }   // self-loops rank nothing
-
-				if (IsRankingDestination(Dest))           { Primary[Node].AddUnique(DestNode); }
-				else if (IsDeactivationDestination(Dest)) { Secondary[Node].AddUnique(DestNode); }
-			}
-		}
-	}
-
-	// A node with NO exec or prereq wiring at all is invisible to the primary relation, and if its only wires are
-	// deactivation ones it would sit alone at rank 0 saying nothing. Fold those in - and ONLY those, so a teardown
-	// wire never drags a node that already has real structure.
-	TSet<UEdGraphNode*> HasPrimary;
-	for (const TPair<UEdGraphNode*, TArray<UEdGraphNode*>>& Pair : Primary)
-	{
-		if (Pair.Value.Num() > 0) { HasPrimary.Add(Pair.Key); for (UEdGraphNode* D : Pair.Value) { HasPrimary.Add(D); } }
-	}
-	for (UEdGraphNode* Node : Nodes)
-	{
-		if (HasPrimary.Contains(Node)) { continue; }
-		for (UEdGraphNode* Dest : Secondary[Node])
-		{
-			if (!HasPrimary.Contains(Dest)) { Primary[Node].AddUnique(Dest); }
-		}
-	}
-
-	// IN-DEGREE, for seeding. A source is a node nothing points at - Entry is one of these, not the definition of one.
-	TMap<UEdGraphNode*, int32> InDegree;
-	for (UEdGraphNode* Node : Nodes) { InDegree.Add(Node, 0); }
-	for (UEdGraphNode* Node : Nodes)
-	{
-		for (UEdGraphNode* Dest : Primary[Node]) { ++InDegree[Dest]; }
-	}
+	FQuestGraphRelation Rel;
+	BuildQuestGraphRelation(Graph, Rel);
+	TArray<UEdGraphNode*>& Nodes = Rel.Nodes;
+	TMap<UEdGraphNode*, FString>& KeyByNode = Rel.KeyByNode;
+	TMap<UEdGraphNode*, TArray<FQuestGraphEdge>>& Primary = Rel.Primary;
+	TMap<UEdGraphNode*, int32>& InDegree = Rel.InDegree;
 
 	// CYCLE BREAK. DFS from the sources first, in key order, then from anything still unvisited. Seeding from sources
 	// is load-bearing: a naive DFS that wanders into a branch before reaching a hub classifies hub->branch as the back
@@ -196,10 +251,10 @@ void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks
 	{
 		Visited.Add(Node);
 		OnStack.Add(Node);
-		for (UEdGraphNode* Dest : Primary[Node])
+		for (const FQuestGraphEdge& E : Primary[Node])
 		{
-			if (OnStack.Contains(Dest))      { BackEdges.Add({ Node, Dest }); }
-			else if (!Visited.Contains(Dest)) { Walk(Dest); }
+			if (OnStack.Contains(E.Target))       { BackEdges.Add({ Node, E.Target }); }
+			else if (!Visited.Contains(E.Target)) { Walk(E.Target); }
 		}
 		OnStack.Remove(Node);
 	};
@@ -220,9 +275,9 @@ void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks
 	
 	for (UEdGraphNode* Node : Nodes)
 	{
-		for (UEdGraphNode* Dest : Primary[Node])
+		for (const FQuestGraphEdge& E : Primary[Node])
 		{
-			if (!BackEdges.Contains({ Node, Dest })) { ++Remaining[Dest]; }
+			if (!BackEdges.Contains({ Node, E.Target })) { ++Remaining[E.Target]; }
 		}
 	}
 
@@ -233,8 +288,9 @@ void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks
 	{
 		UEdGraphNode* Node = Frontier[0];
 		Frontier.RemoveAt(0);
-		for (UEdGraphNode* Dest : Primary[Node])
+		for (const FQuestGraphEdge& E : Primary[Node])
 		{
+			UEdGraphNode* Dest = E.Target;
 			if (BackEdges.Contains({ Node, Dest })) { continue; }
 			Rank[Dest] = FMath::Max(Rank[Dest], Rank[Node] + 1);
 			if (--Remaining[Dest] == 0)
@@ -271,5 +327,146 @@ void RankQuestGraphNodes(const UEdGraph& Graph, TArray<FQuestNodeRank>& OutRanks
 	{
 		return A.Rank != B.Rank ? A.Rank < B.Rank : A.OrderKey < B.OrderKey;
 	});
+}
+
+namespace
+{
+	// Column pitch is a CONSTANT because node WIDTH is unknowable without a widget - sized for a content node with a
+	// long label. Height is estimated rather than guessed, because pin count IS knowable, and a Step's outcome pins are
+	// data-derived: a two-outcome Step and a six-outcome one are very different objects.
+	constexpr float GColumnPitch    = 420.0f;
+	constexpr float GRowGap         = 48.0f;
+	constexpr float GNodeBaseHeight = 64.0f;
+	constexpr float GPinHeight      = 22.0f;
+
+	float EstimatedHeight(const UEdGraphNode* Node)
+	{
+		int32 In = 0, Out = 0;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin) { continue; }
+			(Pin->Direction == EGPD_Input ? In : Out)++;
+		}
+		return GNodeBaseHeight + FMath::Max(In, Out) * GPinHeight;
+	}
+
+	UEdGraphNode* FindEntryNode(const UEdGraph& Graph)
+	{
+		for (UEdGraphNode* Node : Graph.Nodes)
+		{
+			if (Cast<UQuestlineNode_Entry>(Node)) { return Node; }
+		}
+		return nullptr;
+	}
+}
+
+int32 ArrangeQuestGraph(UEdGraph& Graph, bool bRecurseIntoContainers)
+{
+	TArray<FQuestNodeRank> Ranks;
+	RankQuestGraphNodes(Graph, Ranks);
+	if (Ranks.Num() == 0) { return 0; }
+
+	FQuestGraphRelation Rel;
+	BuildQuestGraphRelation(Graph, Rel);
+
+	// INCOMING EDGES for the barycentre, over BOTH relations. Deactivation edges cannot move a node to another column,
+	// but they can pull it next to whatever it tears down - the "context clarifier" role they were given.
+	struct FIncoming { UEdGraphNode* Source; int32 SourceRow; int32 TargetRow; };
+	TMap<UEdGraphNode*, TArray<FIncoming>> Incoming;
+	for (UEdGraphNode* Node : Rel.Nodes) { Incoming.Add(Node); }
+	for (UEdGraphNode* Node : Rel.Nodes)
+	{
+		for (const FQuestGraphEdge& E : Rel.Primary[Node])   { Incoming[E.Target].Add({ Node, E.SourceRow, E.TargetRow }); }
+		for (const FQuestGraphEdge& E : Rel.Secondary[Node]) { Incoming[E.Target].Add({ Node, E.SourceRow, E.TargetRow }); }
+	}
+
+	// ANCHOR. Entry's current position IS the origin: unmoved it is (0,0), and moved it is wherever the designer put
+	// it - one rule, both cases, nothing to detect.
+	UEdGraphNode* Entry = FindEntryNode(Graph);
+	const int32 AnchorX = Entry ? Entry->NodePosX : 0;
+	const int32 AnchorY = Entry ? Entry->NodePosY : 0;
+
+	TMap<UEdGraphNode*, float> AssignedY;
+	int32 Moved = 0;
+	int32 Index = 0;
+
+	while (Index < Ranks.Num())
+	{
+		const int32 ThisRank = Ranks[Index].Rank;
+		TArray<UEdGraphNode*> Column;
+		while (Index < Ranks.Num() && Ranks[Index].Rank == ThisRank) { Column.Add(Ranks[Index++].Node); }
+
+		// WHERE THE WIRES WANT THIS NODE. Ranks arrive left-to-right, so every predecessor in an earlier column already
+		// has a Y. Averaging the SOURCE PINS rather than the source nodes is what makes a fan-out come out in pin order:
+		// siblings hanging off one node share its Y exactly and would otherwise tie, handing the decision to the GUID.
+		// Subtracting the target row aims the node so its own receiving pin lines up with the wire, which is the part
+		// that makes a long chain read level. Both nodes are assumed to have the same header depth - untrue for a Step
+		// carrying a picker widget, and one of the things real geometry would fix.
+		TMap<UEdGraphNode*, float> Desired;
+		for (UEdGraphNode* Node : Column)
+		{
+			float Sum = 0.0f; int32 Count = 0;
+			for (const FIncoming& In : Incoming[Node])
+			{
+				if (const float* Y = AssignedY.Find(In.Source))
+				{
+					Sum += *Y + (In.SourceRow - In.TargetRow) * GPinHeight;
+					++Count;
+				}
+			}
+			// No placed predecessor sorts last on a sentinel rather than falling in beside connected nodes - it has
+			// nothing to be near, and pretending otherwise scatters the ones that do.
+			Desired.Add(Node, Count > 0 ? Sum / Count : TNumericLimits<float>::Max());
+		}
+
+		Column.Sort([&Desired, &Rel, Entry](const UEdGraphNode& A, const UEdGraphNode& B)
+		{
+			// Entry first in its column, so it keeps the anchor exactly rather than being displaced by whatever else
+			// happens to share rank 0 - the portal Exits, which have no inputs either.
+			if (&A == Entry) { return true; }
+			if (&B == Entry) { return false; }
+			UEdGraphNode* NA = const_cast<UEdGraphNode*>(&A);
+			UEdGraphNode* NB = const_cast<UEdGraphNode*>(&B);
+			return Desired[NA] != Desired[NB] ? Desired[NA] < Desired[NB] : Rel.KeyByNode[NA] < Rel.KeyByNode[NB];
+		});
+
+		float Cursor = 0.0f;
+		for (UEdGraphNode* Node : Column)
+		{
+			// Honour the desired Y only DOWNWARD. Pulling a node up to straighten its wire would overlap the node above
+			// it, and no wire is worth a collision; pushing down costs empty space, which reads as breathing room.
+			const float* Want = Desired.Find(Node);
+			const float Y = (Want && *Want < TNumericLimits<float>::Max()) ? FMath::Max(Cursor, *Want) : Cursor;
+
+			const int32 NewX = AnchorX + ThisRank * FMath::RoundToInt(GColumnPitch);
+			const int32 NewY = AnchorY + FMath::RoundToInt(Y);
+			AssignedY.Add(Node, Y);
+
+			if (Node->NodePosX != NewX || Node->NodePosY != NewY)
+			{
+				Node->Modify();
+				Node->NodePosX = NewX;
+				Node->NodePosY = NewY;
+				++Moved;
+			}
+			Cursor = Y + EstimatedHeight(Node) + GRowGap;
+		}
+	}
+
+	if (bRecurseIntoContainers)
+	{
+		// Each inner graph is its own layered reading with its own Entry at its own origin - a container is a plain box
+		// to the outer pass, which is why the outer layout needs to know nothing about what is inside it.
+		for (UEdGraphNode* Node : Graph.Nodes)
+		{
+			if (const UQuestlineNode_Quest* Quest = Cast<UQuestlineNode_Quest>(Node))
+			{
+				if (UEdGraph* Inner = Quest->GetInnerGraph()) { Moved += ArrangeQuestGraph(*Inner, true); }
+			}
+		}
+	}
+
+	if (Moved > 0) { Graph.NotifyGraphChanged(); }
+	return Moved;
 }
 

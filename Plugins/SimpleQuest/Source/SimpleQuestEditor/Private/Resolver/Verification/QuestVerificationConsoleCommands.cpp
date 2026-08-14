@@ -14,6 +14,7 @@
 #include "Resolver/Verification/QuestRoundTripOracle.h"
 #include "Resolver/Verification/QuestVerificationPaths.h"
 #include "SimpleQuestLog.h"
+#include "Graph/QuestGraphArrange.h"
 #include "UObject/UObjectGlobals.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -157,6 +158,32 @@ namespace
 			AuthoredMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), AuthoredMiss,
 			CompiledMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), CompiledMiss);
 	}
+	static void LogGraphRanksCmd(const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("LogGraphRanks: usage 'SimpleQuest.LogGraphRanks <QuestlineAssetPath>'."));
+			return;
+		}
+		const UQuestlineGraph* Graph = LoadObject<UQuestlineGraph>(nullptr, *Args[0]);
+		if (!Graph || !Graph->QuestlineEdGraph)
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("LogGraphRanks: couldn't load '%s'."), *Args[0]);
+			return;
+		}
+
+		TArray<FQuestNodeRank> Ranks;
+		RankQuestGraphNodes(*Graph->QuestlineEdGraph, Ranks);
+
+		UE_LOG(LogSimpleQuestResolver, Log, TEXT("LogGraphRanks: '%s' - %d ranked node(s)."), *Args[0], Ranks.Num());
+		for (const FQuestNodeRank& R : Ranks)
+		{
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("  rank %2d  %-40s  %s"),
+				R.Rank,
+				*R.Node->GetNodeTitle(ENodeTitleType::ListView).ToString(),
+				*R.OrderKey);
+		}
+	}
 }
 
 static FAutoConsoleCommand GDumpCompiledCmd(
@@ -179,3 +206,9 @@ static FAutoConsoleCommand GRoundTripCompareCmd(
 		"WITHOUT re-export/import. Corrupt the _RT asset, re-run ExportQuestline+DumpCompiled on it, then this — the "
 		"real comparators should go red on the injected break. Args: <OriginalID>."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RoundTripCompareCmd));
+
+static FAutoConsoleCommand GLogGraphRanksCmd(
+	TEXT("SimpleQuest.LogGraphRanks"),
+	TEXT("Log the layered rank of every node in a questline's root graph. Computes only - moves nothing."),
+	FConsoleCommandWithArgsDelegate::CreateStatic(&LogGraphRanksCmd));
+

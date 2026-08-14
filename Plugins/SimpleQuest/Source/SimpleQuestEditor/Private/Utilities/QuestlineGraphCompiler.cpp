@@ -938,7 +938,11 @@ void FQuestlineGraphCompiler::CompileGroupSetters(UEdGraph* Graph, const FString
     }
 }
 
-void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes)
+void FQuestlineGraphCompiler::CompileUtilityNodes(
+	UEdGraph* Graph,
+	const FString& TagPrefix,
+	TArray<FString>& VisitedAssetPaths,
+	TArray<UQuestlineNode_UtilityBase*>& OutUtilityEdNodes)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_CompileUtilityNodes);
 
@@ -1079,8 +1083,13 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(UEdGraph* Graph, const FString
     }
 }
 
-void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_ContentBase*>& ContentNodes, const TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& NodeInstanceMap, const FString& TagPrefix, const
-                                                  TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath, TArray<FString>& VisitedAssetPaths)
+void FQuestlineGraphCompiler::CompileOutputWiring(
+	const TArray<UQuestlineNode_ContentBase*>& ContentNodes,
+	const TMap<UQuestlineNode_ContentBase*,
+	UQuestNodeBase*>& NodeInstanceMap,
+	const FString& TagPrefix,
+	const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+	TArray<FString>& VisitedAssetPaths)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_CompileOutputWiring);
 
@@ -1264,9 +1273,12 @@ void FQuestlineGraphCompiler::CompileOutputWiring(const TArray<UQuestlineNode_Co
     }
 }
 
-TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(UEdGraph* Graph, const FString& TagPrefix, const TMap<FName,
-	                                                        TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath, TArray<FString>& VisitedAssetPaths, TMap
-                                                        <FName, FQuestEntryRouteList>* OutEntryTagsByPath)
+TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
+	UEdGraph* Graph,
+	const FString& TagPrefix,
+	const TMap<FName, TArray<FQuestBoundaryCompletion>>& BoundaryCompletionsByPath,
+	TArray<FString>& VisitedAssetPaths,
+	TMap <FName, FQuestEntryRouteList>* OutEntryTagsByPath)
 {
 	TArray<FName> EntryTags;
 	for (UEdGraphNode* Node : Graph->Nodes)
@@ -1765,17 +1777,41 @@ FName FQuestlineGraphCompiler::ResolveSourceFilterTag(const FIncomingSignalPinSp
 	return ComputeCompiledTagForContentNode(SourceNode, SourceAsset);
 }
 
-int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)
+int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(
+	UEdGraphPin* OutputPin,
+	const FString& TagPrefix,
+	TArray<FString>& VisitedAssetPaths,
+	TSet<const UEdGraphNode*>& OnPath,
+	FPrerequisiteExpression& OutExpression)
 {
-    if (!OutputPin) return INDEX_NONE;
-    UEdGraphNode* Node = OutputPin->GetOwningNode();
+	if (!OutputPin) return INDEX_NONE;
+	UEdGraphNode* Node = OutputPin->GetOwningNode();
+	if (!Node) return INDEX_NONE;
+
+	/**
+	 * A RECURSION STACK, not a visited set. A prerequisite OUTPUT may legitimately feed more than one parent, so the
+	 * same node can be reached twice by different paths - a shared sub-expression, which must compile into a subtree
+	 * at EACH occurrence because the expression is a tree of appended nodes. A permanent visited set would return INDEX_NONE
+	 * the second time and SILENTLY DROP a branch, trading a loud crash for a quiet wrong answer. Marking on entry and
+	 * clearing on exit separates "seen before" from "seen on the way here", and only the second is a cycle. The schema
+	 * refuses most cycles at authoring time but not all of them, and this walk must not depend on that: a graph can also
+	 * arrive from the resolver, from a hand-edited asset, or from an authoring path added later.
+	 */
+	if (OnPath.Contains(Node))
+	{
+		AddError(FString::Printf(TEXT("[%s] Circular prerequisite wiring at '%s' - a prerequisite chain cannot feed back into itself."),
+								 *TagPrefix, *Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString()), Node);
+		return INDEX_NONE;
+	}
+	OnPath.Add(Node);
+	ON_SCOPE_EXIT { OnPath.Remove(Node); };
 
     if (UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
     {
         UEdGraphPin* KnotIn = Knot->FindPin(TEXT("KnotIn"), EGPD_Input);
         if (KnotIn && KnotIn->LinkedTo.Num() > 0)
         {
-            return CompilePrerequisiteFromOutputPin(KnotIn->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+            return CompilePrerequisiteFromOutputPin(KnotIn->LinkedTo[0], TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
         }
         return INDEX_NONE;
     }
@@ -1783,13 +1819,13 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     // AND
     if (Cast<UQuestlineNode_PrerequisiteAnd>(Node))
     {
-        return CompileCombinatorNode(EPrerequisiteExpressionType::And, Node, TagPrefix, VisitedAssetPaths, OutExpression);
+        return CompileCombinatorNode(EPrerequisiteExpressionType::And, Node, TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
     }
 
     // OR
     if (Cast<UQuestlineNode_PrerequisiteOr>(Node))
     {
-        return CompileCombinatorNode(EPrerequisiteExpressionType::Or, Node, TagPrefix, VisitedAssetPaths, OutExpression);
+        return CompileCombinatorNode(EPrerequisiteExpressionType::Or, Node, TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
     }
     
 	// NOT
@@ -1801,7 +1837,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 		{
 			if (CondPin->LinkedTo.Num() > 0)
 			{
-				const int32 ChildIndex = CompilePrerequisiteFromOutputPin(CondPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+				const int32 ChildIndex = CompilePrerequisiteFromOutputPin(CondPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
 				OutExpression.AddCombinatorChild(NodeIndex, ChildIndex);
 			}
 		}
@@ -1859,7 +1895,7 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
 		{
 			if (EnterPin->LinkedTo.Num() > 0)
 			{
-				return CompilePrerequisiteFromOutputPin(EnterPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OutExpression);
+				return CompilePrerequisiteFromOutputPin(EnterPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
 			}
 		}
 
@@ -1970,7 +2006,13 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(UEdGraphPin* Out
     return INDEX_NONE;
 }
 
-int32 FQuestlineGraphCompiler::CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression)
+int32 FQuestlineGraphCompiler::CompileCombinatorNode(
+	EPrerequisiteExpressionType Type,
+	UEdGraphNode* Node,
+	const FString& TagPrefix,
+	TArray<FString>& VisitedAssetPaths,
+	TSet <const UEdGraphNode*>& OnPath,
+	FPrerequisiteExpression& OutExpression)
 {
 	const int32 NodeIndex = OutExpression.AddCombinator(Type);
 
@@ -1979,7 +2021,7 @@ int32 FQuestlineGraphCompiler::CompileCombinatorNode(EPrerequisiteExpressionType
         if (Pin->Direction != EGPD_Input) continue;
         for (UEdGraphPin* LinkedPin : Pin->LinkedTo)
         {
-            const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OutExpression);
+            const int32 ChildIndex = CompilePrerequisiteFromOutputPin(LinkedPin, TagPrefix, VisitedAssetPaths, OnPath, OutExpression);
             if (ChildIndex != INDEX_NONE)
             {
                 OutExpression.Nodes[NodeIndex].ChildIndices.Add(ChildIndex);
@@ -2065,8 +2107,11 @@ FPrerequisiteExpression FQuestlineGraphCompiler::CompilePrerequisiteExpression(U
     FPrerequisiteExpression Expression;
     if (!PrerequisiteInputPin || PrerequisiteInputPin->LinkedTo.IsEmpty()) return Expression;
 
+	// Fresh per root, never shared between expressions - the guard is about one walk's own path, not about what some
+	// earlier prerequisite happened to touch.
+	TSet<const UEdGraphNode*> OnPath;
     // Schema enforces exactly one wire into any QuestPrerequisite input pin
-    const int32 RootIndex = CompilePrerequisiteFromOutputPin(PrerequisiteInputPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, Expression);
+    const int32 RootIndex = CompilePrerequisiteFromOutputPin(PrerequisiteInputPin->LinkedTo[0], TagPrefix, VisitedAssetPaths, OnPath, Expression);
 
     if (RootIndex == INDEX_NONE)
     {
@@ -2080,7 +2125,12 @@ FPrerequisiteExpression FQuestlineGraphCompiler::CompilePrerequisiteExpression(U
     return Expression;
 }
 
-void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags)
+void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(
+	UEdGraphPin* FromPin,
+	const FString& TagPrefix,
+	TArray<FString>& VisitedAssetPaths,
+	TArray<FName>& OutActivateTags,
+	TArray<FName>& OutDeactivateTags)
 {
     for (UEdGraphPin* LinkedPin : FromPin->LinkedTo)
     {

@@ -38,6 +38,7 @@
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestPlanBroker.h"
+#include "Resolver/QuestPlanReport.h"
 #include "Resolver/QuestResolverEditorMemo.h"
 #include "Resolver/QuestRowApply.h"
 #include "Resolver/SQuestPlanPanel.h"
@@ -1234,20 +1235,9 @@ bool FQuestlineGraphEditor::RunImport(const FQuestPlanSource& Source, bool bAppl
 
     Outcome.Plan.TargetAssetPath = QuestlineGraph->GetPathName();
 
-    // The panel path reported NOTHING on success while the console printed a full summary, so a designer working only
-    // in the panel had no trail at all - and it made this surface undiagnosable from a log. One line, matching the
-    // console's counts. The full itemised rendering is LogInPlacePlan, which still lives with the console; a second
-    // caller wanting it is exactly the condition R4 recorded for hoisting it into a shared report.
-    UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: %d update(s) (%d with changes), %d created, %d orphaned, "
-        "%d connection(s) added, %d removed, %d refusal(s)."),
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: %s"),
         bApply ? TEXT("Apply Plan") : TEXT("Build Plan"),
-        Outcome.Plan.CountOf(EQuestNodePlanAction::Update),
-        Outcome.Plan.ChangedNodeCount(),
-        Outcome.Plan.CountOf(EQuestNodePlanAction::Create),
-        Outcome.Plan.CountOf(EQuestNodePlanAction::Orphan),
-        Outcome.Plan.AddedEdges.Num(),
-        Outcome.Plan.RemovedEdges.Num(),
-        Outcome.Plan.Refusals.Num());
+        *BuildQuestPlanSummary(Outcome.Plan, EQuestPlanSubject::Questline));
     
     FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, Source);
 
@@ -1506,16 +1496,24 @@ bool FQuestlineGraphEditor::IsPlanSourceStale() const
     // A failure record describes no plan, so there is nothing for the selection to have drifted away from.
     if (!Record || !Record->Source.IsValid() || !Record->Error.IsEmpty()) { return false; }
 
-    if (Record->Source.Mapping != LastImportSource.Mapping) { return true; }
-    if (Record->Source.Kind() != LastImportSource.Kind()) { return true; }
+    // WHICH SELECTION a plan is answerable to depends on WHICH WAY IT POINTS. FQuestPlanRecord::Source means "what
+    // this plan was built from", and for an OUTBOUND plan that is the DESTINATION endpoint - so comparing it against
+    // the import row reported every export plan stale the moment it was built, before anything had changed. The field
+    // name says Source while the meaning is provenance; until that name is revisited, direction has to be read here.
+    const FQuestPlanSource& Selection = (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
+        ? LastExportDestination
+        : LastImportSource;
+
+    if (Record->Source.Mapping != Selection.Mapping) { return true; }
+    if (Record->Source.Kind() != Selection.Kind()) { return true; }
     // Compared per field rather than by whole-struct equality, because FormatName is meaningless for a table and would
     // otherwise report every table plan stale the moment the combo held anything.
-    if (LastImportSource.Kind() == EQuestPlanSourceKind::DataTable)
+    if (Selection.Kind() == EQuestPlanSourceKind::DataTable)
     {
-        return Record->Source.Table != LastImportSource.Table;
+        return Record->Source.Table != Selection.Table;
     }
-    return Record->Source.Folder != LastImportSource.Folder
-        || Record->Source.FormatName != LastImportSource.FormatName;
+    return Record->Source.Folder != Selection.Folder
+        || Record->Source.FormatName != Selection.FormatName;
 }
 
 void FQuestlineGraphEditor::ApplyImportPlan()

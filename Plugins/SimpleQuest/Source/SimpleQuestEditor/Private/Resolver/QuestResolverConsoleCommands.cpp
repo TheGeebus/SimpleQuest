@@ -21,6 +21,7 @@
 #include "IAssetTools.h"
 #include "ISimpleQuestEditorModule.h"
 #include "QuestExportOperations.h"
+#include "QuestPlanReport.h"
 #include "Internationalization/Text.h"
 #include "Misc/Paths.h"
 #include "Quests/QuestlineGraph.h"
@@ -61,57 +62,6 @@ static const TCHAR* PlanActionName(EQuestNodePlanAction Action)
 	case EQuestNodePlanAction::Create: return TEXT("CREATE");
 	case EQuestNodePlanAction::Orphan: return TEXT("ORPHAN");
 	default:                           return TEXT("UPDATE");
-	}
-}
-
-static void LogInPlacePlan(const FQuestInPlacePlan& Plan)
-{
-	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: in-place PLAN for '%s' - %d update(s) (%d with changes), %d create(s), %d orphan(s), "
-		"%d node(s) outside the levels this source declares, %d contested key(s), %d wire edge(s) added, %d removed. Nothing was modified."),
-		*Plan.TargetAssetPath,
-		Plan.CountOf(EQuestNodePlanAction::Update),
-		Plan.ChangedNodeCount(),
-		Plan.CountOf(EQuestNodePlanAction::Create),
-		Plan.CountOf(EQuestNodePlanAction::Orphan),
-		Plan.UntouchedNodeCount,
-		Plan.AmbiguousKeys.Num(),
-		Plan.AddedEdges.Num(),
-		Plan.RemovedEdges.Num());
-
-	for (const FQuestDataEdge& E : Plan.RemovedEdges) { UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [WIRE-] %s|%s|%s"), *E.From, *E.Type, *E.To); }
-	for (const FQuestDataEdge& E : Plan.AddedEdges)   { UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [WIRE+] %s|%s|%s"), *E.From, *E.Type, *E.To); }
-	for (const FString& R : Plan.Refusals) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("  [REFUSED] %s"), *R); }
-
-	for (const FQuestNodePlanEntry& Entry : Plan.Entries)
-	{
-		// Unchanged matches are the common case on a healthy re-import; listing them would bury the ones that matter.
-		if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.Num() == 0 && !Entry.bMoved) continue;
-
-		// An orphan has no incoming row, so its level is only known from the asset side; the questline itself sits in no
-		// level at all, being the thing levels belong to.
-		const FString& Level = (Entry.Action == EQuestNodePlanAction::Orphan) ? Entry.CurrentGraphCell : Entry.GraphCell;
-		const FString Where = Entry.bIsQuestlineSelf ? FString(TEXT("the questline itself")) : FString::Printf(TEXT("graph '%s'"), *Level);
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("  [%s] %s (%s) - %s%s"),
-			PlanActionName(Entry.Action),
-			*Entry.Key,
-			*Entry.ClassName,
-			*Where,
-			Entry.bMoved ? TEXT("  ** moves to a different container **") : TEXT(""));
-
-		if (Entry.bMoved)
-		{
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("      graph: %s -> %s"), *Entry.CurrentGraphCell, *Entry.GraphCell);
-		}
-		for (const FQuestPropertyChange& Change : Entry.Changes)
-		{
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("      %s: '%s' -> '%s'"), *Change.Property, *Change.CurrentText, *Change.IncomingText);
-		}
-	}
-
-	for (const FString& W : Plan.Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
-	if (Plan.IsNoOp())
-	{
-		UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: the asset already matches the source - a re-import would change nothing."));
 	}
 }
 
@@ -278,7 +228,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		}
 
 		Outcome.Plan.TargetAssetPath = AssetPath;
-		LogInPlacePlan(Outcome.Plan);
+		LogQuestPlanReport(Outcome.Plan, EQuestPlanSubject::Questline, TEXT("ImportQuestline"));
 		// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 		// about to be applied, so the panel always shows what the run actually decided.
 		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanSourceFromEndpoint(Endpoint, ArgMapping));
@@ -521,18 +471,12 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	// reports one so the two read alike, and published so the panel can show it.
 	if (Out.bPlanned)
 	{
-		LogInPlacePlan(Out.RowPlan);
-		FQuestPlanBroker::Get().Publish(Graph->GetPathName(), Out.RowPlan,
-			QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+		LogQuestPlanReport(Out.RowPlan, EQuestPlanSubject::Row, TEXT("ExportQuestline"));
+		FQuestPlanBroker::Get().Publish(Graph->GetPathName(), Out.RowPlan, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
 
 		if (!bApply)
 		{
-			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: PLANNED for '%s' — %d row(s) to create, %d to update. "
-				"%d row(s) in that table are claimed by nothing here and were left alone. Re-run with --apply to write."),
-				*DataTablePath,
-				Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
-				Out.RowPlan.ChangedNodeCount(),
-				Out.RowPlan.UnclaimedRowCount);
+			UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: nothing was written. Re-run with --apply."));
 			return;
 		}
 

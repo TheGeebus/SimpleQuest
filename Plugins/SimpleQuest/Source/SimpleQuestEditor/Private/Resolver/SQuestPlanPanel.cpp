@@ -739,10 +739,14 @@ FText SQuestPlanPanel::GetStaleText() const
 			? LOCTEXT("PlanStaleDest", "The data table this plan writes into has changed since the plan was computed. Build the plan again to see what would happen now.")
 			: LOCTEXT("PlanStaleSrc",  "The data table this plan was read from has changed since the plan was computed. Build the plan again to refresh it.");
 	}
+	
 	// NOT "the source above has changed". The selection and the plan also disagree when the plan was published by
 	// ANOTHER SURFACE whose source this panel never adopted - which a console-built plan does every time. Nothing
 	// changed; they simply differ, and saying otherwise sends someone hunting for an edit they never made.
-	return LOCTEXT("PlanStaleSource", "The selection above no longer matches what this plan was built from. Build the plan again to use it.");
+	// Named by ROW because there are two of them now - "above" was unambiguous when there was one.
+	return PlanDirection == EQuestPlanDirection::IntoTable
+		? LOCTEXT("PlanStaleDestSel", "The Destination selection no longer matches what this plan was built from. Build the plan again to use it.")
+		: LOCTEXT("PlanStaleSrcSel",  "The Source selection no longer matches what this plan was built from. Build the plan again to use it.");
 }
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)

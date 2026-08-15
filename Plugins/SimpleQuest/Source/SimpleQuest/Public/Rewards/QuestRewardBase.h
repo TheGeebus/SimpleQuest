@@ -40,6 +40,22 @@ public:
 	/** Drains the grants queued by DeliverReward during the last TryGrantReward. The reward node finalizes + publishes each. */
 	TArray<FQuestRewardContext> TakePendingGrants() { return MoveTemp(PendingGrants); }
 
+	/**
+	 * STABLE PER-INSTANCE IDENTITY, the same job UQuestlineNodeBase::QuestGuid does for a graph node. A reward is
+	 * addressed by the data pipeline as a child row, and until this existed that row was keyed by the reward's ARRAY
+	 * INDEX - a locally-minted, densely-packed key. Two people each appending a reward to the same array both mint the
+	 * same next index, in different per-class files where a text merge sees no overlap at all.
+	 *
+	 * NOT EditAnywhere: identity is not authoring surface. Keeping it out of the edit set also keeps it out of the
+	 * export's cells and the compiled dump, both of which walk editable properties - it addresses the row rather than
+	 * being data on it.
+	 */
+	UPROPERTY()
+	FGuid RewardGuid;
+
+	virtual void PostLoad() override;
+	virtual void PreSave(FObjectPreSaveContext SaveContext) override;
+
 protected:
 	/**
 	 * Compute + deliver the grant(s). Fires when the reward node activates. Read Incoming ("how the flow reached me"),

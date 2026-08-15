@@ -103,6 +103,11 @@ namespace
 			GEngine->Exec(nullptr, *Cmd);
 		};
 
+		// Stamped BEFORE anything runs, so "modified at or after this" means "produced by this run". The existing
+		// bEveryStepRan check catches a command that does not EXIST; it cannot catch one that runs and refuses, and a
+		// refused export leaves the previous run's folder sitting there looking exactly like a successful one.
+		const FDateTime RunStart = FDateTime::UtcNow();
+
 		// COMPILE THE SOURCE BEFORE DUMPING IT. ImportQuestline compiles the RT side moments before its dump, so
 		// leaving the source at whatever state it was last saved in compares a FRESH artifact against a STALE one -
 		// and the verdict then reports when someone last pressed Compile rather than what the pipeline did. It can
@@ -136,13 +141,35 @@ namespace
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *RtAssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
 
-		// A step that did not run leaves the PREVIOUS run's artifacts on disk, and those compare clean - so a skipped
-		// step does not merely weaken the verdict, it manufactures a passing one. Refuse to report rather than report
-		// something unearned.
-		if (!bEveryStepRan)
+		// A step that did not run - or ran and refused - leaves the PREVIOUS run's artifacts on disk, and those compare
+		// against each other perfectly happily. Refuse to report rather than report something unearned.
+		auto FileIsFresh = [&RunStart](const FString& Path)
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("==== RoundTrip '%s': ABORTED - at least one step did not run, so "
-				"any artifacts on disk are from an earlier run. No verdict. ===="), *OriginalID);
+			return IFileManager::Get().FileExists(*Path) && IFileManager::Get().GetTimeStamp(*Path) >= RunStart;
+		};
+		auto FolderIsFresh = [&RunStart](const FString& Dir)
+		{
+			TArray<FString> Found;
+			IFileManager::Get().FindFiles(Found, *(Dir / TEXT("*.*")), true, false);
+			for (const FString& F : Found)
+			{
+				if (IFileManager::Get().GetTimeStamp(*(Dir / F)) >= RunStart) { return true; }
+			}
+			return false;
+		};
+
+		const TCHAR* StaleWhat =
+			  !bEveryStepRan            ? TEXT("a step was skipped entirely")
+			: !FolderIsFresh(SrcFolder) ? TEXT("the source export folder was not written by this run")
+			: !FileIsFresh(SrcDump)     ? TEXT("the source compiled dump was not written by this run")
+			: !FolderIsFresh(RtFolder)  ? TEXT("the round-trip export folder was not written by this run")
+			: !FileIsFresh(RtDump)      ? TEXT("the round-trip compiled dump was not written by this run")
+			:                             nullptr;
+
+		if (StaleWhat)
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("==== RoundTrip '%s': ABORTED - %s, so what is on disk is from an "
+				"earlier run. No verdict. Check the errors above. ===="), *OriginalID, StaleWhat);
 			return;
 		}
 

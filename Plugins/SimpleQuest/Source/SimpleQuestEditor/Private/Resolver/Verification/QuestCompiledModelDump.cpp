@@ -4,7 +4,6 @@
 #include "Resolver/Verification/QuestCompiledModelDump.h"
 
 #include "GameplayTagContainer.h"
-#include "SimpleQuestLog.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/Types/PrerequisiteExpression.h"
@@ -21,7 +20,8 @@ static FString DumpSanitize(const FString& In)
 /**
  * Serialize one property value. Sets and maps get SORTED element-wise renders (TSet/TMap iteration order is
  * insertion-dependent — raw ExportTextItem would leak authoring order into the dump and break determinism).
- * Everything else goes through ExportTextItem directly.
+ * Structs render member-wise through this same function so the FText policy reaches nested values; everything else
+ * goes through ExportTextItem directly.
  */
 static FString DumpProperty(const FProperty* Prop, const void* ValuePtr)
 {
@@ -31,15 +31,29 @@ static FString DumpProperty(const FProperty* Prop, const void* ValuePtr)
 	{
 		return TextProp->GetPropertyValue(ValuePtr).ToString();
 	}
+
+	// Structs render MEMBER-WISE through this same function, so the FText policy above reaches values NESTED inside a
+	// struct. Handing a struct to ExportTextItem instead re-exports its members with PPF_Delimited, which restores the
+	// loc-identity form this dump exists to strip - and a nested FText was the one case that slipped past the check
+	// above. It surfaced as a save-order-dependent diff: the imported asset gets saved, and serialization mints a text
+	// key for every keyless FText, while the source is compiled in memory and never serialized at all.
+	if (const FStructProperty* StructProp = CastField<FStructProperty>(Prop))
+	{
+		TArray<FString> Members;
+		for (TFieldIterator<FProperty> It(StructProp->Struct); It; ++It)
+		{
+			Members.Add(FString::Printf(TEXT("%s=%s"), *It->GetName(), *DumpProperty(*It, It->ContainerPtrToValuePtr<void>(ValuePtr))));
+		}
+		return FString::Printf(TEXT("(%s)"), *FString::Join(Members, TEXT(",")));
+	}
+	
 	if (const FSetProperty* SetProp = CastField<FSetProperty>(Prop))
 	{
 		TArray<FString> Elems;
 		FScriptSetHelper Helper(SetProp, ValuePtr);
 		for (FScriptSetHelper::FIterator It(Helper); It; ++It)
 		{
-			FString Elem;
-			SetProp->ElementProp->ExportTextItem_Direct(Elem, Helper.GetElementPtr(It), nullptr, nullptr, PPF_None);
-			Elems.Add(Elem);
+			Elems.Add(DumpProperty(SetProp->ElementProp, Helper.GetElementPtr(It)));
 		}
 		Elems.Sort();
 		return FString::Printf(TEXT("{%s}"), *FString::Join(Elems, TEXT(",")));
@@ -50,10 +64,9 @@ static FString DumpProperty(const FProperty* Prop, const void* ValuePtr)
 		FScriptMapHelper Helper(MapProp, ValuePtr);
 		for (FScriptMapHelper::FIterator It(Helper); It; ++It)
 		{
-			FString K, V;
-			MapProp->KeyProp->ExportTextItem_Direct(K, Helper.GetKeyPtr(It), nullptr, nullptr, PPF_None);
-			MapProp->ValueProp->ExportTextItem_Direct(V, Helper.GetValuePtr(It), nullptr, nullptr, PPF_None);
-			Pairs.Add(FString::Printf(TEXT("%s=%s"), *K, *V));
+			Pairs.Add(FString::Printf(TEXT("%s=%s"),
+				*DumpProperty(MapProp->KeyProp, Helper.GetKeyPtr(It)),
+				*DumpProperty(MapProp->ValueProp, Helper.GetValuePtr(It))));
 		}
 		Pairs.Sort();
 		return FString::Printf(TEXT("{%s}"), *FString::Join(Pairs, TEXT(",")));
@@ -73,9 +86,7 @@ static FString DumpProperty(const FProperty* Prop, const void* ValuePtr)
 			FScriptArrayHelper Helper(ArrProp, ValuePtr);
 			for (int32 i = 0; i < Helper.Num(); ++i)
 			{
-				FString Elem;
-				ArrProp->Inner->ExportTextItem_Direct(Elem, Helper.GetRawPtr(i), nullptr, nullptr, PPF_None);
-				Elems.Add(Elem);
+				Elems.Add(DumpProperty(ArrProp->Inner, Helper.GetRawPtr(i)));
 			}
 			Elems.Sort();
 			return FString::Printf(TEXT("[%s]"), *FString::Join(Elems, TEXT(",")));
@@ -129,8 +140,7 @@ static FString RenderPrereqNode(const FPrerequisiteExpression& Expr, int32 NodeI
 		{
 			const FString Name = It->GetName();
 			if (Name == TEXT("Type") || Name == TEXT("ChildIndices")) continue;
-			FString Val;
-			It->ExportTextItem_Direct(Val, It->ContainerPtrToValuePtr<void>(&Node), nullptr, nullptr, PPF_None);
+			const FString Val = DumpProperty(*It, It->ContainerPtrToValuePtr<void>(&Node));
 			Fields.Add(FString::Printf(TEXT("%s=%s"), *Name, *Val));
 		}
 		return FString::Printf(TEXT("%s(%s)"), *UEnum::GetValueAsString(Node.Type), *FString::Join(Fields, TEXT(",")));
@@ -151,8 +161,7 @@ static FString RenderRewardInstance(const UQuestRewardBase* Reward)
 	for (TFieldIterator<FProperty> It(Reward->GetClass()); It; ++It)
 	{
 		if (!It->HasAnyPropertyFlags(CPF_Edit) || It->HasAnyPropertyFlags(CPF_Transient)) continue;
-		FString Val;
-		It->ExportTextItem_Direct(Val, It->ContainerPtrToValuePtr<void>(Reward), nullptr, nullptr, PPF_None);
+		const FString Val = DumpProperty(*It, It->ContainerPtrToValuePtr<void>(Reward));
 		Fields.Add(FString::Printf(TEXT("%s=%s"), *It->GetName(), *Val));
 	}
 	return FString::Printf(TEXT("%s(%s)"), *Reward->GetClass()->GetName(), *FString::Join(Fields, TEXT(",")));
@@ -228,8 +237,7 @@ TArray<FString> RenderQuestCompiledModel(const UQuestlineGraph& Graph, int32& Ou
 				FScriptArrayHelper Helper(ArrProp, ValuePtr);
 				for (int32 i = 0; i < Helper.Num(); ++i)
 				{
-					FString Elem;
-					ArrProp->Inner->ExportTextItem_Direct(Elem, Helper.GetRawPtr(i), nullptr, nullptr, PPF_None);
+					const FString Elem = DumpProperty(ArrProp->Inner, Helper.GetRawPtr(i));
 					Elems.Add(Elem);
 				}
 				Elems.Sort();

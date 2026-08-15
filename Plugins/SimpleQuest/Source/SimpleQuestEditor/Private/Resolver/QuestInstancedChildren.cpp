@@ -55,6 +55,27 @@ static bool SplitLeafSegment(const FString& ChildKey, FString& OutBracketToken)
 	return true;
 }
 
+/**
+ * Every child row sitting directly under Prefix, ordered by its bracketed index parsed as a NUMBER. Both callers order
+ * a reward GRANT SEQUENCE - one for a node's Rewards, one for the array nested inside each QuestlineRewards entry - so
+ * this being one function rather than two copies is what stops the nested case drifting from the flat one.
+ * Numeric, never lexical: keys are text, and as text "[10]" sorts before "[1]" (']' is 0x5D, '0' is 0x30), which puts
+ * the whole teens block in front of the single digits.
+ */
+static void GatherIndexedChildKeys(const FQuestDataBundle& Bundle, const FString& Prefix, TArray<TPair<int32, FString>>& Out)
+{
+	const FString Open = Prefix + TEXT("[");
+	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+		for (const FQuestDataRow& R : TablePair.Value.Rows)
+			if (R.Key.StartsWith(Open))
+			{
+				FString Tok;
+				SplitLeafSegment(R.Key, Tok);
+				Out.Add({ FCString::Atoi(*Tok), R.Key });
+			}
+	Out.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
+}
+
 void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
 {
 	for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
@@ -71,16 +92,8 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 			FObjectProperty* InnerObj = CastField<FObjectProperty>(Arr->Inner);
 			if (!InnerObj || !Arr->Inner->HasAnyPropertyFlags(CPF_InstancedReference)) continue;
 
-			// Gather this property's child keys, ordered by numeric index.
 			TArray<TPair<int32, FString>> Indexed;
-			for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-				for (const FQuestDataRow& R : TablePair.Value.Rows)
-					if (R.Key.StartsWith(PropPrefix + TEXT("[")))
-					{
-						FString Tok; SplitLeafSegment(R.Key, Tok);
-						Indexed.Add({ FCString::Atoi(*Tok), R.Key });
-					}
-			Indexed.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
+			GatherIndexedChildKeys(Bundle, PropPrefix, Indexed);
 
 			// SILENCE IS NOT AN ASSERTION OF EMPTINESS. A source that declares no children for this property has said
 			// nothing about it - the same contract a missing scalar cell carries, where RestoreQuestCell's Empty arm leaves the
@@ -142,11 +155,7 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 
 							const FString ArrPrefix = FString::Printf(TEXT("%s.%s"), *ValueOwnerKey, *SIt->GetName());
 							TArray<TPair<int32, FString>> Indexed;
-							for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
-								for (const FQuestDataRow& R : TablePair.Value.Rows)
-									if (R.Key.StartsWith(ArrPrefix + TEXT("[")))
-									{ FString Tok; SplitLeafSegment(R.Key, Tok); Indexed.Add({ FCString::Atoi(*Tok), R.Key }); }
-							Indexed.Sort([](const auto& A, const auto& B){ return A.Key < B.Key; });
+							GatherIndexedChildKeys(Bundle, ArrPrefix, Indexed);
 
 							if (Indexed.IsEmpty()) continue;   // see the array case
 

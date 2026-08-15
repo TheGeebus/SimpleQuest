@@ -34,6 +34,8 @@
 #include "Rewards/XPReward.h"
 #include "ScopedTransaction.h"
 #include "Kismet2/StructureEditorUtils.h"
+#include "Rewards/LootTableReward.h"
+#include "Rewards/ScaledAmountReward.h"
 #include "Tests/QuestResolverTestRow.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -105,6 +107,19 @@ namespace
 			T.Columns.AddUnique(C.Key);
 		}
 		T.Rows.Add(MoveTemp(R));
+	}
+
+	/**
+	 * Read an int UPROPERTY by name. The reward classes keep their fields protected, and reflection is not a workaround
+	 * here - it is the same surface RestoreQuestRowProperties writes through, so an assertion made this way exercises
+	 * exactly the path the pipeline uses. Returns MIN_int32 for a missing property so a renamed field fails loudly
+	 * instead of reading as a plausible zero.
+	 */
+	int32 ReadIntProperty(const UObject* Obj, const TCHAR* PropName)
+	{
+		if (!Obj) { return MIN_int32; }
+		const FIntProperty* Prop = FindFProperty<FIntProperty>(Obj->GetClass(), FName(PropName));
+		return Prop ? Prop->GetPropertyValue_InContainer(Obj) : MIN_int32;
 	}
 }
 
@@ -2108,6 +2123,137 @@ bool FQuestResolver_EdgeQualifierMatchesOutcomeLabel::RunTest(const FString& Par
 	TestEqual(TEXT("An outcome naming no pin is still an addition"), Added.Num(), 1);
 	TestEqual(TEXT("...and the real edge is still a removal"), Removed.Num(), 1);
 
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_MixedClassChildrenKeepIndexOrder, "SimpleQuest.Resolver.Reattach.MixedClassChildrenKeepIndexOrder", TestFlags)
+bool FQuestResolver_MixedClassChildrenKeepIndexOrder::RunTest(const FString& Parameters)
+{
+	/**
+	 * Every instanced-child fixture in this suite until now used exactly ONE element, so the ordering path was never
+	 * exercised at all. Reward order is GRANT ORDER - the codebase's own note calls it the one compiled ordering that
+	 * is semantics rather than noise - so a rebuild that returns the right children in the wrong sequence is a real
+	 * defect that nothing here could see.
+	 * The rows are declared OUT OF ORDER and spread across three per-class tables, which is exactly how they land on
+	 * disk: a child row is filed under its own class's stem, so a three-element mixed array is three files. If the
+	 * rebuild followed row-encounter order rather than the bracket index, this test fails.
+	 */
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable Loot;
+		AddRow(Loot, TEXT("n_reward/Rewards[2]"), { { TEXT("class"), TEXT("LootTableReward") }, { TEXT("RollCount"), TEXT("7") } });
+		Bundle.TablesByType.Add(TEXT("loot_table_reward"), MoveTemp(Loot));
+
+		FQuestDataTable Xp;
+		AddRow(Xp, TEXT("n_reward/Rewards[0]"), { { TEXT("class"), TEXT("XPReward") }, { TEXT("Amount"), TEXT("11") } });
+		Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Xp));
+
+		FQuestDataTable Scaled;
+		AddRow(Scaled, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("ScaledAmountReward") }, { TEXT("BaseAmount"), TEXT("22") } });
+		Bundle.TablesByType.Add(TEXT("scaled_amount_reward"), MoveTemp(Scaled));
+	}
+
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	ReattachQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+
+	TestEqual(TEXT("All three declared children were rebuilt"), Owner->Rewards.Num(), 3);
+	if (Owner->Rewards.Num() != 3) { return false; }
+
+	// Class AND value at each slot: class alone would pass if two same-class children swapped.
+	const UXPReward* First = Cast<UXPReward>(Owner->Rewards[0].Get());
+	const UScaledAmountReward* Second = Cast<UScaledAmountReward>(Owner->Rewards[1].Get());
+	const ULootTableReward* Third = Cast<ULootTableReward>(Owner->Rewards[2].Get());
+
+	TestNotNull(TEXT("Index 0 is the XP reward declared as [0]"), First);
+	TestNotNull(TEXT("Index 1 is the scaled reward declared as [1]"), Second);
+	TestNotNull(TEXT("Index 2 is the loot reward declared as [2]"), Third);
+	if (First)  { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(First,  TEXT("Amount")),     11); }
+	if (Second) { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(Second, TEXT("BaseAmount")), 22); }
+	if (Third)  { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(Third,  TEXT("RollCount")),   7); }
+
+	TestEqual(TEXT("Every child row was consumed"), Consumed.Num(), 3);
+	TestEqual(TEXT("No warnings on a well-formed rebuild"), Warnings.Num(), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ChildIndicesSortNumerically, "SimpleQuest.Resolver.Reattach.ChildIndicesSortNumerically", TestFlags)
+bool FQuestResolver_ChildIndicesSortNumerically::RunTest(const FString& Parameters)
+{
+	/**
+	 * TWELVE elements, because the bug only appears past ten. Child keys are text, and sorted as text "[10]" lands
+	 * before "[1]" - ']' is 0x5D, '0' is 0x30 - so a lexicographic order puts the whole teens block in the middle of
+	 * the single digits. The reattach parses the bracket to an int and sorts numerically; this is the test that can
+	 * tell those two apart, and no existing fixture has more than one element to tell them apart WITH.
+	 * Declared shuffled so the sort has to do work rather than accidentally agreeing with insertion order.
+	 */
+	UQuestlineNode_Reward* Owner = NewObject<UQuestlineNode_Reward>(GetTransientPackage());
+
+	static constexpr int32 Count = 12;
+	const int32 DeclareOrder[Count] = { 10, 3, 11, 0, 7, 1, 9, 4, 2, 8, 5, 6 };
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable Xp;
+	for (int32 i = 0; i < Count; ++i)
+	{
+		// Amount == the element's own index, so a wrong ORDER is visible as a wrong VALUE at that slot.
+		const FString Key    = FString::Printf(TEXT("n_reward/Rewards[%d]"), DeclareOrder[i]);
+		const FString Amount = FString::FromInt(DeclareOrder[i]);
+		AddRow(Xp, *Key, { { TEXT("class"), TEXT("XPReward") }, { TEXT("Amount"), *Amount } });
+	}
+	Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Xp));
+
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	ReattachQuestInstancedChildren(Owner, TEXT("n_reward"), Bundle, Consumed, Warnings);
+
+	TestEqual(TEXT("All twelve children were rebuilt"), Owner->Rewards.Num(), Count);
+	if (Owner->Rewards.Num() != Count) { return false; }
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const UXPReward* At = Cast<UXPReward>(Owner->Rewards[i].Get());
+		if (!At) { AddError(FString::Printf(TEXT("Slot %d is not an XPReward"), i)); continue; }
+		TestEqual(*FString::Printf(TEXT("Slot %d holds the child declared as [%d]"), i, i), ReadIntProperty(At, TEXT("Amount")), i);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_RefusesDuplicateChildKey, "SimpleQuest.Resolver.Validate.RefusesDuplicateChildKey", TestFlags)
+bool FQuestResolver_RefusesDuplicateChildKey::RunTest(const FString& Parameters)
+{
+	/**
+	 * THE KNOWN-BAD FOR THE DUPLICATE-KEY GUARD. Child keys carry an array index minted from the live array length, so
+	 * two branches each appending one reward both mint Rewards[1] - and because a child row is filed under its own
+	 * CLASS, those two rows land in different files with no textual overlap for a merge to conflict on. The merge is
+	 * clean and the corpus is wrong.
+	 * Left unguarded the import does not fail: FindQuestChildRow returns the first key match while walking a TMap, so
+	 * one reward is built TWICE and the other never, with the array length coincidentally correct.
+	 */
+	FQuestDataBundle Bundle;
+
+	FQuestDataTable Self;
+	AddRow(Self, TEXT("TestLine"), { { TEXT("class"), TEXT("QuestlineGraph") } });
+	Bundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
+
+	// The SAME key in two per-class tables - the exact shape two independent appends produce.
+	FQuestDataTable Xp;
+	AddRow(Xp, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("XPReward") } });
+	Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Xp));
+
+	FQuestDataTable Currency;
+	AddRow(Currency, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("ScaledAmountReward") } });
+	Bundle.TablesByType.Add(TEXT("scaled_amount_reward"), MoveTemp(Currency));
+
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	TSet<FString> AllRowKeys;
+	FString Error;
+	const bool bValid = QuestBundle_Validate(Bundle, NodeRowsByKey, AllRowKeys, Error);
+
+	TestFalse(TEXT("Two rows claiming one key is refused"), bValid);
+	TestTrue(TEXT("...and the refusal names the offending key"), Error.Contains(TEXT("n_reward/Rewards[1]")));
 	return true;
 }
 

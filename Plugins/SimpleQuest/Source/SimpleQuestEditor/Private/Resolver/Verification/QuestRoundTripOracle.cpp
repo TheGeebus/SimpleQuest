@@ -46,7 +46,11 @@ static FString StripRTSuffix(const FString& Line, const FString& /*OriginalID*/)
  */
 FString StripRTFromDump(const FString& Line, const FString& OriginalID)
 {
-	return GQuestRoundTripSuffix;
+	// Forwards deliberately: the substitution is identical to the folder-line one, and saying so here is better than
+	// a second copy that can drift. What made this worth stating in code rather than in a comment is that it did
+	// drift - this returned the marker itself, ignoring Line, so every dump line on both sides normalized to the
+	// same string and the comparison could only ever notice a difference in line COUNT.
+	return StripRTSuffix(Line, OriginalID);
 }
 
 /**

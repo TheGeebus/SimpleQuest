@@ -6,6 +6,7 @@
 // RoundTrip writes a reconstructed copy, but only ever under the destination package the caller names.
 
 #include "CoreMinimal.h"
+#include "ISimpleQuestEditorModule.h"
 #include "Engine/Engine.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -16,6 +17,7 @@
 #include "SimpleQuestLog.h"
 #include "Graph/QuestGraphArrange.h"
 #include "UObject/UObjectGlobals.h"
+#include "Utilities/QuestlineGraphCompiler.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
 namespace
@@ -71,7 +73,7 @@ namespace
 			if (Arg.StartsWith(TEXT("--format="))) { FormatArg = FString(TEXT(" ")) + Arg; break; }
 		}
 
-		const UQuestlineGraph* Src = LoadObject<UQuestlineGraph>(nullptr, *AssetPath);
+		UQuestlineGraph* Src = LoadObject<UQuestlineGraph>(nullptr, *AssetPath);
 		if (!Src) { UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
 		const FString OriginalID = FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(Src->GetEffectiveID());
 
@@ -100,6 +102,27 @@ namespace
 			UE_LOG(LogSimpleQuestResolver, Log, TEXT("RoundTrip: > %s"), *Cmd);
 			GEngine->Exec(nullptr, *Cmd);
 		};
+
+		// COMPILE THE SOURCE BEFORE DUMPING IT. ImportQuestline compiles the RT side moments before its dump, so
+		// leaving the source at whatever state it was last saved in compares a FRESH artifact against a STALE one -
+		// and the verdict then reports when someone last pressed Compile rather than what the pipeline did. It can
+		// fail either way: a stale source that is missing wiring reads as the import inventing it, and a stale source
+		// that still holds since-deleted wiring reads as a clean pass.
+		// Through the module's factory rather than by constructing one, so an adopter's replacement compiler is the
+		// one under test - verifying the default while shipping a substitute would be verifying the wrong thing.
+		// The toolkit's ceremony (message-log pages, linked-neighbour compiles, rename capture) is deliberately not
+		// mirrored: none of it reaches the compiled model this harness reads.
+		{
+			TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
+			if (!Compiler->Compile(Src))
+			{
+				// ABORT WITH NO VERDICT, matching the missing-command check below. A source with compile ERRORS has no
+				// trustworthy compiled model, so anything the comparison says about it is unearned in either direction.
+				UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: the source '%s' does not compile cleanly. "
+					"Fix the compile errors first - a round trip against a broken source proves nothing."), *AssetPath);
+				return;
+			}
+		}
 
 		// 1. Export the source (authored folder + we'll dump its compiled form too).
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *AssetPath, *FormatArg));

@@ -39,8 +39,8 @@ struct FQuestExportOutcome
 	FString ExportKey;
 
 	/**
-	 * True when the request named no folder and the destination came from the questline's ID. Callers word the receipt
-	 * differently: a derived destination is somewhere the user has never navigated to, and worth naming in full.
+	 * True when the request named no folder and the destination came from the questline's ID. Named in the receipt when
+	 * set: a derived destination is somewhere the user has never navigated to, so it is worth stating in full.
 	 */
 	bool bDestinationDerived = false;
 

@@ -519,23 +519,8 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 		return;
 	}
 
-	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: '%s' — %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
-		"collapsed. Wrote %d file(s) to '%s'%s; removed %d from the previous export."),
-		*Out.ExportKey,
-		Out.EntityRows,
-		Out.TypeCount,
-		Out.EdgeCount,
-		Out.KnotsCollapsed,
-		Out.FilesWritten,
-		*Out.OutDir,
-		Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""),
-		Out.FilesRemoved);
-
-	FQuestPlanBroker::Get().PublishExport(Graph->GetPathName(), FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
-		Out.FilesWritten,
-		*Out.OutDir,
-		Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT("")),
-	FString());
+	LogQuestExportReport(Out, TEXT("ExportQuestline"));
+	FQuestPlanBroker::Get().PublishExport(Graph->GetPathName(), BuildQuestExportReceipt(Out), FString());
 }
 
 static FAutoConsoleCommand GImportQuestlineCmd(

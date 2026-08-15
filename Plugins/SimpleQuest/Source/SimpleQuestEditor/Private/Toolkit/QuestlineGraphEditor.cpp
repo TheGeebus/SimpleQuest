@@ -1697,15 +1697,8 @@ void FQuestlineGraphEditor::ExportQuestlineData()
         return;
     }
 
-    const FString Summary = FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
-        Out.FilesWritten,
-        *Out.OutDir,
-        Out.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""));
-
-    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Export: '%s' - %d entity row(s) across %d type(s), %d edge(s). %s; "
-        "removed %d from the previous export."),
-        *Out.ExportKey, Out.EntityRows, Out.TypeCount, Out.EdgeCount, *Summary, Out.FilesRemoved);
-
+    const FString Summary = BuildQuestExportReceipt(Out);
+    LogQuestExportReport(Out, TEXT("Export"));
     FQuestPlanBroker::Get().PublishExport(QuestlineGraph->GetPathName(), Summary, FString());
 
     // A notification as well as the panel line, because the designer who pressed the button may have the tab covered -

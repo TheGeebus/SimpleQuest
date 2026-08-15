@@ -3,6 +3,7 @@
 
 #include "Resolver/QuestPlanReport.h"
 
+#include "QuestExportOperations.h"
 #include "SimpleQuestLog.h"
 
 namespace
@@ -93,5 +94,38 @@ void LogQuestPlanReport(const FQuestInPlacePlan& Plan, EQuestPlanSubject Subject
 	}
 
 	for (const FString& W : Plan.Warnings) { UE_LOG(LogSimpleQuestResolver, Warning, TEXT("%s: %s"), *Prefix, *W); }
+}
+
+FString BuildQuestExportReceipt(const FQuestExportOutcome& Outcome)
+{
+	// NOTHING WRITTEN IS NOT A FAILURE and should not read like one. "Exported 0 file(s)" sends someone hunting for a
+	// problem when the honest answer is that there was nothing to do.
+	if (Outcome.FilesWritten == 0)
+	{
+		return FString::Printf(TEXT("Nothing to write to '%s'%s"),
+			*Outcome.OutDir,
+			Outcome.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""));
+	}
+
+	return FString::Printf(TEXT("Exported %d file(s) to '%s'%s"),
+		Outcome.FilesWritten,
+		*Outcome.OutDir,
+		Outcome.bDestinationDerived ? TEXT(" (default destination)") : TEXT(""));
+}
+
+void LogQuestExportReport(const FQuestExportOutcome& Outcome, const FString& Prefix)
+{
+	// The knot count was in the console's line and absent from the toolkit's. Nobody decided that; the two were written
+	// at different times and drifted, which is the whole reason this lives in one place now.
+	UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: '%s' - %d entity row(s) across %d type(s), %d edge(s), %d knot(s) "
+		"collapsed. %s; removed %d from the previous export."),
+		*Prefix,
+		*Outcome.ExportKey,
+		Outcome.EntityRows,
+		Outcome.TypeCount,
+		Outcome.EdgeCount,
+		Outcome.KnotsCollapsed,
+		*BuildQuestExportReceipt(Outcome),
+		Outcome.FilesRemoved);
 }
 

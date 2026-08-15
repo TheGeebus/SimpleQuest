@@ -11,6 +11,9 @@
 #include "Resolver/QuestInPlacePlan.h"
 
 
+struct FQuestExportOutcome;
+
+
 /**
  * WHAT the plan is about, which decides the vocabulary. Both directions share FQuestInPlacePlan - that reuse decision
  * held - but they do not share nouns: a questline plan describes nodes, the containers they sit in and the wires
@@ -36,4 +39,13 @@ FString BuildQuestPlanSummary(const FQuestInPlacePlan& Plan, EQuestPlanSubject S
  * Refusals and warnings go out at Warning so a filtered log still surfaces them.
  */
 void LogQuestPlanReport(const FQuestInPlacePlan& Plan, EQuestPlanSubject Subject, const FString& Prefix);
+
+/**
+ * THE RECEIPT: what was written and where, in one sentence. Short on purpose - it goes on a panel beside the plan
+ * rather than into a log, and a designer reads it to confirm the thing they just asked for actually happened.
+ */
+FString BuildQuestExportReceipt(const FQuestExportOutcome& Outcome);
+
+/** The full detail line for a log, receipt included. Prefix is the caller's verb, same contract as the plan report. */
+void LogQuestExportReport(const FQuestExportOutcome& Outcome, const FString& Prefix);
 

@@ -338,17 +338,17 @@ namespace
 	}
 }
 
-FQuestPlanSource QuestPlanSourceFromEndpoint(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping)
+FQuestPlanEndpoint QuestPlanEndpointFrom(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping)
 {
-	FQuestPlanSource Source;
-	Source.Folder     = Endpoint.Folder;
-	Source.FormatName = Endpoint.FormatName;
-	Source.Table      = Endpoint.Table.ToSoftObjectPath();
-	Source.Mapping    = Mapping ? FSoftObjectPath(Mapping) : FSoftObjectPath();
-	return Source;
+	FQuestPlanEndpoint OutEndpoint;
+	OutEndpoint.Folder     = Endpoint.Folder;
+	OutEndpoint.FormatName = Endpoint.FormatName;
+	OutEndpoint.Table      = Endpoint.Table.ToSoftObjectPath();
+	OutEndpoint.Mapping    = Mapping ? FSoftObjectPath(Mapping) : FSoftObjectPath();
+	return OutEndpoint;
 }
 
-FQuestDataEndpoint QuestEndpointFromPlanSource(const FQuestPlanSource& Source)
+FQuestDataEndpoint QuestEndpointFromPlanSource(const FQuestPlanEndpoint& Source)
 {
 	FQuestDataEndpoint Endpoint;
 	// The two provenances are exclusive, so the table decides. Deriving Kind here rather than storing it means the

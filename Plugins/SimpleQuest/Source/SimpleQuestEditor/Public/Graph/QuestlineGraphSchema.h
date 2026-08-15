@@ -46,8 +46,8 @@ public:
 	 * the intended connection against the rules for graphs using this schema and generates the connection response. Overridden to
 	 * allow self-loop behavior where additional knots are placed to control Outcome wires looping back to the same node's Activate pin.
 	 * 
-	 * @param A The first pin.
-	 * @param B The second pin.
+	 * @param A The pin dragged from.
+	 * @param B The pin dragged to.
 	 * @return True if a connection was made/broken (graph was modified); false if the connection failed and had no side effects.
 	 */
 	virtual bool TryCreateConnection(UEdGraphPin* A, UEdGraphPin* B) const override;

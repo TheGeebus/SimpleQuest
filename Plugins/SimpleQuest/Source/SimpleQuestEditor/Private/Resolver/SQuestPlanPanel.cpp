@@ -63,7 +63,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnBrowseRequested = InArgs._OnBrowseRequested;
 	CanBuildPlan = InArgs._CanBuildPlan;
 	CanApply = InArgs._CanApply;
-	SourceStale = InArgs._SourceStale;
+	ProvenanceStale = InArgs._ProvenanceStale;
 	PlanProvenance = InArgs._PlanProvenance;
 	SourceFolder = InArgs._SourceFolder;
 	OnFolderChanged = InArgs._OnFolderChanged;
@@ -88,12 +88,12 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnDestinationBrowseRequested = InArgs._OnDestinationBrowseRequested;
 	
 	ShownSourceKind = SourceTable.Get(FSoftObjectPath()).IsValid()
-		? EQuestPlanSourceKind::DataTable
-		: EQuestPlanSourceKind::Folder;
+		? EQuestPlanEndpointKind::DataTable
+		: EQuestPlanEndpointKind::Folder;
 
 	ShownDestinationKind = DestinationTable.Get(FSoftObjectPath()).IsValid()
-		? EQuestPlanSourceKind::DataTable
-		: EQuestPlanSourceKind::Folder;
+		? EQuestPlanEndpointKind::DataTable
+		: EQuestPlanEndpointKind::Folder;
 
 	// Subscribe AND pull. A plan may have been computed before this tab was ever opened, and a panel that only listened
 	// would sit empty beside a plan the log had already printed.
@@ -273,13 +273,13 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 						{
 							// ASYMMETRIC WITH THE SOURCE, and honestly so: a folder is OURS, so writing it is
 							// fire-and-forget and there is no plan to build. A studio's table is THEIRS, so it plans.
-							return ShownDestinationKind == EQuestPlanSourceKind::DataTable
+							return ShownDestinationKind == EQuestPlanEndpointKind::DataTable
 								? LOCTEXT("BuildExportPlan", "Build Export Plan")
 								: LOCTEXT("PlanExport", "Export");
 						})
 						.ToolTipText_Lambda([this]()
 						{
-							if (ShownDestinationKind != EQuestPlanSourceKind::DataTable)
+							if (ShownDestinationKind != EQuestPlanEndpointKind::DataTable)
 							{
 								return LOCTEXT("PlanExportTip", "Write this questline out as data tables you can read, diff and edit. Goes to the destination folder above, or to the default location when none is set.");
 							}
@@ -298,7 +298,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 						.IsEnabled_Lambda([this]()
 						{
 							if (!CanExport.Get(false)) { return false; }
-							if (ShownDestinationKind != EQuestPlanSourceKind::DataTable) { return true; }
+							if (ShownDestinationKind != EQuestPlanEndpointKind::DataTable) { return true; }
 							// A table write needs BOTH: somewhere to write, and a recipe saying which of that table's
 							// fields this questline's properties belong in. Without either it refuses every time, so
 							// the button could only ever fail - and a button that can only fail is not an affordance.
@@ -315,7 +315,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 						// unavailable; collapse what is meaningless here. Same rule the format combo follows.
 						.Visibility_Lambda([this]()
 						{
-							return ShownDestinationKind == EQuestPlanSourceKind::DataTable
+							return ShownDestinationKind == EQuestPlanEndpointKind::DataTable
 								? EVisibility::Visible : EVisibility::Collapsed;
 						})
 						.Text(LOCTEXT("ApplyExportPlan", "Apply Export Plan"))
@@ -364,13 +364,13 @@ SQuestPlanPanel::~SQuestPlanPanel()
 TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs& Args)
 {
 	// A pointer to the panel's member, not a copy: this row drives live state that other controls read back.
-	EQuestPlanSourceKind* Kind = Args.Kind;
+	EQuestPlanEndpointKind* Kind = Args.Kind;
 	const bool bDest = (Args.Role == EQuestEndpointRole::Destination);
 	TSharedPtr<SComboBox<TSharedPtr<FString>>>* ComboSlot = Args.FormatCombo;
 
 	// One definition each, reused by every control that follows the kind - four folder-visible controls and one table.
-	auto FolderVisibility = [Kind]() { return *Kind == EQuestPlanSourceKind::Folder    ? EVisibility::Visible : EVisibility::Collapsed; };
-	auto TableVisibility  = [Kind]() { return *Kind == EQuestPlanSourceKind::DataTable ? EVisibility::Visible : EVisibility::Collapsed; };
+	auto FolderVisibility = [Kind]() { return *Kind == EQuestPlanEndpointKind::Folder    ? EVisibility::Visible : EVisibility::Collapsed; };
+	auto TableVisibility  = [Kind]() { return *Kind == EQuestPlanEndpointKind::DataTable ? EVisibility::Visible : EVisibility::Collapsed; };
 
 	return SNew(SHorizontalBox)
 
@@ -387,7 +387,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 			.OnGetMenuContent_Lambda([Kind, OnKindChanged = Args.OnKindChanged]()
 			{
 				FMenuBuilder Menu(true, nullptr);
-				auto AddKind = [Kind, &OnKindChanged, &Menu](EQuestPlanSourceKind NewKind, const FText& Label)
+				auto AddKind = [Kind, &OnKindChanged, &Menu](EQuestPlanEndpointKind NewKind, const FText& Label)
 				{
 					Menu.AddMenuEntry(Label, FText::GetEmpty(), FSlateIcon(),
 						FUIAction(FExecuteAction::CreateLambda([Kind, OnKindChanged, NewKind]()
@@ -396,8 +396,8 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 							OnKindChanged.ExecuteIfBound(NewKind);
 						})));
 				};
-				AddKind(EQuestPlanSourceKind::Folder, LOCTEXT("SourceKindFolder", "Folder"));
-				AddKind(EQuestPlanSourceKind::DataTable, LOCTEXT("SourceKindTable", "Data Table"));
+				AddKind(EQuestPlanEndpointKind::Folder, LOCTEXT("SourceKindFolder", "Folder"));
+				AddKind(EQuestPlanEndpointKind::DataTable, LOCTEXT("SourceKindTable", "Data Table"));
 				return Menu.MakeWidget();
 			})
 			.ButtonContent()
@@ -409,7 +409,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 				[
 					SNew(STextBlock).Text_Lambda([Kind]()
 					{
-						return *Kind == EQuestPlanSourceKind::DataTable
+						return *Kind == EQuestPlanEndpointKind::DataTable
 							? LOCTEXT("SourceKindTable", "Data Table")
 							: LOCTEXT("SourceKindFolder", "Folder");
 					})
@@ -506,7 +506,7 @@ TSharedRef<SWidget> SQuestPlanPanel::MakeEndpointRow(const FQuestEndpointRowArgs
 			SNew(STextBlock)
 			.Text_Lambda([Kind]()
 			{
-				return *Kind == EQuestPlanSourceKind::DataTable
+				return *Kind == EQuestPlanEndpointKind::DataTable
 					? LOCTEXT("LocationLabelAsset", "Asset")
 					: LOCTEXT("LocationLabelPath", "Path");
 			})
@@ -643,7 +643,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 	if (const FQuestPlanRecord* Rec = FQuestPlanBroker::Get().Find(InAssetPath))
 	{
 		LastError = Rec->Error;
-		LastFailedFormat = Rec->Source.FormatName;
+		LastFailedFormat = Rec->Provenance.FormatName;
 	}
 	
 	// A FAILURE also arrives here - PublishFailure broadcasts through the same delegate - and it did not produce a
@@ -722,7 +722,7 @@ EVisibility SQuestPlanPanel::GetStaleVisibility() const
 	// Three independent reasons a plan stops being true: the ASSET moved under it, the DATA it concerns moved, or the
 	// SELECTION moved away from what it was built against. Any one makes what is on screen a statement about a state
 	// that no longer exists.
-	return (bStale || bTableStale || SourceStale.Get(false)) ? EVisibility::Visible : EVisibility::Collapsed;
+	return (bStale || bTableStale || ProvenanceStale.Get(false)) ? EVisibility::Visible : EVisibility::Collapsed;
 }
 
 FText SQuestPlanPanel::GetStaleText() const

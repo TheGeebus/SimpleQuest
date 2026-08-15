@@ -18,7 +18,7 @@ DECLARE_DELEGATE_OneParam(FOnQuestPlanFormatChanged, FString /*FormatName*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanMappingChanged, const FSoftObjectPath& /*MappingAsset*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
-DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanSourceKind /*Kind*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanEndpointKind /*Kind*/);
 
 /** Which end of the pipeline a row describes. The controls are identical; the WORDS are not. */
 enum class EQuestEndpointRole : uint8 { Source, Destination };
@@ -35,7 +35,7 @@ struct FQuestEndpointRowArgs
 {
 	FText Label;
 
-	EQuestPlanSourceKind* Kind = nullptr;
+	EQuestPlanEndpointKind* Kind = nullptr;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>>* FormatCombo = nullptr;
 	EQuestEndpointRole Role = EQuestEndpointRole::Source;
 
@@ -101,7 +101,7 @@ public:
 		/**
 		 * PROVENANCE - what the displayed plan was built from, which is NOT the same fact as what is currently selected.
 		 * Empty when no plan exists, and the subtitle slot collapses. The selection lives in the fields below, and the
-		 * two disagreeing is what SourceStale reports.
+		 * two disagreeing is what ProvenanceStale reports.
 		 */
 		SLATE_ATTRIBUTE(FText, PlanProvenance)
 
@@ -138,7 +138,7 @@ public:
 		 * True when the SELECTION has moved away from what the displayed plan was built from. A second staleness
 		 * reason alongside the asset having changed, and it wants its own sentence.
 		 */
-		SLATE_ATTRIBUTE(bool, SourceStale)
+		SLATE_ATTRIBUTE(bool, ProvenanceStale)
 
 		
 		/** Raised by Export. The panel displays; the toolkit owns the operation and the destination. */
@@ -199,7 +199,7 @@ private:
 	FSimpleDelegate OnBrowseRequested;
 	TAttribute<bool> CanBuildPlan;
 	TAttribute<bool> CanApply;
-	TAttribute<bool> SourceStale;
+	TAttribute<bool> ProvenanceStale;
 
 	FSimpleDelegate OnExportRequested;
 	TAttribute<bool> CanExport;
@@ -237,7 +237,7 @@ private:
 	FSimpleDelegate OnDestinationBrowseRequested;
 
 	/** Which provenance the DESTINATION row is showing - its own state, for the same reason the source's is. */
-	EQuestPlanSourceKind ShownDestinationKind = EQuestPlanSourceKind::Folder;
+	EQuestPlanEndpointKind ShownDestinationKind = EQuestPlanEndpointKind::Folder;
 
 	/** Per-row, because there are two combos now. FormatOptions stays SHARED - the registry is one list. */
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> DestinationFormatCombo;
@@ -246,7 +246,7 @@ private:
 	 * Which provenance the row is SHOWING. Panel state, not the toolkit's: a record always has one or the other, but
 	 * the UI has to be able to sit on Data Table with nothing picked yet. Seeded from whatever is bound at construction.
 	 */
-	EQuestPlanSourceKind ShownSourceKind = EQuestPlanSourceKind::Folder;
+	EQuestPlanEndpointKind ShownSourceKind = EQuestPlanEndpointKind::Folder;
 
 	/** Backing store for the format combo. Refreshed on open rather than at construction, because a provider can be
 	 *  registered after this panel exists and a snapshot would hide it. */

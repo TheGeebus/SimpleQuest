@@ -13,26 +13,28 @@
 #include "UObject/SoftObjectPath.h"
 
 /**
- * WHICH PROVENANCE a source is. Lives beside FQuestPlanSource because that is what it describes; the resolver's private
+ * WHICH PROVENANCE a source is. Lives beside FQuestPlanEndpoint because that is what it describes; the resolver's private
  * FQuestDataEndpoint derives its own kind from the same fact, through one helper, so the two cannot disagree.
  */
-enum class EQuestPlanSourceKind : uint8
+enum class EQuestPlanEndpointKind : uint8
 {
 	Folder,
 	DataTable,
 };
 
 /**
- * Where a plan's data came from, as plain fields rather than an FQuestDataEndpoint - that type is private to the
- * resolver and this header is public. Carried WITH the plan because applying re-reads the source, so a consumer that
- * can see a plan must also be able to name what produced it; otherwise the surface showing a plan and the surface
- * offering to apply it disagree about whether there is anything to do.
+ * An ENDPOINT a plan concerns: a folder plus its format, or a DataTable, plus the translation mapping in force. Held as
+ * plain fields rather than the resolver's own FQuestDataEndpoint because that type is private and this header is public.
+ *
+ * DIRECTION-NEUTRAL ON PURPOSE. The same shape describes where data is READ FROM and where it is WRITTEN INTO; which of
+ * those it means is carried by the member holding it and by the plan's own Direction, never by this type. Reading a
+ * direction into the type itself is a mistake it cannot catch for you.
  */
-struct FQuestPlanSource
+struct FQuestPlanEndpoint
 {
-	FString Folder;          // empty when the source was a DataTable
+	FString Folder;          // empty when this endpoint is a DataTable
 	FString FormatName;      // meaningful only for a folder
-	FSoftObjectPath Table;   // invalid when the source was a folder
+	FSoftObjectPath Table;   // invalid when this endpoint is a folder
 	FSoftObjectPath Mapping; // the translation mapping in force, invalid for none	
 
 	/**
@@ -40,7 +42,7 @@ struct FQuestPlanSource
 	 * a statement about a RECORD, which always has one or the other; a UI may legitimately sit on DataTable with
 	 * nothing picked yet, which is a state no record can hold and which the panel therefore tracks itself.
 	 */
-	EQuestPlanSourceKind Kind() const { return Table.IsValid() ? EQuestPlanSourceKind::DataTable : EQuestPlanSourceKind::Folder; }
+	EQuestPlanEndpointKind Kind() const { return Table.IsValid() ? EQuestPlanEndpointKind::DataTable : EQuestPlanEndpointKind::Folder; }
 
 
 	bool IsValid() const { return !Folder.IsEmpty() || Table.IsValid(); }
@@ -49,7 +51,14 @@ struct FQuestPlanSource
 struct FQuestPlanRecord
 {
 	FQuestInPlacePlan Plan;
-	FQuestPlanSource Source;
+	
+	/**
+	 * WHAT THIS PLAN WAS BUILT FROM - provenance, not a direction. For an inbound plan that is the source endpoint; for
+	 * an OUTBOUND one it is the destination, because that is what an export plan was computed against. Reading it as
+	 * "the source endpoint" is what made every export plan compare against the import row and report itself stale on
+	 * the instant it was built.
+	 */
+	FQuestPlanEndpoint Provenance;
 	
 	/**
 	 * Non-empty when the last attempt on this asset FAILED TO PRODUCE A PLAN at all - an unreadable source, a refused
@@ -71,7 +80,7 @@ public:
 	static FQuestPlanBroker& Get();
 
 	/** Record a plan and what produced it, then tell anyone listening. Replaces any previous plan for the asset. */
-	void Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanSource& Source);
+	void Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanEndpoint& Provenance);
 
 	/**
 	 * Record that an attempt produced NO plan, and why. Goes through the same channel for the same reason a plan does:
@@ -79,7 +88,7 @@ public:
 	 * "no plan yet" when the truth is "the source could not be read" is telling a designer to try the thing that just
 	 * failed. Reason reaches every listener, so a console failure surfaces in the panel too.
 	 */
-	void PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanSource& Source);
+	void PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanEndpoint& Provenance);
 
 	/** The last plan computed for an asset, with its source, or null. */
 	const FQuestPlanRecord* Find(const FString& TargetAssetPath) const;

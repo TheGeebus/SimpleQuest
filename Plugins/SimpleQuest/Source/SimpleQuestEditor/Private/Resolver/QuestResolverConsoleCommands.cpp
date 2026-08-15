@@ -166,7 +166,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		// site would surface mapping and validation failures and silently miss the one a designer hits most.
 		if (bInPlace)
 		{
-			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, QuestPlanSourceFromEndpoint(Endpoint, ArgMapping));
+			FQuestPlanBroker::Get().PublishFailure(NormalizeConsoleAssetPath(InPlacePath), ReadError, QuestPlanEndpointFrom(Endpoint, ArgMapping));
 		}
 		return;
 	}
@@ -222,7 +222,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 			// Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
 			// log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
 			// failed. The notification catches the eye; the panel is where the reason stays.
-			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+			FQuestPlanBroker::Get().PublishFailure(TargetGraph->GetPathName(), Outcome.Error, QuestPlanEndpointFrom(Request.Endpoint, Request.Mapping));
 			UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s. Nothing was modified."), *Outcome.Error);
 			return;
 		}
@@ -231,7 +231,7 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		LogQuestPlanReport(Outcome.Plan, EQuestPlanSubject::Questline, TEXT("ImportQuestline"));
 		// The log is one rendering of the plan; the panel is another. Published unconditionally, including for a plan
 		// about to be applied, so the panel always shows what the run actually decided.
-		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanSourceFromEndpoint(Endpoint, ArgMapping));
+		FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan,	QuestPlanEndpointFrom(Endpoint, ArgMapping));
 
 		if (!bApply)
 		{
@@ -472,7 +472,7 @@ void ExportQuestlineCmd(const TArray<FString>& Args)
 	if (Out.bPlanned)
 	{
 		LogQuestPlanReport(Out.RowPlan, EQuestPlanSubject::Row, TEXT("ExportQuestline"));
-		FQuestPlanBroker::Get().Publish(Graph->GetPathName(), Out.RowPlan, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+		FQuestPlanBroker::Get().Publish(Graph->GetPathName(), Out.RowPlan, QuestPlanEndpointFrom(Request.Endpoint, Request.Mapping));
 
 		if (!bApply)
 		{

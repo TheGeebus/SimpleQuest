@@ -1149,7 +1149,7 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .OnBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForImportFolder))
             .CanBuildPlan(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanBuildImportPlan))
             .CanApply(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan))
-            .SourceStale(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::IsPlanSourceStale))
+            .ProvenanceStale(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::IsPlanProvenanceStale))
             .PlanProvenance(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetPlanProvenanceLabel))
             .SourceFolder(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFolder))
             .OnFolderChanged(FOnQuestPlanFolderChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFolderChanged))
@@ -1181,7 +1181,7 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         ];
 }
 
-bool FQuestlineGraphEditor::RunImport(const FQuestPlanSource& Source, bool bApply)
+bool FQuestlineGraphEditor::RunImport(const FQuestPlanEndpoint& Source, bool bApply)
 {
     if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
 
@@ -1379,12 +1379,12 @@ void FQuestlineGraphEditor::HandleImportTableChanged(const FSoftObjectPath& NewT
     SaveImportEndpointToMemo();
 }
 
-void FQuestlineGraphEditor::HandleSourceKindChanged(EQuestPlanSourceKind NewKind)
+void FQuestlineGraphEditor::HandleSourceKindChanged(EQuestPlanEndpointKind NewKind)
 {
     // Clears the side no longer in play rather than leaving both set, so the endpoint's derived kind always agrees with
     // what the panel is showing. The panel keeps its own notion of which control is visible, because it can sit on
     // Data Table with nothing picked - a state no source can hold.
-    if (NewKind == EQuestPlanSourceKind::DataTable) { LastImportSource.Folder.Reset(); }
+    if (NewKind == EQuestPlanEndpointKind::DataTable) { LastImportSource.Folder.Reset(); }
     else                                            { LastImportSource.Table.Reset(); }
     SaveImportEndpointToMemo();
 }
@@ -1422,9 +1422,9 @@ void FQuestlineGraphEditor::HandleExportTableChanged(const FSoftObjectPath& NewT
     SaveImportEndpointToMemo();
 }
 
-void FQuestlineGraphEditor::HandleDestinationKindChanged(EQuestPlanSourceKind NewKind)
+void FQuestlineGraphEditor::HandleDestinationKindChanged(EQuestPlanEndpointKind NewKind)
 {
-    if (NewKind == EQuestPlanSourceKind::DataTable) { LastExportDestination.Folder.Reset(); }
+    if (NewKind == EQuestPlanEndpointKind::DataTable) { LastExportDestination.Folder.Reset(); }
     else                                            { LastExportDestination.Table.Reset(); }
     SaveImportEndpointToMemo();
 }
@@ -1468,7 +1468,7 @@ FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
     // ALWAYS says something. A line that collapses when there is no plan makes the row jump, and its absence carries
     // no information - "there is no plan" is a fact worth stating plainly.
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    if (!Record || !Record->Source.IsValid())
+    if (!Record || !Record->Provenance.IsValid())
     {
         return NSLOCTEXT("SimpleQuestEditor", "PlanNone", "No plan built");
     }
@@ -1481,46 +1481,46 @@ FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
 
     // Names what the ROWS are a statement about, which is no longer the same fact as what the fields above show. The
     // format is part of it: one folder read as TSV and the same folder read as JSON are different sources.
-    return Record->Source.Kind() == EQuestPlanSourceKind::DataTable
+    return Record->Provenance.Kind() == EQuestPlanEndpointKind::DataTable
         ? FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromTable", "Plan built from {0}"),
-            FText::FromString(Record->Source.Table.ToString()))
+            FText::FromString(Record->Provenance.Table.ToString()))
         : FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromFolder", "Plan built from {0} as {1}"),
-            FText::FromString(Record->Source.Folder),
-            FText::FromString(Record->Source.FormatName));
+            FText::FromString(Record->Provenance.Folder),
+            FText::FromString(Record->Provenance.FormatName));
 }
 
-bool FQuestlineGraphEditor::IsPlanSourceStale() const
+bool FQuestlineGraphEditor::IsPlanProvenanceStale() const
 {
     if (!QuestlineGraph) { return false; }
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
     // A failure record describes no plan, so there is nothing for the selection to have drifted away from.
-    if (!Record || !Record->Source.IsValid() || !Record->Error.IsEmpty()) { return false; }
+    if (!Record || !Record->Provenance.IsValid() || !Record->Error.IsEmpty()) { return false; }
 
     // WHICH SELECTION a plan is answerable to depends on WHICH WAY IT POINTS. FQuestPlanRecord::Source means "what
     // this plan was built from", and for an OUTBOUND plan that is the DESTINATION endpoint - so comparing it against
     // the import row reported every export plan stale the moment it was built, before anything had changed. The field
     // name says Source while the meaning is provenance; until that name is revisited, direction has to be read here.
-    const FQuestPlanSource& Selection = (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
+    const FQuestPlanEndpoint& Selection = (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
         ? LastExportDestination
         : LastImportSource;
 
-    if (Record->Source.Mapping != Selection.Mapping) { return true; }
-    if (Record->Source.Kind() != Selection.Kind()) { return true; }
+    if (Record->Provenance.Mapping != Selection.Mapping) { return true; }
+    if (Record->Provenance.Kind() != Selection.Kind()) { return true; }
     // Compared per field rather than by whole-struct equality, because FormatName is meaningless for a table and would
     // otherwise report every table plan stale the moment the combo held anything.
-    if (Selection.Kind() == EQuestPlanSourceKind::DataTable)
+    if (Selection.Kind() == EQuestPlanEndpointKind::DataTable)
     {
-        return Record->Source.Table != Selection.Table;
+        return Record->Provenance.Table != Selection.Table;
     }
-    return Record->Source.Folder != Selection.Folder
-        || Record->Source.FormatName != Selection.FormatName;
+    return Record->Provenance.Folder != Selection.Folder
+        || Record->Provenance.FormatName != Selection.FormatName;
 }
 
 void FQuestlineGraphEditor::ApplyImportPlan()
 {
     if (!QuestlineGraph) { return; }
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
-    if (!Record || !Record->Source.IsValid()) { return; }
+    if (!Record || !Record->Provenance.IsValid()) { return; }
 
     // ONE Apply, dispatching on the plan itself. This is what putting Direction on the PLAN rather than the broker
     // record buys: the button does not need to know which endpoint field was last edited, only what it is holding.
@@ -1530,10 +1530,10 @@ void FQuestlineGraphEditor::ApplyImportPlan()
     // LastImportSource, for the same reason.
     if (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
     {
-        ApplyRowPlan(Record->Source);
+        ApplyRowPlan(Record->Provenance);
         return;
     }
-    RunImport(Record->Source, true);
+    RunImport(Record->Provenance, true);
 }
 
 /**
@@ -1547,7 +1547,7 @@ static bool ConfirmMutation(const FText& Title, const FText& Message)
         == EAppReturnType::Yes;
 }
 
-void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanSource& Source)
+void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanEndpoint& Source)
 {
     if (!QuestlineGraph) { return; }
 
@@ -1687,7 +1687,7 @@ void FQuestlineGraphEditor::ExportQuestlineData()
     // the plan's direction - can act on it. Mirrors what the console does, deliberately: two surfaces, one behavior.
     if (Out.bPlanned)
     {
-        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, QuestPlanSourceFromEndpoint(Request.Endpoint, Request.Mapping));
+        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, QuestPlanEndpointFrom(Request.Endpoint, Request.Mapping));
 
         UE_LOG(LogSimpleQuestResolver, Log, TEXT("Plan Write: %d row(s) to create, %d to update. %d row(s) in that table "
             "are claimed by nothing here and were left alone."),
@@ -1761,7 +1761,7 @@ bool FQuestlineGraphEditor::CanApplyImportPlan() const
     if (!QuestlineGraph) { return false; }
     const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
     return Record
-        && Record->Source.IsValid()
+        && Record->Provenance.IsValid()
         && Record->Plan.Refusals.IsEmpty()
         && Record->Plan.AmbiguousKeys.IsEmpty()
         && !Record->Plan.IsNoOp();

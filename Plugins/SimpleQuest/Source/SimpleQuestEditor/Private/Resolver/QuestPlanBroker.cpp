@@ -9,16 +9,16 @@ FQuestPlanBroker& FQuestPlanBroker::Get()
 	return Instance;
 }
 
-void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanSource& Source)
+void FQuestPlanBroker::Publish(const FString& TargetAssetPath, const FQuestInPlacePlan& Plan, const FQuestPlanEndpoint& Provenance)
 {
 	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
 	Record.Plan = Plan;
-	Record.Source = Source;
+	Record.Provenance = Provenance;
 	Record.Error.Empty();
 	PlanPublished.Broadcast(TargetAssetPath, Record.Plan);
 }
 
-void FQuestPlanBroker::PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanSource& Source)
+void FQuestPlanBroker::PublishFailure(const FString& TargetAssetPath, const FString& Reason, const FQuestPlanEndpoint& Provenance)
 {
 	// A failure with NO REASON is not expressible on purpose: Error is what every consumer gates on. An empty one
 	// silently turns a success into "no plan" and clears the rows. Guarded here.
@@ -29,7 +29,7 @@ void FQuestPlanBroker::PublishFailure(const FString& TargetAssetPath, const FStr
 	}
 
 	FQuestPlanRecord& Record = RecordByAsset.FindOrAdd(TargetAssetPath);
-	Record.Source = Source;
+	Record.Provenance = Provenance;
 	Record.Error  = Reason;
 	// The previous plan is deliberately left in place but is no longer the current answer - consumers gate on Error
 	// first. Discarding it would lose a plan the designer may still be reading while they fix the source.

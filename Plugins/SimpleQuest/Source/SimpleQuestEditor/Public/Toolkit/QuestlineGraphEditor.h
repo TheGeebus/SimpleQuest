@@ -192,12 +192,12 @@ private:
 	
 	void HandleImportFolderChanged(const FString& NewFolder);
 	void HandleImportTableChanged(const FSoftObjectPath& NewTable);
-	void HandleSourceKindChanged(EQuestPlanSourceKind NewKind);
+	void HandleSourceKindChanged(EQuestPlanEndpointKind NewKind);
 	void HandleImportFormatChanged(FString NewFormat);
 	void HandleImportMappingChanged(const FSoftObjectPath& NewMapping);
 	void HandleExportFolderChanged(const FString& NewFolder);
 	void HandleExportTableChanged(const FSoftObjectPath& NewTable);
-	void HandleDestinationKindChanged(EQuestPlanSourceKind NewKind);
+	void HandleDestinationKindChanged(EQuestPlanEndpointKind NewKind);
 	void HandleExportFormatChanged(FString NewFormat);
 	void HandleExportMappingChanged(const FSoftObjectPath& NewMapping);
 	void BrowseForExportFolder();
@@ -220,21 +220,21 @@ private:
 	FText GetPlanProvenanceLabel() const;
 
 	/** True when the selection has moved away from what the displayed plan was built from. */
-	bool IsPlanSourceStale() const;
+	bool IsPlanProvenanceStale() const;
 
 	/**
 	 * Runs against the source it is GIVEN rather than the held selection, because the two callers legitimately want
 	 * different ones: Build Plan reads the current selection, Apply re-runs what the reviewed plan came from and must
 	 * not overwrite a field the designer has edited since. Assign-then-run is how a table provenance got dropped once.
 	 */
-	bool RunImport(const FQuestPlanSource& Source, bool bApply);
+	bool RunImport(const FQuestPlanEndpoint& Source, bool bApply);
 
 	/**
 	 * Apply an OUTBOUND plan: re-run the export the record came from, this time writing. Mirrors RunImport's contract -
 	 * what runs is what you reviewed, so it re-runs the RECORD's source rather than the current selection, and the two
 	 * can legitimately differ once a designer edits a field after building a plan.
 	 */
-	void ApplyRowPlan(const FQuestPlanSource& Source);
+	void ApplyRowPlan(const FQuestPlanEndpoint& Source);
 	
 	/**
 	 * Per-user, per-project memory of this questline's source, so a session resumes where the last one ended. Restored
@@ -251,13 +251,13 @@ private:
 	 * FormatName is seeded in InitQuestlineGraphEditor rather than by a braced initializer here - the first two members
 	 * are both FStrings, so a positional default would mis-assign silently if they were ever reordered.
 	 */
-	FQuestPlanSource LastImportSource;
+	FQuestPlanEndpoint LastImportSource;
 
 	/**
-	 * WHERE this questline's data is written. FQuestPlanSource describes an ENDPOINT - its name predates there being
+	 * WHERE this questline's data is written. FQuestPlanEndpoint describes an ENDPOINT - its name predates there being
 	 * two of them, and is worth revisiting rather than working around.
 	 */
-	FQuestPlanSource LastExportDestination;
+	FQuestPlanEndpoint LastExportDestination;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

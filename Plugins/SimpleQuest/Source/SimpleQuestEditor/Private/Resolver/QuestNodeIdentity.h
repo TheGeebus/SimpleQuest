@@ -26,7 +26,8 @@ class UQuestlineNodeBase;
  * @param OutGraphCellByGuid   Optional. GUID -> the graph level the node sits in: "root", else the owning container's key.
  * @param GraphCell            The level being walked. Callers use the default; recursion supplies the container's key.
  */
-void CollectQuestNodeIdentity(const UEdGraph* EdGraph,
+void CollectQuestNodeIdentity(
+	const UEdGraph* EdGraph,
 	TMap<FString, FString>& OutSourceKeyByGuid,
 	TMap<FString, const UQuestlineNodeBase*>& OutNodeByGuid,
 	TMap<FString, FString>* OutGraphCellByGuid = nullptr,
@@ -42,7 +43,8 @@ FString QuestNodeIdentityKey(const FString& Guid, const TMap<FString, FString>& 
  * A key claimed by more than one node, or a node claimed by more than one key, is AMBIGUOUS: it is reported and left out
  * of the index entirely, so a caller refuses rather than picking a winner by hash order.
  */
-void BuildQuestNodeKeyIndex(const TMap<FString, FString>& SourceKeyByGuid,
+void BuildQuestNodeKeyIndex(
+	const TMap<FString, FString>& SourceKeyByGuid,
 	const TArray<FString>& AllGuids,
 	TMap<FString, FString>& OutGuidByKey,
 	TArray<FString>& OutAmbiguousKeys);
@@ -66,11 +68,13 @@ bool IsQuestInstancedBearing(const FProperty* Prop);
  * that silently disappears.
  * @param PathPrefix  the property path so far, relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards").
  */
-void ForEachQuestInstancedChild(const FProperty* Prop,
-	const void* ValuePtr,
-	const FString& OwnerKey,
-	const FString& PathPrefix,
-	TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit);
+void ForEachQuestInstancedChild(
+	const FProperty* Prop,
+    const void* ValuePtr,
+    const FString& OwnerKey,
+    const FString& PathPrefix,
+    TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)> Visit,
+    int32 ArrayOrdinal = INDEX_NONE);
 
 /** Wire-edge verb for a source pin category. Every edge is written output->input, and the verbs read true in that direction. */
 FString QuestEdgeVerb(FName PinCategory);
@@ -94,10 +98,11 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
  * An endpoint naming no known node passes through unresolved, which correctly makes an edge touching a to-be-created node
  * an addition rather than a match.
  */
-void CompareQuestEdges(const TArray<FQuestDataEdge>& Incoming,
-                       const TArray<FQuestDataEdge>& Live,
-                       const TMap<FString, FString>& GuidByKey,
-                       const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid,
-                       TArray<FQuestDataEdge>& OutAdded,
-                       TArray<FQuestDataEdge>& OutRemoved);
+void CompareQuestEdges(
+	const TArray<FQuestDataEdge>& Incoming,
+    const TArray<FQuestDataEdge>& Live,
+    const TMap<FString, FString>& GuidByKey,
+    const TMap<FString, const UQuestlineNodeBase*>& NodeByGuid,
+    TArray<FQuestDataEdge>& OutAdded,
+    TArray<FQuestDataEdge>& OutRemoved);
 

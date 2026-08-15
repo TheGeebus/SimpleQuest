@@ -46,7 +46,9 @@ void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, 
 	for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 	{
 		const FString& Column = Cell.Key;
-		if (Column == TEXT("class") || Column == TEXT("graph")) continue;   // structural - describes the row, not a property
+		// Structural - describes the row, not a property. "index" is the child's position in its owner's array: real
+		// meaning, but not a property OF the child, and diffing it as one would report a reorder as a value edit.
+		if (Column == TEXT("class") || Column == TEXT("graph") || Column == TEXT("index")) continue;
 
 		FProperty* Prop = PropByAuthoredName.FindRef(Column);
 		if (!Prop)
@@ -170,26 +172,26 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
 
 		TSet<FString> LiveKeys;
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-			[&](const FString& ChildKey, const FString& Path, const UObject* Child)
-			{
-				LiveKeys.Add(ChildKey);
+		[&](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
+	        {
+	            LiveKeys.Add(ChildKey);
 
-				FString ChildClass;
-				const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
-				if (!ChildRow)
-				{
-					// The source DOES describe this property's contents, and this child is not among them.
-					FQuestPropertyChange Change;
-					Change.Property     = Path;
-					Change.CurrentText  = Child->GetClass()->GetName();
-					Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
-					Change.IncomingText = TEXT("<removed>");
-					Entry.Changes.Add(MoveTemp(Change));
-					return;
-				}
-				DiffQuestObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan, Policies);
-				DiffQuestInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
-			});
+	            FString ChildClass;
+	            const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
+	            if (!ChildRow)
+	            {
+	                // The source DOES describe this property's contents, and this child is not among them.
+	                FQuestPropertyChange Change;
+	                Change.Property     = Path;
+	                Change.CurrentText  = Child->GetClass()->GetName();
+	                Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
+	                Change.IncomingText = TEXT("<removed>");
+	                Entry.Changes.Add(MoveTemp(Change));
+	                return;
+	            }
+	            DiffQuestObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan, Policies);
+	            DiffQuestInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
+	       });
 
 		// Rows under this property with no live counterpart are additions.
 		const FString Indexed = PropPrefix + TEXT("[");

@@ -32,10 +32,10 @@ static void CollectApplyTargets(UObject* Owner, const FString& OwnerKey, const F
 		if (!IsQuestInstancedBearing(Prop)) continue;
 
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-			[&OutByPath](const FString& ChildKey, const FString& Path, const UObject* Child)
-			{
-				CollectApplyTargets(const_cast<UObject*>(Child), ChildKey, Path, OutByPath);
-			});
+		[&OutByPath](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
+	        {
+	            CollectApplyTargets(const_cast<UObject*>(Child), ChildKey, Path, OutByPath);
+	        });
 	}
 }
 

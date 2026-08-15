@@ -7,6 +7,7 @@
 
 #include "CoreMinimal.h"
 #include "ISimpleQuestEditorModule.h"
+#include "ObjectTools.h"
 #include "Engine/Engine.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
@@ -132,6 +133,20 @@ namespace
 		// 1. Export the source (authored folder + we'll dump its compiled form too).
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *AssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *AssetPath));
+
+		// RoundTrip OWNS the <ID>_RT name, so a leftover from an earlier run is this command's mess to clear rather than
+		// a collision to report. Left in place it keeps claiming the previous run's QuestlineID, and two assets in one
+		// tag namespace is a compile collision with nothing to do with what is being verified - it reads as a pipeline
+		// fault and is not one.
+		{
+			const FString ExistingPath = FString::Printf(TEXT("%s/%s.%s"), *DestPackagePath, *RtID, *RtID);
+			if (UObject* Leftover = StaticLoadObject(UQuestlineGraph::StaticClass(), nullptr, *ExistingPath, nullptr, LOAD_NoWarn | LOAD_Quiet))
+			{
+				const int32 Deleted = ObjectTools::ForceDeleteObjects({ Leftover }, /*ShowConfirmation*/ false);
+				UE_LOG(LogSimpleQuestResolver, Log, TEXT("RoundTrip: cleared %d leftover '%s' asset(s) from an earlier run."),
+					   Deleted, *RtID);
+			}
+		}
 
 		// 2. Import from the source folder -> creates <ID>_RT in DestPackagePath.
 		Exec(FString::Printf(TEXT("SimpleQuest.ImportQuestline %s %s%s"), *SrcFolder, *DestPackagePath, *FormatArg));

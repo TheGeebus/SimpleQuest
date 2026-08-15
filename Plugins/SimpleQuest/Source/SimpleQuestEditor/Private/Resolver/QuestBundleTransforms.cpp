@@ -22,14 +22,28 @@ bool QuestBundle_Validate(const FQuestDataBundle& Bundle,
 	if (!Questline) { OutError = TEXT("no questline_graph table (the self row)"); return false; }
 	if (Questline->Rows.Num() != 1) { OutError = TEXT("questline_graph table must have exactly one row"); return false; }
 
-	// Index every row key. Node/self rows are keyed by GUID digits or the EffectiveID; instanced child rows carry
-	// a '/' path segment. Only NODE rows spawn editor nodes, so split the two - but track ALL keys so edge
-	// endpoints that legitimately reference child rows (contains edges) validate. Self = the questline_graph table.
 	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 	{
 		const bool bIsSelf = (TablePair.Key == TEXT("questline_graph"));
 		for (const FQuestDataRow& R : TablePair.Value.Rows)
 		{
+			// A KEY IS AN IDENTITY. Two rows sharing one are not two statements about a thing, they are two rows each
+			// claiming to BE it, and nothing downstream can choose between them: FindQuestChildRow returns the first
+			// match while walking a TMap, so which one wins is not even stable across runs. Previously this Add
+			// silently swallowed the second row and NodeRowsByKey.Add silently overwrote the first.
+			// CHILD ROWS ARE CHECKED TOO, and they are the reason this matters: their keys carry an array index minted
+			// from the live array length, so two branches each appending to one array both mint the same index - in
+			// different per-class files, where a textual merge sees no overlap at all and joins them cleanly.
+
+			bool bAlreadySeen = false;
+			AllRowKeys.Add(R.Key, &bAlreadySeen);
+			if (bAlreadySeen)
+			{
+				OutError = FString::Printf(TEXT("duplicate row key '%s' (seen again in table '%s') - two rows cannot "
+					"claim one identity"), *R.Key, *TablePair.Key);
+				return false;
+			}
+
 			AllRowKeys.Add(R.Key);
 			const bool bIsChild = R.Key.Contains(TEXT("/"));
 			if (!bIsChild && !bIsSelf) NodeRowsByKey.Add(R.Key, &R);

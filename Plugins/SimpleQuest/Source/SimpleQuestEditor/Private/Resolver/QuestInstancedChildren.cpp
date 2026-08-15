@@ -5,6 +5,7 @@
 
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestRowRestore.h"
+#include "Rewards/QuestRewardBase.h"
 #include "UObject/UnrealType.h"
 
 
@@ -18,6 +19,19 @@ const FQuestDataRow* FindQuestChildRow(const FQuestDataBundle& Bundle, const FSt
 		}
 	}
 	return nullptr;
+}
+
+// Parse a child key's LAST path segment: "<owner>/<prop>[<pos>]" or "<owner>/<prop>[<mapkey>].<sub>[<pos>]".
+// Returns the leaf property name + the bracketed token; the middle path is already resolved because we arrive here
+// via the property walk, not by parsing the whole path (D2's smaller-parser property).
+static bool SplitLeafSegment(const FString& ChildKey, FString& OutBracketToken)
+{
+	int32 OpenIdx;
+	if (!ChildKey.FindLastChar(TEXT('['), OpenIdx)) return false;
+	int32 CloseIdx;
+	if (!ChildKey.FindLastChar(TEXT(']'), CloseIdx) || CloseIdx < OpenIdx) return false;
+	OutBracketToken = ChildKey.Mid(OpenIdx + 1, CloseIdx - OpenIdx - 1);
+	return true;
 }
 
 // Rebuild one instanced child object from its row: NewObject<class> under Owner, restore its cells, recurse
@@ -36,23 +50,27 @@ static UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const 
 	}
 
 	UObject* Sub = NewObject<UObject>(Owner, Class, NAME_None, RF_Transactional);
+
+	// IDENTITY COMES FROM THE KEY, exactly as a node's QuestGuid does. The bracket segment IS this reward's GUID, and
+	// it is deliberately not a cell - identity addresses the row rather than being data on it - so nothing else would
+	// restore it. Without this a rebuilt reward mints a fresh identity and the round trip reports every reward as
+	// changed while its behaviour is provably identical.
+	// A positional key from a corpus written before identity existed simply fails to parse, leaving the GUID invalid
+	// for PreSave to mint - which is the correct migration, not a fallback worth warning about.
+	if (UQuestRewardBase* Reward = Cast<UQuestRewardBase>(Sub))
+	{
+		FString Tok;
+		FGuid Parsed;
+		if (SplitLeafSegment(ChildKey, Tok) && FGuid::ParseExact(Tok, EGuidFormats::Digits, Parsed))
+		{
+			Reward->RewardGuid = Parsed;
+		}
+	}
+
 	RestoreQuestRowProperties(Sub, *Row);
 	OutConsumed.Add(ChildKey);
 	ReattachQuestInstancedChildren(Sub, ChildKey, Bundle, OutConsumed, OutWarnings);   // a child could itself nest
 	return Sub;
-}
-
-// Parse a child key's LAST path segment: "<owner>/<prop>[<pos>]" or "<owner>/<prop>[<mapkey>].<sub>[<pos>]".
-// Returns the leaf property name + the bracketed token; the middle path is already resolved because we arrive here
-// via the property walk, not by parsing the whole path (D2's smaller-parser property).
-static bool SplitLeafSegment(const FString& ChildKey, FString& OutBracketToken)
-{
-	int32 OpenIdx;
-	if (!ChildKey.FindLastChar(TEXT('['), OpenIdx)) return false;
-	int32 CloseIdx;
-	if (!ChildKey.FindLastChar(TEXT(']'), CloseIdx) || CloseIdx < OpenIdx) return false;
-	OutBracketToken = ChildKey.Mid(OpenIdx + 1, CloseIdx - OpenIdx - 1);
-	return true;
 }
 
 /**
@@ -66,13 +84,31 @@ static void GatherIndexedChildKeys(const FQuestDataBundle& Bundle, const FString
 {
 	const FString Open = Prefix + TEXT("[");
 	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
+	{		
 		for (const FQuestDataRow& R : TablePair.Value.Rows)
+		{	
 			if (R.Key.StartsWith(Open))
 			{
-				FString Tok;
-				SplitLeafSegment(R.Key, Tok);
-				Out.Add({ FCString::Atoi(*Tok), R.Key });
+				// ORDER COMES FROM THE index CELL now that the bracket holds identity. Parsing the bracket would be
+				// worse than useless here: a GUID starting with digits Atoi's to a large plausible number, so the
+				// ordering would look computed and be wrong.
+				const FString IndexCell = R.Get(TEXT("index"));
+				int32 Ordinal = INDEX_NONE;
+				if (!IndexCell.IsEmpty())
+				{
+					Ordinal = FCString::Atoi(*IndexCell);
+				}
+				else
+				{
+					// A corpus written before the ordinal existed keyed by POSITION, so there the bracket is the order.
+					FString Tok;
+					SplitLeafSegment(R.Key, Tok);
+					if (Tok.IsNumeric()) { Ordinal = FCString::Atoi(*Tok); }
+				}
+				Out.Add({ Ordinal, R.Key });
 			}
+		}
+	}
 	Out.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
 }
 

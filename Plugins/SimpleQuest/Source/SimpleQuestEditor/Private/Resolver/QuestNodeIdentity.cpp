@@ -11,6 +11,7 @@
 #include "Graph/QuestlineGraphSchema.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Rewards/QuestRewardBase.h"
 #include "UObject/UnrealType.h"
 
 
@@ -122,25 +123,54 @@ bool IsQuestInstancedBearing(const FProperty* Prop)
 	return false;
 }
 
-void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child)> Visit)
+void ForEachQuestInstancedChild(
+	const FProperty* Prop,
+	const void* ValuePtr,
+	const FString& OwnerKey,
+	const FString& PathPrefix,
+	TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)> Visit,
+	int32 ArrayOrdinal)
 {
 	// Direct instanced object: one child. A null slot yields nothing — absence is the honest representation.
 	if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
 	{
 		if (const UObject* Sub = Obj->GetObjectPropertyValue(ValuePtr))
 		{
-			Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Sub);
+			Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Sub, ArrayOrdinal);
 		}
 		return;
 	}
-	// Array: each element carries an [i] path segment.
+	// Array: each element carries a bracketed segment. WHERE THE ELEMENT IS THE CHILD, that segment is the child's own
+	// IDENTITY rather than its position - a positional key is minted from the live array length, so two people each
+	// appending one child both mint the same next index, and because sibling rows are filed by CLASS those land in
+	// different files where a text merge sees no overlap at all. Where the element merely CONTAINS a child (an array
+	// of structs) the index stays: that segment is structural path, and a struct element has no identity to use.
 	if (const FArrayProperty* Arr = CastField<FArrayProperty>(Prop))
 	{
+		const FObjectProperty* InnerObj = CastField<FObjectProperty>(Arr->Inner);
+		const bool bElementIsChild = InnerObj && Arr->Inner->HasAnyPropertyFlags(CPF_InstancedReference);
+
 		FScriptArrayHelper Helper(Arr, ValuePtr);
 		for (int32 Idx = 0; Idx < Helper.Num(); ++Idx)
 		{
-			ForEachQuestInstancedChild(Arr->Inner, Helper.GetRawPtr(Idx), OwnerKey,
-				FString::Printf(TEXT("%s[%d]"), *PathPrefix, Idx), Visit);
+			FString Segment = FString::Printf(TEXT("%s[%d]"), *PathPrefix, Idx);
+			if (bElementIsChild)
+			{
+				// Rewards are the only instanced-child kind the corpus has. Naming the class here is honest about
+				// that; a second kind turns this into a small dispatch rather than a rewrite.
+				const UObject* Element = InnerObj->GetObjectPropertyValue(Helper.GetRawPtr(Idx));
+				if (const UQuestRewardBase* Reward = Cast<UQuestRewardBase>(Element))
+				{
+					if (Reward->RewardGuid.IsValid())
+					{
+						Segment = FString::Printf(TEXT("%s[%s]"), *PathPrefix, *Reward->RewardGuid.ToString(EGuidFormats::Digits));
+					}
+				}
+			}
+			// The ordinal rides SEPARATELY: position is still meaning for a reward array (grant sequence), it just
+			// stops being identity. INDEX_NONE where the element is not itself the child - it has no position of its own.
+			ForEachQuestInstancedChild(Arr->Inner, Helper.GetRawPtr(Idx), OwnerKey, Segment, Visit,
+									   bElementIsChild ? Idx : INDEX_NONE);
 		}
 		return;
 	}
@@ -153,7 +183,7 @@ void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, con
 			FString KeyExport;
 			Map->KeyProp->ExportTextItem_Direct(KeyExport, Helper.GetKeyPtr(It), nullptr, nullptr, PPF_None);
 			ForEachQuestInstancedChild(Map->ValueProp, Helper.GetValuePtr(It), OwnerKey,
-				FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeChildKeySegment(KeyExport)), Visit);
+			                           FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeChildKeySegment(KeyExport)), Visit);
 		}
 		return;
 	}
@@ -168,7 +198,7 @@ void ForEachQuestInstancedChild(const FProperty* Prop, const void* ValuePtr, con
 				continue;
 			}
 			ForEachQuestInstancedChild(*It, It->ContainerPtrToValuePtr<void>(ValuePtr), OwnerKey,
-				FString::Printf(TEXT("%s.%s"), *PathPrefix, *It->GetName()), Visit);
+			                           FString::Printf(TEXT("%s.%s"), *PathPrefix, *It->GetName()), Visit);
 		}
 	}
 }

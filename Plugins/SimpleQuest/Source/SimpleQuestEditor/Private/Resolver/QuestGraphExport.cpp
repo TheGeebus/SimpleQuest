@@ -50,10 +50,17 @@ static FString NodeKeyOf(const UQuestlineNodeBase* Node)
 static void RecurseInstanced(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, FQuestDataBundle& Bundle)
 {
 	ForEachQuestInstancedChild(Prop, ValuePtr, OwnerKey, PathPrefix,
-		[&Bundle, &OwnerKey](const FString& ChildKey, const FString& Path, const UObject* Child)
+		[&Bundle, &OwnerKey](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
 		{
 			Bundle.Edges.Add({ OwnerKey, FString::Printf(TEXT("contains(%s)"), *Path), ChildKey });
-			CollectQuestEntityRow(Child, ChildKey, {}, Bundle);   // which recurses this child's own instanced properties
+
+			// ORDER AS DATA. The key carries identity now, so position has to be written down or it is lost - and for
+			// a reward array position IS meaning. Emitted for EVERY child, blank when the child is not an array
+			// element, because a type's column set is captured from its FIRST row and a cell present on only some
+			// rows would be missing from it.
+			TMap<FString, FString> Extra;
+			Extra.Add(TEXT("index"), ArrayOrdinal == INDEX_NONE ? FString() : FString::FromInt(ArrayOrdinal));
+			CollectQuestEntityRow(Child, ChildKey, Extra, Bundle);   // which recurses this child's own instanced properties
 		});
 }
 

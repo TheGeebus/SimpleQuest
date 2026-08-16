@@ -189,6 +189,16 @@ private:
 	void HandleObjectModified(UObject* Modified);
 
 	FString TargetAssetPath;
+	
+	/**
+	 * The path to MATCH published plans against, read live rather than from the snapshot below. An asset path is not
+	 * stable for the lifetime of a panel - renaming or moving the questline changes it, and a panel comparing against
+	 * the path it was born with silently drops every plan from that moment on while Apply, which never consults it,
+	 * keeps working. That divergence reads as "the panel is broken" and took a rename to notice.
+	 * Falls back to the snapshot when the questline has gone, which is the only time the snapshot is the better answer.
+	 */
+	FString CurrentTargetPath() const;
+	
 	TWeakObjectPtr<UQuestlineGraph> Questline;
 	FDelegateHandle PublishHandle;
 	FDelegateHandle ModifiedHandle;

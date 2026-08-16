@@ -55,6 +55,11 @@ namespace
 	}
 }
 
+FString SQuestPlanPanel::CurrentTargetPath() const
+{
+	return Questline.IsValid() ? Questline->GetPathName() : TargetAssetPath;
+}
+
 void SQuestPlanPanel::Construct(const FArguments& InArgs)
 {
 	TargetAssetPath = InArgs._TargetAssetPath;
@@ -347,9 +352,9 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 		]
 	];
 
-	if (const FQuestPlanRecord* Existing = FQuestPlanBroker::Get().Find(TargetAssetPath))
+	if (const FQuestPlanRecord* Existing = FQuestPlanBroker::Get().Find(CurrentTargetPath()))
 	{
-		HandlePlanPublished(TargetAssetPath, Existing->Plan);
+		HandlePlanPublished(CurrentTargetPath(), Existing->Plan);
 	}
 }
 
@@ -610,7 +615,7 @@ TArray<FTableColumnDef<FQuestPlanRowPtr>> SQuestPlanPanel::MakeColumns() const
 
 void SQuestPlanPanel::HandlePlanCleared(const FString& InAssetPath)
 {
-	if (InAssetPath != TargetAssetPath) { return; }
+	if (InAssetPath != CurrentTargetPath()) { return; }
 
 	// Everything a plan put on screen leaves together. Clearing the flags while leaving the rows would render work that
 	// has already happened underneath a header saying there is no plan - which is the state this exists to prevent.
@@ -631,7 +636,7 @@ void SQuestPlanPanel::HandlePlanCleared(const FString& InAssetPath)
 
 void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQuestInPlacePlan& Plan)
 {
-	if (InAssetPath != TargetAssetPath) { return; }
+	if (InAssetPath != CurrentTargetPath()) { return; }
 
 	// A new plan supersedes the last export receipt: it was a statement about an action two actions ago, and leaving it
 	// beside fresh rows invites reading it as commentary on them.
@@ -691,7 +696,7 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 
 void SQuestPlanPanel::HandleExportCompleted(const FString& InAssetPath, const FString& InSummary, const FString& Error)
 {
-	if (InAssetPath != TargetAssetPath) { return; }
+	if (InAssetPath != CurrentTargetPath()) { return; }
 	LastExportSummary = InSummary;
 	LastExportError = Error;
 }

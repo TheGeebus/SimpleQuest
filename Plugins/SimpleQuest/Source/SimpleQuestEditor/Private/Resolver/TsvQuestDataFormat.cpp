@@ -202,8 +202,11 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 		SortedRows.Sort([](const FQuestDataRow& A, const FQuestDataRow& B) { return A.Key < B.Key; });
 
 		TArray<FString> Lines;
-		// The key column goes back out under the header it came in with, so reading a studio's folder and writing it back does
-		// not quietly rename their key. Empty means the table was built rather than read: use our own export layout, which is "key".
+		// The key goes out under the name the TABLE carries, so a bundle that knows what its key was CALLED writes that back
+		// instead of flattening it to ours. Empty means the table was built rather than read, and that is the arm every export
+		// actually takes today - the graph builds its own tables, so nothing in the current pipeline carries a read name here.
+		// Kept anyway, and covered by a test: a writer that ignores a field its own type carries is a trap for whoever adds
+		// the first read-to-write path, and it would fail silently by renaming somebody's column.
 		const FString KeyHeader = Table.KeyColumn.IsEmpty() ? FString(TEXT("key")) : Table.KeyColumn;
 		Lines.Add(FString::Printf(TEXT("%s\t%s"), *KeyHeader, *FString::Join(Table.Columns, TEXT("\t"))));
 		for (const FQuestDataRow& Row : SortedRows)

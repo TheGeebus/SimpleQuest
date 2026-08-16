@@ -688,6 +688,84 @@ bool FQuestResolver_BlankGateColumnsAreSilent::RunTest(const FString& Parameters
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_KeyHeaderSurvivesAWrite, "SimpleQuest.Resolver.Write.KeyHeaderSurvives", TestFlags)
+bool FQuestResolver_KeyHeaderSurvivesAWrite::RunTest(const FString& Parameters)
+{
+	// A studio calls its key column what it likes, and the parse used to consume that name and throw it away - so a bundle
+	// knew what its keys WERE but not what they were CALLED. Asserted at the PROVIDER, because no production path reaches
+	// the live arm: every export builds its tables from the graph, so the writer always takes the fallback. That is exactly
+	// why it is pinned here rather than left for whoever adds the first read-to-write path to discover.
+	const FString ReadDir  = FPaths::ProjectIntermediateDir() / TEXT("QuestResolverTests") / TEXT("KeyHeaderSurvives_In");
+	const FString WriteDir = FPaths::ProjectIntermediateDir() / TEXT("QuestResolverTests") / TEXT("KeyHeaderSurvives_Out");
+	for (const FString& Dir : { ReadDir, WriteDir })
+	{
+		IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
+		IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
+	}
+
+	const FString Tsv =
+		TEXT("quest_id\tgraph\tclass\tNodeLabel\n")
+		TEXT("n_a\troot\tQuestlineNode_Step\tGo There\n");
+	TestTrue(TEXT("Fixture written"),
+		FFileHelper::SaveStringToFile(Tsv, *(ReadDir / TEXT("content.tsv")), FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+
+	FTsvQuestDataFormat Format;
+	FQuestDataBundle Bundle;
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(ReadDir, Bundle));
+
+	if (const FQuestDataTable* Content = Bundle.TablesByType.Find(TEXT("content")))
+	{
+		// Two different questions about one header, and the answer to each must not contaminate the other: the name is
+		// recorded, and it stays OUT of the bindable columns because a key cannot bind to a property.
+		TestEqual(TEXT("The key column's name survives the parse"), Content->KeyColumn, FString(TEXT("quest_id")));
+		TestFalse(TEXT("...and does not join the bindable columns"), Content->Columns.Contains(TEXT("quest_id")));
+	}
+	else
+	{
+		AddError(TEXT("Content table did not parse"));
+		return false;
+	}
+
+	// THE LIVE ARM: a table that knows its key's name writes that name back.
+	TestTrue(TEXT("Read bundle written"), Format.WriteBundle(Bundle, WriteDir));
+	FString ReadBack;
+	TestTrue(TEXT("Written file loaded"), FFileHelper::LoadFileToString(ReadBack, *(WriteDir / TEXT("content.tsv"))));
+	TArray<FString> ReadBackLines;
+	ReadBack.ParseIntoArrayLines(ReadBackLines, /*CullEmpty*/ false);
+	TestTrue(TEXT("The written file has a header"), ReadBackLines.Num() > 0);
+	if (ReadBackLines.Num() > 0)
+	{
+		TestTrue(TEXT("The studio's key header comes back out, not ours"), ReadBackLines[0].StartsWith(TEXT("quest_id\t")));
+	}
+
+	// THE INERT ARM, and the one that matters more today: a table BUILT rather than read carries no name and must still
+	// write "key". Every current export takes this path, so getting it wrong would change output nobody asked to change.
+	FQuestDataBundle Built;
+	FQuestDataTable& BuiltTable = Built.TablesByType.Add(TEXT("content"));
+	BuiltTable.Columns = { TEXT("graph"), TEXT("class") };
+	FQuestDataRow BuiltRow;
+	BuiltRow.Key = TEXT("n_a");
+	BuiltRow.Cells.Add(TEXT("graph"), FQuestDataValue::MakeString(TEXT("root")));
+	BuiltRow.Cells.Add(TEXT("class"), FQuestDataValue::MakeString(TEXT("QuestlineNode_Step")));
+	BuiltTable.Rows.Add(MoveTemp(BuiltRow));
+
+	IFileManager::Get().DeleteDirectory(*WriteDir, /*RequireExists*/ false, /*Tree*/ true);
+	IFileManager::Get().MakeDirectory(*WriteDir, /*Tree*/ true);
+	TestTrue(TEXT("Built bundle written"), Format.WriteBundle(Built, WriteDir));
+	FString BuiltBack;
+	TestTrue(TEXT("Built file loaded"), FFileHelper::LoadFileToString(BuiltBack, *(WriteDir / TEXT("content.tsv"))));
+	TArray<FString> BuiltLines;
+	BuiltBack.ParseIntoArrayLines(BuiltLines, /*CullEmpty*/ false);
+	if (BuiltLines.Num() > 0)
+	{
+		TestTrue(TEXT("A table carrying no key name still writes 'key'"), BuiltLines[0].StartsWith(TEXT("key\t")));
+	}
+
+	IFileManager::Get().DeleteDirectory(*ReadDir,  /*RequireExists*/ false, /*Tree*/ true);
+	IFileManager::Get().DeleteDirectory(*WriteDir, /*RequireExists*/ false, /*Tree*/ true);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_NodeKeyIndexAnswersToBothNames, "SimpleQuest.Resolver.Identity.BothNames", TestFlags)
 bool FQuestResolver_NodeKeyIndexAnswersToBothNames::RunTest(const FString& Parameters)
 {

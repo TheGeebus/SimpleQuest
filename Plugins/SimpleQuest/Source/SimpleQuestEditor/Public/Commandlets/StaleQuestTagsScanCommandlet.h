@@ -35,7 +35,12 @@
  * Exit code:
  *   0   no stale references found
  *   1   one or more stale references found
- *  <0   unexpected failure (could not initialize, write JSON, etc.)
+ *   2   the scan could not complete (could not initialize, JSON write failed)
+ *
+ * Those three are a CONTRACT, shared with the wrapper scripts in Scripts/ and with every other SimpleQuest
+ * commandlet: 0 clean, 1 findings, 2 the run itself failed. A negative code is deliberately not used - a process
+ * exiting -1 is reported as 255 by both cmd and bash, so it would reach a build server as a number appearing in no
+ * documentation, and it collides with nothing a caller could switch on.
  */
 UCLASS()
 class UStaleQuestTagsScanCommandlet : public UCommandlet

@@ -23,11 +23,22 @@ struct FQuestDataBundle;
  */
 struct FQuestSourceColumns
 {
-	TArray<FName> Columns;				// the source's value columns (never includes the structural "key" column)
-	bool bReadable = false;				// false = the source couldn't be read (bad folder / unloadable table / bad format)
-	bool bHasDuplicateColumns = false;	// true = a column name appears more than once in one source table — data is
-										//        ALREADY ambiguous (cells collapsed on parse); a blocking source-validity error
-	FText Error;						// human-readable reason when !bReadable or bHasDuplicateColumns
+	/** the source's value columns: the bindable ones, never the structural key column */
+	TArray<FName> Columns;
+	/**
+	 * what this source calls its key column; None when it has none (a Data Table is keyed by row name) or when its
+	 * tables disagree about the name
+	 */
+	FName KeyColumn;
+	/** false = the source couldn't be read (bad folder / unloadable table / bad format) */
+	bool bReadable = false;
+	/**
+	 * true = a column name appears more than once in one source table: data is ALREADY ambiguous (cells collapsed on
+	 * parse); a blocking source-validity error
+	 */
+	bool bHasDuplicateColumns = false;
+	/** human-readable reason when !bReadable or bHasDuplicateColumns */
+	FText Error;
 };
 
 /**
@@ -38,9 +49,11 @@ const UQuestImportMapping* LoadQuestMappingArg(const TArray<FString>& Args);
 
 /**
  * Foreign-file source: read the folder through the named format provider and collect the UNION of value columns across all
- * content tables (the self-row "questline_graph" table is excluded — it isn't a fanned-out source of node rows). A column
+ * content tables (the self-row "questline_graph" table is excluded - it isn't a fanned-out source of node rows). A column
  * name repeated within one table's header is flagged bHasDuplicateColumns (the parse already collapsed its cells, so the
- * data is ambiguous). Runs a real ReadBundle — call it on source-descriptor change / Refresh, never per-frame.
+ * data is ambiguous). Runs a real ReadBundle - call it on source-descriptor change / Refresh, never per-frame.
+ * KeyColumn is reported ALONGSIDE rather than among them: it is structural and never bindable, so it must stay out of
+ * Columns, and it is the one column a key picker exists to name, so it must still be knowable.
  */
 FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const FString& SourceFolder);
 
@@ -56,6 +69,8 @@ TArray<FString> EnumerateColumnDistinctValues(const FString& FormatName, const F
 /**
  * Data Table source: walk the row struct's properties. No file I/O, no parse, cannot be stale (the struct is the authority).
  * Both binding sides are FProperty-shaped here — the purest no-typing case. A null/unloadable table yields bReadable=false.
+ * KeyColumn comes back UNSET, and that is the honest answer: a Data Table is keyed by ROW NAME, not by a column. Designating
+ * a row-struct field to carry the key is a separate decision, and its candidates are the returned Columns.
  */
 FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& SourceTable);
 

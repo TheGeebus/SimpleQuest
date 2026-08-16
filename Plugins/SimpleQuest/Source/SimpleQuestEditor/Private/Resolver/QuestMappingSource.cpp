@@ -56,12 +56,16 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 	}
 
 	// The source is readable. Collect the UNION of value columns across every content table (all node rows share one
-	// discriminator + one binding set, so a column that appears in ANY content table is bindable). Exclude the self-row
-	// table — it isn't fanned-out source content. Detect a within-table duplicate: the parse already keyed cells by column
-	// name (collapsing a repeated header), so a duplicate means the data is irrecoverably ambiguous — a blocking error.
+	// discriminator and one binding set, so a column that appears in ANY content table is bindable). Exclude the self-row
+	// table - it isn't fanned-out source content. Detect a within-table duplicate: the parse already keyed cells by column
+	// name (collapsing a repeated header), so a duplicate means the data is irrecoverably ambiguous - a blocking error.
+	// The KEY column is gathered separately, and from EVERY table INCLUDING the self row: it is structural, one source
+	// spells it the same way throughout, and it is never bindable - so it stays out of Columns and is reported beside them.
 	TSet<FName> Seen;
+	TSet<FName> KeyNames;
 	for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
 	{
+		if (!TablePair.Value.KeyColumn.IsEmpty()) { KeyNames.Add(FName(*TablePair.Value.KeyColumn)); }
 		if (TablePair.Key == TEXT("questline_graph")) continue;   // self row, not fanned source content
 
 		TSet<FName> WithinTable;
@@ -82,6 +86,23 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 
 	Result.Columns = Seen.Array();
 	Result.Columns.Sort(FNameLexicalLess());   // stable, alphabetical for the dropdown
+
+	// One agreed name is an answer. Several is not, and picking one would be a coin flip on TMap iteration order — so leave it
+	// unset and say so. Unset shows up as nothing to choose, which is the truth, rather than an arbitrary name that looks decided.
+	if (KeyNames.Num() == 1)
+	{
+		Result.KeyColumn = *KeyNames.CreateConstIterator();
+	}
+	else if (KeyNames.Num() > 1)
+	{
+		TArray<FName> Sorted = KeyNames.Array();
+		Sorted.Sort(FNameLexicalLess());
+		TArray<FString> AsText;
+		for (const FName& Name : Sorted) { AsText.Add(Name.ToString()); }
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("EnumerateForeignFileColumns: '%s' does not agree on its key column across "
+			"its tables (%s) — leaving it unset."), *SourceFolder, *FString::Join(AsText, TEXT(", ")));
+	}
+
 	Result.bReadable = true;
 	return Result;
 }

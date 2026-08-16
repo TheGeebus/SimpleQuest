@@ -91,19 +91,24 @@ namespace
 
 	// Parse one .tsv into a table (first line is the header; column 0 is always "key"). Cells become string-bearing
 	// FQuestDataValues: Scalar = the unsanitized cell, Kind generic (the routing core types each against the
-	// destination property — see spec §1). An empty/absent trailing field maps to no cell (== Kind::Empty downstream).
+	// destination property). An empty/absent trailing field maps to no cell (== Kind::Empty downstream).
 	bool ParseTsvTable(const FString& Path, FQuestDataTable& OutTable, TArray<FQuestDataRow>& OutRows)
 	{
 		FString Text;
 		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
 		TArray<FString> Lines;
-		Text.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
+		Text.ParseIntoArrayLines(Lines, false);
 		if (Lines.Num() == 0) return false;
 
-		// Header: "key\t<col1>\t<col2>...". Drop the leading "key" — Columns holds the value columns only (matching the
-		// export layout, which prepends "key" at write time and stores only the value columns in Columns).
+		// Header: "<key>\t<col1>\t<col2>...". Column 0 is the key whatever it is called, and Columns holds the value columns
+		// only - but the key's header is RECORDED rather than dropped. It is the studio's own word for the column, it cannot be
+		// reconstructed from anything else in the table, and every consumer that has to name the key needs it.
 		TArray<FString> Header;
-		Lines[0].ParseIntoArray(Header, TEXT("\t"), /*CullEmpty*/ false);
+		Lines[0].ParseIntoArray(Header, TEXT("\t"), false);
+		if (Header.Num() > 0)
+		{
+			OutTable.KeyColumn = Header[0];
+		}
 		for (int32 c = 1; c < Header.Num(); ++c)
 		{
 			OutTable.Columns.Add(Header[c]);
@@ -113,7 +118,7 @@ namespace
 		{
 			if (Lines[i].IsEmpty()) continue;
 			TArray<FString> Fields;
-			Lines[i].ParseIntoArray(Fields, TEXT("\t"), /*CullEmpty*/ false);
+			Lines[i].ParseIntoArray(Fields, TEXT("\t"), false);
 
 			FQuestDataRow Row;
 			Row.Key = Fields.IsValidIndex(0) ? Fields[0] : FString();
@@ -148,8 +153,9 @@ namespace
 	// still parses. This name is only the default output.
 	const TCHAR* GEdgeTableDefaultName = TEXT("edges.tsv");
 
-	// Is this file's header the edge signature? An edge table's first line is exactly "from\ttype\tto"; a content table's
-	// first column is always "key". The two can't collide (every content row is keyed), so the header alone identifies it.
+	// Is this file's header the edge signature? An edge table's first line is exactly "from\ttype\tto", and nothing else has
+	// three columns spelled that way - a content table's first column is its KEY, under whatever name the studio gave it, and
+	// the remaining two would have to be "type" and "to" for the shapes to collide. The header alone identifies it.
 	bool FileHasEdgeSignature(const FString& Path)
 	{
 		FString Text;
@@ -190,13 +196,16 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 	{
 		const FQuestDataTable& Table = Bundle.TablesByType[Stem];
 
-		// Rows sorted by key for determinism. A local copy — WriteBundle takes a const bundle, so the sort that used to
+		// Rows sorted by key for determinism. A local copy. WriteBundle takes a const bundle, so the sort that used to
 		// happen in the export's WriteBundle moves here; the on-disk order is the provider's concern.
 		TArray<FQuestDataRow> SortedRows = Table.Rows;
 		SortedRows.Sort([](const FQuestDataRow& A, const FQuestDataRow& B) { return A.Key < B.Key; });
 
 		TArray<FString> Lines;
-		Lines.Add(FString::Printf(TEXT("key\t%s"), *FString::Join(Table.Columns, TEXT("\t"))));
+		// The key column goes back out under the header it came in with, so reading a studio's folder and writing it back does
+		// not quietly rename their key. Empty means the table was built rather than read: use our own export layout, which is "key".
+		const FString KeyHeader = Table.KeyColumn.IsEmpty() ? FString(TEXT("key")) : Table.KeyColumn;
+		Lines.Add(FString::Printf(TEXT("%s\t%s"), *KeyHeader, *FString::Join(Table.Columns, TEXT("\t"))));
 		for (const FQuestDataRow& Row : SortedRows)
 		{
 			TArray<FString> Cells;
@@ -267,7 +276,7 @@ bool FTsvQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle&
 
 	for (const FString& File : TsvFiles)
 	{
-		// The edge table is recognized by its column signature (from/type/to), NOT its filename — so a studio's own-named
+		// The edge table is recognized by its column signature (from/type/to), NOT its filename - so a studio's own-named
 		// relation file parses as edges, and our default edges.tsv still round-trips (it carries the same signature).
 		if (FileHasEdgeSignature(SrcFolder / File))
 		{

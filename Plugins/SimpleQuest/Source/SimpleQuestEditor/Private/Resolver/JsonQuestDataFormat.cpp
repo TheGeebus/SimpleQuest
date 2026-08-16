@@ -318,6 +318,12 @@ bool FJsonQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle
 			if (!TablePair.Value->TryGetObject(TableObj) || !TableObj || !TableObj->IsValid()) continue;
 
 			FQuestDataTable Table;
+
+			// This schema NAMES the key - every row object carries it as a "key" field - where TSV leaves the header to the
+			// author. So the name is fixed here rather than discovered, and stating it means a consumer never has to know
+			// which provider it read from to find out what the key is called.
+			Table.KeyColumn = TEXT("key");
+
 			const TArray<TSharedPtr<FJsonValue>>* ColsJson = nullptr;
 			if ((*TableObj)->TryGetArrayField(TEXT("columns"), ColsJson) && ColsJson)
 			{

@@ -66,15 +66,19 @@ private:
 	void ApplyDiscriminatorColumn(FName Column);
 	void ApplyKeyColumn(FName Column);
 
-	/** True when the sample actually offers this column, or it is empty (meaning clear). Reads the CACHED option list. */
-	bool IsPastableColumn(FName Column) const;
+	/**
+	 * True when the given option list actually offers this column, or it is empty (meaning clear). Reads CACHED options rather
+	 * than re-enumerating. The list is a parameter because the two pickers no longer accept the same set: only the key picker
+	 * may name the structural key column, and only the discriminator picker is restricted to bindable value columns.
+	 */
+	bool IsPastableColumn(FName Column, const TArray<TSharedPtr<FString>>& Options) const;
 	
 	TWeakObjectPtr<UQuestImportMapping> Mapping;
 	TSharedPtr<SQuestMappingBindingList> BindingList;
 	TSharedPtr<SQuestMappingDiscriminatorList> DiscriminatorList;
 
-	// Transient sample source — editor-only, NEVER serialized on the recipe. Its job: give the two pick-only widgets real
-	// columns + discriminator values to choose from, so a designer authors the SHAPE against a representative file. Thrown
+	// Transient sample source - editor-only, NEVER serialized on the recipe. Its job: give the two pick-only widgets real
+	// columns and discriminator values to choose from, so a designer authors the SHAPE against a representative file. Thrown
 	// away with the panel; the recipe stays shape-only (it describes a shape, not where a file lives).
 	FName SampleFormatName = TEXT("TSV");
 	FString SampleFolder;
@@ -103,6 +107,14 @@ private:
 	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;		// rebuilt from the sample's columns
 	TSharedPtr<SSearchableComboBox> DiscriminatorColumnCombo;	// held so a sample change can RefreshOptions() it
 	TSharedPtr<SSearchableComboBox> KeyColumnCombo;
+
+	/**
+	 * The key picker's OWN option list: the sample's columns plus a clear entry. It cannot share the discriminator's,
+	 * because the two differ in exactly the way the list has to express - the discriminator is required and clearing it
+	 * is a deliberate act, while the key column is documented optional and had no way to say so.
+	 */
+	TArray<TSharedPtr<FString>> KeyColumnOptions;
+	void RebuildKeyColumnOptions();
 	void RebuildDiscriminatorColumnOptions();
 	FText GetDiscriminatorColumnText() const;					// reads Mapping->DiscriminatorColumn
 	void OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);

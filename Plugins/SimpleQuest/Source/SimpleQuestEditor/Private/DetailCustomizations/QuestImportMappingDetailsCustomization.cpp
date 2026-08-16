@@ -150,6 +150,7 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	// widgets (columns feed the binding list; discriminator values feed the value->class list). The combo caches its options
 	// at build time, so rebuilding the backing array isn't enough — tell the widget to re-read it.
 	RebuildDiscriminatorColumnOptions();
+	RebuildKeyColumnOptions();
 	if (DiscriminatorColumnCombo.IsValid()) { DiscriminatorColumnCombo->RefreshOptions(); }
 	if (KeyColumnCombo.IsValid())			{ KeyColumnCombo->RefreshOptions(); }
 	if (DiscriminatorList.IsValid())        { DiscriminatorList->RefreshRows(); }
@@ -158,12 +159,38 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	SaveSampleToMemo();
 }
 
+// The key column is OPTIONAL, so its picker needs a way to say "none" - parenthesised so it cannot be mistaken for a
+// column of that name.
+static const TCHAR* GQuestKeyColumnNoneLabel = TEXT("(none)");
+
 void FQuestImportMappingDetailsCustomization::RebuildDiscriminatorColumnOptions()
 {
 	DiscriminatorColumnOptions.Reset();
 	for (const FName& Col : SampleSourceColumns())
 	{
 		DiscriminatorColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
+	}
+}
+
+void FQuestImportMappingDetailsCustomization::RebuildKeyColumnOptions()
+{
+	KeyColumnOptions.Reset();
+	KeyColumnOptions.Add(MakeShareable(new FString(GQuestKeyColumnNoneLabel)));   // leads, so clearing is the first thing offered
+
+	// Enumerated here rather than through SampleSourceColumns() because this picker needs BOTH halves of the result, and one
+	// parse answering both beats two parses answering one each. The sample's own key column leads the real entries: it is the
+	// expected answer, and for a folder source it is the ONLY column the provider will actually read the key from.
+	if (SampleFolder.IsEmpty()) { return; }
+	const FQuestSourceColumns Cols = EnumerateForeignFileColumns(SampleFormatName.ToString(), SampleFolder);
+	if (!Cols.bReadable) { return; }
+
+	if (!Cols.KeyColumn.IsNone())
+	{
+		KeyColumnOptions.Add(MakeShareable(new FString(Cols.KeyColumn.ToString())));
+	}
+	for (const FName& Col : Cols.Columns)
+	{
+		KeyColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
 	}
 }
 
@@ -202,7 +229,12 @@ FText FQuestImportMappingDetailsCustomization::GetKeyColumnText() const
 
 void FQuestImportMappingDetailsCustomization::OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type)
 {
-	if (NewValue.IsValid()) { ApplyKeyColumn(FName(**NewValue)); }
+	// The clear entry is the only option that is not a column name, so it maps to None rather than to a column called
+	// "(none)". Everything downstream already treats None as "no key column" - this just gives the field a way to say it.
+	if (NewValue.IsValid())
+	{
+		ApplyKeyColumn(*NewValue == GQuestKeyColumnNoneLabel ? NAME_None : FName(**NewValue));
+	}
 }
 
 void FQuestImportMappingDetailsCustomization::ApplyKeyColumn(FName Column)
@@ -217,14 +249,12 @@ void FQuestImportMappingDetailsCustomization::ApplyKeyColumn(FName Column)
 	OnMappingModified();
 }
 
-bool FQuestImportMappingDetailsCustomization::IsPastableColumn(FName Column) const
+bool FQuestImportMappingDetailsCustomization::IsPastableColumn(FName Column, const TArray<TSharedPtr<FString>>& Options) const
 {
 	if (Column.IsNone()) { return true; }   // empty means "clear it", which is always legal
 	const FString AsText = Column.ToString();
-	// The CACHED options, not a fresh enumeration - both column combos read this same array, and re-reading would parse
-	// the whole sample folder for a validity check.
-	return DiscriminatorColumnOptions.ContainsByPredicate(
-		[&AsText](const TSharedPtr<FString>& Opt) { return Opt.IsValid() && *Opt == AsText; });
+	// The CACHED options, not a fresh enumeration - re-reading would parse the whole sample folder for a validity check.
+	return Options.ContainsByPredicate([&AsText](const TSharedPtr<FString>& Opt) { return Opt.IsValid() && *Opt == AsText; });
 }
 
 void FQuestImportMappingDetailsCustomization::CopySampleSource() const
@@ -297,7 +327,7 @@ void FQuestImportMappingDetailsCustomization::PasteDiscriminatorColumn()
 		return;
 	}
 	const FName Column = Value->IsEmpty() ? NAME_None : FName(**Value);
-	if (!IsPastableColumn(Column))
+	if (!IsPastableColumn(Column, DiscriminatorColumnOptions))
 	{
 		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Discriminator column paste refused: '%s' is not in the current sample."), **Value);
 		return;
@@ -318,7 +348,7 @@ void FQuestImportMappingDetailsCustomization::PasteKeyColumn()
 		return;
 	}
 	const FName Column = Value->IsEmpty() ? NAME_None : FName(**Value);
-	if (!IsPastableColumn(Column))
+	if (!IsPastableColumn(Column, KeyColumnOptions))
 	{
 		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Key column paste refused: '%s' is not in the current sample."), **Value);
 		return;
@@ -424,6 +454,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 		FormatOptions.Add(MakeShareable(new FString(Name)));
 	}
 	RebuildDiscriminatorColumnOptions();
+	RebuildKeyColumnOptions();
 
 	// Publish the sample's columns onto the mapping so the stock-array GetOptions dropdowns (wire bindings) can pick from
 	// them — the same column set the bespoke pickers use, one source of truth.
@@ -518,7 +549,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	.ValueContent().MinDesiredWidth(300.0f)
 	[
 		SAssignNew(KeyColumnCombo, SSearchableComboBox)
-		.OptionsSource(&DiscriminatorColumnOptions)
+		.OptionsSource(&KeyColumnOptions)
 		.bAlwaysSelectItem(true)   // see the Format combo above - external writes leave the combo's own cache stale
 		.OnGenerateWidget_Lambda([](TSharedPtr<FString> In) { return SNew(STextBlock).Text(FText::FromString(*In)); })
 		.OnSelectionChanged(this, &FQuestImportMappingDetailsCustomization::OnKeyColumnChanged)

@@ -54,18 +54,41 @@ FString BuildQuestExportReceipt(const FQuestExportOutcome& Outcome);
 void LogQuestExportReport(const FQuestExportOutcome& Outcome, const FString& Prefix);
 
 
-/** Where one plan in a run came from — the export marker's account of its folder, as the run should report it. */
+/** Where one plan in a run came from - the export marker's account of its folder, as the run should report it. */
 struct FQuestPlanRunSource
 {
 	FString Folder;    // RELATIVE to the run's root, so two machines planning the same corpus produce the same file
 	FString Format;
 	FString Mapping;   // empty for a canonical export
+	int32 RowCount = 0;   // how much data the corpus holds - a fact about the SOURCE, not about any comparison
 };
 
 /** One plan plus the provenance a consumer needs to act on it. */
 struct FQuestPlanRunItem
 {
+	/**
+	 * The questline this corpus CLAIMS, taken from its marker - not from Plan.TargetAssetPath. A corpus whose asset does
+	 * not exist yet has no plan and therefore no such field, and switching the report's source depending on whether
+	 * planning happened is precisely how one report comes to name two different things. One field, always populated.
+	 */
+	FString Questline;
+
+	/**
+	 * False when the source was read and validated but never compared, because there was no asset to compare against.
+	 * That is a legitimate, common outcome - progression data authored before anyone builds the questline - and it is
+	 * NOT the same as "the asset matches", which is why it gets its own status rather than an empty plan.
+	 * Defaults to false so a caller that forgets to set it reports every corpus as unplanned, which is loud and gets
+	 * fixed on the first run; the opposite default would silently report a missing asset as clean.
+	 */
+	bool bPlanned = false;
+
+	/**
+	 * Empty apart from Refusals when bPlanned is false. A read failure goes in Plan.Refusals deliberately: a refusal is
+	 * a refusal whether it was earned by reading the source or by comparing it, and one channel is what lets a consumer
+	 * ask "what is wrong here" without first asking how far the run got.
+	 */
 	FQuestInPlacePlan Plan;
+
 	FQuestPlanRunSource Source;
 };
 

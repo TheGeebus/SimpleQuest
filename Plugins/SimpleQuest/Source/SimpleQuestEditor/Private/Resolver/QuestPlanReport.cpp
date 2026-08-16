@@ -167,12 +167,16 @@ namespace
 		}
 	}
 
-	// Refused BEFORE clean, because IsNoOp() already folds in "no refusals" and would otherwise call a refused plan clean.
-	// Derived here rather than by a caller so the artifact and the exit code cannot come apart.
-	const TCHAR* PlanStatusJson(const FQuestInPlacePlan& Plan)
+	// Order is load-bearing. Refused first, because IsNoOp() already folds in "no refusals" and would otherwise call a
+	// refused plan clean. Validated next, because a corpus that was never compared has an empty plan and IsNoOp() would
+	// happily call THAT clean too - and "sound, but nothing exists to compare it to" is a different answer from "matches
+	// perfectly", however similar the two look from the outside. Derived here rather than by a caller so the artifact and
+	// the exit code cannot come apart.
+	const TCHAR* PlanStatusJson(const FQuestPlanRunItem& Item)
 	{
-		if (Plan.Refusals.Num() > 0) return TEXT("refused");
-		return Plan.IsNoOp() ? TEXT("clean") : TEXT("differences");
+		if (Item.Plan.Refusals.Num() > 0) return TEXT("refused");
+		if (!Item.bPlanned)               return TEXT("validated");
+		return Item.Plan.IsNoOp() ? TEXT("clean") : TEXT("differences");
 	}
 
 	void WriteSortedStrings(TJsonWriter<>& Writer, const TCHAR* Field, const TArray<FString>& Values)
@@ -260,15 +264,16 @@ namespace
 		const bool bIntoTable = Plan.Direction == EQuestPlanDirection::IntoTable;
 
 		Writer.WriteObjectStart();
-		Writer.WriteValue(TEXT("questline"),   Plan.TargetAssetPath);
+		Writer.WriteValue(TEXT("questline"),   Item.Questline);
 		Writer.WriteValue(TEXT("destination"), Plan.DestinationAssetPath);
 		Writer.WriteValue(TEXT("direction"),   bIntoTable ? TEXT("intoTable") : TEXT("intoGraph"));
-		Writer.WriteValue(TEXT("status"),      PlanStatusJson(Plan));
+		Writer.WriteValue(TEXT("status"),      PlanStatusJson(Item));
 
 		Writer.WriteObjectStart(TEXT("source"));
-		Writer.WriteValue(TEXT("folder"),  Item.Source.Folder);
-		Writer.WriteValue(TEXT("format"),  Item.Source.Format);
-		Writer.WriteValue(TEXT("mapping"), Item.Source.Mapping);
+		Writer.WriteValue(TEXT("folder"),   Item.Source.Folder);
+		Writer.WriteValue(TEXT("format"),   Item.Source.Format);
+		Writer.WriteValue(TEXT("mapping"),  Item.Source.Mapping);
+		Writer.WriteValue(TEXT("rowCount"), Item.Source.RowCount);
 		Writer.WriteObjectEnd();
 
 		// Every count, both directions, with the irrelevant one honestly at zero. untouchedNodes and unclaimedRows are
@@ -323,17 +328,20 @@ FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FStr
 	Sorted.Sort([](const FQuestPlanRunItem& A, const FQuestPlanRunItem& B)
 	{
 		// By questline, then by folder: one questline can legitimately be described by more than one corpus folder, and
-		// leaving those two in discovery order would make the file depend on directory enumeration.
-		if (A.Plan.TargetAssetPath != B.Plan.TargetAssetPath) return A.Plan.TargetAssetPath < B.Plan.TargetAssetPath;
+		// leaving those two in discovery order would make the file depend on directory enumeration. Keyed on the MARKER'S
+		// claim rather than the plan's target, because an unplanned corpus has no target and they would all sort together
+		// under an empty string - which is a stable order but a useless one.
+		if (A.Questline != B.Questline) return A.Questline < B.Questline;
 		return A.Source.Folder < B.Source.Folder;
 	});
-	
-	int32 CleanCount = 0, DifferenceCount = 0, RefusedCount = 0;
+
+	int32 CleanCount = 0, DifferenceCount = 0, ValidatedCount = 0, RefusedCount = 0;
 	for (const FQuestPlanRunItem& Item : Sorted)
 	{
-		const FString Status = PlanStatusJson(Item.Plan);
+		const FString Status = PlanStatusJson(Item);
 		if (Status == TEXT("refused"))          { ++RefusedCount; }
 		else if (Status == TEXT("differences")) { ++DifferenceCount; }
+		else if (Status == TEXT("validated"))   { ++ValidatedCount; }
 		else                                    { ++CleanCount; }
 	}
 
@@ -351,9 +359,10 @@ FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FStr
 	Writer->WriteValue(TEXT("planCount"),       Sorted.Num());
 	Writer->WriteValue(TEXT("clean"),           CleanCount);
 	Writer->WriteValue(TEXT("withDifferences"), DifferenceCount);
+	Writer->WriteValue(TEXT("validated"),       ValidatedCount);
 	Writer->WriteValue(TEXT("refused"),         RefusedCount);
 	Writer->WriteObjectEnd();
-
+	
 	Writer->WriteArrayStart(TEXT("plans"));
 	for (const FQuestPlanRunItem& Item : Sorted) { WritePlan(Writer.Get(), Item); }
 	Writer->WriteArrayEnd();

@@ -2476,17 +2476,33 @@ bool FQuestResolver_PlanJsonIsDeterministic::RunTest(const FString& Parameters)
 		Other.TargetAssetPath = TEXT("/Game/Q/QL_Other.QL_Other");
 
 		FQuestPlanRunItem ItemA;
+		ItemA.Questline = Plan.TargetAssetPath;
+		ItemA.bPlanned  = true;
 		ItemA.Plan = Plan;
-		ItemA.Source.Folder = TEXT("thing");
-		ItemA.Source.Format = TEXT("TSV");
+		ItemA.Source.Folder   = TEXT("thing");
+		ItemA.Source.Format   = TEXT("TSV");
+		ItemA.Source.RowCount = 7;
 
 		FQuestPlanRunItem ItemB;
+		ItemB.Questline = Other.TargetAssetPath;
+		ItemB.bPlanned  = true;
 		ItemB.Plan = Other;
-		ItemB.Source.Folder = TEXT("other");
-		ItemB.Source.Format = TEXT("TSV");
+		ItemB.Source.Folder   = TEXT("other");
+		ItemB.Source.Format   = TEXT("TSV");
+		ItemB.Source.RowCount = 3;
+
+		// A corpus whose asset does not exist yet: validated, never compared, and carrying NO plan. It goes in the fixture
+		// because a status that is never rendered is a status whose ordering was never exercised - and because its empty
+		// plan is exactly the shape that would read as "clean" if the status derivation ever lost its middle branch.
+		FQuestPlanRunItem ItemC;
+		ItemC.Questline = TEXT("/Game/Q/QL_Uncreated.QL_Uncreated");
+		ItemC.bPlanned  = false;
+		ItemC.Source.Folder   = TEXT("uncreated");
+		ItemC.Source.Format   = TEXT("TSV");
+		ItemC.Source.RowCount = 11;
 
 		TArray<FQuestPlanRunItem> Items;
-		if (bReversed) { Items = { ItemA, ItemB }; } else { Items = { ItemB, ItemA }; }
+		if (bReversed) { Items = { ItemA, ItemC, ItemB }; } else { Items = { ItemB, ItemA, ItemC }; }
 		return Items;
 	};
 
@@ -2499,7 +2515,13 @@ bool FQuestResolver_PlanJsonIsDeterministic::RunTest(const FString& Parameters)
 	TestTrue(TEXT("...and states its schema version"), Forward.Contains(TEXT("\"schemaVersion\"")));
 	TestTrue(TEXT("...and carries both entries"),      Forward.Contains(TEXT("n_alpha")) && Forward.Contains(TEXT("n_beta")));
 	TestTrue(TEXT("...and quarantines its labels"),    Forward.Contains(TEXT("labelByKey")));
-	TestTrue(TEXT("...and both plans"),                Forward.Contains(TEXT("QL_Thing")) && Forward.Contains(TEXT("QL_Other")));
+	TestTrue(TEXT("...and all three plans"),           Forward.Contains(TEXT("QL_Thing")) && Forward.Contains(TEXT("QL_Other"))
+													   && Forward.Contains(TEXT("QL_Uncreated")));
+
+	// The status the empty plan must NOT get. An uncreated corpus and a perfectly-matching asset both render zero entries
+	// and zero counts, so this is the one assertion standing between them.
+	TestTrue(TEXT("An uncreated corpus reports validated"), Forward.Contains(TEXT("\"status\": \"validated\"")));
+	TestTrue(TEXT("...and its row count survives"),         Forward.Contains(TEXT("\"rowCount\": 11")));
 
 	if (Forward != Reverse)
 	{

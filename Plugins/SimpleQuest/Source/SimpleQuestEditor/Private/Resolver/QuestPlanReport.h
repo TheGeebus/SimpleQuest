@@ -101,7 +101,14 @@ struct FQuestPlanRunItem
  * against the last one, and a single moving field turns every diff into noise.
  *
  * The subject is DERIVED from each plan's Direction rather than passed in, so a caller cannot hand this a row plan
- * labelled as a questline - which is exactly how a row plan came to name the wrong asset in the log.
+ * labelled as a questline — which is exactly how a row plan came to name the wrong asset in the log.
+ *
+ * ROOT IS EMITTED VERBATIM, AND THAT MAKES ITS PORTABILITY THE CALLER'S DEBT. Pass a project-relative spelling, never
+ * an absolute path. Nothing here can check it — the difference between a portable root and a machine path is not
+ * visible in the string — so the rule above is stated and unenforced, which is precisely how an absolute path reached
+ * the artifact the first time this ran for real: every other field was relative, and the one that was not did not
+ * look out of place. Item.Source.Folder is the same debt paid correctly, being made relative before it arrives.
  */
+FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FString& Root, const FString& FailOn);
 FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FString& Root, const FString& FailOn);
 

@@ -50,6 +50,14 @@ struct FQuestNodePlanEntry
 	FString Key;                 // the row key: a studio-authored id, or our exported GUID
 
 	/**
+	 * WHERE the row lives in the destination table, which is a different fact from what it is CALLED. When a recipe names
+	 * a KeyColumn the studio's key is a CELL, and the DataTable's row name is theirs to choose - so Key answers "which
+	 * row is this" and this answers "where do I write it". Equal to Key when no KeyColumn is set, which covers every
+	 * table keyed by row name. Empty on an inbound plan: a questline has no row names.
+	 */
+	FName DestinationRowName;
+
+	/**
 	 * What the node calls itself in the editor, for display only - never for matching. A canonical export keys every row
 	 * by GUID, so without this a plan reads as a wall of hex. Empty when there is nothing to ask: a Create has no live
 	 * node yet, and takes whatever the incoming row offers or nothing at all.
@@ -99,7 +107,21 @@ enum class EQuestPlanDirection : uint8
 /** The whole comparison. */
 struct FQuestInPlacePlan
 {
+	/**
+	 * The QUESTLINE this plan belongs to, both ways round: what an inbound plan would change, and what an outbound plan was
+	 * built FROM. It is also the broker's key, because the panel looks a plan up by the asset it has open - so it is not free
+	 * to become "whatever changes" when the direction flips.
+	 */
 	FString TargetAssetPath;
+
+	/**
+	 * The Data Table an outbound plan would WRITE INTO. Empty on an inbound plan, which changes the questline itself. It
+	 * needs its own field precisely because the one above is spoken for: with a single path on the plan, every rendering of
+	 * a row plan names the graph it came from while describing changes to a table it never names - and "rows there were left
+	 * alone" is not something a reviewer can act on when "there" is missing.
+	 */
+	FString DestinationAssetPath;
+
 	TArray<FQuestNodePlanEntry> Entries;
 	TArray<FString> Warnings;
 

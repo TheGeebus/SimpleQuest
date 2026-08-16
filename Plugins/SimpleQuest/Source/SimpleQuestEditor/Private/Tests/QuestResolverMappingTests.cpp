@@ -1712,6 +1712,10 @@ bool FQuestResolver_ExportPlansRatherThanWritesIntoATable::RunTest(const FString
 		// open on, so a plan keyed to the table is a plan nothing ever looks for.
 		TestEqual(TEXT("The plan is filed under the questline"), Out.RowPlan.TargetAssetPath, Graph->GetPathName());
 
+		// And still says which table it would write into. The two paths are easy to conflate precisely because one of them
+		// is absent by default, so assert them as a PAIR - a destination silently equal to the questline passes neither.
+		TestEqual(TEXT("...while naming the table it writes into"), Out.RowPlan.DestinationAssetPath, Table->GetPathName());
+
 		// The studio's row is theirs. Counted, never entered - the territory rule, reached through the real operation
 		// rather than by calling the planner directly.
 		TestTrue(TEXT("An unclaimed row is counted"), Out.RowPlan.UnclaimedRowCount >= 1);

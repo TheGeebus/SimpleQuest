@@ -46,7 +46,10 @@ void ApplyQuestRowPlan(UDataTable& Destination, const FQuestInPlacePlan& Plan,
 
 	for (const FQuestNodePlanEntry& Entry : Plan.Entries)
 	{
-		const FName RowName(*Entry.Key);
+		// The planner decided WHERE this goes, having read the recipe's key column; deriving it from the key again here
+		// would re-make that decision with less information. Falls back to the key for a plan built before the two were
+		// separate facts.
+		const FName RowName = Entry.DestinationRowName.IsNone() ? FName(*Entry.Key) : Entry.DestinationRowName;
 
 		if (Entry.Action == EQuestNodePlanAction::Create)
 		{

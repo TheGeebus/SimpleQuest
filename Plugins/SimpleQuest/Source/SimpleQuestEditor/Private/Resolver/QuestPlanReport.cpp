@@ -26,9 +26,13 @@ FString BuildQuestPlanSummary(const FQuestInPlacePlan& Plan, EQuestPlanSubject S
 	{
 		// A row plan has no orphans, no moves and no wires - it can only add or change rows, and anything in that table
 		// this questline does not claim is deliberately left alone rather than treated as debris.
-		return FString::Printf(TEXT("%d row(s) to create, %d to update, %d refusal(s). %d row(s) there are claimed by "
-								    "nothing here and were left alone."),
+		// MATCHED and CHANGED are separate numbers, the same way the questline summary reports them. Collapsing them
+		// makes "every row matched and agreed" read identically to "nothing matched at all" - both print zero - and
+		// those are the two outcomes a reviewer most needs to tell apart before writing into someone else's table.
+		return FString::Printf(TEXT("%d row(s) to create, %d update(s) (%d with changes), %d refusal(s). %d row(s) there "
+									"are claimed by nothing here and were left alone."),
 			Plan.CountOf(EQuestNodePlanAction::Create),
+			Plan.CountOf(EQuestNodePlanAction::Update),
 			Plan.ChangedNodeCount(),
 			Plan.Refusals.Num(),
 			Plan.UnclaimedRowCount);
@@ -50,8 +54,17 @@ FString BuildQuestPlanSummary(const FQuestInPlacePlan& Plan, EQuestPlanSubject S
 
 void LogQuestPlanReport(const FQuestInPlacePlan& Plan, EQuestPlanSubject Subject, const FString& Prefix)
 {
-	UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: plan for '%s' - %s"),
-		   *Prefix, *Plan.TargetAssetPath, *BuildQuestPlanSummary(Plan, Subject));
+	// A row plan names BOTH ends. The plan's one path is the QUESTLINE - the broker's key - and printing it alone beneath a
+	// summary counting rows reads as though it were the table, which is the single fact a reviewer needs before allowing a
+	// write into an asset somebody else owns. Falls back to the one path when a refusal fired before a destination was known.
+	const FString PlanFor = (Subject == EQuestPlanSubject::Row && !Plan.DestinationAssetPath.IsEmpty())
+		? FString::Printf(TEXT("'%s' writing into '%s'"), *Plan.TargetAssetPath, *Plan.DestinationAssetPath)
+		: FString::Printf(TEXT("'%s'"), *Plan.TargetAssetPath);
+
+	UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: plan for %s - %s"),
+		*Prefix,
+		*PlanFor,
+		*BuildQuestPlanSummary(Plan, Subject));
 
 	// Wires are questline-only. Looping an empty array would be harmless but the SILENCE is the point: a row plan that
 	// printed a wire section with nothing under it reads as "no wires changed" rather than "wires are not a thing here".

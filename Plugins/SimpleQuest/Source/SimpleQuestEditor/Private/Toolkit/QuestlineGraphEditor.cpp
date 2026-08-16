@@ -1689,11 +1689,7 @@ void FQuestlineGraphEditor::ExportQuestlineData()
     {
         FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, QuestPlanEndpointFrom(Request.Endpoint, Request.Mapping));
 
-        UE_LOG(LogSimpleQuestResolver, Log, TEXT("Plan Write: %d row(s) to create, %d to update. %d row(s) in that table "
-            "are claimed by nothing here and were left alone."),
-            Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
-            Out.RowPlan.ChangedNodeCount(),
-            Out.RowPlan.UnclaimedRowCount);
+        LogQuestPlanReport(Out.RowPlan, EQuestPlanSubject::Row, TEXT("Plan Write"));
         return;
     }
 

@@ -405,7 +405,14 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 			// D. Their key, not our GUID. Import preserved the studio's row key on the node when it wasn't already one of
 			//    our GUIDs; restoring it is what makes the file readable as a diff against their source. A CHILD key
 			//    carries its owner as a leading path segment, so it goes through the same helper rather than a bare lookup.
+			//    When the recipe names a key column, the same key is also written as a CELL: a table keyed that way is
+			//    matched on the column and never on the row's name, so the key has to reach them as data or the next plan
+			//    matches nothing and proposes a duplicate of every row they already have.
 			Row.Key = RestateKey(Row.Key, SourceKeyByGuid);
+			if (!Mapping.KeyColumn.IsNone())
+			{
+				Row.Cells.Add(Mapping.KeyColumn.ToString(), FQuestDataValue::MakeString(Row.Key));
+			}
 
 			// E. The LEVEL a row sits in, restated the same way. The graph cell names its owning container by OUR exported
 			//     GUID, while D has just renamed that container's row to the studio's key — so left alone, a nested file

@@ -83,7 +83,18 @@ private:
 	FName SampleFormatName = TEXT("TSV");
 	FString SampleFolder;
 
-	TArray<FName> SampleSourceColumns() const;					// feeds the binding widget's SourceColumnProvider
+	/**
+	 * The sample's enumeration, read ONCE per refresh and served from here after. Every widget on this panel used to ask for
+	 * the columns separately and every ask re-parsed the entire folder, so a single sample change did that work five times
+	 * over - and two widgets built moments apart could disagree if the file changed between them. Refreshed wherever the
+	 * sample changes, read everywhere else. An unreadable source leaves both empty, which is what the accessor returned for
+	 * that case anyway, so no caller learns a new state.
+	 */
+	TArray<FName> CachedSampleColumns;							// the bindable value columns
+	FName CachedSampleKeyColumn;								// the structural key column; None when the source has none or disagrees
+	void RefreshSampleColumnCache();
+
+	TArray<FName> SampleSourceColumns() const;					// the cached columns; feeds the binding widget's SourceColumnProvider
 	TArray<FString> SampleDiscriminatorValues() const;			// feeds the discriminator widget's DistinctValueProvider
 	TArray<FString> SampleQualifierOptions() const;				// structural pins + outcome identities from the sample's objective classes
 	void OnMappingModified();

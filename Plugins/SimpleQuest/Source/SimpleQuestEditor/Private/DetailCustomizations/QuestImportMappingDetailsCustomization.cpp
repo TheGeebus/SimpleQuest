@@ -57,11 +57,25 @@ TSharedRef<IDetailCustomization> FQuestImportMappingDetailsCustomization::MakeIn
 	return MakeShareable(new FQuestImportMappingDetailsCustomization);
 }
 
+void FQuestImportMappingDetailsCustomization::RefreshSampleColumnCache()
+{
+	CachedSampleColumns.Reset();
+	CachedSampleKeyColumn = NAME_None;
+
+	if (SampleFolder.IsEmpty()) return;   // no sample pointed at yet -> empty -> dropdowns disabled/empty (loud, not typed)
+
+	// This parses every file in the sample folder, which is why it lives where the sample CHANGES rather than where columns
+	// are READ: the accessors below run once per widget rebuild and there are several widgets.
+	const FQuestSourceColumns Cols = EnumerateForeignFileColumns(SampleFormatName.ToString(), SampleFolder);
+	if (!Cols.bReadable) return;
+
+	CachedSampleColumns   = Cols.Columns;
+	CachedSampleKeyColumn = Cols.KeyColumn;
+}
+
 TArray<FName> FQuestImportMappingDetailsCustomization::SampleSourceColumns() const
 {
-	if (SampleFolder.IsEmpty()) return {};   // no sample pointed at yet -> empty -> dropdowns disabled/empty (loud, not typed)
-	const FQuestSourceColumns Cols = EnumerateForeignFileColumns(SampleFormatName.ToString(), SampleFolder);
-	return Cols.bReadable ? Cols.Columns : TArray<FName>();
+	return CachedSampleColumns;
 }
 
 TArray<FString> FQuestImportMappingDetailsCustomization::SampleDiscriminatorValues() const
@@ -129,14 +143,31 @@ FReply FQuestImportMappingDetailsCustomization::OnBrowseForSampleFolder()
 	return FReply::Handled();
 }
 
-void FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type)
+void FQuestImportMappingDetailsCustomization::OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type CommitType)
 {
-	SampleFolder = NewText.ToString().TrimQuotes();
+	// Slate commits a text box TWICE for one edit - once for the Enter, and again for the focus change behind it - and the
+	// second carries the same string and no new intent. Dropped, but ONLY the focus one: committing an UNCHANGED path with
+	// Enter is how a designer says "I edited the file, read it again", and that has to keep working.
+	const FString Committed = NewText.ToString().TrimQuotes();
+	if (CommitType != ETextCommit::OnEnter && Committed == SampleFolder)
+	{
+		UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Sample folder commit ignored: '%s' is already the sample."), *Committed);
+		return;
+	}
+
+	SampleFolder = Committed;
 	RefreshFromSample();
 }
 
 void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 {
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Mapping panel: RefreshFromSample ('%s' as %s)."),
+		SampleFolder.IsEmpty() ? TEXT("(unset)") : *SampleFolder, *SampleFormatName.ToString());
+
+	// Read the sample ONCE, here, before anything below asks for a column. Everything downstream — both pickers, both lists
+	// and the mapping's own cache — then describes the same snapshot of the folder rather than re-reading it apiece.
+	RefreshSampleColumnCache();
+
 	// Publish the sample's columns onto the mapping so the stock-array GetOptions dropdowns (wire bindings) can pick from
 	// them — the same column set the bespoke pickers use, one source of truth.
 	if (UQuestImportMapping* M = Mapping.Get())
@@ -177,18 +208,13 @@ void FQuestImportMappingDetailsCustomization::RebuildKeyColumnOptions()
 	KeyColumnOptions.Reset();
 	KeyColumnOptions.Add(MakeShareable(new FString(GQuestKeyColumnNoneLabel)));   // leads, so clearing is the first thing offered
 
-	// Enumerated here rather than through SampleSourceColumns() because this picker needs BOTH halves of the result, and one
-	// parse answering both beats two parses answering one each. The sample's own key column leads the real entries: it is the
-	// expected answer, and for a folder source it is the ONLY column the provider will actually read the key from.
-	if (SampleFolder.IsEmpty()) { return; }
-	const FQuestSourceColumns Cols = EnumerateForeignFileColumns(SampleFormatName.ToString(), SampleFolder);
-	if (!Cols.bReadable) { return; }
-
-	if (!Cols.KeyColumn.IsNone())
+	// The sample's own key column leads the real entries: it is the expected answer, and for a folder source it is the ONLY
+	// column the provider will actually read the key from.
+	if (!CachedSampleKeyColumn.IsNone())
 	{
-		KeyColumnOptions.Add(MakeShareable(new FString(Cols.KeyColumn.ToString())));
+		KeyColumnOptions.Add(MakeShareable(new FString(CachedSampleKeyColumn.ToString())));
 	}
-	for (const FName& Col : Cols.Columns)
+	for (const FName& Col : CachedSampleColumns)
 	{
 		KeyColumnOptions.Add(MakeShareable(new FString(Col.ToString())));
 	}
@@ -438,7 +464,10 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	Mapping = Cast<UQuestImportMapping>(Objects[0].Get());
 	if (!Mapping.IsValid()) return;
 
-	RestoreSampleFromMemo();   // per-user convenience only; the recipe itself stays shape-only
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Mapping panel: CustomizeDetails."));
+
+	RestoreSampleFromMemo();      // per-user convenience only; the recipe itself stays shape-only
+	RefreshSampleColumnCache();   // the memo just named a sample; everything below reads columns and none of it should re-read them
 	
 	// Hide the stock discriminator column + class map: both are now driven by pickers (a typed FName + a typed TMap key were
 	// the last two corruption holes). The stock Bindings array stays hidden too — the binding widget is its editor.

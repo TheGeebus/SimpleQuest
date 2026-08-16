@@ -1181,6 +1181,31 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
         ];
 }
 
+namespace
+{
+    /**
+     * Tell a graph and every inner graph beneath it that something changed. Needed because node widgets BAKE their
+     * summary values at construction - SGraphNode_QuestlineStep reads the element count, the watched actors, the watched
+     * givers and the target classes once and builds a fixed widget - so a property written programmatically leaves every
+     * one of those stale until the panel rebuilds the node. The details panel re-reads on its own and therefore hides
+     * the problem: the value looks updated in one place and not in the other.
+     * Recursive because a container's contents live in their own UEdGraph, and a write inside one would otherwise go
+     * unrepainted while the outer graph refreshed around it.
+     */
+    void NotifyQuestGraphTreeChanged(UEdGraph* Graph)
+    {
+        if (!Graph) return;
+        Graph->NotifyGraphChanged();
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+            {
+                NotifyQuestGraphTreeChanged(QuestNode->GetInnerGraph());
+            }
+        }
+    }
+}
+
 bool FQuestlineGraphEditor::RunImport(const FQuestPlanEndpoint& Source, bool bApply)
 {
     if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
@@ -1247,6 +1272,11 @@ bool FQuestlineGraphEditor::RunImport(const FQuestPlanEndpoint& Source, bool bAp
     if (bApply && !Outcome.ApplyResult.bRefused)
     {
         FQuestPlanBroker::Get().Clear(Outcome.Plan.TargetAssetPath);
+
+        // The writes landed but nothing has told the graph. Node widgets bake their summary values at construction, so
+        // without this an applied change is visible in the details panel and invisible on the node itself - which reads
+        // as the apply having half-worked.
+        NotifyQuestGraphTreeChanged(QuestlineGraph->QuestlineEdGraph);
     }
     
     // An apply recompiles the target and its linked neighborhood (QuestImport_RunInPlace owns that, so the console gets

@@ -22,6 +22,7 @@ bool ReadQuestExportMarker(const FString& Folder, FQuestExportMarker& Out)
 		if (!Line.Split(TEXT("="), &Key, &Value)) continue;   // comment/blank lines have no '='
 		if (Key == TEXT("Format"))           { Out.Format = Value; }
 		else if (Key == TEXT("SourceAsset")) { Out.SourceAsset = Value; }
+		else if (Key == TEXT("Mapping"))     { Out.Mapping = Value; }   // absent in markers written before recipes were recorded
 		else if (Key == TEXT("File"))        { Out.Files.Add(Value); }
 	}
 	return true;
@@ -35,6 +36,9 @@ bool WriteQuestExportMarker(const FString& Folder, const FQuestExportMarker& Mar
 	Lines.Add(TEXT("# will then refuse to export here rather than overwrite them."));
 	Lines.Add(FString::Printf(TEXT("Format=%s"), *Marker.Format));
 	Lines.Add(FString::Printf(TEXT("SourceAsset=%s"), *Marker.SourceAsset));
+	// Written even when empty, like its neighbours above: in a file a human opens, a present-but-blank line says "canonical,
+	// no recipe" where an omitted one reads as an oversight.
+	Lines.Add(FString::Printf(TEXT("Mapping=%s"), *Marker.Mapping));
 	for (const FString& File : Marker.Files) { Lines.Add(FString::Printf(TEXT("File=%s"), *File)); }
 	// Force UTF-8: SaveStringToFile's AutoDetect silently switches to UTF-16 the moment any non-ASCII character appears
 	// in the text, which would make this adopter-facing file unreadable in a plain editor and inconsistent with the data

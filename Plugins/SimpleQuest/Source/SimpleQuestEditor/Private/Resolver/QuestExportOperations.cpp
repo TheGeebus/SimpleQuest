@@ -312,7 +312,9 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	// The asset's own path, which is already canonical - unlike a console argument, which the caller may have typed in
 	// either the short or the object-path form.
 	Marker.SourceAsset = Graph->GetPathName();
-	Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported — works for any provider, including one that ignores us
+	// The recipe, by the same rule and for the same reason: the asset's own path, and empty when the export was canonical.
+	Marker.Mapping = Request.Mapping ? Request.Mapping->GetPathName() : FString();
+	Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported - works for any provider, including one that ignores us
 
 	// REPLACE — remove only what the PREVIOUS export recorded. Never a directory, never read-only: a read-only file is
 	// protected on purpose, and a subdirectory can't contribute to the stale-shape problem because the reader doesn't

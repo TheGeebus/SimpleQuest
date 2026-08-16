@@ -34,6 +34,7 @@
 #include "Rewards/XPReward.h"
 #include "ScopedTransaction.h"
 #include "Kismet2/StructureEditorUtils.h"
+#include "Resolver/QuestExportOutput.h"
 #include "Rewards/LootTableReward.h"
 #include "Rewards/ScaledAmountReward.h"
 #include "Tests/QuestResolverTestRow.h"
@@ -2336,6 +2337,65 @@ bool FQuestResolver_RefusesDuplicateChildKey::RunTest(const FString& Parameters)
 
 	TestFalse(TEXT("Two rows claiming one key is refused"), bValid);
 	TestTrue(TEXT("...and the refusal names the offending key"), Error.Contains(TEXT("n_reward/Rewards[1]")));
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_ExportMarkerCarriesItsRecipe, "SimpleQuest.Resolver.Export.MarkerCarriesRecipe", TestFlags)
+bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Parameters)
+{
+	// The marker is a COMMITTED file that a reader arriving with nothing but the folder has to understand - a build server,
+	// a batch validator, a teammate's checkout. It had no coverage at all until this, which is a poor state for a format
+	// that lives in other people's repositories and is about to gain a field.
+	const FString Dir = FPaths::ProjectIntermediateDir() / TEXT("QuestResolverTests") / TEXT("ExportMarker");
+	IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
+	IFileManager::Get().MakeDirectory(*Dir, /*Tree*/ true);
+
+	// ROUND TRIP - everything written comes back, the recipe included.
+	FQuestExportMarker Written;
+	Written.Format      = TEXT("TSV");
+	Written.SourceAsset = TEXT("/Game/Quests/QL_Thing.QL_Thing");
+	Written.Mapping     = TEXT("/Game/Quests/DA_Recipe.DA_Recipe");
+	Written.Files       = { TEXT("content.tsv"), TEXT("edges.tsv") };
+	TestTrue(TEXT("Marker written"), WriteQuestExportMarker(Dir, Written));
+
+	FQuestExportMarker ReadBack;
+	TestTrue(TEXT("Marker read"), ReadQuestExportMarker(Dir, ReadBack));
+	TestEqual(TEXT("The format survives"),      ReadBack.Format,       Written.Format);
+	TestEqual(TEXT("The source asset survives"), ReadBack.SourceAsset, Written.SourceAsset);
+	TestEqual(TEXT("The recipe survives"),       ReadBack.Mapping,     Written.Mapping);
+	TestEqual(TEXT("The file list survives"),    ReadBack.Files.Num(), Written.Files.Num());
+
+	// A CANONICAL export names no recipe, and blank has to come back blank rather than be guessed at.
+	FQuestExportMarker Canonical;
+	Canonical.Format      = TEXT("TSV");
+	Canonical.SourceAsset = TEXT("/Game/Quests/QL_Thing.QL_Thing");
+	TestTrue(TEXT("Canonical marker written"), WriteQuestExportMarker(Dir, Canonical));
+	FQuestExportMarker CanonicalBack;
+	TestTrue(TEXT("Canonical marker read"), ReadQuestExportMarker(Dir, CanonicalBack));
+	TestTrue(TEXT("A canonical export names no recipe"), CanonicalBack.Mapping.IsEmpty());
+
+	// A MARKER WRITTEN BEFORE RECIPES WERE RECORDED still reads, and reads as canonical. That is the compatibility promise
+	// the field was added under, so it is asserted rather than assumed - and it is the arm that would break somebody's
+	// existing corpus rather than merely disappoint them.
+	const FString Legacy =
+		TEXT("# a comment line, which carries no equals sign\n")
+		TEXT("Format=TSV\n")
+		TEXT("SourceAsset=/Game/Quests/QL_Old.QL_Old\n")
+		TEXT("File=content.tsv\n");
+	TestTrue(TEXT("Legacy marker written"), FFileHelper::SaveStringToFile(Legacy, *(Dir / GQuestExportMarkerName),
+		FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM));
+	FQuestExportMarker LegacyBack;
+	TestTrue(TEXT("Legacy marker read"), ReadQuestExportMarker(Dir, LegacyBack));
+	TestEqual(TEXT("...with its source asset intact"), LegacyBack.SourceAsset, FString(TEXT("/Game/Quests/QL_Old.QL_Old")));
+	TestEqual(TEXT("...and its file list intact"),     LegacyBack.Files.Num(), 1);
+	TestTrue(TEXT("...and no recipe, which reads as canonical"), LegacyBack.Mapping.IsEmpty());
+
+	// Left in place when something failed, so the file can be opened rather than reconstructed from assertions.
+	if (!HasAnyErrors())
+	{
+		IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
+	}
 	return true;
 }
 

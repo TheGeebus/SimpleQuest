@@ -257,6 +257,18 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 				: TEXT("Choose a different destination, or move or delete that folder."));
 		return false;
 	}
+
+	// A marker that DISCLAIMS ownership is a folder describing itself for readers without offering itself for replacement -
+	// a studio's own corpus saying what it is. Same outcome as no marker at all, but a different reason, and different
+	// advice: deleting the marker is exactly the wrong fix here, since the marker is the thing making the folder readable.
+	if (bHadMarker && !Previous.bOwned)
+	{
+		Out.Error = FString::Printf(TEXT("refusing — '%s' carries a marker declaring it is not export output (Owned=false). "
+			"It is described for readers but is not ours to replace. Choose a different destination. Nothing written."),
+			*OutDir);
+		return false;
+	}
+	
 	// The marker may predate the normalization below, and "same asset, other spelling" must not read as "different
 	// questline". That refusal tells a designer to change their QuestlineID, which would be wrong.
 	if (bHadMarker && !Previous.SourceAsset.IsEmpty()
@@ -314,6 +326,9 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	Marker.SourceAsset = Graph->GetPathName();
 	// The recipe, by the same rule and for the same reason: the asset's own path, and empty when the export was canonical.
 	Marker.Mapping = Request.Mapping ? Request.Mapping->GetPathName() : FString();
+	// Stated rather than left to the default, because this is the one place that can honestly claim it: we are writing
+	// these files, so this folder IS ours. Every other producer of a marker is a human, and theirs should say false.
+	Marker.bOwned = true;
 	Marker.Files = QuestExportFilesIn(Staging);   // enumerated, not reported - works for any provider, including one that ignores us
 
 	// REPLACE — remove only what the PREVIOUS export recorded. Never a directory, never read-only: a read-only file is

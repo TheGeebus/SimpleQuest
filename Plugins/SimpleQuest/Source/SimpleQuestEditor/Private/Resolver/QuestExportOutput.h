@@ -29,7 +29,16 @@ struct FQuestExportMarker
 	 */
 	FString Mapping;
 
-	TArray<FString> Files;   // what the previous export wrote - the ONLY things a replacement may remove
+	/**
+	 * Whether this folder is export OUTPUT, and so ours to replace. True for anything our export wrote - including every
+	 * marker written before this field existed, which is why it defaults true rather than false.
+	 * A HAND-PLACED MARKER SETS IT FALSE: a studio declaring what a folder holds so a reader can find it, without offering
+	 * the folder up to be overwritten. Those are separate claims, and while one field made both, a corpus we did not write
+	 * could not describe itself at all - the only way to declare provenance was to surrender the folder.
+	 */
+	bool bOwned = true;
+
+	TArray<FString> Files;   // what the previous export wrote — the ONLY things a replacement may remove
 };
 
 /** Read the marker from Folder. False when there is none, which means the folder is not ours to replace. */

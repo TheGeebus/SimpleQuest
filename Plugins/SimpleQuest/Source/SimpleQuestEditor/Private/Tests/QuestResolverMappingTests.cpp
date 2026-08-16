@@ -2366,6 +2366,18 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestEqual(TEXT("The source asset survives"), ReadBack.SourceAsset, Written.SourceAsset);
 	TestEqual(TEXT("The recipe survives"),       ReadBack.Mapping,     Written.Mapping);
 	TestEqual(TEXT("The file list survives"),    ReadBack.Files.Num(), Written.Files.Num());
+	TestTrue(TEXT("An export claims its folder"), ReadBack.bOwned);
+
+	// A HAND-PLACED marker: provenance without ownership. This is the case the field exists for - a corpus we did not
+	// write, describing itself so a reader can find it, while refusing to be overwritten.
+	FQuestExportMarker Disclaimed = Written;
+	Disclaimed.bOwned = false;
+	TestTrue(TEXT("Disclaimed marker written"), WriteQuestExportMarker(Dir, Disclaimed));
+	FQuestExportMarker DisclaimedBack;
+	TestTrue(TEXT("Disclaimed marker read"), ReadQuestExportMarker(Dir, DisclaimedBack));
+	TestFalse(TEXT("A disclaimed folder is not ours to replace"), DisclaimedBack.bOwned);
+	TestEqual(TEXT("...while still naming its questline"), DisclaimedBack.SourceAsset, Written.SourceAsset);
+	TestEqual(TEXT("...and its recipe"),                   DisclaimedBack.Mapping,     Written.Mapping);
 
 	// A CANONICAL export names no recipe, and blank has to come back blank rather than be guessed at.
 	FQuestExportMarker Canonical;
@@ -2391,6 +2403,9 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestEqual(TEXT("...with its source asset intact"), LegacyBack.SourceAsset, FString(TEXT("/Game/Quests/QL_Old.QL_Old")));
 	TestEqual(TEXT("...and its file list intact"),     LegacyBack.Files.Num(), 1);
 	TestTrue(TEXT("...and no recipe, which reads as canonical"), LegacyBack.Mapping.IsEmpty());
+	// The compatibility half of the ownership default: a marker predating the field was written by our export, so an
+	// absent Owned line must read as OURS. Defaulting the other way would make every existing export folder refuse itself.
+	TestTrue(TEXT("...and is still ours to replace"), LegacyBack.bOwned);
 
 	// Left in place when something failed, so the file can be opened rather than reconstructed from assertions.
 	if (!HasAnyErrors())

@@ -3,9 +3,13 @@
 
 #pragma once
 
-// One text rendering of a plan, shared by every surface that reports one. Three existed before this: the console's
-// itemised dump, the toolkit's hand-rolled one-liner with a different set of counts, and the table-export arm, which
-// called the console's and then printed its own corrected version on the next line.
+// Every rendering of a plan, shared by every surface that reports one. Three text renderings existed before this: the
+// console's itemised dump, the toolkit's hand-rolled one-liner with a different set of counts, and the table-export arm,
+// which called the console's and then printed its own corrected version on the next line.
+//
+// TWO AUDIENCES NOW, one model. The log renderings are read by a person, so they may reword freely. The JSON rendering is
+// read by a build server and is a CONTRACT: its field names and its ordering are promises, and it carries a schema
+// version because a gate that breaks silently when the shape moves is worse than no gate at all.
 
 #include "CoreMinimal.h"
 #include "Resolver/QuestInPlacePlan.h"
@@ -48,4 +52,33 @@ FString BuildQuestExportReceipt(const FQuestExportOutcome& Outcome);
 
 /** The full detail line for a log, receipt included. Prefix is the caller's verb, same contract as the plan report. */
 void LogQuestExportReport(const FQuestExportOutcome& Outcome, const FString& Prefix);
+
+
+/** Where one plan in a run came from — the export marker's account of its folder, as the run should report it. */
+struct FQuestPlanRunSource
+{
+	FString Folder;    // RELATIVE to the run's root, so two machines planning the same corpus produce the same file
+	FString Format;
+	FString Mapping;   // empty for a canonical export
+};
+
+/** One plan plus the provenance a consumer needs to act on it. */
+struct FQuestPlanRunItem
+{
+	FQuestInPlacePlan Plan;
+	FQuestPlanRunSource Source;
+};
+
+/**
+ * The whole run as JSON - the machine-readable half of the plan report, and the only one that is a contract.
+ *
+ * DETERMINISTIC BY CONSTRUCTION: identical inputs produce a BYTE-IDENTICAL string. Every collection is sorted here
+ * rather than trusted to arrive ordered, and nothing that varies between runs goes in - no timestamp, no duration, no
+ * absolute path. That is not tidiness: the point of the artifact is that a build server can diff this commit's run
+ * against the last one, and a single moving field turns every diff into noise.
+ *
+ * The subject is DERIVED from each plan's Direction rather than passed in, so a caller cannot hand this a row plan
+ * labelled as a questline - which is exactly how a row plan came to name the wrong asset in the log.
+ */
+FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FString& Root, const FString& FailOn);
 

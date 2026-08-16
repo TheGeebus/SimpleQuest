@@ -35,6 +35,7 @@
 #include "ScopedTransaction.h"
 #include "Kismet2/StructureEditorUtils.h"
 #include "Resolver/QuestExportOutput.h"
+#include "Resolver/QuestPlanReport.h"
 #include "Rewards/LootTableReward.h"
 #include "Rewards/ScaledAmountReward.h"
 #include "Tests/QuestResolverTestRow.h"
@@ -2396,6 +2397,123 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	{
 		IFileManager::Get().DeleteDirectory(*Dir, /*RequireExists*/ false, /*Tree*/ true);
 	}
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_PlanJsonIsDeterministic, "SimpleQuest.Resolver.Report.PlanJsonIsDeterministic", TestFlags)
+bool FQuestResolver_PlanJsonIsDeterministic::RunTest(const FString& Parameters)
+{
+	// The artifact's entire value is that a build server can diff this commit's run against the last one, so a field that
+	// moves between runs turns every diff into noise. RENDERING THE SAME PLAN TWICE WOULD NOT TEST THAT - one TMap iterated
+	// twice inside one process usually yields the same order, so an unsorted map passes that version of the test happily.
+	// This builds the same CONTENT twice with every collection filled in the OPPOSITE ORDER, which is what a different
+	// discovery order, a different map history or a different machine actually hands the renderer.
+	auto MakeEntry = [](const FString& Key, const FString& Label, bool bReversed)
+	{
+		FQuestNodePlanEntry Entry;
+		Entry.Key              = Key;
+		Entry.Action           = EQuestNodePlanAction::Update;
+		Entry.Guid             = Key + TEXT("-guid");
+		Entry.ClassName        = TEXT("QuestlineNode_Step");
+		Entry.CurrentClassName = TEXT("QuestlineNode_Step");
+		Entry.GraphCell        = TEXT("root");
+		Entry.CurrentGraphCell = TEXT("root");
+		Entry.Label            = Label;
+
+		FQuestPropertyChange First;
+		First.Property     = TEXT("Alpha");
+		First.Kind         = EQuestPropertyChangeKind::Edit;
+		First.CurrentText  = TEXT("1");
+		First.IncomingText = TEXT("2");
+
+		FQuestPropertyChange Second;
+		Second.Property     = TEXT("Beta");
+		Second.Kind         = EQuestPropertyChangeKind::ChildAdded;
+		Second.IncomingText = TEXT("new");
+
+		if (bReversed) { Entry.Changes = { Second, First }; }
+		else           { Entry.Changes = { First, Second }; }
+		return Entry;
+	};
+
+	auto MakeItems = [&MakeEntry](bool bReversed)
+	{
+		FQuestInPlacePlan Plan;
+		Plan.Direction          = EQuestPlanDirection::IntoGraph;
+		Plan.TargetAssetPath    = TEXT("/Game/Q/QL_Thing.QL_Thing");
+		Plan.UntouchedNodeCount = 2;
+
+		const FQuestNodePlanEntry Alpha = MakeEntry(TEXT("n_alpha"), TEXT("Alpha Node"), bReversed);
+		const FQuestNodePlanEntry Beta  = MakeEntry(TEXT("n_beta"),  TEXT("Beta Node"),  bReversed);
+		if (bReversed) { Plan.Entries = { Beta, Alpha }; } else { Plan.Entries = { Alpha, Beta }; }
+
+		const FQuestDataEdge EdgeOne { TEXT("n_alpha"), TEXT("activates()"), TEXT("n_beta")  };
+		const FQuestDataEdge EdgeTwo { TEXT("n_beta"),  TEXT("activates()"), TEXT("n_alpha") };
+		if (bReversed) { Plan.AddedEdges = { EdgeTwo, EdgeOne }; Plan.RemovedEdges = { EdgeOne, EdgeTwo }; }
+		else           { Plan.AddedEdges = { EdgeOne, EdgeTwo }; Plan.RemovedEdges = { EdgeTwo, EdgeOne }; }
+
+		if (bReversed)
+		{
+			Plan.Refusals      = { TEXT("refusal two"), TEXT("refusal one") };
+			Plan.Warnings      = { TEXT("warning two"), TEXT("warning one") };
+			Plan.AmbiguousKeys = { TEXT("k_two"), TEXT("k_one") };
+			Plan.LabelByKey.Add(TEXT("n_beta"),  TEXT("Beta Node"));
+			Plan.LabelByKey.Add(TEXT("n_alpha"), TEXT("Alpha Node"));
+		}
+		else
+		{
+			Plan.Refusals      = { TEXT("refusal one"), TEXT("refusal two") };
+			Plan.Warnings      = { TEXT("warning one"), TEXT("warning two") };
+			Plan.AmbiguousKeys = { TEXT("k_one"), TEXT("k_two") };
+			Plan.LabelByKey.Add(TEXT("n_alpha"), TEXT("Alpha Node"));
+			Plan.LabelByKey.Add(TEXT("n_beta"),  TEXT("Beta Node"));
+		}
+
+		// A SECOND plan, so the run-level sort is exercised too. Discovery walks a directory, and directory enumeration
+		// order is not something a committed artifact may inherit.
+		FQuestInPlacePlan Other = Plan;
+		Other.TargetAssetPath = TEXT("/Game/Q/QL_Other.QL_Other");
+
+		FQuestPlanRunItem ItemA;
+		ItemA.Plan = Plan;
+		ItemA.Source.Folder = TEXT("thing");
+		ItemA.Source.Format = TEXT("TSV");
+
+		FQuestPlanRunItem ItemB;
+		ItemB.Plan = Other;
+		ItemB.Source.Folder = TEXT("other");
+		ItemB.Source.Format = TEXT("TSV");
+
+		TArray<FQuestPlanRunItem> Items;
+		if (bReversed) { Items = { ItemA, ItemB }; } else { Items = { ItemB, ItemA }; }
+		return Items;
+	};
+
+	const FString Forward = BuildQuestPlanRunJson(MakeItems(/*bReversed*/ false), TEXT("Data/Quests"), TEXT("refusals"));
+	const FString Reverse = BuildQuestPlanRunJson(MakeItems(/*bReversed*/ true),  TEXT("Data/Quests"), TEXT("refusals"));
+
+	// Guard against the DEGENERATE PASS: two empty strings are equal, and so are two renders that dropped everything they
+	// were given. An equality test with nothing on either side of it is the easiest green in the world to write by accident.
+	TestTrue(TEXT("The render is non-trivial"),        Forward.Len() > 200);
+	TestTrue(TEXT("...and states its schema version"), Forward.Contains(TEXT("\"schemaVersion\"")));
+	TestTrue(TEXT("...and carries both entries"),      Forward.Contains(TEXT("n_alpha")) && Forward.Contains(TEXT("n_beta")));
+	TestTrue(TEXT("...and quarantines its labels"),    Forward.Contains(TEXT("labelByKey")));
+	TestTrue(TEXT("...and both plans"),                Forward.Contains(TEXT("QL_Thing")) && Forward.Contains(TEXT("QL_Other")));
+
+	if (Forward != Reverse)
+	{
+		// Inequality between two multi-KB strings is unreadable, and the one thing worth knowing is WHICH field moved.
+		int32 At = 0;
+		while (At < Forward.Len() && At < Reverse.Len() && Forward[At] == Reverse[At]) { ++At; }
+		const int32 From = FMath::Max(0, At - 80);
+		AddInfo(FString::Printf(TEXT("first difference at offset %d"), At));
+		AddInfo(FString::Printf(TEXT("  forward: %s"), *Forward.Mid(From, 200)));
+		AddInfo(FString::Printf(TEXT("  reverse: %s"), *Reverse.Mid(From, 200)));
+	}
+	TestEqual(TEXT("Both renders are the same length"),       Forward.Len(), Reverse.Len());
+	TestTrue(TEXT("Insertion order never reaches the file"),  Forward == Reverse);
+
 	return true;
 }
 

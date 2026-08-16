@@ -5,6 +5,8 @@
 
 #include "QuestExportOperations.h"
 #include "SimpleQuestLog.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 namespace
 {
@@ -140,5 +142,224 @@ void LogQuestExportReport(const FQuestExportOutcome& Outcome, const FString& Pre
 		Outcome.KnotsCollapsed,
 		*BuildQuestExportReceipt(Outcome),
 		Outcome.FilesRemoved);
+}
+
+
+namespace
+{
+	const TCHAR* PlanActionJson(EQuestNodePlanAction Action)
+	{
+		switch (Action)
+		{
+			case EQuestNodePlanAction::Create: return TEXT("create");
+			case EQuestNodePlanAction::Orphan: return TEXT("orphan");
+			default:                           return TEXT("update");
+		}
+	}
+
+	const TCHAR* ChangeKindJson(EQuestPropertyChangeKind Kind)
+	{
+		switch (Kind)
+		{
+			case EQuestPropertyChangeKind::ChildAdded:   return TEXT("childAdded");
+			case EQuestPropertyChangeKind::ChildRemoved: return TEXT("childRemoved");
+			default:                                     return TEXT("edit");
+		}
+	}
+
+	// Refused BEFORE clean, because IsNoOp() already folds in "no refusals" and would otherwise call a refused plan clean.
+	// Derived here rather than by a caller so the artifact and the exit code cannot come apart.
+	const TCHAR* PlanStatusJson(const FQuestInPlacePlan& Plan)
+	{
+		if (Plan.Refusals.Num() > 0) return TEXT("refused");
+		return Plan.IsNoOp() ? TEXT("clean") : TEXT("differences");
+	}
+
+	void WriteSortedStrings(TJsonWriter<>& Writer, const TCHAR* Field, const TArray<FString>& Values)
+	{
+		TArray<FString> Sorted = Values;
+		Sorted.Sort();
+		Writer.WriteArrayStart(Field);
+		for (const FString& Value : Sorted) { Writer.WriteValue(Value); }
+		Writer.WriteArrayEnd();
+	}
+
+	void WriteEdges(TJsonWriter<>& Writer, const TCHAR* Field, const TArray<FQuestDataEdge>& Edges)
+	{
+		// The same ordering the TSV writer uses, so an edge reads identically wherever it is reported.
+		TArray<FQuestDataEdge> Sorted = Edges;
+		Sorted.Sort([](const FQuestDataEdge& A, const FQuestDataEdge& B)
+		{
+			if (A.From != B.From) return A.From < B.From;
+			if (A.Type != B.Type) return A.Type < B.Type;
+			return A.To < B.To;
+		});
+		Writer.WriteArrayStart(Field);
+		for (const FQuestDataEdge& Edge : Sorted)
+		{
+			Writer.WriteObjectStart();
+			Writer.WriteValue(TEXT("from"), Edge.From);
+			Writer.WriteValue(TEXT("type"), Edge.Type);
+			Writer.WriteValue(TEXT("to"),   Edge.To);
+			Writer.WriteObjectEnd();
+		}
+		Writer.WriteArrayEnd();
+	}
+
+	void WriteChange(TJsonWriter<>& Writer, const FQuestPropertyChange& Change)
+	{
+		Writer.WriteObjectStart();
+		Writer.WriteValue(TEXT("property"), Change.Property);
+		Writer.WriteValue(TEXT("kind"),     ChangeKindJson(Change.Kind));
+
+		// IncomingValue is deliberately absent: it exists so the APPLY step writes what planning decided, in-process. A
+		// consumer of this file is not applying - it should re-run the plan rather than replay a serialized value.
+		Writer.WriteObjectStart(TEXT("display"));
+		Writer.WriteValue(TEXT("current"),  Change.CurrentText);
+		Writer.WriteValue(TEXT("incoming"), Change.IncomingText);
+		Writer.WriteObjectEnd();
+
+		Writer.WriteObjectEnd();
+	}
+
+	void WriteEntry(TJsonWriter<>& Writer, const FQuestNodePlanEntry& Entry)
+	{
+		Writer.WriteObjectStart();
+
+		// Everything OUTSIDE "display" is what a tool matches on. Empty strings are written rather than omitted so a
+		// consumer diffing two runs never sees a key appear and disappear as entries change action.
+		Writer.WriteValue(TEXT("key"),                Entry.Key);
+		Writer.WriteValue(TEXT("action"),             PlanActionJson(Entry.Action));
+		Writer.WriteValue(TEXT("guid"),               Entry.Guid);
+		Writer.WriteValue(TEXT("class"),              Entry.ClassName);
+		Writer.WriteValue(TEXT("currentClass"),       Entry.CurrentClassName);
+		Writer.WriteValue(TEXT("graph"),              Entry.GraphCell);
+		Writer.WriteValue(TEXT("currentGraph"),       Entry.CurrentGraphCell);
+		Writer.WriteValue(TEXT("destinationRowName"), Entry.DestinationRowName.IsNone() ? FString() : Entry.DestinationRowName.ToString());
+		Writer.WriteValue(TEXT("moved"),              Entry.bMoved);
+		Writer.WriteValue(TEXT("isQuestlineSelf"),    Entry.bIsQuestlineSelf);
+
+		TArray<FQuestPropertyChange> Changes = Entry.Changes;
+		Changes.Sort([](const FQuestPropertyChange& A, const FQuestPropertyChange& B) { return A.Property < B.Property; });
+		Writer.WriteArrayStart(TEXT("changes"));
+		for (const FQuestPropertyChange& Change : Changes) { WriteChange(Writer, Change); }
+		Writer.WriteArrayEnd();
+
+		Writer.WriteObjectStart(TEXT("display"));
+		Writer.WriteValue(TEXT("label"),        Entry.Label);
+		Writer.WriteValue(TEXT("graph"),        Entry.GraphLabel);
+		Writer.WriteValue(TEXT("currentGraph"), Entry.CurrentGraphLabel);
+		Writer.WriteObjectEnd();
+
+		Writer.WriteObjectEnd();
+	}
+
+	void WritePlan(TJsonWriter<>& Writer, const FQuestPlanRunItem& Item)
+	{
+		const FQuestInPlacePlan& Plan = Item.Plan;
+		const bool bIntoTable = Plan.Direction == EQuestPlanDirection::IntoTable;
+
+		Writer.WriteObjectStart();
+		Writer.WriteValue(TEXT("questline"),   Plan.TargetAssetPath);
+		Writer.WriteValue(TEXT("destination"), Plan.DestinationAssetPath);
+		Writer.WriteValue(TEXT("direction"),   bIntoTable ? TEXT("intoTable") : TEXT("intoGraph"));
+		Writer.WriteValue(TEXT("status"),      PlanStatusJson(Plan));
+
+		Writer.WriteObjectStart(TEXT("source"));
+		Writer.WriteValue(TEXT("folder"),  Item.Source.Folder);
+		Writer.WriteValue(TEXT("format"),  Item.Source.Format);
+		Writer.WriteValue(TEXT("mapping"), Item.Source.Mapping);
+		Writer.WriteObjectEnd();
+
+		// Every count, both directions, with the irrelevant one honestly at zero. untouchedNodes and unclaimedRows are
+		// kept apart for the reason the struct keeps them apart: "outside every level the source declares" and "unclaimed
+		// by any node" are different statements, and one name for both is how a reader conflates them.
+		Writer.WriteObjectStart(TEXT("counts"));
+		Writer.WriteValue(TEXT("create"),         Plan.CountOf(EQuestNodePlanAction::Create));
+		Writer.WriteValue(TEXT("update"),         Plan.CountOf(EQuestNodePlanAction::Update));
+		Writer.WriteValue(TEXT("orphan"),         Plan.CountOf(EQuestNodePlanAction::Orphan));
+		Writer.WriteValue(TEXT("changed"),        Plan.ChangedNodeCount());
+		Writer.WriteValue(TEXT("untouchedNodes"), Plan.UntouchedNodeCount);
+		Writer.WriteValue(TEXT("unclaimedRows"),  Plan.UnclaimedRowCount);
+		Writer.WriteValue(TEXT("ambiguousKeys"),  Plan.AmbiguousKeys.Num());
+		Writer.WriteValue(TEXT("refusals"),       Plan.Refusals.Num());
+		Writer.WriteValue(TEXT("edgesAdded"),     Plan.AddedEdges.Num());
+		Writer.WriteValue(TEXT("edgesRemoved"),   Plan.RemovedEdges.Num());
+		Writer.WriteObjectEnd();
+
+		WriteSortedStrings(Writer, TEXT("refusals"),      Plan.Refusals);
+		WriteSortedStrings(Writer, TEXT("warnings"),      Plan.Warnings);
+		WriteSortedStrings(Writer, TEXT("ambiguousKeys"), Plan.AmbiguousKeys);
+
+		TArray<FQuestNodePlanEntry> Entries = Plan.Entries;
+		Entries.Sort([](const FQuestNodePlanEntry& A, const FQuestNodePlanEntry& B) { return A.Key < B.Key; });
+		Writer.WriteArrayStart(TEXT("entries"));
+		for (const FQuestNodePlanEntry& Entry : Entries) { WriteEntry(Writer, Entry); }
+		Writer.WriteArrayEnd();
+
+		Writer.WriteObjectStart(TEXT("edges"));
+		WriteEdges(Writer, TEXT("added"),   Plan.AddedEdges);
+		WriteEdges(Writer, TEXT("removed"), Plan.RemovedEdges);
+		Writer.WriteObjectEnd();
+
+		// LabelByKey is a TMap, and TMap iteration order is NOT stable between runs. Sorting the keys here is the whole
+		// difference between an artifact a build server can diff and one that appears to change on every commit.
+		TArray<FString> LabelKeys;
+		Plan.LabelByKey.GetKeys(LabelKeys);
+		LabelKeys.Sort();
+		Writer.WriteObjectStart(TEXT("display"));
+		Writer.WriteObjectStart(TEXT("labelByKey"));
+		for (const FString& Key : LabelKeys) { Writer.WriteValue(Key, Plan.LabelByKey[Key]); }
+		Writer.WriteObjectEnd();
+		Writer.WriteObjectEnd();
+
+		Writer.WriteObjectEnd();
+	}
+}
+
+FString BuildQuestPlanRunJson(const TArray<FQuestPlanRunItem>& Items, const FString& Root, const FString& FailOn)
+{
+	TArray<FQuestPlanRunItem> Sorted = Items;
+	Sorted.Sort([](const FQuestPlanRunItem& A, const FQuestPlanRunItem& B)
+	{
+		// By questline, then by folder: one questline can legitimately be described by more than one corpus folder, and
+		// leaving those two in discovery order would make the file depend on directory enumeration.
+		if (A.Plan.TargetAssetPath != B.Plan.TargetAssetPath) return A.Plan.TargetAssetPath < B.Plan.TargetAssetPath;
+		return A.Source.Folder < B.Source.Folder;
+	});
+	
+	int32 CleanCount = 0, DifferenceCount = 0, RefusedCount = 0;
+	for (const FQuestPlanRunItem& Item : Sorted)
+	{
+		const FString Status = PlanStatusJson(Item.Plan);
+		if (Status == TEXT("refused"))          { ++RefusedCount; }
+		else if (Status == TEXT("differences")) { ++DifferenceCount; }
+		else                                    { ++CleanCount; }
+	}
+
+	FString Json;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&Json);
+	Writer->WriteObjectStart();
+
+	// The version is FIRST and is a promise. A consumer that finds a number it does not know should refuse rather than
+	// guess, which is only possible if it can read the number before anything else it might misinterpret.
+	Writer->WriteValue(TEXT("schemaVersion"), 1);
+	Writer->WriteValue(TEXT("root"),          Root);
+	Writer->WriteValue(TEXT("failOn"),        FailOn);
+
+	Writer->WriteObjectStart(TEXT("summary"));
+	Writer->WriteValue(TEXT("planCount"),       Sorted.Num());
+	Writer->WriteValue(TEXT("clean"),           CleanCount);
+	Writer->WriteValue(TEXT("withDifferences"), DifferenceCount);
+	Writer->WriteValue(TEXT("refused"),         RefusedCount);
+	Writer->WriteObjectEnd();
+
+	Writer->WriteArrayStart(TEXT("plans"));
+	for (const FQuestPlanRunItem& Item : Sorted) { WritePlan(Writer.Get(), Item); }
+	Writer->WriteArrayEnd();
+
+	Writer->WriteObjectEnd();
+	Writer->Close();
+	return Json;
 }
 

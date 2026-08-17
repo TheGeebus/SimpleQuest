@@ -301,7 +301,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 							}
 							if (!DestinationMapping.Get(FSoftObjectPath()).IsValid())
 							{
-								return LOCTEXT("BuildExportNoMapping", "Pick a Mapping. Writing into a Data Table needs a recipe saying which of that table's fields this questline's properties belong in.");
+								return LOCTEXT("BuildExportNoMapping", "Pick a Mapping. Writing into a Data Table needs to say which of that table's fields this questline's properties belong in.");
 							}
 							return LOCTEXT("BuildExportPlanTip", "Work out what writing this questline into that Data Table would change. Nothing is written - review it below, then apply.");
 						})

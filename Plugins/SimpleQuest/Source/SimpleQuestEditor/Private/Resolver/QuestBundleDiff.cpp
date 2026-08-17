@@ -74,7 +74,7 @@ void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, 
 		const EQuestAbsentFieldPolicy Policy = bAbsent ? Policies.Resolve(FName(*Column)) : EQuestAbsentFieldPolicy::Preserve;
 		if (bAbsent && Policy == EQuestAbsentFieldPolicy::Require)
 		{
-			OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' leaves '%s' blank, and the recipe requires a value for it"),
+			OutPlan.Refusals.Add(FString::Printf(TEXT("row '%s' leaves '%s' blank, and the Mapping requires a value for it"),
 				*Row.Key, *Column));
 			continue;
 		}

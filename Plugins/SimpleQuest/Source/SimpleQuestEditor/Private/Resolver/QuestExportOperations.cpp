@@ -111,8 +111,8 @@ static bool QuestExport_PlanRows(const FQuestExportRequest& Request, const FQues
 	// in, and every row would refuse one column at a time. Say it once, up front.
 	if (!Request.Mapping)
 	{
-		Out.Error = TEXT("refusing — writing into a Data Table needs a recipe. Without one, nothing says which of "
-			"the table's fields this questline's properties belong in. Choose a mapping. Nothing planned.");
+		Out.Error = TEXT("refusing — writing into a Data Table needs a Mapping. Without one, nothing says which of "
+			"the table's fields this questline's properties belong in. Choose one. Nothing planned.");
 		return false;
 	}
 

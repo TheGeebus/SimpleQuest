@@ -139,7 +139,7 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 					SNew(STextBlock)
 					.Text(this, &SQuestMappingDiscriminatorList::GetStaleSummaryText)
 					.ColorAndOpacity(this, &SQuestMappingDiscriminatorList::GetStaleSummaryColor)
-					.ToolTipText(LOCTEXT("StaleSummaryTip", "Values stored on this recipe that the current sample source does not contain. Use Show to isolate them."))
+					.ToolTipText(LOCTEXT("StaleSummaryTip", "Values stored on this Mapping that the current sample source does not contain. Use Show to isolate them."))
 				]
 			]
 			.EmptyState()
@@ -162,7 +162,7 @@ void SQuestMappingDiscriminatorList::Construct(const FArguments& InArgs)
 					{
 						return LOCTEXT("EmptyAllFilteredOut", "Every value is hidden by the current Show filter.");
 					}
-					return LOCTEXT("EmptyNoValues", "That column holds no values in this sample, and none are stored on the recipe.");
+					return LOCTEXT("EmptyNoValues", "That column holds no values in this sample, and none are stored on the Mapping.");
 				})
 			]
 		]
@@ -230,7 +230,7 @@ TSharedRef<SWidget> SQuestMappingDiscriminatorList::MakeValueCell(const FQuestDi
 			.Text(Note)
 			.Font(FAppStyle::GetFontStyle(TEXT("PropertyWindow.ItalicFont")))
 			.ColorAndOpacity(FSlateColor(StaleNoteColor))
-			.ToolTipText(LOCTEXT("StaleTip", "This value is stored on the recipe but is not present in the current sample source. Remove it, or point at a sample that contains it."))
+			.ToolTipText(LOCTEXT("StaleTip", "This value is stored on the Mapping but is not present in the current sample source. Remove it, or point at a sample that contains it."))
 		];
 }
 
@@ -427,7 +427,7 @@ TSharedRef<SWidget> SQuestMappingDiscriminatorList::BuildFilterMenu()
 
 	Menu.AddMenuEntry(
 		LOCTEXT("HideInSample", "Hide values in the sample"),
-		LOCTEXT("HideInSampleTip", "Show only values stored on the recipe that this sample no longer contains — what has drifted."),
+		LOCTEXT("HideInSampleTip", "Show only values stored on the Mapping that this sample no longer contains — what has drifted."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([this]() { bHideInSample = !bHideInSample; RefreshRows(); }),

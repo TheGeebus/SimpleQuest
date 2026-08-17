@@ -137,7 +137,7 @@ int32 UQuestPlanScanCommandlet::Main(const FString& Params)
 			: Cast<UQuestImportMapping>(FSoftObjectPath(Marker.Mapping).TryLoad());
 		if (!Marker.Mapping.IsEmpty() && !Mapping)
 		{
-			Item.Plan.Refusals.Add(FString::Printf(TEXT("the recipe '%s' this folder names did not load - the corpus "
+			Item.Plan.Refusals.Add(FString::Printf(TEXT("the Mapping '%s' this folder names did not load - the corpus "
 				"cannot be read in the vocabulary it was written in"), *Marker.Mapping));
 			Items.Add(MoveTemp(Item));
 			continue;

@@ -297,7 +297,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 {
 	if (Mapping.DiscriminatorColumn.IsNone())
 	{
-		Warnings.Add(TEXT("reverse mapping: the recipe has no discriminator column — bundle left in canonical shape"));
+		Warnings.Add(TEXT("reverse mapping: the Mapping has no discriminator column — bundle left in canonical shape"));
 		return;
 	}
 
@@ -529,7 +529,7 @@ void QuestBundle_ApplyReverseMapping(FQuestDataBundle& Bundle, const UQuestImpor
 		Edge.To   = RestateKey(Edge.To,   SourceKeyByGuid);   // a contains edge's target is a CHILD key, not a bare GUID
 	}
 
-	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: restated %d row(s) in the recipe's vocabulary, %d column(s) kept of %d "
+	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ExportQuestline: restated %d row(s) in the Mapping's vocabulary, %d column(s) kept of %d "
 		"(faithful re-statement — per-row casing, at-default values and original file layout are not reconstructed), %d wire(s) written."),
 		Restated,
 		ColsAfter,

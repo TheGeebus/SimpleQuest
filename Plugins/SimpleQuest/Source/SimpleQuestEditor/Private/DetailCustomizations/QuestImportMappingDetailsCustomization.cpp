@@ -515,7 +515,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 	// Sample-source row: an editor-only "point at a representative file to author against" control. NOT saved on the recipe.
 	Category.AddCustomRow(LOCTEXT("SampleSourceFilter", "Sample Source"))
 	.NameContent()[ SNew(STextBlock).Text(LOCTEXT("SampleSourceLabel", "Sample Source"))
-		.ToolTipText(LOCTEXT("SampleSourceTip", "Point at a folder of representative source files. Reads every file of the chosen format and unions their columns to populate the pickers below. Editor-only — not saved on this recipe."))
+		.ToolTipText(LOCTEXT("SampleSourceTip", "Point at a folder of representative source files. Reads every file of the chosen format and unions their columns to populate the pickers below. Editor-only — not saved on this Mapping."))
 		.Font(IDetailLayoutBuilder::GetDetailFont())
 	]
 	.ValueContent().MinDesiredWidth(400.0f)

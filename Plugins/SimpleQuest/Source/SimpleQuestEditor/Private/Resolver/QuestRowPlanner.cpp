@@ -72,7 +72,7 @@ void PlanQuestRowsIntoTable(const FQuestDataBundle& Bundle, const UDataTable& De
 	}
 	for (const FString& Column : MissingBound)
 	{
-		OutPlan.Refusals.Add(FString::Printf(TEXT("the recipe binds column '%s', which '%s' has no field for - every "
+		OutPlan.Refusals.Add(FString::Printf(TEXT("the Mapping binds column '%s', which '%s' has no field for - every "
 			"value written through it would be dropped"), *Column, *RowStruct->GetName()));
 	}
 	for (const FString& Column : MissingUnbound)
@@ -123,7 +123,7 @@ void PlanQuestRowsIntoTable(const FQuestDataBundle& Bundle, const UDataTable& De
 		}
 		if (!KeyProp)
 		{
-			OutPlan.Refusals.Add(FString::Printf(TEXT("the recipe's key column '%s' is not a field on '%s' - every row "
+			OutPlan.Refusals.Add(FString::Printf(TEXT("the Mapping's key column '%s' is not a field on '%s' - every row "
 				"would match nothing and be planned as a duplicate"), *KeyColumnName, *RowStruct->GetName()));
 		}
 		else

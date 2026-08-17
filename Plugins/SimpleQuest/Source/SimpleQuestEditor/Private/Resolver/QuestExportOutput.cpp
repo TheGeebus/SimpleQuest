@@ -35,8 +35,8 @@ bool ReadQuestExportMarker(const FString& Folder, FQuestExportMarker& Out)
 bool WriteQuestExportMarker(const FString& Folder, const FQuestExportMarker& Marker)
 {
 	TArray<FString> Lines;
-	Lines.Add(TEXT("# Written by SimpleQuest. It records what this folder holds — which questline, in which format, through"));
-	Lines.Add(TEXT("# which recipe — so a reader arriving with nothing but the folder can make sense of it."));
+	Lines.Add(TEXT("# Written by SimpleQuest. It records what this folder holds - which questline, in which format, through"));
+	Lines.Add(TEXT("# which Mapping - so a reader arriving with nothing but the folder can make sense of it."));
 	Lines.Add(TEXT("# Owned=true means this folder is export output, which a later export of the same questline replaces."));
 	Lines.Add(TEXT("# Set Owned=false to keep your own edits: SimpleQuest will then refuse to export here, while still"));
 	Lines.Add(TEXT("# reading the folder. Deleting this file also stops the overwrite, but makes the folder undiscoverable."));

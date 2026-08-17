@@ -1771,10 +1771,10 @@ bool FQuestResolver_ExportPlansRatherThanWritesIntoATable::RunTest(const FString
 	// front rather than discovered one unmatched column at a time.
 	{
 		FQuestExportOutcome Out;
-		TestFalse(TEXT("A table destination with no recipe is refused"), QuestExport_Run(Request, Out));
+		TestFalse(TEXT("A table destination with no Mapping is refused"), QuestExport_Run(Request, Out));
 		TestFalse(TEXT("...nothing exported"), Out.bExported);
 		TestFalse(TEXT("...and nothing planned"), Out.bPlanned);
-		TestTrue(TEXT("...with a reason naming the recipe"), Out.Error.Contains(TEXT("recipe")));
+		TestTrue(TEXT("...with a reason naming the Mapping"), Out.Error.Contains(TEXT("Mapping")));
 	}
 
 	// WITH one. The same call now PLANS, and must not fall through to folders, ownership markers and staged replacement.
@@ -1782,7 +1782,7 @@ bool FQuestResolver_ExportPlansRatherThanWritesIntoATable::RunTest(const FString
 		Request.Mapping = MakeMapping();
 
 		FQuestExportOutcome Out;
-		TestTrue(TEXT("A table destination with a recipe succeeds"), QuestExport_Run(Request, Out));
+		TestTrue(TEXT("A table destination with a Mapping succeeds"), QuestExport_Run(Request, Out));
 		TestTrue(TEXT("...error-free"), Out.Error.IsEmpty());
 		TestTrue(TEXT("...having PLANNED"), Out.bPlanned);
 		TestFalse(TEXT("...and explicitly NOT exported"), Out.bExported);
@@ -2364,7 +2364,7 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestTrue(TEXT("Marker read"), ReadQuestExportMarker(Dir, ReadBack));
 	TestEqual(TEXT("The format survives"),      ReadBack.Format,       Written.Format);
 	TestEqual(TEXT("The source asset survives"), ReadBack.SourceAsset, Written.SourceAsset);
-	TestEqual(TEXT("The recipe survives"),       ReadBack.Mapping,     Written.Mapping);
+	TestEqual(TEXT("The Mapping survives"),       ReadBack.Mapping,     Written.Mapping);
 	TestEqual(TEXT("The file list survives"),    ReadBack.Files.Num(), Written.Files.Num());
 	TestTrue(TEXT("An export claims its folder"), ReadBack.bOwned);
 
@@ -2377,7 +2377,7 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestTrue(TEXT("Disclaimed marker read"), ReadQuestExportMarker(Dir, DisclaimedBack));
 	TestFalse(TEXT("A disclaimed folder is not ours to replace"), DisclaimedBack.bOwned);
 	TestEqual(TEXT("...while still naming its questline"), DisclaimedBack.SourceAsset, Written.SourceAsset);
-	TestEqual(TEXT("...and its recipe"),                   DisclaimedBack.Mapping,     Written.Mapping);
+	TestEqual(TEXT("...and its Mapping"),                   DisclaimedBack.Mapping,     Written.Mapping);
 
 	// A CANONICAL export names no recipe, and blank has to come back blank rather than be guessed at.
 	FQuestExportMarker Canonical;
@@ -2386,7 +2386,7 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestTrue(TEXT("Canonical marker written"), WriteQuestExportMarker(Dir, Canonical));
 	FQuestExportMarker CanonicalBack;
 	TestTrue(TEXT("Canonical marker read"), ReadQuestExportMarker(Dir, CanonicalBack));
-	TestTrue(TEXT("A canonical export names no recipe"), CanonicalBack.Mapping.IsEmpty());
+	TestTrue(TEXT("A canonical export names no Mapping"), CanonicalBack.Mapping.IsEmpty());
 
 	// A MARKER WRITTEN BEFORE RECIPES WERE RECORDED still reads, and reads as canonical. That is the compatibility promise
 	// the field was added under, so it is asserted rather than assumed - and it is the arm that would break somebody's
@@ -2402,7 +2402,7 @@ bool FQuestResolver_ExportMarkerCarriesItsRecipe::RunTest(const FString& Paramet
 	TestTrue(TEXT("Legacy marker read"), ReadQuestExportMarker(Dir, LegacyBack));
 	TestEqual(TEXT("...with its source asset intact"), LegacyBack.SourceAsset, FString(TEXT("/Game/Quests/QL_Old.QL_Old")));
 	TestEqual(TEXT("...and its file list intact"),     LegacyBack.Files.Num(), 1);
-	TestTrue(TEXT("...and no recipe, which reads as canonical"), LegacyBack.Mapping.IsEmpty());
+	TestTrue(TEXT("...and no Mapping, which reads as canonical"), LegacyBack.Mapping.IsEmpty());
 	// The compatibility half of the ownership default: a marker predating the field was written by our export, so an
 	// absent Owned line must read as OURS. Defaulting the other way would make every existing export folder refuse itself.
 	TestTrue(TEXT("...and is still ours to replace"), LegacyBack.bOwned);

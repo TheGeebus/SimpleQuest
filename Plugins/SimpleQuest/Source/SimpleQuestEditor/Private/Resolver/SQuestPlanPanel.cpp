@@ -680,16 +680,27 @@ void SQuestPlanPanel::HandlePlanPublished(const FString& InAssetPath, const FQue
 		Plan.RemovedEdges.Num(),
 		Plan.UntouchedNodeCount));
 
+	// TWO GROUPS, TWO HEADINGS. A refusal stops the apply and a warning does not, so collecting them into one list under
+	// "cannot be applied until these are resolved" tells a designer to go fix something that was never blocking anything.
+	// The per-line REFUSED:/warning: prefixes already carried the distinction; only the heading flattened it.
+	const bool bAnyBlocking = !Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty();
+
 	TArray<FString> Lines;
-	for (const FString& R : Plan.Refusals) { Lines.Add(FString::Printf(TEXT("REFUSED: %s"), *R)); }
-	for (const FString& K : Plan.AmbiguousKeys) { Lines.Add(FString::Printf(TEXT("CONTESTED KEY: %s"), *K)); }
-	for (const FString& W : Plan.Warnings) { Lines.Add(FString::Printf(TEXT("warning: %s"), *W)); }
-	if (!Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty())
+	if (bAnyBlocking)
 	{
-		Lines.Insert(TEXT("This plan cannot be applied until these are resolved. Nothing would be written."), 0);
+		Lines.Add(TEXT("This plan cannot be applied until these are resolved. Nothing would be written."));
+		for (const FString& R : Plan.Refusals)      { Lines.Add(FString::Printf(TEXT("REFUSED: %s"), *R)); }
+		for (const FString& K : Plan.AmbiguousKeys) { Lines.Add(FString::Printf(TEXT("CONTESTED KEY: %s"), *K)); }
 	}
+	if (!Plan.Warnings.IsEmpty())
+	{
+		if (bAnyBlocking) { Lines.Add(FString()); }   // a blank line, so the two groups cannot read as one list
+		Lines.Add(TEXT("These do not stop the apply:"));
+		for (const FString& W : Plan.Warnings) { Lines.Add(FString::Printf(TEXT("warning: %s"), *W)); }
+	}
+
 	Blockers = FText::FromString(FString::Join(Lines, TEXT("\n")));
-	bBlocking = !Plan.Refusals.IsEmpty() || !Plan.AmbiguousKeys.IsEmpty();
+	bBlocking = bAnyBlocking;
 	
 	RebuildRows(Plan);
 }
@@ -848,6 +859,14 @@ FText SQuestPlanPanel::GetSummaryText() const
 		// The status line above already states that no plan exists; this says what to DO about it.
 		return LOCTEXT("NoPlanYet", "Choose a source above, then press Build Plan.");
 	}
+	// A REFUSED plan is not a matching one. Falling through to "already matches its source" with blockers on screen tells
+	// a designer their data is fine while the reason it is not sits directly above - and an empty table is exactly the
+	// state where that happens, because a refused row produces no row to list.
+	if (bBlocking && Rows.IsEmpty())
+	{
+		return LOCTEXT("PlanIsBlocked", "Nothing else to show — the blockers above are the whole plan.");
+	}
+
 	// A plan that exists and finds nothing is a DIFFERENT fact from no plan at all, and only one of them means the
 	// asset matches its source. Saying so is what stops an empty table reading as a broken panel.
 	return Rows.IsEmpty()

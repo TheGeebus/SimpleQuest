@@ -767,6 +767,16 @@ FText SQuestPlanPanel::GetStaleText() const
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 {
+	// STreeView keys expansion by ITEM POINTER, and this used to mint a fresh row object for every entry - so every
+	// re-plan collapsed the whole tree, which punishes exactly the edit-plan-edit loop the panel exists to serve.
+	// Carrying the POINTER forward for a node that was already listed keeps its expansion with the tree needing to know
+	// nothing about it, and without a read-back accessor the shared table view does not expose.
+	TMap<FString, FQuestPlanRowPtr> Previous;
+	for (const FQuestPlanRowPtr& Row : Rows)
+	{
+		if (Row.IsValid() && !Row->Id.IsEmpty()) { Previous.Add(Row->Id, Row); }
+	}
+
 	Rows.Reset();
 
 	for (const FQuestNodePlanEntry& Entry : Plan.Entries)
@@ -775,7 +785,13 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 		// which is the same judgement the log makes - the two renderings agree deliberately.
 		if (Entry.Action == EQuestNodePlanAction::Update && Entry.Changes.IsEmpty() && !Entry.bMoved) { continue; }
 
-		FQuestPlanRowPtr Node = MakeShared<FQuestPlanRow>();
+		// Reused when this node was in the previous plan, fresh otherwise. Children are rebuilt either way: a change row
+		// has no children of its own, so there is no deeper expansion to preserve.
+		FQuestPlanRowPtr* Existing = Previous.Find(Entry.Key);
+		FQuestPlanRowPtr Node = Existing ? *Existing : MakeShared<FQuestPlanRow>();
+		Node->Children.Reset();
+
+		Node->Id          = Entry.Key;
 		Node->Kind        = FQuestPlanRow::EKind::Node;
 		Node->Action      = PlanRowActionText(Entry);
 		Node->Name        = Entry.Label.IsEmpty() ? Entry.Key : Entry.Label;
@@ -807,7 +823,14 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 	// rewires but changes no property would otherwise render as an empty table beside a summary claiming edge changes.
 	if (!Plan.AddedEdges.IsEmpty() || !Plan.RemovedEdges.IsEmpty())
 	{
-		FQuestPlanRowPtr Wiring = MakeShared<FQuestPlanRow>();
+		// The one row with no entry behind it, so it gets a fixed id - it is the same row conceptually on every plan,
+		// and a designer who expanded the wiring once should not have to keep re-expanding it.
+		static const FString WiringId = TEXT("__connections__");
+		FQuestPlanRowPtr* ExistingWiring = Previous.Find(WiringId);
+		FQuestPlanRowPtr Wiring = ExistingWiring ? *ExistingWiring : MakeShared<FQuestPlanRow>();
+		Wiring->Children.Reset();
+
+		Wiring->Id     = WiringId;
 		Wiring->Kind   = FQuestPlanRow::EKind::Node;
 		Wiring->Action = TEXT("WIRING");
 		Wiring->Name   = TEXT("Connections");

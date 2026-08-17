@@ -62,6 +62,14 @@ struct FQuestPlanRow
 	enum class EKind : uint8 { Node, Change };
 
 	EKind   Kind = EKind::Node;
+
+	/**
+	 * Identity, stable across re-plans - the entry's KEY, never its label. Not the same job as Name: eight nodes in one
+	 * plan can legitimately be called "AND", and matching on that would carry one node's expansion onto another's.
+	 * Blank on a change row, which has no independent identity - it belongs to the node above it.
+	 */
+	FString Id;
+
 	FString Action;      // CREATE / MOVE / UPDATE / ORPHAN — blank on a change row
 	FString Name;        // the node's label (or key), or the property's name
 	FString Detail;      // where the node lives, or "before -> after" for a property

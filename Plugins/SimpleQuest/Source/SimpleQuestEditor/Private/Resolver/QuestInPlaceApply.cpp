@@ -85,6 +85,12 @@ int32 ApplyQuestChangesToObject(UObject* Owner, const FString& OwnerKey, const T
 	CollectApplyTargets(Owner, OwnerKey, FString(), ByPath);
 
 	int32 Written = 0;
+	
+	// (object, property) pairs to notify once every write has landed. Collected rather than fired inline because a handler
+	// is free to reconstruct the node it belongs to - rebuilding pins is exactly what one of them does - and doing that
+	// midway through a loop still writing to those same objects is a hazard with no upside.
+	TArray<TPair<UObject*, FProperty*>> PendingNotifies;
+	
 	for (const FQuestPropertyChange& Change : Changes)
 	{
 		FString PropertyName;
@@ -122,8 +128,22 @@ int32 ApplyQuestChangesToObject(UObject* Owner, const FString& OwnerKey, const T
 				*Change.Property, *OwnerKey));
 			continue;
 		}
+		PendingNotifies.Emplace(Target, Prop);
 		++Written;
 	}
+
+	// TELL EACH OBJECT WHAT CHANGED. Modify() records the write for undo; it does not tell the object anything. A node
+	// reacts to its own properties in PostEditChangeProperty - UQuestlineNode_Entry rebuilds its deactivation pins there -
+	// so a write that skips this leaves the property saying one thing and the node saying another, until some unrelated
+	// later edit silently reconciles the two. That is worse than not writing at all: the plan reported success.
+	// Per-PROPERTY rather than a bare PostEditChange(), because those handlers match on GetPropertyName() and a
+	// property-less event reports NAME_None, which matches nothing and would look like this fix had been applied.
+	for (const TPair<UObject*, FProperty*>& Notify : PendingNotifies)
+	{
+		FPropertyChangedEvent ChangedEvent(Notify.Value, EPropertyChangeType::ValueSet);
+		Notify.Key->PostEditChangeProperty(ChangedEvent);
+	}
+
 	return Written;
 }
 

@@ -6,6 +6,7 @@
 #include "Engine/DataTable.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "PropertyCustomizationHelpers.h"
+#include "SimpleQuestLog.h"
 #include "SWarningOrErrorBox.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/QuestDataFormatRegistry.h"
@@ -66,6 +67,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnBuildPlanRequested = InArgs._OnBuildPlanRequested;
 	OnApplyRequested = InArgs._OnApplyRequested;
 	OnBrowseRequested = InArgs._OnBrowseRequested;
+	OnNavigateRequested = InArgs._OnNavigateRequested;
 	CanBuildPlan = InArgs._CanBuildPlan;
 	CanApply = InArgs._CanApply;
 	ProvenanceStale = InArgs._ProvenanceStale;
@@ -197,6 +199,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			.bShowExpanderWires(false)
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(TEXT("QuestPlanPanel"))
+			.OnItemActivated(this, &SQuestPlanPanel::HandleRowActivated)
 			.FilterHintText(LOCTEXT("PlanFilterHint", "Filter nodes and properties..."))
 			.bShowSearchBox(false)
 			.EmptyState()
@@ -733,6 +736,15 @@ void SQuestPlanPanel::HandleObjectModified(UObject* Modified)
 	}
 }
 
+void SQuestPlanPanel::HandleRowActivated(FQuestPlanRowPtr Row)
+{
+	// Silently ignored for a Create, an orphan-less wiring row, or anything else with no live node — the row is not
+	// broken, it simply describes something that does not exist in the graph yet. A message here would be noise on a
+	// gesture the user may not even have aimed at this row.
+	if (!Row.IsValid() || Row->NodeGuid.IsEmpty()) { return; }
+	OnNavigateRequested.ExecuteIfBound(Row->NodeGuid);
+}
+
 EVisibility SQuestPlanPanel::GetStaleVisibility() const
 {
 	// Three independent reasons a plan stops being true: the ASSET moved under it, the DATA it concerns moved, or the
@@ -792,6 +804,7 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 		Node->Children.Reset();
 
 		Node->Id          = Entry.Key;
+		Node->NodeGuid    = Entry.Guid;
 		Node->Kind        = FQuestPlanRow::EKind::Node;
 		Node->Action      = PlanRowActionText(Entry);
 		Node->Name        = Entry.Label.IsEmpty() ? Entry.Key : Entry.Label;
@@ -807,6 +820,9 @@ void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 			Row->Kind   = FQuestPlanRow::EKind::Change;
 			Row->Name   = Change.Property;
 			Row->Detail = FString::Printf(TEXT("'%s' → '%s'"), *Change.CurrentText, *Change.IncomingText);
+			// A change belongs to the node above it, so double-clicking one goes to the same place. The row it sits under
+			// is a heading, not a different destination.
+			Row->NodeGuid = Node->NodeGuid;
 			switch (Change.Kind)
 			{
 			case EQuestPropertyChangeKind::ChildAdded:   Row->Action = TEXT("+ child"); break;

@@ -52,6 +52,79 @@ const FName FQuestlineGraphEditor::PrereqExaminerTabId(TEXT("QuestlineGraphEdito
 const FName FQuestlineGraphEditor::PlanTabId(TEXT("QuestlineGraphEditor_Plan"));
 
 
+// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
+// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
+// preserved when descending into an inline Quest's inner graph.
+static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
+{
+    if (!Graph) return {};
+
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
+        {
+            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
+            if (Combined == ContentGuid)
+                return { Graph, Node };
+        }
+
+        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+        {
+            if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
+            {
+                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
+                if (Inner.IsValid()) return Inner;
+            }
+        }
+
+        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
+        if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
+        {
+            if (!LinkedNode->LinkedGraph.IsNull())
+            {
+                if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
+                {
+                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
+                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
+                    if (Linked.IsValid()) return Linked;
+                }
+            }
+        }
+    }
+
+    return {};
+}
+
+/**
+ * Find a node by its AUTHORED guid - UQuestlineNodeBase::QuestGuid, exactly as the resolver indexes nodes.
+ * A sibling of FindEdNodeInGraph rather than a parameter on it, because the two search different IDENTITY SPACES and
+ * conflating them is what sent a plan row looking for an Entry in the compiled-content space, where Entry nodes do not
+ * exist: that walk matches ContentBase only, against a guid the compiler CHAINS through linked wrappers.
+ * Deliberately does NOT descend into linked assets. A plan describes nodes in THIS questline, and following a link would
+ * navigate away from the asset the plan is about.
+ */
+static FQuestlineGraphEditor::FEdNodeLocation FindAuthoredNodeInGraph(UEdGraph* Graph, const FGuid& AuthoredGuid)
+{
+    if (!Graph) { return {}; }
+
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (const UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(Node))
+        {
+            if (Base->QuestGuid == AuthoredGuid) { return { Graph, Node }; }
+        }
+
+        // A container's contents are their own graph, and a plan row for a node inside one is the case this exists for.
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+        {
+            FQuestlineGraphEditor::FEdNodeLocation Inner = FindAuthoredNodeInGraph(QuestNode->GetInnerGraph(), AuthoredGuid);
+            if (Inner.IsValid()) { return Inner; }
+        }
+    }
+    return {};
+}
+
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
 {
     ISimpleQuestEditorModule::Get().OnQuestlineCompiled().Remove(ExternalCompileHandle);
@@ -1171,7 +1244,8 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .OnDestinationFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportFormatChanged))
             .DestinationMapping(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportMappingPath))
             .OnDestinationMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportMappingChanged))
-            .OnDestinationBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForExportFolder));
+            .OnDestinationBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForExportFolder))
+            .OnNavigateRequested(FOnQuestPlanNavigate::CreateSP(this, &FQuestlineGraphEditor::NavigateToPlanRow));
     }
 
     return SNew(SDockTab)
@@ -1786,6 +1860,18 @@ bool FQuestlineGraphEditor::CanApplyImportPlan() const
         && !Record->Plan.IsNoOp();
 }
 
+void FQuestlineGraphEditor::NavigateToPlanRow(const FString& NodeGuid)
+{
+    FGuid Parsed;
+    const bool bParsed = FGuid::ParseExact(NodeGuid, EGuidFormats::Digits, Parsed);
+
+    const FEdNodeLocation Loc = bParsed
+        ? FindAuthoredNodeInGraph(QuestlineGraph ? QuestlineGraph->QuestlineEdGraph : nullptr, Parsed)
+        : FEdNodeLocation();
+
+    if (Loc.IsValid()) { NavigateToLocation(Loc.HostGraph, Loc.EdNode); }
+}
+
 void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const
 {
     // Invoke the tab; creates the panel widget via SpawnGroupExaminerTab if not already created.
@@ -1818,50 +1904,6 @@ void FQuestlineGraphEditor::ClearNodeHighlight()
     {
         GraphEditorWidget->ClearHoverHighlight();
     }
-}
-
-// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
-// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
-// preserved when descending into an inline Quest's inner graph.
-static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
-{
-    if (!Graph) return {};
-
-    for (UEdGraphNode* Node : Graph->Nodes)
-    {
-        if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
-        {
-            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
-            if (Combined == ContentGuid)
-                return { Graph, Node };
-        }
-
-        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
-        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
-        {
-            if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
-            {
-                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
-                if (Inner.IsValid()) return Inner;
-            }
-        }
-
-        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
-        if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
-        {
-            if (!LinkedNode->LinkedGraph.IsNull())
-            {
-                if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
-                {
-                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
-                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
-                    if (Linked.IsValid()) return Linked;
-                }
-            }
-        }
-    }
-
-    return {};
 }
 
 TArray<FQuestlineBreadcrumb> FQuestlineGraphEditor::BuildBreadcrumbs(UEdGraph* Graph) const

@@ -275,6 +275,14 @@ class SColumnTableView : public SCompoundWidget
 public:
 	DECLARE_DELEGATE_TwoParams(FOnGetChildren, ItemType /*Parent*/, TArray<ItemType>& /*OutChildren*/);
 	DECLARE_DELEGATE_OneParam(FOnItemSelected, ItemType);
+	DECLARE_DELEGATE_OneParam(FOnItemSelected, ItemType);
+
+	/**
+	 * Double-click on a row. Forwarded straight to the tree, which has always had it - this only surfaces it, because a
+	 * table whose rows NAME something the user then has to go find is a table that stops one step short. Optional: a
+	 * consumer that binds nothing gets exactly the behaviour it had before.
+	 */
+	using FOnItemActivated = typename TSlateDelegates<ItemType>::FOnMouseButtonDoubleClick;
 
 	using FOnRowAction			= typename SColumnTableRow<ItemType>::FOnRowAction;
 	using FCanRowAction			= typename SColumnTableRow<ItemType>::FCanRowAction;
@@ -370,6 +378,7 @@ public:
 		SLATE_NAMED_SLOT(FArguments, EmptyState)
 
 		SLATE_EVENT(FOnItemSelected, OnItemSelected)
+		SLATE_EVENT(FOnItemActivated, OnItemActivated)
 		SLATE_EVENT(FOnContextMenuOpening, OnContextMenuOpening)
 
 		/**
@@ -526,6 +535,7 @@ public:
 						.OnGetChildren(this, &SColumnTableView::GetVisibleChildren)
 						.OnExpansionChanged(InArgs._OnExpansionChanged)
 						.OnSelectionChanged(this, &SColumnTableView::HandleSelectionChanged)
+						.OnMouseButtonDoubleClick(InArgs._OnItemActivated)
 						.OnContextMenuOpening(InArgs._OnContextMenuOpening.IsBound()
 							? InArgs._OnContextMenuOpening
 							: FOnContextMenuOpening::CreateSP(this, &SColumnTableView::MakeDefaultContextMenu))

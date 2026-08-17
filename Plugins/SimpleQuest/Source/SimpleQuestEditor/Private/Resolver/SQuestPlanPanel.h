@@ -19,6 +19,7 @@ DECLARE_DELEGATE_OneParam(FOnQuestPlanMappingChanged, const FSoftObjectPath& /*M
 DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanEndpointKind /*Kind*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanNavigate, const FString& /*NodeGuid*/);
 
 /** Which end of the pipeline a row describes. The controls are identical; the WORDS are not. */
 enum class EQuestEndpointRole : uint8 { Source, Destination };
@@ -69,6 +70,14 @@ struct FQuestPlanRow
 	 * Blank on a change row, which has no independent identity - it belongs to the node above it.
 	 */
 	FString Id;
+
+	/**
+	 * The live node this row describes, for navigating to it. DISTINCT from Id: Id is the plan's key, which is a GUID
+	 * only when the source was a canonical export and a studio's own id otherwise. This is always the node's GUID, and
+	 * it is EMPTY for a Create — which is not a special case to handle but the answer itself, since there is no node to
+	 * go to yet. Also empty on the synthetic wiring row, which describes no single node.
+	 */
+	FString NodeGuid;
 
 	FString Action;      // CREATE / MOVE / UPDATE / ORPHAN — blank on a change row
 	FString Name;        // the node's label (or key), or the property's name
@@ -175,6 +184,9 @@ public:
 		SLATE_EVENT(FOnQuestPlanMappingChanged, OnDestinationMappingChanged)
 
 		SLATE_EVENT(FSimpleDelegate, OnDestinationBrowseRequested)
+
+		/** A row was double-clicked and names a live node. The toolkit navigates; the panel does not know how. */
+		SLATE_EVENT(FOnQuestPlanNavigate, OnNavigateRequested)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -195,6 +207,7 @@ private:
 	/** One endpoint row, built from bindings rather than from members, so it can be built more than once. */
 	TSharedRef<SWidget> MakeEndpointRow(const FQuestEndpointRowArgs& Args);
 	void HandleObjectModified(UObject* Modified);
+	void HandleRowActivated(FQuestPlanRowPtr Row);
 
 	FString TargetAssetPath;
 	
@@ -253,6 +266,7 @@ private:
 	TAttribute<FSoftObjectPath> DestinationMapping;
 	FOnQuestPlanMappingChanged OnDestinationMappingChanged;
 	FSimpleDelegate OnDestinationBrowseRequested;
+	FOnQuestPlanNavigate OnNavigateRequested;
 
 	/** Which provenance the DESTINATION row is showing - its own state, for the same reason the source's is. */
 	EQuestPlanEndpointKind ShownDestinationKind = EQuestPlanEndpointKind::Folder;

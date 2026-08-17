@@ -207,6 +207,8 @@ private:
 	bool CanBuildImportPlan() const;
 	void ApplyImportPlan();
 	bool CanApplyImportPlan() const;
+
+	void NavigateToPlanRow(const FString& NodeGuid);
 	
 	/**
 	 * Writes this questline out through the endpoint the panel is showing. Shares the SELECTION with the import

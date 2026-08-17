@@ -96,6 +96,9 @@ public:
 	 */
 	DECLARE_DELEGATE_RetVal_OneParam(bool, FOnRowPaste, ItemType);
 
+	/** Hover entered/left, raised by the ROW because the row under the cursor is the only thing that knows. */
+	DECLARE_DELEGATE_TwoParams(FOnRowHovered, ItemType, bool);
+
 	SLATE_BEGIN_ARGS(SColumnTableRow<ItemType>) {}
 		SLATE_ARGUMENT(ItemType, Item)
 		SLATE_ARGUMENT(const TArray<FTableColumnDef<ItemType>>*, Columns)
@@ -103,6 +106,7 @@ public:
 		SLATE_EVENT(FOnRowAction, OnCopyRow)
 		SLATE_EVENT(FOnRowPaste, OnPasteRow)
 		SLATE_EVENT(FCanRowAction, CanPasteRow)
+		SLATE_EVENT(FOnRowHovered, OnRowHovered)
 
 		/** Raised on an unshifted right-click, just before the base opens the menu, so the table knows what it is about. */
 		SLATE_EVENT(FOnRowAction, OnRowRightClicked)
@@ -124,6 +128,7 @@ public:
 		OnCopyRow = InArgs._OnCopyRow;
 		OnPasteRow = InArgs._OnPasteRow;
 		CanPasteRow = InArgs._CanPasteRow;
+		OnRowHovered = InArgs._OnRowHovered;
 		OnRowRightClicked = InArgs._OnRowRightClicked;
 		ExpanderColumnId = InArgs._ExpanderColumnId;
 		bShowExpanderWires = InArgs._bShowExpanderWires;
@@ -173,6 +178,24 @@ public:
 			OnRowRightClicked.ExecuteIfBound(Item);
 		}
 		return SMultiColumnTableRow<ItemType>::OnMouseButtonUp(MyGeometry, MouseEvent);
+	}
+
+	/**
+	 * Slate raises these on the row under the cursor, so hover costs nothing until the pointer actually moves onto one.
+	 * NOTE THE ORDER a consumer must expect: moving between rows fires Leave(old) THEN Enter(new), so a handler that
+	 * unconditionally clears on Leave will wipe the highlight it just set. Clear only if the item leaving is still the
+	 * one you are showing.
+	 */
+	virtual void OnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override
+	{
+		SMultiColumnTableRow<ItemType>::OnMouseEnter(MyGeometry, MouseEvent);
+		OnRowHovered.ExecuteIfBound(Item, true);
+	}
+
+	virtual void OnMouseLeave(const FPointerEvent& MouseEvent) override
+	{
+		SMultiColumnTableRow<ItemType>::OnMouseLeave(MouseEvent);
+		OnRowHovered.ExecuteIfBound(Item, false);
 	}
 
 	/**
@@ -264,6 +287,7 @@ private:
 	FOnRowPaste OnPasteRow;
 	FCanRowAction CanPasteRow;
 	FOnRowAction OnRowRightClicked;
+	FOnRowHovered OnRowHovered;
 	FName ExpanderColumnId;
 	bool bShowExpanderWires = false;
 	mutable FCurveSequence Pulse;
@@ -282,8 +306,8 @@ public:
 	 * table whose rows NAME something the user then has to go find is a table that stops one step short. Optional: a
 	 * consumer that binds nothing gets exactly the behaviour it had before.
 	 */
-	using FOnItemActivated = typename TSlateDelegates<ItemType>::FOnMouseButtonDoubleClick;
-
+	using FOnItemActivated		= typename TSlateDelegates<ItemType>::FOnMouseButtonDoubleClick;
+	using FOnItemHovered		= typename SColumnTableRow<ItemType>::FOnRowHovered;
 	using FOnRowAction			= typename SColumnTableRow<ItemType>::FOnRowAction;
 	using FCanRowAction			= typename SColumnTableRow<ItemType>::FCanRowAction;
 	using FOnRowPaste			= typename SColumnTableRow<ItemType>::FOnRowPaste;
@@ -379,6 +403,7 @@ public:
 
 		SLATE_EVENT(FOnItemSelected, OnItemSelected)
 		SLATE_EVENT(FOnItemActivated, OnItemActivated)
+		SLATE_EVENT(FOnItemHovered, OnItemHovered)
 		SLATE_EVENT(FOnContextMenuOpening, OnContextMenuOpening)
 
 		/**
@@ -398,6 +423,7 @@ public:
 		PersistenceKey		= InArgs._PersistenceKey;
 		bAllowCopy			= InArgs._AllowClipboardCopy;
 		OnItemSelected		= InArgs._OnItemSelected;
+		OnItemHovered		= InArgs._OnItemHovered;
 		OnCopyRow			= InArgs._OnCopyRow;
 		OnPasteRow			= InArgs._OnPasteRow;
 		CanPasteRow			= InArgs._CanPasteRow;
@@ -782,7 +808,8 @@ private:
 			.OnCopyRow(OnCopyRow)
 			.OnPasteRow(OnPasteRow)
 			.CanPasteRow(CanPasteRow)
-			.OnRowRightClicked(FOnRowAction::CreateSP(this, &SColumnTableView::HandleRowRightClicked));
+			.OnRowRightClicked(FOnRowAction::CreateSP(this, &SColumnTableView::HandleRowRightClicked))
+			.OnRowHovered(OnItemHovered);
 	}
 
 	FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
@@ -978,6 +1005,7 @@ private:
 	FName								ExpanderColumnId;
 	bool								bShowExpanderWires = false;
 	FOnItemSelected						OnItemSelected;
+	FOnItemHovered						OnItemHovered;
 	TSharedPtr<STreeView<ItemType>>		TreeView;
 
 	TArray<ItemType>					RootItems;

@@ -20,6 +20,7 @@ DECLARE_DELEGATE_OneParam(FOnQuestPlanFolderChanged, const FString& /*Folder*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanTableChanged, const FSoftObjectPath& /*SourceTable*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanSourceKindChanged, EQuestPlanEndpointKind /*Kind*/);
 DECLARE_DELEGATE_OneParam(FOnQuestPlanNavigate, const FString& /*NodeGuid*/);
+DECLARE_DELEGATE_OneParam(FOnQuestPlanHover, const FString& /*NodeGuid, empty clears*/);
 
 /** Which end of the pipeline a row describes. The controls are identical; the WORDS are not. */
 enum class EQuestEndpointRole : uint8 { Source, Destination };
@@ -187,6 +188,7 @@ public:
 
 		/** A row was double-clicked and names a live node. The toolkit navigates; the panel does not know how. */
 		SLATE_EVENT(FOnQuestPlanNavigate, OnNavigateRequested)
+		SLATE_EVENT(FOnQuestPlanHover, OnHoverRequested)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -208,6 +210,7 @@ private:
 	TSharedRef<SWidget> MakeEndpointRow(const FQuestEndpointRowArgs& Args);
 	void HandleObjectModified(UObject* Modified);
 	void HandleRowActivated(FQuestPlanRowPtr Row);
+	void HandleRowHovered(FQuestPlanRowPtr Row, bool bHovered);
 
 	FString TargetAssetPath;
 	
@@ -267,7 +270,11 @@ private:
 	FOnQuestPlanMappingChanged OnDestinationMappingChanged;
 	FSimpleDelegate OnDestinationBrowseRequested;
 	FOnQuestPlanNavigate OnNavigateRequested;
+	FOnQuestPlanHover OnHoverRequested;
 
+	/** What we last asked to be haloed, so a Leave from a row we already moved off does not clear the new one. */
+	FString HoveredNodeGuid;
+	
 	/** Which provenance the DESTINATION row is showing - its own state, for the same reason the source's is. */
 	EQuestPlanEndpointKind ShownDestinationKind = EQuestPlanEndpointKind::Folder;
 
@@ -280,8 +287,10 @@ private:
 	 */
 	EQuestPlanEndpointKind ShownSourceKind = EQuestPlanEndpointKind::Folder;
 
-	/** Backing store for the format combo. Refreshed on open rather than at construction, because a provider can be
-	 *  registered after this panel exists and a snapshot would hide it. */
+	/**
+	 * Backing store for the format combo. Refreshed on open rather than at construction, because a provider can be
+	 * registered after this panel exists and a snapshot would hide it.
+	 */
 	TArray<TSharedPtr<FString>> FormatOptions;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> FormatCombo;
 

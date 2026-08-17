@@ -68,6 +68,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 	OnApplyRequested = InArgs._OnApplyRequested;
 	OnBrowseRequested = InArgs._OnBrowseRequested;
 	OnNavigateRequested = InArgs._OnNavigateRequested;
+	OnHoverRequested = InArgs._OnHoverRequested;
 	CanBuildPlan = InArgs._CanBuildPlan;
 	CanApply = InArgs._CanApply;
 	ProvenanceStale = InArgs._ProvenanceStale;
@@ -200,6 +201,7 @@ void SQuestPlanPanel::Construct(const FArguments& InArgs)
 			.SelectionMode(ESelectionMode::None)
 			.PersistenceKey(TEXT("QuestPlanPanel"))
 			.OnItemActivated(this, &SQuestPlanPanel::HandleRowActivated)
+			.OnItemHovered(this, &SQuestPlanPanel::HandleRowHovered)
 			.FilterHintText(LOCTEXT("PlanFilterHint", "Filter nodes and properties..."))
 			.bShowSearchBox(false)
 			.EmptyState()
@@ -745,6 +747,27 @@ void SQuestPlanPanel::HandleRowActivated(FQuestPlanRowPtr Row)
 	OnNavigateRequested.ExecuteIfBound(Row->NodeGuid);
 }
 
+void SQuestPlanPanel::HandleRowHovered(FQuestPlanRowPtr Row, bool bHovered)
+{
+	const FString Guid = (Row.IsValid() && bHovered) ? Row->NodeGuid : FString();
+
+	if (bHovered)
+	{
+		// An empty guid is a real answer, not a no-op: hovering a Create or the wiring row means "nothing to show", and
+		// leaving the previous halo lit would point at a node the cursor is no longer anywhere near.
+		HoveredNodeGuid = Guid;
+	}
+	else
+	{
+		// Only OUR row may clear. Leave(old) can arrive after Enter(new), and an unconditional clear there wipes the
+		// halo that was just set - the bug this guard exists for, regardless of what order Slate happens to use today.
+		if (!Row.IsValid() || Row->NodeGuid != HoveredNodeGuid) { return; }
+		HoveredNodeGuid.Empty();
+	}
+
+	OnHoverRequested.ExecuteIfBound(HoveredNodeGuid);
+}
+
 EVisibility SQuestPlanPanel::GetStaleVisibility() const
 {
 	// Three independent reasons a plan stops being true: the ASSET moved under it, the DATA it concerns moved, or the
@@ -779,6 +802,13 @@ FText SQuestPlanPanel::GetStaleText() const
 
 void SQuestPlanPanel::RebuildRows(const FQuestInPlacePlan& Plan)
 {
+	// A row destroyed while hovered never sends its Leave, so the halo would stay lit over a node no row still names.
+	if (!HoveredNodeGuid.IsEmpty())
+	{
+		HoveredNodeGuid.Empty();
+		OnHoverRequested.ExecuteIfBound(HoveredNodeGuid);
+	}
+	
 	// STreeView keys expansion by ITEM POINTER, and this used to mint a fresh row object for every entry - so every
 	// re-plan collapsed the whole tree, which punishes exactly the edit-plan-edit loop the panel exists to serve.
 	// Carrying the POINTER forward for a node that was already listed keeps its expansion with the tree needing to know

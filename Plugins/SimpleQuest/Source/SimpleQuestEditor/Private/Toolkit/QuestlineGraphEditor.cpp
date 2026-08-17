@@ -1245,6 +1245,7 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Ar
             .DestinationMapping(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportMappingPath))
             .OnDestinationMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportMappingChanged))
             .OnDestinationBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForExportFolder))
+            .OnHoverRequested(FOnQuestPlanHover::CreateSP(this, &FQuestlineGraphEditor::HighlightPlanRow))
             .OnNavigateRequested(FOnQuestPlanNavigate::CreateSP(this, &FQuestlineGraphEditor::NavigateToPlanRow));
     }
 
@@ -1870,6 +1871,25 @@ void FQuestlineGraphEditor::NavigateToPlanRow(const FString& NodeGuid)
         : FEdNodeLocation();
 
     if (Loc.IsValid()) { NavigateToLocation(Loc.HostGraph, Loc.EdNode); }
+}
+
+void FQuestlineGraphEditor::HighlightPlanRow(const FString& NodeGuid)
+{
+    // Empty means clear, and it arrives for rows that name no node as well as for leaving one - the panel has already
+    // decided which, so this does not second-guess it.
+    if (NodeGuid.IsEmpty())
+    {
+        ClearNodeHighlight();
+        return;
+    }
+
+    FGuid Parsed;
+    if (!FGuid::ParseExact(NodeGuid, EGuidFormats::Digits, Parsed)) { return; }
+
+    // Same authored-guid walk navigation uses, so a row highlights exactly the node it would take you to. Resolving these
+    // two differently is how a halo comes to land on something the double-click does not.
+    const FEdNodeLocation Loc = FindAuthoredNodeInGraph(QuestlineGraph ? QuestlineGraph->QuestlineEdGraph : nullptr, Parsed);
+    HighlightNodesInViewport(Loc.IsValid() ? TArray<UEdGraphNode*>{ Loc.EdNode } : TArray<UEdGraphNode*>{});
 }
 
 void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const

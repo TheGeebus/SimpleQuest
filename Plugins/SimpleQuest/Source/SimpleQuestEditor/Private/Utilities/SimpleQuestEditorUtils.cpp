@@ -33,6 +33,7 @@
 #include "Objectives/QuestObjective.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
+#include "Resolver/QuestEdgeVerbs.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
@@ -199,11 +200,7 @@ FText FSimpleQuestEditorUtilities::GetOutcomeLabel(FName TagName)
 
 FName FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(const FString& Verb)
 {
-	if (Verb == TEXT("activates"))    return TEXT("QuestActivation");
-	if (Verb == TEXT("outcome"))      return TEXT("QuestOutcome");
-	if (Verb == TEXT("feeds-prereq")) return TEXT("QuestPrerequisite");
-	if (Verb == TEXT("deactivates"))  return TEXT("QuestDeactivated");
-	return NAME_None;
+	return QuestEdgeVerbs::PinCategoryForVerb(Verb);
 }
 
 void FSimpleQuestEditorUtilities::NotifyGraphAndDescendants(UEdGraph* Graph)

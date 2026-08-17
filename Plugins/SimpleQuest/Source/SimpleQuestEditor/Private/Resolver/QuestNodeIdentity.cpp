@@ -3,6 +3,7 @@
 
 #include "Resolver/QuestNodeIdentity.h"
 
+#include "QuestEdgeVerbs.h"
 #include "QuestGraphBuilder.h"
 #include "SimpleQuestLog.h"
 #include "EdGraph/EdGraph.h"
@@ -205,13 +206,11 @@ void ForEachQuestInstancedChild(
 
 FString QuestEdgeVerb(FName PinCategory)
 {
-	if (PinCategory == TEXT("QuestActivation"))   return TEXT("activates");
-	if (PinCategory == TEXT("QuestOutcome"))      return TEXT("outcome");
-	if (PinCategory == TEXT("QuestPrerequisite")) return TEXT("feeds-prereq");
-	// Output-side category is past-tense "QuestDeactivated" (the input side's "QuestDeactivate" never appears as an edge
-	// source — sources are always output pins).
-	if (PinCategory == TEXT("QuestDeactivated"))  return TEXT("deactivates");
-	return FString::Printf(TEXT("wire:%s"), *PinCategory.ToString());
+	const FString Verb = QuestEdgeVerbs::VerbForPinCategory(PinCategory);
+	// The "wire:" spelling stays HERE rather than in the shared table: it is this path's way of writing down a category it
+	// does not have a verb for, and the import direction has no matching parser for it. An asymmetry worth leaving visible
+	// rather than burying in a table that would then look bidirectional.
+	return Verb.IsEmpty() ? FString::Printf(TEXT("wire:%s"), *PinCategory.ToString()) : Verb;
 }
 
 void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraphTraversalPolicy& Policy, TArray<FQuestDataEdge>& OutEdges)

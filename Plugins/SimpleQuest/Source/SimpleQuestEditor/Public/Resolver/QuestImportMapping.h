@@ -11,6 +11,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Nodes/QuestlineNodeBase.h"
+#include "Resolver/QuestEdgeVerbs.h"
 #include "QuestImportMapping.generated.h"
 
 // On re-import into an existing asset, whether an absent/unmapped cell keeps the graph's current value or resets it.
@@ -121,10 +122,7 @@ public:
 	TArray<FString> GetQualifierOptions() const { return SampleQualifierCache; }
 
 	UFUNCTION()
-	TArray<FString> GetEdgeVerbOptions() const
-	{
-		return { TEXT("activates"), TEXT("outcome"), TEXT("feeds-prereq"), TEXT("deactivates") };
-	}
+	TArray<FString> GetEdgeVerbOptions() const { return QuestEdgeVerbs::Options(); }
 	
 	// ── Which node kind is each row? ─────────────────────────────────────────────────────────────────
 	// The source column whose value names each row's node kind (the studio's "type"/"kind" column).

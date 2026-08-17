@@ -94,6 +94,15 @@ private:
 	FName CachedSampleKeyColumn;								// the structural key column; None when the source has none or disagrees
 	void RefreshSampleColumnCache();
 
+	/**
+	 * The discriminator column's distinct values, cached for the same reason the columns are: EnumerateColumnDistinctValues
+	 * re-reads the WHOLE sample folder, and the discriminator list asks for them on every rebuild.
+	 * TWO invalidation points rather than one, because this depends on a second thing: the sample AND which column is the
+	 * discriminator, and that column changes without the sample moving. Refreshed at both; read everywhere else.
+	 */
+	TArray<FString> CachedDiscriminatorValues;
+	void RefreshDiscriminatorValueCache();
+
 	TArray<FName> SampleSourceColumns() const;					// the cached columns; feeds the binding widget's SourceColumnProvider
 	TArray<FString> SampleDiscriminatorValues() const;			// feeds the discriminator widget's DistinctValueProvider
 	TArray<FString> SampleQualifierOptions() const;				// structural pins + outcome identities from the sample's objective classes

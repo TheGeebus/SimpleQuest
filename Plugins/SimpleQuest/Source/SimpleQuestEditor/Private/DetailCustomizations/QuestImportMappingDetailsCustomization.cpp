@@ -78,11 +78,21 @@ TArray<FName> FQuestImportMappingDetailsCustomization::SampleSourceColumns() con
 	return CachedSampleColumns;
 }
 
+void FQuestImportMappingDetailsCustomization::RefreshDiscriminatorValueCache()
+{
+	CachedDiscriminatorValues.Reset();
+
+	const UQuestImportMapping* M = Mapping.Get();
+	if (!M || M->DiscriminatorColumn.IsNone() || SampleFolder.IsEmpty()) return;
+
+	// Another whole-folder read, which is why it lives here and not in the accessor - the discriminator list asks for
+	// these every time it rebuilds, and it rebuilds whenever anything about the sample or the recipe moves.
+	CachedDiscriminatorValues = EnumerateColumnDistinctValues(SampleFormatName.ToString(), SampleFolder, M->DiscriminatorColumn);
+}
+
 TArray<FString> FQuestImportMappingDetailsCustomization::SampleDiscriminatorValues() const
 {
-	const UQuestImportMapping* M = Mapping.Get();
-	if (!M || M->DiscriminatorColumn.IsNone() || SampleFolder.IsEmpty()) return {};
-	return EnumerateColumnDistinctValues(SampleFormatName.ToString(), SampleFolder, M->DiscriminatorColumn);
+	return CachedDiscriminatorValues;
 }
 
 TArray<FString> FQuestImportMappingDetailsCustomization::SampleQualifierOptions() const
@@ -164,12 +174,13 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("Mapping panel: RefreshFromSample ('%s' as %s)."),
 		SampleFolder.IsEmpty() ? TEXT("(unset)") : *SampleFolder, *SampleFormatName.ToString());
 
-	// Read the sample ONCE, here, before anything below asks for a column. Everything downstream — both pickers, both lists
-	// and the mapping's own cache — then describes the same snapshot of the folder rather than re-reading it apiece.
+	// Read the sample ONCE, here, before anything below asks for a column. Everything downstream - both pickers, both lists
+	// and the mapping's own cache - then describes the same snapshot of the folder rather than re-reading it apiece.
 	RefreshSampleColumnCache();
+	RefreshDiscriminatorValueCache();
 
 	// Publish the sample's columns onto the mapping so the stock-array GetOptions dropdowns (wire bindings) can pick from
-	// them — the same column set the bespoke pickers use, one source of truth.
+	// them - the same column set the bespoke pickers use, one source of truth.
 	if (UQuestImportMapping* M = Mapping.Get())
 	{
 		M->SampleColumnCache.Reset();
@@ -179,7 +190,7 @@ void FQuestImportMappingDetailsCustomization::RefreshFromSample()
 	
 	// Sample changed -> the column set may have changed, so rebuild the discriminator-column dropdown, then re-pull both
 	// widgets (columns feed the binding list; discriminator values feed the value->class list). The combo caches its options
-	// at build time, so rebuilding the backing array isn't enough — tell the widget to re-read it.
+	// at build time, so rebuilding the backing array isn't enough - tell the widget to re-read it.
 	RebuildDiscriminatorColumnOptions();
 	RebuildKeyColumnOptions();
 	if (DiscriminatorColumnCombo.IsValid()) { DiscriminatorColumnCombo->RefreshOptions(); }
@@ -242,7 +253,10 @@ void FQuestImportMappingDetailsCustomization::ApplyDiscriminatorColumn(FName Col
 	M->DiscriminatorColumn = Column;
 	M->PostEditChange();
 	OnMappingModified();
-	// The discriminator column changed -> its distinct value set changed -> rebuild the value->class rows.
+	// The discriminator column changed -> its distinct value set changed. Re-read BEFORE the rows rebuild, or the list
+	// repopulates from the previous column's values - which is the failure a cache introduces if its second invalidation
+	// point is missed, and the reason this one is not lazy.
+	RefreshDiscriminatorValueCache();
 	if (DiscriminatorList.IsValid()) { DiscriminatorList->RefreshRows(); }
 }
 
@@ -468,6 +482,7 @@ void FQuestImportMappingDetailsCustomization::CustomizeDetails(IDetailLayoutBuil
 
 	RestoreSampleFromMemo();      // per-user convenience only; the recipe itself stays shape-only
 	RefreshSampleColumnCache();   // the memo just named a sample; everything below reads columns and none of it should re-read them
+	RefreshDiscriminatorValueCache();
 	
 	// Hide the stock discriminator column + class map: both are now driven by pickers (a typed FName + a typed TMap key were
 	// the last two corruption holes). The stock Bindings array stays hidden too — the binding widget is its editor.

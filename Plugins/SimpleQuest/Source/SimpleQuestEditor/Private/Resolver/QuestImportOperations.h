@@ -34,7 +34,14 @@ struct FQuestImportOutcome
 {
 	FQuestInPlacePlan Plan;
 	FQuestApplyResult ApplyResult;    // only meaningful when the run was asked to apply
-	TArray<FString> Warnings;         // read/mapping warnings; the plan carries its own separately
+	
+	/**
+	 * Read/mapping warnings from a run that produced NO PLAN - an unreadable source, a refused mapping, a bad bundle.
+	 * Once a plan exists they are moved onto it, because a warning about the read is a warning about the plan the read
+	 * produced, and leaving them in two places asked every caller to merge two lists. None of them did.
+	 * So: non-empty here means the run stopped early, and Error says why.
+	 */
+	TArray<FString> Warnings;
 
 	/** Non-empty when the run stopped BEFORE producing a plan - an unreadable source, a refused mapping, a bad bundle. */
 	FString Error;

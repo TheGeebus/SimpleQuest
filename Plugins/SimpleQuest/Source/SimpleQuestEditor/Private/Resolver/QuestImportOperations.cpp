@@ -79,6 +79,13 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 	PlanQuestInPlace(Target, Bundle, NodeRowsByKey, Out.Warnings, Out.Plan, Request.Policies);
 	Out.bPlanned = true;
 
+	// A plan EXISTS now, so the warnings that produced it belong ON it. They are collected separately because a read can
+	// fail before there is any plan to hold them - but once there is one, two lists means every consumer has to remember
+	// to merge, and all three forgot: the panel showed none of them, and the console and commandlet render only what the
+	// plan carries. MOVED rather than copied, so nothing downstream can report them twice.
+	Out.Plan.Warnings.Append(Out.Warnings);
+	Out.Warnings.Reset();
+
 	if (!bApply) { return true; }
 
 	FQuestApplyOptions Options;

@@ -2554,4 +2554,56 @@ bool FQuestResolver_PlanJsonIsDeterministic::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestResolver_EnumeratedColumnsUseAuthoredNames,
+	"SimpleQuest.Resolver.EnumeratedColumnsUseAuthoredNames", TestFlags)
+bool FQuestResolver_EnumeratedColumnsUseAuthoredNames::RunTest(const FString& Parameters)
+{
+	// The PLANNER matching authored names is covered next door. This covers the other end of the same fact: what the
+	// column ENUMERATOR offers a designer to pick from. The two must agree, because a picker that offers a name the
+	// planner cannot resolve produces a recipe that refuses every row of the struct it was built against.
+	UUserDefinedStruct* Struct = FStructureEditorUtils::CreateUserDefinedStruct(
+		GetTransientPackage(), TEXT("S_ResolverEnumeratedNameProbe"), RF_Transient);
+	if (!TestNotNull(TEXT("A Blueprint struct can be created"), Struct)) { return false; }
+	Struct->AddToRoot();
+
+	FEdGraphPinType StringType;
+	StringType.PinCategory = UEdGraphSchema_K2::PC_String;
+	TestTrue(TEXT("A string member can be added"), FStructureEditorUtils::AddVariable(Struct, StringType));
+
+	FStrProperty* StringProp = nullptr;
+	for (TFieldIterator<FProperty> It(Struct); It; ++It)
+	{
+		if (FStrProperty* S = CastField<FStrProperty>(*It)) { StringProp = S; break; }
+	}
+	if (!TestNotNull(TEXT("The string member is reflected"), StringProp)) { Struct->RemoveFromRoot(); return false; }
+
+	const FString Authored = Struct->GetAuthoredNameForField(StringProp);
+	const FString Internal = StringProp->GetName();
+
+	// THE FIXTURE'S OWN PRECONDITION, asserted rather than assumed - the same guard the planner-side test carries. If UE
+	// ever stops mangling, the assertions below would all pass while distinguishing nothing.
+	if (!TestNotEqual(TEXT("A Blueprint struct's property name differs from its authored name"), Internal, Authored))
+	{
+		AddError(TEXT("This fixture no longer exhibits the divergence it was built to cover - the test is inert, not passing."));
+		Struct->RemoveFromRoot();
+		return false;
+	}
+
+	UDataTable* Table = NewObject<UDataTable>(GetTransientPackage(), TEXT("DT_EnumeratedNameProbe"), RF_Transactional);
+	Table->RowStruct = Struct;
+	Table->AddToRoot();
+
+	const FQuestSourceColumns Columns = EnumerateDataTableColumns(TSoftObjectPtr<UDataTable>(Table));
+
+	TestTrue(TEXT("The table reads"), Columns.bReadable);
+	TestTrue(TEXT("The enumerator offers the AUTHORED name"), Columns.Columns.Contains(FName(*Authored)));
+	// The half that would still pass on the old behaviour if only the line above were checked, since a picker could
+	// legitimately offer both.
+	TestFalse(TEXT("...and not the internal one"), Columns.Columns.Contains(FName(*Internal)));
+
+	Table->RemoveFromRoot();
+	Struct->RemoveFromRoot();
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

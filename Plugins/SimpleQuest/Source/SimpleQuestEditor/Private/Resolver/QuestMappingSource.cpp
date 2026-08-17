@@ -155,11 +155,15 @@ FQuestSourceColumns EnumerateDataTableColumns(const TSoftObjectPtr<UDataTable>& 
 	}
 
 	// Walk the row struct's properties. Field names are unique by construction (a UScriptStruct can't hold two members of
-	// the same name), so no duplicate check is needed — this provenance is structurally unambiguous.
+	// the same name), so no duplicate check is needed - this provenance is structurally unambiguous.
+	// AUTHORED names, not internal ones. A Blueprint row struct stores a member as "key_21_26B6F1E3…" and shows the
+	// designer "key" - and the ROW PLANNER already matches on the authored name, so returning the internal one here would
+	// offer a picker full of columns that could never resolve against the very struct they came from.
 	for (TFieldIterator<FProperty> It(RowStruct); It; ++It)
 	{
-		Result.Columns.Add(It->GetFName());
+		Result.Columns.Add(FName(*RowStruct->GetAuthoredNameForField(*It)));
 	}
+	
 	Result.Columns.Sort(FNameLexicalLess());
 	Result.bReadable = true;
 	return Result;

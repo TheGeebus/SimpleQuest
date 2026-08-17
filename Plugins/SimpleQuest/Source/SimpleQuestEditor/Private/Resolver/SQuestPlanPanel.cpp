@@ -885,9 +885,15 @@ FText SQuestPlanPanel::GetSummaryText() const
 	// A REFUSED plan is not a matching one. Falling through to "already matches its source" with blockers on screen tells
 	// a designer their data is fine while the reason it is not sits directly above - and an empty table is exactly the
 	// state where that happens, because a refused row produces no row to list.
-	if (bBlocking && Rows.IsEmpty())
+	if (bBlocking)
 	{
-		return LOCTEXT("PlanIsBlocked", "Nothing else to show — the blockers above are the whole plan.");
+		// The rows below are worth showing - they are what a designer gets once the blockers are cleared, and hiding them
+		// would leave a refusal above an empty table with no way to see what the plan holds. What must NOT read as fact is
+		// the COUNT: none of it happens while a blocker stands, and the plain summary states it as though it will.
+		return Rows.IsEmpty()
+			? LOCTEXT("PlanIsBlocked", "Nothing else to show — the blockers above are the whole plan.")
+			: FText::Format(LOCTEXT("PlanIsBlockedWithRows", "Blocked — none of this runs until the blockers above are "
+				"resolved. It would be: {0}"), Summary);
 	}
 
 	// A plan that exists and finds nothing is a DIFFERENT fact from no plan at all, and only one of them means the

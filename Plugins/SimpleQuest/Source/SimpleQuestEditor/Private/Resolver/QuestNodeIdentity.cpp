@@ -2,8 +2,6 @@
 // SPDX-License-Identifier: MIT
 
 #include "Resolver/QuestNodeIdentity.h"
-
-#include "QuestEdgeVerbs.h"
 #include "QuestGraphBuilder.h"
 #include "SimpleQuestLog.h"
 #include "EdGraph/EdGraph.h"
@@ -12,6 +10,7 @@
 #include "Graph/QuestlineGraphSchema.h"
 #include "Nodes/QuestlineNodeBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
+#include "Resolver/QuestEdgeVerbs.h"
 #include "Rewards/QuestRewardBase.h"
 #include "UObject/UnrealType.h"
 

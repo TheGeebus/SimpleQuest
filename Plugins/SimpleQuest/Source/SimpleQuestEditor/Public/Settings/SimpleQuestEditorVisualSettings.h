@@ -13,9 +13,7 @@
  * colors, and debug-highlight colors used by the Questline graph editor. Per-developer (saved to the user's local
  * EditorPerProjectUserSettings.ini, not source-controlled); class-header defaults are the canonical palette that ships
  * with the plugin. Lives in Editor Preferences rather than Project Settings because these knobs aren't meant for adopter
- * tweaking — the palette is a categorization vocabulary the plugin standardizes on.
- *
- * TO BE REMOVED ONCE THE COLOR SCHEME IS FINALIZED
+ * tweaking — the palette is a categorization vocabulary the plugin standardizes on. 
  */
 UCLASS(config=EditorPerProjectUserSettings, meta=(DisplayName="Simple Quest Visuals"))
 class SIMPLEQUESTEDITOR_API USimpleQuestEditorVisualSettings : public UDeveloperSettings
@@ -32,7 +30,7 @@ public:
 	FLinearColor ActivationWireColor = FLinearColor::White;
 
 	UPROPERTY(Config, EditAnywhere, Category="Wires")
-	FLinearColor PrerequisiteWireColor = FLinearColor::White;
+	FLinearColor PrerequisiteWireColor = FLinearColor(0.603212f, 0.128689f, 0.651406f);
 
 	UPROPERTY(Config, EditAnywhere, Category="Wires")
 	FLinearColor OutcomeWireColor = FLinearColor(1.000000f, 0.734210f, 0.061106f);

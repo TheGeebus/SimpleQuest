@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## 2026-08-17 — 0.7.0 — The Data Resolver
+## [0.7.0] — 2026-08-17 — The Data Resolver
 
 Quest data has always lived inside the `.uasset` binary. That's fine while
 you're authoring one questline in the graph editor, and increasingly awkward
@@ -100,7 +100,7 @@ tenth time, into a questline someone has since edited by hand.
   describes one part of a questline is never treated as speaking for the rest.
 - **Match rows by a key of your choosing.** Writing into a Data Table, the row
   name belongs to you. Name a column in your Mapping and rows are matched on that
-  value instead - so you can rename a row and the next import still recognises
+  value instead - so you can rename a row and the next import still recognizes
   it, rather than creating a duplicate beside it. A row whose *name* matches
   while its key doesn't is left alone: it's somebody else's.
 - **The preview points at the graph.** Hover a row and the node it describes

@@ -1035,8 +1035,10 @@ bool FQuestResolver_PlanRefusesUndeliverableRows::RunTest(const FString& Paramet
 {
 	// Resolving a deliberately-bogus class exhausts every lookup before refusing, and the engine narrates each miss. Declare
 	// both so the run stays clean AND the exhaustion is asserted — a refusal that skipped the lookup would be a different bug.
+	// The second match deliberately stops before the class name: engines differ on whether a failed lookup is narrated with a
+	// package prefix ("Class None.X" vs "Class X"), and the name itself is already pinned by the line above.
 	AddExpectedMessagePlain(TEXT("Short type name \"NoSuchNodeClass\" provided for TryFindType"), EAutomationExpectedMessageFlags::Contains, 1);
-	AddExpectedMessagePlain(TEXT("Failed to find object 'Class None.NoSuchNodeClass'"), EAutomationExpectedMessageFlags::Contains, 1);
+	AddExpectedMessagePlain(TEXT("Failed to find object 'Class"), EAutomationExpectedMessageFlags::Contains, 1);
 	
 	// A plan is a promise the apply step keeps. Promising to CREATE a node whose class does not resolve, or one whose level
 	// nothing declares, is a promise the spawn path refuses — so the plan would report work that silently never happens, and

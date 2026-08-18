@@ -57,13 +57,25 @@ FQuestObjectiveTriggerContext UQuestObjective::ResolveTriggerContext(const FQues
 	return Out;
 }
 
-void UQuestObjective::DispatchOnObjectiveDeactivated()
+void UQuestObjective::DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason Reason)
 {
+	DeactivationReason = Reason;
 	OnObjectiveDeactivated();
 	// Clear cached identity after the subclass override has had its last chance to read it — keeps GetOwningStepTag()
-	// honest after the Step releases this Objective. The Step also calls UnregisterActiveObjective on the QSS
-	// (see UQuestStep::DeactivateInternal / OnObjectiveComplete) so the live-objective registry stays in sync.
+	// and GetDeactivationReason() honest after the Step releases this Objective. The Step also calls
+	// UnregisterActiveObjective on the QSS (see UQuestStep::DeactivateInternal / OnObjectiveComplete) so the
+	// live-objective registry stays in sync.
+	DeactivationReason = EQuestObjectiveDeactivationReason::Unspecified;
 	OwningStepTag = FGameplayTag();
+}
+
+void UQuestObjective::RestoreObjectiveState_Implementation(const FSimpleQuestObjectiveSaveState& State)
+{
+}
+
+FSimpleQuestObjectiveSaveState UQuestObjective::CaptureObjectiveState_Implementation() const
+{
+	return FSimpleQuestObjectiveSaveState{};
 }
 
 void UQuestObjective::OnObjectiveDeactivated_Implementation()

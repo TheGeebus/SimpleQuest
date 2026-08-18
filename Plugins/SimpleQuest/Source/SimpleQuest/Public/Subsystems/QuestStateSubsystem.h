@@ -386,7 +386,9 @@ public:
 	 * path for "tag may be unregistered or compile may have missed it." Empty-authored-content (record exists,
 	 * DisplayName field intentionally blank) is silent.
 	 *
-	 * Alias-walks via canonical resolution; an alias-form tag yields the same result as its canonical.
+	 * An alias-form tag yields the same result as its canonical: the registry stores a parallel record under the
+	 * canonical tag AND every alias key at registration, so a direct lookup on any perspective hits without a
+	 * runtime canonical walk.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	FText GetDisplayName(FGameplayTag Tag) const;

@@ -18,7 +18,7 @@ FText UQuestlineNode_Exit::GetNodeTitle(ENodeTitleType::Type TitleType) const
 	{
 		FFormatNamedArguments Args;
 		Args.Add("OutcomePrefix", FText::FromName(FName("Outcome")));
-		Args.Add("LeafTag", GetOutcomeLabel(OutcomeTag.GetTagName()));
+		Args.Add("LeafTag", FSimpleQuestEditorUtilities::GetOutcomeLabel(OutcomeTag.GetTagName()));
 		FText OutText = FText::Format(LOCTEXT("ExitTitleFormat", "{OutcomePrefix} - {LeafTag}"), Args);
 		return OutText;
 	}

@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveDeactivationReason.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
@@ -129,6 +130,13 @@ public:
 	FGameplayTag GetOwningStepTag() const { return OwningStepTag; }
 
 	/**
+	 * Why this objective is being deactivated. Meaningful ONLY during OnObjectiveDeactivated - Unspecified at every
+	 * other time, including before the first activation and after the step releases the objective.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
+	EQuestObjectiveDeactivationReason GetDeactivationReason() const { return DeactivationReason; }
+
+	/**
 	 * Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
 	 * that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
 	 * Uncached — lookup-per-call via QSS's existing alias index.
@@ -173,22 +181,27 @@ public:
 	 * Does NOT fire on PIE-end / ResetTransientState, the objective is already GC'd at that point.
 	 * Subclasses subscribing to non-UE systems should defend against PIE end via TWeakObjectPtr or
 	 * equivalent standard UE patterns.
+	 * 	 
+	 * Reason is stored on the objective for the duration of the call and readable via GetDeactivationReason(), so an
+	 * override can branch on completion-versus-interruption without a signature change. Deliberately has no default:
+	 * a custom Step calling this should say which path it is on rather than inherit a guess.
 	 */
-	void DispatchOnObjectiveDeactivated();
+	void DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason Reason);
 	
 	// ── Save/load — per-instance state hook ───────────────────────────────────────────────────────────────
 	//
 	// Objectives that carry durable per-instance progress (e.g. a running count) override these so save/load can
 	// persist and re-apply it. Base returns empty / no-op — a stateless objective needs nothing. Capture runs at save;
 	// Restore runs AFTER the objective is rebuilt on load (which has already reset it), so the override re-applies the
-	// saved values. Plain C++ virtual for now; promote to BlueprintNativeEvent (override becomes _Implementation) when a
-	// Blueprint objective needs to persist its own state.
+	// saved values. BlueprintNativeEvent: C++ override appends _Implementation.
 
 	/** Capture this objective's durable progress into a save-state struct. Base returns empty (nothing to persist). */
-	virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const { return FSimpleQuestObjectiveSaveState{}; }
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Quest|Objectives")
+	FSimpleQuestObjectiveSaveState CaptureObjectiveState() const;
 
 	/** Re-apply progress from a save-state struct after the objective has been rebuilt on load. Base is a no-op. */
-	virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) {}
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Quest|Objectives")
+	void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State);
 	
 protected:
 	/**
@@ -360,6 +373,13 @@ private:
 	 */
 	UPROPERTY(VisibleAnywhere)
 	FGameplayTag OwningStepTag;
+
+	/**
+	 * Set by DispatchOnObjectiveDeactivated before the BP event fires and cleared immediately after, so the getter is
+	 * honest outside the call. Same idiom as OwningStepTag, for the same reason: capability without a signature break.
+	 */
+	UPROPERTY(VisibleAnywhere)
+	EQuestObjectiveDeactivationReason DeactivationReason = EQuestObjectiveDeactivationReason::Unspecified;
 	
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, meta = (AllowPrivateAccess = true), Category = Targets)
 	TSet<TSoftObjectPtr<AActor>> TargetActors;

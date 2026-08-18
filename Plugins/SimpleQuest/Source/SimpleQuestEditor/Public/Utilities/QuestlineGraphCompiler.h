@@ -274,14 +274,24 @@ private:
 	 * Recursive helper. Walks one output pin in the prerequisite expression sub-graph and appends the corresponding node(s) to 
 	 * OutExpression. Returns the index of the root node added, or INDEX_NONE if the pin could not be resolved.
 	 */
-	int32 CompilePrerequisiteFromOutputPin(UEdGraphPin* OutputPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, FPrerequisiteExpression& OutExpression);
+	int32 CompilePrerequisiteFromOutputPin(
+		UEdGraphPin* OutputPin,
+		const FString& TagPrefix,
+		TArray<FString>& VisitedAssetPaths,
+		TSet<const UEdGraphNode*>& OnPath,
+		FPrerequisiteExpression& OutExpression);
 
 	/**
 	 * Follows the Deactivated output pin and splits resolved node tags by destination pin category: connections to Activate inputs
 	 * populate OutActivateTags (NextNodesOnDeactivation); connections to Deactivate inputs populate OutDeactivateTags
 	 * (NextNodesToDeactivateOnDeactivation).
 	 */
-	void ResolveDeactivatedPinToTags(UEdGraphPin* FromPin, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths, TArray<FName>& OutActivateTags, TArray<FName>& OutDeactivateTags);
+	void ResolveDeactivatedPinToTags(
+		UEdGraphPin* FromPin,
+		const FString& TagPrefix,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<FName>& OutActivateTags,
+		TArray<FName>& OutDeactivateTags);
 
 	/**
 	 * Emits a tokenized compile-time warning when a single content-node output pin reaches two or more distinct Outcome
@@ -343,7 +353,13 @@ private:
 	void DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid);
 
 	/** Shared handler for AND/OR combinator nodes — creates expression node and recurses into all input pins. */
-	int32 CompileCombinatorNode(EPrerequisiteExpressionType Type, UEdGraphNode* Node, const FString& TagPrefix, TArray<FString>& VisitedAssetPaths,	FPrerequisiteExpression& OutExpression);
+	int32 CompileCombinatorNode(
+		EPrerequisiteExpressionType Type,
+		UEdGraphNode* Node,
+		const FString& TagPrefix,
+		TArray<FString>& VisitedAssetPaths,
+		TSet<const UEdGraphNode*>& OnPath,
+		FPrerequisiteExpression& OutExpression);
 
 	/**
 	 * Walks a container content node's (Quest or LinkedQuestline) output pins and builds the per-path

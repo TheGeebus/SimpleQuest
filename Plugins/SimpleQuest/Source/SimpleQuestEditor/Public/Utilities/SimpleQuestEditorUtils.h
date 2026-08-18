@@ -52,17 +52,24 @@ struct FPrereqExaminerTree;
 
 
 /**
- * Output of DiscoverObjectivePaths: pairs the path identity FName with its provenance. bIsRegisteredTag
- * is true when Identity came from a registered FGameplayTag source (the OutcomeTag pin DefaultValue parsed
- * as a tag, an ObjectiveOutcome UPROPERTY meta scan, or GetPossibleOutcomes); false when Identity is a bare
- * designer-authored or auto-numbered K2 placement string (PathName / "Dynamic N"). The compiler uses this
- * to register only known-registered-tag identities at the gameplay tag manager root, capturing provenance
- * at the source instead of inferring it later from string structure (which a dotted PathName could defeat).
+ * Output of DiscoverObjectivePaths: a completion path's two orthogonal axes, carried separately.
+ *
+ * Identity is the ROUTING id — which output branch of the node this is. Always present, always the routing key
+ * (NextNodesByPath etc.). For a static placement it is the outcome tag's full name; for a dynamic placement it is
+ * the authored PathName or an auto-numbered "Dynamic N".
+ *
+ * Outcome is the OUTCOME — the gameplay result the branch represents — as a real FGameplayTag, valid ONLY when the
+ * path is statically named by a registered tag. Invalid for dynamic placements (the runtime outcome isn't known at
+ * author time) and for the any-outcome route (there is no outcome). So Outcome.IsValid() answers "is this a
+ * registered-tag path" directly.
  */
 struct FObjectivePathDescriptor
 {
 	FName Identity;
-	bool bIsRegisteredTag = false;
+	FGameplayTag Outcome;
+
+	/** Convenience: a path is a registered-tag path exactly when it carries a valid outcome tag. */
+	bool IsRegisteredTag() const { return Outcome.IsValid(); }
 
 	bool operator==(const FObjectivePathDescriptor& Other) const { return Identity == Other.Identity; }
 };
@@ -76,6 +83,32 @@ public:
 	 * alphanumeric or underscore with an underscore.
 	 */
 	static FString SanitizeQuestlineTagSegment(const FString& InLabel);
+
+	/**
+	 * Returns the leaf segment of a dotted tag name (everything after the last '.'), display-formatted.
+	 */
+	static FText GetTagLeafLabel(FName TagName);
+
+	/**
+	 * Strips the SimpleQuest.Outcome. prefix, preserving any sub-hierarchy the designer authored (so "Combat.Won" and
+	 * "Social.Won" stay distinct). Falls back to GetTagLeafLabel for non-outcome tags. This is the ONE rendering of an
+	 * outcome tag — node pins, the Prereq Examiner, and the mapping panel's qualifier picker all read identically.
+	 */
+	static FText GetOutcomeLabel(FName TagName);
+
+	/**
+	 * The output pin CATEGORY an edge verb leaves from — the inverse of the export's category->verb rendering. One
+	 * definition, so the import's pin resolution and the export's wire-binding inversion can never disagree on the mapping.
+	 */
+	static FName PinCategoryForEdgeVerb(const FString& Verb);
+	
+	/**
+	 * Tells the editor a graph and every graph nested inside it have changed, so open panels redraw. Needed by anything
+	 * that mutates a graph's Nodes array directly rather than through UEdGraph::AddNode / RemoveNode, which notify on
+	 * their own - a reparent has to, because AddNode asserts the node's outer already matches and that is only true
+	 * after the Rename.
+	 */
+	static void NotifyGraphAndDescendants(UEdGraph* Graph);
 
 	/**
 	 * Collects unique OutcomeTags from all Exit nodes in a graph. Returns the tag names suitable for passing directly to SyncPinsByCategory.
@@ -272,6 +305,20 @@ public:
 	 * renames are written to rebuild the redirect map for subsequent FGameplayTag deserialization.
 	 */
 	static int32 WriteGameplayTagRedirects(const TMap<FName, FName>& Renames);
+	
+	/**
+	 * Remove redirect entries by OldTagName, preserving every other line in the file verbatim. The inverse of
+	 * WriteGameplayTagRedirects and deliberately beside it: the file path, section header, line prefix and quoted-value
+	 * conventions are shared, and a second parser of the same format would be one drift away from disagreeing with the
+	 * writer about what a redirect line is.
+	 *
+	 * THE CALLER OWNS THE DECISION. This performs no analysis - it removes what it is told to, on the caller's proof
+	 * that those redirects are spent. Deleting a live redirect silently un-heals every asset still holding its old
+	 * name, so nothing here should be invoked on a guess.
+	 *
+	 * @return how many redirect lines were removed.
+	 */
+	static int32 RemoveGameplayTagRedirects(const TSet<FName>& OldTagNames);
 	
 	/**
 	 * Walks every loaded UBlueprint's generated-class CDO and rewrites any FGameplayTag or FGameplayTagContainer field whose stored

@@ -10,7 +10,9 @@
 
 void ULootTableReward::TryGrantReward_Implementation(const FQuestRewardActivationContext& Incoming)
 {
-	if (!LootTable)
+	// Sync-load the soft table at use time (designer authored a soft ref; the resident asset is only needed here).
+	const UQuestLootTable* Table = LootTable.LoadSynchronous();
+	if (!Table)
 	{
 		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("ULootTableReward: no LootTable assigned — nothing granted."));
 		return;
@@ -21,7 +23,7 @@ void ULootTableReward::TryGrantReward_Implementation(const FQuestRewardActivatio
 	// same table yields different drops depending on how the quest was completed.
 	TArray<const FQuestLootEntry*> Eligible;
 	float TotalWeight = 0.f;
-	for (const FQuestLootEntry& Entry : LootTable->Entries)
+	for (const FQuestLootEntry& Entry : Table->Entries)
 	{
 		if (Entry.Weight <= 0.f) continue;
 		if (Entry.RequiredOutcome.IsValid() && !Incoming.IncomingOutcomeTag.MatchesTag(Entry.RequiredOutcome)) continue;
@@ -62,8 +64,9 @@ void ULootTableReward::TryGrantReward_Implementation(const FQuestRewardActivatio
 TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(AActor* Viewer) const
 {
 	TArray<FQuestRewardPreview> Out;
-	if (!LootTable) return Out;
-	for (const FQuestLootEntry& E : LootTable->Entries)
+	const UQuestLootTable* Table = LootTable.LoadSynchronous();
+	if (!Table) return Out;
+	for (const FQuestLootEntry& E : Table->Entries)
 	{
 		if (E.Weight <= 0.f) continue;
 		FQuestRewardPreview P;

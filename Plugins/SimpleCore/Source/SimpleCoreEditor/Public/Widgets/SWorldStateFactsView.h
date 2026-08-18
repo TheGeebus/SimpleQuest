@@ -5,9 +5,8 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "SColumnTableView.h"
 #include "Widgets/SCompoundWidget.h"
-#include "Widgets/Views/SHeaderRow.h"
-#include "Widgets/Views/SListView.h"
 #include "Widgets/Input/SComboBox.h"
 
 
@@ -35,29 +34,40 @@ class SWorldStateFactsView : public SCompoundWidget
 {
 public:
     SLATE_BEGIN_ARGS(SWorldStateFactsView) {}
-    SLATE_END_ARGS()
+    /**
+     * Stable key for persisting this panel's table state - sort column, direction and column widths. Forwarded from
+     * the hosting SFactsPanel via the FactsPanelRegistry factory signature, so two docked panels keep their own
+     * layout instead of overwriting each other's. Empty disables persistence.
+     */
+    SLATE_ARGUMENT(FName, PanelPersistenceKey)
+SLATE_END_ARGS()
 
     void Construct(const FArguments& InArgs);
     virtual ~SWorldStateFactsView();
 
-    /** Current filter substring formatted for STextBlock::HighlightText. Public so row widgets can bind to it. */
-    FText GetFilterTextAsText() const { return FText::FromString(FilterText); }
-
 private:
-    TSharedRef<ITableRow> HandleGenerateRow(TSharedPtr<FWorldStateFactRow> Item, const TSharedRef<STableViewBase>& OwnerTable);
-    TSharedPtr<SWidget>   HandleContextMenuOpening();
+    /**
+     * Column definitions for the table. Built once at construction - the columns carry the sorting, filtering and copy
+     * behavior, so this is the only place that describes what a fact row looks like.
+     */
+    static TArray<FTableColumnDef<TSharedPtr<FWorldStateFactRow>>> MakeColumns();
+    
+    /** Every fact row for the effective session, unfiltered. The table owns filtering and sorting from here. */
+    TArray<TSharedPtr<FWorldStateFactRow>> Rows;
+    TSharedPtr<SColumnTableView<TSharedPtr<FWorldStateFactRow>>> Table;
 
-    EVisibility GetEmptyMessageVisibility() const;
+    TSharedPtr<SWidget>   HandleContextMenuOpening();
+    
     FText GetEmptyMessageText() const;
     FText GetStatusText() const;
 
     /**
      * Subscribed to channel's OnSessionHistoryChanged — fires on session push/finalize and on every fact mutation
-     * while in flight. Refreshes AllRows from the channel and requests list paint if the diff changed.
+     * while in flight. Refreshes the rows from the channel and hands them to the table if the diff changed.
      */
     void HandleSessionHistoryChanged();
 
-    /** Rebuilds the AllRows array from the channel's effective session. Returns true if the contents changed. */
+    /** Rebuilds the row array from the channel's effective session. Returns true if the contents changed. */
     bool RefreshRowsFromChannel();
 
     /**
@@ -67,28 +77,9 @@ private:
      */
     int32 GetEffectiveSessionIndex() const;
 
-    /** Reorders AllRows in place per CurrentSortColumn / CurrentSortMode. No-op when CurrentSortMode is None. */
-    void SortAllRows();
-
-    void HandleFilterTextChanged(const FText& NewText);
-    void ApplyFilter();
-
-    EColumnSortMode::Type GetColumnSortMode(FName ColumnID) const;
-    void HandleColumnSort(EColumnSortPriority::Type SortPriority, const FName& ColumnID, EColumnSortMode::Type NewSortMode);
-
     void CopySelectionAsTagList();
     void CopySelectionAsTagContainer();
     void CopySelectionAsTSV();
-
-    /** Full set of rows pulled from WorldState (pre-filter). Rebuilt on PIE transitions and per-tick fact changes. */
-    TArray<TSharedPtr<FWorldStateFactRow>> AllRows;
-    FString FilterText;
-
-    TArray<TSharedPtr<FWorldStateFactRow>> Rows;
-    TSharedPtr<SListView<TSharedPtr<FWorldStateFactRow>>> ListView;
-
-    FName CurrentSortColumn;
-    EColumnSortMode::Type CurrentSortMode = EColumnSortMode::None;
 
     /**
      * Rebuilds SessionItems from the channel's history, refreshes the combo's options, and re-syncs the combo's

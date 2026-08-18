@@ -147,7 +147,7 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 		else
 		{
 			UE_LOG(LogSimpleQuestCompiler, Error, TEXT("StaleQuestTagsScan: failed to write JSON results to %s"), *OutputJsonPath);
-			return -1;
+			return 2;   // the RUN failed - deliberately distinct from 1, which means the scan completed and found something
 		}
 	}
 

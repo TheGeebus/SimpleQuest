@@ -3,6 +3,7 @@
 
 #include "Toolkit/QuestlineGraphEditor.h"
 
+#include "DesktopPlatformModule.h"
 #include "EdGraphUtilities.h"
 #include "Toolkit/QuestlineGraphPanel.h"
 #include "Quests/QuestlineGraph.h"
@@ -32,7 +33,15 @@
 #include "EdGraphNode_Comment.h"
 #include "GameplayTagsManager.h"
 #include "GraphEditorActions.h"
+#include "IDesktopPlatform.h"
 #include "ScopedTransaction.h"
+#include "Resolver/QuestExportOperations.h"
+#include "Resolver/QuestImportOperations.h"
+#include "Resolver/QuestPlanBroker.h"
+#include "Resolver/QuestPlanReport.h"
+#include "Resolver/QuestResolverEditorMemo.h"
+#include "Resolver/QuestRowApply.h"
+#include "Resolver/SQuestPlanPanel.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -40,7 +49,81 @@ const FName FQuestlineGraphEditor::DetailsTabId(TEXT("QuestlineGraphEditor_Detai
 const FName FQuestlineGraphEditor::OutlinerTabId(TEXT("QuestlineGraphEditor_Outliner"));
 const FName FQuestlineGraphEditor::GroupExaminerTabId(TEXT("QuestlineGraphEditor_GroupExaminer"));
 const FName FQuestlineGraphEditor::PrereqExaminerTabId(TEXT("QuestlineGraphEditor_PrereqExaminer"));
+const FName FQuestlineGraphEditor::PlanTabId(TEXT("QuestlineGraphEditor_Plan"));
 
+
+// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
+// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
+// preserved when descending into an inline Quest's inner graph.
+static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
+{
+    if (!Graph) return {};
+
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
+        {
+            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
+            if (Combined == ContentGuid)
+                return { Graph, Node };
+        }
+
+        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+        {
+            if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
+            {
+                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
+                if (Inner.IsValid()) return Inner;
+            }
+        }
+
+        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
+        if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
+        {
+            if (!LinkedNode->LinkedGraph.IsNull())
+            {
+                if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
+                {
+                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
+                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
+                    if (Linked.IsValid()) return Linked;
+                }
+            }
+        }
+    }
+
+    return {};
+}
+
+/**
+ * Find a node by its AUTHORED guid - UQuestlineNodeBase::QuestGuid, exactly as the resolver indexes nodes.
+ * A sibling of FindEdNodeInGraph rather than a parameter on it, because the two search different IDENTITY SPACES and
+ * conflating them is what sent a plan row looking for an Entry in the compiled-content space, where Entry nodes do not
+ * exist: that walk matches ContentBase only, against a guid the compiler CHAINS through linked wrappers.
+ * Deliberately does NOT descend into linked assets. A plan describes nodes in THIS questline, and following a link would
+ * navigate away from the asset the plan is about.
+ */
+static FQuestlineGraphEditor::FEdNodeLocation FindAuthoredNodeInGraph(UEdGraph* Graph, const FGuid& AuthoredGuid)
+{
+    if (!Graph) { return {}; }
+
+    for (UEdGraphNode* Node : Graph->Nodes)
+    {
+        if (const UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(Node))
+        {
+            if (Base->QuestGuid == AuthoredGuid) { return { Graph, Node }; }
+        }
+
+        // A container's contents are their own graph, and a plan row for a node inside one is the case this exists for.
+        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+        {
+            FQuestlineGraphEditor::FEdNodeLocation Inner = FindAuthoredNodeInGraph(QuestNode->GetInnerGraph(), AuthoredGuid);
+            if (Inner.IsValid()) { return Inner; }
+        }
+    }
+    return {};
+}
 
 FQuestlineGraphEditor::~FQuestlineGraphEditor()
 {
@@ -91,10 +174,15 @@ FQuestlineGraphEditor::~FQuestlineGraphEditor()
 void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UQuestlineGraph* InQuestlineGraph)
 {
     CrossAssetBackEditor.Reset();
-    QuestlineGraph = InQuestlineGraph;    
+    QuestlineGraph = InQuestlineGraph;
+    // Seeded before the restore so a questline with no memory still gets a usable format; TSV matches what the console
+    // defaults to, so both callers start in the same reading. Not a member initializer - see the declaration for why a
+    // braced default is a hazard on this struct.
+    LastImportSource.FormatName = TEXT("TSV");
+    RestoreImportEndpointFromMemo();
     ExternalCompileHandle = ISimpleQuestEditorModule::Get().OnQuestlineCompiled().AddSP(this, &FQuestlineGraphEditor::OnExternalCompile);
     
-    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v10")
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("QuestlineGraphEditor_Layout_v11")
         ->AddArea
         (
             FTabManager::NewPrimaryArea()
@@ -126,9 +214,25 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
             )
             ->Split
             (
-                FTabManager::NewStack()
+                // The plan sits UNDER the graph rather than in the left column. Its data is landscape - three columns
+                // where one carries before-and-after values - and it is a read-then-act-then-dismiss surface, which is
+                // where every UE editor puts the Message Log. The left column holds things you keep an eye on, and
+                // stacking there would evict the Details panel you want open WHILE reviewing a plan.
+                FTabManager::NewSplitter()
+                ->SetOrientation(Orient_Vertical)
                 ->SetSizeCoefficient(0.80f)
-                ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
+                ->Split
+                (
+                    FTabManager::NewStack()
+                    ->SetSizeCoefficient(0.72f)
+                    ->AddTab(GraphViewportTabId, ETabState::OpenedTab)
+                )
+                ->Split
+                (
+                    FTabManager::NewStack()
+                    ->SetSizeCoefficient(0.28f)
+                    ->AddTab(PlanTabId, ETabState::ClosedTab)
+                )
             )
         );
     
@@ -219,7 +323,12 @@ void FQuestlineGraphEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& I
         FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPrereqExaminerTab))
         .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerTabLabel", "Prereq Examiner"))
         .SetGroup(WorkspaceMenuCategory.ToSharedRef())
-        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint")); /* "Kismet.Tabs.FindResults" "Kismet.FindInBlueprints.MenuIcon" "BlueprintEditor.FindInBlueprint" */
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlueprintEditor.FindInBlueprint"));
+    InTabManager->RegisterTabSpawner(PlanTabId,
+        FOnSpawnTab::CreateSP(this, &FQuestlineGraphEditor::SpawnPlanTab))
+        .SetDisplayName(NSLOCTEXT("SimpleQuestEditor", "SourceDataTabLabel", "Source Data"))
+        .SetGroup(WorkspaceMenuCategory.ToSharedRef())
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "ContentBrowser.AssetActions.Duplicate"));
 }
 
 void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
@@ -229,6 +338,7 @@ void FQuestlineGraphEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>&
     InTabManager->UnregisterTabSpawner(OutlinerTabId);
     InTabManager->UnregisterTabSpawner(GroupExaminerTabId);
     InTabManager->UnregisterTabSpawner(PrereqExaminerTabId);
+    InTabManager->UnregisterTabSpawner(PlanTabId);
     FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 }
 
@@ -394,6 +504,15 @@ void FQuestlineGraphEditor::BindGraphCommands()
     GraphEditorCommands->MapAction(
        FQuestlineGraphEditorCommands::Get().CompileQuestlineGraph,
        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CompileQuestlineGraph));
+
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().OpenSourceData,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::OpenSourceData));
+
+    GraphEditorCommands->MapAction(
+        FQuestlineGraphEditorCommands::Get().ApplyImportPlan,
+        FExecuteAction::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan),
+        FCanExecuteAction::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan));
 
     GraphEditorCommands->MapAction(
         FQuestlineGraphEditorCommands::Get().CompileAllQuestlineGraphs,
@@ -832,6 +951,17 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
 
     ToolbarBuilder.EndSection();
 
+    ToolbarBuilder.BeginSection("Resolver");
+
+    ToolbarBuilder.AddToolBarButton(
+        FQuestlineGraphEditorCommands::Get().OpenSourceData,
+        NAME_None,
+        NSLOCTEXT("SimpleQuestEditor", "SourceData_Label", "Source Data"),
+        TAttribute<FText>(),
+        FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
+
+    ToolbarBuilder.EndSection();
+
     ToolbarBuilder.BeginSection("GraphDefaults");
 
     // Graph Defaults — pins the Details panel to the asset's own properties. Toggle button, mirrors BP's Class Defaults.
@@ -1078,6 +1208,690 @@ TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnGroupExaminerTab(const FSpawnTa
         ];
 }
 
+TSharedRef<SDockTab> FQuestlineGraphEditor::SpawnPlanTab(const FSpawnTabArgs& Args)
+{
+    if (!PlanPanel.IsValid())
+    {
+        // Bound to the asset path the resolver keys plans by, so a plan computed for a DIFFERENT questline never
+        // renders here. GetPathName gives the same spelling the console command resolves --in-place to.
+        PlanPanel = SNew(SQuestPlanPanel)
+            .TargetAssetPath(QuestlineGraph ? QuestlineGraph->GetPathName() : FString())
+            .Questline(QuestlineGraph)
+            .OnBuildPlanRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BuildImportPlan))
+            .OnApplyRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ApplyImportPlan))
+            .OnBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForImportFolder))
+            .CanBuildPlan(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanBuildImportPlan))
+            .CanApply(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanApplyImportPlan))
+            .ProvenanceStale(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::IsPlanProvenanceStale))
+            .PlanProvenance(TAttribute<FText>::CreateSP(this, &FQuestlineGraphEditor::GetPlanProvenanceLabel))
+            .SourceFolder(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFolder))
+            .OnFolderChanged(FOnQuestPlanFolderChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFolderChanged))
+            .SourceTable(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportTable))
+            .OnTableChanged(FOnQuestPlanTableChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportTableChanged))
+            .OnSourceKindChanged(FOnQuestPlanSourceKindChanged::CreateSP(this, &FQuestlineGraphEditor::HandleSourceKindChanged))
+            .FormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetImportFormatName))
+            .OnFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportFormatChanged))
+            .MappingAsset(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetImportMappingPath))
+            .OnMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleImportMappingChanged))
+            .OnExportRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::ExportQuestlineData))
+            .CanExport(TAttribute<bool>::CreateSP(this, &FQuestlineGraphEditor::CanExportQuestlineData))
+            .DestinationFolder(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetExportFolder))
+            .OnDestinationFolderChanged(FOnQuestPlanFolderChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportFolderChanged))
+            .DestinationTable(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportTable))
+            .OnDestinationTableChanged(FOnQuestPlanTableChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportTableChanged))
+            .OnDestinationKindChanged(FOnQuestPlanSourceKindChanged::CreateSP(this, &FQuestlineGraphEditor::HandleDestinationKindChanged))
+            .DestinationFormatName(TAttribute<FString>::CreateSP(this, &FQuestlineGraphEditor::GetExportFormatName))
+            .OnDestinationFormatChanged(FOnQuestPlanFormatChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportFormatChanged))
+            .DestinationMapping(TAttribute<FSoftObjectPath>::CreateSP(this, &FQuestlineGraphEditor::GetExportMappingPath))
+            .OnDestinationMappingChanged(FOnQuestPlanMappingChanged::CreateSP(this, &FQuestlineGraphEditor::HandleExportMappingChanged))
+            .OnDestinationBrowseRequested(FSimpleDelegate::CreateSP(this, &FQuestlineGraphEditor::BrowseForExportFolder))
+            .OnHoverRequested(FOnQuestPlanHover::CreateSP(this, &FQuestlineGraphEditor::HighlightPlanRow))
+            .OnNavigateRequested(FOnQuestPlanNavigate::CreateSP(this, &FQuestlineGraphEditor::NavigateToPlanRow));
+    }
+
+    return SNew(SDockTab)
+        .Label(NSLOCTEXT("SimpleQuestEditor", "SourceDataTabLabel", "Source Data"))
+        [
+            PlanPanel.ToSharedRef()
+        ];
+}
+
+namespace
+{
+    /**
+     * Tell a graph and every inner graph beneath it that something changed. Needed because node widgets BAKE their
+     * summary values at construction - SGraphNode_QuestlineStep reads the element count, the watched actors, the watched
+     * givers and the target classes once and builds a fixed widget - so a property written programmatically leaves every
+     * one of those stale until the panel rebuilds the node. The details panel re-reads on its own and therefore hides
+     * the problem: the value looks updated in one place and not in the other.
+     * Recursive because a container's contents live in their own UEdGraph, and a write inside one would otherwise go
+     * unrepainted while the outer graph refreshed around it.
+     */
+    void NotifyQuestGraphTreeChanged(UEdGraph* Graph)
+    {
+        if (!Graph) return;
+        Graph->NotifyGraphChanged();
+        for (UEdGraphNode* Node : Graph->Nodes)
+        {
+            if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+            {
+                NotifyQuestGraphTreeChanged(QuestNode->GetInnerGraph());
+            }
+        }
+    }
+}
+
+bool FQuestlineGraphEditor::RunImport(const FQuestPlanEndpoint& Source, bool bApply)
+{
+    if (!QuestlineGraph || !QuestlineGraph->QuestlineEdGraph) { return false; }
+
+    // From the SOURCE, not the held selection: an Apply re-running a reviewed plan must use the mapping that plan was
+    // built with, even if the picker has moved since.
+    const UQuestImportMapping* Mapping = Cast<UQuestImportMapping>(Source.Mapping.TryLoad());
+
+    FQuestImportRequest Request;
+    // Kind comes from the source rather than being assumed. Hardcoding ForeignFile here is what made a DataTable plan
+    // un-runnable from this editor even when the record it came from named the table perfectly well.
+    Request.Endpoint = QuestEndpointFromPlanSource(Source);
+    Request.Mapping = Mapping;
+    Request.Policies = QuestImport_ResolvePolicies(Mapping, false);
+
+    // Defaulted at the USE site as well as at init, because a format is only ever absent by accident - and the error it
+    // produces names the folder, which is the one thing the user did supply.
+    if (Request.Endpoint.Kind == EQuestEndpointKind::ForeignFile && Request.Endpoint.FormatName.IsEmpty())
+    {
+        Request.Endpoint.FormatName = TEXT("TSV");
+    }
+
+    // The caller owns the transaction, so an apply driven from the toolbar is ONE undo step covering everything the
+    // plan performs - the same guarantee the console gives. Held by SCOPE, not by use: constructing it opens the
+    // transaction and this pointer's destruction closes it, which is why nothing below refers to it again. Conditional,
+    // so a read-only plan opens no transaction at all.
+    TUniquePtr<FScopedTransaction> Transaction;
+    if (bApply)
+    {
+        Transaction = MakeUnique<FScopedTransaction>(
+            NSLOCTEXT("SimpleQuestEditor", "ApplyImportPlanTransaction", "Apply Import Plan"));
+    }
+
+    FQuestImportOutcome Outcome;
+    if (!QuestImport_RunInPlace(*QuestlineGraph, Request, bApply, Outcome))
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Build Plan: %s. Nothing was modified."), *Outcome.Error);
+
+        // Published as well as logged. Picking the wrong format is now one click, and a failure that only reaches the
+        // log leaves the panel saying "no plan has been computed" - which reads as "try again" for the thing that just
+        // failed. The notification catches the eye; the panel is where the reason stays.
+        FQuestPlanBroker::Get().PublishFailure(QuestlineGraph->GetPathName(), Outcome.Error, LastImportSource);
+
+        FNotificationInfo Info(FText::Format(
+            NSLOCTEXT("SimpleQuestEditor", "ImportReadFailed", "Could not read the source — {0}"),
+            FText::FromString(Outcome.Error)));
+        Info.ExpireDuration = 6.f;
+        Info.bUseSuccessFailIcons = true;
+        FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+        return false;
+    }
+
+    Outcome.Plan.TargetAssetPath = QuestlineGraph->GetPathName();
+
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("%s: %s"),
+        bApply ? TEXT("Apply Plan") : TEXT("Build Plan"),
+        *BuildQuestPlanSummary(Outcome.Plan, EQuestPlanSubject::Questline));
+    
+    FQuestPlanBroker::Get().Publish(Outcome.Plan.TargetAssetPath, Outcome.Plan, Source);
+
+    // An APPLIED plan describes the past, so it goes once it has run - keeping it leaves Apply lit over work already
+    // done. Published FIRST and cleared after, rather than skipped: an apply that REFUSES has not run, and the plan
+    // together with its refusals is precisely what should still be on screen.
+    if (bApply && !Outcome.ApplyResult.bRefused)
+    {
+        FQuestPlanBroker::Get().Clear(Outcome.Plan.TargetAssetPath);
+
+        // The writes landed but nothing has told the graph. Node widgets bake their summary values at construction, so
+        // without this an applied change is visible in the details panel and invisible on the node itself - which reads
+        // as the apply having half-worked.
+        NotifyQuestGraphTreeChanged(QuestlineGraph->QuestlineEdGraph);
+    }
+    
+    // An apply recompiles the target and its linked neighborhood (QuestImport_RunInPlace owns that, so the console gets
+    // it too). Report the outcome here rather than only logging it: this path has a designer watching, and "the change
+    // landed but the asset still needs compiling" is precisely the state they must not walk away from.
+    if (bApply && Outcome.ApplyResult.GraphsCompiled > 0)
+    {
+        if (Outcome.ApplyResult.bCompileSucceeded)
+        {
+            FNotificationInfo Info(FText::Format(
+                NSLOCTEXT("SimpleQuestEditor", "ApplyRecompiled", "Import applied. {0} graph(s) recompiled."),
+                Outcome.ApplyResult.GraphsCompiled));
+            Info.ExpireDuration = 3.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+        }
+        else
+        {
+            // Deliberately NOT rolled back — the writes were correct and reverting them would discard good work to
+            // report a compile problem. The asset is modified and uncompiled, which is a state the compiler log can
+            // explain and a recompile can clear.
+            UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply Plan: the import applied but a recompile FAILED - '%s' is "
+                "modified and needs a manual compile."), *QuestlineGraph->GetPathName());
+
+            FNotificationInfo Info(NSLOCTEXT("SimpleQuestEditor", "ApplyCompileFailed",
+                "Import applied, but the recompile failed. The questline is modified and needs compiling — see the Quest Compiler log."));
+            Info.ExpireDuration = 8.f;
+            Info.bUseSuccessFailIcons = true;
+            FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Fail);
+        }
+    }
+    return true;
+}
+
+void FQuestlineGraphEditor::OpenSourceData()
+{
+    if (TabManager.IsValid()) { TabManager->TryInvokeTab(PlanTabId); }
+}
+
+void FQuestlineGraphEditor::RestoreImportEndpointFromMemo()
+{
+    if (!QuestlineGraph) { return; }
+    const UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
+    const FString Path = QuestlineGraph->GetPathName();
+
+    if (const FQuestResolverEndpointMemo* Remembered = Memo->EndpointByQuestline.Find(Path))
+    {
+        // Each field is taken only when it says something, so a memo written by an older build - or one whose format
+        // was never chosen - leaves the seeded default standing rather than blanking it.
+        LastImportSource.Folder = Remembered->Folder;
+        if (!Remembered->FormatName.IsEmpty()) { LastImportSource.FormatName = Remembered->FormatName; }
+        LastImportSource.Table = FSoftObjectPath(Remembered->Table);
+        LastImportSource.Mapping = FSoftObjectPath(Remembered->Mapping);
+    }
+
+    if (const FQuestResolverEndpointMemo* Dest = Memo->DestinationByQuestline.Find(Path))
+    {
+        LastExportDestination.Folder = Dest->Folder;
+        if (!Dest->FormatName.IsEmpty()) { LastExportDestination.FormatName = Dest->FormatName; }
+        LastExportDestination.Table = FSoftObjectPath(Dest->Table);
+        LastExportDestination.Mapping = FSoftObjectPath(Dest->Mapping);
+    }
+    else if (const FQuestResolverEndpointMemo* Remembered = Memo->EndpointByQuestline.Find(Path))
+    {
+        // MIGRATION, once. A questline remembered before the split has no destination memo, and export used to read the
+        // SOURCE's folder and format - so seeding from those puts it back exactly where it used to write. The TABLE is
+        // deliberately not carried across: export refused a table outright, so no questline ever wrote to one, and
+        // inheriting it would silently turn a folder export into a write into the table it was imported from.
+        LastExportDestination.Folder = Remembered->Folder;
+        if (!Remembered->FormatName.IsEmpty()) { LastExportDestination.FormatName = Remembered->FormatName; }
+        LastExportDestination.Mapping = FSoftObjectPath(Remembered->Mapping);
+    }
+}
+
+void FQuestlineGraphEditor::SaveImportEndpointToMemo() const
+{
+    if (!QuestlineGraph) { return; }
+    const FString Path = QuestlineGraph->GetPathName();
+
+    FQuestResolverEndpointMemo Source;
+    Source.Folder     = LastImportSource.Folder;
+    Source.FormatName = LastImportSource.FormatName;
+    Source.Table      = LastImportSource.Table.ToString();
+    Source.Mapping    = LastImportSource.Mapping.ToString();
+
+    FQuestResolverEndpointMemo Destination;
+    Destination.Folder     = LastExportDestination.Folder;
+    Destination.FormatName = LastExportDestination.FormatName;
+    Destination.Table      = LastExportDestination.Table.ToString();
+    Destination.Mapping    = LastExportDestination.Mapping.ToString();
+
+    UQuestResolverEditorMemo* Memo = UQuestResolverEditorMemo::Get();
+    Memo->EndpointByQuestline.Add(Path, Source);
+    Memo->DestinationByQuestline.Add(Path, Destination);
+    Memo->SaveConfig();
+}
+
+void FQuestlineGraphEditor::BrowseForImportFolder()
+{
+    IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+    if (!Desktop) { return; }
+
+    const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+    FString Chosen;
+    if (!Desktop->OpenDirectoryDialog(ParentWindow,
+            NSLOCTEXT("SimpleQuestEditor", "ChooseSourceTitle", "Choose a folder of source data").ToString(),
+            LastImportSource.Folder, Chosen))
+    {
+        return;   // cancelled; nothing to say
+    }
+
+    // Routed through the same write typing uses, so browsing and typing cannot diverge.
+    HandleImportFolderChanged(Chosen);
+}
+
+void FQuestlineGraphEditor::HandleImportFolderChanged(const FString& NewFolder)
+{
+    if (NewFolder == LastImportSource.Folder) { return; }
+    LastImportSource.Folder = NewFolder;
+    // The two provenances are exclusive; naming a folder means this is no longer a table source.
+    LastImportSource.Table.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleImportTableChanged(const FSoftObjectPath& NewTable)
+{
+    if (NewTable == LastImportSource.Table) { return; }
+    LastImportSource.Table = NewTable;
+    LastImportSource.Folder.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleSourceKindChanged(EQuestPlanEndpointKind NewKind)
+{
+    // Clears the side no longer in play rather than leaving both set, so the endpoint's derived kind always agrees with
+    // what the panel is showing. The panel keeps its own notion of which control is visible, because it can sit on
+    // Data Table with nothing picked - a state no source can hold.
+    if (NewKind == EQuestPlanEndpointKind::DataTable) { LastImportSource.Folder.Reset(); }
+    else                                            { LastImportSource.Table.Reset(); }
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleImportFormatChanged(FString NewFormat)
+{
+    if (NewFormat == LastImportSource.FormatName) { return; }
+    LastImportSource.FormatName = MoveTemp(NewFormat);
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleImportMappingChanged(const FSoftObjectPath& NewMapping)
+{
+    if (NewMapping == LastImportSource.Mapping) { return; }
+    LastImportSource.Mapping = NewMapping;
+    SaveImportEndpointToMemo();
+}
+
+// The destination half. Deliberately the same shape as the import handlers above rather than something cleverer: they
+// answer the same questions about a different endpoint, and a reader who has understood one has understood both.
+void FQuestlineGraphEditor::HandleExportFolderChanged(const FString& NewFolder)
+{
+    if (NewFolder == LastExportDestination.Folder) { return; }
+    LastExportDestination.Folder = NewFolder;
+    // The two provenances are exclusive; naming a folder means this is no longer a table destination.
+    LastExportDestination.Table.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportTableChanged(const FSoftObjectPath& NewTable)
+{
+    if (NewTable == LastExportDestination.Table) { return; }
+    LastExportDestination.Table = NewTable;
+    LastExportDestination.Folder.Reset();
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleDestinationKindChanged(EQuestPlanEndpointKind NewKind)
+{
+    if (NewKind == EQuestPlanEndpointKind::DataTable) { LastExportDestination.Folder.Reset(); }
+    else                                            { LastExportDestination.Table.Reset(); }
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportFormatChanged(FString NewFormat)
+{
+    if (NewFormat == LastExportDestination.FormatName) { return; }
+    LastExportDestination.FormatName = MoveTemp(NewFormat);
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::HandleExportMappingChanged(const FSoftObjectPath& NewMapping)
+{
+    if (NewMapping == LastExportDestination.Mapping) { return; }
+    LastExportDestination.Mapping = NewMapping;
+    SaveImportEndpointToMemo();
+}
+
+void FQuestlineGraphEditor::BrowseForExportFolder()
+{
+    IDesktopPlatform* Desktop = FDesktopPlatformModule::Get();
+    if (!Desktop) { return; }
+
+    const void* ParentWindow = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
+    FString Chosen;
+    if (!Desktop->OpenDirectoryDialog(ParentWindow,
+            NSLOCTEXT("SimpleQuestEditor", "ChooseDestinationTitle", "Choose a folder to write this questline into").ToString(),
+            LastExportDestination.Folder, Chosen))
+    {
+        return;   // cancelled; nothing to say
+    }
+
+    // Routed through the same write typing uses, so browsing and typing cannot diverge.
+    HandleExportFolderChanged(Chosen);
+}
+
+FText FQuestlineGraphEditor::GetPlanProvenanceLabel() const
+{
+    if (!QuestlineGraph) { return FText::GetEmpty(); }
+
+    // ALWAYS says something. A line that collapses when there is no plan makes the row jump, and its absence carries
+    // no information - "there is no plan" is a fact worth stating plainly.
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    if (!Record || !Record->Provenance.IsValid())
+    {
+        return NSLOCTEXT("SimpleQuestEditor", "PlanNone", "No plan built");
+    }
+    // A FAILURE record carries a source as well, so testing Source.IsValid() alone announced "Plan built from ..." for
+    // a read that produced nothing. The reason belongs to the summary; this line only names which state we are in.
+    if (!Record->Error.IsEmpty())
+    {
+        return NSLOCTEXT("SimpleQuestEditor", "PlanReadFailed", "No plan — the last read failed");
+    }
+
+    // Names what the ROWS are a statement about, which is no longer the same fact as what the fields above show. The
+    // format is part of it: one folder read as TSV and the same folder read as JSON are different sources.
+    return Record->Provenance.Kind() == EQuestPlanEndpointKind::DataTable
+        ? FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromTable", "Plan built from {0}"),
+            FText::FromString(Record->Provenance.Table.ToString()))
+        : FText::Format(NSLOCTEXT("SimpleQuestEditor", "PlanFromFolder", "Plan built from {0} as {1}"),
+            FText::FromString(Record->Provenance.Folder),
+            FText::FromString(Record->Provenance.FormatName));
+}
+
+bool FQuestlineGraphEditor::IsPlanProvenanceStale() const
+{
+    if (!QuestlineGraph) { return false; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    // A failure record describes no plan, so there is nothing for the selection to have drifted away from.
+    if (!Record || !Record->Provenance.IsValid() || !Record->Error.IsEmpty()) { return false; }
+
+    // WHICH SELECTION a plan is answerable to depends on WHICH WAY IT POINTS. FQuestPlanRecord::Source means "what
+    // this plan was built from", and for an OUTBOUND plan that is the DESTINATION endpoint - so comparing it against
+    // the import row reported every export plan stale the moment it was built, before anything had changed. The field
+    // name says Source while the meaning is provenance; until that name is revisited, direction has to be read here.
+    const FQuestPlanEndpoint& Selection = (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
+        ? LastExportDestination
+        : LastImportSource;
+
+    if (Record->Provenance.Mapping != Selection.Mapping) { return true; }
+    if (Record->Provenance.Kind() != Selection.Kind()) { return true; }
+    // Compared per field rather than by whole-struct equality, because FormatName is meaningless for a table and would
+    // otherwise report every table plan stale the moment the combo held anything.
+    if (Selection.Kind() == EQuestPlanEndpointKind::DataTable)
+    {
+        return Record->Provenance.Table != Selection.Table;
+    }
+    return Record->Provenance.Folder != Selection.Folder
+        || Record->Provenance.FormatName != Selection.FormatName;
+}
+
+void FQuestlineGraphEditor::ApplyImportPlan()
+{
+    if (!QuestlineGraph) { return; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    if (!Record || !Record->Provenance.IsValid()) { return; }
+
+    // ONE Apply, dispatching on the plan itself. This is what putting Direction on the PLAN rather than the broker
+    // record buys: the button does not need to know which endpoint field was last edited, only what it is holding.
+    //
+    // Both arms re-run the RECORD's source rather than the current selection - "what runs is what you reviewed" is the
+    // promise, and the two can legitimately differ once a designer edits a field after building a plan. Neither writes
+    // LastImportSource, for the same reason.
+    if (Record->Plan.Direction == EQuestPlanDirection::IntoTable)
+    {
+        ApplyRowPlan(Record->Provenance);
+        return;
+    }
+    RunImport(Record->Provenance, true);
+}
+
+/**
+ * A last look before something outside this questline changes. Defaults to NO when unattended, so a commandlet or an
+ * automation run never silently performs a write a human would have been asked about - the default has to be the safe
+ * answer, because nobody is there to give the unsafe one.
+ */
+static bool ConfirmMutation(const FText& Title, const FText& Message)
+{
+    return FMessageDialog::Open(EAppMsgCategory::Warning, EAppMsgType::YesNo, EAppReturnType::No, Message, Title)
+        == EAppReturnType::Yes;
+}
+
+void FQuestlineGraphEditor::ApplyRowPlan(const FQuestPlanEndpoint& Source)
+{
+    if (!QuestlineGraph) { return; }
+
+    FQuestExportRequest Request;
+    Request.Graph = QuestlineGraph;
+    Request.Endpoint = QuestEndpointFromPlanSource(Source);
+    Request.Mapping = Cast<UQuestImportMapping>(Source.Mapping.TryLoad());
+
+    // Re-planned rather than replayed. The destination is an asset we do not own and nothing watches it, so the plan
+    // reviewed a moment ago may already describe a table that has moved on - recomputing is the only honest way to
+    // write what the CURRENT comparison says rather than what an old one did.
+    FQuestExportOutcome Out;
+    if (!QuestExport_Run(Request, Out) || !Out.bPlanned)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: %s"),
+            Out.Error.IsEmpty() ? TEXT("the plan could not be recomputed. Nothing was written.") : *Out.Error);
+        return;
+    }
+
+    UDataTable* Destination = Request.Endpoint.Table.LoadSynchronous();
+    if (!Destination)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: the destination data table could not be loaded. Nothing written."));
+        return;
+    }
+
+    TMap<FString, const FQuestDataRow*> RowsByKey;
+    if (const FQuestDataTable* Content = Out.PlannedBundle.TablesByType.Find(TEXT("content")))
+    {
+        for (const FQuestDataRow& R : Content->Rows) { RowsByKey.Add(R.Key, &R); }
+    }
+
+    // Asked AFTER the re-plan, so the numbers are the ones about to happen rather than the ones last reviewed. A no-op
+    // needs no permission - and asking for it would train the answer.
+    if (Out.RowPlan.CountOf(EQuestNodePlanAction::Create) > 0 || Out.RowPlan.ChangedNodeCount() > 0)
+    {
+        if (!ConfirmMutation(
+            NSLOCTEXT("SimpleQuestEditor", "ConfirmRowWriteTitle", "Write rows into a data table"),
+            FText::Format(NSLOCTEXT("SimpleQuestEditor", "ConfirmRowWriteBody",
+                "Write into '{0}':\n\n"
+                "    {1} row(s) created\n"
+                "    {2} row(s) updated\n"
+                "    {3} row(s) left untouched - this questline claims none of them\n\n"
+                "This modifies an asset this questline does not own. Undo restores the ENTIRE table to its current "
+                "state, not only these rows - so any other edit made to it meanwhile would be reverted with them.\n\n"
+                "Continue?"),
+                FText::FromString(Destination->GetName()),
+                Out.RowPlan.CountOf(EQuestNodePlanAction::Create),
+                Out.RowPlan.ChangedNodeCount(),
+                Out.RowPlan.UnclaimedRowCount)))
+        {
+            UE_LOG(LogSimpleQuestResolver, Log, TEXT("Apply: cancelled at the confirmation. Nothing written."));
+            return;
+        }
+    }
+
+    // The CALLER owns the transaction, so the write and everything around it undo as one unit.
+    FScopedTransaction Transaction(NSLOCTEXT("SimpleQuest", "ApplyRowPlan", "Write questline rows into a data table"));
+    FQuestApplyResult Result;
+    ApplyQuestRowPlan(*Destination, Out.RowPlan, RowsByKey, Result);
+
+    for (const FString& S : Result.Skipped)
+    {
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Apply: skipped %s"), *S);
+    }
+    if (Result.bRefused)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Apply: refused - the plan carries %d refusal(s) and %d contested key(s). "
+            "Nothing was written."), Out.RowPlan.Refusals.Num(), Out.RowPlan.AmbiguousKeys.Num());
+
+        // The re-plan is what refused, so publish IT - otherwise the panel keeps showing the older plan that did not.
+        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, Source);
+        return;
+    }
+
+    if (Result.ChangedAnything()) { Destination->MarkPackageDirty(); }
+
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Apply: wrote into '%s' - %d row(s) created, %d field(s) written, %d skipped."),
+        *Destination->GetName(), Result.EntitiesCreated, Result.PropertiesWritten, Result.Skipped.Num());
+
+    // Same reason as the inbound apply: the destination has moved, so the plan now describes the past.
+    FQuestPlanBroker::Get().Clear(QuestlineGraph->GetPathName());
+}
+
+void FQuestlineGraphEditor::ExportQuestlineData()
+{
+    if (!CanExportQuestlineData()) { return; }
+
+    // Only the FOLDER direction asks here. A table destination PLANS - its confirmation belongs on the apply, where
+    // there is an exact summary to show rather than a guess.
+    if (!LastExportDestination.Table.IsValid())
+    {
+        const bool bDerived = LastExportDestination.Folder.IsEmpty();
+        const FString Where = bDerived ? QuestExport_DerivedFolderFor(*QuestlineGraph) : LastExportDestination.Folder;
+
+        if (!ConfirmMutation(
+            NSLOCTEXT("SimpleQuestEditor", "ConfirmExportTitle", "Export questline data"),
+            FText::Format(NSLOCTEXT("SimpleQuestEditor", "ConfirmExportBody",
+                "Write '{0}' as {1} files into:\n\n{2}{3}\n\n"
+                "Files recorded by a previous export there will be DELETED and replaced.\n\n"
+                "This writes to disk, outside the project's asset system, and CANNOT BE UNDONE from the editor.\n\n"
+                "Continue?"),
+                FText::FromString(QuestlineGraph->GetName()),
+                FText::FromString(LastExportDestination.FormatName.IsEmpty() ? TEXT("TSV") : LastExportDestination.FormatName),
+                FText::FromString(Where),
+                bDerived ? NSLOCTEXT("SimpleQuestEditor", "ConfirmExportDerived", "  (default destination)") : FText::GetEmpty())))
+        {
+            UE_LOG(LogSimpleQuestResolver, Log, TEXT("Export: cancelled at the confirmation. Nothing written."));
+            return;
+        }
+    }
+
+    FQuestExportRequest Request;
+    Request.Graph = QuestlineGraph;
+    // The DESTINATION, which is now its own memory rather than the source's folder borrowed. Kind is derived from
+    // whether a table is named, so the pair can never disagree. An empty folder still means the derived destination,
+    // which is what makes Export work before anyone has pointed it anywhere.
+    Request.Endpoint = QuestEndpointFromPlanSource(LastExportDestination);
+    Request.Mapping = Cast<UQuestImportMapping>(LastExportDestination.Mapping.TryLoad());
+
+    FQuestExportOutcome Out;
+    const bool bOk = QuestExport_Run(Request, Out);
+
+    for (const FString& W : Out.Warnings)
+    {
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Export: %s"), *W);
+    }
+
+    if (!bOk)
+    {
+        UE_LOG(LogSimpleQuestResolver, Error, TEXT("Export: %s"), *Out.Error);
+        FQuestPlanBroker::Get().PublishExport(QuestlineGraph->GetPathName(), FString(), Out.Error);
+        return;
+    }
+
+    // A table destination PLANNED rather than wrote. Published so the panel shows it, and Apply - which dispatches on
+    // the plan's direction - can act on it. Mirrors what the console does, deliberately: two surfaces, one behavior.
+    if (Out.bPlanned)
+    {
+        FQuestPlanBroker::Get().Publish(QuestlineGraph->GetPathName(), Out.RowPlan, QuestPlanEndpointFrom(Request.Endpoint, Request.Mapping));
+
+        LogQuestPlanReport(Out.RowPlan, EQuestPlanSubject::Row, TEXT("Plan Write"));
+        return;
+    }
+
+    const FString Summary = BuildQuestExportReceipt(Out);
+    LogQuestExportReport(Out, TEXT("Export"));
+    FQuestPlanBroker::Get().PublishExport(QuestlineGraph->GetPathName(), Summary, FString());
+
+    // A notification as well as the panel line, because the designer who pressed the button may have the tab covered -
+    // and unlike a refusal, a success does not need to persist anywhere.
+    FNotificationInfo Info(FText::FromString(Summary));
+    Info.ExpireDuration = 4.f;
+    Info.bUseSuccessFailIcons = true;
+    FSlateNotificationManager::Get().AddNotification(Info)->SetCompletionState(SNotificationItem::CS_Success);
+}
+
+bool FQuestlineGraphEditor::CanExportQuestlineData() const
+{
+    return QuestlineGraph != nullptr && QuestlineGraph->QuestlineEdGraph != nullptr;
+}
+
+void FQuestlineGraphEditor::BuildImportPlan()
+{
+    // Reads the SELECTION. Rebuild used to re-run whatever the last plan came from, which meant an edited folder could
+    // not be acted on without going back through a file dialog.
+    if (!CanBuildImportPlan())
+    {
+        // Says WHY rather than doing nothing. A greyed button explains itself only if you already know the rule, and a
+        // handler that returns silently is indistinguishable from one that is not wired at all.
+        UE_LOG(LogSimpleQuestResolver, Warning, TEXT("Build Plan: nothing to read - %s. Target '%s'."),
+            LastImportSource.Table.IsValid() ? TEXT("no Data Table is set")
+                                             : TEXT("a folder and a format are both required"),
+            QuestlineGraph ? *QuestlineGraph->GetPathName() : TEXT("<none>"));
+        return;
+    }
+
+    UE_LOG(LogSimpleQuestResolver, Log, TEXT("Build Plan: reading '%s'%s for '%s'."),
+        LastImportSource.Table.IsValid() ? *LastImportSource.Table.ToString() : *LastImportSource.Folder,
+        LastImportSource.Table.IsValid() ? TEXT("") : *FString::Printf(TEXT(" as %s"), *LastImportSource.FormatName),
+        *QuestlineGraph->GetPathName());
+
+    RunImport(LastImportSource, false);
+}
+
+bool FQuestlineGraphEditor::CanBuildImportPlan() const
+{
+    // A source that RESOLVES, not merely one that is non-empty: a folder needs a format to be read through, a table
+    // carries its own in the row struct.
+    if (!QuestlineGraph) { return false; }
+    if (LastImportSource.Table.IsValid()) { return true; }
+    return !LastImportSource.Folder.IsEmpty() && !LastImportSource.FormatName.IsEmpty();
+}
+
+bool FQuestlineGraphEditor::CanApplyImportPlan() const
+{
+    // Gated on the BROKER, not on a folder this editor session happens to remember. The panel reads the broker too, so
+    // the two can no longer disagree - which they did: reopening an asset left a plan visibly displayed while Apply sat
+    // greyed out, because the folder lived only in this object. A plan carrying refusals still applies nothing.
+    if (!QuestlineGraph) { return false; }
+    const FQuestPlanRecord* Record = FQuestPlanBroker::Get().Find(QuestlineGraph->GetPathName());
+    return Record
+        && Record->Provenance.IsValid()
+        && Record->Plan.Refusals.IsEmpty()
+        && Record->Plan.AmbiguousKeys.IsEmpty()
+        && !Record->Plan.IsNoOp();
+}
+
+void FQuestlineGraphEditor::NavigateToPlanRow(const FString& NodeGuid)
+{
+    FGuid Parsed;
+    const bool bParsed = FGuid::ParseExact(NodeGuid, EGuidFormats::Digits, Parsed);
+
+    const FEdNodeLocation Loc = bParsed
+        ? FindAuthoredNodeInGraph(QuestlineGraph ? QuestlineGraph->QuestlineEdGraph : nullptr, Parsed)
+        : FEdNodeLocation();
+
+    if (Loc.IsValid()) { NavigateToLocation(Loc.HostGraph, Loc.EdNode); }
+}
+
+void FQuestlineGraphEditor::HighlightPlanRow(const FString& NodeGuid)
+{
+    // Empty means clear, and it arrives for rows that name no node as well as for leaving one - the panel has already
+    // decided which, so this does not second-guess it.
+    if (NodeGuid.IsEmpty())
+    {
+        ClearNodeHighlight();
+        return;
+    }
+
+    FGuid Parsed;
+    if (!FGuid::ParseExact(NodeGuid, EGuidFormats::Digits, Parsed)) { return; }
+
+    // Same authored-guid walk navigation uses, so a row highlights exactly the node it would take you to. Resolving these
+    // two differently is how a halo comes to land on something the double-click does not.
+    const FEdNodeLocation Loc = FindAuthoredNodeInGraph(QuestlineGraph ? QuestlineGraph->QuestlineEdGraph : nullptr, Parsed);
+    HighlightNodesInViewport(Loc.IsValid() ? TArray<UEdGraphNode*>{ Loc.EdNode } : TArray<UEdGraphNode*>{});
+}
+
 void FQuestlineGraphEditor::PinGroupExaminer(FGameplayTag GroupTag, UEdGraphNode* PinnedEndpointNode, UEdGraphNode* RowToHighlight) const
 {
     // Invoke the tab; creates the panel widget via SpawnGroupExaminerTab if not already created.
@@ -1110,50 +1924,6 @@ void FQuestlineGraphEditor::ClearNodeHighlight()
     {
         GraphEditorWidget->ClearHoverHighlight();
     }
-}
-
-// Walks the editor graph hierarchy looking for the content node whose compiler-combined GUID matches ContentGuid.
-// OuterGuidChain mirrors the compiler's CurrentOuterGuidChain — extended when descending into a LinkedQuestline's graph,
-// preserved when descending into an inline Quest's inner graph.
-static FQuestlineGraphEditor::FEdNodeLocation FindEdNodeInGraph(UEdGraph* Graph, const FGuid& ContentGuid, const FGuid& OuterGuidChain = FGuid())
-{
-    if (!Graph) return {};
-
-    for (UEdGraphNode* Node : Graph->Nodes)
-    {
-        if (UQuestlineNode_ContentBase* Content = Cast<UQuestlineNode_ContentBase>(Node))
-        {
-            const FGuid Combined = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, Content->QuestGuid);
-            if (Combined == ContentGuid)
-                return { Graph, Node };
-        }
-
-        // Inline Quest: descend without extending the chain (compiler doesn't push for inline placements).
-        if (UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
-        {
-            if (UEdGraph* InnerGraph = QuestNode->GetInnerGraph())
-            {
-                FQuestlineGraphEditor::FEdNodeLocation Inner = FindEdNodeInGraph(InnerGraph, ContentGuid, OuterGuidChain);
-                if (Inner.IsValid()) return Inner;
-            }
-        }
-
-        // LinkedQuestline: extend the chain with this wrapper's QuestGuid before descending into the linked asset's graph.
-        if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(Node))
-        {
-            if (!LinkedNode->LinkedGraph.IsNull())
-            {
-                if (UQuestlineGraph* LinkedAsset = LinkedNode->LinkedGraph.LoadSynchronous())
-                {
-                    const FGuid NewChain = FQuestlineGraphCompiler::CombineGuids(OuterGuidChain, LinkedNode->QuestGuid);
-                    FQuestlineGraphEditor::FEdNodeLocation Linked = FindEdNodeInGraph(LinkedAsset->QuestlineEdGraph, ContentGuid, NewChain);
-                    if (Linked.IsValid()) return Linked;
-                }
-            }
-        }
-    }
-
-    return {};
 }
 
 TArray<FQuestlineBreadcrumb> FQuestlineGraphEditor::BuildBreadcrumbs(UEdGraph* Graph) const

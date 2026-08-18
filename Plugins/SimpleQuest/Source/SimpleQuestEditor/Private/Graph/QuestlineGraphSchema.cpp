@@ -358,9 +358,16 @@ bool UQuestlineGraphSchema::PrereqChainReachesNode(const UEdGraphNode* StartNode
                     }
                 }
             }
-            else if (Cast<const UQuestlineNode_PrerequisiteBase>(Next))
+        	// THIS SET MUST MATCH WHAT THE COMPILER RECURSES THROUGH, or the two disagree about what a chain even is.
+        	// CompilePrerequisiteFromOutputPin walks back through knots, And / Or / Not, and a Rule Entry's Enter pin,
+        	// and treats everything else as a leaf. UQuestlineNode_PrerequisiteRuleEntry was the one it walks and this
+        	// did not: it derives from UQuestlineNode_PortalEntryBase rather than PrerequisiteBase, yet carries
+        	// QuestPrerequisite pins in both directions - so the detector went blind exactly where the compiler kept
+        	// going. Broadening to "any node" instead would be worse than the gap: it would traverse edges the
+        	// compiler terminates at and refuse graphs that compile perfectly well.
+            else if (Cast<const UQuestlineNode_PrerequisiteBase>(Next) || Cast<const UQuestlineNode_PrerequisiteRuleEntry>(Next))
             {
-                if (PrereqChainReachesNode(Next, TargetNode, Visited)) return true;
+            	if (PrereqChainReachesNode(Next, TargetNode, Visited)) return true;
             }
         }
     }
@@ -959,7 +966,17 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 	                "Only outcome or prerequisite signals may feed a prerequisite input through a reroute node."));
 	        }
 	    }
-	    return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+		// The reachability check above is skipped whenever either endpoint is a knot, which is how a cycle CLOSED
+		// through a reroute node reaches the compiler. The detector follows knots correctly - it was simply never
+		// asked. Walking forward from the destination back to this knot asks exactly what ValidatePrerequisiteConnection
+		// asks in the non-knot case.
+		TSet<const UEdGraphNode*> CycleVisited;
+		if (PrereqChainReachesNode(InputNode, OutputNode, CycleVisited))
+		{
+			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqKnotCircular",
+				"This would create a circular prerequisite expression through a reroute node."));
+		}
+		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 	}
 
 	// Case 2: Non-knot signal → KnotIn, where that knot leads to a prerequisite input.

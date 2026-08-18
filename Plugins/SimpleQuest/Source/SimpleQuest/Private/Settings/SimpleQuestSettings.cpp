@@ -5,7 +5,9 @@
 
 
 FOnPickerCategoriesChanged USimpleQuestSettings::OnPickerCategoriesChanged;
+TArray<FString> USimpleQuestSettings::AvailableFormats;
 
+#if !NO_LOGGING
 namespace
 {
 	ELogVerbosity::Type ToELogVerbosity(EQuestLogVerbosity Verbosity)
@@ -24,14 +26,22 @@ namespace
 		}
 	}
 }
+#endif
 
 void USimpleQuestSettings::ApplyLogVerbosity() const
 {
+	/**
+	 * Shipping builds compile logging out entirely, which leaves every category an empty struct with no SetVerbosity to
+	 * call. There is no dial to drive there, so the body goes with it.
+	 */
+#if !NO_LOGGING
 	LogSimpleQuest.SetVerbosity(ToELogVerbosity(LogSimpleQuestVerbosity));
 	LogSimpleQuestActivation.SetVerbosity(ToELogVerbosity(LogSimpleQuestActivationVerbosity));
 	LogSimpleQuestCompiler.SetVerbosity(ToELogVerbosity(LogSimpleQuestCompilerVerbosity));
+	LogSimpleQuestResolver.SetVerbosity(ToELogVerbosity(LogSimpleQuestResolverVerbosity));
 	LogSimpleQuestSubscription.SetVerbosity(ToELogVerbosity(LogSimpleQuestSubscriptionVerbosity));
 	LogSimpleQuestState.SetVerbosity(ToELogVerbosity(LogSimpleQuestStateVerbosity));
+#endif
 }
 
 #if WITH_EDITOR
@@ -77,6 +87,16 @@ FString USimpleQuestSettings::ComposeOutcomePickerCategories() const
 FString USimpleQuestSettings::ComposeQuestlinePickerCategories() const
 {
 	return ComposePickerCategories(TEXT("SimpleQuest.Questline"), AdditionalQuestlinePickerCategories);
+}
+
+void USimpleQuestSettings::SetAvailableFormats(const TArray<FString>& InFormatNames)
+{
+	AvailableFormats = InFormatNames;
+}
+
+TArray<FString> USimpleQuestSettings::GetAvailableFormatNames()
+{
+	return AvailableFormats;
 }
 
 FString USimpleQuestSettings::ComposePickerCategories(const FString& DefaultNamespace, const TArray<FName>& AdditionalCategories)

@@ -29,8 +29,8 @@ public:
     UFUNCTION(BlueprintCallable)
     void SetCurrentElements(const int32 NewAmount);
     
-    virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState() const override;
-    virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) override;
+    virtual FSimpleQuestObjectiveSaveState CaptureObjectiveState_Implementation() const override;
+    virtual void RestoreObjectiveState_Implementation(const FSimpleQuestObjectiveSaveState& State) override;
     
 protected:
     virtual void OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime) override;

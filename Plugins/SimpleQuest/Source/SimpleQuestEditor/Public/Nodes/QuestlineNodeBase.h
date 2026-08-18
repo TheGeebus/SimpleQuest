@@ -100,6 +100,15 @@ public:
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	FGuid QuestGuid;
 	
+	/**
+	 * The original row key from an imported source, when it was a semantic identifier (a studio's "kill_boss") rather than
+	 * one of our exported GUIDs. Populated at import from the source's key column; empty for hand-authored nodes and for
+	 * round-tripped nodes whose key already was a GUID. Read by reverse-export so the studio's key column comes back verbatim
+	 * instead of the (un-invertible) GUID its identity hashes to. Provenance only — never drives identity or wiring.
+	 */
+	UPROPERTY(VisibleAnywhere, Category = "Quest")
+	FString ImportSourceKey;
+	
 protected:
 	/**
 	 * Syncs this node's pins of a category to match DesiredPinNames. See FSimpleQuestEditorUtilities::SyncPinsByCategory for
@@ -115,12 +124,6 @@ protected:
 	 * @param InsertBeforeCategories Categories before which newly-added pins are inserted. Pass empty to append at the end.
 	 */
 	void SyncPinsByCategory(EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
-
-	/** Returns the leaf segment of a dotted tag name (everything after the last '.'). */
-	static FText GetTagLeafLabel(FName TagName);
-
-	/** Strips the SimpleQuest.Outcome. prefix, preserving any sub-hierarchy the designer authored. Falls back to GetTagLeafLabel. */
-	static FText GetOutcomeLabel(FName TagName);
 
 	static bool SortPinsAlphabetically(const FName& A, const FName& B) { return A.Compare(B) < 0; }
 };

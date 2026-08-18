@@ -7,6 +7,7 @@
 
 #include "Utilities/SimpleCoreLog.h"
 
+/** Print DisplayString to the log and also to the screen (in Color) for 3 seconds */
 #define LOG_IT_BABY(Color, DisplayString, ...) \
 do { \
 const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
@@ -14,6 +15,7 @@ UE_LOG(LogSimpleCore, Warning, TEXT("%s"), *_SQMsg); \
 if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 3.f, Color, _SQMsg); \
 } while(0)
 
+/** Print DisplayString to the log and also to the screen (in Color) for a single tick */
 #define LOG_IT_TICK(Color, DisplayString, ...) \
 do { \
 const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \
@@ -21,6 +23,7 @@ UE_LOG(LogSimpleCore, Warning, TEXT("%s"), *_SQMsg); \
 if (GEngine) GEngine->AddOnScreenDebugMessage((int32)HashCombine(GetTypeHash(FString(TEXT(__FILE__))), __LINE__), -1.f, Color, _SQMsg); \
 } while(0)
 
+/** Print DisplayString to the log and also to the screen (in Color) for the rest of the session (probably) */
 #define LOG_IT_FOREVER(Color, DisplayString, ...) \
 do { \
 const FString _SQMsg = FString::Printf(TEXT("[%s] : ") DisplayString, UTF8_TO_TCHAR(__FUNCTION__) __VA_OPT__(,) __VA_ARGS__); \

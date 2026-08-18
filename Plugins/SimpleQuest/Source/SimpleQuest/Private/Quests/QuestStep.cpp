@@ -107,7 +107,7 @@ void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 		// Symmetric to OnObjectiveActivated: fire the deactivation hook BEFORE delegate cleanup and null-out
 		// so subclass overrides (universal-adapter pattern: subscribed to game-system events in OnObjective-
 		// Activated) can still inspect targets / objective state and explicitly unsubscribe.
-		LiveObjective->DispatchOnObjectiveDeactivated();
+		LiveObjective->DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason::Interrupted);
 		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
 		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
 		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
@@ -143,7 +143,7 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 		// data out of the objective, so the subclass override can read CompletionContext / ForwardActivation-
 		// Params if it needs them. The objective is still live (we're inside its OnQuestObjectiveComplete
 		// broadcast); ConditionalBeginDestroy hasn't fired yet.
-		LiveObjective->DispatchOnObjectiveDeactivated();
+		LiveObjective->DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason::Completed);
 		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
 		CompletionContext = LiveObjective->TakeCompletionContext();
 		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();

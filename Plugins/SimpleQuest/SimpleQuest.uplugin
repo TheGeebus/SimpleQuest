@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 1,
-	"VersionName": "0.6.1",
+	"VersionName": "0.7.0",
 	"FriendlyName": "Simple Quest",
 	"Description": "Easily create and manage any series of linear or non-linear gameplay events - or quests.",
 	"Category": "Gameplay",

@@ -69,11 +69,11 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 		"Leave unconnected to forward only the chain — the common case.").ToString();
 }
 
-FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(bool* bOutIsRegisteredTag) const
+FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(FGameplayTag* OutOutcome) const
 {
-	if (bOutIsRegisteredTag) *bOutIsRegisteredTag = false;
+	if (OutOutcome) *OutOutcome = FGameplayTag();
 
-	// 1. Designer-authored PathName wins (dynamic with explicit identity).
+	// 1. Designer-authored PathName wins (dynamic with explicit identity). No compile-time outcome.
 	if (!PathName.IsNone())
 	{
 		return PathName;
@@ -85,17 +85,14 @@ FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(bool* bOutIsRegi
 		return NAME_None;
 	}
 
-	// 2. Wired without PathName: auto-numbered "Dynamic N" identity per stable DynamicIndex. EnsureDynamicIndex-
-	//    Allocated runs at wire-connect / paste / PathName-cleared time so each placement carries its own index.
-	//    INDEX_NONE fallback (allocation hadn't fired yet — defensive) maps to "Dynamic 1" so the path identity
-	//    is at least non-empty.
+	// 2. Wired without PathName: auto-numbered "Dynamic N". The runtime outcome isn't known at author time.
 	if (OutcomeTagPin->LinkedTo.Num() > 0)
 	{
 		const int32 DisplayNumber = (DynamicIndex >= 0 ? DynamicIndex : 0) + 1;
 		return FName(*FString::Printf(TEXT("Dynamic %d"), DisplayNumber));
 	}
 
-	// 3. Static placement: parse the OutcomeTag pin's DefaultValue.
+	// 3. Static placement: parse the OutcomeTag pin's DefaultValue — this IS the outcome tag.
 	if (OutcomeTagPin->DefaultValue.IsEmpty())
 	{
 		return NAME_None;
@@ -105,7 +102,7 @@ FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(bool* bOutIsRegi
 	FGameplayTag::StaticStruct()->ImportText(*OutcomeTagPin->DefaultValue, &OutcomeTag, nullptr, PPF_None, nullptr, FString());
 	if (OutcomeTag.IsValid())
 	{
-		if (bOutIsRegisteredTag) *bOutIsRegisteredTag = true;
+		if (OutOutcome) *OutOutcome = OutcomeTag;
 		return OutcomeTag.GetTagName();
 	}
 	return NAME_None;

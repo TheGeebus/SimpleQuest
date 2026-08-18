@@ -4,19 +4,21 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "EditorUndoClient.h"
 #include "GameplayTagContainer.h"
 #include "IDetailsView.h"
-#include "EditorUndoClient.h"
+#include "Resolver/QuestPlanBroker.h"
 #include "Toolkit/QuestlineBreadcrumbBar.h"
 
 
-class SQuestlineGraphPanel;
 struct FQuestlineOutlinerItem;
-class SQuestlineOutlinerPanel;
-class UQuestlineGraph;
 class SGraphEditor;
 class SGroupExaminerPanel;
 class SPrereqExaminerPanel;
+class SQuestPlanPanel;
+class SQuestlineGraphPanel;
+class SQuestlineOutlinerPanel;
+class UQuestlineGraph;
 
 
 class FQuestlineGraphEditor : public FAssetEditorToolkit, public FEditorUndoClient
@@ -171,6 +173,94 @@ private:
 	
 	TSharedPtr<SGroupExaminerPanel> GroupExaminerPanel;
 	static const FName GroupExaminerTabId;
+	
+	TSharedRef<SDockTab> SpawnPlanTab(const FSpawnTabArgs& Args);
+	TSharedPtr<SQuestPlanPanel> PlanPanel;
+	static const FName PlanTabId;
+
+	void OpenSourceData();
+
+	/** SELECTION - what the next Build Plan will read. A different fact from the displayed plan's provenance. */
+	FString GetImportFolder() const { return LastImportSource.Folder; }
+	FSoftObjectPath GetImportTable() const { return LastImportSource.Table; }
+	FString GetImportFormatName() const { return LastImportSource.FormatName; }
+	FSoftObjectPath GetImportMappingPath() const { return LastImportSource.Mapping; }
+	FString GetExportFolder() const { return LastExportDestination.Folder; }
+	FSoftObjectPath GetExportTable() const { return LastExportDestination.Table; }
+	FString GetExportFormatName() const { return LastExportDestination.FormatName; }
+	FSoftObjectPath GetExportMappingPath() const { return LastExportDestination.Mapping; }
+	
+	void HandleImportFolderChanged(const FString& NewFolder);
+	void HandleImportTableChanged(const FSoftObjectPath& NewTable);
+	void HandleSourceKindChanged(EQuestPlanEndpointKind NewKind);
+	void HandleImportFormatChanged(FString NewFormat);
+	void HandleImportMappingChanged(const FSoftObjectPath& NewMapping);
+	void HandleExportFolderChanged(const FString& NewFolder);
+	void HandleExportTableChanged(const FSoftObjectPath& NewTable);
+	void HandleDestinationKindChanged(EQuestPlanEndpointKind NewKind);
+	void HandleExportFormatChanged(FString NewFormat);
+	void HandleExportMappingChanged(const FSoftObjectPath& NewMapping);
+	void BrowseForExportFolder();
+
+	void BrowseForImportFolder();
+	void BuildImportPlan();
+	bool CanBuildImportPlan() const;
+	void ApplyImportPlan();
+	bool CanApplyImportPlan() const;
+
+	void NavigateToPlanRow(const FString& NodeGuid);
+	void HighlightPlanRow(const FString& NodeGuid);
+	
+	/**
+	 * Writes this questline out through the endpoint the panel is showing. Shares the SELECTION with the import
+	 * direction - one questline has one text form, and two independent format pickers is a machine for producing the
+	 * conversion refusal by accident.
+	 */
+	void ExportQuestlineData();
+	bool CanExportQuestlineData() const;
+
+	/** PROVENANCE - what the displayed plan was built from. EMPTY when there is no plan, so the slot collapses. */
+	FText GetPlanProvenanceLabel() const;
+
+	/** True when the selection has moved away from what the displayed plan was built from. */
+	bool IsPlanProvenanceStale() const;
+
+	/**
+	 * Runs against the source it is GIVEN rather than the held selection, because the two callers legitimately want
+	 * different ones: Build Plan reads the current selection, Apply re-runs what the reviewed plan came from and must
+	 * not overwrite a field the designer has edited since. Assign-then-run is how a table provenance got dropped once.
+	 */
+	bool RunImport(const FQuestPlanEndpoint& Source, bool bApply);
+
+	/**
+	 * Apply an OUTBOUND plan: re-run the export the record came from, this time writing. Mirrors RunImport's contract -
+	 * what runs is what you reviewed, so it re-runs the RECORD's source rather than the current selection, and the two
+	 * can legitimately differ once a designer edits a field after building a plan.
+	 */
+	void ApplyRowPlan(const FQuestPlanEndpoint& Source);
+	
+	/**
+	 * Per-user, per-project memory of this questline's source, so a session resumes where the last one ended. Restored
+	 * once at init; saved from every site that moves LastImportSource or LastImportMapping, because a choice that
+	 * survives only until the editor closes is worse than none - it looks remembered right up until it isn't.
+	 */
+	void RestoreImportEndpointFromMemo();
+	void SaveImportEndpointToMemo() const;
+
+	/**
+	 * What the next read will use, and what Apply and Rebuild re-run. Held as the BROKER's source type rather than a
+	 * loose folder+format pair so a DataTable provenance survives the round trip through a plan record: the loose pair
+	 * could only ever describe a folder, so a table plan published by the console arrived here as no source at all.
+	 * FormatName is seeded in InitQuestlineGraphEditor rather than by a braced initializer here - the first two members
+	 * are both FStrings, so a positional default would mis-assign silently if they were ever reordered.
+	 */
+	FQuestPlanEndpoint LastImportSource;
+
+	/**
+	 * WHERE this questline's data is written. FQuestPlanEndpoint describes an ENDPOINT - its name predates there being
+	 * two of them, and is worth revisiting rather than working around.
+	 */
+	FQuestPlanEndpoint LastExportDestination;
 	
 	/*-----------------------------------------------------------------------------------
 	 * Nested Graph Navigation

@@ -33,6 +33,7 @@ public:
 	
 	virtual void CompileAllQuestlineGraphs() override;
 	virtual void CollectLinkedNeighborhood(UQuestlineGraph* Primary, TArray<UQuestlineGraph*>& OutNeighborhood) const override;
+	virtual bool CompileQuestlineAndNeighborhood(UQuestlineGraph* Primary, int32& OutCompiledCount) override;
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
@@ -109,6 +110,19 @@ private:
 	 * state-fact expansion logic stays in one place.
 	 */
 	void AddNativeTagsForGraph(const TArray<FName>& TagNames);
+
+	/**
+	 * Surgically unregister native tags a removed/recompiled graph no longer owns — but ONLY those no OTHER still-registered
+	 * graph claims (shared tags like SimpleQuest.Outcome.Reached are registered by many graphs; unregistering one on a single
+	 * removal would silently break every other graph resolving against it). Destroys just the orphaned FNativeGameplayTags +
+	 * one tree refresh — O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
+	 * Registry must ALREADY reflect the post-change state (removed graph gone / recompiled graph's new tags in), so the
+	 * "still claimed by another" check sees the correct remaining set.
+	 */
+	void RemoveNativeTagsForGraph(const TArray<FName>& RemovedTagNames);
+
+	/** Stale tag names accumulated across a compile batch; consumed surgically in EndCompileBatch */
+	TSet<FName> BatchStaleNames;   
 	
 	/**
 	 * Parallel index for AddNativeTagsForGraph's O(1) "already registered?" check. Stays in sync
@@ -124,4 +138,5 @@ private:
 
 	bool bBatchActive = false;
 	bool bBatchHasStaleTags = false;
+	bool bBatchAddedNewTag = false;
 };

@@ -8,18 +8,6 @@
 #include "Utilities/QuestTagComposer.h"
 
 
-FText UQuestlineNodeBase::GetTagLeafLabel(FName TagName)
-{
-	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
-}
-
-FText UQuestlineNodeBase::GetOutcomeLabel(FName TagName)
-{
-	return FQuestTagComposer::IsOutcomeTag(TagName)
-		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
-		: GetTagLeafLabel(TagName);
-}
-
 EQuestPinRole UQuestlineNodeBase::GetPinRole(const UEdGraphPin* Pin) const
 {
 	if (!Pin) return EQuestPinRole::None;
@@ -112,7 +100,7 @@ FText UQuestlineNodeBase::GetPinDisplayName(const UEdGraphPin* Pin) const
 {
 	if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
 	{
-		return GetOutcomeLabel(Pin->PinName);
+		return FSimpleQuestEditorUtilities::GetOutcomeLabel(Pin->PinName);
 	}
 	return Super::GetPinDisplayName(Pin);
 }
@@ -209,6 +197,12 @@ void UQuestlineNodeBase::PostPasteNode()
 	// which instantiates via NewObject and calls PostPasteNode (not PostDuplicate). Without this override, pasted
 	// nodes retain the source's QuestGuid, which the compiler rejects as duplicate identity.
 	QuestGuid = FGuid::NewGuid();
+
+	// A pasted node is a NEW node, not the imported one it was copied from. Keeping the key it was imported under would put
+	// two nodes in one graph answering to the same source row, which a data re-import cannot resolve: it would have to guess
+	// which copy the row means. Cleared HERE and deliberately NOT in PostDuplicate — that is the StaticDuplicateObject path
+	// the Content Browser uses to copy a whole asset, and a duplicated questline should keep its nodes' provenance intact.
+	ImportSourceKey.Reset();
 }
 
 void UQuestlineNodeBase::AutowireNewNode(UEdGraphPin* FromPin)

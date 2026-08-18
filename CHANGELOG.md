@@ -5,6 +5,228 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased] — 0.7.0 — The Data Resolver
+
+Quest data has always lived inside the `.uasset` binary. That's fine while
+you're authoring one questline in the graph editor, and increasingly awkward
+after that: you can't diff a change, review one, bulk-edit a hundred rows,
+generate content from a spreadsheet, or hand a designer's table to a build
+pipeline. This release opens that up in **both** directions - a questline can
+be written out as plain tables you can read, edit and version, and those tables
+can be read back into a questline. Not as an export format to look at, but as a
+working surface you can actually operate on.
+
+The point isn't a file. It's that a questline stops being a thing only the
+graph editor can change.
+
+### Questlines out, questlines back in
+
+- **Export a questline to readable tables.** You get one table per node kind
+  plus a single relationship table, keyed stably so the same questline always
+  writes the same rows. Diffable, reviewable, and legible without the editor
+  open.
+- **Import them back.** Round-tripping a questline through tables and back
+  produces the same questline: the same nodes, the same wiring, the same
+  configured rewards, including reward objects nested inside other data.
+- **Reroute nodes stay out of your way.** Wiring routed through reroute knots
+  is written as the relationship it *means*, not as the hops it takes, so
+  tidying a graph's layout doesn't churn the data.
+- **Nested objects keep their identity.** A reward inside a step is written under
+  a stable identity of its own rather than its position in a list, with that
+  position travelling alongside as ordinary data. Reorder two rewards and the
+  export changes the two cells that say where they sit and nothing else - so two
+  people adding a reward on separate branches merge into two rewards, instead of
+  silently becoming one.
+
+### Bring your own shape
+
+Your data probably doesn't look like the framework's does, and shouldn't have to.
+
+- **Map your columns to quest properties.** A reusable **Mapping** asset says
+  which of your columns feed which node properties, which of your type values
+  mean which kind of node, and which column carries your row keys. Your source
+  keeps its own vocabulary; the Mapping does the translating.
+- **Author the Mapping by picking, never typing.** Point it at a sample of your
+  own data and every field is chosen from what's actually there, so a typo
+  can't quietly mis-bind a column.
+- **Express relationships as columns.** If your table says a step's `next` is
+  `guard_post`, that's wiring - no separate edge table required. Name an
+  outcome instead of a plain target and you get outcome branching straight from
+  flat data.
+- **Prerequisites from a column too.** `unlock_after`, `unlock_any` and
+  `unlock_unless` columns build the same prerequisite gates you'd wire by hand.
+- **Your keys come back.** Export through the same Mapping and you get *your*
+  column names, *your* type values, and *your* row keys - a file you can diff
+  against the one you started with.
+
+### Your data can stay where it lives
+
+- **A folder of tab-separated files, JSON, or an in-engine Data Table.** One
+  unchanged Mapping reads all of them to the same result.
+- **Split across files however suits you.** A source can be one table or many -
+  by chapter, by author, by whatever boundary your team already has.
+- **Write your own format.** The reader/writer interface and the data types it
+  exchanges are public, so a studio can support an encoding the framework has 
+  never heard of without forking anything, and can implement only the direction 
+  it needs.
+
+### Re-importing into a questline that already exists
+
+The interesting case isn't building a questline from data once. It's the
+tenth time, into a questline someone has since edited by hand.
+
+- **See what would change before anything changes.** A re-import first produces
+  a preview: which nodes would be updated and in which properties, what would be
+  created, what the source no longer mentions, and how the wiring would differ.
+  Nested values are named by path, so you see *`Rewards[0].Amount` 42 → 99*,
+  not "something in this node changed."
+- **Choose the format and the Mapping from the panel.** The preview reads whichever
+  format you pick - the list is every provider registered with the plugin,
+  including any that your own module adds - and applies an optional Mapping chosen
+  the same way. Changing either re-previews immediately, so what you're looking at
+  is always the reading you selected.
+- **A source that can't be read says so, in the panel.** An unreadable folder, a
+  refused Mapping or an incoherent source all report where you're looking rather
+  than only in the log, naming the format that was actually tried - which isn't
+  always the one the panel is set to, since a console import carries its own.
+- **Nothing is written until you ask.** Previewing is the default; applying is a
+  separate, deliberate step.
+- **Decide what a blank cell means.** A column your source declares but leaves
+  empty can either preserve whatever the questline currently holds or reset it
+  to its default: per column, or as a default for the whole Mapping. A third
+  setting refuses the import outright if a required value is missing.
+- **Deleting is opt-in, and scoped.** Nodes your source no longer mentions are
+  always *reported*; they're only removed if you ask. And a source that
+  describes one part of a questline is never treated as speaking for the rest.
+- **Match rows by a key of your choosing.** Writing into a Data Table, the row
+  name belongs to you. Name a column in your Mapping and rows are matched on that
+  value instead - so you can rename a row and the next import still recognises
+  it, rather than creating a duplicate beside it. A row whose *name* matches
+  while its key doesn't is left alone: it's somebody else's.
+- **The preview points at the graph.** Hover a row and the node it describes
+  lights up; double-click and the editor goes there, opening a container's inner
+  graph if that's where the node lives. Property rows behave as the node they
+  belong to.
+- **One undo takes it all back**, including created nodes, deleted nodes and
+  nested reward values.
+
+### Watching it work
+
+- **Resolver output has its own log channel.** Export, import, column mapping
+  and the re-import preview all report on `LogSimpleQuestResolver`, separate
+  from quest activation and graph compilation. Turn it up when you want to see
+  what an import did without everything else coming along for the ride.
+- **Dial it from Project Settings.** *Plugins → Simple Quest → Logging →
+  Resolver*, applied live without an editor restart.
+
+### Check a whole corpus without opening the editor
+
+If your quest data lives in files, the question worth answering on every commit
+is whether it still applies cleanly to the assets it describes. That's the same
+preview the panel shows, so it can run without a person in front of it.
+
+- **Plan every questline in a folder tree, from the command line.** Point it at
+  a directory and it finds each exported corpus, previews it against the
+  questline that corpus names, and reports the lot. One editor start for the
+  whole run, not one per questline.
+- **Structured output, not scraped logs.** The run writes JSON: what each plan
+  would create and change, what it refuses, what it warns about, and which
+  questline and folder every result belongs to. Field names and ordering are
+  stable, so two runs over unchanged data produce byte-identical files and a
+  diff between commits is signal rather than noise.
+- **An exit code your build can act on.** Nothing to report, findings, or the
+  run itself failed. You choose whether a source merely *differing* from its
+  asset fails the build or only one that genuinely can't be applied - the first
+  is right when your files are the source of truth, the second when both ends
+  get edited.
+- **A corpus whose questline doesn't exist yet is validated, not failed.** Data
+  authored before anyone builds the asset is an ordinary state: the source is
+  read and checked on its own terms, and reported as such - which is a different
+  answer from "the asset already matches."
+- **A run that finds nothing to check refuses.** Pointing it at the wrong
+  directory reports an error instead of a clean build.
+
+### It refuses rather than guessing
+
+- **A source it can't fully describe is refused, not partly applied.** If the
+  preview couldn't make sense of the data, applying part of it would be acting
+  on a description already known to be wrong.
+- **Renaming a questline isn't a property write.** A questline's ID is its
+  compiled tag namespace and changing it moves every tag the questline owns and
+  breaks save data keyed on them. A re-import reports the difference and
+  declines to make it.
+- **Rebuilds are refused, not half-done.** A node whose kind changed, or that
+  moved into a different container, can't be edited in place, so it's reported
+  rather than partially updated.
+- **Exports won't overwrite a folder they didn't write.** An export claims its
+  destination and refuses one belonging to something else, so pointing it at the
+  wrong directory costs you nothing. It also refuses to *convert* one: exporting
+  in a different format than the folder already holds would delete every file the
+  previous format wrote, so it stops and says so rather than doing it quietly.
+- **An export folder says what it is.** Alongside claiming ownership, an export
+  records which questline it came from, which format wrote it and which Mapping it
+  was written through - so a folder arriving in someone else's checkout can be
+  read back without anyone remembering how it was made. A folder you maintain
+  yourself can carry that same description while declining to be overwritten.
+
+### Keeping gameplay tags tidy
+
+Renaming a quest node writes a gameplay tag redirect so existing content keeps
+working. Those pile up, and nothing in the engine tells you when one has
+outlived its purpose - or when one has quietly turned harmful.
+
+- **Find out which redirects are still doing something.**
+  `SimpleQuest.ScanTagRedirects` reads every package on disk and reports each
+  redirect as retirable, still in use (naming the packages holding it), or
+  *inverted*. `--prune` then deletes the retirable ones from your project
+  config.
+- **Inverted redirects are the ones worth knowing about.** Move a node into a
+  container and back out again and you can be left with a redirect pointing
+  *away* from a tag that is still live, toward one that no longer exists. Every
+  reference to that node then resolves to an invalid tag: it still activates,
+  but stops writing state facts and never registers for deactivation - silently.
+  The engine never checks that a redirect's target exists, and a stale redirect
+  actually suppresses the warning that would otherwise surface it. The scan
+  names them, and tells you to delete the line rather than resave anything.
+- **`SimpleCore.TraceAssetDirty`** logs a callstack whenever a matching package
+  is marked dirty, by either of the two routes that can do it - so "why does
+  this asset keep asking to be saved?" becomes a question you can answer.
+
+### Fixes
+
+- **An asset marked dirty after a tag rename now says why.** Loading an asset
+  that holds a redirected tag marks it dirty so a save can persist the healed
+  value - but it did so silently, and an asset that had *always* held that tag
+  got marked too. The log now names the tag and the property that matched, which
+  is the difference between one restart and an afternoon.
+- **Questlines no longer carry a rename ledger nothing read.** Every compile
+  recorded old tag names into the asset, for a deferred-propagation feature that
+  was never built. They were dead weight, and they made it impossible to tell a
+  tag still awaiting migration from a historical record of one that had already
+  happened. Removed - assets shed the field on their next save.
+- **Applying a re-import recompiles the questline.** An apply changed the graph but
+  left the compiled model describing it as it was, so the runtime, the state
+  subsystem and the tag registry all read stale data until something else
+  triggered a compile. An apply that changes anything now recompiles the
+  questline *and every questline linked to it* - a linked parent embeds the
+  target's compiled data, so recompiling only the target would fix one asset and
+  leave its neighbours describing nodes that no longer exist. Nothing is
+  recompiled when an apply changes nothing.
+- **Re-exporting no longer refuses over how you typed the path.** The console
+  accepts a questline as `/Game/Path/Asset` or `/Game/Path/Asset.Asset`, but an
+  export recorded whichever form it was given and compared the next one
+  literally. Using the other spelling read as a *different questline* and the
+  export refused, advising you to change the questline's ID - which would have
+  been the wrong fix for a difference that was never real. Both sides are
+  normalized now, and markers already written keep working.
+- **`OnObjectiveDeactivated` now reports why it fired.** The hook has always run
+  on both the completion path and the interruption paths, but couldn't tell them
+  apart - an Objective wanting to release a reservation on abandon but not on
+  success had to track that itself. `GetDeactivationReason()` now answers it
+  during the call: `Completed` when the Objective reported an outcome,
+  `Interrupted` when it was torn down without one. Non-breaking - the event
+  signature is unchanged, so existing overrides keep working untouched.
+
 ## [0.6.1] — 2026-07-21 — Embedded Questline Rewards Fix
 
 A fix release for questline-level rewards. In 0.6.0, a questline's own

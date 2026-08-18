@@ -22,9 +22,13 @@ struct SIMPLEQUEST_API FQuestContextBase
 	GENERATED_BODY()
 
 	/**
-	 * Actor that caused this event/activation. Live weak reference — deliberately NOT SaveGame-flagged: a weak pointer
-	 * resolves eagerly on load and nulls when the actor hasn't streamed in yet. The save-stable form is captured as a
-	 * lazily-resolving soft reference at the save boundary (see FQuestEntryArrival::InstigatorRef).
+	 * Actor that caused this event or activation. A live weak reference, meant for use during play rather than across a
+	 * save. It carries no SaveGame flag, but do not rely on that for exclusion - the engine's default save path writes
+	 * every non-transient property regardless of the flag, so this one is written as a path and resolved on load.
+	 * In practice it is already empty by the time a save is taken, the actor having gone long before.
+	 * For attribution that survives a load, read FQuestEntryArrival::InstigatorRef instead: a soft reference recorded
+	 * beside the entry while the actor was still live, resolved lazily, and surfaced by
+	 * UQuestStateSubsystem::GetLastGiverActor. Nothing repopulates this field from that one.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TWeakObjectPtr<AActor> Instigator;

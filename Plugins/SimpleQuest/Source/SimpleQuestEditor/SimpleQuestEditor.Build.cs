@@ -19,7 +19,8 @@ public class SimpleQuestEditor: ModuleRules
 			"DeveloperSettings",
 			"SimpleQuest",
 			"SimpleCore",
-			"AssetTools", 
+			"AssetTools",
+			"DesktopPlatform",
 			"GraphEditor",
 			"Slate",
 			"SlateCore",
@@ -36,7 +37,9 @@ public class SimpleQuestEditor: ModuleRules
 			"WorkspaceMenuStructure",
 			"WorldPartitionEditor",
 			"SimpleCoreEditor",
-			"DataTableEditor"
+			"DataTableEditor",
+			"Json",
+			"ToolWidgets",
 		});
 
 		if (Target.bBuildEditor)

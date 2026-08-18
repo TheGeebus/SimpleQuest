@@ -172,38 +172,48 @@ public:
 	/** Returns the trailing dot-delimited segment ("SimpleQuest.Questline.A.B" → "B"). */
 	static FString GetLeafSegment(FName TagName);
 
-	/** Strips the trailing dot-delimited segment ("SimpleQuest.Questline.A.B" → "SimpleQuest.Questline.A").
-	 *  Returns false if TagName has no '.' separator (already at root). */
+	/**
+	 * Strips the trailing dot-delimited segment ("SimpleQuest.Questline.A.B" → "SimpleQuest.Questline.A").
+	 * Returns false if TagName has no '.' separator (already at root).
+	 */
 	static bool TryGetParentTag(FName TagName, FName& OutParentTag);
 
-	/** Walks ancestors leaf → root, invoking Visitor per ancestor. Visitor returns false to short-circuit.
-	 *  Stops before reaching the root prefix (caller's responsibility to define the stop boundary). */
+	/**
+	 * Walks ancestors leaf → root, invoking Visitor per ancestor. Visitor returns false to short-circuit.
+	 * Stops before reaching the root prefix (caller's responsibility to define the stop boundary).
+	 */
 	static void EnumerateAncestors(FName TagName, TFunctionRef<bool(FName)> Visitor);
 
-	/** Strips the outcome namespace prefix from PathString in-place if present. Handles BOTH the modern
-	 *  SimpleQuest.Outcome. namespace AND the legacy Quest.Outcome. prefix. Returns true if a strip occurred. */
+	/**
+	 * Strips the outcome namespace prefix from PathString in-place if present. Handles BOTH the modern
+	 * SimpleQuest.Outcome. namespace AND the legacy Quest.Outcome. prefix. Returns true if a strip occurred.
+	 */
 	static bool TryStripOutcomePrefix(FString& InOutPathString);
 
-	/** Canonical "Combat: Boss Defeated" formatter for outcome-tag display. Strips the outcome prefix, splits
-	 *  remaining segments on '.', NameToDisplayString per segment, joins with ": ". Single source so K2Node
-	 *  display, QuestlineNodeBase::GetOutcomeLabel, and the Prereq Examiner tree all render identically. */
+	/**
+	 * Canonical "Combat: Boss Defeated" formatter for outcome-tag display. Strips the outcome prefix, splits
+	 * remaining segments on '.', NameToDisplayString per segment, joins with ": ". Single source so K2Node
+	 * display, QuestlineNodeBase::GetOutcomeLabel, and the Prereq Examiner tree all render identically.
+	 */
 	static FText FormatOutcomeForDisplay(FName OutcomeTagName);
 
-	/** Strips the PluginPrefix ("SimpleQuest.") from a tag and returns the remainder for rendering surfaces
-	 *  (panel headers, K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim —
-	 *  preserves the namespace context that distinguishes `Questline.X` (identity) from `State.X.Live`
-	 *  (state fact) without forcing designers to mentally re-prepend the plugin name on every read. The
-	 *  data layer keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances
-	 *  and serialization continue to use the raw tag.
+	/**
+	 * Strips the PluginPrefix ("SimpleQuest.") from a tag and returns the remainder for rendering surfaces
+	 * (panel headers, K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim —
+	 * preserves the namespace context that distinguishes `Questline.X` (identity) from `State.X.Live`
+	 * (state fact) without forcing designers to mentally re-prepend the plugin name on every read. The
+	 * data layer keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances
+	 * and serialization continue to use the raw tag.
 	 *
-	 *  Examples:
-	 *    "SimpleQuest.Questline.MyAsset.Step1"            → "Questline.MyAsset.Step1"
-	 *    "SimpleQuest.State.MyAsset.Step1.Live"           → "State.MyAsset.Step1.Live"
-	 *    "SimpleQuest.Outcome.Combat.BossDefeated"        → "Outcome.Combat.BossDefeated"
-	 *    "SimpleQuest.PrereqRule.MyRule"                  → "PrereqRule.MyRule"
-	 *    "Quest.Outcome.Combat.BossDefeated" (legacy)     → "Quest.Outcome.Combat.BossDefeated"
-	 *    "Game.Foo.Bar" (foreign — no PluginPrefix)       → "Game.Foo.Bar"
-	 *    NAME_None                                        → ""             (empty FText) */
+	 * Examples:
+	 *   "SimpleQuest.Questline.MyAsset.Step1"            → "Questline.MyAsset.Step1"
+	 *   "SimpleQuest.State.MyAsset.Step1.Live"           → "State.MyAsset.Step1.Live"
+	 *   "SimpleQuest.Outcome.Combat.BossDefeated"        → "Outcome.Combat.BossDefeated"
+	 *   "SimpleQuest.PrereqRule.MyRule"                  → "PrereqRule.MyRule"
+	 *   "Quest.Outcome.Combat.BossDefeated" (legacy)     → "Quest.Outcome.Combat.BossDefeated"
+	 *   "Game.Foo.Bar" (foreign — no PluginPrefix)       → "Game.Foo.Bar"
+	 *   NAME_None                                        → ""             (empty FText)
+	 */
 	static FText FormatTagForDisplay(FName TagName);
 
 	// ------------------------------------------------------------------------------------------------
@@ -215,6 +225,5 @@ public:
 
 private:
 	FQuestTagComposer() = delete;
-
 
 };

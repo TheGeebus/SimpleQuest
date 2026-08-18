@@ -1,0 +1,149 @@
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+#pragma once
+
+// Details customization for UQuestImportMapping. The recipe describes a SHAPE, not where a file lives, so the panel gives a
+// transient "sample source" control (editor-only, never serialized) whose columns + discriminator values feed the two
+// bespoke pick-only widgets: the discriminator value->class list and the column->property binding list. Every authored field
+// is a PICK from the sample — nothing is typed (the anti-corruption bar). Follows the module's customization pattern (see
+// QuestlineGraphRewardsDetailsCustomization).
+
+#include "CoreMinimal.h"
+#include "EditorUndoClient.h"
+#include "IDetailCustomization.h"
+
+class IDetailLayoutBuilder;
+class SQuestMappingBindingList;
+class SQuestMappingDiscriminatorList;
+class SSearchableComboBox;
+class UQuestImportMapping;
+
+class FQuestImportMappingDetailsCustomization : public IDetailCustomization, public FSelfRegisteringEditorUndoClient
+{
+public:
+	static TSharedRef<IDetailCustomization> MakeInstance();
+	virtual void CustomizeDetails(IDetailLayoutBuilder& DetailBuilder) override;
+
+	/**
+	 * A transaction rollback restores the mapping asset directly and notifies nobody, so both list widgets keep the rows
+	 * they built from the pre-undo state. The panel's own writes route through OnMappingModified, which an undo never
+	 * reaches - these are the only hook that hears about it.
+	 */
+	virtual void PostUndo(bool bSuccess) override;
+	virtual void PostRedo(bool bSuccess) override;
+
+	/** Narrows the above to transactions that actually touched OUR mapping; without it every editor undo rebuilds both lists. */
+	virtual bool MatchesContext(const FTransactionContext& InContext,
+		const TArray<TPair<UObject*, FTransactionObjectEvent>>& TransactionObjectContexts) const override;
+
+private:
+private:
+	/** Re-read both lists from the mapping. Shared by undo and redo. */
+	void RefreshListsAfterTransaction();
+
+	/**
+	 * Copy/paste for the three picker rows. Without BOTH a CopyAction and a PasteAction the details panel treats a custom
+	 * row as having no value and greys its whole context menu - FDetailWidgetRow::IsCopyPasteBound() requires the pair.
+	 * Supplying them also lights up the stock Shift+RMB / Shift+LMB here, matching the tables below.
+	 *
+	 * No CanExecuteAction is wired, deliberately. SDetailSingleItemRow gates the paste CHORD on CanExecute, so a predicate
+	 * would grey the menu entry at the cost of making a refused chord do nothing at all and say nothing - and a silent
+	 * no-op is indistinguishable from a click that never registered. Each handler validates, reports, and returns.
+	 */
+	void CopySampleSource() const;
+	void PasteSampleSource();
+
+	/**
+	 * Both column rows share one payload type on purpose: each holds a column name drawn from the same sample, so copying
+	 * one into the other is something a designer actually wants rather than an accident to guard against.
+	 */
+	void CopyColumnValue(FName Column) const;
+	void PasteDiscriminatorColumn();
+	void PasteKeyColumn();
+
+	/** The write, shared by the combo callback and the paste so both land identically. */
+	void ApplyDiscriminatorColumn(FName Column);
+	void ApplyKeyColumn(FName Column);
+
+	/**
+	 * True when the given option list actually offers this column, or it is empty (meaning clear). Reads CACHED options rather
+	 * than re-enumerating. The list is a parameter because the two pickers no longer accept the same set: only the key picker
+	 * may name the structural key column, and only the discriminator picker is restricted to bindable value columns.
+	 */
+	bool IsPastableColumn(FName Column, const TArray<TSharedPtr<FString>>& Options) const;
+	
+	TWeakObjectPtr<UQuestImportMapping> Mapping;
+	TSharedPtr<SQuestMappingBindingList> BindingList;
+	TSharedPtr<SQuestMappingDiscriminatorList> DiscriminatorList;
+
+	// Transient sample source - editor-only, NEVER serialized on the recipe. Its job: give the two pick-only widgets real
+	// columns and discriminator values to choose from, so a designer authors the SHAPE against a representative file. Thrown
+	// away with the panel; the recipe stays shape-only (it describes a shape, not where a file lives).
+	FName SampleFormatName = TEXT("TSV");
+	FString SampleFolder;
+
+	/**
+	 * The sample's enumeration, read ONCE per refresh and served from here after. Every widget on this panel used to ask for
+	 * the columns separately and every ask re-parsed the entire folder, so a single sample change did that work five times
+	 * over - and two widgets built moments apart could disagree if the file changed between them. Refreshed wherever the
+	 * sample changes, read everywhere else. An unreadable source leaves both empty, which is what the accessor returned for
+	 * that case anyway, so no caller learns a new state.
+	 */
+	TArray<FName> CachedSampleColumns;							// the bindable value columns
+	FName CachedSampleKeyColumn;								// the structural key column; None when the source has none or disagrees
+	void RefreshSampleColumnCache();
+
+	/**
+	 * The discriminator column's distinct values, cached for the same reason the columns are: EnumerateColumnDistinctValues
+	 * re-reads the WHOLE sample folder, and the discriminator list asks for them on every rebuild.
+	 * TWO invalidation points rather than one, because this depends on a second thing: the sample AND which column is the
+	 * discriminator, and that column changes without the sample moving. Refreshed at both; read everywhere else.
+	 */
+	TArray<FString> CachedDiscriminatorValues;
+	void RefreshDiscriminatorValueCache();
+
+	TArray<FName> SampleSourceColumns() const;					// the cached columns; feeds the binding widget's SourceColumnProvider
+	TArray<FString> SampleDiscriminatorValues() const;			// feeds the discriminator widget's DistinctValueProvider
+	TArray<FString> SampleQualifierOptions() const;				// structural pins + outcome identities from the sample's objective classes
+	void OnMappingModified();
+
+	// Sample-source control callbacks
+	TArray<TSharedPtr<FString>> FormatOptions;					// registry names for the format dropdown
+	FText GetSampleFormatText() const;
+	void OnSampleFormatChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+	FText GetSampleFolderText() const;
+
+	/**
+	 * Browse for the sample folder. Deliberately NOT SDirectoryPicker: that widget takes the path as a one-time
+	 * SLATE_ARGUMENT and keeps a private copy with no setter, so a paste - which writes SampleFolder directly - would
+	 * leave it showing the old path. The text box beside this button is attribute-bound and has no such problem.
+	 */
+	FReply OnBrowseForSampleFolder();
+	void OnSampleFolderCommitted(const FText& NewText, ETextCommit::Type);
+	void RefreshFromSample();									// re-enumerate + tell BOTH widgets to rebuild
+
+	// Discriminator-column picker: a dropdown of the sample's columns (never a typed FName).
+	TArray<TSharedPtr<FString>> DiscriminatorColumnOptions;		// rebuilt from the sample's columns
+	TSharedPtr<SSearchableComboBox> DiscriminatorColumnCombo;	// held so a sample change can RefreshOptions() it
+	TSharedPtr<SSearchableComboBox> KeyColumnCombo;
+
+	/**
+	 * The key picker's OWN option list: the sample's columns plus a clear entry. It cannot share the discriminator's,
+	 * because the two differ in exactly the way the list has to express - the discriminator is required and clearing it
+	 * is a deliberate act, while the key column is documented optional and had no way to say so.
+	 */
+	TArray<TSharedPtr<FString>> KeyColumnOptions;
+	void RebuildKeyColumnOptions();
+	void RebuildDiscriminatorColumnOptions();
+	FText GetDiscriminatorColumnText() const;					// reads Mapping->DiscriminatorColumn
+	void OnDiscriminatorColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+	
+	// Key-column picker (reuses DiscriminatorColumnOptions — both pick a source column; never a typed FName).
+	FText GetKeyColumnText() const;
+	void OnKeyColumnChanged(TSharedPtr<FString> NewValue, ESelectInfo::Type);
+
+	void RestoreSampleFromMemo();   // per-user last-used sample for this recipe (never recipe data)
+	void SaveSampleToMemo() const;
+};
+

@@ -34,6 +34,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Prerequisite composition** — AND / OR / NOT combinators plus reusable Prerequisite Rules gate activation, progression, or completion on arbitrarily deep boolean expressions. Rules are named and referenced from multiple content nodes without duplication.
 - **Rewards as adapters** — self-configuring reward types read completion context and broadcast to any actor whose Reward Recipient component watches that reward type. The granting node never needs to know who's listening. A preview query returns what a completion advertises *before* it's earned: the "do this, get this" data a quest-giver hub or bounty board needs.
 - **Visual graph authoring** — compose progressions in a node graph with designer-friendly widgets, inline tag pickers, and in-editor compile with clickable diagnostics that navigate straight to the offending node. The graph is the authoring surface on the framework, but the framework works without opening a graph editor.
+- **Progression data as text** — export a questline to flat, diffable tables, edit them wherever your team already works, and re-import onto the existing asset. A read-only plan states every property it would change before anything is written, and refuses structural rewrites rather than half-applying them. A Mapping asset teaches the importer to read your studio's own file shape, so nobody reformats a spreadsheet to suit the plugin, and file formats are a registered seam you can add to.
 - **Save/load** — full progression state packs into a single serializable snapshot you embed in whatever save game your project already uses. Plain value copy, safe to hand off to an async save. Restored actors see events flagged as catch-up so they can jump straight to settled state rather than replaying transitions.
 - **Late-registration catch-up** — components that register after an event has fired receive the recorded state immediately on bind. Streaming levels, dynamically spawned actors, late-joining players, and save-game restoration all work without special-casing.
 - **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A searchable World State Facts panel lists every asserted fact. No log-diving to understand runtime state.
@@ -79,7 +80,7 @@ Game progression framework. Runtime and editor modules, with an optional Electro
 
 ## Installation
 
-> **Important -- do not use GitHub's "Code > Download ZIP" button.** 
+> **Important -- do not use GitHub's "Code > Download ZIP" button.**
 >
 >This repository uses Git LFS for `.uasset` and `.umap` binaries. The ZIP archive endpoint does not resolve LFS pointers, so the download will contain ~130-byte stub files instead of the real assets. Clone the repo (with `git-lfs` installed) or download a .zip from the [Releases](https://github.com/TheGeebus/SimpleQuest/releases) page instead.
 
@@ -106,7 +107,9 @@ Open the asset to launch the graph editor. From Entry, drag off a wire and place
 
 Objective choice is where your game's specific gameplay meets the framework. The Step's inline picker lists the reference Objectives shipped in the plugin (counting-based, location-reach, multi-target interaction) plus any you author for your own event sources. See [Objectives](#objectives) for the lifecycle model and how to author your own.
 
-Completion Path pins (or simply "Path" pins, which are always an output) connected to Activation pins (always an input) automatically create Activation wires (solid), indicating the connection represents the flow of execution and dictates the order and timing of node activations. Connections between Path output pins and Prerequisite input pins automatically create Prerequisite wires (dashed), indicating activation is contingent on a given completion path.
+Completion Path pins (or simply "Path" pins, which are always an output) connected to Activation pins (always an input) automatically create Activation wires - the standard solid blueprint wire, indicating the connection represents the flow of execution and dictates the order and timing of node activations. Connections between Path output pins and Prerequisite input pins automatically create dashed Prerequisite wires, indicating that progression is contingent on a given completion path.
+
+**Solid wires carry activation. Dashed wires carry prerequisites.**
 
 When a content node receives an activation signal, it checks satisfaction of any attached prerequisite expression. If the prerequisite is satisfied - or if there is no connected prerequisite wire - the node activates. If a connected prerequisite remains unsatisfied, further progress is deferred until that prerequisite is satisfied. A node that has been activated but deferred proceeds automatically when the prerequisite gating it is fulfilled, no additional signalling is needed.
 
@@ -140,11 +143,11 @@ If you need custom orchestration logic (analytics, save integration, bespoke act
 
 ### 5. Attach components to actors
 
-| Component | Attach to | Purpose |
-|---|---|---|
-| `UQuestGiverComponent` | NPC Actor | Offers and activates quests on interaction |
-| `UQuestTriggerComponent` | Enemy, item, or location Actor | Publishes trigger fires; receives per-fire response, structural-block, and per-lifecycle feedback |
-| `UQuestObserverComponent` | Any Actor | Receives lifecycle events for one or more quests |
+| Component                 | Attach to                      | Purpose                                                                                           |
+|---------------------------|--------------------------------|---------------------------------------------------------------------------------------------------|
+| `UQuestGiverComponent`    | NPC Actor                      | Offers and activates quests on interaction                                                        |
+| `UQuestTriggerComponent`  | Enemy, item, or location Actor | Publishes trigger fires; receives per-fire response, structural-block, and per-lifecycle feedback |
+| `UQuestObserverComponent` | Any Actor                      | Receives lifecycle events for one or more quests                                                  |
 
 ### 6. Inspect during PIE
 
@@ -155,7 +158,7 @@ Start Play In Editor. The graph panel shows per-state colored halos on content n
 Two surfaces catch broken or stale tag references the compiler can't flag on its own:
 
 - **Validate Tags** (questline graph editor toolbar) — project-wide scan for prerequisite conditions pointing at missing fact tags, Rule Exits pointing at missing Rule Entries, and Rule Entries that no Exit references. Results go to the **Quest Validator** message log with per-node navigation tokens. Read-only; never modifies assets.
-- **Stale Quest Tags** (Window > Developer Tools > Debug) — lists quest-component tag references whose target isn't registered in the runtime tag manager. **Scan Loaded** typically runs in under a second; **Full Project Scan** also covers Actor Blueprint defaults and unloaded levels (including World Partition). Per-row badges indicate whether each entry came from a loaded actor, a Blueprint default, or an unloaded level, with matching navigation: **Find** frames a loaded actor in the level, **Open BP** opens a Blueprint editor, **Open Level** loads the containing map. Per-row Clear works on every source; multi-select + Clear Selected wraps a confirmation dialog and atomic undo. Affected packages roll into a panel-header **Save All Modified** button. A headless commandlet variant supports CI gating — `UnrealEditor-Cmd.exe <project>.uproject -run=StaleQuestTagsScan -OutputJson=<path>` writes structured JSON and returns `0` (clean) / `1` (stale found) / `2` (infra failure). A Windows `.bat` wrapper at `Scripts/RunStaleQuestTagsScan.bat` is included for convenience.
+- **Stale Quest Tags** (Window > Developer Tools > Debug) — lists quest-component tag references whose target isn't registered in the runtime tag manager. **Scan Loaded** typically runs in under a second; **Full Project Scan** also covers Actor Blueprint defaults and unloaded levels (including World Partition). Per-row badges indicate whether each entry came from a loaded actor, a Blueprint default, or an unloaded level, with matching navigation: **Find** frames a loaded actor in the level, **Open BP** opens a Blueprint editor, **Open Level** loads the containing map. Per-row Clear works on every source; multi-select + Clear Selected wraps a confirmation dialog and atomic undo. Affected packages roll into a panel-header **Save All Modified** button. A headless commandlet variant supports CI gating - `UnrealEditor-Cmd.exe <project>.uproject -run=StaleQuestTagsScan -OutputJson=<path>` writes structured JSON and returns `0` (clean) / `1` (stale found) / `2` (infra failure). A Windows `.bat` wrapper at `Scripts/RunStaleQuestTagsScan.bat` is included for convenience.
 
 Both are pull-based: you open them, review, decide. Neither runs automatically or modifies data without an explicit click.
 
@@ -206,7 +209,7 @@ Editor-side compilation translates authored graphs into runtime node instances a
 
 ## Objectives
 
-Objectives are the primary variation point of the framework. Most games will author at least one custom Objective subclass - Objectives are where your specific gameplay meets the progression system, and the reference implementations shipped in the plugin cover common patterns but aren't a complete library.
+Objectives are the primary variation point of the framework - they occupy the same place in SimpleQuest that Abilities occupy in GAS: the type you subclass, where your own gameplay lives, and the thing to understand before the rest of the framework means much. The surface is much smaller, though - three `BlueprintNativeEvent` overrides, covered below. Most games will author at least one custom Objective subclass, and the reference implementations shipped in the plugin cover common patterns without being a complete library.
 
 ### What an Objective is
 
@@ -267,6 +270,13 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
             // paths (abandon, blocked, cascade-deactivated). Unsubscribe from external event sources, tear
             // down UI handles, stop timers. The Objective is still live at this point — safe to inspect
             // state stored during activation.
+            Super::OnObjectiveDeactivated_Implementation();
+
+            // GetDeactivationReason() says which path fired, and is only meaningful inside this call.
+            if (GetDeactivationReason() == EQuestObjectiveDeactivationReason::Interrupted)
+            {
+                // Torn down without completing. Release anything you reserved on the assumption of success.
+            }
         }
     };
 ```
@@ -317,7 +327,7 @@ Base returns empty / no-op because a stateless Objective needs nothing. Capture 
 
 ### When to write a custom Objective vs use a reference
 
-Use the shipped references when they fit: `UCountingQuestObjective` handles a substantial fraction of "N of X" completion patterns, `UGoToQuestObjective` and `UInteractAllTargetsObjective` cover their respective shapes. 
+Use the shipped references when they fit: `UCountingQuestObjective` handles a substantial fraction of "N of X" completion patterns, `UGoToQuestObjective` and `UInteractAllTargetsObjective` cover their respective shapes.
 
 Write a custom Objective when your completion condition depends on a game-specific event source the references don't cover: dialogue beats, GAS ability uses, inventory changes, faction reputation thresholds, cooldown expirations, weather changes, AI brain transitions - anything your game publishes as an event the framework doesn't know about. The custom Objective is where you bridge that event source into the progression pipeline.
 
@@ -332,27 +342,9 @@ The v0.8.0 release ships reference implementations for the timer, world-state-fa
 
 ---
 
-## Extending the Plugin
+## Reacting to Quest Events
 
-Three tiers of extensibility, matched to the scope of the change:
-
-### Tier 1 — Self-describing node types (subclass + override)
-
-Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals - no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
-
-### Tier 2 — Replaceable policies (subclass + register)
-
-`FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide. Useful for projects with bespoke node-type behavior that differs from the defaults.
-
-### Tier 3 — Factory-registered algorithms (subclass + register factory)
-
-For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
-
-### Custom Orchestration
-
-Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
-
-### Reacting to Quest Events
+Objectives are how your game *drives* progression. This is how it *listens* - and neither direction requires the framework to hold a reference to your code, or your code to hold one to the framework. Subscriptions route by tag, so a publisher and a listener never need to meet.
 
 **Blueprint** — drop the **Observe Quest Lifecycle** async node, feed it a quest tag, and toggle on the lifecycle pins you care about via right-click context menu (Offer Phase: `On Activated`, `On Enabled`, `On Disabled`, `On Give Blocked`; Run Phase: `On Started`, `On Progress`, `On Completed`; End Phase: `On Deactivated`, `On Blocked`, `On Unblocked`). The observation stays bound across the quest's full lifecycle and can receive events for every descendant tag under a parent subscription (e.g. observe on `SimpleQuest.Questline.MyLine` to watch the whole line). Each pin carries the event's `FQuestEventPayload` - `TriggeredActor`, `Instigator`, `NodeInfo`, `CustomData` - plus the event-specific extras (`OutcomeTag` on Completed, `PrereqStatus` on Activated, `Blockers` on GiveBlocked, `GiverActor` on Started). The proxy subscribes only to events whose pins you've enabled, so unused subscriptions cost nothing. Call `Cancel` on the returned `Observer` reference when you're done, or let the GameInstance tear it down.
 
@@ -371,6 +363,118 @@ USimpleQuestBlueprintLibrary::UnsubscribeFromQuestEvent(this, QuestTag, Handle);
 
 Same semantics as the async action, but returns a raw `FDelegateHandle` for caller-managed lifetime. Guards against stale tags via `IsTagRegisteredInRuntime` and returns an invalid handle if the subsystem or tag can't be resolved.
 
+Components cover the common shapes without either of the above: the Giver, Observer, Trigger, and Reward Recipient components each subscribe on the tags you set on them, and all four handle late registration - an actor that spawns or streams in after an event has fired receives the recorded state on bind.
+
+---
+
+## Data Resolver
+
+Progression data lives in `.uasset` graphs, and binary assets don't diff, don't merge, and don't open in the tools narrative and design teams already use. The Data Resolver moves that data in and out of plain text without giving up the graph as the source of truth for structure.
+
+### Export, import, and re-import
+
+**Export** writes a questline to a folder of flat tables - one per node type, plus a single `edges` table holding every connection as `{from, type, to}`. Routing, nesting, and prerequisite wiring are one primitive underneath, so one edge table describes all three. The output is text: diffable in a pull request, editable in a spreadsheet, greppable.
+
+**Import** reads that folder back. The round trip is lossless - the same questline compiles to the same tags - which is what makes the format safe to hand to someone who will edit it by hand.
+
+**In-place re-import** applies external edits to a questline that already exists, matching rows to live nodes by stable identity rather than by position. This is the case a real pipeline needs: a designer changes one column in a spreadsheet and the edit lands on the existing asset without disturbing anything around it.
+
+### Nothing is written until you ask
+
+In-place re-import always produces a **plan** first - a read-only account of every node it would update, create, or orphan, every property that would change with its before and after values, and every wire it would add or remove. Applying is a separate, deliberate step.
+
+The plan also states what it won't do. A row that would change a node's class or move it to a different container is a structural change, and those are **refused rather than half-performed** - the safe version of that edit is a rebuild, not a patch. Each refusal names the row and the reason. An apply that does run is a single transaction: one undo reverses all of it, deletions included.
+
+### Reading a studio's own data
+
+A round trip through SimpleQuest's own export assumes SimpleQuest's table shape. Most studios already have their own, so the resolver takes a **Mapping** - a `UQuestImportMapping` data asset - that teaches it to read a foreign layout with nobody reformatting a file:
+
+- **Row kinds** — which column distinguishes rows, and which value in it means which node type.
+- **Column bindings** — which source column feeds which node property, *picked* from the columns in a real sample file rather than typed by hand.
+- **Absent-field policy** — per binding, what a blank cell means: preserve the current value, reset to the class default, or refuse the import outright.
+- **Wiring** — which columns express relationships, and what verb each one carries.
+
+A mapping is an asset, so it's authored once, versioned, and reused by every import that speaks the same dialect. Mapping authoring lives in that asset's details panel.
+
+### Sources and formats
+
+A source can be a **folder of files** or an **in-engine DataTable** - both are first-class, and one unchanged mapping reads either. Shipped file formats are **TSV** and **JSON**.
+
+Formats are a registered seam, not a fixed list. Implement `ISimpleQuestDataFormat`, register it from your editor module, and your format works everywhere the shipped ones do:
+
+```c++
+    class FMyFormat : public ISimpleQuestDataFormat
+    {
+        virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) override;
+        virtual bool WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder) override;
+        virtual FString FormatName() const override { return TEXT("MyFormat"); }
+    };
+```
+
+Both directions are optional - a read-only provider implements `ReadBundle` and leaves `WriteBundle` alone, and the base reports the unsupported direction honestly rather than failing obscurely. A provider owns parsing, framing, and escaping, and needs to know nothing about quests; structural validity is checked downstream.
+
+#### *"Do I use a Mapping asset or a format provider?"*
+
+It depends on what doesn't fit. If your data is already TSV, JSON, or a DataTable, a Mapping asset finishes the job by naming which of your columns is which. Anything else - XML, YAML, a studio's own exporter - needs a format provider first: until something can read the file, there are no columns to map.
+
+### Driving it today
+
+The pipeline is complete and exercised end to end, driven by console commands - which is how the backend was proven before any UI existed:
+
+| Command                                                         | Purpose                                                     |
+|-----------------------------------------------------------------|-------------------------------------------------------------|
+| `SimpleQuest.ExportQuestline <asset>`                           | Write a questline out to a table folder                     |
+| `SimpleQuest.ImportQuestline <folder> <destpackage>`            | Build a new questline asset from tables                     |
+| `SimpleQuest.ImportQuestline <folder> --in-place=<asset>`       | Plan against an existing asset; add `--apply` to perform it |
+| `SimpleQuest.ImportQuestline <destpackage> --datatable=<asset>` | Use an in-engine DataTable as the source                    |
+| `SimpleQuest.EnumerateSourceColumns <folder>`                   | List the columns a source exposes                           |
+
+Add `--format=<name>` to select a registered format and `--mapping=<asset>` to apply a mapping. Everything above is also reachable from the editor: Export and Import on the questline graph editor toolbar, and a dockable **Source Data** panel showing the same plan the console prints - hover a row to highlight the node it describes, double-click to navigate to it.
+
+### Gating it in CI
+
+The plan the panel shows can also run with no editor session, across a whole tree of exported data at once - which is the form a build server needs.
+
+```
+UnrealEditor-Cmd.exe <project>.uproject -run=QuestPlanScan -Root=<dir> [-OutputJson=<path>] [-FailOn=refusals|differences]
+```
+
+`-Root` is walked **recursively** for export markers, so one invocation covers every corpus beneath it and pays for a single editor start rather than one per questline. `Saved/` and `Intermediate/` are skipped. Exit codes match the stale-tag scanner: `0` nothing to report, `1` findings, `2` the run could not complete - which includes finding no markers at all, because a gate that checked nothing must not report success.
+
+`-FailOn` decides what fails a build. `refusals` (the default) fails only when a corpus genuinely cannot be applied; `differences` also fails when a corpus and its asset merely disagree, which is the right setting when your files are the source of truth and the assets are expected to match them.
+
+The JSON is a **stable artifact rather than a formatted log**: field names and collection ordering are fixed, so two runs over unchanged data produce byte-identical files and diffing this commit's run against the last is signal rather than churn. Each plan names both ends - the questline, and the corpus folder it came from relative to `-Root` - alongside its status, counts, refusals, warnings and per-node property changes.
+
+A corpus whose questline doesn't exist yet reports `validated` rather than failing: the source is read and checked on its own terms, which is a different answer from "the asset already matches it". Wrapper scripts are at `Scripts/RunQuestPlanScan.bat` and `Scripts/RunQuestPlanScan.sh`.
+
+---
+
+## Extending the Plugin
+
+**Reach for the variation points first.** Most of what looks like it needs new code is already a knob, and the sections above are largely a tour of them: Objectives compose authored config with runtime context before you subclass anything, and the shipped references cover common shapes; named outcomes and Completion Path discovery let a single Step branch as many ways as you author without code; prerequisite composition and reusable Rules express gating as data; rewards are adapters that self-configure from completion context and broadcast to whoever is listening; the Giver, Observer, Trigger, and Reward Recipient components each carry their own settings; **Observe Quest Lifecycle** and the C++ subscription library let anything in your game react without the framework knowing it exists; and a Mapping asset reshapes foreign data without a line of code. Between those and the Configuration section below, most projects never need what follows.
+
+This section is for when those genuinely aren't enough - when you need the framework itself to *behave* differently rather than be configured differently. Three tiers, matched to the scope of the change:
+
+### Tier 1 — Self-describing node types (subclass + override)
+
+Add a new quest node type by subclassing the relevant editor base class and overriding classification virtuals (`IsExitNode`, `IsContentNode`, `IsPassThroughNode`, etc.). Traversal, schema validation, and compilation all read these virtuals - no registration required. Matches Unreal's native pattern for extending `UK2Node` or `UEdGraphNode`.
+
+### Tier 2 — Registered seams (subclass + register)
+
+Two seams take a registration from your module: one replaces a default, the other adds alongside it.
+
+**Graph walk rules are replaceable.** `FQuestlineGraphTraversalPolicy` encapsulates classification decisions used during graph traversal and compilation. Subclass it and register your subclass via `ISimpleQuestEditorModule` to override classification project-wide. Useful for projects with bespoke node-type behavior that differs from the defaults.
+
+**Data formats register additively.** `FQuestDataFormatRegistry::RegisterFormat` *adds* a format alongside the shipped TSV and JSON rather than replacing anything, so any number coexist and each source selects one by name. Implement `ISimpleQuestDataFormat` and register from your editor module's startup - see [Data Resolver](#data-resolver) for the interface and what a provider is responsible for. Used when your data is in a format the framework doesn't already read - a Mapping asset covers the other case, where the file type is one of those but the *columns* are yours.
+
+### Tier 3 — Factory-registered algorithms (subclass + register factory)
+
+For full algorithmic replacement. Subclass `FQuestlineGraphCompiler` and register via `ISimpleQuestEditorModule::RegisterCompilerFactory` to take over the entire pipeline. Use when the compilation algorithm itself must change.
+
+### Custom Orchestration
+
+Subclass `UQuestManagerSubsystem` (C++ or Blueprint) and set it as the configured class in **Project Settings > Plugins > Simple Quest > QuestManagerClass**. Override lifecycle hooks to add analytics, integrate save systems, or inject custom activation logic without touching plugin source.
+
 ---
 
 ## Configuration
@@ -381,15 +485,16 @@ Same semantics as the async action, but returns a raw `FDelegateHandle` for call
 
 **Editor Preferences > Plugins > Simple Quest Visuals** — wire, pin, node title, and debug-highlight colors used by the questline graph editor. Per-developer; not committed to source control.
 
-**Log verbosity** — SimpleQuest's logging is split into five channels for independent dial control:
+**Log verbosity** — SimpleQuest's logging is split into six channels for independent dial control:
 
-| Channel | Coverage                                                                                         |
-|---|--------------------------------------------------------------------------------------------------|
-| `LogSimpleQuest` | Module startup, settings, debug overlay, and anything not covered by a specialized channel below |
-| `LogSimpleQuestActivation` | Quest activation flow - starts, chain advancement, deactivation                                  |
+| Channel                      | Coverage                                                                                         |
+|------------------------------|--------------------------------------------------------------------------------------------------|
+| `LogSimpleQuest`             | Module startup, settings, debug overlay, and anything not covered by a specialized channel below |
+| `LogSimpleQuestActivation`   | Quest activation flow - starts, chain advancement, deactivation                                  |
 | `LogSimpleQuestSubscription` | Component and Blueprint subscriptions; catch-up event delivery                                   |
-| `LogSimpleQuestCompiler` | Graph compile output, native tag registration, tag rename propagation                            |
-| `LogSimpleQuestState` | Quest history recording - resolutions, entries, tag registrations                                |
+| `LogSimpleQuestCompiler`     | Graph compile output, native tag registration, tag rename propagation                            |
+| `LogSimpleQuestResolver`     | Import/export pipeline - reading and writing external tables, column mapping, in-place re-import |
+| `LogSimpleQuestState`        | Quest history recording - resolutions, entries, tag registrations                                |
 
 SimpleCore logs under `LogSimpleCore`. Set verbosity per channel via the Project Settings pages above - changes apply live without editor restart. The `[Core.Log]` section in `DefaultEngine.ini` still works as a fallback for non-editor builds.
 
@@ -415,10 +520,11 @@ Log statements at `VeryVerbose` are stripped entirely in Shipping builds.
 | Q2 2026  | Authoring primitives + subscriber routing — Prereq Gate utility node; Add / Remove / Clear Facts nodes (questline graphs as first-class World State publishers); Resettable Replay prerequisite setting for honest re-gating on replayable content; subscriber-side hierarchical-vs-exact routing control; observer surface broadening (catch-all `OnAnyQuestEvent`, run-phase `ProgressRefused`); runtime add/remove of component watched-tag sets for dynamic-spawn join-in-progress; quest-resolution attribution fixes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | **Shipped** (v0.4.1)               |
 | Q3 2026  | Save/Load system — struct-based snapshot embedded in your own save game, with mid-step state handling                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | **Shipped** (v0.5.0)               |
 | Q3 2026  | Rewards — first-class reward nodes + self-configuring reward adapters, broadcast-to-recipient delivery, the "do this, get this" advertisement query surface, and questline-level rewards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | **Shipped** (v0.6.0, fixes v0.6.1) |
-| Q3 2026  | Pluggable data resolver — user-writable adapters for bidirectional graph ↔ text data pipelines; version-controllable, diff-friendly progression data outside .uassets, fitting existing studio content workflows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | ***Active Development*** (v0.7.0) |
-| Q1 2026  | Sample project + expanded objective library — a complete playable progression exercising branching outcomes, prerequisites, linked questlines, rewards, and save/load end to end; timer, world-state-fact, and composite reference objectives built alongside it | Planned (v0.8.0) |
-| Q2 2027  | Documentation pass — full authoring and API documentation grounded in the sample project's real usage | Planned (v0.9.0) |
-| Q2 2027  | SimpleCore public API versioning + 1.0 polish — freeze the coordination-layer contract once SimpleQuest, the sample project, and early adopters have exercised it | Planned (v1.0.0) |
+| Q3 2026  | Pluggable data resolver — user-writable adapters for bidirectional graph ↔ text data pipelines; version-controllable, diff-friendly progression data outside .uassets, fitting existing studio content workflows                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | **Shipped** (v0.7.0)               |
+| Q4 2026  | Guided on-ramp — a companion walkthrough for the QuickStart chapters plus a step-by-step first questline, taking a new user from install to authoring their own progression unaided. Deliberately narrow: the comprehensive reference follows the sample project that grounds it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Planned                            |
+| Q1 2027  | Sample project + expanded objective library — a complete playable progression exercising branching outcomes, prerequisites, linked questlines, rewards, and save/load end to end; timer, world-state-fact, and composite reference objectives built alongside it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Planned (v0.8.0)                   |
+| Q2 2027  | Documentation pass — full authoring and API documentation grounded in the sample project's real usage                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        | Planned (v0.9.0)                   |
+| Q2 2027  | SimpleCore public API versioning + 1.0 polish — freeze the coordination-layer contract once SimpleQuest, the sample project, and early adopters have exercised it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Planned (v1.0.0)                   |
 | Post-1.0 | Multiplayer replication — server-authoritative quest state with join-in-progress                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Pro Module                         |
 | Post-1.0 | GAS integration — GameplayTag identifiers, GameplayEffect rewards, Gameplay Event triggers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Pro Module                         |
 

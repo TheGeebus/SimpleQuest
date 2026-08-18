@@ -1972,11 +1972,20 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
 {
     TMap<FGameplayTag, FQuestRewardPreviewList> Out;
 
-    // Read the compiled reward map by identity FName rather than the live UQuestlineGraph, so a query for an EMBEDDED
-    // questline's identity resolves — its source asset is never loaded at runtime, so it's absent from LiveGraphsByIdentity,
-    // but its rewards were flattened into LiveQuestlineRewardsByIdentity at the enclosing graph's registration. Same
-    // per-questline, per-outcome shape as before; just reachable for embedded identities (the live twin of delivery).
-    const FQuestCompiledQuestlineRewards* Compiled = LiveQuestlineRewardsByIdentity.Find(QuestlineTag.GetTagName());
+    // Resolve the query tag to a reward-map identity. A caller may pass either a questline's own IDENTITY tag (standalone
+    // or the harvested inner identity) or a linked placement's CONTEXTUAL tag. For the latter, the wrapper node carries
+    // LinkedInnerIdentityTag — the bridge to the inner asset's identity, under which its rewards were harvested. Resolve
+    // through it so a placement tag isn't a dead end to the identity-keyed reward map.
+    FName IdentityName = QuestlineTag.GetTagName();
+    if (const UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestlineTag.GetTagName()))
+    {
+        if (Node->LinkedInnerIdentityTag.IsValid())
+        {
+            IdentityName = Node->LinkedInnerIdentityTag.GetTagName();
+        }
+    }
+
+    const FQuestCompiledQuestlineRewards* Compiled = LiveQuestlineRewardsByIdentity.Find(IdentityName);
     if (!Compiled) return Out;
 
     for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Compiled->RewardsByOutcome)

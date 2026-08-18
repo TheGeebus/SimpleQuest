@@ -2,43 +2,43 @@
 // SPDX-License-Identifier: MIT
 
 #include "Utilities/SimpleQuestEditorUtils.h"
-
 #include "DataTableEditorUtils.h"
 #include "SimpleQuestLog.h"
-#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
-#include "Nodes/QuestlineNode_Exit.h"
-#include "Objectives/QuestObjective.h"
 #include "Editor.h"
 #include "EditorWorldUtils.h"
 #include "EngineUtils.h"
 #include "GameplayTagsManager.h"
 #include "GameplayTagsSettings.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Misc/FileHelper.h"
-#include "Nodes/QuestlineNode_Step.h"
-#include "Nodes/QuestlineNode_Quest.h"
-#include "Quests/QuestlineGraph.h"
-#include "Components/QuestTriggerComponent.h"
-#include "Components/QuestGiverComponent.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
-#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
-#include "Quests/QuestNodeBase.h"
-#include "Toolkit/QuestlineGraphEditor.h"
-#include "Utilities/GroupExaminerTypes.h"
-#include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "ToolMenu.h"
 #include "ToolMenus.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Components/QuestGiverComponent.h"
 #include "Components/QuestObserverComponent.h"
+#include "Components/QuestTriggerComponent.h"
 #include "Engine/InheritableComponentHandler.h"
 #include "Engine/SCS_Node.h"
+#include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
+#include "Misc/FileHelper.h"
 #include "Nodes/QuestlineNode_Knot.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
+#include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/QuestlineNode_Step.h"
+#include "Nodes/QuestlineNode_Quest.h"
+#include "Nodes/QuestlineNode_Exit.h"
+#include "Objectives/QuestObjective.h"
+#include "Quests/QuestlineGraph.h"
+#include "Quests/QuestNodeBase.h"
+#include "Resolver/QuestEdgeVerbs.h"
+#include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/PrereqExaminerTypes.h"
 #include "Types/QuestPinRole.h"
+#include "Utilities/GroupExaminerTypes.h"
+#include "Utilities/QuestlineGraphTraversalPolicy.h"
 #include "Utilities/QuestTagComposer.h"
 #include "WorldPartition/WorldPartition.h"
 #include "WorldPartition/WorldPartitionActorDescInstance.h"
@@ -186,6 +186,36 @@ FString FSimpleQuestEditorUtilities::SanitizeQuestlineTagSegment(const FString& 
 	return Result;
 }
 
+FText FSimpleQuestEditorUtilities::GetTagLeafLabel(FName TagName)
+{
+	return FText::FromString(FName::NameToDisplayString(FQuestTagComposer::GetLeafSegment(TagName), false));
+}
+
+FText FSimpleQuestEditorUtilities::GetOutcomeLabel(FName TagName)
+{
+	return FQuestTagComposer::IsOutcomeTag(TagName)
+		? FQuestTagComposer::FormatOutcomeForDisplay(TagName)
+		: GetTagLeafLabel(TagName);
+}
+
+FName FSimpleQuestEditorUtilities::PinCategoryForEdgeVerb(const FString& Verb)
+{
+	return QuestEdgeVerbs::PinCategoryForVerb(Verb);
+}
+
+void FSimpleQuestEditorUtilities::NotifyGraphAndDescendants(UEdGraph* Graph)
+{
+	if (!Graph) { return; }
+	Graph->NotifyGraphChanged();
+	for (UEdGraphNode* Node : Graph->Nodes)
+	{
+		if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+		{
+			NotifyGraphAndDescendants(QuestNode->GetInnerGraph());
+		}
+	}
+}
+
 TArray<FName> FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(const UEdGraph* Graph)
 {
 	TArray<FName> Result;
@@ -228,11 +258,11 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 			Graph->GetNodesOfClass(Nodes);
 			for (const UK2Node_CompleteObjectiveWithOutcome* Node : Nodes)
 			{
-				bool bIsRegisteredTag = false;
-				const FName ResolvedPath = Node->ResolvePathIdentity(&bIsRegisteredTag);
+				FGameplayTag Outcome;
+				const FName ResolvedPath = Node->ResolvePathIdentity(&Outcome);
 				if (!ResolvedPath.IsNone())
 				{
-					AllPaths.AddUnique({ ResolvedPath, bIsRegisteredTag });
+					AllPaths.AddUnique({ ResolvedPath, Outcome });
 				}
 				// Else: misconfigured placement (no PathName, no OutcomeTag default, no wire). Discovery
 				// silently skips; ValidateNodeDuringCompilation flags it as a Warning at compile time.
@@ -241,7 +271,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 	}
 
 	// ── Source 2: UPROPERTY reflection scan (ObjectiveOutcome meta) ──
-	// Always a registered FGameplayTag — bIsRegisteredTag = true.
+	// Always carries a valid Outcome tag
 	if (const UQuestObjective* CDO = GetDefault<UQuestObjective>(ObjectiveClass))
 	{
 		for (TFieldIterator<FStructProperty> PropIt(ObjectiveClass); PropIt; ++PropIt)
@@ -252,18 +282,18 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 				const FGameplayTag* Tag = PropIt->ContainerPtrToValuePtr<FGameplayTag>(CDO);
 				if (Tag && Tag->IsValid())
 				{
-					AllPaths.AddUnique({ Tag->GetTagName(), true });
+					AllPaths.AddUnique({ Tag->GetTagName(), *Tag });
 				}
 			}
 		}
 
 		// ── Source 3: Virtual GetPossibleOutcomes (programmatic / legacy) ──
-		// Returns FGameplayTags; always registered tags — bIsRegisteredTag = true.
+		// Returns FGameplayTags; always carries a valid Outcome tag
 		for (const FGameplayTag& Tag : CDO->GetPossibleOutcomes())
 		{
 			if (Tag.IsValid())
 			{
-				AllPaths.AddUnique({ Tag.GetTagName(), true });
+				AllPaths.AddUnique({ Tag.GetTagName(), Tag });
 			}
 		}
 	}
@@ -889,6 +919,60 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 	}
 
 	return Added;
+}
+
+int32 FSimpleQuestEditorUtilities::RemoveGameplayTagRedirects(const TSet<FName>& OldTagNames)
+{
+	if (OldTagNames.Num() == 0) return 0;
+
+	const FString ConfigFile = FPaths::ProjectConfigDir() / TEXT("DefaultGameplayTags.ini");
+	static const FString RedirectLinePrefix = TEXT("+GameplayTagRedirects=");
+	static const FString OldNameMarker = TEXT("OldTagName=\"");
+
+	FString FileContents;
+	if (!FFileHelper::LoadFileToString(FileContents, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("RemoveGameplayTagRedirects: could not read '%s'."), *ConfigFile);
+		return 0;
+	}
+
+	// LINE-WISE, keeping everything that is not a targeted redirect exactly as written. Comments, blank lines, other
+	// keys and other sections all survive byte-for-byte - a config file is hand-edited, and a rewrite that reformats
+	// it costs the reader their own annotations.
+	TArray<FString> Lines;
+	FileContents.ParseIntoArrayLines(Lines, /*bCullEmpty*/ false);
+
+	FString Rebuilt;
+	int32 Removed = 0;
+	for (const FString& Line : Lines)
+	{
+		const FString Trimmed = Line.TrimStartAndEnd();
+		if (Trimmed.StartsWith(RedirectLinePrefix))
+		{
+			const int32 Pos = Trimmed.Find(OldNameMarker);
+			if (Pos != INDEX_NONE)
+			{
+				const int32 Start = Pos + OldNameMarker.Len();
+				const int32 End = Trimmed.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, Start);
+				if (End != INDEX_NONE && OldTagNames.Contains(FName(*Trimmed.Mid(Start, End - Start))))
+				{
+					++Removed;
+					UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("RemoveGameplayTagRedirects: dropped %s"), *Trimmed);
+					continue;
+				}
+			}
+		}
+		Rebuilt += Line;
+		Rebuilt += LINE_TERMINATOR;
+	}
+
+	if (Removed > 0 && !FFileHelper::SaveStringToFile(Rebuilt, *ConfigFile))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Error, TEXT("RemoveGameplayTagRedirects: removed %d entr(ies) in memory but could "
+			"not write '%s' - the file is unchanged."), Removed, *ConfigFile);
+		return 0;
+	}
+	return Removed;
 }
 
 int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TMap<FName, FName>& Renames)

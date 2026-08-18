@@ -70,6 +70,13 @@ public:
 	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
 
 	/**
+	 * Import/export pipeline — reading and writing external tables, mapping columns onto node properties, and the
+	 * in-place re-import plan. Raise to Verbose when debugging "why didn't my column land on the node I expected."
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Resolver"))
+	EQuestLogVerbosity LogSimpleQuestResolverVerbosity = EQuestLogVerbosity::Log;
+
+	/**
 	 * UQuestStateSubsystem registry mutations — resolutions, entries, tag/alias registrations. The durable record of
 	 * what happened (becomes load-bearing once save/load lands in 0.5.0). Raise to Verbose when debugging "what's
 	 * persisted vs ephemeral."
@@ -117,6 +124,26 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Authoring", meta=(DisplayName="Additional Questline Picker Categories"))
 	TArray<FName> AdditionalQuestlinePickerCategories;
 
+	// ── Resolver ─────────────────────────────────────────────────────────────────────────────────────────
+	//
+	// The data resolver reads and writes questline content as editable tables (for diffing, bulk edits, or
+	// importing from an external pipeline) in a chosen on-disk format. This is the format used when no more
+	// specific choice is made at the point of an import or export.
+
+	/**
+	 * Default format the resolver reads and writes. Chosen from the formats currently available; the built-in
+	 * choices are "TSV" and "JSON", and a studio that plugs in its own format sees it listed here too.
+	 */
+	UPROPERTY(config, EditAnywhere, Category="Resolver", meta=(DisplayName="Default Import/Export Format", GetOptions="GetAvailableFormatNames"))
+	FName DefaultImportFormat = TEXT("TSV");
+
+	/** The format names offered by the setting above. Populated by the editor from its registered formats. */
+	static void SetAvailableFormats(const TArray<FString>& InFormatNames);
+
+	/** Backs the DefaultImportFormat dropdown from the names the editor supplied (empty outside the editor). */
+	UFUNCTION()
+	static TArray<FString> GetAvailableFormatNames();
+
 	/** Fires when AdditionalOutcomePickerCategories or AdditionalQuestlinePickerCategories changes. */
 	static FOnPickerCategoriesChanged OnPickerCategoriesChanged;
 	
@@ -142,6 +169,12 @@ private:
 	 * Categories list contains overlapping roots.
 	 */
 	static FString ComposePickerCategories(const FString& DefaultNamespace, const TArray<FName>& AdditionalCategories);
+
+	/**
+	 * The resolver format names the editor supplied via SetAvailableFormats. Static because the source of truth
+	 * (the editor's format registry) is editor-only; the value flows editor -> here, the setting reads it back.
+	 */
+	static TArray<FString> AvailableFormats;
 
 public:
 

@@ -250,8 +250,18 @@ protected:
     virtual void ResetTransientState();
     
     /**
-     * Stable save key. Derived from the authoring node's GUID at compile time. Never hand-edited. Forms part of the GUID
-     * chain for save data keying in linked graphs.
+     * Stable per-placement save key. Composed at compile time as CombineGuids(outer-placement-chain, AuthoredNodeGuid),
+     * so the same authored node placed in N linked contexts yields N distinct keys — each placement is its own saved
+     * instance. Never hand-edited.
+     *
+     * Save-key contract (for save-state tooling and data pipelines): this GUID is a one-way composition — you CANNOT
+     * recover "which node, which placement" from the value alone. Save-state maps keyed by it (DeferredActivations,
+     * ObjectiveStates) are therefore resolved to their nodes by looking the GUID up against the compiled node set
+     * (the running game, or a resolver that holds the compiled graph, provides that forward map) — not by inverting the
+     * key. AuthoredNodeGuid is the placement-independent component: two instances of the same authored node share it,
+     * so it is the handle for "this node regardless of where it's placed." Runtime save STATE is thus addressed through
+     * the compiled graph, not as free-standing human-readable rows — by design: a readable companion identity on save
+     * rows was considered and deferred until a concrete consumer needs it.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FGuid QuestContentGuid;
@@ -274,10 +284,22 @@ protected:
     bool bIsLinkedQuestlinePlacement = false;
 
     /**
+     * For a LinkedQuestline placement wrapper (bIsLinkedQuestlinePlacement == true), the identity tag of the inner
+     * questline asset this wrapper instantiates — SimpleQuest.Questline.<InnerQuestlineID>, with no node-label leaf.
+     * Empty for inline placements and for a wrapper whose linked asset failed to resolve. This is the runtime bridge
+     * from a placement's ContextualTag to the inner asset's own identity: the inner asset is never loaded at runtime
+     * (its nodes are inlined here), so its identity-keyed data — e.g. questline-level rewards in
+     * LiveQuestlineRewardsByIdentity — is otherwise unreachable from the placement. Matches the identity the compiler
+     * harvests the inner questline's rewards under.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    FGameplayTag LinkedInnerIdentityTag;
+
+    /**
      * Parent-context routing tag for this node. Compiler-stamped from the parent compile-context's TagPrefix + node
      * label, so nodes inside a LinkedQuestline placement carry the parent asset's prefix. Used for all event bus
-     * routing on the contextualized channel; will pair with StandaloneTag (Phase A of §1.4 dual-tag finalization)
-     * for cross-asset subscriber compatibility.
+     * routing on the contextualized channel. Cross-asset subscriber compatibility is provided by AssetScopedAliasTags
+     * (the per-enclosing-asset perspectives) rather than a single standalone tag.
      *
      * Format: SimpleQuest.Questline.<ParentPath>.<...>.<SanitizedNodeLabel>
      */
@@ -504,6 +526,7 @@ public:
     FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnAnyOutcome() const { return ResolvedGraphsOnAnyOutcome; }
     FORCEINLINE const TArray<FQuestBoundaryCompletion>& GetBoundaryCompletionsOnForward() const { return BoundaryCompletionsOnForward; }
     FORCEINLINE const TArray<FQuestGraphResolution>& GetResolvedGraphsOnForward() const { return ResolvedGraphsOnForward; }
+    FORCEINLINE const FPrerequisiteExpression& GetPrerequisiteExpression() const { return PrerequisiteExpression; }
     FORCEINLINE const FText& GetDisplayName() const { return DisplayName; }
     FORCEINLINE const FText& GetDescription() const { return Description; }
     FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }

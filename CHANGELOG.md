@@ -31,16 +31,22 @@ graph editor can change.
 - **Reroute nodes stay out of your way.** Wiring routed through reroute knots
   is written as the relationship it *means*, not as the hops it takes, so
   tidying a graph's layout doesn't churn the data.
+- **Nested objects keep their identity.** A reward inside a step is written under
+  a stable identity of its own rather than its position in a list, with that
+  position travelling alongside as ordinary data. Reorder two rewards and the
+  export changes the two cells that say where they sit and nothing else - so two
+  people adding a reward on separate branches merge into two rewards, instead of
+  silently becoming one.
 
 ### Bring your own shape
 
 Your data probably doesn't look like the framework's does, and shouldn't have to.
 
-- **Map your columns to quest properties.** A reusable *recipe* asset says
+- **Map your columns to quest properties.** A reusable **Mapping** asset says
   which of your columns feed which node properties, which of your type values
   mean which kind of node, and which column carries your row keys. Your source
-  keeps its own vocabulary; the recipe does the translating.
-- **Author the recipe by picking, never typing.** Point it at a sample of your
+  keeps its own vocabulary; the Mapping does the translating.
+- **Author the Mapping by picking, never typing.** Point it at a sample of your
   own data and every field is chosen from what's actually there, so a typo
   can't quietly mis-bind a column.
 - **Express relationships as columns.** If your table says a step's `next` is
@@ -49,19 +55,20 @@ Your data probably doesn't look like the framework's does, and shouldn't have to
   flat data.
 - **Prerequisites from a column too.** `unlock_after`, `unlock_any` and
   `unlock_unless` columns build the same prerequisite gates you'd wire by hand.
-- **Your keys come back.** Export through the same recipe and you get *your*
-  column names, *your* type values and *your* row keys - a file you can diff
+- **Your keys come back.** Export through the same Mapping and you get *your*
+  column names, *your* type values, and *your* row keys - a file you can diff
   against the one you started with.
 
 ### Your data can stay where it lives
 
 - **A folder of tab-separated files, JSON, or an in-engine Data Table.** One
-  unchanged recipe reads all of them to the same result.
+  unchanged Mapping reads all of them to the same result.
 - **Split across files however suits you.** A source can be one table or many -
   by chapter, by author, by whatever boundary your team already has.
 - **Write your own format.** The reader/writer interface and the data types it
-  exchanges are public, so a studio can support an encoding we've never heard
-  of without forking anything, and can implement only the direction it needs.
+  exchanges are public, so a studio can support an encoding the framework has 
+  never heard of without forking anything, and can implement only the direction 
+  it needs.
 
 ### Re-importing into a questline that already exists
 
@@ -73,24 +80,33 @@ tenth time, into a questline someone has since edited by hand.
   created, what the source no longer mentions, and how the wiring would differ.
   Nested values are named by path, so you see *`Rewards[0].Amount` 42 → 99*,
   not "something in this node changed."
-- **Choose the format and the recipe from the panel.** The preview reads whichever
+- **Choose the format and the Mapping from the panel.** The preview reads whichever
   format you pick - the list is every provider registered with the plugin,
-  including any that your own module adds - and applies an optional recipe chosen
+  including any that your own module adds - and applies an optional Mapping chosen
   the same way. Changing either re-previews immediately, so what you're looking at
   is always the reading you selected.
 - **A source that can't be read says so, in the panel.** An unreadable folder, a
-  refused recipe or an incoherent source all report where you're looking rather
+  refused Mapping or an incoherent source all report where you're looking rather
   than only in the log, naming the format that was actually tried - which isn't
   always the one the panel is set to, since a console import carries its own.
 - **Nothing is written until you ask.** Previewing is the default; applying is a
   separate, deliberate step.
 - **Decide what a blank cell means.** A column your source declares but leaves
   empty can either preserve whatever the questline currently holds or reset it
-  to its default: per column, or as a default for the whole recipe. A third
+  to its default: per column, or as a default for the whole Mapping. A third
   setting refuses the import outright if a required value is missing.
 - **Deleting is opt-in, and scoped.** Nodes your source no longer mentions are
   always *reported*; they're only removed if you ask. And a source that
   describes one part of a questline is never treated as speaking for the rest.
+- **Match rows by a key of your choosing.** Writing into a Data Table, the row
+  name belongs to you. Name a column in your Mapping and rows are matched on that
+  value instead - so you can rename a row and the next import still recognises
+  it, rather than creating a duplicate beside it. A row whose *name* matches
+  while its key doesn't is left alone: it's somebody else's.
+- **The preview points at the graph.** Hover a row and the node it describes
+  lights up; double-click and the editor goes there, opening a container's inner
+  graph if that's where the node lives. Property rows behave as the node they
+  belong to.
 - **One undo takes it all back**, including created nodes, deleted nodes and
   nested reward values.
 
@@ -102,6 +118,33 @@ tenth time, into a questline someone has since edited by hand.
   what an import did without everything else coming along for the ride.
 - **Dial it from Project Settings.** *Plugins → Simple Quest → Logging →
   Resolver*, applied live without an editor restart.
+
+### Check a whole corpus without opening the editor
+
+If your quest data lives in files, the question worth answering on every commit
+is whether it still applies cleanly to the assets it describes. That's the same
+preview the panel shows, so it can run without a person in front of it.
+
+- **Plan every questline in a folder tree, from the command line.** Point it at
+  a directory and it finds each exported corpus, previews it against the
+  questline that corpus names, and reports the lot. One editor start for the
+  whole run, not one per questline.
+- **Structured output, not scraped logs.** The run writes JSON: what each plan
+  would create and change, what it refuses, what it warns about, and which
+  questline and folder every result belongs to. Field names and ordering are
+  stable, so two runs over unchanged data produce byte-identical files and a
+  diff between commits is signal rather than noise.
+- **An exit code your build can act on.** Nothing to report, findings, or the
+  run itself failed. You choose whether a source merely *differing* from its
+  asset fails the build or only one that genuinely can't be applied - the first
+  is right when your files are the source of truth, the second when both ends
+  get edited.
+- **A corpus whose questline doesn't exist yet is validated, not failed.** Data
+  authored before anyone builds the asset is an ordinary state: the source is
+  read and checked on its own terms, and reported as such - which is a different
+  answer from "the asset already matches."
+- **A run that finds nothing to check refuses.** Pointing it at the wrong
+  directory reports an error instead of a clean build.
 
 ### It refuses rather than guessing
 
@@ -120,6 +163,11 @@ tenth time, into a questline someone has since edited by hand.
   wrong directory costs you nothing. It also refuses to *convert* one: exporting
   in a different format than the folder already holds would delete every file the
   previous format wrote, so it stops and says so rather than doing it quietly.
+- **An export folder says what it is.** Alongside claiming ownership, an export
+  records which questline it came from, which format wrote it and which Mapping it
+  was written through - so a folder arriving in someone else's checkout can be
+  read back without anyone remembering how it was made. A folder you maintain
+  yourself can carry that same description while declining to be overwritten.
 
 ### Keeping gameplay tags tidy
 

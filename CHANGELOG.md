@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased] — 0.7.0 — The Data Resolver
+## 2026-08-17 — 0.7.0 — The Data Resolver
 
 Quest data has always lived inside the `.uasset` binary. That's fine while
 you're authoring one questline in the graph editor, and increasingly awkward

@@ -5,7 +5,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.7.2] — 2026-08-19 — Honest Debug Surfaces
+
+A debug surface that reports the wrong state is worse than one reporting nothing,
+because you act on it. This release corrects three ways the graph debug tooling
+misread live quest state, adds a dimension it was missing, and fixes a runtime
+defect that correcting them uncovered.
 
 ### Added
 

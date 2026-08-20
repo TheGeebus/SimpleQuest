@@ -264,6 +264,17 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CompiledListenerGroupTags.Reset();
 	
 	InGraph->Modify();
+
+	// Move the previous compile's subobjects out of the graph before dropping them. They survive until the next GC, and
+	// the new pass names its nodes deterministically from their tags - so without this, every recompile would collide
+	// with its own predecessor and UE would silently uniquify the name, reintroducing the churn this exists to remove.
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Stale : InGraph->CompiledNodes)
+	{
+		if (UQuestNodeBase* Node = Stale.Value)
+		{
+			Node->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
+		}
+	}
 	InGraph->CompiledNodes.Empty(); 
 	InGraph->CompiledQuestlineRewards.Empty();
 	InGraph->EntryNodeTags.Empty();
@@ -334,6 +345,22 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	
     // Detect renames via GUID bridge
     DetectAndRecordTagRenames(InGraph, OldTagsByGuid);
+
+	// Name each compiled subobject from its own registry key rather than letting NewObject auto-number it. UE's default
+	// naming draws from a per-class counter that keeps advancing, so an unchanged graph produced QuestStep_12 on one
+	// compile and QuestStep_47 on the next - different export tables, a rewritten .uasset, and a binary diff on a graph
+	// nobody touched. The key is unique per compiled node by construction, so it is both stable and collision-free.
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : InGraph->CompiledNodes)
+	{
+		if (UQuestNodeBase* Node = Compiled.Value)
+		{
+			const FString StableName = Compiled.Key.ToString().Replace(TEXT("."), TEXT("_"));
+			if (Node->GetFName() != FName(*StableName))
+			{
+				Node->Rename(*StableName, nullptr, REN_DontCreateRedirectors | REN_DoNotDirty);
+			}
+		}
+	}
 
     RegisterCompiledTags(InGraph);
 
@@ -1620,9 +1647,16 @@ void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_RegisterCompiledTags);
 
-    ISimpleQuestEditorModule::Get().RegisterCompiledTags(
-        InGraph->GetPackage()->GetName(),
-        InGraph->CompiledQuestTags);
+	// A transient graph has no persistent identity, so its tags must not reach the project's compiled tag config: the
+	// registry is keyed by package name, and every transient graph shares /Engine/Transient. Compiling a scratch graph -
+	// an import preview, a tooling fixture, a test - would otherwise write tags into a tracked config that nothing can
+	// later attribute or clean up, since the "asset" they came from never existed on disk.
+	UPackage* Package = InGraph ? InGraph->GetPackage() : nullptr;
+	if (!Package || Package->HasAnyFlags(RF_Transient) || Package == GetTransientPackage()) return;
+
+	ISimpleQuestEditorModule::Get().RegisterCompiledTags(
+		Package->GetName(),
+		InGraph->CompiledQuestTags);
 }
 
 void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourcePathKey>& OutKeys,	TSet<UEdGraph*>& VisitedGraphs)

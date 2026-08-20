@@ -218,6 +218,16 @@ public:
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
     const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
+
+    /**
+     * Sets the tag-namespace identity for this questline, applying the same normalization the details panel does - a
+     * whitespace-only ID is not empty, so it would defeat the asset-name fallback and compose a tag with an empty leaf.
+     *
+     * The ID must be unique across the project: the compiler refuses a graph whose ID is already claimed, so callers
+     * creating questlines programmatically are responsible for choosing one that isn't taken.
+     */
+    void SetQuestlineID(const FString& InQuestlineID);
+    
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }

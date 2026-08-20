@@ -147,6 +147,24 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 }
 
 /**
+ * Checksum archive that sees what a package save sees, and nothing else.
+ *
+ * FArchiveObjectCrc32 is not a persistent archive, so it walks Transient properties too. Those never reach the
+ * .uasset, so comparing them makes the dirty guard report a change for state that was never going to be written -
+ * an asset that would serialize byte-identically still gets marked dirty. CompiledEditorNodes is exactly this case:
+ * rebuilt every compile, transient, and on every questline, which is why it moved the checksum universally.
+ */
+class FQuestCompiledCrc32 : public FArchiveObjectCrc32
+{
+public:
+	virtual bool ShouldSkipProperty(const FProperty* InProperty) const override
+	{
+		if (InProperty && InProperty->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient)) return true;
+		return FArchiveObjectCrc32::ShouldSkipProperty(InProperty);
+	}
+};
+
+/**
  * Checksums the compiled model into LABELED components: the ed-graph, the graph itself, then every compiled node in
  * sorted key order.
  *
@@ -163,17 +181,58 @@ static void CompiledFingerprint(UQuestlineGraph* Graph, TMap<FName, uint32>& Out
 
 	if (Graph->QuestlineEdGraph)
 	{
-		FArchiveObjectCrc32 EdCrc;
+		FQuestCompiledCrc32 EdCrc;
 		Out.Add(TEXT("EdGraph"), EdCrc.Crc32(Graph->QuestlineEdGraph));
 	}
 
-	FArchiveObjectCrc32 GraphCrc;
+	FQuestCompiledCrc32 GraphCrc;
 	Out.Add(TEXT("Graph"), GraphCrc.Crc32(Graph));
 
 	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : Graph->GetCompiledNodes())
 	{
-		FArchiveObjectCrc32 NodeCrc;
+		FQuestCompiledCrc32 NodeCrc;
 		Out.Add(Compiled.Key, Compiled.Value ? NodeCrc.Crc32(Compiled.Value) : 0u);
+	}
+
+	// Diagnostic only: split the graph-level checksum into one component per compiled container, so a mismatch names
+	// the field instead of just the object. Built only when the log will actually show it - the strings are not free.
+	if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
+	{
+		auto CrcOf = [](const TArray<FString>& Parts) { return FCrc::StrCrc32(*FString::Join(Parts, TEXT("|"))); };
+		TArray<FString> Parts;
+
+		for (const FName& Tag : Graph->GetCompiledQuestTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.CompiledQuestTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FName& Tag : Graph->GetEntryNodeTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.EntryNodeTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FQuestCompiledNodeAlias& Alias : Graph->GetCompiledNodeAliases())
+			Parts.Add(FString::Printf(TEXT("%s>%s"), *Alias.ContextualFName.ToString(), *Alias.AliasFName.ToString()));
+		Out.Add(TEXT("G.CompiledNodeAliases"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FGameplayTag& Tag : Graph->GetOutwardSetterGroupTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.OutwardSetterGroupTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FGameplayTag& Tag : Graph->GetListenerGroupTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.ListenerGroupTags"), CrcOf(Parts)); Parts.Reset();
+
+		// Key ORDER, not just membership - a TMap that holds the same pairs in a different layout serializes to
+		// different bytes, and that is one of the candidate churn sources.
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : Graph->GetCompiledNodes())
+			Parts.Add(FString::Printf(TEXT("%s=%s"), *Pair.Key.ToString(), Pair.Value ? *Pair.Value->GetName() : TEXT("null")));
+		Out.Add(TEXT("G.CompiledNodesOrder"), CrcOf(Parts)); Parts.Reset();
+
+		for (const TPair<FName, FQuestCompiledQuestlineRewards>& Source : Graph->GetCompiledQuestlineRewards())
+		{
+			for (const TPair<FGameplayTag, FQuestRewardSet>& Set : Source.Value.RewardsByOutcome)
+			{
+				for (const TObjectPtr<UQuestRewardBase>& Reward : Set.Value.Rewards)
+					Parts.Add(FString::Printf(TEXT("%s/%s/%s"), *Source.Key.ToString(), *Set.Key.ToString(),
+						Reward ? *Reward->GetName() : TEXT("null")));
+			}
+		}
+		Out.Add(TEXT("G.CompiledQuestlineRewards"), CrcOf(Parts));
 	}
 }
 

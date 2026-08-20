@@ -218,6 +218,9 @@ public:
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
     const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
+    const TArray<FGameplayTag>& GetOutwardSetterGroupTags() const { return OutwardSetterGroupTags; }
+    const TArray<FGameplayTag>& GetListenerGroupTags() const { return ListenerGroupTags; }
+    const TMap<FName, FQuestCompiledQuestlineRewards>& GetCompiledQuestlineRewards() const { return CompiledQuestlineRewards; }
 
     /**
      * Sets the tag-namespace identity for this questline, applying the same normalization the details panel does - a

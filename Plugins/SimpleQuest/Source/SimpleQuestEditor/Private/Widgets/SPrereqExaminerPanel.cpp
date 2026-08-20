@@ -1668,10 +1668,6 @@ void SPrereqExaminerPanel::Tick(const FGeometry& AllottedGeometry, const double 
 EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-    UE_LOG(LogSimpleQuest, Verbose, TEXT("ComputeDebugState: idx=%d valid=%d channel=%d active=%d type=%d"),
-        NodeIndex, Tree.Nodes.IsValidIndex(NodeIndex) ? 1 : 0, Channel ? 1 : 0,
-        (Channel && Channel->IsActive()) ? 1 : 0,
-        Tree.Nodes.IsValidIndex(NodeIndex) ? (int32)Tree.Nodes[NodeIndex].Type : -1);
 
     if (!Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
     

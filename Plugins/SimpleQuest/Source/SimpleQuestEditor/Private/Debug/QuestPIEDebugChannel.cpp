@@ -170,7 +170,7 @@ bool FQuestPIEDebugChannel::ResolvePIESubsystems()
 		CachedQuestState.IsValid() ? TEXT("resolved") : TEXT("NULL"));
 	
 	// IsActive() condition unchanged: WorldState + QuestManager are the load-bearing pair for existing queries
-	// (QueryNodeState, QueryLeafState, HasFact). QuestState is a separately-checked optional resource for the
+	// (QueryNodeState, TryGetPrereqStatusForNode, HasFact). QuestState is a separately-checked optional resource for the
 	// Quest State view; failures to resolve it don't disable the rest of the channel.
 	return CachedWorldState.IsValid() && CachedQuestManager.IsValid();
 }
@@ -248,8 +248,6 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 	UQuestManagerSubsystem* Manager = CachedQuestManager.Get();
 	if (!WorldState || !StateSubsystem || !Manager)
 	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("TryGetPrereqStatusForNode: subsystems unresolved (WS=%d QSS=%d QM=%d)"),
-			WorldState ? 1 : 0, StateSubsystem ? 1 : 0, Manager ? 1 : 0);
 		return false;
 	}
 
@@ -265,8 +263,6 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 			Instance = Manager->FindNodeInstance(Canonical);
 			if (Instance)
 			{
-				UE_LOG(LogSimpleQuest, Verbose, TEXT("TryGetPrereqStatusForNode: '%s' resolved to running placement '%s'"),
-					*RuntimeTag.ToString(), *Canonical.ToString());
 				break;
 			}
 		}
@@ -278,13 +274,6 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 	}
 
 	OutStatus = Instance->GetPrerequisiteStatus(WorldState, StateSubsystem);
-
-	UE_LOG(LogSimpleQuest, Verbose, TEXT("TryGetPrereqStatusForNode: '%s' always=%d satisfied=%d leaves=%d"),
-		*RuntimeTag.ToString(), OutStatus.bIsAlways ? 1 : 0, OutStatus.bSatisfied ? 1 : 0, OutStatus.Leaves.Num());
-	for (const FQuestPrereqLeafStatus& Leaf : OutStatus.Leaves)
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("  runtime leaf: %s = %d"), *Leaf.LeafTag.ToString(), Leaf.bSatisfied ? 1 : 0);
-	}
 	return true;
 }
 

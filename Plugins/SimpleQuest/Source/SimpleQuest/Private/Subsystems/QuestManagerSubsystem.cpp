@@ -2936,13 +2936,15 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     const bool bCurrentlyLive = FQuestLifecycleQuery::IsLive(WorldState, ContainerTag);
     if (bAnyInnerLive && !bCurrentlyLive)
     {
-        WorldState->AddFact(ContainerLiveFact);
+        // Across perspectives, like every other lifecycle write: a container queried through an alias spelling must
+        // read Live the same as through its canonical, or observers bound on that perspective never see it start.
+        AddStateFactAcrossPerspectives(ContainerTag, EQuestStateLeaf::Live);
         MarkQuestStarted(ContainerTag);
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("DeriveContainerLive: '%s' → Live (inner Step now active)"), *ContainerTag.ToString());
     }
     else if (!bAnyInnerLive && bCurrentlyLive)
     {
-        WorldState->RemoveFact(ContainerLiveFact);
+        RemoveStateFactAcrossPerspectives(ContainerTag, EQuestStateLeaf::Live);
         // ResolvedByEvents is intentionally NOT cleared here. Under multi-tag fanout, a single logical gameplay
         // event can produce two sequential cascades (one per per-context Step), and the first cascade's resolution
         // causes this branch to fire mid-event — clearing the set here would empty it before the second cascade

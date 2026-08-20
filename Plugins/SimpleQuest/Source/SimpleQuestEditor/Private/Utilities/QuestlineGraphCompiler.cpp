@@ -123,13 +123,15 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 		FQuestRewardSet DuplicatedSet;
 		DuplicatedSet.Rewards.Reserve(OutcomePair.Value.Rewards.Num());
 		const FString OutcomeSegment = OutcomePair.Key.ToString().Replace(TEXT("."), TEXT("_"));
+		const FString SourceSegment = IdentityName.ToString().Replace(TEXT("."), TEXT("_"));
 		for (int32 RewardIndex = 0; RewardIndex < OutcomePair.Value.Rewards.Num(); ++RewardIndex)
 		{
-			// Outer is the GRAPH, not a per-compile node, so these names must be both stable AND unique across outcomes -
-			// hence the outcome tag in the name. The previous compile's instances are retired in Compile before the map is
-			// emptied, so a stable name cannot collide with its own predecessor.
+			// Outer is the GRAPH, so the name must be unique across everything this compile puts there - and this function
+			// runs once PER SOURCE QUESTLINE, every one of them outering into the same graph. Two questlines sharing an
+			// outcome would otherwise claim the same name, which is a hard crash when their reward classes differ.
+			// IdentityName is the per-source key these are recorded under, so it is exactly the missing segment.
 			const TObjectPtr<UQuestRewardBase>& Authored_Reward = OutcomePair.Value.Rewards[RewardIndex];
-			const FString RewardName = FString::Printf(TEXT("QuestlineReward_%s_%d"), *OutcomeSegment, RewardIndex);
+			const FString RewardName = FString::Printf(TEXT("QuestlineReward_%s_%s_%d"), *SourceSegment, *OutcomeSegment, RewardIndex);
 			DuplicatedSet.Rewards.Add(Authored_Reward
 				? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph, *RewardName)
 				: nullptr);

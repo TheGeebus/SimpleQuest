@@ -53,6 +53,7 @@
 #include "Quests/RemoveFactNode.h"
 #include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
+#include "Serialization/ArchiveObjectCrc32.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
@@ -145,13 +146,73 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 	}
 }
 
+/**
+ * Checksums the compiled model into LABELED components: the ed-graph, the graph itself, then every compiled node in
+ * sorted key order.
+ *
+ * Deliberately NOT a hand-listed set of fields - the checksum archive walks whatever serialization walks, which is
+ * whatever the .uasset contains, so a compiled field added later is covered without anyone enrolling it here.
+ *
+ * The ed-graph gets its own entry even though the graph-level checksum already recurses into it, because that is the
+ * one component that is compiler INPUT rather than output. Separating it means a mismatch can say which side moved.
+ */
+static void CompiledFingerprint(UQuestlineGraph* Graph, TMap<FName, uint32>& Out)
+{
+	Out.Reset();
+	if (!Graph) return;
+
+	if (Graph->QuestlineEdGraph)
+	{
+		FArchiveObjectCrc32 EdCrc;
+		Out.Add(TEXT("EdGraph"), EdCrc.Crc32(Graph->QuestlineEdGraph));
+	}
+
+	FArchiveObjectCrc32 GraphCrc;
+	Out.Add(TEXT("Graph"), GraphCrc.Crc32(Graph));
+
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : Graph->GetCompiledNodes())
+	{
+		FArchiveObjectCrc32 NodeCrc;
+		Out.Add(Compiled.Key, Compiled.Value ? NodeCrc.Crc32(Compiled.Value) : 0u);
+	}
+}
+
+/** Logs every component that moved between two fingerprints, and returns whether any did. */
+static bool FingerprintDiffers(const TMap<FName, uint32>& Before, const TMap<FName, uint32>& After, const FString& GraphName)
+{
+	bool bDiffers = false;
+	for (const TPair<FName, uint32>& Entry : After)
+	{
+		const uint32* Prior = Before.Find(Entry.Key);
+		if (!Prior)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': ADDED '%s'"), *GraphName, *Entry.Key.ToString());
+			bDiffers = true;
+		}
+		else if (*Prior != Entry.Value)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': CHANGED '%s' (0x%08X -> 0x%08X)"),
+				*GraphName, *Entry.Key.ToString(), *Prior, Entry.Value);
+			bDiffers = true;
+		}
+	}
+	for (const TPair<FName, uint32>& Entry : Before)
+	{
+		if (!After.Contains(Entry.Key))
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': REMOVED '%s'"), *GraphName, *Entry.Key.ToString());
+			bDiffers = true;
+		}
+	}
+	return bDiffers;
+}
+
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
 {
 }
 
 FQuestlineGraphCompiler::~FQuestlineGraphCompiler() = default;
-
 
 // -------------------------------------------------------------------------------------------------
 // Entry point
@@ -273,7 +334,12 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CompiledSetterGroupTags.Reset();
 	CompiledListenerGroupTags.Reset();
 	
-	InGraph->Modify();
+	// Fingerprint what is already compiled BEFORE tearing it down, so the end of the compile can tell whether anything
+	// actually changed. Modify() is deliberately NOT called here: it dirties the package before the compile can possibly
+	// know whether it will change anything, which is how eleven untouched assets end up wanting to be saved.
+	TMap<FName, uint32> PreCompileFingerprint;
+	CompiledFingerprint(InGraph, PreCompileFingerprint);
+	const bool bPackageWasDirtyBeforeCompile = InGraph->GetPackage() && InGraph->GetPackage()->IsDirty();
 
 	// Move the previous compile's subobjects out of the graph before dropping them. They survive until the next GC, and
 	// the new pass names its nodes deterministically from their tags - so without this, every recompile would collide
@@ -389,13 +455,31 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 		}
 	}
 
-    RegisterCompiledTags(InGraph);
-
-	// Phase 1 of container lifecycle alignment — compute structural reachability data so the downstream
+	RegisterCompiledTags(InGraph);
+	// Phase 1 of container lifecycle alignment - compute structural reachability data so the downstream
 	// lifecycle methods (SetQuestLive auto-propagation, path-aware giver gate, etc.) can branch on
 	// structural containment rather than re-deriving it at runtime.
 	ComputeContainerReachability(InGraph);
 	BuildRewardManifest(InGraph);
+
+	// Dirty the package only if the compile actually produced something different. Two ordering constraints, both of them
+	// load-bearing. It must come AFTER the naming pass, because only then do old and new nodes share names and the object
+	// references inside them resolve to identical paths - before it, every reference differs and this could only ever
+	// report "changed". And it must come after the LAST writer of compiled state, which is BuildRewardManifest, or those
+	// writes land outside the compared window and the comparison silently answers a narrower question than it appears to.
+	TMap<FName, uint32> PostCompileFingerprint;
+	CompiledFingerprint(InGraph, PostCompileFingerprint);
+
+	if (FingerprintDiffers(PreCompileFingerprint, PostCompileFingerprint, InGraph->GetName()))
+	{
+		InGraph->Modify();
+	}
+	else if (UPackage* Package = InGraph->GetPackage())
+	{
+		// Nothing observable changed. The subobjects are fresh instances but byte-identical in content, so a save would
+		// write the same file — marking the asset dirty would only prompt the user to re-save what they already have.
+		Package->SetDirtyFlag(bPackageWasDirtyBeforeCompile);
+	}
 	
     UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
         *InGraph->GetName(),

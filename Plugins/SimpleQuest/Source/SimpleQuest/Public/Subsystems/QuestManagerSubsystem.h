@@ -21,6 +21,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestGiveBlockedEvent;
 struct FQuestProgressRefusedEvent;
 struct FQuestGraphResolution;
 struct FQuestActivationRequestEvent;
@@ -542,6 +543,12 @@ private:
 	 * listening keeps the manager the only writer and covers any future publisher without another edit.
 	 */
 	void HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
+
+	/**
+	 * Records a refused give into the same refusal history as a refused interaction. Separate handler rather than a shared
+	 * template because the two payload types differ and a template over two call sites reads worse than the duplication.
+	 */
+	void HandleGiveBlockedForRecord(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
 	
 	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
@@ -565,6 +572,7 @@ private:
 	FDelegateHandle ResolveRequestDelegateHandle;
 	FDelegateHandle QuestlineStartRequestDelegateHandle;
 	FDelegateHandle ProgressRefusedRecordHandle;
+	FDelegateHandle GiveBlockedRecordHandle;
 
 	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
 

@@ -181,6 +181,7 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
             // valid tag. Trim it to get the root every node tag descends from.
             const FString RefusalRoot = FQuestTagComposer::IdentityNamespace.LeftChop(1);
             ProgressRefusedRecordHandle = QuestSignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(FGameplayTag::RequestGameplayTag(FName(*RefusalRoot), false), this, &UQuestManagerSubsystem::HandleProgressRefusedForRecord);
+            GiveBlockedRecordHandle = QuestSignalSubsystem->SubscribeMessage<FQuestGiveBlockedEvent>(FGameplayTag::RequestGameplayTag(FName(*RefusalRoot), false), this, &UQuestManagerSubsystem::HandleGiveBlockedForRecord);
         }
     }
 
@@ -1457,6 +1458,13 @@ void UQuestManagerSubsystem::HandleOnNodeActivationRefused(UQuestNodeBase* Node,
     {
         QuestStateSubsystem->RecordActivationRefusal(InContextualTag, EQuestActivationBlocker::PrereqUnmet, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
     }
+}
+
+void UQuestManagerSubsystem::HandleGiveBlockedForRecord(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event)
+{
+    if (!QuestStateSubsystem || Event.Blockers.Num() == 0 || !Event.QuestTag.IsValid()) return;
+
+    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
 }
 
 void UQuestManagerSubsystem::HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)

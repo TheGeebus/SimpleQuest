@@ -14,6 +14,22 @@ defect that correcting them uncovered.
 
 ### Added
 
+- **Quests keep a history of refused attempts.** Interacting with a step whose
+  prerequisites aren't met, or asking a giver for a quest it can't hand over,
+  was already broadcast as an event — but an event only reaches whoever was
+  subscribed at the moment it fired. Those refusals are now also recorded, and
+  `Get Refusal History` returns them per quest with the reason and the time.
+  A journal, a hint system, or a "you can't do that yet" prompt can ask what
+  the player has been refused rather than having to be listening when it
+  happened. The history is session-scoped and bounded, so it isn't carried in
+  save games and a player who retries repeatedly can't grow it without limit.
+- **A node pulses in the graph debug overlay when an attempt to advance it is
+  refused.** Interacting with a step that isn't ready, or a give that can't
+  proceed, flashes the node's lifecycle color and fades over about half a
+  second. It pulses the lifecycle layer specifically, because a refusal is the
+  absence of a state change — the pulse marks what *didn't* advance. A node
+  holding no state yet flashes and fades to nothing, which is what the
+  attempted transition did.
 - **The graph debug overlay shows why a node can't proceed.** A node waiting on
   unsatisfied prerequisites, or explicitly blocked, now wears a ring outside its
   state color - drawn in the prerequisite wire's own color for a prerequisite

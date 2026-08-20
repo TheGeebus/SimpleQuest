@@ -122,9 +122,17 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 
 		FQuestRewardSet DuplicatedSet;
 		DuplicatedSet.Rewards.Reserve(OutcomePair.Value.Rewards.Num());
-		for (const TObjectPtr<UQuestRewardBase>& Authored_Reward : OutcomePair.Value.Rewards)
+		const FString OutcomeSegment = OutcomePair.Key.ToString().Replace(TEXT("."), TEXT("_"));
+		for (int32 RewardIndex = 0; RewardIndex < OutcomePair.Value.Rewards.Num(); ++RewardIndex)
 		{
-			DuplicatedSet.Rewards.Add(Authored_Reward ? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph) : nullptr);
+			// Outer is the GRAPH, not a per-compile node, so these names must be both stable AND unique across outcomes -
+			// hence the outcome tag in the name. The previous compile's instances are retired in Compile before the map is
+			// emptied, so a stable name cannot collide with its own predecessor.
+			const TObjectPtr<UQuestRewardBase>& Authored_Reward = OutcomePair.Value.Rewards[RewardIndex];
+			const FString RewardName = FString::Printf(TEXT("QuestlineReward_%s_%d"), *OutcomeSegment, RewardIndex);
+			DuplicatedSet.Rewards.Add(Authored_Reward
+				? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph, *RewardName)
+				: nullptr);
 		}
 		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
 	}
@@ -275,6 +283,23 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 			Node->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
 		}
 	}
+
+	// Questline-level rewards are outered to the graph itself, so they outlive the map that references them exactly as the
+	// nodes do, and their now-stable names would collide with the next compile's.
+	for (const TPair<FName, FQuestCompiledQuestlineRewards>& StaleGraph : InGraph->CompiledQuestlineRewards)
+	{
+		for (const TPair<FGameplayTag, FQuestRewardSet>& StaleSet : StaleGraph.Value.RewardsByOutcome)
+		{
+			for (const TObjectPtr<UQuestRewardBase>& StaleReward : StaleSet.Value.Rewards)
+			{
+				if (StaleReward)
+				{
+					StaleReward->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
+				}
+			}
+		}
+	}
+
 	InGraph->CompiledNodes.Empty(); 
 	InGraph->CompiledQuestlineRewards.Empty();
 	InGraph->EntryNodeTags.Empty();
@@ -1078,9 +1103,15 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(
         	// instances (per-placement isolation for future escrow state). A shallow assign would share the editor
         	// node's sub-objects. Null array slots are preserved as null and skipped at runtime.
         	Inst->Rewards.Reserve(RewardEdNode->Rewards.Num());
-        	for (const TObjectPtr<UQuestRewardBase>& Authored : RewardEdNode->Rewards)
+        	for (int32 RewardIndex = 0; RewardIndex < RewardEdNode->Rewards.Num(); ++RewardIndex)
         	{
-        		Inst->Rewards.Add(Authored ? DuplicateObject<UQuestRewardBase>(Authored, Inst) : nullptr);
+        		// Named from the authored position rather than left to auto-numbering, which draws from a counter that keeps
+        		// advancing and so renames every reward on every compile. Position is the right identity here: reordering
+        		// authored rewards IS an edit, and should change the asset.
+        		const TObjectPtr<UQuestRewardBase>& Authored = RewardEdNode->Rewards[RewardIndex];
+        		Inst->Rewards.Add(Authored
+					? DuplicateObject<UQuestRewardBase>(Authored, Inst, *FString::Printf(TEXT("Reward_%d"), RewardIndex))
+					: nullptr);
         	}
         	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;

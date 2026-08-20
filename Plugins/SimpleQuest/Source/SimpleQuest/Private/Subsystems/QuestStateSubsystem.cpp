@@ -140,6 +140,34 @@ TArray<FQuestResolutionEntry> UQuestStateSubsystem::GetResolutionHistory(FGamepl
 	return Result;
 }
 
+void UQuestStateSubsystem::RecordActivationRefusal(FGameplayTag QuestTag, EQuestActivationBlocker Reason, double RefusalTime)
+{
+	if (!QuestTag.IsValid()) return;
+
+	// Multi-perspective write, symmetric with RecordResolution: a refusal must be readable through whichever spelling
+	// the querying surface holds, or an alias-perspective consumer sees a quest that was never refused.
+	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
+	{
+		FQuestRefusalRecord& Record = QuestRefusals.FindOrAdd(Perspective);
+		FQuestRefusalEntry& Entry = Record.History.Emplace_GetRef();
+		Entry.Reason = Reason;
+		Entry.RefusalTime = RefusalTime;
+
+		const int32 Excess = Record.History.Num() - FQuestRefusalRecord::MaxEntries;
+		if (Excess > 0) Record.History.RemoveAt(0, Excess, EAllowShrinking::No);
+	});
+
+	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::RecordActivationRefusal : '%s' reason=%d at t=%.2fs"),
+		*QuestTag.ToString(), (int32)Reason, RefusalTime);
+	OnAnyRegistryChanged.Broadcast();
+}
+
+TArray<FQuestRefusalEntry> UQuestStateSubsystem::GetRefusalHistory(FGameplayTag QuestTag) const
+{
+	if (const FQuestRefusalRecord* Record = QuestRefusals.Find(QuestTag)) return Record->History;
+	return TArray<FQuestRefusalEntry>();
+}
+
 FQuestResolutionEntry UQuestStateSubsystem::GetLatestResolution(FGameplayTag QuestTag) const
 {
 	if (const FQuestResolutionRecord* Record = QuestResolutions.Find(QuestTag))

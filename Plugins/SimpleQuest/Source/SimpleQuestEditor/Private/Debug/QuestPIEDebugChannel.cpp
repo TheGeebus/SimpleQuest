@@ -230,18 +230,31 @@ TArray<FQuestActivationBlocker> FQuestPIEDebugChannel::QueryNodeGating(const UEd
 	return Out;
 }
 
+float FQuestPIEDebugChannel::GetRefusalPulseAlpha(const UEdGraphNode* EditorNode) const
+{
+	if (!IsActive()) return 0.f;
+
+	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
+	if (!StateSubsystem) return 0.f;
+
+	const FGameplayTag RuntimeTag = ResolveRuntimeTag(EditorNode);
+	if (!RuntimeTag.IsValid()) return 0.f;
+
+	// The history is written across perspectives, so whichever spelling ResolveRuntimeTag produced will find it.
+	const TArray<FQuestRefusalEntry> History = StateSubsystem->GetRefusalHistory(RuntimeTag);
+	if (History.Num() == 0) return 0.f;
+
+	const double Elapsed = GetCurrentGameTimeSeconds() - History.Last().RefusalTime;
+	if (Elapsed < 0.0 || Elapsed > RefusalPulseSeconds) return 0.f;
+	return 1.f - static_cast<float>(Elapsed / RefusalPulseSeconds);
+}
+
 bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* EditorNode, FQuestPrereqStatus& OutStatus) const
 {
 	if (!IsActive()) return false;
 
 	const FGameplayTag RuntimeTag = ResolveRuntimeTag(EditorNode);
-	if (!RuntimeTag.IsValid())
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("TryGetPrereqStatusForNode: no runtime tag for editor node '%s' (class=%s)"),
-			EditorNode ? *EditorNode->GetName() : TEXT("(null)"),
-			EditorNode ? *EditorNode->GetClass()->GetName() : TEXT("(null)"));
-		return false;
-	}
+	if (!RuntimeTag.IsValid()) return false;
 
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
@@ -267,11 +280,7 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 			}
 		}
 	}
-	if (!Instance)
-	{
-		UE_LOG(LogSimpleQuest, Verbose, TEXT("TryGetPrereqStatusForNode: no instance for '%s' under any perspective"), *RuntimeTag.ToString());
-		return false;
-	}
+	if (!Instance) return false;
 
 	OutStatus = Instance->GetPrerequisiteStatus(WorldState, StateSubsystem);
 	return true;

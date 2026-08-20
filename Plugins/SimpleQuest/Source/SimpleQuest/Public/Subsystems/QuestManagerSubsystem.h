@@ -21,6 +21,7 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestProgressRefusedEvent;
 struct FQuestGraphResolution;
 struct FQuestActivationRequestEvent;
 struct FQuestBlockRequestEvent;
@@ -533,6 +534,16 @@ private:
 	UFUNCTION()
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
+	void HandleOnNodeActivationRefused(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	
+	/**
+	 * Records a published progress refusal into the state subsystem's refusal history. Subscribed rather than called at
+	 * each publish site because UQuestTriggerComponent publishes one of these too, and components do not write state -
+	 * listening keeps the manager the only writer and covers any future publisher without another edit.
+	 */
+	void HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
+	
+	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
 	
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
@@ -553,6 +564,7 @@ private:
 	FDelegateHandle ClearBlockRequestDelegateHandle;
 	FDelegateHandle ResolveRequestDelegateHandle;
 	FDelegateHandle QuestlineStartRequestDelegateHandle;
+	FDelegateHandle ProgressRefusedRecordHandle;
 
 	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
 

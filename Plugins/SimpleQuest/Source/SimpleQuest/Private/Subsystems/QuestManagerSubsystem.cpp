@@ -176,6 +176,11 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
             ClearBlockRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestClearBlockRequestEvent>(Tag_Channel_QuestClearBlockRequest, this, &UQuestManagerSubsystem::HandleClearBlockRequest);
             ResolveRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestResolveRequestEvent>(Tag_Channel_QuestResolveRequest, this, &UQuestManagerSubsystem::HandleResolveRequest);
             QuestlineStartRequestDelegateHandle = QuestSignalSubsystem->SubscribeMessage<FQuestlineStartRequestEvent>(Tag_Channel_QuestlineStartRequest, this, &UQuestManagerSubsystem::HandleQuestlineStartRequest);
+            
+            // IdentityNamespace carries a trailing dot for concatenation ("SimpleQuest.Questline."), which is not a
+            // valid tag. Trim it to get the root every node tag descends from.
+            const FString RefusalRoot = FQuestTagComposer::IdentityNamespace.LeftChop(1);
+            ProgressRefusedRecordHandle = QuestSignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(FGameplayTag::RequestGameplayTag(FName(*RefusalRoot), false), this, &UQuestManagerSubsystem::HandleProgressRefusedForRecord);
         }
     }
 
@@ -391,6 +396,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             Instance->OnRegisteredWithManager();
             Instance->OnNodeCompleted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeCompleted);
             Instance->OnNodeStarted.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeStarted);
+            Instance->OnNodeActivationRefused.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeActivationRefused);
             Instance->OnNodeForwardActivated.BindDynamic(this, &UQuestManagerSubsystem::HandleOnNodeForwardActivated);
             const FGameplayTag ResolvedTag = Instance->GetContextualTag();
             if (ResolvedTag.IsValid() && QuestSignalSubsystem)
@@ -1442,6 +1448,24 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
     }
 }
 
+void UQuestManagerSubsystem::HandleOnNodeActivationRefused(UQuestNodeBase* Node, FGameplayTag InContextualTag)
+{
+    // Recorded, not published. A deferral is normal gating rather than a failure, so raising FQuestActivationFailedEvent
+    // for it would tell observers something went wrong when nothing did. The record answers "did an activation just reach
+    // this node and stop here", which is the question with no other source.
+    if (QuestStateSubsystem && InContextualTag.IsValid())
+    {
+        QuestStateSubsystem->RecordActivationRefusal(InContextualTag, EQuestActivationBlocker::PrereqUnmet, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+    }
+}
+
+void UQuestManagerSubsystem::HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
+{
+    if (!QuestStateSubsystem || Event.Blockers.Num() == 0 || !Event.QuestTag.IsValid()) return;
+
+    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+}
+
 void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
 {
     if (!Node) return;
@@ -1577,6 +1601,10 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         {
             FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyLive, Context));
+            if (QuestStateSubsystem)
+            {
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyLive, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+            }
         }
         return;
     }
@@ -1589,6 +1617,10 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         {
             FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyPendingGiver, Context));
+            if (QuestStateSubsystem)
+            {
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyPendingGiver, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+            }
         }
         return;
     }
@@ -1642,6 +1674,10 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         {
             FQuestEventPayload Context = AssembleEventContext(Instance, FQuestObjectiveTriggerContext());
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::Blocked, Context));
+            if (QuestStateSubsystem)
+            {
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::Blocked, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+            }
         }
         return;
 

@@ -35,6 +35,7 @@ namespace PIEOverlay_Style
     // which is deliberately the prerequisite wire's own hue so a gated node and the wire gating it read as one idea.
     static const FLinearColor GateBlocked  = FLinearColor(FColor(230,  60,  60));  // red — externally locked out
     static const FLinearColor GatePrereq   = FLinearColor(0.603212f, 0.128689f, 0.651406f);
+    static const FLinearColor RefusalPulse = FLinearColor::Red /* FLinearColor(FColor(255, 70, 70)) */ ;   // refused activation — fades out
 
     const FLinearColor& ColorForState(EQuestNodeDebugState State)
     {
@@ -403,15 +404,24 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
                 const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
                 if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
 
-                if (State != EQuestNodeDebugState::Unknown)
+                // A refusal is the ABSENCE of a state change, so it pulses the lifecycle halo - the layer that should have
+                // advanced and didn't. On a node holding no state at all, the halo appears in the pulse color and fades to
+                // nothing, which is what the attempted transition did.
+                const float RefusalAlpha = DebugChannel->GetRefusalPulseAlpha(Node);
+                const bool bHasState = State != EQuestNodeDebugState::Unknown;
+                if (bHasState || RefusalAlpha > 0.f)
                 {
+                    FLinearColor HaloColor = bHasState ? PIEOverlay_Style::ColorForState(State) : PIEOverlay_Style::RefusalPulse;
+                    if (bHasState && RefusalAlpha > 0.f) HaloColor = FMath::Lerp(HaloColor, PIEOverlay_Style::RefusalPulse, RefusalAlpha);
+                    if (!bHasState) HaloColor.A = RefusalAlpha;
+
                     FSlateDrawElement::MakeBox(
                         OutDrawElements,
                         DebugOverlayLayer,
                         NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
                         DebugBrush,
                         ESlateDrawEffect::None,
-                        PIEOverlay_Style::ColorForState(State)
+                        HaloColor
                     );
                 }
 

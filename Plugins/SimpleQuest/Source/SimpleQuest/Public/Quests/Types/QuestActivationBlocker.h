@@ -59,3 +59,40 @@ struct SIMPLEQUEST_API FQuestActivationBlocker
 	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
 	TArray<FGameplayTag> UnsatisfiedLeafTags;
 };
+
+/**
+ * One refused activation attempt, appended to a quest's refusal history. Session-scoped and deliberately NOT SaveGame:
+ * refusals are diagnostic history rather than progression state, and a save that carried them would grow without bound.
+ */
+USTRUCT(BlueprintType)
+struct SIMPLEQUEST_API FQuestRefusalEntry
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
+	EQuestActivationBlocker Reason = EQuestActivationBlocker::PrereqUnmet;
+
+	/** World time the refusal occurred, in the manager's GetTimeSeconds domain. */
+	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
+	double RefusalTime = 0.0;
+};
+
+/**
+ * Per-quest refusal history, the durable counterpart to FQuestActivationFailedEvent. An event reaches only whoever was
+ * subscribed when it fired; this is what a surface that arrived afterwards - a panel, a joining client - can still read.
+ *
+ * Bounded, because a refusal repeats every time a player retries a blocked interaction and unbounded growth would be a
+ * leak on exactly the input a frustrated player produces most of.
+ */
+USTRUCT(BlueprintType)
+struct SIMPLEQUEST_API FQuestRefusalRecord
+{
+	GENERATED_BODY()
+
+	/** Most recent last. Capped at MaxEntries; oldest are dropped. */
+	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
+	TArray<FQuestRefusalEntry> History;
+
+	static constexpr int32 MaxEntries = 16;
+};
+

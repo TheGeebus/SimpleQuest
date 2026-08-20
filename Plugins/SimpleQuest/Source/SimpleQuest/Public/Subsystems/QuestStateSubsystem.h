@@ -116,7 +116,14 @@ public:
      * Empty array if the quest hasn't resolved this session.
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
-    TArray<FQuestResolutionEntry> GetResolutionHistory(FGameplayTag QuestTag) const;
+	TArray<FQuestResolutionEntry> GetResolutionHistory(FGameplayTag QuestTag) const;
+
+	/**
+	 * Returns this session's refused activation attempts for a quest, oldest first. Empty if it has never been refused.
+	 * Bounded — see FQuestRefusalRecord — so a long session reports the most recent refusals rather than all of them.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|State")
+	TArray<FQuestRefusalEntry> GetRefusalHistory(FGameplayTag QuestTag) const;
 
     /** Returns the most recent resolution entry for a quest, or a default-constructed entry if no resolutions. */
     UFUNCTION(BlueprintCallable, Category = "Quest|State")
@@ -430,8 +437,12 @@ public:
 private:
     friend class UQuestManagerSubsystem;
 
-    UPROPERTY()
-    TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
+	UPROPERTY()
+	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;
+
+	/** Refused activation attempts by perspective, written by RecordActivationRefusal. Session-scoped, not saved. */
+	UPROPERTY()
+	TMap<FGameplayTag, FQuestRefusalRecord> QuestRefusals;
 
     /**
      * Parallel O(1) index for HasResolvedWith. Maintained alongside QuestResolutions: every RecordResolution call
@@ -498,6 +509,8 @@ private:
 	    const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
 	    FName PathIdentity,
 	    const FOriginatingEventID& OriginatingEventID = {});
+
+	void RecordActivationRefusal(FGameplayTag QuestTag, EQuestActivationBlocker Reason, double RefusalTime);
 
 	/**
 	 * Registers ContextualTag into KnownQuests with a default-constructed FQuestRuntimeRecord stamped with current world time.

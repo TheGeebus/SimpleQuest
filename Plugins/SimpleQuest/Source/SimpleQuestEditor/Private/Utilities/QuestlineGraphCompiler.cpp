@@ -339,23 +339,7 @@ uint32 FQuestlineGraphCompiler::ComputeSourceHash(UQuestlineGraph* Root)
 		const uint32 GraphCrc = Crc.Crc32(Current->QuestlineEdGraph);
 		CrcByPath.Add(Current->GetPathName(), GraphCrc);
 
-		// Verbose-only: dump every authoring node's saved properties so the SAME walk can be compared at compile time
-		// and at open time. The checksum says the input drifted across a save/load round trip; only the text says what
-		// drifted. One line per property, tagged so the two runs can be diffed out of the log.
-		if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
-		{
-			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SourceHash WALK '%s' = 0x%08X"), *Current->GetName(), GraphCrc);
-			for (UEdGraphNode* Node : Current->QuestlineEdGraph->Nodes)
-			{
-				if (!Node) continue;
-				TArray<FString> Lines;
-				DumpSavedProperties(Node).ParseIntoArrayLines(Lines);
-				for (const FString& Line : Lines)
-				{
-					UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SrcProp|%s|%s|%s"), *Current->GetName(), *Node->GetName(), *Line);
-				}
-			}
-		}
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SourceHash WALK '%s' = 0x%08X"), *Current->GetName(), GraphCrc);
 
 		for (UEdGraphNode* Node : Current->QuestlineEdGraph->Nodes)
 		{

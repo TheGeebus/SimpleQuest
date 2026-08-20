@@ -9,6 +9,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
+#include "Internationalization/TextPackageNamespaceUtil.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -165,6 +166,21 @@ public:
 };
 
 /**
+ * Re-home a display FText into the package that will actually save it, keeping its localization key.
+ *
+ * Compiled nodes copy their text from the authoring node, which for a linked questline lives in a DIFFERENT package.
+ * UE stamps every saved FText with its owning package's localization namespace, and the default copy method mints a
+ * NEW key whenever that namespace changes. So the text arrives carrying the source package's namespace, saving
+ * re-keys it into this one, and the next compile drags the source namespace back in - a loop that rewrites the
+ * .uasset on every compile with no authored change behind it. PreserveKey keeps existing translations attached.
+ */
+static FText RehomeDisplayText(const FText& Source, UObject* Target)
+{
+	if (Source.IsEmpty() || !Target) return Source;
+	return TextNamespaceUtil::CopyTextToPackage(Source, Target,	TextNamespaceUtil::ETextCopyMethod::PreserveKey, true);
+}
+
+/**
  * Checksums the compiled model into LABELED components: the ed-graph, the graph itself, then every compiled node in
  * sorted key order.
  *
@@ -233,6 +249,40 @@ static void CompiledFingerprint(UQuestlineGraph* Graph, TMap<FName, uint32>& Out
 			}
 		}
 		Out.Add(TEXT("G.CompiledQuestlineRewards"), CrcOf(Parts));
+	}
+}
+
+/** Renders an object's saved properties as text, one per line, so two compiles can be diffed field by field. */
+static FString DumpSavedProperties(UObject* Obj)
+{
+	if (!Obj) return FString();
+	TStringBuilder<4096> Sb;
+	for (TFieldIterator<FProperty> It(Obj->GetClass()); It; ++It)
+	{
+		FProperty* Prop = *It;
+		if (!Prop || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient)) continue;
+		FString Value;
+		Prop->ExportText_InContainer(0, Value, Obj, Obj, Obj, PPF_None);
+		Sb << Prop->GetName() << TEXT(" = ") << Value << TEXT("\n");
+	}
+	return FString(Sb);
+}
+
+/** Logs only the lines that differ between two property dumps. Verbose-only; the dumps are large. */
+static void LogPropertyDelta(const FString& GraphName, FName NodeKey, const FString& Before, const FString& After)
+{
+	TArray<FString> B, A;
+	Before.ParseIntoArrayLines(B);
+	After.ParseIntoArrayLines(A);
+	for (int32 i = 0; i < FMath::Max(B.Num(), A.Num()); ++i)
+	{
+		const FString& Bl = B.IsValidIndex(i) ? B[i] : FString();
+		const FString& Al = A.IsValidIndex(i) ? A[i] : FString();
+		if (Bl != Al)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("  Delta '%s'/'%s':\n    was: %s\n    now: %s"),
+				*GraphName, *NodeKey.ToString(), *Bl, *Al);
+		}
 	}
 }
 
@@ -400,6 +450,17 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CompiledFingerprint(InGraph, PreCompileFingerprint);
 	const bool bPackageWasDirtyBeforeCompile = InGraph->GetPackage() && InGraph->GetPackage()->IsDirty();
 
+	// Verbose-only: capture each compiled node's saved properties as text NOW, while the previous compile's nodes are
+	// still alive. After the teardown below they are gone, and a checksum delta on its own cannot name a field.
+	TMap<FName, FString> PreCompileNodeText;
+	if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
+	{
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : InGraph->GetCompiledNodes())
+		{
+			PreCompileNodeText.Add(Pair.Key, DumpSavedProperties(Pair.Value));
+		}
+	}
+
 	// Move the previous compile's subobjects out of the graph before dropping them. They survive until the next GC, and
 	// the new pass names its nodes deterministically from their tags - so without this, every recompile would collide
 	// with its own predecessor and UE would silently uniquify the name, reintroducing the churn this exists to remove.
@@ -532,6 +593,19 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	if (FingerprintDiffers(PreCompileFingerprint, PostCompileFingerprint, InGraph->GetName()))
 	{
 		InGraph->Modify();
+
+		// Verbose-only: a checksum says a node moved but not which field. Pair the captured text against the fresh
+		// object for every node whose checksum actually changed, so the log names the property.
+		for (const TPair<FName, FString>& Prior : PreCompileNodeText)
+		{
+			const uint32* Was = PreCompileFingerprint.Find(Prior.Key);
+			const uint32* Now = PostCompileFingerprint.Find(Prior.Key);
+			if (Was && Now && *Was != *Now)
+			{
+				LogPropertyDelta(InGraph->GetName(), Prior.Key, Prior.Value,
+					DumpSavedProperties(InGraph->GetCompiledNodes().FindRef(Prior.Key)));
+			}
+		}
 	}
 	else if (UPackage* Package = InGraph->GetPackage())
 	{
@@ -918,7 +992,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
-    	Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
+    	Instance->NodeInfo.DisplayName = RehomeDisplayText(ContentNode->NodeLabel, Instance);
     	Instance->bResettableReplay = bNodeResettable;
 
     	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
@@ -928,8 +1002,8 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     	if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(ContentNode))
     	{
     		UQuestlineGraph* InnerAsset = LinkedNode->LinkedGraph.LoadSynchronous();
-    		Instance->DisplayName = (LinkedNode->DisplayName.IsEmpty() && InnerAsset) ? InnerAsset->DisplayName : LinkedNode->DisplayName;
-    		Instance->Description = (LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description;
+    		Instance->DisplayName = RehomeDisplayText((LinkedNode->DisplayName.IsEmpty() && InnerAsset) ? InnerAsset->DisplayName : LinkedNode->DisplayName, Instance);
+    		Instance->Description = RehomeDisplayText((LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description, Instance);
     		Instance->DisplayData = (!LinkedNode->DisplayData && InnerAsset) ? InnerAsset->DisplayData : LinkedNode->DisplayData;
     	}
     	
@@ -2904,9 +2978,15 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 			// The outcome tag: for a Step, from the descriptor; for a container, the path key is itself a registered tag.
 			const FGameplayTag Outcome = bIsStepNode ? OutcomeByPath.FindRef(PathId)
 													 : UGameplayTagsManager::Get().RequestGameplayTag(PathId, false);
-			if (!Outcome.IsValid()) return FText::FromName(PathId);				// dynamic PathName — show as authored
-			const FString Full = Outcome.ToString();							// registered tag — show the leaf
-			int32 Dot; return FText::FromString(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
+			// Culture-invariant, NOT FromString. A keyless FText gets a fresh localization key minted for it every time
+			// the package saves, so the next compile regenerates the keyless version, the two compare unequal, and the
+			// asset dirties again with no authored change behind it. These labels are gameplay-tag leaf names rather
+			// than authored prose - there is nothing to translate - so marking them invariant is both the fix and an
+			// accurate description of what they are. The "On completion" literal above keeps its NSLOCTEXT key and is
+			// stable precisely because it has one.
+			if (!Outcome.IsValid()) return FText::AsCultureInvariant(PathId.ToString());	// dynamic PathName - show as authored
+			const FString Full = Outcome.ToString();										// registered tag - show the leaf
+			int32 Dot; return FText::AsCultureInvariant(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
 		};
 
 		// Any-outcome bucket (NAME_None).

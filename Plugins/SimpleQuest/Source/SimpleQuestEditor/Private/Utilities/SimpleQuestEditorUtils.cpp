@@ -1574,10 +1574,12 @@ namespace PrereqExaminer_Internal
     	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
     	if (Role == EQuestPinRole::AnyOutcomeOut)
     	{
+    		Leaf.bLeafIsAnyOutcome = true;
     		Leaf.LeafPathLabel = FText::FromString(TEXT("Any Outcome"));
     	}
     	else
     	{
+    		Leaf.LeafPathIdentity = OutputPin->PinName;
     		// Tag-picker syntax: strip the SimpleQuest.Outcome. root (present on static outcome-derived pin
     		// names), then split the remainder into category prefix and leaf so the widget can render the hierarchy
     		// de-emphasized above the leaf. Bare path identities (dynamic placements) lack the prefix and the dot -

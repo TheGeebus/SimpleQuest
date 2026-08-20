@@ -5,10 +5,51 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **The graph debug overlay shows why a node can't proceed.** A node waiting on
+  unsatisfied prerequisites, or explicitly blocked, now wears a ring outside its
+  state color - drawn in the prerequisite wire's own color for a prerequisite
+  gate, red for an explicit block. Because it's a second channel rather than a
+  replacement color, a node that is running *and* gated reads as both, which the
+  previous single-color treatment could not express: being blocked used to
+  replace the node's lifecycle color entirely, hiding whether it was live,
+  pending, or already complete. The ring also makes a prerequisite cleared by
+  resettable replay visible the moment it clears, rather than when the node
+  eventually runs again.
+
+### Fixes
+
+- **The Prerequisite Examiner reports live prerequisite state correctly.** Three
+  cases were wrong, all from the same cause. A prerequisite wired from a step's
+  Any Outcome pin showed no state at all. A questline opened on its own while it
+  was actually running as part of a parent questline showed no state either. And
+  a prerequisite cleared by resettable replay kept reading as satisfied, which is
+  the case the panel exists to make visible. The panel now identifies a leaf the
+  way the graph does - by its source node and the completion path it requires -
+  instead of by the fact tag it happens to read, so the three resolve together.
+- **The graph debug overlay no longer shows a node as completed while it is
+  running again.** A node that has completed keeps that record permanently, and a
+  container stays live across loop iterations, so a node on its second run
+  asserts both at once. The overlay ranked completion above activity and painted
+  it as done. Current activity now wins.
+- **A container's Live state is readable from every tag perspective.** Quest and
+  questline containers derive Live from their inner Steps, and that derived state
+  was written to only one of the container's tag spellings - unlike every other
+  lifecycle state, which is published across all of them. Querying whether a
+  container was live through an asset-scoped alias returned false while it was
+  running, and an observer bound on that perspective never saw it start. Most
+  visible on a questline embedded in another as a linked node, where the
+  embedded copy and the placement running it are spelled differently: the graph
+  debug overlay showed such a container as completed and never as live, even
+  while its inner Steps were active.
+
 ## [0.7.1] — 2026-08-17 — Clean-Install Fixes
 
 A fix release for three things a clean install surfaces that a development
-machine cannot: a build path that had never been compiled, a graph colour that
+machine cannot: a build path that had never been compiled, a graph color that
 only looked right locally, and a test coupled to one engine's log wording.
 
 ### Fixes
@@ -20,10 +61,10 @@ only looked right locally, and a test coupled to one engine's log wording.
   Nodes could fail to compile. The definition is now unconditional, and only its
   value varies with whether the plugin is present.
 - **Prerequisite wires are distinct from activation wires on a fresh install.**
-  The shipped default for the prerequisite wire colour matched the activation
-  wire colour, so the two wire types — execution flow and gating contingency —
+  The shipped default for the prerequisite wire color matched the activation
+  wire color, so the two wire types — execution flow and gating contingency —
   rendered identically until the dashed-wire integration was active or the
-  colour was overridden locally.
+  color was overridden locally.
 - **A resolver test no longer depends on one engine's log formatting.** It
   asserted on the exact wording of a failed class lookup, which varies between
   engine versions; it now matches the stable portion.

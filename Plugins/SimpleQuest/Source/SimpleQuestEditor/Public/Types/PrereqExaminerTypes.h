@@ -33,38 +33,70 @@ struct FPrereqExaminerNode
     /** Human-readable row text, e.g., "Step: Reached", "Rule: BossDefeated", "AND". */
     UPROPERTY() FText DisplayLabel;
 
-    /** Leaf-only: content node's display title (row-1 value in the leaf's two-row display). Will transparently pick up
-        a DisplayName override once that field lands on the content-node display. */
+    /**
+     * Leaf-only: content node's display title (row-1 value in the leaf's two-row display). Will transparently pick up
+     * a DisplayName override once that field lands on the content-node display.
+     */
     UPROPERTY() FText LeafSourceLabel;
 
-    /** Leaf-only: path's tag-picker category prefix for static-OutcomeTag-derived path identities (everything after
-        "SimpleQuest.Outcome." up to and including the last dot, e.g., "Combat." for
-        SimpleQuest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome"), for outcomes that are
-        direct children of SimpleQuest.Outcome, and for dynamic path identities (bare designer-authored or
-        "Dynamic N" auto-numbered names). Rendered de-emphasized above LeafPathLabel in the leaf widget. */
+    /**
+     * Leaf-only: path's tag-picker category prefix for static-OutcomeTag-derived path identities (everything after
+     * "SimpleQuest.Outcome." up to and including the last dot, e.g., "Combat." for
+     * SimpleQuest.Outcome.Combat.BossDefeated). Empty for sentinels ("Any Outcome"), for outcomes that are
+     * direct children of SimpleQuest.Outcome, and for dynamic path identities (bare designer-authored or
+     * "Dynamic N" auto-numbered names). Rendered de-emphasized above LeafPathLabel in the leaf widget.
+     */
     UPROPERTY() FText LeafPathCategory;
 
-    /** Leaf-only: path pin label, the leaf segment of a named outcome tag for static placements, the bare path
-        identity for dynamic placements, the "Any Outcome" sentinel, or "Entered". Row-2 primary value in the
-        leaf's two-row display. */
+    /**
+     * Leaf-only: path pin label, the leaf segment of a named outcome tag for static placements, the bare path
+     * identity for dynamic placements, the "Any Outcome" sentinel, or "Entered". Row-2 primary value in the
+     * leaf's two-row display.
+     */
     UPROPERTY() FText LeafPathLabel;
-
-    /** WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
-        (MakeNodePathFact for named paths, MakeStateFact(Completed) for Any Outcome). For RuleRef: the rule's
-        group tag. Invalid on combinator nodes and on leaves whose source pin role isn't covered by
-        ResolveLeafFactForOutputPin (rare. Entry outcome leaves, for example). Drives PIE leaf-state coloring. */
+    
+    /**
+     * WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
+     * (MakeNodePathFact for named paths, MakeStateFact(Completed) for Any Outcome). For RuleRef: the rule's group tag.
+     * Invalid on combinator nodes and on leaves whose source pin role isn't covered by ResolveLeafFactForOutputPin
+     * (rare - Entry outcome leaves, for example). Display and diagnostics only: PIE coloring correlates on
+     * LeafSourceTag and LeafPathIdentity, because one displayed leaf can map to several compiled leaves.
+     */
     UPROPERTY() FGameplayTag LeafTag;
 
-    /** Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
-        can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
-        Leaf-only; invalid on other node types. */
+    /**
+     * Source content node's compiled runtime tag (e.g. "SimpleQuest.Questline.Demo.Step1"). Paired with LeafPathIdentity
+     * as the key the debug channel correlates runtime leaf state by, matched across every spelling the runtime alias index
+     * knows so an asset opened standalone still resolves against a placement running under a parent's namespace.
+     * Leaf-only; invalid on other node types.
+     */
     UPROPERTY() FGameplayTag LeafSourceTag;
+
+    /**
+     * Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
+     * can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
+     * Leaf-only; invalid on other node types.
+     */
+    
+    /**
+     * Leaf-only: the completion path this leaf requires on its source node, taken from the wired output pin's name — the
+     * same FName the compiler keys path leaves by. NAME_None when the leaf is the Any Outcome sentinel.
+     */
+    UPROPERTY() FName LeafPathIdentity;
+
+    /**
+     * Leaf-only: true when the leaf reads the Any Outcome pin. The compiler expands that into one path leaf per completion
+     * path on the source node, so correlating runtime state means OR-ing all of that source's leaves.
+     */
+    UPROPERTY() bool bLeafIsAnyOutcome = false;
 
     /** Navigation target on double-click - the editor node that sources this leaf or owns this rule reference. */
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> SourceNode;
 
-    /** RuleRef only: the Prerequisite Rule Entry that defines the referenced rule. Enables drill-down into the rule's
-        own Enter expression (walked eagerly into ChildIndices when the RuleRef is emitted). */
+    /**
+     * RuleRef only: the Prerequisite Rule Entry that defines the referenced rule. Enables drill-down into the rule's
+     * own Enter expression (walked eagerly into ChildIndices when the RuleRef is emitted).
+     */
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> RuleEntryNode;
 
     /** Indices into FPrereqExaminerTree::Nodes — combinator operands, or a RuleRef's expanded inner expression. */

@@ -104,6 +104,12 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 
 	friend class USimpleQuestBlueprintLibrary;
 	
+	/**
+	 * PIE debug overlay. Maps a resolved runtime tag back to its registered instance to evaluate live prerequisite state.
+	 * Reaches in rather than the manager growing public API for one consumer, matching the Blueprint library above.
+	 */
+	friend class FQuestPIEDebugChannel;
+	
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
@@ -254,6 +260,16 @@ protected:
 
 	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
 	virtual TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	/**
+	 * The live node instance registered under Tag, or null when nothing is registered for it. Accepts any perspective the
+	 * registry is keyed under: registration adds the canonical tag and every asset-scoped alias, all pointing at the same
+	 * instance, so a caller does not need to resolve to canonical form first.
+	 *
+	 * Part of the replacement contract: an orchestrator that maintains its own registry instead of LoadedNodeInstances must
+	 * override this, or editor tooling and any other introspection will silently report against a registry it no longer fills.
+	 */
+	virtual const UQuestNodeBase* FindNodeInstance(FGameplayTag Tag) const { return LoadedNodeInstances.FindRef(Tag.GetTagName()); }
 
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);

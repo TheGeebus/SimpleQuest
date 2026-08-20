@@ -16,6 +16,7 @@
 #include "SimpleQuestLog.h"
 #include "Debug/QuestNodeDebugState.h"
 #include "Debug/QuestPIEDebugChannel.h"
+#include "Quests/Types/QuestActivationBlocker.h"
 #include "Styling/SlateStyleRegistry.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -24,18 +25,21 @@ namespace PIEOverlay_Style
 {
     // sRGB-correct per-state tints. FColor → FLinearColor constructor does sRGB→linear conversion so authored values match
     // their on-screen appearance. Priority order matches FQuestPIEDebugChannel::QueryNodeState's selection logic.
-    static const FLinearColor Blocked      = FLinearColor(FColor(230,  60,  60));  // red — highest urgency
     static const FLinearColor PendingGiver = FLinearColor(FColor( 80, 180, 230));  // cyan — waiting
-    static const FLinearColor Live       = FLinearColor(FColor(250, 200,  60));  // amber — running
+    static const FLinearColor Live         = FLinearColor(FColor(250, 200,  60));  // amber — running
     static const FLinearColor Completed    = FLinearColor(FColor( 90, 210, 110));  // green — done
     static const FLinearColor Deactivated  = FLinearColor(FColor(150, 150, 150));  // grey — inert
     static const FLinearColor DebugBadge   = FLinearColor(FColor(250, 200,  60));  // badge text color when overlay active
+
+    // Gating ring, drawn outside the lifecycle halo. Blocked is an explicit lockout and outranks an unmet prerequisite,
+    // which is deliberately the prerequisite wire's own hue so a gated node and the wire gating it read as one idea.
+    static const FLinearColor GateBlocked  = FLinearColor(FColor(230,  60,  60));  // red — externally locked out
+    static const FLinearColor GatePrereq   = FLinearColor(0.603212f, 0.128689f, 0.651406f);
 
     const FLinearColor& ColorForState(EQuestNodeDebugState State)
     {
         switch (State)
         {
-        case EQuestNodeDebugState::Blocked:       return Blocked;
         case EQuestNodeDebugState::PendingGiver:  return PendingGiver;
         case EQuestNodeDebugState::Live:          return Live;
         case EQuestNodeDebugState::Completed:     return Completed;
@@ -385,7 +389,8 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
                 if (!Node) continue;
 
                 const EQuestNodeDebugState State = DebugChannel->QueryNodeState(Node);
-                if (State == EQuestNodeDebugState::Unknown) continue;
+                const TArray<FQuestActivationBlocker> Gating = DebugChannel->QueryNodeGating(Node);
+                if (State == EQuestNodeDebugState::Unknown && Gating.Num() == 0) continue;
 
                 TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
                 if (!NodeWidget.IsValid()) continue;
@@ -398,14 +403,33 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
                 const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
                 if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
 
-                FSlateDrawElement::MakeBox(
-                    OutDrawElements,
-                    DebugOverlayLayer,
-                    NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
-                    DebugBrush,
-                    ESlateDrawEffect::None,
-                    PIEOverlay_Style::ColorForState(State)
-                );
+                if (State != EQuestNodeDebugState::Unknown)
+                {
+                    FSlateDrawElement::MakeBox(
+                        OutDrawElements,
+                        DebugOverlayLayer,
+                        NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
+                        DebugBrush,
+                        ESlateDrawEffect::None,
+                        PIEOverlay_Style::ColorForState(State)
+                    );
+                }
+
+                // Gating reads as a ring outside the lifecycle halo rather than replacing its color, because the two are
+                // independent: a node can be live and gated at once, and collapsing them hides whichever loses.
+                if (Gating.Num() > 0)
+                {
+                    const bool bBlocked = Gating.ContainsByPredicate([](const FQuestActivationBlocker& B)
+                        { return B.Reason == EQuestActivationBlocker::Blocked; });
+                    FSlateDrawElement::MakeBox(
+                        OutDrawElements,
+                        DebugOverlayLayer - 1,
+                        NodeGeom.ToInflatedPaintGeometry(ShadowInflate * 1.6f),
+                        DebugBrush,
+                        ESlateDrawEffect::None,
+                        bBlocked ? PIEOverlay_Style::GateBlocked : PIEOverlay_Style::GatePrereq
+                    );
+                }
             }
             TopLayer = DebugOverlayLayer;
 

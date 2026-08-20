@@ -7,9 +7,9 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "SimpleQuestEditor.h"
+#include "SimpleQuestLog.h"
 #include "Debug/QuestPIEDebugChannel.h"
 #include "Debug/QuestPrereqDebugState.h"
-#include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Styling/AppStyle.h"
@@ -1667,9 +1667,14 @@ void SPrereqExaminerPanel::Tick(const FGeometry& AllottedGeometry, const double 
 
 EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
 {
-    if (!Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
-
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
+    UE_LOG(LogSimpleQuest, Verbose, TEXT("ComputeDebugState: idx=%d valid=%d channel=%d active=%d type=%d"),
+        NodeIndex, Tree.Nodes.IsValidIndex(NodeIndex) ? 1 : 0, Channel ? 1 : 0,
+        (Channel && Channel->IsActive()) ? 1 : 0,
+        Tree.Nodes.IsValidIndex(NodeIndex) ? (int32)Tree.Nodes[NodeIndex].Type : -1);
+
+    if (!Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
+    
     if (!Channel || !Channel->IsActive()) return EPrereqDebugState::Unknown;
 
     const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
@@ -1677,7 +1682,11 @@ EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
     {
     case EPrereqExaminerNodeType::Leaf:
         {
-            return Channel->QueryLeafState(Node.LeafTag, Node.LeafSourceTag);
+            // Correlate on the pair the graph itself uses — source node plus completion path — rather than on the leaf's
+            // fact tag. One displayed leaf can map to several compiled leaves, since Any Outcome expands to one leaf per
+            // completion path on the source, and the channel ORs them.
+            return Channel->QueryLeafStateForSource(Tree.ContextNode.Get(), Node.LeafSourceTag,
+                Node.LeafPathIdentity, Node.bLeafIsAnyOutcome);
         }
     case EPrereqExaminerNodeType::And:
     {

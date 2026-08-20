@@ -7,9 +7,13 @@
 #include "QuestNodeDebugState.generated.h"
 
 /**
- * Runtime state of a quest node during PIE, as resolved from WorldState facts by FQuestPIEDebugChannel. Values listed in
- * presentation-priority order — the channel picks the highest-priority state the node currently holds
- * (Blocked > PendingGiver > Live > Completed > Deactivated) so the overlay surfaces the most-urgent-to-see condition.
+ * Where a quest node currently sits in its lifecycle during PIE, as resolved from WorldState facts by
+ * FQuestPIEDebugChannel. Values listed in presentation-priority order — the channel picks the highest-priority state the
+ * node holds (PendingGiver > Live > Completed > Deactivated), because current activity outranks history: the Completed
+ * fact is append-only and a container keeps Live across loop iterations, so a node running again asserts both.
+ *
+ * Why a node cannot proceed is a SEPARATE, orthogonal dimension — a node can be gated at any point in its lifecycle.
+ * See FQuestPIEDebugChannel::QueryNodeGating, which reports that in the runtime's own blocker vocabulary.
  */
 UENUM()
 enum class EQuestNodeDebugState : uint8
@@ -28,8 +32,6 @@ enum class EQuestNodeDebugState : uint8
 	Live,
 
 	/** QuestState.<Tag>.PendingGiver fact is set — waiting on giver approval before activation. */
-	PendingGiver,
-
-	/** QuestState.<Tag>.Blocked fact is set — highest visual priority. */
-	Blocked
+	PendingGiver
 };
+

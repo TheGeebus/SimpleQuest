@@ -12,6 +12,7 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 
 
+struct FQuestActivationBlocker;
 class UQuestlineNode_ContentBase;
 class UEdGraphNode;
 class UWorldStateSubsystem;
@@ -80,14 +81,39 @@ public:
 	EQuestNodeDebugState QueryNodeState(const UEdGraphNode* EditorNode) const;
 
 	/**
-	 * Classifies a prereq-expression leaf's current state given the compiled fact tag it checks and the compiled tag of
-	 * the source content node it reads from. Returns Unknown when not in PIE or when either tag is invalid. See
-	 * EPrereqDebugState for the classification semantics.
+	 * Why the node backing EditorNode cannot currently proceed, in the same vocabulary the runtime's blocker API uses.
+	 * Empty when nothing gates it, when PIE is inactive, or when the node has no registered runtime instance.
+	 *
+	 * Orthogonal to QueryNodeState: a node can be gated at any point in its lifecycle, so the two are read together. Only
+	 * the reasons meaningful for a node already in the graph are reported — Blocked and PrereqUnmet. The give-flow
+	 * reasons answer "why can't this be started", which is the wrong question for an overlay.
 	 */
-	EPrereqDebugState QueryLeafState(const FGameplayTag& LeafFact, const FGameplayTag& SourceRuntimeTag) const;
+	TArray<FQuestActivationBlocker> QueryNodeGating(const UEdGraphNode* EditorNode) const;
+	
+	/**
+	 * Live prerequisite evaluation for the runtime instance backing EditorNode, with per-leaf detail. Returns false when PIE
+	 * is inactive, when the node resolves to no compiled instance, or when the manager has not registered one - all cases the
+	 * caller must render as unknown, since a default-constructed status reads as trivially satisfied.
+	 *
+	 * Evaluated on demand rather than read from the state subsystem's cached prereq status, which is populated only for
+	 * giver-gated quests and cleared as soon as they leave giver state.
+	 */
+	bool TryGetPrereqStatusForNode(const UEdGraphNode* EditorNode, FQuestPrereqStatus& OutStatus) const;
 
-	/** Convenience raw-fact lookup — returns true if the PIE world's WorldState has the given fact asserted. False otherwise
-		(including when not in PIE). */
+	/**
+	 * Live state of one prerequisite leaf, identified the way the graph identifies it: the content node it reads from and
+	 * which completion path on that node it requires. Pass bAnyOutcome for the Any Outcome sentinel, which the compiler
+	 * expands into one leaf per path — satisfied when any of them is.
+	 *
+	 * SourceTag may be in the opened asset's own namespace while the running instance is a placement under a parent's, so
+	 * it is matched through the runtime alias index rather than by equality.
+	 */
+	EPrereqDebugState QueryLeafStateForSource(const UEdGraphNode* OwnerNode, FGameplayTag SourceTag, FName PathIdentity, bool bAnyOutcome) const;
+
+	/**
+	 * Convenience raw-fact lookup — returns true if the PIE world's WorldState has the given fact asserted. False otherwise
+	 * (including when not in PIE).
+	 */
 	bool HasFact(const FGameplayTag& FactTag) const;
 
 	/**

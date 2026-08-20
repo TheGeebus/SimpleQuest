@@ -121,6 +121,7 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 		else if (Node.Type == EPrerequisiteExpressionType::Leaf_Resolution)
 		{
 			FQuestPrereqLeafStatus LeafStatus;
+			LeafStatus.SourceQuestTag = Node.LeafQuestTag;
 			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag: preserves blocker-display API shape
 			LeafStatus.bSatisfied = StateSubsystem
 				&& Node.LeafQuestTag.IsValid()
@@ -135,6 +136,7 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 			// readable identifier from the (QuestTag, OutcomeTag) pair so blocker-display UI can render
 			// "Quest <X> entered with outcome <Y>" without a separate display path.
 			LeafStatus.LeafTag = Node.LeafQuestTag;  // best available identifier; OutcomeTag captured below
+			LeafStatus.SourceQuestTag = Node.LeafQuestTag;
 			LeafStatus.bSatisfied = StateSubsystem
 				&& Node.LeafQuestTag.IsValid()
 				&& Node.LeafOutcomeTag.IsValid()
@@ -145,6 +147,8 @@ FQuestPrereqStatus FPrerequisiteExpression::EvaluateWithLeafStatus(const UWorldS
 		{
 			FQuestPrereqLeafStatus LeafStatus;
 			LeafStatus.LeafTag = Node.LeafTag;  // bridge fact tag: preserves blocker-display API shape
+			LeafStatus.SourceQuestTag    = Node.LeafQuestTag;
+			LeafStatus.SourcePathIdentity = Node.LeafPathIdentity;
 			// Match EvaluateNode: resettable path leaves report against the per-run mirror fact, permanent ones
 			// against the resolution registry, so display tracks the re-gated state after a reset.
 			LeafStatus.bSatisfied = Node.bResettableRead

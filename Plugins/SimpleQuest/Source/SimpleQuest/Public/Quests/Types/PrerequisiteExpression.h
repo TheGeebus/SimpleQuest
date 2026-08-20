@@ -13,7 +13,7 @@ class UQuestStateSubsystem;
 UENUM()
 enum class EPrerequisiteExpressionType : uint8
 {
-	Always,			 // no prereqs wired — trivially satisfied
+	Always,			 // no prereqs wired - trivially satisfied
 	Leaf,			 // single WorldState fact (queries UWorldStateSubsystem::HasFact on LeafTag)
 	And,			 // all children must be satisfied
 	Or,				 // any child must be satisfied
@@ -28,13 +28,13 @@ enum class EPrerequisiteExpressionType : uint8
 					 // serialized assets continue to deserialize correctly.
 	Leaf_Path,		 // Path-keyed quest-resolution check (queries UQuestStateSubsystem::HasResolvedAtPath on
 					 // LeafQuestTag and LeafPathIdentity). Satisfies only when the named quest resolved
-					 // through the specific authored path. This is what pin-wire prereq authoring emits —
+					 // through the specific authored path. This is what pin-wire prereq authoring emits -
 					 // the designer wired a specific output pin into a Prereq input, so only that pin's
 					 // resolution satisfies. Distinct from Leaf_Resolution: a quest with two paths sharing
 					 // an outcome tag will satisfy Leaf_Resolution on either path's resolution, but
 					 // Leaf_Path only on the named path's. Appended at the end so existing assets stamped
 					 // with int values 0–6 continue to deserialize correctly.
-	Leaf_Outcome	 // Context-free outcome leaf — satisfies when ANY quest has resolved with LeafOutcomeTag
+	Leaf_Outcome	 // Context-free outcome leaf - satisfies when ANY quest has resolved with LeafOutcomeTag
 					 // (or any descendant via gameplay-tag hierarchy). Queries UQuestStateSubsystem::
 					 // HasAnyQuestResolvedWith and subscribes directly on the outcome tag channel (Phase 6a
 					 // outcome-channel publish target). Authored by the declarative PrerequisiteOutcome node;
@@ -43,10 +43,10 @@ enum class EPrerequisiteExpressionType : uint8
 };
 
 /**
- * The role a given FPrerequisiteExpressionNode field plays FOR A SPECIFIC Type. A leaf node is a tagged union — the
+ * The role a given FPrerequisiteExpressionNode field plays FOR A SPECIFIC Type. A leaf node is a tagged union - the
  * same physical field means different things (or nothing) depending on Type, and one field's meaning can even depend
  * on a sibling (LeafTag is a live mirror fact only for Leaf_Path + bResettableRead). This enum names each role so a
- * consumer — the data-table schema generator, a bulk-editor, a translator, or validation — knows what a field VALUE
+ * consumer - the data-table schema generator, a bulk-editor, a translator, or validation - knows what a field VALUE
  * means for a row of a given type, not merely that it is set.
  */
 enum class EPrereqLeafFieldRole : uint8
@@ -64,7 +64,7 @@ enum class EPrereqLeafFieldRole : uint8
 };
 
 /**
- * Per-Type field-role map for FPrerequisiteExpressionNode — the ONE authoritative statement of which fields a leaf of
+ * Per-Type field-role map for FPrerequisiteExpressionNode - the ONE authoritative statement of which fields a leaf of
  * a given Type populates and what each means. This is the machine-readable form of the per-Type field-presence that
  * the evaluator enforces (by guarding every read) and the builders enforce (by setting only the right fields). Adding
  * a leaf Type means adding one row here; every consumer (schema generation, validation, docs) then picks it up.
@@ -81,7 +81,7 @@ struct FPrereqLeafFieldContract
 
 /**
  * Returns the authoritative field-role contract for a given leaf/combinator Type. Single source of truth for the
- * per-Type field-presence matrix — consumed by the Phase-2 table schema, validation, and docs.
+ * per-Type field-presence matrix - consumed by the Phase-2 table schema, validation, and docs.
  */
 SIMPLEQUEST_API FPrereqLeafFieldContract GetPrereqFieldContract(EPrerequisiteExpressionType Type);
 
@@ -93,31 +93,39 @@ struct SIMPLEQUEST_API FPrerequisiteExpressionNode
 	UPROPERTY() EPrerequisiteExpressionType Type = EPrerequisiteExpressionType::Always;
 
 	/**
-	 * Per-Type role varies — see GetPrereqFieldContract(Type). Live WorldState fact for Leaf; editor-only bridge tag
+	 * Per-Type role varies - see GetPrereqFieldContract(Type). Live WorldState fact for Leaf; editor-only bridge tag
 	 * for Leaf_Resolution/Leaf_Path (runtime ignores it); the per-run mirror fact the runtime reads for Leaf_Path when
 	 * bResettableRead.
 	 */
 	UPROPERTY() FGameplayTag LeafTag;
 
-	/** Source quest tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Path. The runtime evaluator
-		dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith for resolution
-		leaves (outcome-keyed), HasEnteredWith for entry leaves, HasResolvedAtPath for path leaves (path-keyed).
-		Stamped by the compiler from the source content node's compiled tag. */
+	/**
+	 * Source quest tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Path. The runtime evaluator
+	 * dispatches on Type to decide which UQuestStateSubsystem method to query: HasResolvedWith for resolution
+	 * leaves (outcome-keyed), HasEnteredWith for entry leaves, HasResolvedAtPath for path leaves (path-keyed).
+	 * Stamped by the compiler from the source content node's compiled tag.
+	 */
 	UPROPERTY() FGameplayTag LeafQuestTag;
 
-	/** Outcome tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Outcome. NOT populated for
-		Type=Leaf_Path — path leaves are path-keyed via LeafPathIdentity, not outcome-keyed. For Leaf_Outcome
-		this is both the match criterion AND the subscribe channel (Phase 6a outcome-channel publish target). */
+	/**
+	 * Outcome tag for Type=Leaf_Resolution, Type=Leaf_Entry, and Type=Leaf_Outcome. NOT populated for
+	 * Type=Leaf_Path - path leaves are path-keyed via LeafPathIdentity, not outcome-keyed. For Leaf_Outcome
+	 * this is both the match criterion AND the subscribe channel (Phase 6a outcome-channel publish target).
+	 */
 	UPROPERTY() FGameplayTag LeafOutcomeTag;
 
-	/** Path identity for Type=Leaf_Path. Matches the source content node's output pin name (the pin's PathIdentity).
-		Stamped by the compiler from the wired pin. NOT populated for any other leaf type. */
+	/**
+	 * Path identity for Type=Leaf_Path. Matches the source content node's output pin name (the pin's PathIdentity).
+	 * Stamped by the compiler from the wired pin. NOT populated for any other leaf type.
+	 */
 	UPROPERTY() FName LeafPathIdentity;
 	
-	/** Type=Leaf_Path only: when true this leaf reads its per-run mirror fact (the LeafTag projection in WorldState)
-		instead of the append-only resolution registry, so the gate re-gates after a resettable-scoped node is reset
-		on replay. Stamped by the compiler from the resolved node's effective Resettable Replay setting. Default false
-		— registry-read / permanent — which is also how pre-existing serialized expressions deserialize (back-compat). */
+	/**
+	 * Type=Leaf_Path only: when true this leaf reads its per-run mirror fact (the LeafTag projection in WorldState)
+	 * instead of the append-only resolution registry, so the gate re-gates after a resettable-scoped node is reset
+	 * on replay. Stamped by the compiler from the resolved node's effective Resettable Replay setting. Default false
+	 * - registry-read / permanent - which is also how pre-existing serialized expressions deserialize (back-compat).
+	 */
 	UPROPERTY() bool bResettableRead = false;
 
 	UPROPERTY() TArray<int32> ChildIndices;
@@ -134,11 +142,29 @@ struct SIMPLEQUEST_API FQuestPrereqLeafStatus
 {
 	GENERATED_BODY()
 
-	/** The WorldState fact tag this leaf monitors. Matches the compiler's per-leaf fact output. */
+	/**
+	 * Identifier for this leaf, composed differently per leaf kind - a fact tag for fact and path leaves, the source
+	 * quest tag for entry leaves, the outcome tag for context-free ones. Use SourceQuestTag / SourcePathIdentity to
+	 * correlate a leaf with the graph that authored it; this field is for display and for existing blocker APIs.
+	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Prereq")
 	FGameplayTag LeafTag;
 
-	/** True if WorldState->HasFact(LeafTag) returned true at evaluation time. */
+	/**
+	 * The content node this leaf reads from, for the kinds that name one. Lets a consumer group leaves by source
+	 * without parsing LeafTag. Invalid for raw-fact and context-free outcome leaves.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "Prereq")
+	FGameplayTag SourceQuestTag;
+
+	/** The completion path required on SourceQuestTag, for path leaves. NAME_None for every other kind. */
+	UPROPERTY(BlueprintReadOnly, Category = "Prereq")
+	FName SourcePathIdentity;
+
+	/**
+	 * Whether this leaf's condition currently holds. Evaluated against whichever layer the leaf reads - the per-run
+	 * mirror fact for resettable path leaves, the resolution registry for permanent ones.
+	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Prereq")
 	bool bSatisfied = false;
 };
@@ -156,7 +182,7 @@ struct SIMPLEQUEST_API FQuestPrereqStatus
 {
 	GENERATED_BODY()
 
-	/** True if the expression has no wired prereqs — trivially satisfiable. When true, Leaves is empty. */
+	/** True if the expression has no wired prereqs - trivially satisfiable. When true, Leaves is empty. */
 	UPROPERTY(BlueprintReadOnly, Category = "Prereq")
 	bool bIsAlways = true;
 
@@ -173,19 +199,19 @@ struct SIMPLEQUEST_API FQuestPrereqStatus
  * Per-leaf descriptor used by FPrerequisiteExpression::CollectLeaves to expose subscription-relevant identity for
  * each leaf with type discrimination. Plain (non-USTRUCT): only used internally by subscription wiring.
  *
- *  - Type=Leaf				—   FactTag is the WorldState fact to subscribe via FWorldStateFactAddedEvent /
+ *  - Type=Leaf				-   FactTag is the WorldState fact to subscribe via FWorldStateFactAddedEvent /
  *								FWorldStateFactRemovedEvent on its tag channel.
- *  - Type=Leaf_Resolution	—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent. LeafOutcomeTag
+ *  - Type=Leaf_Resolution	-	LeafQuestTag is the channel for FQuestResolutionRecordedEvent. LeafOutcomeTag
  *								is the match criterion: handler re-evaluates whether the quest has resolved with
- *								that outcome on any path. Legacy — no current authoring path emits this.
- *  - Type=Leaf_Entry		—	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag is the
+ *								that outcome on any path. Legacy - no current authoring path emits this.
+ *  - Type=Leaf_Entry		-	LeafQuestTag is the channel for FQuestEntryRecordedEvent. LeafOutcomeTag is the
  *								match criterion: handler re-evaluates whether the quest has been entered with that
  *								incoming outcome.
- *  - Type=Leaf_Path		—	LeafQuestTag is the channel for FQuestResolutionRecordedEvent (same channel as
+ *  - Type=Leaf_Path		-	LeafQuestTag is the channel for FQuestResolutionRecordedEvent (same channel as
  *								Leaf_Resolution). LeafPathIdentity is the match criterion: handler re-evaluates
  *								whether the quest has resolved through that specific authored path.
- *  - Type=Leaf_Outcome	—	LeafOutcomeTag is BOTH the channel (Phase 6a outcome-channel publish target for
- *								FQuestResolutionRecordedEvent) AND the match criterion. Context-free — no
+ *  - Type=Leaf_Outcome	-	LeafOutcomeTag is BOTH the channel (Phase 6a outcome-channel publish target for
+ *								FQuestResolutionRecordedEvent) AND the match criterion. Context-free - no
  *								LeafQuestTag scoping; handler re-evaluates whether any quest has resolved with
  *								that outcome (or any descendant via gameplay-tag hierarchy).
  */

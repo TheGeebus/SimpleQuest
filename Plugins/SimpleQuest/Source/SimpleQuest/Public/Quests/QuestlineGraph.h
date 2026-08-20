@@ -121,6 +121,14 @@ private:
      */
     UPROPERTY()
     TArray<FName> EntryNodeTags;
+    
+    /**
+     * Checksum of the authoring input this asset's compiled data was built from — this graph plus every questline it
+     * links, transitively. Compared against a freshly computed value when the editor opens the asset to decide whether
+     * the compiled data is current. Zero on assets compiled before this existed; the next compile fills it in.
+     */
+    UPROPERTY()
+    uint32 CompiledSourceHash = 0;
 
     /**
      * All compiled node instances, keyed by tag. Owned by this asset. Populated by the compiler — includes nodes inlined from
@@ -221,6 +229,7 @@ public:
     const TArray<FGameplayTag>& GetOutwardSetterGroupTags() const { return OutwardSetterGroupTags; }
     const TArray<FGameplayTag>& GetListenerGroupTags() const { return ListenerGroupTags; }
     const TMap<FName, FQuestCompiledQuestlineRewards>& GetCompiledQuestlineRewards() const { return CompiledQuestlineRewards; }
+    uint32 GetCompiledSourceHash() const { return CompiledSourceHash; }
 
     /**
      * Sets the tag-namespace identity for this questline, applying the same normalization the details panel does - a

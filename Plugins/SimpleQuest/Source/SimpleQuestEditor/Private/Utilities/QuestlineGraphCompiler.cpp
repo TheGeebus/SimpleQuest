@@ -316,6 +316,67 @@ static bool FingerprintDiffers(const TMap<FName, uint32>& Before, const TMap<FNa
 	return bDiffers;
 }
 
+uint32 FQuestlineGraphCompiler::ComputeSourceHash(UQuestlineGraph* Root)
+{
+	if (!Root) return 0;
+
+	// FORWARD-only walk, deliberately: this answers "what does my compiled output depend on," which is this graph plus
+	// everything it inlines. The module's CollectLinkedNeighborhood is bidirectional - correct for deciding what to
+	// RECOMPILE, wrong here, because a parent editing its own graph would mark this child stale when nothing about the
+	// child changed.
+	TSet<UQuestlineGraph*> Seen;
+	TArray<UQuestlineGraph*> Frontier;
+	TMap<FString, uint32> CrcByPath;
+	Frontier.Add(Root);
+
+	while (Frontier.Num() > 0)
+	{
+		UQuestlineGraph* Current = Frontier.Pop(EAllowShrinking::No);
+		if (!Current || Seen.Contains(Current) || !Current->QuestlineEdGraph) continue;
+		Seen.Add(Current);
+
+		FQuestCompiledCrc32 Crc;
+		const uint32 GraphCrc = Crc.Crc32(Current->QuestlineEdGraph);
+		CrcByPath.Add(Current->GetPathName(), GraphCrc);
+
+		// Verbose-only: dump every authoring node's saved properties so the SAME walk can be compared at compile time
+		// and at open time. The checksum says the input drifted across a save/load round trip; only the text says what
+		// drifted. One line per property, tagged so the two runs can be diffed out of the log.
+		if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SourceHash WALK '%s' = 0x%08X"), *Current->GetName(), GraphCrc);
+			for (UEdGraphNode* Node : Current->QuestlineEdGraph->Nodes)
+			{
+				if (!Node) continue;
+				TArray<FString> Lines;
+				DumpSavedProperties(Node).ParseIntoArrayLines(Lines);
+				for (const FString& Line : Lines)
+				{
+					UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SrcProp|%s|%s|%s"), *Current->GetName(), *Node->GetName(), *Line);
+				}
+			}
+		}
+
+		for (UEdGraphNode* Node : Current->QuestlineEdGraph->Nodes)
+		{
+			if (UQuestlineNode_LinkedQuestline* Linked = Cast<UQuestlineNode_LinkedQuestline>(Node))
+			{
+				if (UQuestlineGraph* Inner = Linked->LinkedGraph.LoadSynchronous()) Frontier.Add(Inner);
+			}
+		}
+	}
+
+	// Sorted by path so the result does not depend on traversal order - the compiler and the editor's status check reach
+	// the same set by different routes, and an order-sensitive combine would make them disagree permanently.
+	TArray<FString> Paths;
+	CrcByPath.GenerateKeyArray(Paths);
+	Paths.Sort();
+
+	uint32 Combined = 0;
+	for (const FString& Path : Paths) Combined = HashCombine(Combined, CrcByPath[Path]);
+	return Combined;
+}
+
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
 {
@@ -582,6 +643,11 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	ComputeContainerReachability(InGraph);
 	BuildRewardManifest(InGraph);
 
+	// Stamp the authoring input's checksum BEFORE the comparison below, so it sits inside the compared window: a source
+	// edit moves the hash, the comparison sees it, and the asset dirties. Outside the window it would silently diverge
+	// from what was saved and the status icon would report stale forever.
+	InGraph->CompiledSourceHash = ComputeSourceHash(InGraph);
+	
 	// Dirty the package only if the compile actually produced something different. Two ordering constraints, both of them
 	// load-bearing. It must come AFTER the naming pass, because only then do old and new nodes share names and the object
 	// references inside them resolve to identical paths - before it, every reference differs and this could only ever

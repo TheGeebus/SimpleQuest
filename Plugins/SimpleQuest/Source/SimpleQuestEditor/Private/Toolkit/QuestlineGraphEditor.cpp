@@ -175,6 +175,7 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
 {
     CrossAssetBackEditor.Reset();
     QuestlineGraph = InQuestlineGraph;
+
     // Seeded before the restore so a questline with no memory still gets a usable format; TSV matches what the console
     // defaults to, so both callers start in the same reading. Not a member initializer - see the declaration for why a
     // braced default is a hazard on this struct.
@@ -262,6 +263,20 @@ void FQuestlineGraphEditor::InitQuestlineGraphEditor(const EToolkitMode::Type Mo
         InQuestlineGraph);
 
     if (GEditor) GEditor->RegisterForUndo(this);
+
+    // Seed the compile-status icon LAST. Constructing the graph editor widget above fires OnGraphChanged, which drops
+    // the status to Unknown - correct for a user edit, wrong for the notification that comes from simply building the
+    // view. Seeding before InitAssetEditor computes the right answer and then has it torn back down a few lines later.
+    if (QuestlineGraph)
+    {
+        const uint32 Stored = QuestlineGraph->GetCompiledSourceHash();
+        const uint32 Live   = FQuestlineGraphCompiler::ComputeSourceHash(QuestlineGraph);
+        UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SourceHash OPEN '%s': stored 0x%08X, live 0x%08X — %s"),
+            *QuestlineGraph->GetName(), Stored, Live, (Stored == Live) ? TEXT("MATCH") : TEXT("MISMATCH"));
+
+        CompileStatus = (Stored != 0 && Stored == Live) ? EQuestlineCompileStatus::UpToDate
+                                                        : EQuestlineCompileStatus::Unknown;
+    }
 }
 
 FName FQuestlineGraphEditor::GetToolkitFName() const

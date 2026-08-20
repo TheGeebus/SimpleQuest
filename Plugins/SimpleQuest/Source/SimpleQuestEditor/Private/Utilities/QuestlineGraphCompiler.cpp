@@ -1056,6 +1056,12 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     		Instance->Description = RehomeDisplayText((LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description, Instance);
     		Instance->DisplayData = (!LinkedNode->DisplayData && InnerAsset) ? InnerAsset->DisplayData : LinkedNode->DisplayData;
     	}
+    	else
+    	{
+    		Instance->DisplayName = RehomeDisplayText(ContentNode->DisplayName, Instance);
+    		Instance->Description = RehomeDisplayText(ContentNode->Description, Instance);
+    		Instance->DisplayData = ContentNode->DisplayData;
+    	}
     	
         AllCompiledQuestTags.Add(TagName);
     	for (const FName& AliasFName : AliasFNames)

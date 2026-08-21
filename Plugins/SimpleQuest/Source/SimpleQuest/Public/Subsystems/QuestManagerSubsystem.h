@@ -439,10 +439,7 @@ private:
 	 * receives the result either way and is responsible for any null check.
 	 */
 	template<CSoftLoadable TAsset>
-	static void AsyncLoadAndActivate(
-		UObject* WeakBindContext,
-		const TSoftObjectPtr<TAsset>& SoftPtr,
-		TFunction<void(TAsset*)> OnComplete)
+	static void AsyncLoadAndActivate(UObject* WeakBindContext, const TSoftObjectPtr<TAsset>& SoftPtr, TFunction<void(TAsset*)> OnComplete)
 	{
 		if (SoftPtr.IsNull())
 		{
@@ -471,10 +468,7 @@ private:
 	 * UClass*; the caller can cast back to TSubclassOf<TClass> if needed.
 	 */
 	template<CSoftLoadable TClass>
-	static void AsyncLoadAndActivateClass(
-		UObject* WeakBindContext,
-		const TSoftClassPtr<TClass>& SoftClassPtr,
-		TFunction<void(UClass*)> OnComplete)
+	static void AsyncLoadAndActivateClass(UObject* WeakBindContext, const TSoftClassPtr<TClass>& SoftClassPtr, TFunction<void(UClass*)> OnComplete)
 	{
 		if (SoftClassPtr.IsNull())
 		{

@@ -53,6 +53,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::Activate : '%s' deferring — prerequisite unsatisfied (bBypassPrerequisites would force it Live)"),
         *InContextualTag.ToString());
     
+    OnNodeActivationRefused.ExecuteIfBound(this, InContextualTag);
     DeferActivation(InContextualTag);
 }
 
@@ -199,7 +200,11 @@ void UQuestNodeBase::TryActivateDeferred()
         bSatisfied ? TEXT("SATISFIED, will activate") : TEXT("UNSATISFIED, staying deferred"),
         PrereqSubscriptionHandles.Num());
 
-    if (!bSatisfied) return;
+    if (!bSatisfied)
+    {
+        OnNodeActivationRefused.ExecuteIfBound(this, DeferredContextualTag);
+        return;
+    }
 
     USignalSubsystem* Signals = CachedGameInstance->GetSubsystem<USignalSubsystem>();
     FPrereqLeafSubscription::UnsubscribeAll(Signals, PrereqSubscriptionHandles);

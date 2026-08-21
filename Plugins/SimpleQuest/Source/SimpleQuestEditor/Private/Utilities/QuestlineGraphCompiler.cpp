@@ -9,6 +9,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphPin.h"
+#include "Internationalization/TextPackageNamespaceUtil.h"
 #include "Nodes/QuestlineNode_ContentBase.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Step.h"
@@ -53,6 +54,7 @@
 #include "Quests/RemoveFactNode.h"
 #include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
+#include "Serialization/ArchiveObjectCrc32.h"
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
@@ -122,9 +124,19 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 
 		FQuestRewardSet DuplicatedSet;
 		DuplicatedSet.Rewards.Reserve(OutcomePair.Value.Rewards.Num());
-		for (const TObjectPtr<UQuestRewardBase>& Authored_Reward : OutcomePair.Value.Rewards)
+		const FString OutcomeSegment = OutcomePair.Key.ToString().Replace(TEXT("."), TEXT("_"));
+		const FString SourceSegment = IdentityName.ToString().Replace(TEXT("."), TEXT("_"));
+		for (int32 RewardIndex = 0; RewardIndex < OutcomePair.Value.Rewards.Num(); ++RewardIndex)
 		{
-			DuplicatedSet.Rewards.Add(Authored_Reward ? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph) : nullptr);
+			// Outer is the GRAPH, so the name must be unique across everything this compile puts there - and this function
+			// runs once PER SOURCE QUESTLINE, every one of them outering into the same graph. Two questlines sharing an
+			// outcome would otherwise claim the same name, which is a hard crash when their reward classes differ.
+			// IdentityName is the per-source key these are recorded under, so it is exactly the missing segment.
+			const TObjectPtr<UQuestRewardBase>& Authored_Reward = OutcomePair.Value.Rewards[RewardIndex];
+			const FString RewardName = FString::Printf(TEXT("QuestlineReward_%s_%s_%d"), *SourceSegment, *OutcomeSegment, RewardIndex);
+			DuplicatedSet.Rewards.Add(Authored_Reward
+				? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph, *RewardName)
+				: nullptr);
 		}
 		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
 	}
@@ -135,13 +147,226 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 	}
 }
 
+/**
+ * Checksum archive that sees what a package save sees, and nothing else.
+ *
+ * FArchiveObjectCrc32 is not a persistent archive, so it walks Transient properties too. Those never reach the
+ * .uasset, so comparing them makes the dirty guard report a change for state that was never going to be written -
+ * an asset that would serialize byte-identically still gets marked dirty. CompiledEditorNodes is exactly this case:
+ * rebuilt every compile, transient, and on every questline, which is why it moved the checksum universally.
+ */
+class FQuestCompiledCrc32 : public FArchiveObjectCrc32
+{
+public:
+	virtual bool ShouldSkipProperty(const FProperty* InProperty) const override
+	{
+		if (InProperty && InProperty->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient)) return true;
+		return FArchiveObjectCrc32::ShouldSkipProperty(InProperty);
+	}
+};
+
+/**
+ * Re-home a display FText into the package that will actually save it, keeping its localization key.
+ *
+ * Compiled nodes copy their text from the authoring node, which for a linked questline lives in a DIFFERENT package.
+ * UE stamps every saved FText with its owning package's localization namespace, and the default copy method mints a
+ * NEW key whenever that namespace changes. So the text arrives carrying the source package's namespace, saving
+ * re-keys it into this one, and the next compile drags the source namespace back in - a loop that rewrites the
+ * .uasset on every compile with no authored change behind it. PreserveKey keeps existing translations attached.
+ */
+static FText RehomeDisplayText(const FText& Source, UObject* Target)
+{
+	if (Source.IsEmpty() || !Target) return Source;
+	return TextNamespaceUtil::CopyTextToPackage(Source, Target,	TextNamespaceUtil::ETextCopyMethod::PreserveKey, true);
+}
+
+/**
+ * Checksums the compiled model into LABELED components: the ed-graph, the graph itself, then every compiled node in
+ * sorted key order.
+ *
+ * Deliberately NOT a hand-listed set of fields - the checksum archive walks whatever serialization walks, which is
+ * whatever the .uasset contains, so a compiled field added later is covered without anyone enrolling it here.
+ *
+ * The ed-graph gets its own entry even though the graph-level checksum already recurses into it, because that is the
+ * one component that is compiler INPUT rather than output. Separating it means a mismatch can say which side moved.
+ */
+static void CompiledFingerprint(UQuestlineGraph* Graph, TMap<FName, uint32>& Out)
+{
+	Out.Reset();
+	if (!Graph) return;
+
+	if (Graph->QuestlineEdGraph)
+	{
+		FQuestCompiledCrc32 EdCrc;
+		Out.Add(TEXT("EdGraph"), EdCrc.Crc32(Graph->QuestlineEdGraph));
+	}
+
+	FQuestCompiledCrc32 GraphCrc;
+	Out.Add(TEXT("Graph"), GraphCrc.Crc32(Graph));
+
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : Graph->GetCompiledNodes())
+	{
+		FQuestCompiledCrc32 NodeCrc;
+		Out.Add(Compiled.Key, Compiled.Value ? NodeCrc.Crc32(Compiled.Value) : 0u);
+	}
+
+	// Diagnostic only: split the graph-level checksum into one component per compiled container, so a mismatch names
+	// the field instead of just the object. Built only when the log will actually show it - the strings are not free.
+	if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
+	{
+		auto CrcOf = [](const TArray<FString>& Parts) { return FCrc::StrCrc32(*FString::Join(Parts, TEXT("|"))); };
+		TArray<FString> Parts;
+
+		for (const FName& Tag : Graph->GetCompiledQuestTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.CompiledQuestTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FName& Tag : Graph->GetEntryNodeTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.EntryNodeTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FQuestCompiledNodeAlias& Alias : Graph->GetCompiledNodeAliases())
+			Parts.Add(FString::Printf(TEXT("%s>%s"), *Alias.ContextualFName.ToString(), *Alias.AliasFName.ToString()));
+		Out.Add(TEXT("G.CompiledNodeAliases"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FGameplayTag& Tag : Graph->GetOutwardSetterGroupTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.OutwardSetterGroupTags"), CrcOf(Parts)); Parts.Reset();
+
+		for (const FGameplayTag& Tag : Graph->GetListenerGroupTags()) Parts.Add(Tag.ToString());
+		Out.Add(TEXT("G.ListenerGroupTags"), CrcOf(Parts)); Parts.Reset();
+
+		// Key ORDER, not just membership - a TMap that holds the same pairs in a different layout serializes to
+		// different bytes, and that is one of the candidate churn sources.
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : Graph->GetCompiledNodes())
+			Parts.Add(FString::Printf(TEXT("%s=%s"), *Pair.Key.ToString(), Pair.Value ? *Pair.Value->GetName() : TEXT("null")));
+		Out.Add(TEXT("G.CompiledNodesOrder"), CrcOf(Parts)); Parts.Reset();
+
+		for (const TPair<FName, FQuestCompiledQuestlineRewards>& Source : Graph->GetCompiledQuestlineRewards())
+		{
+			for (const TPair<FGameplayTag, FQuestRewardSet>& Set : Source.Value.RewardsByOutcome)
+			{
+				for (const TObjectPtr<UQuestRewardBase>& Reward : Set.Value.Rewards)
+					Parts.Add(FString::Printf(TEXT("%s/%s/%s"), *Source.Key.ToString(), *Set.Key.ToString(),
+						Reward ? *Reward->GetName() : TEXT("null")));
+			}
+		}
+		Out.Add(TEXT("G.CompiledQuestlineRewards"), CrcOf(Parts));
+	}
+}
+
+/** Renders an object's saved properties as text, one per line, so two compiles can be diffed field by field. */
+static FString DumpSavedProperties(UObject* Obj)
+{
+	if (!Obj) return FString();
+	TStringBuilder<4096> Sb;
+	for (TFieldIterator<FProperty> It(Obj->GetClass()); It; ++It)
+	{
+		FProperty* Prop = *It;
+		if (!Prop || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_DuplicateTransient)) continue;
+		FString Value;
+		Prop->ExportText_InContainer(0, Value, Obj, Obj, Obj, PPF_None);
+		Sb << Prop->GetName() << TEXT(" = ") << Value << TEXT("\n");
+	}
+	return FString(Sb);
+}
+
+/** Logs only the lines that differ between two property dumps. Verbose-only; the dumps are large. */
+static void LogPropertyDelta(const FString& GraphName, FName NodeKey, const FString& Before, const FString& After)
+{
+	TArray<FString> B, A;
+	Before.ParseIntoArrayLines(B);
+	After.ParseIntoArrayLines(A);
+	for (int32 i = 0; i < FMath::Max(B.Num(), A.Num()); ++i)
+	{
+		const FString& Bl = B.IsValidIndex(i) ? B[i] : FString();
+		const FString& Al = A.IsValidIndex(i) ? A[i] : FString();
+		if (Bl != Al)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("  Delta '%s'/'%s':\n    was: %s\n    now: %s"),
+				*GraphName, *NodeKey.ToString(), *Bl, *Al);
+		}
+	}
+}
+
+/** Logs every component that moved between two fingerprints, and returns whether any did. */
+static bool FingerprintDiffers(const TMap<FName, uint32>& Before, const TMap<FName, uint32>& After, const FString& GraphName)
+{
+	bool bDiffers = false;
+	for (const TPair<FName, uint32>& Entry : After)
+	{
+		const uint32* Prior = Before.Find(Entry.Key);
+		if (!Prior)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': ADDED '%s'"), *GraphName, *Entry.Key.ToString());
+			bDiffers = true;
+		}
+		else if (*Prior != Entry.Value)
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': CHANGED '%s' (0x%08X -> 0x%08X)"),
+				*GraphName, *Entry.Key.ToString(), *Prior, Entry.Value);
+			bDiffers = true;
+		}
+	}
+	for (const TPair<FName, uint32>& Entry : Before)
+	{
+		if (!After.Contains(Entry.Key))
+		{
+			UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Fingerprint '%s': REMOVED '%s'"), *GraphName, *Entry.Key.ToString());
+			bDiffers = true;
+		}
+	}
+	return bDiffers;
+}
+
+uint32 FQuestlineGraphCompiler::ComputeSourceHash(UQuestlineGraph* Root)
+{
+	if (!Root) return 0;
+
+	// FORWARD-only walk, deliberately: this answers "what does my compiled output depend on," which is this graph plus
+	// everything it inlines. The module's CollectLinkedNeighborhood is bidirectional - correct for deciding what to
+	// RECOMPILE, wrong here, because a parent editing its own graph would mark this child stale when nothing about the
+	// child changed.
+	TSet<UQuestlineGraph*> Seen;
+	TArray<UQuestlineGraph*> Frontier;
+	TMap<FString, uint32> CrcByPath;
+	Frontier.Add(Root);
+
+	while (Frontier.Num() > 0)
+	{
+		UQuestlineGraph* Current = Frontier.Pop(EAllowShrinking::No);
+		if (!Current || Seen.Contains(Current) || !Current->QuestlineEdGraph) continue;
+		Seen.Add(Current);
+
+		FQuestCompiledCrc32 Crc;
+		const uint32 GraphCrc = Crc.Crc32(Current->QuestlineEdGraph);
+		CrcByPath.Add(Current->GetPathName(), GraphCrc);
+
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("SourceHash WALK '%s' = 0x%08X"), *Current->GetName(), GraphCrc);
+
+		for (UEdGraphNode* Node : Current->QuestlineEdGraph->Nodes)
+		{
+			if (UQuestlineNode_LinkedQuestline* Linked = Cast<UQuestlineNode_LinkedQuestline>(Node))
+			{
+				if (UQuestlineGraph* Inner = Linked->LinkedGraph.LoadSynchronous()) Frontier.Add(Inner);
+			}
+		}
+	}
+
+	// Sorted by path so the result does not depend on traversal order - the compiler and the editor's status check reach
+	// the same set by different routes, and an order-sensitive combine would make them disagree permanently.
+	TArray<FString> Paths;
+	CrcByPath.GenerateKeyArray(Paths);
+	Paths.Sort();
+
+	uint32 Combined = 0;
+	for (const FString& Path : Paths) Combined = HashCombine(Combined, CrcByPath[Path]);
+	return Combined;
+}
+
 FQuestlineGraphCompiler::FQuestlineGraphCompiler()
     : TraversalPolicy(MakeUnique<FQuestlineGraphTraversalPolicy>())
 {
 }
 
 FQuestlineGraphCompiler::~FQuestlineGraphCompiler() = default;
-
 
 // -------------------------------------------------------------------------------------------------
 // Entry point
@@ -263,7 +488,51 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	CompiledSetterGroupTags.Reset();
 	CompiledListenerGroupTags.Reset();
 	
-	InGraph->Modify();
+	// Fingerprint what is already compiled BEFORE tearing it down, so the end of the compile can tell whether anything
+	// actually changed. Modify() is deliberately NOT called here: it dirties the package before the compile can possibly
+	// know whether it will change anything, which is how eleven untouched assets end up wanting to be saved.
+	TMap<FName, uint32> PreCompileFingerprint;
+	CompiledFingerprint(InGraph, PreCompileFingerprint);
+	const bool bPackageWasDirtyBeforeCompile = InGraph->GetPackage() && InGraph->GetPackage()->IsDirty();
+
+	// Verbose-only: capture each compiled node's saved properties as text NOW, while the previous compile's nodes are
+	// still alive. After the teardown below they are gone, and a checksum delta on its own cannot name a field.
+	TMap<FName, FString> PreCompileNodeText;
+	if (UE_LOG_ACTIVE(LogSimpleQuestCompiler, Verbose))
+	{
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : InGraph->GetCompiledNodes())
+		{
+			PreCompileNodeText.Add(Pair.Key, DumpSavedProperties(Pair.Value));
+		}
+	}
+
+	// Move the previous compile's subobjects out of the graph before dropping them. They survive until the next GC, and
+	// the new pass names its nodes deterministically from their tags - so without this, every recompile would collide
+	// with its own predecessor and UE would silently uniquify the name, reintroducing the churn this exists to remove.
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Stale : InGraph->CompiledNodes)
+	{
+		if (UQuestNodeBase* Node = Stale.Value)
+		{
+			Node->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
+		}
+	}
+
+	// Questline-level rewards are outered to the graph itself, so they outlive the map that references them exactly as the
+	// nodes do, and their now-stable names would collide with the next compile's.
+	for (const TPair<FName, FQuestCompiledQuestlineRewards>& StaleGraph : InGraph->CompiledQuestlineRewards)
+	{
+		for (const TPair<FGameplayTag, FQuestRewardSet>& StaleSet : StaleGraph.Value.RewardsByOutcome)
+		{
+			for (const TObjectPtr<UQuestRewardBase>& StaleReward : StaleSet.Value.Rewards)
+			{
+				if (StaleReward)
+				{
+					StaleReward->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_DoNotDirty);
+				}
+			}
+		}
+	}
+
 	InGraph->CompiledNodes.Empty(); 
 	InGraph->CompiledQuestlineRewards.Empty();
 	InGraph->EntryNodeTags.Empty();
@@ -335,13 +604,65 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     // Detect renames via GUID bridge
     DetectAndRecordTagRenames(InGraph, OldTagsByGuid);
 
-    RegisterCompiledTags(InGraph);
+	// Name each compiled subobject from its own registry key rather than letting NewObject auto-number it. UE's default
+	// naming draws from a per-class counter that keeps advancing, so an unchanged graph produced QuestStep_12 on one
+	// compile and QuestStep_47 on the next - different export tables, a rewritten .uasset, and a binary diff on a graph
+	// nobody touched. The key is unique per compiled node by construction, so it is both stable and collision-free.
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : InGraph->CompiledNodes)
+	{
+		if (UQuestNodeBase* Node = Compiled.Value)
+		{
+			const FString StableName = Compiled.Key.ToString().Replace(TEXT("."), TEXT("_"));
+			if (Node->GetFName() != FName(*StableName))
+			{
+				Node->Rename(*StableName, nullptr, REN_DontCreateRedirectors | REN_DoNotDirty);
+			}
+		}
+	}
 
-	// Phase 1 of container lifecycle alignment — compute structural reachability data so the downstream
+	RegisterCompiledTags(InGraph);
+	// Phase 1 of container lifecycle alignment - compute structural reachability data so the downstream
 	// lifecycle methods (SetQuestLive auto-propagation, path-aware giver gate, etc.) can branch on
 	// structural containment rather than re-deriving it at runtime.
 	ComputeContainerReachability(InGraph);
 	BuildRewardManifest(InGraph);
+
+	// Stamp the authoring input's checksum BEFORE the comparison below, so it sits inside the compared window: a source
+	// edit moves the hash, the comparison sees it, and the asset dirties. Outside the window it would silently diverge
+	// from what was saved and the status icon would report stale forever.
+	InGraph->CompiledSourceHash = ComputeSourceHash(InGraph);
+	
+	// Dirty the package only if the compile actually produced something different. Two ordering constraints, both of them
+	// load-bearing. It must come AFTER the naming pass, because only then do old and new nodes share names and the object
+	// references inside them resolve to identical paths - before it, every reference differs and this could only ever
+	// report "changed". And it must come after the LAST writer of compiled state, which is BuildRewardManifest, or those
+	// writes land outside the compared window and the comparison silently answers a narrower question than it appears to.
+	TMap<FName, uint32> PostCompileFingerprint;
+	CompiledFingerprint(InGraph, PostCompileFingerprint);
+
+	if (FingerprintDiffers(PreCompileFingerprint, PostCompileFingerprint, InGraph->GetName()))
+	{
+		InGraph->Modify();
+
+		// Verbose-only: a checksum says a node moved but not which field. Pair the captured text against the fresh
+		// object for every node whose checksum actually changed, so the log names the property.
+		for (const TPair<FName, FString>& Prior : PreCompileNodeText)
+		{
+			const uint32* Was = PreCompileFingerprint.Find(Prior.Key);
+			const uint32* Now = PostCompileFingerprint.Find(Prior.Key);
+			if (Was && Now && *Was != *Now)
+			{
+				LogPropertyDelta(InGraph->GetName(), Prior.Key, Prior.Value,
+					DumpSavedProperties(InGraph->GetCompiledNodes().FindRef(Prior.Key)));
+			}
+		}
+	}
+	else if (UPackage* Package = InGraph->GetPackage())
+	{
+		// Nothing observable changed. The subobjects are fresh instances but byte-identical in content, so a save would
+		// write the same file — marking the asset dirty would only prompt the user to re-save what they already have.
+		Package->SetDirtyFlag(bPackageWasDirtyBeforeCompile);
+	}
 	
     UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Compile: '%s' finished — %d node(s), %d tag(s), %d error(s), %d warning(s)"),
         *InGraph->GetName(),
@@ -721,7 +1042,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 
     	Instance->QuestContentGuid = CombineGuids(CurrentOuterGuidChain, ContentNode->QuestGuid);
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
-    	Instance->NodeInfo.DisplayName = ContentNode->NodeLabel;
+    	Instance->NodeInfo.DisplayName = RehomeDisplayText(ContentNode->NodeLabel, Instance);
     	Instance->bResettableReplay = bNodeResettable;
 
     	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
@@ -731,14 +1052,14 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     	if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(ContentNode))
     	{
     		UQuestlineGraph* InnerAsset = LinkedNode->LinkedGraph.LoadSynchronous();
-    		Instance->DisplayName = (LinkedNode->DisplayName.IsEmpty() && InnerAsset) ? InnerAsset->DisplayName : LinkedNode->DisplayName;
-    		Instance->Description = (LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description;
+    		Instance->DisplayName = RehomeDisplayText((LinkedNode->DisplayName.IsEmpty() && InnerAsset) ? InnerAsset->DisplayName : LinkedNode->DisplayName, Instance);
+    		Instance->Description = RehomeDisplayText((LinkedNode->Description.IsEmpty() && InnerAsset) ? InnerAsset->Description : LinkedNode->Description, Instance);
     		Instance->DisplayData = (!LinkedNode->DisplayData && InnerAsset) ? InnerAsset->DisplayData : LinkedNode->DisplayData;
     	}
     	else
     	{
-    		Instance->DisplayName = ContentNode->DisplayName;
-    		Instance->Description = ContentNode->Description;
+    		Instance->DisplayName = RehomeDisplayText(ContentNode->DisplayName, Instance);
+    		Instance->Description = RehomeDisplayText(ContentNode->Description, Instance);
     		Instance->DisplayData = ContentNode->DisplayData;
     	}
     	
@@ -1051,9 +1372,15 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(
         	// instances (per-placement isolation for future escrow state). A shallow assign would share the editor
         	// node's sub-objects. Null array slots are preserved as null and skipped at runtime.
         	Inst->Rewards.Reserve(RewardEdNode->Rewards.Num());
-        	for (const TObjectPtr<UQuestRewardBase>& Authored : RewardEdNode->Rewards)
+        	for (int32 RewardIndex = 0; RewardIndex < RewardEdNode->Rewards.Num(); ++RewardIndex)
         	{
-        		Inst->Rewards.Add(Authored ? DuplicateObject<UQuestRewardBase>(Authored, Inst) : nullptr);
+        		// Named from the authored position rather than left to auto-numbering, which draws from a counter that keeps
+        		// advancing and so renames every reward on every compile. Position is the right identity here: reordering
+        		// authored rewards IS an edit, and should change the asset.
+        		const TObjectPtr<UQuestRewardBase>& Authored = RewardEdNode->Rewards[RewardIndex];
+        		Inst->Rewards.Add(Authored
+					? DuplicateObject<UQuestRewardBase>(Authored, Inst, *FString::Printf(TEXT("Reward_%d"), RewardIndex))
+					: nullptr);
         	}
         	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;
@@ -1620,9 +1947,16 @@ void FQuestlineGraphCompiler::RegisterCompiledTags(UQuestlineGraph* InGraph)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_RegisterCompiledTags);
 
-    ISimpleQuestEditorModule::Get().RegisterCompiledTags(
-        InGraph->GetPackage()->GetName(),
-        InGraph->CompiledQuestTags);
+	// A transient graph has no persistent identity, so its tags must not reach the project's compiled tag config: the
+	// registry is keyed by package name, and every transient graph shares /Engine/Transient. Compiling a scratch graph -
+	// an import preview, a tooling fixture, a test - would otherwise write tags into a tracked config that nothing can
+	// later attribute or clean up, since the "asset" they came from never existed on disk.
+	UPackage* Package = InGraph ? InGraph->GetPackage() : nullptr;
+	if (!Package || Package->HasAnyFlags(RF_Transient) || Package == GetTransientPackage()) return;
+
+	ISimpleQuestEditorModule::Get().RegisterCompiledTags(
+		Package->GetName(),
+		InGraph->CompiledQuestTags);
 }
 
 void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourcePathKey>& OutKeys,	TSet<UEdGraph*>& VisitedGraphs)
@@ -2700,9 +3034,15 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 			// The outcome tag: for a Step, from the descriptor; for a container, the path key is itself a registered tag.
 			const FGameplayTag Outcome = bIsStepNode ? OutcomeByPath.FindRef(PathId)
 													 : UGameplayTagsManager::Get().RequestGameplayTag(PathId, false);
-			if (!Outcome.IsValid()) return FText::FromName(PathId);				// dynamic PathName — show as authored
-			const FString Full = Outcome.ToString();							// registered tag — show the leaf
-			int32 Dot; return FText::FromString(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
+			// Culture-invariant, NOT FromString. A keyless FText gets a fresh localization key minted for it every time
+			// the package saves, so the next compile regenerates the keyless version, the two compare unequal, and the
+			// asset dirties again with no authored change behind it. These labels are gameplay-tag leaf names rather
+			// than authored prose - there is nothing to translate - so marking them invariant is both the fix and an
+			// accurate description of what they are. The "On completion" literal above keeps its NSLOCTEXT key and is
+			// stable precisely because it has one.
+			if (!Outcome.IsValid()) return FText::AsCultureInvariant(PathId.ToString());	// dynamic PathName - show as authored
+			const FString Full = Outcome.ToString();										// registered tag - show the leaf
+			int32 Dot; return FText::AsCultureInvariant(Full.FindLastChar(TEXT('.'), Dot) ? Full.RightChop(Dot + 1) : Full);
 		};
 
 		// Any-outcome bucket (NAME_None).

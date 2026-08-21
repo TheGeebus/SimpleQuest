@@ -272,7 +272,7 @@ protected:
 	/**
 	 * Derived components may expose a set of tags to be implicitly observed alongside the
 	 * designer-authored ObservedTags container. Returned tags receive default FObservedQuestEventSettings
-	 * (every observe-flag on, no outcome filter) only when not already present in ObservedTags —
+	 * (every observe-flag on, no outcome filter) only when not already present in ObservedTags -
 	 * designer-authored settings always win on overlap.
 	 *
 	 * Use to bridge tags managed by a derived component (e.g., Giver's QuestTagsToGive) onto the

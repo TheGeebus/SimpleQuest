@@ -155,9 +155,20 @@ public:
     DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeStarted, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
     DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnNodeCompleted, UQuestNodeBase*, Node, FGameplayTag, OutcomeTag, FName, PathIdentity);
     DECLARE_DYNAMIC_DELEGATE_OneParam (FOnNodeForwardActivated, UQuestNodeBase*, Node);
+    
+    /**
+     * Fired every time an activation attempt reaches this node and does not advance it - on the first arrival when a
+     * prerequisite is unmet, and again on each wake-and-re-check that still fails. The manager records the attempt; the
+     * node does not write state itself.
+     *
+     * The attempt leaves no other trace, because the node's own state is unchanged - which is what being refused means.
+     * Without this, a surface asking "did something just try to advance this and fail?" has nothing to read.
+     */
+    DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnNodeActivationRefused, UQuestNodeBase*, Node, FGameplayTag, InContextualTag);
 
     FOnNodeStarted OnNodeStarted;
     FOnNodeCompleted OnNodeCompleted;
+    FOnNodeActivationRefused OnNodeActivationRefused;
 
     virtual UWorld* GetWorld() const override;
     
@@ -502,6 +513,20 @@ public:
      * is the signal save/load uses to detect a node that must be re-armed on load.
      */
     bool IsAwaitingPrerequisite() const { return PrereqSubscriptionHandles.Num() > 0; }
+    
+    /**
+     * Current evaluation of this node's prerequisite expression, with per-leaf detail. A pure read: it evaluates against the
+     * subsystems it is handed and caches nothing, so a caller sees present truth rather than the last value some other path
+     * happened to push. A node with no wired prerequisites reports bIsAlways and bSatisfied true over an empty Leaves array.
+     *
+     * Reports what the EXPRESSION says, deliberately ignoring bBypassPrerequisitesOnce: a one-shot activation bypass does not
+     * make an unsatisfied prerequisite satisfied, and a surface that showed otherwise would hide the thing being inspected.
+     */
+    FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const
+    {
+        return PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, StateSubsystem);
+    }
+    
     const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
 
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }

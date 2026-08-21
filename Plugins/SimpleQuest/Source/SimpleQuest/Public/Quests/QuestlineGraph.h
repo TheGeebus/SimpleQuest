@@ -121,6 +121,14 @@ private:
      */
     UPROPERTY()
     TArray<FName> EntryNodeTags;
+    
+    /**
+     * Checksum of the authoring input this asset's compiled data was built from — this graph plus every questline it
+     * links, transitively. Compared against a freshly computed value when the editor opens the asset to decide whether
+     * the compiled data is current. Zero on assets compiled before this existed; the next compile fills it in.
+     */
+    UPROPERTY()
+    uint32 CompiledSourceHash = 0;
 
     /**
      * All compiled node instances, keyed by tag. Owned by this asset. Populated by the compiler — includes nodes inlined from
@@ -218,6 +226,20 @@ public:
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
     const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
+    const TArray<FGameplayTag>& GetOutwardSetterGroupTags() const { return OutwardSetterGroupTags; }
+    const TArray<FGameplayTag>& GetListenerGroupTags() const { return ListenerGroupTags; }
+    const TMap<FName, FQuestCompiledQuestlineRewards>& GetCompiledQuestlineRewards() const { return CompiledQuestlineRewards; }
+    uint32 GetCompiledSourceHash() const { return CompiledSourceHash; }
+
+    /**
+     * Sets the tag-namespace identity for this questline, applying the same normalization the details panel does - a
+     * whitespace-only ID is not empty, so it would defeat the asset-name fallback and compose a tag with an empty leaf.
+     *
+     * The ID must be unique across the project: the compiler refuses a graph whose ID is already claimed, so callers
+     * creating questlines programmatically are responsible for choosing one that isn't taken.
+     */
+    void SetQuestlineID(const FString& InQuestlineID);
+    
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }

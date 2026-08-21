@@ -5,6 +5,114 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.2] — 2026-08-21 — UE 5.8 Support and Honest Surfaces
+
+SimpleQuest now runs on Unreal Engine 5.8 alongside 5.6 and 5.7.
+
+The rest of this release is about surfaces that reported the wrong thing, which
+is worse than reporting nothing because you act on it: graph debug tooling that
+misread live quest state, a runtime defect that correcting it uncovered, a
+compiler that claimed changes it had not made, and a compile button that never
+knew whether it had anything to do.
+
+### Added
+
+- **Unreal Engine 5.8 is supported.** SimpleQuest and SimpleCore build and run
+  on 5.8 alongside 5.6 and 5.7, with the full automation suite passing and the
+  demo content and data resolver verified on it. The Electronic Nodes visual
+  integration continues to activate automatically on 5.7+ when EN is installed.
+  Plugins no longer declare a fixed `EngineVersion` - a single value can't
+  describe a range of supported versions, and on a plugin built from source it
+  mostly produced a startup prompt on newer engines. A minimum-version check at
+  build time replaces it, so an unsupported engine reports what it needs instead
+  of failing with unrelated compile errors.
+
+- **Quests keep a history of refused attempts.** Interacting with a step whose
+  prerequisites aren't met, or asking a giver for a quest it can't hand over,
+  was already broadcast as an event - but an event only reaches whoever was
+  subscribed at the moment it fired. Those refusals are now also recorded, and
+  `Get Refusal History` returns them per quest with the reason and the time.
+  A journal, a hint system, or a "you can't do that yet" prompt can ask what
+  the player has been refused rather than having to be listening when it
+  happened. The history is session-scoped and bounded, so it isn't carried in
+  save games and a player who retries repeatedly can't grow it without limit.
+- **A node pulses in the graph debug overlay when an attempt to advance it is
+  refused.** Interacting with a step that isn't ready, or a give that can't
+  proceed, flashes the node's lifecycle color and fades over about half a
+  second. It pulses the lifecycle layer specifically, because a refusal is the
+  absence of a state change - the pulse marks what *didn't* advance. A node
+  holding no state yet flashes and fades to nothing, which is what the
+  attempted transition did.
+- **The graph debug overlay shows why a node can't proceed.** A node waiting on
+  unsatisfied prerequisites, or explicitly blocked, now wears a ring outside its
+  state color - drawn in the prerequisite wire's own color for a prerequisite
+  gate, red for an explicit block. Because it's a second channel rather than a
+  replacement color, a node that is running *and* gated reads as both, which the
+  previous single-color treatment could not express: being blocked used to
+  replace the node's lifecycle color entirely, hiding whether it was live,
+  pending, or already complete. The ring also makes a prerequisite cleared by
+  resettable replay visible the moment it clears, rather than when the node
+  eventually runs again.
+
+- **The compile button reports whether a compile is actually needed.** Opening a
+  questline showed the status as unknown until you happened to compile it in that
+  session, so the indicator told you nothing on the way in and there was no way
+  to tell a questline that needed compiling from one that didn't. It now compares
+  the questline's authoring graph - and, transitively, every questline it links -
+  against what the compiled data was built from, and reads as up to date when
+  they match. Editing anything the compiled data depends on, in this questline or
+  in a linked one, returns it to unknown until you compile.
+
+### Fixes
+
+- **Compile All no longer crashes the editor when a questline can't be saved.**
+  It saves each questline as it compiles, and a failed save brought the whole
+  editor down rather than reporting the problem - so a questline still read-only
+  because it hadn't been checked out of source control, or open in another
+  program, or held by a second editor instance, ended the session. Compile All
+  now reports which questlines could not be written and why, counts them as
+  failures, and finishes the rest.
+- **Compiling a questline no longer modifies assets it did not change.** A
+  compile rewrote every questline it touched, whether or not anything about it
+  had changed, so opening the editor and pressing Compile produced a dozen
+  modified files in version control. A code-only commit could sweep content in
+  alongside it, and the history could no longer tell you whether a questline had
+  actually been edited. An adopter's first compile dirtied content they had never
+  opened. Three separate causes, all fixed: compiled objects were named from a
+  counter that kept advancing, so an unchanged questline produced differently
+  named internals on every compile; the compile marked the asset as modified
+  before it could know whether anything would change; and generated text was
+  assigned a new localization key each time the asset was saved. Compiling an
+  unchanged questline now produces byte-identical output and leaves the asset
+  alone. Verified by an automation test that compiles twice and compares.
+- **The generated display name file no longer changes on every compile.** Same
+  underlying cause as above - display text was being re-keyed as it was written -
+  so this file appeared in every diff regardless of whether any display name had
+  been edited.
+- **The Prerequisite Examiner reports live prerequisite state correctly.** Three
+  cases were wrong, all from the same cause. A prerequisite wired from a step's
+  Any Outcome pin showed no state at all. A questline opened on its own while it
+  was actually running as part of a parent questline showed no state either. And
+  a prerequisite cleared by resettable replay kept reading as satisfied, which is
+  the case the panel exists to make visible. The panel now identifies a leaf the
+  way the graph does - by its source node and the completion path it requires -
+  instead of by the fact tag it happens to read, so the three resolve together.
+- **The graph debug overlay no longer shows a node as completed while it is
+  running again.** A node that has completed keeps that record permanently, and a
+  container stays live across loop iterations, so a node on its second run
+  asserts both at once. The overlay ranked completion above activity and painted
+  it as done. Current activity now wins.
+- **A container's Live state is readable from every tag perspective.** Quest and
+  questline containers derive Live from their inner Steps, and that derived state
+  was written to only one of the container's tag spellings - unlike every other
+  lifecycle state, which is published across all of them. Querying whether a
+  container was live through an asset-scoped alias returned false while it was
+  running, and an observer bound on that perspective never saw it start. Most
+  visible on a questline embedded in another as a linked node, where the
+  embedded copy and the placement running it are spelled differently: the graph
+  debug overlay showed such a container as completed and never as live, even
+  while its inner Steps were active.
+
 ## [0.7.1] — 2026-08-17 — Clean-Install Fixes
 
 A fix release for three things a clean install surfaces that a development

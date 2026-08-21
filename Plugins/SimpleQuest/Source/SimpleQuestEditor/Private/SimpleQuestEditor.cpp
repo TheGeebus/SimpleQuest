@@ -678,9 +678,32 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 
 				UPackage* Package = Graph->GetOutermost();
 				Package->MarkPackageDirty();
+
+				// SAVE_NoError is load-bearing, not defensive dressing. Without it SavePackage calls appError on any
+				// write failure, which takes the whole editor down - and the failure modes are ordinary rather than
+				// exotic: a questline still read-only because it has not been checked out of Perforce, an asset open in
+				// another program, a second editor instance holding the file. Compiling a dozen questlines should
+				// report the ones it could not write, not lose the session over the first of them.
 				FSavePackageArgs Args;
-				UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
-				QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
+				Args.SaveFlags = SAVE_NoError;
+				const bool bSaved = UPackage::SavePackage(Package, Graph, *FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension()), Args);
+
+				if (bSaved)
+				{
+					QuestlineCompiledDelegate.Broadcast(Package->GetName(), true);
+				}
+				else
+				{
+					// Compiled successfully but could not be written. Counted as a failure because the compiled data on
+					// disk no longer matches the graph, which is the thing the caller needs to know.
+					--SuccessCount;
+					++FailCount;
+					CompilerLog.Error(FText::Format(
+						NSLOCTEXT("SimpleQuestEditor", "CompileAll_SaveFailed",
+							"'{0}' compiled but could not be saved. It may be read-only, checked in to source control, or open in another program."),
+						FText::FromName(AssetData.AssetName)));
+					QuestlineCompiledDelegate.Broadcast(Package->GetName(), false);
+				}
 			}
 			else
 			{

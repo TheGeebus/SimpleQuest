@@ -458,4 +458,11 @@ public:
 	 */
 	static FGuid CombineGuids(const FGuid& Outer, const FGuid& Inner);
 	
+	/**
+	 * Checksum of everything this questline's compiled output is built from: its own authoring graph plus, transitively,
+	 * every questline it links. Stored on the asset at compile time and recomputed when the editor opens it, so the
+	 * compile-status indicator can answer whether a compile is actually needed instead of defaulting to "unknown".
+	 */
+	static uint32 ComputeSourceHash(UQuestlineGraph* Root);
+	
 };

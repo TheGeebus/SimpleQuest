@@ -21,6 +21,8 @@
 #include "QuestManagerSubsystem.generated.h"
 
 
+struct FQuestGiveBlockedEvent;
+struct FQuestProgressRefusedEvent;
 struct FQuestGraphResolution;
 struct FQuestActivationRequestEvent;
 struct FQuestBlockRequestEvent;
@@ -103,6 +105,12 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 	friend class USimpleQuestBlueprintLibrary;
+	
+	/**
+	 * PIE debug overlay. Maps a resolved runtime tag back to its registered instance to evaluate live prerequisite state.
+	 * Reaches in rather than the manager growing public API for one consumer, matching the Blueprint library above.
+	 */
+	friend class FQuestPIEDebugChannel;
 	
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -254,6 +262,16 @@ protected:
 
 	/** Per-instance objective progress on live objectives, keyed by owning-Step QuestContentGuid. Read by snapshot capture. */
 	virtual TMap<FGuid, FSimpleQuestObjectiveSaveState> CaptureObjectiveStates() const;
+
+	/**
+	 * The live node instance registered under Tag, or null when nothing is registered for it. Accepts any perspective the
+	 * registry is keyed under: registration adds the canonical tag and every asset-scoped alias, all pointing at the same
+	 * instance, so a caller does not need to resolve to canonical form first.
+	 *
+	 * Part of the replacement contract: an orchestrator that maintains its own registry instead of LoadedNodeInstances must
+	 * override this, or editor tooling and any other introspection will silently report against a registry it no longer fills.
+	 */
+	virtual const UQuestNodeBase* FindNodeInstance(FGameplayTag Tag) const { return LoadedNodeInstances.FindRef(Tag.GetTagName()); }
 
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
@@ -421,10 +439,7 @@ private:
 	 * receives the result either way and is responsible for any null check.
 	 */
 	template<CSoftLoadable TAsset>
-	static void AsyncLoadAndActivate(
-		UObject* WeakBindContext,
-		const TSoftObjectPtr<TAsset>& SoftPtr,
-		TFunction<void(TAsset*)> OnComplete)
+	static void AsyncLoadAndActivate(UObject* WeakBindContext, const TSoftObjectPtr<TAsset>& SoftPtr, TFunction<void(TAsset*)> OnComplete)
 	{
 		if (SoftPtr.IsNull())
 		{
@@ -453,10 +468,7 @@ private:
 	 * UClass*; the caller can cast back to TSubclassOf<TClass> if needed.
 	 */
 	template<CSoftLoadable TClass>
-	static void AsyncLoadAndActivateClass(
-		UObject* WeakBindContext,
-		const TSoftClassPtr<TClass>& SoftClassPtr,
-		TFunction<void(UClass*)> OnComplete)
+	static void AsyncLoadAndActivateClass(UObject* WeakBindContext, const TSoftClassPtr<TClass>& SoftClassPtr, TFunction<void(UClass*)> OnComplete)
 	{
 		if (SoftClassPtr.IsNull())
 		{
@@ -517,6 +529,22 @@ private:
 	UFUNCTION()
 	void HandleOnNodeStarted(UQuestNodeBase* Node, FGameplayTag InContextualTag);
 	UFUNCTION()
+	void HandleOnNodeActivationRefused(UQuestNodeBase* Node, FGameplayTag InContextualTag);
+	
+	/**
+	 * Records a published progress refusal into the state subsystem's refusal history. Subscribed rather than called at
+	 * each publish site because UQuestTriggerComponent publishes one of these too, and components do not write state -
+	 * listening keeps the manager the only writer and covers any future publisher without another edit.
+	 */
+	void HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
+
+	/**
+	 * Records a refused give into the same refusal history as a refused interaction. Separate handler rather than a shared
+	 * template because the two payload types differ and a template over two call sites reads worse than the duplication.
+	 */
+	void HandleGiveBlockedForRecord(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
+	
+	UFUNCTION()
 	void HandleOnNodeForwardActivated(UQuestNodeBase* Node);
 	
 	void HandleGiveQuestEvent(FGameplayTag Channel, const FQuestGivenEvent& Event);
@@ -537,6 +565,8 @@ private:
 	FDelegateHandle ClearBlockRequestDelegateHandle;
 	FDelegateHandle ResolveRequestDelegateHandle;
 	FDelegateHandle QuestlineStartRequestDelegateHandle;
+	FDelegateHandle ProgressRefusedRecordHandle;
+	FDelegateHandle GiveBlockedRecordHandle;
 
 	TMap<FGameplayTag, FDelegateHandle> LiveStepTriggerHandles;
 

@@ -125,14 +125,10 @@ void UQuestlineGraph::PostEditChangeProperty(FPropertyChangedEvent& PropertyChan
 	{
 		// Trim surrounding whitespace so a stray space can never become the identity. This is more than tidiness: a
 		// whitespace-only value is not IsEmpty(), so GetEffectiveID() returns it instead of falling back to the asset name,
-		// and it then sanitizes away to nothing — which composes the tag "SimpleQuest.Questline." (rejected by the engine,
+		// and it then sanitizes away to nothing - which composes the tag "SimpleQuest.Questline." (rejected by the engine,
 		// silently replaced with the bare root) and resolves the export folder to the export root. Trimming converts that
 		// case into the plain empty value the asset-name fallback already handles correctly.
-		const FString Trimmed = QuestlineID.TrimStartAndEnd();
-		if (Trimmed != QuestlineID)
-		{
-			QuestlineID = Trimmed;
-		}
+		SetQuestlineID(QuestlineID);
 	}
 }
 #endif
@@ -220,5 +216,10 @@ void UQuestlineGraph::PostDuplicate(bool bDuplicateForPIE)
 					"QuestlineID compile into one tag namespace; change one before compiling."),
 			   *GetName(), *QuestlineID);
 	}
+}
+
+void UQuestlineGraph::SetQuestlineID(const FString& InQuestlineID)
+{
+	QuestlineID = InQuestlineID.TrimStartAndEnd();
 }
 

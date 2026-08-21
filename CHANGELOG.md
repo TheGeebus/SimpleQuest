@@ -5,18 +5,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.7.2] — 2026-08-19 — Honest Debug Surfaces
+## [0.7.2] — *In Development* — Honest Surfaces
 
-A debug surface that reports the wrong state is worse than one reporting nothing,
-because you act on it. This release corrects three ways the graph debug tooling
-misread live quest state, adds a dimension it was missing, and fixes a runtime
-defect that correcting them uncovered.
+A surface that reports the wrong thing is worse than one reporting nothing,
+because you act on it. This release corrects several: graph debug tooling that
+misread live quest state, a runtime defect that correcting it uncovered, a
+compiler that claimed changes it had not made, and a compile button that never
+knew whether it had anything to do.
 
 ### Added
 
 - **Quests keep a history of refused attempts.** Interacting with a step whose
   prerequisites aren't met, or asking a giver for a quest it can't hand over,
-  was already broadcast as an event — but an event only reaches whoever was
+  was already broadcast as an event - but an event only reaches whoever was
   subscribed at the moment it fired. Those refusals are now also recorded, and
   `Get Refusal History` returns them per quest with the reason and the time.
   A journal, a hint system, or a "you can't do that yet" prompt can ask what
@@ -27,7 +28,7 @@ defect that correcting them uncovered.
   refused.** Interacting with a step that isn't ready, or a give that can't
   proceed, flashes the node's lifecycle color and fades over about half a
   second. It pulses the lifecycle layer specifically, because a refusal is the
-  absence of a state change — the pulse marks what *didn't* advance. A node
+  absence of a state change - the pulse marks what *didn't* advance. A node
   holding no state yet flashes and fades to nothing, which is what the
   attempted transition did.
 - **The graph debug overlay shows why a node can't proceed.** A node waiting on
@@ -41,8 +42,34 @@ defect that correcting them uncovered.
   resettable replay visible the moment it clears, rather than when the node
   eventually runs again.
 
+- **The compile button reports whether a compile is actually needed.** Opening a
+  questline showed the status as unknown until you happened to compile it in that
+  session, so the indicator told you nothing on the way in and there was no way
+  to tell a questline that needed compiling from one that didn't. It now compares
+  the questline's authoring graph - and, transitively, every questline it links -
+  against what the compiled data was built from, and reads as up to date when
+  they match. Editing anything the compiled data depends on, in this questline or
+  in a linked one, returns it to unknown until you compile.
+
 ### Fixes
 
+- **Compiling a questline no longer modifies assets it did not change.** A
+  compile rewrote every questline it touched, whether or not anything about it
+  had changed, so opening the editor and pressing Compile produced a dozen
+  modified files in version control. A code-only commit could sweep content in
+  alongside it, and the history could no longer tell you whether a questline had
+  actually been edited. An adopter's first compile dirtied content they had never
+  opened. Three separate causes, all fixed: compiled objects were named from a
+  counter that kept advancing, so an unchanged questline produced differently
+  named internals on every compile; the compile marked the asset as modified
+  before it could know whether anything would change; and generated text was
+  assigned a new localization key each time the asset was saved. Compiling an
+  unchanged questline now produces byte-identical output and leaves the asset
+  alone. Verified by an automation test that compiles twice and compares.
+- **The generated display name file no longer changes on every compile.** Same
+  underlying cause as above - display text was being re-keyed as it was written -
+  so this file appeared in every diff regardless of whether any display name had
+  been edited.
 - **The Prerequisite Examiner reports live prerequisite state correctly.** Three
   cases were wrong, all from the same cause. A prerequisite wired from a step's
   Any Outcome pin showed no state at all. A questline opened on its own while it

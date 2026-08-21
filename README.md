@@ -1,5 +1,5 @@
 # SimpleQuest
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6%20%7C%205.7-dea309?style=flat&logo=unrealengine)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE) ![Unreal Engine](https://img.shields.io/badge/Unreal-5.6%20%7C%205.7%20%7C%205.8-dea309?style=flat&logo=unrealengine)
 
 **An event-driven game progression framework for Unreal Engine.** Free and MIT licensed.
 
@@ -18,7 +18,7 @@ SimpleQuest started as an answer to a targeted question, *how do you make a sing
 
 <img width="1913" height="1013" alt="SimpleQuestDemo-0 3 0-quick-build" src="https://github.com/user-attachments/assets/43efee3f-d276-4a39-b632-ceb2d465ee34" />
 
-This version targets Unreal Engine 5.6 and is verified compatible with 5.7; the Electronic Nodes visual integration activates automatically on 5.7+ when EN is installed.
+This version targets Unreal Engine 5.6 and is verified compatible with 5.7 and 5.8; the Electronic Nodes visual integration activates automatically on 5.7+ when EN is installed.
 
 Please visit the [Simple Quest Discord server](https://discord.gg/PN9kzPypeS) for community showcases and additional support, including bug reports and feature requests.
 
@@ -72,7 +72,7 @@ Game progression framework. Runtime and editor modules, with an optional Electro
 
 ## Requirements
 
-- Unreal Engine 5.6 or 5.7
+- Unreal Engine 5.6, 5.7, or 5.8
 - Visual Studio 2022 (Windows) or Xcode (Mac) with C++20 support enabled
 - [Git LFS](https://git-lfs.com/) installed locally (required for cloning - see below)
 

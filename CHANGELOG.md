@@ -5,15 +5,27 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.7.2] — *In Development* — Honest Surfaces
+## [0.7.2] — 2026-08-21 — UE 5.8 Support and Honest Surfaces
 
-A surface that reports the wrong thing is worse than one reporting nothing,
-because you act on it. This release corrects several: graph debug tooling that
+SimpleQuest now runs on Unreal Engine 5.8 alongside 5.6 and 5.7.
+
+The rest of this release is about surfaces that reported the wrong thing, which
+is worse than reporting nothing because you act on it: graph debug tooling that
 misread live quest state, a runtime defect that correcting it uncovered, a
 compiler that claimed changes it had not made, and a compile button that never
 knew whether it had anything to do.
 
 ### Added
+
+- **Unreal Engine 5.8 is supported.** SimpleQuest and SimpleCore build and run
+  on 5.8 alongside 5.6 and 5.7, with the full automation suite passing and the
+  demo content and data resolver verified on it. The Electronic Nodes visual
+  integration continues to activate automatically on 5.7+ when EN is installed.
+  Plugins no longer declare a fixed `EngineVersion` - a single value can't
+  describe a range of supported versions, and on a plugin built from source it
+  mostly produced a startup prompt on newer engines. A minimum-version check at
+  build time replaces it, so an unsupported engine reports what it needs instead
+  of failing with unrelated compile errors.
 
 - **Quests keep a history of refused attempts.** Interacting with a step whose
   prerequisites aren't met, or asking a giver for a quest it can't hand over,

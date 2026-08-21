@@ -6,6 +6,7 @@
 #include "EdGraph/EdGraph.h"
 #include "Graph/QuestlineGraphSchema.h"
 #include "ISimpleQuestEditorModule.h"
+#include "Display/QuestDisplayData.h"
 #include "Misc/AutomationTest.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Objectives/CountingQuestObjective.h"
@@ -20,6 +21,9 @@ namespace QuestCompileChurn_Internal
 {
 	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
 
+	static const FString FixtureDisplayName = TEXT("Fixture Display Name");
+	static const FString FixtureDescription = TEXT("Fixture description text.");
+
 	/**
 	 * A questline built from nothing, in a real but never-saved package.
 	 *
@@ -27,13 +31,17 @@ namespace QuestCompileChurn_Internal
 	 * transient fixture reports "not dirty" no matter what the compile did, which makes any dirty assertion vacuous.
 	 *
 	 * Built rather than duplicated from shipped content so the tests survive that content being renamed, re-authored, or
-	 * slimmed, and so the fixture carries no display payload - a graph that contributes no display records never reaches
-	 * the compiled display ini, which removes one whole category of cleanup.
+	 * slimmed.
+	 *
+	 * It DOES carry a display payload, and that is deliberate. An earlier version omitted one to avoid cleaning up the
+	 * compiled display ini - but the ini is written by the module's batch entry points, not by Compile() itself, so a
+	 * test driving the compiler directly never reaches it. The payload costs nothing and covers a real defect class.
 	 */
 	struct FCompileFixture
 	{
 		UQuestlineGraph* Graph = nullptr;
 		UPackage* Package = nullptr;
+		UQuestDisplayData* DisplayData = nullptr;
 
 		explicit FCompileFixture(const TCHAR* PackageName)
 		{
@@ -42,6 +50,10 @@ namespace QuestCompileChurn_Internal
 
 			Graph = NewObject<UQuestlineGraph>(Package, UQuestlineGraph::StaticClass(),
 				TEXT("QL_CompileFixture"), RF_Public | RF_Standalone | RF_Transactional);
+
+			// Explicitly named so its path is identical on every compile - an auto-numbered name would show up as
+			// drift in the stability test, since compiled nodes reference this object by path.
+			DisplayData = NewObject<UQuestDisplayData>(Graph, UQuestDisplayData::StaticClass(), TEXT("DA_CompileFixture"));
 
 			// Mirrors UQuestlineGraphFactory::FactoryCreateNew - the schema's default nodes are what give the graph its
 			// Entry, and the compiler walks from there.
@@ -76,6 +88,11 @@ namespace QuestCompileChurn_Internal
 			// The compiler errors out on a Step with no objective class, so the fixture needs a real one. Which objective is
 			// irrelevant here - nothing exercises its behavior, only that the node compiles.
 			Step->ObjectiveClass = UCountingQuestObjective::StaticClass();
+
+			// Display payload on every step, so a compiled node that stops carrying it has somewhere to be caught.
+			Step->DisplayName = FText::FromString(FixtureDisplayName);
+			Step->Description = FText::FromString(FixtureDescription);
+			Step->DisplayData = DisplayData;
 
 			Step->AllocateDefaultPins();
 			Graph->QuestlineEdGraph->AddNode(Step, false, false);
@@ -181,6 +198,42 @@ bool FQuestCompile_RealChangeStillDirties::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Second compile succeeds"), Compile(Fixture.Graph));
 	TestTrue(TEXT("A graph that actually changed still dirties its package"), Fixture.Package->IsDirty());
+
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestCompile_CompiledNodeCarriesDisplayPayload, "SimpleQuest.Compile.CompiledNodeCarriesDisplayPayload",
+	QuestCompileChurn_Internal::TestFlags)
+bool FQuestCompile_CompiledNodeCarriesDisplayPayload::RunTest(const FString& Parameters)
+{
+	using namespace QuestCompileChurn_Internal;
+
+	// The three churn tests above assert that compiling twice produces the SAME thing. None of them assert that it
+	// produces the RIGHT thing - and a compiled node that quietly stops carrying its authored display fields is stable
+	// in exactly the way they check for. That is not hypothetical: a bad edit anchor deleted the branch copying
+	// DisplayName / Description / DisplayData onto non-linked nodes, every test here stayed green, and it surfaced only
+	// when a quest showed default description text in the running game.
+	FCompileFixture Fixture(TEXT("/Temp/QuestCompileDisplay"));
+	if (!TestTrue(TEXT("Fixture builds"), Fixture.IsValid())) return false;
+	if (!TestTrue(TEXT("Compile succeeds"), Compile(Fixture.Graph))) return false;
+
+	int32 Checked = 0;
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : Fixture.Graph->GetCompiledNodes())
+	{
+		const UQuestNodeBase* Node = Pair.Value;
+		if (!Node) continue;
+
+		TestEqual(*FString::Printf(TEXT("'%s' carries its authored DisplayName"), *Pair.Key.ToString()),
+			Node->GetDisplayName().ToString(), FixtureDisplayName);
+		TestEqual(*FString::Printf(TEXT("'%s' carries its authored Description"), *Pair.Key.ToString()),
+			Node->GetDescription().ToString(), FixtureDescription);
+		TestEqual(*FString::Printf(TEXT("'%s' carries its authored DisplayData"), *Pair.Key.ToString()),
+			Node->GetDisplayData(), Fixture.DisplayData);
+		++Checked;
+	}
+
+	// Without this the loop above passes vacuously on an empty map, which is the failure mode the whole test exists for.
+	TestTrue(TEXT("At least one compiled node was checked"), Checked > 0);
 
 	return true;
 }

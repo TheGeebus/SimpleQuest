@@ -65,6 +65,13 @@ knew whether it had anything to do.
 
 ### Fixes
 
+- **Compile All no longer crashes the editor when a questline can't be saved.**
+  It saves each questline as it compiles, and a failed save brought the whole
+  editor down rather than reporting the problem - so a questline still read-only
+  because it hadn't been checked out of source control, or open in another
+  program, or held by a second editor instance, ended the session. Compile All
+  now reports which questlines could not be written and why, counts them as
+  failures, and finishes the rest.
 - **Compiling a questline no longer modifies assets it did not change.** A
   compile rewrote every questline it touched, whether or not anything about it
   had changed, so opening the editor and pressing Compile produced a dozen

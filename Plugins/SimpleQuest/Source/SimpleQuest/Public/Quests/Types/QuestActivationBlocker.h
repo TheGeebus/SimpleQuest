@@ -19,13 +19,13 @@ enum class EQuestActivationBlocker : uint8
 	/** One or more prereq leaves are unsatisfied. UnsatisfiedLeafTags lists which. */
 	PrereqUnmet,
 
-	/** Quest's Blocked fact is set — externally locked out via SetBlocked. ClearBlocked required to re-enable. */
+	/** Quest's Blocked fact is set - externally locked out via SetBlocked. ClearBlocked required to re-enable. */
 	Blocked,
 
-	/** Quest's Live fact is set — already running. Cannot be re-given while active. */
+	/** Quest's Live fact is set - already running. Cannot be re-given while active. */
 	AlreadyLive,
 
-	/** Quest is not in a giver-gated PendingGiver state — the giver isn't currently offering it. */
+	/** Quest is not in a giver-gated PendingGiver state - the giver isn't currently offering it. */
 	NotPendingGiver,
 
 	/** ContextualTag isn't registered in the runtime tag manager. Stale or never-compiled tag. */
@@ -34,9 +34,16 @@ enum class EQuestActivationBlocker : uint8
 	/**
 	 * Quest IS already in PendingGiver state and a re-activation cascade tried to re-fire the gate. Surfaced as
 	 * an FQuestActivationFailedEvent reason; not used by give-time blocker queries (the give-flow checks
-	 * NotPendingGiver as its symmetric partner — that's "no gate to consume", this is "gate still pending").
+	 * NotPendingGiver as its symmetric partner - that's "no gate to consume", this is "gate still pending").
 	 */
 	AlreadyPendingGiver,
+
+	/**
+	 * An advancement hold is active on this quest, or on a container above it. The quest is otherwise startable - this
+	 * is a deliberate pause requested by game code, not a failure. Held activations are parked and replay in arrival
+	 * order when the last hold clears, so a node reporting this is waiting rather than refused.
+	 */
+	HeldForAdvancement,
 };
 
 /**

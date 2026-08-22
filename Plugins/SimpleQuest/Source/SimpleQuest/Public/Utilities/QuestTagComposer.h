@@ -14,20 +14,20 @@
 enum class EQuestTagKind : uint8
 {
 	Unknown,
-	Identity,           // SimpleQuest.Questline.*           — designer-authored or compiler-emitted node identity
-	State,              // SimpleQuest.State.*				 — runtime-managed state facts
-	Outcome,            // SimpleQuest.Outcome.*			 — designer-authored outcome identifiers
-	PrereqRule,         // SimpleQuest.PrereqRule.*			 — designer-authored prereq rule group identity
-	ActivationGroup,    // SimpleQuest.ActivationGroup.* 	 — designer-authored activation group identity
+	Identity,           // SimpleQuest.Questline.*           - designer-authored or compiler-emitted node identity
+	State,              // SimpleQuest.State.*				 - runtime-managed state facts
+	Outcome,            // SimpleQuest.Outcome.*			 - designer-authored outcome identifiers
+	PrereqRule,         // SimpleQuest.PrereqRule.*			 - designer-authored prereq rule group identity
+	ActivationGroup,    // SimpleQuest.ActivationGroup.* 	 - designer-authored activation group identity
 };
 
 /**
  * Per-quest lifecycle leaf, written under SimpleQuest.State.<Path>.<Leaf>. Replaces the prior FString-keyed
  * Leaf_X constants: typo-proof, switch-exhaustive, iterates cleanly via FQuestTagComposer::AllStateLeaves.
  *
- * Live and Started are a present/past pair on one axis. Live is the "on-air light" — set while the node (or, for
+ * Live and Started are a present/past pair on one axis. Live is the "on-air light" - set while the node (or, for
  * a container, an inner child) is currently active, and re-derived away the moment it isn't. Started is the
- * immutable record that it went live at least once: append-only, never removed. That tense is the contract —
+ * immutable record that it went live at least once: append-only, never removed. That tense is the contract -
  * it lets catch-up reconstruct a Started/Activated event after a save taken while Live has cleared but the node
  * never itself resolved (a container reached, one child finished, neither live nor complete).
  */
@@ -39,6 +39,17 @@ enum class EQuestStateLeaf : uint8
 	PendingGiver,
 	Deactivated,
 	Blocked,
+
+	/**
+	 * An advancement hold is active on this quest, or on a container above it. Written by HoldQuestAdvancement and
+	 * cleared when the last hold on the tag releases. State rather than an event, because it persists between the hold
+	 * and the release - which also means it replicates through the ordinary fact seam and a client can see it.
+	 *
+	 * NEVER PERSISTS. Holds are drained before a save snapshot is captured, so this leaf is always absent by the time
+	 * facts are gathered. That is deliberate: pacing does not survive a save/load boundary, and persisting a pause
+	 * would restore a game that looks stuck.
+	 */
+	Held,
 };
 
 /**
@@ -110,8 +121,8 @@ public:
 	/**
 	 * Comprehensive union of every tag token FQuestTagComposer manages: plugin prefix, sub-prefixes,
 	 * fully composed namespaces, suffixes (Path / EntryPath), and the wire-format leaf names (Live,
-	 * Completed, …) sourced via LeafToString. Heterogeneous by design — single-segment entries mixed
-	 * with dot-bearing prefix strings — so NOT suitable for tag-validity checks (would produce false
+	 * Completed, …) sourced via LeafToString. Heterogeneous by design - single-segment entries mixed
+	 * with dot-bearing prefix strings - so NOT suitable for tag-validity checks (would produce false
 	 * positives). Primary use: reserved-segment validation in the compiler to block designer node
 	 * labels from colliding with any internal-use token. Also suitable as a complete inventory for any
 	 * future audit / inspection surface.
@@ -199,7 +210,7 @@ public:
 
 	/**
 	 * Strips the PluginPrefix ("SimpleQuest.") from a tag and returns the remainder for rendering surfaces
-	 * (panel headers, K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim —
+	 * (panel headers, K2 node tag-picker chips, tooltips). Keeps the post-prefix segments verbatim -
 	 * preserves the namespace context that distinguishes `Questline.X` (identity) from `State.X.Live`
 	 * (state fact) without forcing designers to mentally re-prepend the plugin name on every read. The
 	 * data layer keeps the full tag; only rendering surfaces use this shortened form. Copy-tag affordances
@@ -211,7 +222,7 @@ public:
 	 *   "SimpleQuest.Outcome.Combat.BossDefeated"        → "Outcome.Combat.BossDefeated"
 	 *   "SimpleQuest.PrereqRule.MyRule"                  → "PrereqRule.MyRule"
 	 *   "Quest.Outcome.Combat.BossDefeated" (legacy)     → "Quest.Outcome.Combat.BossDefeated"
-	 *   "Game.Foo.Bar" (foreign — no PluginPrefix)       → "Game.Foo.Bar"
+	 *   "Game.Foo.Bar" (foreign - no PluginPrefix)       → "Game.Foo.Bar"
 	 *   NAME_None                                        → ""             (empty FText)
 	 */
 	static FText FormatTagForDisplay(FName TagName);

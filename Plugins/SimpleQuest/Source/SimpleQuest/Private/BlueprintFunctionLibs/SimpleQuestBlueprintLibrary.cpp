@@ -84,6 +84,18 @@ bool USimpleQuestBlueprintLibrary::IsQuestPendingGiver(const UObject* WorldConte
     return FQuestLifecycleQuery::IsPendingGiver(GetWorldStateSubsystem(WorldContext), QuestTag);
 }
 
+bool USimpleQuestBlueprintLibrary::IsQuestAdvancementHeld(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    return Manager ? Manager->IsQuestAdvancementHeld(QuestTag) : false;
+}
+
+TArray<FName> USimpleQuestBlueprintLibrary::GetActiveHoldReasons(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    return Manager ? Manager->GetActiveHoldReasons(QuestTag) : TArray<FName>();
+}
+
 bool USimpleQuestBlueprintLibrary::IsQuestBlocked(const UObject* WorldContext, FGameplayTag QuestTag)
 {
     return FQuestLifecycleQuery::IsBlocked(GetWorldStateSubsystem(WorldContext), QuestTag);
@@ -217,6 +229,24 @@ void USimpleQuestBlueprintLibrary::RestoreQuestGraphs(const UObject* WorldContex
     }
 }
 
+FQuestAdvancementHold USimpleQuestBlueprintLibrary::HoldQuestAdvancement(const UObject* WorldContext, FGameplayTag QuestTag, FName Reason, bool bHoldDeactivation)
+{
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        return Manager->HoldQuestAdvancement(QuestTag, Reason, bHoldDeactivation);
+    }
+    UE_LOG(LogSimpleQuest, Warning, TEXT("HoldQuestAdvancement: no QuestManagerSubsystem for the given world context; nothing held."));
+    return FQuestAdvancementHold();
+}
+
+void USimpleQuestBlueprintLibrary::ReleaseQuestAdvancement(const UObject* WorldContext, const FQuestAdvancementHold& Hold)
+{
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->ReleaseQuestAdvancement(Hold);
+    }
+}
+
 FSimpleQuestSaveSnapshot USimpleQuestBlueprintLibrary::CaptureQuestState(const UObject* WorldContext)
 {
     FSimpleQuestSaveSnapshot Snapshot{};
@@ -226,6 +256,22 @@ FSimpleQuestSaveSnapshot USimpleQuestBlueprintLibrary::CaptureQuestState(const U
     {
         UE_LOG(LogSimpleQuest, Warning, TEXT("CaptureQuestState: no QuestStateSubsystem for the given world context; returning empty snapshot."));
         return Snapshot;
+    }
+
+    // Drain advancement holds BEFORE the snapshot is taken. Releasing replays every parked activation, so the save
+    // records the successor as Live - an ordinary supported state - instead of a pause that would need its own schema.
+    // It is also what keeps Held facts out of saves: by the time CaptureSnapshot gathers facts they are already gone,
+    // so no transient-fact mechanism is needed anywhere.
+    // THE ORDER IS LOAD-BEARING. Draining after the snapshot would let the released activations change the world after
+    // the picture was taken, and they would be lost.
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        const int32 Drained = Manager->ReleaseAllQuestAdvancementHolds();
+        if (Drained > 0)
+        {
+            UE_LOG(LogSimpleQuest, Log,
+                TEXT("CaptureQuestState: released %d advancement hold(s) before capture - pacing does not survive a save."), Drained);
+        }
     }
 
     Snapshot = QSS->CaptureSnapshot();
@@ -335,7 +381,7 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFr
     const UQuestNodeBase* Owner = Nodes.FindRef(ContentTag.GetTagName());
     if (!Owner) return {};
 
-    // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) — matches the live
+    // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) - matches the live
     // GetAdvertisedRewardsForAnyOutcome (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
     // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
     return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true);
@@ -346,7 +392,7 @@ TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQue
     TMap<FGameplayTag, FQuestRewardPreviewList> Out;
     if (!Questline) return Out;
 
-    // Read the authored questline-level rewards directly off the asset (this map IS the runtime home) — manager-free,
+    // Read the authored questline-level rewards directly off the asset (this map IS the runtime home) - manager-free,
     // works cold. Describe each reward for the viewer; group by the outcome that pays it.
     for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Questline->GetQuestlineRewards())
     {
@@ -370,7 +416,7 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFo
 {
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
     // A static outcome's PathIdentity is its tag-name (the manifest key). Dynamic PathNames aren't reachable from a tag
-    // by design — the any-outcome overload covers that case.
+    // by design - the any-outcome overload covers that case.
     return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, OutcomeTag.GetTagName(), Viewer, bIncludeAnyOutcome) : TArray<FQuestRewardPreview>{};
 }
 

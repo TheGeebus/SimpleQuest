@@ -41,7 +41,7 @@ void UQuestTriggerComponent::SubscribeTriggerStep(FGameplayTag StepTag)
     if (!FQuestTagComposer::IsTagRegisteredInRuntime(StepTag))
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestTriggerComponent::SubscribeTriggerStep : '%s' holds stale step tag '%s' — skipping subscribe. ")
+            TEXT("UQuestTriggerComponent::SubscribeTriggerStep : '%s' holds stale step tag '%s' - skipping subscribe. ")
             TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
             GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"), *StepTag.ToString());
         return;
@@ -75,7 +75,7 @@ void UQuestTriggerComponent::TriggerCatchUpForStep(FGameplayTag StepTag)
     const FGameplayTag LiveFact = FQuestTagComposer::ResolveStateFactTag(StepTag, EQuestStateLeaf::Live);
     if (!LiveFact.IsValid() || !WorldState->HasFact(LiveFact)) return;
 
-    // Spawned/added into an already-Live step — replay the activation path. OnTriggerActivated's dup-guard keeps it
+    // Spawned/added into an already-Live step - replay the activation path. OnTriggerActivated's dup-guard keeps it
     // idempotent against the live path.
     FQuestEventPayload Payload;
     Payload.NodeInfo.QuestTag = StepTag;
@@ -91,20 +91,20 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     if (!StepTagsToTrigger.HasTag(Channel))
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' — channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToTrigger configuration."),
+            TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' - channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToTrigger configuration."),
             *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
         return;
     }
 
-    // Track active subscription by the canonical ContextualTag from Event.Context — invariant across multi-publish
+    // Track active subscription by the canonical ContextualTag from Event.Context - invariant across multi-publish
     // channels (Channel varies by which publish chain the bus dispatched through; Context.NodeInfo.QuestTag is the
     // Step's canonical identity, set by AssembleEventContext to ContextualTag). This serves two ends:
-    //   (1) Dedup when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step —
+    //   (1) Dedup when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step -
     //       multi-publish would otherwise hit both subscriptions and double-activate.
     //   (2) Route trigger publishes (SendTriggerEvent) on ContextualTag, which is what the manager's per-step
-    //       FQuestTriggerFiredEvent subscription is bound to — closing the cross-asset trigger flow that
+    //       FQuestTriggerFiredEvent subscription is bound to - closing the cross-asset trigger flow that
     //       otherwise stalls when a target is bound through an alias only.
-    // Falls back to Channel if Context isn't populated (defensive — preserves behavior for any publish path that
+    // Falls back to Channel if Context isn't populated (defensive - preserves behavior for any publish path that
     // hasn't been routed through FQuestPublish::OnAllNodeTags yet).
     const FGameplayTag CanonicalTag = Event.Payload.NodeInfo.QuestTag.IsValid()
         ? Event.Payload.NodeInfo.QuestTag
@@ -113,7 +113,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     // Guard against duplicate activation for the same step
     if (ActiveStepEndHandles.Contains(CanonicalTag)) return;
 
-    // Subscribe to BOTH end-event types — completion and deactivation are independent signal paths and either
+    // Subscribe to BOTH end-event types - completion and deactivation are independent signal paths and either
     // should end the target's active state. ActiveStepEndHandles tracks the completion-side handle (one slot
     // per Channel); the deactivation-side handle is tracked separately so each can be unsubscribed cleanly
     // when its corresponding event fires.
@@ -185,7 +185,7 @@ TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags(
     Implicit.Reserve(Implicit.Num() + StepTagsToTrigger.Num());
     for (const FGameplayTag& Tag : StepTagsToTrigger)
     {
-        // Trigger keeps default routing for now — Step tags subscribed hierarchically preserve current
+        // Trigger keeps default routing for now - Step tags subscribed hierarchically preserve current
         // behavior. Audit (TODO §4.38) classifies whether Trigger should narrow to ExactMatch in a future pass.
         Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::HierarchicalSubscribe});
     }
@@ -199,12 +199,12 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
     TRACE_CPUPROFILER_EVENT_SCOPE(UQuestTriggerComponent_SendTriggerEvent);
 
     // Default TriggeredActor to the owning actor when the caller didn't supply one. "What was triggered" is almost
-    // always this trigger's owner — most external callers won't bother to set it explicitly.
+    // always this trigger's owner - most external callers won't bother to set it explicitly.
     AActor* OwnerActor = GetOwner();
     UObject* TriggeredActor = Context.TriggeredActor ? Context.TriggeredActor.Get() : Cast<UObject>(OwnerActor);
     UObject* Instigator = Context.Instigator.IsValid() ? Context.Instigator.Get() : nullptr;
 
-    // Echo context for Blocked publishes — TriggeredActor populated as a convenience; OriginatingTriggerComponent
+    // Echo context for Blocked publishes - TriggeredActor populated as a convenience; OriginatingTriggerComponent
     // is the framework-owned identity subscriber-side filters key on. The Live-path uses FQuestTriggerFiredEvent
     // which takes the raw fields directly.
     FQuestObjectiveTriggerContext EchoContext = Context;
@@ -225,7 +225,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
     {
         // Branch per-step on state. Use the activation-blocker query as the single source of truth: AlreadyLive
         // in the result means route to objective for per-fire Response; Blocked / PrereqUnmet (without AlreadyLive)
-        // means publish Blocked for adopter UI feedback; anything else (Idle, Completed, unknown) means silent —
+        // means publish Blocked for adopter UI feedback; anything else (Idle, Completed, unknown) means silent -
         // a trigger fire against a step the runtime hasn't activated isn't the trigger's concern.
         TArray<FQuestActivationBlocker> Blockers;
         if (StateSubsystem) Blockers = StateSubsystem->QueryQuestActivationBlockers(StepTag);
@@ -262,7 +262,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
             continue;
         }
 
-        // Filter to structural blockers — the user-actionable subset. Other reasons (NotPendingGiver, UnknownQuest)
+        // Filter to structural blockers - the user-actionable subset. Other reasons (NotPendingGiver, UnknownQuest)
         // mean the step isn't yet activated; trigger fires against those aren't surfaced.
         TArray<FQuestActivationBlocker> StructuralBlockers = Blockers.FilterByPredicate([](const FQuestActivationBlocker& B)
         {
@@ -271,7 +271,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
 
         if (!StructuralBlockers.IsEmpty())
         {
-            // Canonical identity for the event payload — first channel in the set after resolve, matches
+            // Canonical identity for the event payload - first channel in the set after resolve, matches
             // FQuestPublish::OnAllNodeTags semantics where Event.QuestTag is set to the canonical ContextualTag.
             const FGameplayTag IdentityTag = Channels[0];
             SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestProgressRefusedEvent(IdentityTag, StructuralBlockers, EchoContext));
@@ -290,7 +290,7 @@ void UQuestTriggerComponent::AddTagsToTrigger(const FGameplayTagContainer& Tags)
         {
             // Base observer side, with the same effective settings GetImplicitlyObservedTags produces for a fresh
             // trigger tag (default + Progress/Blocked/Unblocked + the forced Started/GiveBlocked pair, hierarchical).
-            // Mirrors the bridge overlay in RegisterQuestObserver — keep in sync if that overlay changes.
+            // Mirrors the bridge overlay in RegisterQuestObserver - keep in sync if that overlay changes.
             FObservedQuestEventSettings Settings;
             Settings.bObserveProgress = true;
             Settings.bObserveBlocked = true;
@@ -316,7 +316,7 @@ void UQuestTriggerComponent::RemoveTagsFromTrigger(const FGameplayTagContainer& 
         if (bRegistered)
         {
             // If this trigger is currently active for the step (OnTriggerActivated fired and the step-end tracking is
-            // live), fire the closing half of the pair so adopters bound to OnQuestTriggerDeactivated tear down —
+            // live), fire the closing half of the pair so adopters bound to OnQuestTriggerDeactivated tear down -
             // un-watching mid-activation must not strand the trigger visually "on". Manual reason = step lifecycle
             // untouched, trigger audience only; local broadcast, so other components watching the step are unaffected.
             if (ActiveStepEndHandles.Contains(Tag) && OnQuestTriggerDeactivated.IsBound())
@@ -376,7 +376,7 @@ void UQuestTriggerComponent::HandleQuestTriggerDeactivated(FGameplayTag Channel,
 
 void UQuestTriggerComponent::HandleQuestTriggerSatisfied(FGameplayTag Channel, const FQuestTriggerSatisfiedEvent& Event)
 {
-    // Own-fire filter — only react when this component's owner is the satisfied actor.
+    // Own-fire filter - only react when this component's owner is the satisfied actor.
     if (Event.SatisfiedActor.Get() != GetOwner()) return;
 
     SatisfiedStepChannels.Add(Channel);

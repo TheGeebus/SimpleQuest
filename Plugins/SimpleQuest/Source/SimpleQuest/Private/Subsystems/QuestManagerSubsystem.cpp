@@ -297,14 +297,26 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
         && !Step->IsGiverGated()
         && !Step->PrerequisiteExpression.IsAlways())
     {
+        // Leaf status is still built for the refusal payload - subscribers report WHICH leaves are unsatisfied. The
+        // gate decision comes from the hold-aware evaluation instead, so a held source keeps the step gated even
+        // though every leaf now reads as satisfied.
         const FQuestPrereqStatus PrereqStatus = Step->PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestStateSubsystem);
-        if (!PrereqStatus.bSatisfied)
+        const auto IsSourceHeld = [this](FGameplayTag Source) { return IsQuestAdvancementHeld(Source); };
+        const EPrereqTriState GateState = Step->PrerequisiteExpression.EvaluateWithHolds(WorldState, QuestStateSubsystem, IsSourceHeld);
+        if (GateState != EPrereqTriState::Satisfied)
         {
-            // Trigger-side per-fire feedback for the GatesProgression case: prereqs aren't satisfied, so the trigger
-            // is refused. Multichannel publish via FQuestPublish::OnAllNodeTags so subscribers on any perspective
-            // (canonical or asset-scoped alias) receive the refusal.
+            // Trigger-side per-fire feedback for the GatesProgression case. Multichannel publish via
+            // FQuestPublish::OnAllNodeTags so subscribers on any perspective receive the refusal.
+            //
+            // THE REASON DISTINGUISHES TWO SITUATIONS THAT USED TO LOOK IDENTICAL and want opposite responses from a
+            // player: Unsatisfied means "go do the thing this depends on", Indeterminate means "everything is done,
+            // wait a moment." Reporting the second as PrereqUnmet also shipped an EMPTY UnsatisfiedLeafTags, because
+            // every leaf really is satisfied - so a UI listing what remains would have shown nothing at all.
             FQuestActivationBlocker Blocker;
-            Blocker.Reason = EQuestActivationBlocker::PrereqUnmet;
+            Blocker.Reason = (GateState == EPrereqTriState::Indeterminate)
+                ? EQuestActivationBlocker::HeldForAdvancement
+                : EQuestActivationBlocker::PrereqUnmet;
+
             for (const FQuestPrereqLeafStatus& Leaf : PrereqStatus.Leaves)
             {
                 if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
@@ -1104,11 +1116,14 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
         *PathIdentity.ToString());
 
     UQuestStep* Step = Cast<UQuestStep>(Node);
+    // Anything other than Satisfied defers the chain. Indeterminate means a leaf's source is held - the completion is
+    // real and its fact is written, but its consequences have not been released, so this step's chain waits with it.
+    const auto IsSourceHeld = [this](FGameplayTag Source) { return IsQuestAdvancementHeld(Source); };
     if (Step
         && !Step->IsGiverGated()
         && Step->GetPrerequisiteGateMode() == EPrerequisiteGateMode::GatesCompletion
         && !Step->PrerequisiteExpression.IsAlways()
-        && !Step->PrerequisiteExpression.Evaluate(WorldState, QuestStateSubsystem))
+        && Step->PrerequisiteExpression.EvaluateWithHolds(WorldState, QuestStateSubsystem, IsSourceHeld) != EPrereqTriState::Satisfied)
     {
         UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("HandleOnNodeCompleted: '%s' - prereqs unmet, deferring chain"), *Node->GetContextualTag().ToString());
         DeferChainToNextNodes(Step, OutcomeTag, PathIdentity);
@@ -1578,6 +1593,7 @@ void UQuestManagerSubsystem::ReleaseQuestAdvancement(const FQuestAdvancementHold
         *Removed.QuestTag.ToString(), Hold.Id, *Removed.Reason.ToString(), ActiveHolds.Num(), ParkedActivations.Num());
 
     ReplayParkedActivations();
+    RetryDeferredActivations();
 }
 
 bool UQuestManagerSubsystem::IsQuestAdvancementHeld(FGameplayTag QuestTag) const
@@ -1652,7 +1668,7 @@ bool UQuestManagerSubsystem::NodeMatchesHoldTag(const UQuestNodeBase* Instance, 
     return false;
 }
 
-bool UQuestManagerSubsystem::ShouldHoldActivation(const UQuestNodeBase* Instance, FName NodeTagName, EQuestActivationProvenance Provenance) const
+bool UQuestManagerSubsystem::ShouldHoldActivation(const UQuestNodeBase* Instance, FName NodeTagName, EQuestActivationProvenance Provenance, FName IncomingSourceTag) const
 {
     if (ActiveHolds.Num() == 0) return false;
 
@@ -1661,10 +1677,19 @@ bool UQuestManagerSubsystem::ShouldHoldActivation(const UQuestNodeBase* Instance
     const bool bIsDeactivation = (Provenance == EQuestActivationProvenance::DeactivationCascade);
     if (Provenance != EQuestActivationProvenance::ChainCascade && !bIsDeactivation) return false;
 
+    // A hold on X pauses anything going INTO X and anything coming OUT OF X. The second direction is the one the
+    // feature exists for: game code pacing a completion knows what just finished, not what follows it, so requiring
+    // it to name the destination would mean encoding the graph's topology at every call site - and re-encoding it
+    // every time someone rewires the graph.
+    const UQuestNodeBase* SourceInstance = LoadedNodeInstances.FindRef(IncomingSourceTag);
     for (const TPair<int32, FQuestHoldRecord>& Pair : ActiveHolds)
     {
         if (bIsDeactivation && !Pair.Value.bHoldDeactivation) continue;
-        if (NodeMatchesHoldTag(Instance, NodeTagName, Pair.Value.QuestTag)) return true;
+        // SOURCE ONLY. A hold names the node whose downstream flow is paused - it does not pause the node itself.
+        // Matching the destination as well is what made holding a chapter freeze the step the player was standing in
+        // front of: correct by the rule, wrong by every intuition, and the wrong feature entirely. Refusing a player
+        // is what Block is for.
+        if (!IncomingSourceTag.IsNone() && NodeMatchesHoldTag(SourceInstance, IncomingSourceTag, Pair.Value.QuestTag)) return true;
     }
     return false;
 }
@@ -1698,6 +1723,32 @@ void UQuestManagerSubsystem::ReplayParkedActivations()
     {
         ActivateNodeByTag(Entry.NodeTagName, Entry.Provenance, Entry.IncomingOutcomeTag, Entry.IncomingSourceTag,
             Entry.bBypassGiverGate, Entry.bBypassPrerequisites);
+    }
+}
+
+void UQuestManagerSubsystem::RetryDeferredActivations()
+{
+    // Nodes waiting on a prerequisite are NOT parked - they were never activated in the first place, so there is no
+    // call to replay. They are sitting in their own deferral, subscribed to the facts they need. A hold makes them
+    // treat "satisfied" as "not yet", so when it clears they have to be told to look again.
+    //
+    // DELIBERATELY RE-EVALUATES RATHER THAN REMEMBERING. A waiting node is nothing but conditions, and those can
+    // change while a hold is in force - the prerequisite that satisfied during the pause may not still be satisfied
+    // when it lifts. Asking again is what a waiting node already does; the hold only delayed when it asks.
+    int32 Retried = 0;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        UQuestNodeBase* Node = Pair.Value;
+        if (Node && Node->DeferredContextualTag.IsValid())
+        {
+            Node->TryActivateDeferred();
+            ++Retried;
+        }
+    }
+
+    if (Retried > 0)
+    {
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("RetryDeferredActivations: re-evaluated %d deferred node(s) after a hold change"), Retried);
     }
 }
 
@@ -1743,7 +1794,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // Advancement hold, checked BEFORE anything is written to the destination node. Parking here means the node was
     // never touched, so a replayed activation is indistinguishable from one that was never held - no provenance to
     // re-stamp, no one-shot bypass flag to un-set, no half-configured instance to reason about.
-    if (ShouldHoldActivation(Instance, NodeTagName, Provenance))
+    if (ShouldHoldActivation(Instance, NodeTagName, Provenance, IncomingSourceTag))
     {
         FQuestParkedActivation& Parked = ParkedActivations.AddDefaulted_GetRef();
         Parked.NodeTagName          = NodeTagName;

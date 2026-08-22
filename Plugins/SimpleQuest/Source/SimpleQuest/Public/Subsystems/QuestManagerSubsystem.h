@@ -116,12 +116,11 @@ class SIMPLEQUEST_API UQuestManagerSubsystem : public UGameInstanceSubsystem
 	/**
 	 * Advancement-hold tests. Reaches in for the same reason the debug channel does: the hold API is protected because
 	 * it shares a class with the replacement-orchestrator variation points, not because holds are internal.
-	 *
-	 * This friendship is a symptom worth remembering when the manager is decomposed - commands and variation points
-	 * are two different roles currently sharing one access level, which is what makes friends multiply. See the
-	 * IMMUTABLE SUBSTRATE item.
 	 */
 	friend class FQuestAdvancementHoldTestAccess;
+
+	/** Deferred activations ask whether a hold applies before going live. */
+	friend class UQuestNodeBase;
 	
 protected:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -337,7 +336,6 @@ protected:
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
 
-
 private:
 	void LoadCompiledDisplayIni() const;
 	
@@ -394,13 +392,16 @@ private:
 	bool bReplayingParkedActivations = false;
 
 	/** Would this activation be held? Cascade provenances only; see the hold API for the matching rules. */
-	bool ShouldHoldActivation(const UQuestNodeBase* Instance, FName NodeTagName, EQuestActivationProvenance Provenance) const;
+	bool ShouldHoldActivation(const UQuestNodeBase* Instance, FName NodeTagName, EQuestActivationProvenance Provenance, FName IncomingSourceTag) const;
 
 	/** True when HoldTag equals, or is an ancestor of, any tag perspective this node answers to. */
 	bool NodeMatchesHoldTag(const UQuestNodeBase* Instance, FName NodeTagName, FGameplayTag HoldTag) const;
 
 	/** Re-enters ActivateNodeByTag for every parked entry, in arrival order. Clears the queue first so it cannot loop. */
 	void ReplayParkedActivations();
+
+	/** Tells every prerequisite-deferred node to re-evaluate. Called when a hold clears; see the function body. */
+	void RetryDeferredActivations();
 
 	/** Drops any hold whose subject just ended, warning per hold. Called from the completion path. */
 	void ClearHoldsForEndedQuest(FGameplayTag QuestTag);

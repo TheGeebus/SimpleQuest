@@ -39,9 +39,14 @@ enum class EQuestActivationBlocker : uint8
 	AlreadyPendingGiver,
 
 	/**
-	 * An advancement hold is active on this quest, or on a container above it. The quest is otherwise startable - this
-	 * is a deliberate pause requested by game code, not a failure. Held activations are parked and replay in arrival
-	 * order when the last hold clears, so a node reporting this is waiting rather than refused.
+	 * This quest's prerequisite cannot currently be evaluated, because an advancement hold names something it depends
+	 * on. Distinct from PrereqUnmet, and the distinction matters to a player: PrereqUnmet means "go do the thing this
+	 * depends on", while this means "that thing IS done - wait." UnsatisfiedLeafTags is empty here for exactly that
+	 * reason, since every leaf really is satisfied.
+	 *
+	 * NOT reported for the quest a hold NAMES. A hold pauses what flows OUT of a node, so the named node itself is
+	 * unaffected and stays completable - refusing the player is what Blocked is for. This appears only on nodes
+	 * DOWNSTREAM of held content.
 	 */
 	HeldForAdvancement,
 };

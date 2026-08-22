@@ -225,6 +225,25 @@ struct FPrereqLeafDescriptor
 	bool bResettableRead = false;		// Leaf_Path only: leaf reads/subscribes the per-run mirror fact, not the registry
 };
 
+/**
+ * Three-valued result for prerequisite evaluation.
+ *
+ * Indeterminate is NOT a failure. It means an input could not be read - currently, because an advancement hold names
+ * the quest a leaf depends on, so that leaf's consequences have not been released yet. The distinction only changes
+ * an answer inside Or: "A or B" with A indeterminate and B satisfied is SATISFIED, because B satisfies it on its own.
+ * Collapsing indeterminate to unsatisfied would block that, and blocking a branch that genuinely holds is a wrong
+ * answer rather than a conservative one.
+ *
+ * (Satisfied / Unsatisfied rather than True / False because UnrealHeaderTool rejects those names at any casing.)
+ */
+UENUM(BlueprintType)
+enum class EPrereqTriState : uint8
+{
+	Unsatisfied,
+	Satisfied,
+	Indeterminate
+};
+
 USTRUCT(Blueprintable)
 struct SIMPLEQUEST_API FPrerequisiteExpression
 {
@@ -237,8 +256,20 @@ struct SIMPLEQUEST_API FPrerequisiteExpression
 
 	bool Evaluate(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const;
 
-	FQuestPrereqStatus EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState,
-		const UQuestStateSubsystem* StateSubsystem) const;
+	FQuestPrereqStatus EvaluateWithLeafStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const;
+
+	/**
+	 * Evaluates with some leaves treated as unreadable rather than false.
+	 *
+	 * IsSourceHeld is asked about each leaf's SOURCE QUEST - the quest whose completion the leaf reads. A leaf with no
+	 * single source (Leaf_Outcome asks "has ANY quest resolved with this outcome") can never be held, because there is
+	 * nothing to attribute the hold to. That is a real limit and it is correct: a context-free leaf is not downstream
+	 * of anything in particular.
+	 *
+	 * The predicate keeps this type free of any knowledge of holds. It models "this input is unavailable", which is a
+	 * reasonable thing for an evaluator to express regardless of what makes it unavailable.
+	 */
+	EPrereqTriState EvaluateWithHolds(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem, const TFunctionRef<bool(FGameplayTag)>& IsSourceHeld) const;
 
 	void CollectLeafTags(TArray<FGameplayTag>& OutTags) const;
 
@@ -265,6 +296,7 @@ private:
 	bool EvaluateNode(int32 NodeIndex, const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const;
 	void CollectLeafTagsFromNode(int32 NodeIndex, TArray<FGameplayTag>& OutTags) const;
 	void CollectLeavesFromNode(int32 NodeIndex, TArray<FPrereqLeafDescriptor>& OutLeaves) const;
+	EPrereqTriState EvaluateNodeWithHolds(int32 NodeIndex, const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem, const TFunctionRef<bool(FGameplayTag)>& IsSourceHeld) const;
 
 public:
 	void DebugDumpTo(TArray<FString>& OutLines, int32 NodeIndex = -1, int32 Depth = 0) const;

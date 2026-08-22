@@ -42,13 +42,16 @@ public:
 	 * The gating predicate on its own, with no side effects - provenance rules are tested here rather than through
 	 * ActivateNodeByTag, so a "not held" case cannot accidentally run a real activation.
 	 */
-	static bool ShouldHold(const UQuestManagerSubsystem* M, const UQuestNodeBase* N, FName Tag, EQuestActivationProvenance P)
+	static bool ShouldHold(const UQuestManagerSubsystem* M, const UQuestNodeBase* N, FName Tag, EQuestActivationProvenance P, FName SourceTag = NAME_None)
 	{
-		return M->ShouldHoldActivation(N, Tag, P);
+		return M->ShouldHoldActivation(N, Tag, P, SourceTag);
 	}
 
 	static void RegisterInstance(UQuestManagerSubsystem* M, FName Tag, UQuestNodeBase* N) { M->LoadedNodeInstances.Add(Tag, N); }
-	static void Activate(UQuestManagerSubsystem* M, FName Tag, EQuestActivationProvenance P) { M->ActivateNodeByTag(Tag, P); }
+	static void Activate(UQuestManagerSubsystem* M, FName Tag, EQuestActivationProvenance P, FName SourceTag = NAME_None)
+	{
+		M->ActivateNodeByTag(Tag, P, FGameplayTag(), SourceTag);
+	}
 	static int32 ParkedCount(const UQuestManagerSubsystem* M)                   { return M->ParkedActivations.Num(); }
 	static FName ParkedTagAt(const UQuestManagerSubsystem* M, int32 Index)      { return M->ParkedActivations[Index].NodeTagName; }
 };
@@ -213,13 +216,13 @@ bool FQuestHold_GatesOnlyCascadeProvenance::RunTest(const FString& Parameters)
 	FQuestAdvancementHoldTestAccess::Hold(Fixture.Manager, TAG_HoldFixture_Container, TEXT("Cutscene"));
 
 	using EProv = EQuestActivationProvenance;
-	TestTrue (TEXT("ChainCascade is held"),        FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ChainCascade));
+	TestTrue (TEXT("ChainCascade is held"),        FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ChainCascade, InnerName));
 	TestTrue (TEXT("DeactivationCascade is held by default"),
-	                                              FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::DeactivationCascade));
-	TestFalse(TEXT("GiverGate is NOT held"),      FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::GiverGate));
-	TestFalse(TEXT("ExternalAPI is NOT held"),    FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ExternalAPI));
-	TestFalse(TEXT("InitialEntry is NOT held"),   FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::InitialEntry));
-	TestFalse(TEXT("Restored is NOT held"),       FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::Restored));
+	                                              FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::DeactivationCascade, InnerName));
+	TestFalse(TEXT("GiverGate is NOT held"),      FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::GiverGate, InnerName));
+	TestFalse(TEXT("ExternalAPI is NOT held"),    FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ExternalAPI, InnerName));
+	TestFalse(TEXT("InitialEntry is NOT held"),   FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::InitialEntry, InnerName));
+	TestFalse(TEXT("Restored is NOT held"),       FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::Restored, InnerName));
 
 	// The deactivation opt-out. A caller whose deactivation routes are corrective cleanup can let them proceed while
 	// forward progress waits - so a hold placed with it off must gate the one and not the other.
@@ -227,9 +230,9 @@ bool FQuestHold_GatesOnlyCascadeProvenance::RunTest(const FString& Parameters)
 	FQuestAdvancementHoldTestAccess::Hold(Fixture.Manager, TAG_HoldFixture_Container, TEXT("Cutscene"), /*bHoldDeactivation=*/false);
 
 	TestTrue (TEXT("forward cascade still held with the opt-out set"),
-	          FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ChainCascade));
+	          FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::ChainCascade, InnerName));
 	TestFalse(TEXT("deactivation cascade allowed through by the opt-out"),
-	          FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::DeactivationCascade));
+	          FQuestAdvancementHoldTestAccess::ShouldHold(Fixture.Manager, nullptr, InnerName, EProv::DeactivationCascade, InnerName));
 
 	return true;
 }
@@ -265,11 +268,18 @@ bool FQuestHold_ParksCascadeInArrivalOrder::RunTest(const FString& Parameters)
 
 	// The sequence is deliberately NOT a palindrome. Inner/Container/Inner reads the same backwards, so a queue built
 	// in reverse would satisfy every assertion below and the ordering claim would be unfalsifiable.
-	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, InnerName,     EQuestActivationProvenance::ChainCascade);
-	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, ContainerName, EQuestActivationProvenance::ChainCascade);
-	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, ContainerName, EQuestActivationProvenance::ChainCascade);
+	// SOURCE is what a hold matches. A hold names the node whose downstream flow is paused, so these park because
+	// they were CAUSED BY Inner - which sits under the held container - not because of where they are going.
+	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, InnerName,     EQuestActivationProvenance::ChainCascade, InnerName);
+	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, ContainerName, EQuestActivationProvenance::ChainCascade, InnerName);
+	FQuestAdvancementHoldTestAccess::Activate(Fixture.Manager, ContainerName, EQuestActivationProvenance::ChainCascade, InnerName);
 
-	TestEqual(TEXT("all three activations parked"), FQuestAdvancementHoldTestAccess::ParkedCount(Fixture.Manager), 3);
+	// Guard before indexing. A test that dies instead of failing takes every other result with it, and this one has
+	// already done that once.
+	if (!TestEqual(TEXT("all three activations parked"), FQuestAdvancementHoldTestAccess::ParkedCount(Fixture.Manager), 3))
+	{
+		return false;
+	}
 	TestEqual(TEXT("arrival order preserved — first"),  FQuestAdvancementHoldTestAccess::ParkedTagAt(Fixture.Manager, 0), InnerName);
 	TestEqual(TEXT("arrival order preserved — second"), FQuestAdvancementHoldTestAccess::ParkedTagAt(Fixture.Manager, 1), ContainerName);
 	TestEqual(TEXT("arrival order preserved — third"),  FQuestAdvancementHoldTestAccess::ParkedTagAt(Fixture.Manager, 2), ContainerName);

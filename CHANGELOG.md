@@ -5,6 +5,47 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.7.3] — *In Development* — Driving It From Outside
+
+Two things game code couldn't previously do: pause quest advancement while
+something plays out, and drive the data resolver without a console command.
+
+### Added
+
+- **Quest advancement can be held and released.** A questline normally advances
+  the instant a step completes - the next step activates, prerequisites resolve,
+  and anything waiting on that completion proceeds. That leaves nowhere to put an
+  outro line, a reward popup, or a beat of silence, because the gap between
+  "finished" and "what's next" is zero. `Hold Quest Advancement` makes that gap
+  addressable: place a hold when a step completes, play whatever should play, and
+  release it when you're done.
+
+  - A hold names **the node whose downstream flow pauses**, not a node to freeze.
+  Holding a step doesn't stop the player finishing that step - it stops what the
+  step feeds. So game code reacting to a completion holds the thing that just
+  finished, without needing to know what comes next or being broken when someone
+  rewires the graph. Holding a container holds everything inside it, and holding
+  a questline's own tag holds the questline.
+
+  - Holds compose: an audio hold and a cutscene hold don't cancel each other, and
+  advancement resumes when the last one clears. Each carries a Reason, which the
+  log and the debug overlay name - a pause nobody releases is otherwise
+  impossible to diagnose. Holds are session state, never saved: capturing a save
+  releases them first, so a save taken mid-pause restores a running game rather
+  than a stuck one.
+
+  - Prerequisites treat a held quest as **unreadable rather than unmet**, which is
+  the distinction that makes `OR` behave. A step requiring "A or B" with A held
+  and B genuinely satisfied still proceeds, because B never needed anything from
+  A. A step requiring A alone waits. Quests blocked this way report
+  `HeldForAdvancement` rather than `PrereqUnmet`, because the two mean opposite
+  things to a player - one says go do something, the other says it's done, wait.
+
+  - Holds pause advancement; they don't refuse the player. Preventing a quest from
+  being started at all is still `Set Quest Blocked`.
+
+---
+
 ## [0.7.2] — 2026-08-21 — UE 5.8 Support and Honest Surfaces
 
 SimpleQuest now runs on Unreal Engine 5.8 alongside 5.6 and 5.7.

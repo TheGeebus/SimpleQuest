@@ -123,13 +123,13 @@ only looked right locally, and a test coupled to one engine's log wording.
 
 - **The editor module builds without Electronic Nodes installed.** The
   `WITH_ELECTRONIC_NODES` guard was defined only when the optional plugin was
-  found, leaving it undefined rather than zero everywhere else — a warning on
+  found, leaving it undefined rather than zero everywhere else - a warning on
   some engine versions and a hard error on others. A project without Electronic
   Nodes could fail to compile. The definition is now unconditional, and only its
   value varies with whether the plugin is present.
 - **Prerequisite wires are distinct from activation wires on a fresh install.**
   The shipped default for the prerequisite wire color matched the activation
-  wire color, so the two wire types — execution flow and gating contingency —
+  wire color, so the two wire types - execution flow and gating contingency -
   rendered identically until the dashed-wire integration was active or the
   color was overridden locally.
 - **A resolver test no longer depends on one engine's log formatting.** It

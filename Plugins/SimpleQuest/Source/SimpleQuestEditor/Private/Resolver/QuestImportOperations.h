@@ -75,3 +75,18 @@ FQuestAbsentPolicyResolver QuestImport_ResolvePolicies(const UQuestImportMapping
  * The caller owns the transaction; ApplyQuestPlan deliberately does not open one.
  */
 bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& Request, bool bApply, FQuestImportOutcome& Out);
+
+/**
+ * Everything the read pipeline does once a bundle exists - mapping, wire bindings, flow conventions, validation.
+ * Split from QuestImport_ReadAndValidate so a caller supplying files in memory runs this exact path.
+ */
+bool QuestImport_ValidateBundle(const UQuestImportMapping* Mapping,
+	FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys,
+	TArray<FString>& OutWarnings, FString& OutError);
+
+/** The in-place operation from an already-read bundle. QuestImport_RunInPlace is this plus the endpoint read. */
+bool QuestImport_RunInPlaceFromBundle(UQuestlineGraph& Target, FQuestDataBundle& Bundle,
+	const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TSet<FString>& AllRowKeys,
+	const UQuestImportMapping* Mapping, const FQuestAbsentPolicyResolver& Policies, bool bDeleteOrphans,
+	bool bApply, FQuestImportOutcome& Out);
+

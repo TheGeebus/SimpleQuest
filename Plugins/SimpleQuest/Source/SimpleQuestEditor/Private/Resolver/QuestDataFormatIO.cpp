@@ -67,5 +67,22 @@ namespace QuestDataFormatIO
 		}
 		return true;
 	}
+	
+	uint32 FingerprintFiles(const TMap<FString, FString>& Files)
+	{
+		TArray<FString> Names;
+		Files.GenerateKeyArray(Names);
+		Names.Sort();
+
+		uint32 Hash = 0;
+		for (const FString& Name : Names)
+		{
+			// Name AND content both feed the hash: renaming a file changes what gets imported just as surely as
+			// editing one does, and a fingerprint that only covered contents would miss it.
+			Hash = HashCombine(Hash, GetTypeHash(Name));
+			Hash = HashCombine(Hash, GetTypeHash(Files[Name])); 
+		}
+		return Hash;
+	}
 }
 

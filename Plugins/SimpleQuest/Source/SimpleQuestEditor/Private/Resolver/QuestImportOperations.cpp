@@ -11,11 +11,13 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestImportMapping.h"
 
-bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping,
+bool QuestImport_ValidateBundle(const UQuestImportMapping* Mapping,
 	FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys,
 	TArray<FString>& OutWarnings, FString& OutError)
 {
-	if (!ReadEndpointBundle(Endpoint, OutBundle, OutError)) { return false; }
+	// Everything the read pipeline does AFTER a bundle exists. Split out so a caller holding a bundle already - one
+	// given files in memory rather than a folder - runs the identical mapping, wire-binding, convention and validation
+	// path rather than a parallel one that can drift from it.
 
 	// A studio's source-shape translation, before the flow conventions so a mapped column can feed one.
 	if (Mapping)
@@ -39,6 +41,14 @@ bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint, const UQues
 		return false;
 	}
 	return true;
+}
+
+bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping,
+	FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys,
+	TArray<FString>& OutWarnings, FString& OutError)
+{
+	if (!ReadEndpointBundle(Endpoint, OutBundle, OutError)) { return false; }
+	return QuestImport_ValidateBundle(Mapping, OutBundle, OutNodeRowsByKey, OutAllRowKeys, OutWarnings, OutError);
 }
 
 FQuestAbsentPolicyResolver QuestImport_ResolvePolicies(const UQuestImportMapping* Mapping, bool bResetAbsent)
@@ -76,7 +86,20 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 		return false;
 	}
 
-	PlanQuestInPlace(Target, Bundle, NodeRowsByKey, Out.Warnings, Out.Plan, Request.Policies);
+	return QuestImport_RunInPlaceFromBundle(Target, Bundle, NodeRowsByKey, AllRowKeys,
+		Request.Mapping, Request.Policies, Request.bDeleteOrphans, bApply, Out);
+}
+
+bool QuestImport_RunInPlaceFromBundle(UQuestlineGraph& Target, FQuestDataBundle& Bundle,
+	const TMap<FString, const FQuestDataRow*>& NodeRowsByKey, const TSet<FString>& AllRowKeys,
+	const UQuestImportMapping* Mapping, const FQuestAbsentPolicyResolver& Policies, bool bDeleteOrphans,
+	bool bApply, FQuestImportOutcome& Out)
+{
+	// The whole in-place operation from a bundle that is already read and validated. RunInPlace above is now this plus
+	// the read, so a files-in caller and a folder-in caller execute the identical planning and apply path - which is
+	// the only way "what was reviewed is what executes" survives having two entry points.
+
+	PlanQuestInPlace(Target, Bundle, NodeRowsByKey, Out.Warnings, Out.Plan, Policies);
 	Out.bPlanned = true;
 
 	// A plan EXISTS now, so the warnings that produced it belong ON it. They are collected separately because a read can
@@ -89,8 +112,8 @@ bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& 
 	if (!bApply) { return true; }
 
 	FQuestApplyOptions Options;
-	if (Request.Mapping) { Options.bDeleteOrphanedNodes = Request.Mapping->bDeleteOrphanedNodes; }
-	if (Request.bDeleteOrphans) { Options.bDeleteOrphanedNodes = true; }
+	if (Mapping) { Options.bDeleteOrphanedNodes = Mapping->bDeleteOrphanedNodes; }
+	if (bDeleteOrphans) { Options.bDeleteOrphanedNodes = true; }
 
 	ApplyQuestPlan(Target, Out.Plan, Bundle, NodeRowsByKey, Out.ApplyResult, Options);
 

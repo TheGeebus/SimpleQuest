@@ -37,7 +37,36 @@ public:
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
+	
+/*
+	virtual bool ExportQuestline(UQuestlineGraph* Graph, const FString& FormatName, TMap<FString, FString>& OutFiles, FString& OutError) override;
 
+	virtual bool ImportQuestline(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		const FString& DestPackagePath,
+		const UQuestImportMapping* Mapping,
+		FString& OutAssetPath,
+		TArray<FString>& OutWarnings,
+		FString& OutError) override;
+*/
+	virtual bool PlanInPlaceImport(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		UQuestlineGraph* Target,
+		const UQuestImportMapping* Mapping,
+		bool bResetAbsent,
+		FQuestInPlacePlan& OutPlan,
+		FString& OutError) override;
+
+	virtual bool ApplyInPlaceImport(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		UQuestlineGraph* Target,
+		const UQuestImportMapping* Mapping,
+		bool bResetAbsent,
+		bool bDeleteOrphans,
+		const FQuestInPlacePlan& ReviewedPlan,
+		FQuestInPlacePlan& OutAppliedPlan,
+		FString& OutError) override;
+	
 	/** Editor-side PIE debug channel. Lifetime managed by this module. Access via GetPIEDebugChannel(). */
 	static FQuestPIEDebugChannel* GetPIEDebugChannel();
 

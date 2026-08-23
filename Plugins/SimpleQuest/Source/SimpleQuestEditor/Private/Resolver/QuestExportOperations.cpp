@@ -10,6 +10,7 @@
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestBundleTransforms.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestExportOutput.h"
 #include "Resolver/QuestGraphExport.h"
@@ -310,12 +311,24 @@ bool QuestExport_Run(const FQuestExportRequest& Request, FQuestExportOutcome& Ou
 	// '.', so this name cannot collide with a real destination.
 	const FString Staging = OutDir + TEXT(".incoming");
 	IFileManager::Get().DeleteDirectory(*Staging, /*RequireExists*/ false, /*Tree*/ true);
-	if (!Format->WriteBundle(Bundle, Staging))
+
+	// Serialize first, write second. The staging directory still exists for the same reason it always did - nothing is
+	// deleted until the replacement is on disk - but a serialization failure now costs nothing, because it happens
+	// before any file is created.
+	TMap<FString, FString> BundleFiles;
+	if (!Format->WriteBundle(Bundle, BundleFiles))
+	{
+		Out.Error = FString::Printf(TEXT("the %s provider failed to serialize. '%s' is unchanged."),
+			*Format->FormatName(), *OutDir);
+		return false;
+	}
+
+	FString WriteError;
+	if (!QuestDataFormatIO::WriteFilesToFolder(BundleFiles, Staging, WriteError))
 	{
 		IFileManager::Get().DeleteDirectory(*Staging, false, true);
-		Out.Error = FString::Printf(TEXT("the %s provider failed to write. '%s' is unchanged."),
-			*Format->FormatName(),
-			*OutDir);
+		Out.Error = FString::Printf(TEXT("could not write the %s export: %s. '%s' is unchanged."),
+			*Format->FormatName(), *WriteError, *OutDir);
 		return false;
 	}
 

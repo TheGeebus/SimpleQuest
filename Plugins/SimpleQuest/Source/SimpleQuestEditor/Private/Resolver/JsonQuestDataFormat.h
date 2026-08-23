@@ -15,7 +15,10 @@
 class FJsonQuestDataFormat final : public ISimpleQuestDataFormat
 {
 public:
-	virtual bool WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder) override;
-	virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) override;
+	virtual bool WriteBundle(const FQuestDataBundle& Bundle, TMap<FString, FString>& OutFiles) override;
+	virtual bool ReadBundle(const TMap<FString, FString>& Files, FQuestDataBundle& OutBundle) override;
 	virtual FString FormatName() const override { return TEXT("JSON"); }
+
+	/** The single file this format emits. One definition, so the writer and reader cannot disagree about the name. */
+	static FString BundleFileName() { return TEXT("questline.json"); }
 };

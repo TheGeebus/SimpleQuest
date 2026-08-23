@@ -92,10 +92,8 @@ namespace
 	// Parse one .tsv into a table (first line is the header; column 0 is always "key"). Cells become string-bearing
 	// FQuestDataValues: Scalar = the unsanitized cell, Kind generic (the routing core types each against the
 	// destination property). An empty/absent trailing field maps to no cell (== Kind::Empty downstream).
-	bool ParseTsvTable(const FString& Path, FQuestDataTable& OutTable, TArray<FQuestDataRow>& OutRows)
+	bool ParseTsvTable(const FString& Text, FQuestDataTable& OutTable, TArray<FQuestDataRow>& OutRows)
 	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
 		TArray<FString> Lines;
 		Text.ParseIntoArrayLines(Lines, false);
 		if (Lines.Num() == 0) return false;
@@ -153,13 +151,12 @@ namespace
 	// still parses. This name is only the default output.
 	const TCHAR* GEdgeTableDefaultName = TEXT("edges.tsv");
 
-	// Is this file's header the edge signature? An edge table's first line is exactly "from\ttype\tto", and nothing else has
+	// Is this table's header the edge signature? An edge table's first line is exactly "from\ttype\tto", and nothing else has
 	// three columns spelled that way - a content table's first column is its KEY, under whatever name the studio gave it, and
 	// the remaining two would have to be "type" and "to" for the shapes to collide. The header alone identifies it.
-	bool FileHasEdgeSignature(const FString& Path)
+	// Named for TEXT rather than FILE now: it inspects content, and never knew or cared where that content came from.
+	bool TextHasEdgeSignature(const FString& Text)
 	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
 		TArray<FString> Lines;
 		Text.ParseIntoArrayLines(Lines, false);
 		if (Lines.Num() == 0) return false;
@@ -168,10 +165,8 @@ namespace
 		return Header.Num() == 3 && Header[0] == TEXT("from") && Header[1] == TEXT("type") && Header[2] == TEXT("to");
 	}
 
-	bool ParseTsvEdges(const FString& Path, TArray<FQuestDataEdge>& Out)
+	bool ParseTsvEdges(const FString& Text, TArray<FQuestDataEdge>& Out)
 	{
-		FString Text;
-		if (!FFileHelper::LoadFileToString(Text, *Path)) return false;
 		TArray<FString> Lines;
 		Text.ParseIntoArrayLines(Lines, false);
 		for (int32 i = 1; i < Lines.Num(); ++i)   // skip "from\ttype\tto"
@@ -185,10 +180,8 @@ namespace
 	}
 }
 
-bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder)
+bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, TMap<FString, FString>& OutFiles)
 {
-	IFileManager::Get().MakeDirectory(*DestFolder, true);
-
 	TArray<FString> Stems;
 	Bundle.TablesByType.GetKeys(Stems);
 	Stems.Sort();
@@ -229,13 +222,9 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 			Lines.Add(FString::Join(Cells, TEXT("\t")));
 		}
 
-		const FString Path = DestFolder / (Stem + TEXT(".tsv"));
-		if (!FFileHelper::SaveStringToFile(FString::Join(Lines, TEXT("\n")), *Path))
-		{
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *Path);
-			return false;
-		}
-		UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d row(s))."), *Path, SortedRows.Num());
+		const FString FileName = Stem + TEXT(".tsv");
+		OutFiles.Add(FileName, FString::Join(Lines, TEXT("\n")));
+		UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: serialized '%s' (%d row(s))."), *FileName, SortedRows.Num());
 	}
 
 	TArray<FQuestDataEdge> SortedEdges = Bundle.Edges;
@@ -251,47 +240,44 @@ bool FTsvQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FStr
 	{
 		EdgeLines.Add(FString::Printf(TEXT("%s\t%s\t%s"), *E.From, *E.Type, *E.To));
 	}
-	const FString EdgePath = DestFolder / GEdgeTableDefaultName;
-	if (!FFileHelper::SaveStringToFile(FString::Join(EdgeLines, TEXT("\n")), *EdgePath))
-	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: failed to write '%s'."), *EdgePath);
-		return false;
-	}
-	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: wrote '%s' (%d edge(s))."), *EdgePath, SortedEdges.Num());
+	OutFiles.Add(GEdgeTableDefaultName, FString::Join(EdgeLines, TEXT("\n")));
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("TsvQuestDataFormat: serialized '%s' (%d edge(s))."), GEdgeTableDefaultName, SortedEdges.Num());
 	return true;
 }
 
-bool FTsvQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle)
+bool FTsvQuestDataFormat::ReadBundle(const TMap<FString, FString>& Files, FQuestDataBundle& OutBundle)
 {
-	if (!FPaths::DirectoryExists(SrcFolder))
+	if (Files.Num() == 0)
 	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: folder not found '%s'."), *SrcFolder);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: no files given."));
 		return false;
 	}
 
-	TArray<FString> TsvFiles;
-	IFileManager::Get().FindFiles(TsvFiles, *(SrcFolder / TEXT("*.tsv")), /*Files*/ true, /*Dirs*/ false);
-	if (TsvFiles.Num() == 0)
-	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("TsvQuestDataFormat: no .tsv files in '%s'."), *SrcFolder);
-		return false;
-	}
+	// Iterated in sorted name order. The map's own order is unspecified, and a bundle whose tables land in a different
+	// order between runs is the kind of thing that only shows up later as a diff nobody can explain.
+	TArray<FString> Names;
+	Files.GenerateKeyArray(Names);
+	Names.Sort();
 
-	for (const FString& File : TsvFiles)
+	for (const FString& Name : Names)
 	{
+		const FString& Text = Files[Name];
+
 		// The edge table is recognized by its column signature (from/type/to), NOT its filename - so a studio's own-named
 		// relation file parses as edges, and our default edges.tsv still round-trips (it carries the same signature).
-		if (FileHasEdgeSignature(SrcFolder / File))
+		if (TextHasEdgeSignature(Text))
 		{
-			if (!ParseTsvEdges(SrcFolder / File, OutBundle.Edges)) return false;
+			if (!ParseTsvEdges(Text, OutBundle.Edges)) return false;
 			continue;
 		}
-		const FString Stem = FPaths::GetBaseFilename(File);
+
+		const FString Stem = FPaths::GetBaseFilename(Name);
 		FQuestDataTable Table;
 		TArray<FQuestDataRow> Rows;
-		if (!ParseTsvTable(SrcFolder / File, Table, Rows)) return false;
+		if (!ParseTsvTable(Text, Table, Rows)) return false;
 		Table.Rows = MoveTemp(Rows);
 		OutBundle.TablesByType.Add(Stem, MoveTemp(Table));
 	}
 	return true;
 }
+

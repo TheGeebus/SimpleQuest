@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.7.3] — *In Development* — Driving It From Outside
+## [0.8.0] — *In Development* — Driving It From Outside
 
 Two things game code couldn't previously do: pause quest advancement while
 something plays out, and drive the data resolver without a console command.

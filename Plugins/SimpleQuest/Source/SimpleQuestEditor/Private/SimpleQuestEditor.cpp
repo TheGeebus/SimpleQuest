@@ -70,6 +70,7 @@
 #include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Resolver/QuestDataFormatIO.h"
+#include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Widgets/SQuestStateView.h"
@@ -352,10 +353,7 @@ namespace
 	 * plan and apply so the two cannot diverge: apply re-reads deliberately, and "what was reviewed is what executes"
 	 * only holds if both readings run identical code.
 	 */
-	bool ReadFilesIntoBundle(const TMap<FString, FString>& Files, const FString& FormatName,
-		const UQuestImportMapping* Mapping, FQuestDataBundle& OutBundle,
-		TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys,
-		TArray<FString>& OutWarnings, FString& OutError)
+	bool ReadFilesIntoBundle(const TMap<FString, FString>& Files, const FString& FormatName, const UQuestImportMapping* Mapping, FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys, TArray<FString>& OutWarnings, FString& OutError)
 	{
 		if (Files.IsEmpty())
 		{
@@ -381,9 +379,50 @@ namespace
 	}
 }
 
-bool FSimpleQuestEditor::PlanInPlaceImport(const TMap<FString, FString>& Files, const FString& FormatName,
-	UQuestlineGraph* Target, const UQuestImportMapping* Mapping, bool bResetAbsent, FQuestInPlacePlan& OutPlan,
-	FString& OutError)
+bool FSimpleQuestEditor::ExportQuestline(UQuestlineGraph* Graph, const FString& FormatName,	const UQuestImportMapping* Mapping, TMap<FString, FString>& OutFiles, TArray<FString>& OutWarnings, FString& OutError)
+{
+	OutFiles.Reset();
+	OutWarnings.Reset();
+
+	// Endpoint stays default on purpose: BuildBundle reads only Graph and Mapping, and there is no endpoint here - the
+	// caller asked for files, not a destination. The format is resolved directly from the name for the same reason.
+	FQuestExportRequest Request;
+	Request.Graph = Graph;
+	Request.Mapping = Mapping;
+
+	FQuestDataBundle Bundle;
+	FQuestExportOutcome Outcome;
+	const bool bBuilt = QuestExport_BuildBundle(Request, Bundle, Outcome);
+
+	// Carried out even on failure - a reverse mapping can warn about rows it could not restate and then still refuse.
+	OutWarnings = MoveTemp(Outcome.Warnings);
+	if (!bBuilt)
+	{
+		OutError = Outcome.Error;
+		return false;
+	}
+
+	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
+	if (!Format)
+	{
+		OutError = FString::Printf(TEXT("no data format named '%s' is registered. Registered: %s. Nothing exported."),
+			*FormatName, *FString::Join(FQuestDataFormatRegistry::Get().GetRegisteredNames(), TEXT(", ")));
+		return false;
+	}
+
+	if (!Format->WriteBundle(Bundle, OutFiles))
+	{
+		OutError = FString::Printf(TEXT("format '%s' could not serialize the questline. Nothing exported."), *FormatName);
+		OutFiles.Reset();
+		return false;
+	}
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ExportQuestline: '%s' produced %d file(s) via format '%s'."),
+		*Graph->GetPathName(), OutFiles.Num(), *FormatName);
+	return true;
+}
+
+bool FSimpleQuestEditor::PlanInPlaceImport(const TMap<FString, FString>& Files, const FString& FormatName, UQuestlineGraph* Target, const UQuestImportMapping* Mapping, bool bResetAbsent, FQuestInPlacePlan& OutPlan, FString& OutError)
 {
 	if (!Target)
 	{
@@ -1223,8 +1262,7 @@ namespace
 	// Recursive detection walk - returns true on the first field whose value is in RedirectTargets, and reports WHICH tag on which
 	// field so the log can name it. Recurses into nested USTRUCT fields. Cycle-free (no by-value struct self-references in UE).
 	// Mirrors ApplyTagRenamesToStructLayout in shape - the apply path and the detect path walk the same structural territory.
-	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets,
-		FName& OutMatchedTag, FString& OutMatchedField)
+	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets, FName& OutMatchedTag, FString& OutMatchedField)
 	{
 		if (!Struct || !ContainerPtr) return false;
 
@@ -1498,7 +1536,6 @@ void FSimpleQuestEditor::HandlePickerCategoriesChanged()
 			}
 		}
 	}
-
 	if (ReconstructedCount > 0)
 	{
 		UE_LOG(LogSimpleQuest, Verbose,

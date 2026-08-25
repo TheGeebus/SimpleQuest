@@ -103,6 +103,17 @@ FString QuestExport_KeyFor(const UQuestlineGraph& Graph);
 FString QuestExport_DerivedFolderFor(const UQuestlineGraph& Graph);
 
 /**
+ * Builds the bundle a questline exports to, and nothing else - no folder, no ownership marker, no staged replacement.
+ * This is the half both destinations share: QuestExport_Run calls it and then writes a folder, the module's
+ * ExportQuestline calls it and then serializes to files in memory. Reads only Request.Graph and Request.Mapping;
+ * Request.Endpoint is ignored, because where the result goes is not this function's business.
+ *
+ * Stamps Out.ExportKey and appends any reverse-mapping warnings to Out.Warnings. Returns false with Out.Error set for
+ * a missing graph or a QuestlineID that reduces to an empty export key.
+ */
+bool QuestExport_BuildBundle(const FQuestExportRequest& Request, FQuestDataBundle& OutBundle, FQuestExportOutcome& Out);
+
+/**
  * Walk the questline into a bundle, optionally restate it through a recipe, and write it to its export folder -
  * claiming ownership of that folder and refusing rather than overwriting one that belongs to something else.
  * Writes through a staging directory: nothing is deleted until the replacement exists on disk, so a failed or

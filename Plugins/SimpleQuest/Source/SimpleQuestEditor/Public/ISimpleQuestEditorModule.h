@@ -104,7 +104,7 @@ public:
     
     virtual void CompileAllQuestlineGraphs() = 0;
 
-        // ---------------------------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------------------------
     // Resolver operations
     //
     // Data in, structured result out. These exist because the resolver previously had no entry point that was not a
@@ -120,7 +120,7 @@ public:
      * Serializes a questline through the named format. Returns false and fills OutError on an unknown format or a
      * provider that could not serialize.
      */
-//    virtual bool ExportQuestline(UQuestlineGraph* Graph, const FString& FormatName, TMap<FString, FString>& OutFiles, FString& OutError) = 0;
+    virtual bool ExportQuestline(UQuestlineGraph* Graph, const FString& FormatName, const UQuestImportMapping* Mapping, TMap<FString, FString>& OutFiles, TArray<FString>& OutWarnings, FString& OutError) = 0;
 
     /**
      * Creates a NEW questline asset at DestPackagePath from Files. Returns the created asset's path in OutAssetPath.

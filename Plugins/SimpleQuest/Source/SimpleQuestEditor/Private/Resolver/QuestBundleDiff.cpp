@@ -156,10 +156,12 @@ static bool BundleDeclaresChildrenUnder(const FQuestDataBundle& Bundle, const FS
 	return false;
 }
 
-void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
+void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, const FString& OwnerKey, const FQuestDataBundle& Bundle,
 	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
-	for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
+	if (!Layout || !Container) return;
+
+	for (TFieldIterator<FProperty> It(Layout); It; ++It)
 	{
 		FProperty* Prop = *It;
 		// The same filter that decided what became a child row on the way out.
@@ -170,21 +172,10 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
 		if (!BundleDeclaresChildrenUnder(Bundle, PropPrefix)) continue;   // silence is not emptiness
 
 		TSet<FString> LiveKeys;
-		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
+		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Container), OwnerKey, Prop->GetName(),
 		[&](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
 		{
-			// PART 1 LIMIT: struct children export and re-import, but in-place PLANNING does not compare them yet.
-			// Skipping silently would let the plan report "no changes" about a payload the source edited, so say so.
-			if (Child.IsStruct())
-			{
-				OutPlan.Warnings.Add(FString::Printf(
-					TEXT("'%s' holds struct contents that in-place planning does not compare yet - edits to it will not "
-						 "appear in this plan and will not be applied."), *Path));
-				return;
-			}
-
-			LiveKeys.Add(ChildKey);
-
+            LiveKeys.Add(ChildKey);
 			FString ChildClass;
             const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
             if (!ChildRow)
@@ -192,14 +183,16 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
                 // The source DOES describe this property's contents, and this child is not among them.
                 FQuestPropertyChange Change;
                 Change.Property     = Path;
-                Change.CurrentText  = Child.Object->GetClass()->GetName();
+                Change.CurrentText  = Child.TypeName();
                 Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
                 Change.IncomingText = TEXT("<removed>");
                 Entry.Changes.Add(MoveTemp(Change));
                 return;
             }
-            DiffQuestObjectAgainstRow(Child.Object, *ChildRow, Path, Entry, OutPlan, Policies);
-            DiffQuestInstancedChildren(Child.Object, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
+			// One call for both shapes: the row comparison was already written against a layout and a container rather
+			// than against a UObject, so a struct child needs no special case here - only its own layout and memory.
+			DiffQuestContainerAgainstRow(Child.Layout(), Child.IsStruct() ? Child.Memory : static_cast<const void*>(Child.Object), *ChildRow, Path, Entry, OutPlan, Policies);
+			DiffQuestInstancedChildren(Child.Layout(), Child.IsStruct() ? Child.Memory : static_cast<const void*>(Child.Object), ChildKey, Bundle, Entry, OutPlan, Policies);			// a child can itself nest
        });
 
 		// Rows under this property with no live counterpart are additions.
@@ -222,5 +215,12 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
 			}
 		}
 	}
+}
+
+void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
+	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+{
+	if (!Owner) return;
+	DiffQuestInstancedChildren(Owner->GetClass(), Owner, OwnerKey, Bundle, Entry, OutPlan, Policies);
 }
 

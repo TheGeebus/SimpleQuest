@@ -8,11 +8,13 @@
 #include "Misc/AutomationTest.h"
 #include "Quests/Types/QuestRewardPayloads.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestBundleDiff.h"
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportOperations.h"
+#include "Resolver/QuestInPlaceApply.h"
 #include "Resolver/QuestInstancedChildren.h"
 #include "Resolver/QuestRowRestore.h"
 #include "Rewards/GenericReward.h"
@@ -311,6 +313,100 @@ bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Para
 		if (const FQuestRewardAmount* Amount = TargetPayload.GetPtr<FQuestRewardAmount>())
 		{
 			TestEqual(TEXT("the payload's value survived"), Amount->Amount, 42);
+		}
+	}
+
+	return true;
+}
+
+/**
+ * The whole point of decomposition: a payload field is a cell a designer can edit in a sheet, and that edit has to
+ * survive plan AND apply. Part 1 made it exportable and importable; without this it is still read-only in place.
+ *
+ * A UGenericReward is used as the OWNER rather than a node, because it is one - its Payload is a direct
+ * FInstancedStruct property, so the walk, the diff and the apply all run their real paths with no graph fixture.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_StructChildPlansAndApplies,
+	"SimpleQuest.Resolver.StructChildPlansAndApplies", FormatIOTestFlags)
+bool FQuestFormatIO_StructChildPlansAndApplies::RunTest(const FString& Parameters)
+{
+	const FStructProperty* PayloadProp =
+		CastField<FStructProperty>(UGenericReward::StaticClass()->FindPropertyByName(FName(TEXT("Payload"))));
+	if (!TestNotNull(TEXT("UGenericReward has a Payload property"), PayloadProp))
+	{
+		return false;
+	}
+
+	UGenericReward* Reward = NewObject<UGenericReward>(GetTransientPackage());
+	{
+		FInstancedStruct& Live = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Reward);
+		Live.InitializeAs<FQuestRewardAmount>();
+		Live.GetMutable<FQuestRewardAmount>().Amount = 42;
+	}
+
+	// The source describes the SAME payload with a different amount - the edit a designer makes in a spreadsheet.
+	const FString OwnerKey = TEXT("node_a/Rewards[0]");
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable& Table = Bundle.TablesByType.Add(TEXT("quest_reward_amount"));
+		Table.Columns = { TEXT("struct"), TEXT("Amount") };
+
+		FQuestDataRow Row;
+		Row.Key = OwnerKey + TEXT("/Payload");
+
+		FQuestDataValue StructCell;
+		StructCell.Kind = EQuestDataValueKind::String;
+		StructCell.StringForm = TEXT("QuestRewardAmount");
+		Row.Cells.Add(TEXT("struct"), StructCell);
+
+		FQuestDataValue AmountCell;
+		AmountCell.Kind = EQuestDataValueKind::Number;
+		AmountCell.StringForm = TEXT("99");
+		Row.Cells.Add(TEXT("Amount"), AmountCell);
+
+		Table.Rows.Add(MoveTemp(Row));
+	}
+
+	// PLAN. Goes through the UObject forwarder, so that path is exercised too.
+	FQuestNodePlanEntry Entry;
+	FQuestInPlacePlan Plan;
+	DiffQuestInstancedChildren(Reward, OwnerKey, Bundle, Entry, Plan);
+
+	if (!TestEqual(TEXT("the plan reports exactly one change"), Entry.Changes.Num(), 1))
+	{
+		for (const FQuestPropertyChange& C : Entry.Changes)
+		{
+			AddInfo(FString::Printf(TEXT("change: '%s' '%s' -> '%s'"), *C.Property, *C.CurrentText, *C.IncomingText));
+		}
+		return false;
+	}
+	TestEqual(TEXT("the change names the payload's field, not the payload"), Entry.Changes[0].Property, TEXT("Payload.Amount"));
+
+	// An EDIT specifically. Without this the count above is satisfied by any single change - and there is a plausible
+	// wrong one: skip the struct in the walk and it never reaches LiveKeys, so the additions loop reports the payload
+	// row as a spurious ChildAdded. One change, entirely the wrong change.
+	TestTrue(TEXT("it is an edit, not a child add or remove"), Entry.Changes[0].Kind == EQuestPropertyChangeKind::Edit);
+
+	// Reads the LIVE struct, not the row. Contains rather than equals - the display formatting is not what is under test.
+	TestTrue(*FString::Printf(TEXT("the change reports the live value (got '%s')"), *Entry.Changes[0].CurrentText),
+		Entry.Changes[0].CurrentText.Contains(TEXT("42")));
+
+	// APPLY.
+	TArray<FString> Skipped;
+	const int32 Written = ApplyQuestChangesToObject(Reward, OwnerKey, Entry.Changes, Skipped);
+	TestEqual(TEXT("one write landed"), Written, 1);
+	for (const FString& S : Skipped)
+	{
+		AddError(FString::Printf(TEXT("unexpectedly skipped: %s"), *S));
+	}
+
+	// Re-fetched rather than reusing the earlier reference, so the assertion reads the property as it stands now.
+	const FInstancedStruct& After = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Reward);
+	if (TestTrue(TEXT("the payload is still valid after apply"), After.IsValid()))
+	{
+		if (const FQuestRewardAmount* Amount = After.GetPtr<FQuestRewardAmount>())
+		{
+			TestEqual(TEXT("the edit landed in the struct's memory"), Amount->Amount, 99);
 		}
 	}
 

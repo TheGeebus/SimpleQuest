@@ -32,10 +32,13 @@ static void CollectApplyTargets(UObject* Owner, const FString& OwnerKey, const F
 		if (!IsQuestInstancedBearing(Prop)) continue;
 
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-		[&OutByPath](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
-	        {
-	            CollectApplyTargets(const_cast<UObject*>(Child), ChildKey, Path, OutByPath);
-	        });
+		[&OutByPath](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
+		{
+			// PART 1 LIMIT: the target map is UObject-keyed, so struct children have nowhere to go. They are not
+			// collected, which means no change ever resolves onto one - the planner warns about exactly this above.
+			if (Child.IsStruct()) return;
+			CollectApplyTargets(const_cast<UObject*>(Child.Object), ChildKey, Path, OutByPath);
+		});
 	}
 }
 

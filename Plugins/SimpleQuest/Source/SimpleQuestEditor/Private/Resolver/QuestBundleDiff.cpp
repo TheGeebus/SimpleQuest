@@ -32,9 +32,8 @@ static FString DescribeValue(const FQuestDataValue& Value)
 	}
 }
 
-void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, const FQuestDataRow& Row,
-						  const FString& PathPrefix, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan,
-						  const FQuestAbsentPolicyResolver& Policies)
+void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, const FQuestDataRow& Row, const FString& PathPrefix,
+	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	if (!Layout || !Container) return;
 
@@ -131,7 +130,7 @@ void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, 
 }
 
 void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix,
-						  FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	// A UObject IS its own container - the property offsets are relative to the object pointer, exactly as they are
 	// relative to a struct's memory. Only the layout has to be named separately.
@@ -158,7 +157,7 @@ static bool BundleDeclaresChildrenUnder(const FQuestDataBundle& Bundle, const FS
 }
 
 void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle,
-                           FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
 	{
@@ -172,26 +171,36 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
 
 		TSet<FString> LiveKeys;
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-		[&](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
-	        {
-	            LiveKeys.Add(ChildKey);
+		[&](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
+		{
+			// PART 1 LIMIT: struct children export and re-import, but in-place PLANNING does not compare them yet.
+			// Skipping silently would let the plan report "no changes" about a payload the source edited, so say so.
+			if (Child.IsStruct())
+			{
+				OutPlan.Warnings.Add(FString::Printf(
+					TEXT("'%s' holds struct contents that in-place planning does not compare yet - edits to it will not "
+						 "appear in this plan and will not be applied."), *Path));
+				return;
+			}
 
-	            FString ChildClass;
-	            const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
-	            if (!ChildRow)
-	            {
-	                // The source DOES describe this property's contents, and this child is not among them.
-	                FQuestPropertyChange Change;
-	                Change.Property     = Path;
-	                Change.CurrentText  = Child->GetClass()->GetName();
-	                Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
-	                Change.IncomingText = TEXT("<removed>");
-	                Entry.Changes.Add(MoveTemp(Change));
-	                return;
-	            }
-	            DiffQuestObjectAgainstRow(Child, *ChildRow, Path, Entry, OutPlan, Policies);
-	            DiffQuestInstancedChildren(Child, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
-	       });
+			LiveKeys.Add(ChildKey);
+
+			FString ChildClass;
+            const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
+            if (!ChildRow)
+            {
+                // The source DOES describe this property's contents, and this child is not among them.
+                FQuestPropertyChange Change;
+                Change.Property     = Path;
+                Change.CurrentText  = Child.Object->GetClass()->GetName();
+                Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
+                Change.IncomingText = TEXT("<removed>");
+                Entry.Changes.Add(MoveTemp(Change));
+                return;
+            }
+            DiffQuestObjectAgainstRow(Child.Object, *ChildRow, Path, Entry, OutPlan, Policies);
+            DiffQuestInstancedChildren(Child.Object, ChildKey, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
+       });
 
 		// Rows under this property with no live counterpart are additions.
 		const FString Indexed = PropPrefix + TEXT("[");

@@ -181,18 +181,28 @@ static bool RestoreArrayCell(const FProperty* Prop, void* ValuePtr, const FQuest
 
 // Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns (key/class/graph)
 // and any column with no matching property (defensive - a stale table column shouldn't abort the import).
-void RestoreQuestRowProperties(UObject* Target, const FQuestDataRow& Row)
+void RestoreQuestRowProperties(const UStruct* Layout, void* Memory, const FQuestDataRow& Row)
 {
+	if (!Layout || !Memory) return;
+
 	for (const TPair<FString, FQuestDataValue>& Cell : Row.Cells)
 	{
 		const FString& Col = Cell.Key;
-		if (Col == TEXT("class") || Col == TEXT("graph")) continue;
-		FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*Col));
+		// Structural cells, never properties: "class"/"struct" name the type the row reconstructs as, "graph" and
+		// "index" place it. All are read by the caller before it ever gets here.
+		if (Col == TEXT("class") || Col == TEXT("struct") || Col == TEXT("graph") || Col == TEXT("index")) continue;
+		FProperty* Prop = Layout->FindPropertyByName(FName(*Col));
 		if (!Prop) continue;
 		// RestoreQuestCell types the value against the property (structured providers write typed fields directly; string-
 		// carrying Kinds route through ImportText on Scalar) - see the switch(Kind) in RestoreQuestCell.
-		RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Cell.Value);
+		RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(Memory), Cell.Value);
 	}
+}
+
+void RestoreQuestRowProperties(UObject* Target, const FQuestDataRow& Row)
+{
+	if (!Target) return;
+	RestoreQuestRowProperties(Target->GetClass(), Target, Row);
 }
 
 // Resolve a class named by a bundle cell. The file carries SHORT names deliberately - they are what a studio reads and

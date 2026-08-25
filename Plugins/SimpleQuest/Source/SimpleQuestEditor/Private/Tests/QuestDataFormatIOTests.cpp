@@ -6,11 +6,17 @@
 #include "HAL/FileManager.h"
 #include "ISimpleQuestEditorModule.h"
 #include "Misc/AutomationTest.h"
+#include "Quests/Types/QuestRewardPayloads.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportOperations.h"
+#include "Resolver/QuestInstancedChildren.h"
+#include "Resolver/QuestRowRestore.h"
+#include "Rewards/GenericReward.h"
+#include "StructUtils/InstancedStruct.h"
 #include "Tests/QuestGraphFixture.h"
 
 namespace
@@ -216,6 +222,97 @@ bool FQuestImport_CreateRefusesExistingAsset::RunTest(const FString& Parameters)
 	// available here that the guard ran at all.
 	TestTrue(*FString::Printf(TEXT("refused by the guard, naming the existing asset (got: %s)"), *Error),
 		Error.Contains(FullPath) && Error.Contains(TEXT("plan and apply")));
+
+	return true;
+}
+
+/**
+ * Bundles written BEFORE struct decomposition must still import, and must not lose the payload.
+ *
+ * The old form carried an FInstancedStruct as a StructLiteral CELL on the owner's row; the new form gives it a child
+ * ROW of its own. Import reads both, and the compatibility is not a shim - it falls out of the order the two restore
+ * passes already run in. RestoreQuestRowProperties populates the cell first, then ReattachQuestInstancedChildren finds
+ * no child row and leaves the value alone, because SILENCE IS NOT AN ASSERTION OF EMPTINESS.
+ *
+ * That makes migration free: an old bundle imports, and the next export writes the new form. Running the pipeline once
+ * IS the migration. This test is what keeps that true - the two behaviors it depends on live in different files and
+ * neither one's author would see this consequence.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_LegacyStructLiteralStillImports,
+	"SimpleQuest.Resolver.LegacyStructLiteralStillImports", FormatIOTestFlags)
+bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Parameters)
+{
+	const FStructProperty* PayloadProp =
+		CastField<FStructProperty>(UGenericReward::StaticClass()->FindPropertyByName(FName(TEXT("Payload"))));
+	if (!TestNotNull(TEXT("UGenericReward has a Payload property"), PayloadProp))
+	{
+		return false;
+	}
+
+	// PRODUCE the legacy literal rather than hardcoding one, so this test cannot drift if ExportTextItem's syntax
+	// changes - what it asserts is that whatever the old exporter WROTE is still readable, not that one string is.
+	FString LegacyLiteral;
+	{
+		UGenericReward* Source = NewObject<UGenericReward>(GetTransientPackage());
+		FInstancedStruct& SourcePayload = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Source);
+		SourcePayload.InitializeAs<FQuestRewardAmount>();
+		SourcePayload.GetMutable<FQuestRewardAmount>().Amount = 42;
+		PayloadProp->ExportTextItem_Direct(LegacyLiteral, &SourcePayload, nullptr, nullptr, PPF_None);
+	}
+	// Without this the bundle below carries an empty cell, RestoreQuestCell's empty arm declines it, and the whole test
+	// would be asserting against a payload nothing ever tried to write.
+	if (!TestTrue(TEXT("the legacy literal is non-empty"), !LegacyLiteral.IsEmpty()))
+	{
+		return false;
+	}
+
+	// A bundle in the OLD shape: the payload is a cell on the reward's own row, and there is no child table for it.
+	const FString RewardKey = TEXT("node_a/Rewards[0]");
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable& Table = Bundle.TablesByType.Add(TEXT("generic_reward"));
+		Table.Columns = { TEXT("class"), TEXT("RewardType"), TEXT("Payload") };
+
+		FQuestDataRow Row;
+		Row.Key = RewardKey;
+
+		FQuestDataValue ClassCell;
+		ClassCell.Kind = EQuestDataValueKind::String;
+		ClassCell.StringForm = TEXT("GenericReward");
+		Row.Cells.Add(TEXT("class"), ClassCell);
+
+		FQuestDataValue PayloadCell;
+		PayloadCell.Kind = EQuestDataValueKind::StructLiteral;
+		PayloadCell.StringForm = LegacyLiteral;
+		Row.Cells.Add(TEXT("Payload"), PayloadCell);
+
+		Table.Rows.Add(MoveTemp(Row));
+	}
+
+	UGenericReward* Target = NewObject<UGenericReward>(GetTransientPackage());
+	FInstancedStruct& TargetPayload = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Target);
+
+	// CONTROL. "It holds 42 afterwards" proves nothing unless it held nothing beforehand.
+	if (!TestFalse(TEXT("the target payload starts unset"), TargetPayload.IsValid()))
+	{
+		return false;
+	}
+
+	// The two passes, in the order the real import runs them.
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	RestoreQuestRowProperties(Target, Bundle.TablesByType[TEXT("generic_reward")].Rows[0]);
+	ReattachQuestInstancedChildren(Target, RewardKey, Bundle, Consumed, Warnings);
+
+	if (TestTrue(TEXT("the legacy payload survived both passes"), TargetPayload.IsValid()))
+	{
+		TestEqual(TEXT("the payload is the type the literal named"), TargetPayload.GetScriptStruct()->GetName(), FQuestRewardAmount::StaticStruct()->GetName());
+
+		if (const FQuestRewardAmount* Amount = TargetPayload.GetPtr<FQuestRewardAmount>())
+		{
+			TestEqual(TEXT("the payload's value survived"), Amount->Amount, 42);
+		}
+	}
 
 	return true;
 }

@@ -25,7 +25,7 @@ void CollectQuestNodeIdentity(const UEdGraph* EdGraph, TMap<FString, FString>& O
 
 		// Reroute knots are wire furniture, not entities: the writer collapses them into the wire walk and emits no row for
 		// one, so no source can ever mention a knot. Collecting them here would make every knot in the asset look like a row
-		// the source dropped — and under a delete-orphans policy, an apply would remove them and sever the wires through them.
+		// the source dropped - and under a delete-orphans policy, an apply would remove them and sever the wires through them.
 		if (Node->IsPassThroughNode()) continue;
 
 		const FString Guid = Node->QuestGuid.ToString(EGuidFormats::Digits);
@@ -41,7 +41,7 @@ void CollectQuestNodeIdentity(const UEdGraph* EdGraph, TMap<FString, FString>& O
 
 		if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
 		{
-			// A container's inner level is named by the container's own key — the same convention the row 'graph' cell uses.
+			// A container's inner level is named by the container's own key - the same convention the row 'graph' cell uses.
 			const FString InnerCell = Node->ImportSourceKey.IsEmpty() ? Guid : Node->ImportSourceKey;
 			CollectQuestNodeIdentity(QuestNode->GetInnerGraph(), OutSourceKeyByGuid, OutNodeByGuid, OutGraphCellByGuid, InnerCell);
 		}
@@ -84,7 +84,7 @@ FString ResolveQuestLevelToGuid(const FString& LevelName, const TMap<FString, FS
 {
 	if (LevelName.IsEmpty() || LevelName == TEXT("root")) { return LevelName; }
 	if (const FString* Guid = GuidByKey.Find(LevelName)) { return *Guid; }
-	return LevelName;   // names no node we know — the caller decides whether that is a create or a refusal
+	return LevelName;   // names no node we know - the caller decides whether that is a create or a refusal
 }
 
 namespace
@@ -112,6 +112,13 @@ bool IsQuestInstancedBearing(const FProperty* Prop)
 	}
 	if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
 	{
+		// An FInstancedStruct IS a child: its contents are authored in place and carry their own type, exactly like a
+		// subobject. Everything else is inspected for subobjects nested inside it (FQuestRewardSet holds an array of
+		// rewards this way) - the struct itself stays a plain value.
+		if (Struct->Struct == FInstancedStruct::StaticStruct())
+		{
+			return true;
+		}
 		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
 		{
 			if (IsQuestInstancedBearing(*It))
@@ -128,15 +135,36 @@ void ForEachQuestInstancedChild(
 	const void* ValuePtr,
 	const FString& OwnerKey,
 	const FString& PathPrefix,
-	TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)> Visit,
+	TFunctionRef<void(const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)> Visit,
 	int32 ArrayOrdinal)
 {
+	// An FInstancedStruct's contents: one child, typed by whatever it currently holds. An UNSET one yields nothing, for
+	// the same reason a null object slot does - absence is the honest representation, and emitting a typeless row would
+	// give import nothing to reconstruct from.
+	if (const FStructProperty* AsStruct = CastField<FStructProperty>(Prop))
+	{
+		if (AsStruct->Struct == FInstancedStruct::StaticStruct())
+		{
+			const FInstancedStruct& Inst = *static_cast<const FInstancedStruct*>(ValuePtr);
+			if (const UScriptStruct* Type = Inst.GetScriptStruct())
+			{
+				FQuestInstancedChild Child;
+				Child.StructType = Type;
+				Child.Memory = Inst.GetMemory();
+				Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Child, ArrayOrdinal);
+			}
+			return;
+		}
+	}
+
 	// Direct instanced object: one child. A null slot yields nothing — absence is the honest representation.
 	if (const FObjectProperty* Obj = CastField<FObjectProperty>(Prop))
 	{
 		if (const UObject* Sub = Obj->GetObjectPropertyValue(ValuePtr))
 		{
-			Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Sub, ArrayOrdinal);
+			FQuestInstancedChild Child;
+			Child.Object = Sub;
+			Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Child, ArrayOrdinal);
 		}
 		return;
 	}
@@ -170,7 +198,7 @@ void ForEachQuestInstancedChild(
 			// The ordinal rides SEPARATELY: position is still meaning for a reward array (grant sequence), it just
 			// stops being identity. INDEX_NONE where the element is not itself the child - it has no position of its own.
 			ForEachQuestInstancedChild(Arr->Inner, Helper.GetRawPtr(Idx), OwnerKey, Segment, Visit,
-									   bElementIsChild ? Idx : INDEX_NONE);
+			                           bElementIsChild ? Idx : INDEX_NONE);
 		}
 		return;
 	}
@@ -188,7 +216,7 @@ void ForEachQuestInstancedChild(
 		return;
 	}
 	// Struct: descend its instanced-bearing fields, extending the path with the field name. Non-instanced siblings are
-	// dropped — the only corpus case is a reward set whose sole field IS the instanced array.
+	// dropped - the only corpus case is a reward set whose sole field IS the instanced array.
 	if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
 	{
 		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
@@ -232,7 +260,7 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
 			const UQuestlineNodeBase* ToNode = Cast<UQuestlineNodeBase>(Terminal->GetOwningNode());
 			if (!ToNode)
 			{
-				continue;   // non-questline node downstream — shouldn't occur; skip defensively
+				continue;   // non-questline node downstream - shouldn't occur; skip defensively
 			}
 			const FString Type = FString::Printf(TEXT("%s(%s)"), *QuestEdgeVerb(Pin->PinType.PinCategory), *Pin->PinName.ToString());
 			OutEdges.Add({ FromKey, Type, ToNode->QuestGuid.ToString(EGuidFormats::Digits) });

@@ -78,6 +78,18 @@ Two consequences to be explicit about, since open-core makes people reasonably w
 
 Don't contribute code you don't have the right to license - work owned by an employer, code lifted from a proprietary codebase, or anything under a copyleft license.
 
+**Sign off your commits.** Add the `Signed-off-by` line by committing with `-s`:
+
+```
+git commit -s -m "your message"
+```
+
+That line means you're agreeing to the [Developer Certificate of Origin](https://developercertificate.org/) - a short statement that you wrote the code or otherwise have the right to submit it, and that you understand it will be public under this project's license. It grants me nothing beyond what MIT already gives; it's a record that the code was yours to give, kept next to the code rather than in a document nobody re-reads.
+
+It's not a CLA and doesn't quietly become one. Everything above still holds: no assignment, your copyright stays yours, your contribution stays MIT. I ask for it now because the first merge sets the precedent, and one line per commit is trivial to adopt while retrofitting it across a dozen contributors later is not.
+
+If you forget the flag, I'll say so rather than bounce the PR.
+
 ---
 
 ## What a pull request should carry
@@ -106,7 +118,7 @@ Match the surrounding code. Beyond that, a short list of things that are consist
 - American spellings throughout: `color`, `behavior`, `-ize`.
 - Blueprint-facing APIs take `USTRUCT` parameters and Gameplay Tag pickers, not wildcards and `FName` strings. If a designer will touch it, it should be pickable.
 - Log something. Data-handling code in particular is nearly invisible at both editor time and runtime, and a well-placed `Verbose` line is the difference between a five-minute diagnosis and an afternoon.
-- Commit messages: plain and short. No generated-by or co-authored-by trailers, please.
+- Commit messages: plain and short. The one trailer I do want is the `Signed-off-by` line described above; please leave off generated-by and co-authored-by.
 
 ---
 

@@ -45,7 +45,6 @@ public:
 		TArray<FString>& OutWarnings,
 		FString& OutError) override;
 	
-	/*
 	virtual bool ImportQuestline(const TMap<FString, FString>& Files,
 		const FString& FormatName,
 		const FString& DestPackagePath,
@@ -53,7 +52,6 @@ public:
 		FString& OutAssetPath,
 		TArray<FString>& OutWarnings,
 		FString& OutError) override;
-	*/
 	
 	virtual bool PlanInPlaceImport(const TMap<FString, FString>& Files,
 		const FString& FormatName,

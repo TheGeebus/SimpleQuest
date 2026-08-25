@@ -422,6 +422,35 @@ bool FSimpleQuestEditor::ExportQuestline(UQuestlineGraph* Graph, const FString& 
 	return true;
 }
 
+bool FSimpleQuestEditor::ImportQuestline(const TMap<FString, FString>& Files, const FString& FormatName,
+	const FString& DestPackagePath, const UQuestImportMapping* Mapping, FString& OutAssetPath,
+	TArray<FString>& OutWarnings, FString& OutError)
+{
+	OutAssetPath.Reset();
+	OutWarnings.Reset();
+
+	FQuestDataBundle Bundle;
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	TSet<FString> AllRowKeys;
+	if (!ReadFilesIntoBundle(Files, FormatName, Mapping, Bundle, NodeRowsByKey, AllRowKeys, OutWarnings, OutError))
+	{
+		return false;
+	}
+
+	// EMPTY suffix, unlike the console's round-trip path: an adopter importing into a fresh project has no source asset
+	// to collide with, and would have no idea why they got 'QL_Chapter1_RT'.
+	FQuestCreateOutcome Created;
+	if (!QuestImport_CreateFromBundle(Bundle, NodeRowsByKey, DestPackagePath, FString(), Created, OutWarnings, OutError))
+	{
+		return false;
+	}
+
+	OutAssetPath = Created.AssetPath;
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ImportQuestline: created '%s' - %d node(s), %d edge(s), compile %s."),
+		*Created.AssetPath, Created.NodeCount, Bundle.Edges.Num(), Created.bCompiled ? TEXT("OK") : TEXT("FAILED"));
+	return true;
+}
+
 bool FSimpleQuestEditor::PlanInPlaceImport(const TMap<FString, FString>& Files, const FString& FormatName, UQuestlineGraph* Target, const UQuestImportMapping* Mapping, bool bResetAbsent, FQuestInPlacePlan& OutPlan, FString& OutError)
 {
 	if (!Target)

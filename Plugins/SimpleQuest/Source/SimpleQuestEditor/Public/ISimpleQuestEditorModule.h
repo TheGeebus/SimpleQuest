@@ -126,14 +126,14 @@ public:
      * Creates a NEW questline asset at DestPackagePath from Files. Returns the created asset's path in OutAssetPath.
      * For updating an existing questline, plan and apply instead - this path deliberately cannot overwrite.
      */
-/*    virtual bool ImportQuestline(const TMap<FString, FString>& Files,
+    virtual bool ImportQuestline(const TMap<FString, FString>& Files,
         const FString& FormatName,
         const FString& DestPackagePath,
         const UQuestImportMapping* Mapping,
         FString& OutAssetPath,
         TArray<FString>& OutWarnings,
         FString& OutError) = 0;
-*/
+
     /**
      * Plans what importing Files into Target WOULD change, without changing anything. The returned plan carries its
      * entries, its warnings, and a fingerprint of the files it was built from.

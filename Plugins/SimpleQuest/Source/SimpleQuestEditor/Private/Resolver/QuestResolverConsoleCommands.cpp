@@ -303,89 +303,26 @@ static void ImportQuestlineCmd(const TArray<FString>& Args)
 		return;
 	}
 
-	// P1 - create the asset via the factory, then restore the self row (with _RT identity + instanced rewards).
-	// Two distinct identities: the ROW KEY (sanitized EffectiveID - folder name, tag namespace) and the authored
-	// QuestlineID FIELD (raw, whatever the designer typed, spaces and all - the compiler sanitizes it only when
-	// building tags, never mutating the field). The asset NAME rides the sanitized key (a package name can't hold
-	// spaces); the QuestlineID FIELD must preserve the raw authored value so the round-trip doesn't alter it.
-	const FQuestDataRow& SelfRow = Bundle.TablesByType[TEXT("questline_graph")].Rows[0];
-	const FString OriginalKey = SelfRow.Key;                          // sanitized - folder/tag identity
-	const FString RawQuestlineID = SelfRow.Get(TEXT("QuestlineID"));  // raw authored field (may be empty)
-	const FString AssetName = OriginalKey + TEXT("_RT");              // _RT so the compiled tag namespace doesn't collide.
-
-	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-	UQuestlineGraphFactory* Factory = NewObject<UQuestlineGraphFactory>();
-	UObject* Created = AssetTools.CreateAsset(AssetName, DestPackagePath, UQuestlineGraph::StaticClass(), Factory);
-	UQuestlineGraph* Graph = Cast<UQuestlineGraph>(Created);
-	if (!Graph || !Graph->QuestlineEdGraph)
+	// The create path itself lives in QuestImportOperations beside the in-place ones, so the module API and this command
+	// run the same code. "_RT" is OURS, not the operation's: it keeps a re-imported asset's compiled tag namespace from
+	// colliding with the source it was imported from, which only matters to round-trip verification.
+	FQuestCreateOutcome Created;
+	FString CreateError;
+	if (!QuestImport_CreateFromBundle(Bundle, NodeRowsByKey, DestPackagePath, TEXT("_RT"), Created, Warnings, CreateError))
 	{
-		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: asset creation failed at '%s/%s'."), *DestPackagePath, *AssetName);
+		UE_LOG(LogSimpleQuestResolver, Error, TEXT("ImportQuestline: %s"), *CreateError);
 		return;
 	}
 
-	TSet<FString> Consumed;
-
-	// Self-row properties onto the graph object (QuestlineID gets _RT; instanced QuestlineRewards rebuilt).
-	RestoreQuestRowProperties(Graph, SelfRow);
-	{
-		// QuestlineID handling for the round-trip. Two cases, because GetEffectiveID() falls back to the ASSET
-		// NAME when the field is empty:
-		//   - Source field NON-empty: set the RT field to <raw>_RT, so re-export's QuestlineID cell matches the
-		//     source's modulo _RT.
-		//   - Source field EMPTY (asset-name-derived): LEAVE IT EMPTY. The source's EffectiveID was its asset
-		//     name (e.g. "QL_Ch5_Blocking"); the RT asset's name is "<name>_RT", so the same empty->asset-name
-		//     fallback yields "<name>_RT" - matching the source modulo _RT. Writing the literal "_RT" here (the
-		//     prior bug) would make QuestlineID = "_RT", tags = SimpleQuest.Questline._RT.*, and the export folder
-		//     "_RT" - diverging from the asset-name identity the source actually used.
-		if (!RawQuestlineID.IsEmpty())
-		{
-			if (FProperty* IDProp = Graph->GetClass()->FindPropertyByName(TEXT("QuestlineID")))
-			{
-				const FString RT = RawQuestlineID + TEXT("_RT");
-				IDProp->ImportText_Direct(*RT, IDProp->ContainerPtrToValuePtr<void>(Graph), nullptr, PPF_None);
-			}
-		}
-		// else: RestoreQuestRowProperties already left it empty (the source cell was empty) - nothing to do.
-	}
-	ReattachQuestInstancedChildren(Graph, OriginalKey, Bundle, Consumed, Warnings);   // self-row child keys are prefixed by the self key
-
-	// P2 - spawn nodes, root graph first, recursing into container inner graphs.
-	TMap<FString, UEdGraphNode*> NodeByKey;
-	ImportQuestGraphLevel(Graph->QuestlineEdGraph, TEXT("root"), Bundle, NodeRowsByKey, NodeByKey, Consumed, Warnings);
-
-	// P3 - pin refresh pass (innermost-first).
-	RefreshQuestNodePins(Bundle, NodeRowsByKey, NodeByKey, Warnings);
-
-	// P4 - wire edges + contains-edge cross-check.
-	WireQuestEdges(Bundle, NodeByKey, Consumed, Warnings);
-
-	// Wrap the double-compile in a compile batch so the gameplay-tag-tree rebuild coalesces to ONCE (at EndCompileBatch)
-	// instead of once PER compile pass. The batch's incremental AddNativeTagsForGraph keeps pass 2's RequestGameplayTag
-	// lookups valid against pass 1's registrations (that's exactly what the first-compile-identity double-compile needs),
-	// while the expensive tree rebuild + INI write defer to batch end. Same mechanism CompileAllQuestlineGraphs uses.
-	ISimpleQuestEditorModule::Get().BeginCompileBatch();
-	TUniquePtr<FQuestlineGraphCompiler> Compiler = ISimpleQuestEditorModule::Get().CreateCompiler();
-	Compiler->Compile(Graph);                          // pass 1: registers the identity + state tags
-	const bool bCompiled = Compiler->Compile(Graph);   // pass 2: identity now valid -> complete resolution records
-	ISimpleQuestEditorModule::Get().EndCompileBatch();
-
-	UPackage* Package = Graph->GetPackage();
-	Package->MarkPackageDirty();
-	FAssetRegistryModule::AssetCreated(Graph);
-	const FString FileName = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	UPackage::SavePackage(Package, Graph, *FileName, SaveArgs);
-
 	for (const FString& W : Warnings) UE_LOG(LogSimpleQuestResolver, Warning, TEXT("ImportQuestline: %s"), *W);
 	UE_LOG(LogSimpleQuestResolver, Log, TEXT("ImportQuestline: '%s' -> '%s/%s' - %d node(s), %d edge(s), %d warning(s), compile %s. Run C (re-export + diff) and B2 (DumpCompiled + diff) to verify."),
-		*OriginalKey,
+		*Bundle.TablesByType[TEXT("questline_graph")].Rows[0].Key,
 		*DestPackagePath,
-		*AssetName,
-		NodeByKey.Num(),
+		*Created.AssetName,
+		Created.NodeCount,
 		Bundle.Edges.Num(),
 		Warnings.Num(),
-		bCompiled ? TEXT("OK") : TEXT("FAILED"));
+		Created.bCompiled ? TEXT("OK") : TEXT("FAILED"));
 }
 
 // The destination folder, or empty for the derived one. POSITIONAL rather than a --out= flag because the console

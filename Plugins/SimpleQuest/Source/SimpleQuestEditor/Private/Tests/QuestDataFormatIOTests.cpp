@@ -10,6 +10,7 @@
 #include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestExportOperations.h"
+#include "Resolver/QuestImportOperations.h"
 #include "Tests/QuestGraphFixture.h"
 
 namespace
@@ -163,6 +164,58 @@ bool FQuestFormatIO_PublicExportMatchesFolderExport::RunTest(const FString& Para
 		// The derived destination is under the export root and this test put it there, so clearing it is ours to do.
 		IFileManager::Get().DeleteDirectory(*Outcome.OutDir, false, true);
 	}
+
+	return true;
+}
+
+/**
+ * The create path must refuse an existing asset rather than overwrite it or let CreateAsset quietly mint a numbered
+ * variant. Both alternatives are worse than stopping: an overwrite destroys authored work, and 'QL_QuickStart_2'
+ * appearing in the content browser names the collision nowhere a designer would look.
+ *
+ * Safe to run against shipped content BECAUSE it refuses - nothing is created, so there is nothing to clean up. If this
+ * test ever starts leaving an asset behind, that is itself the failure.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestImport_CreateRefusesExistingAsset,
+	"SimpleQuest.Resolver.CreateRefusesExistingAsset", FormatIOTestFlags)
+bool FQuestImport_CreateRefusesExistingAsset::RunTest(const FString& Parameters)
+{
+	// Aimed at shipped content that is known to exist on disk. If QuickStart is ever renamed this test fails loudly
+	// rather than silently passing, which is the right way round.
+	const FString DestPackagePath = TEXT("/SimpleQuest/QuickStart");
+	const FString ExistingName = TEXT("QL_QuickStart");
+	const FString FullPath = DestPackagePath / ExistingName;
+
+	// CONTROL. Without this, "refused" and "the fixture was wrong about what exists" are the same result.
+	if (!TestTrue(*FString::Printf(TEXT("precondition: '%s' exists on disk"), *FullPath),
+		FPackageName::DoesPackageExist(FullPath)))
+	{
+		return false;
+	}
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable& SelfTable = Bundle.TablesByType.Add(TEXT("questline_graph"));
+	FQuestDataRow SelfRow;
+	SelfRow.Key = ExistingName;
+	SelfTable.Rows.Add(SelfRow);
+
+	const TMap<FString, const FQuestDataRow*> NoNodeRows;
+	FQuestCreateOutcome Created;
+	TArray<FString> Warnings;
+	FString Error;
+	const bool bCreated = QuestImport_CreateFromBundle(Bundle, NoNodeRows, DestPackagePath, FString(),
+		Created, Warnings, Error);
+
+	TestFalse(TEXT("creating over an existing asset is refused"), bCreated);
+	TestNull(TEXT("nothing was created"), Created.Graph);
+
+	// Refused BY OUR GUARD, not by AssetTools. Both refuse unattended and both name the path, so the path alone cannot
+	// tell them apart - only our wording points at plan and apply. The distinction matters because AssetTools refuses
+	// ONLY when unattended: in a live editor CanCreateAsset can prompt, and a designer clicking through would get the
+	// overwrite this guard exists to prevent. Automation is always unattended, so this string is the only evidence
+	// available here that the guard ran at all.
+	TestTrue(*FString::Printf(TEXT("refused by the guard, naming the existing asset (got: %s)"), *Error),
+		Error.Contains(FullPath) && Error.Contains(TEXT("plan and apply")));
 
 	return true;
 }

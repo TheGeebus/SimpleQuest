@@ -23,7 +23,7 @@ UClass* FQuestlineGraphAssetTypeActions::GetSupportedClass() const
 
 uint32 FQuestlineGraphAssetTypeActions::GetCategories()
 {
-	return EAssetTypeCategories::Gameplay;
+	return Category;
 }
 
 void FQuestlineGraphAssetTypeActions::OpenAssetEditor(const TArray<UObject*>& InObjects, TSharedPtr<IToolkitHost> EditWithinLevelEditor)

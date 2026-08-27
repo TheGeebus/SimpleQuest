@@ -76,6 +76,12 @@ public:
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
+
+	/**
+	 * Every other SimpleQuest asset's browser identity, registered together and unregistered together so the two
+	 * lists cannot fall out of step.
+	 */
+	TArray<TSharedRef<class IAssetTypeActions>> QuestAssetTypeActions;
 	TSharedPtr<FQuestlineGraphNodeFactory> QuestlineGraphNodeFactory;
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 	

@@ -64,15 +64,20 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "AssetTypes/QuestAssetTypeActions.h"
 #include "DetailCustomizations/QuestImportMappingDetailsCustomization.h"
 #include "DetailCustomizations/QuestlineGraphRewardsDetailsCustomization.h"
+#include "Display/QuestDisplayData.h"
 #include "FactsPanel/FactsPanelRegistry.h"
 #include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
+#include "Quests/Types/QuestObjectiveConfig.h"
 #include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestImportOperations.h"
+#include "Rewards/QuestLootTable.h"
+#include "Rewards/RewardSetDataAsset.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
 
@@ -188,8 +193,33 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 void FSimpleQuestEditor::StartupModule()
 {
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-	QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>();
+
+	// One category for everything SimpleQuest adds, so a designer finds quest content in one place rather than
+	// hunting it out of Gameplay and Miscellaneous. Registered before any actions, since they carry the bit it returns.
+	const EAssetTypeCategories::Type QuestCategory = AssetTools.RegisterAdvancedAssetCategory(
+		FName(TEXT("SimpleQuest")), NSLOCTEXT("SimpleQuestEditor", "QuestAssetCategory", "SimpleQuest"));
+
+	QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>(QuestCategory);
 	AssetTools.RegisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
+
+	auto RegisterQuestAsset = [&AssetTools, this](UClass* Class, FText Name, FColor Color, uint32 Category)
+	{
+		const TSharedRef<IAssetTypeActions> Actions = MakeShared<FQuestAssetTypeActions>(Class, MoveTemp(Name), Color, Category);
+		AssetTools.RegisterAssetTypeActions(Actions);
+		QuestAssetTypeActions.Add(Actions);
+	};
+
+	// Colours are deliberately near the Questline Graph's green so the group reads as one family in the browser.
+	RegisterQuestAsset(URewardSetDataAsset::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "RewardSetAssetName", "Reward Set"), FColor(200, 165, 60), QuestCategory);
+	RegisterQuestAsset(UQuestLootTable::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "LootTableAssetName", "Quest Loot Table"), FColor(200, 130, 60), QuestCategory);
+	RegisterQuestAsset(UQuestDisplayData::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "DisplayDataAssetName", "Quest Display Data"), FColor(70, 150, 190), QuestCategory);
+	RegisterQuestAsset(UQuestObjectiveConfig::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "ObjectiveConfigAssetName", "Quest Objective Config"), FColor(110, 140, 190), QuestCategory);
+	RegisterQuestAsset(UQuestImportMapping::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "ImportMappingAssetName", "Quest Import Mapping"), FColor(140, 140, 150), QuestCategory);
 
 	QuestlineGraphNodeFactory = MakeShared<FQuestlineGraphNodeFactory>();
 	FEdGraphUtilities::RegisterVisualNodeFactory(QuestlineGraphNodeFactory);
@@ -672,7 +702,12 @@ void FSimpleQuestEditor::ShutdownModule()
 	{
 		IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools").Get();
 		AssetTools.UnregisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
+		for (const TSharedRef<IAssetTypeActions>& Actions : QuestAssetTypeActions)
+		{
+			AssetTools.UnregisterAssetTypeActions(Actions);
+		}
 	}
+	QuestAssetTypeActions.Empty();
 	
 	FEdGraphUtilities::UnregisterVisualNodeFactory(QuestlineGraphNodeFactory);
 	QuestlineGraphNodeFactory.Reset();

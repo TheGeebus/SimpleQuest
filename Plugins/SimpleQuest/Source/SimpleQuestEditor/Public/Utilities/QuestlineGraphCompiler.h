@@ -7,6 +7,8 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
+class UQuestRewardBase;
+class URewardSetDataAsset;
 enum class EResettableReplay : uint8;
 
 struct FQuestGraphResolution;
@@ -39,8 +41,23 @@ class FQuestlineGraphTraversalPolicy;
 class SIMPLEQUESTEDITOR_API FQuestlineGraphCompiler
 {
 public:
-	static void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph,
-	                                    FName IdentityName);
+	/**
+	 * Flatten referenced reward sets into Out, in listed order, ahead of whatever inline rewards the caller appends
+	 * after. Shared by the two authoring surfaces that can reference a set - a Grant Rewards node and a questline's
+	 * per-outcome rewards - so a fix to one cannot drift from the other.
+	 *
+	 * Names each duplicate "<NamePrefix>_<set>_<reward>". The two indices are both load-bearing: the outer object is
+	 * shared, and a name colliding with an inline reward's is a hard crash whenever their classes differ.
+	 * ContextLabel names the owner in a diagnostic; DiagnosticNode is optional and makes the log entry clickable.
+	 */
+	void FlattenRewardSets(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+		UObject* Outer,
+		const FString& NamePrefix,
+		const FString& ContextLabel,
+		const UEdGraphNode* DiagnosticNode,
+		TArray<TObjectPtr<UQuestRewardBase>>& Out);
+	
+	void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName);
 	FQuestlineGraphCompiler();
 	virtual ~FQuestlineGraphCompiler();
 

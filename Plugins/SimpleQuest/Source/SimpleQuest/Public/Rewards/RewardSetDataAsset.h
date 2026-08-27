@@ -29,6 +29,19 @@ class SIMPLEQUEST_API URewardSetDataAsset : public UPrimaryDataAsset
 	GENERATED_BODY()
 
 public:
+
+	/**
+	 * Sets included by this one. Their contents are flattened DEPTH-FIRST, ahead of this set's own Rewards below - the
+	 * same rule one level up, where a node's referenced sets precede its inline rewards. This is what lets a chapter's
+	 * bundle include a shared base bundle instead of re-authoring it in every chapter.
+	 *
+	 * A set that includes itself, directly or through a chain, is refused at compile with a warning naming the chain.
+	 * Including the SAME set from two different branches is legal and grants it twice - that is a designer's choice,
+	 * not a cycle.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Reward")
+	TArray<TSoftObjectPtr<URewardSetDataAsset>> Sets;
+	
 	/**
 	 * The rewards this set grants, in order. Order is meaning - it is the grant sequence - and it is preserved through
 	 * compilation. Each entry is a configured UQuestRewardBase instance, exactly as on a Grant Rewards node.

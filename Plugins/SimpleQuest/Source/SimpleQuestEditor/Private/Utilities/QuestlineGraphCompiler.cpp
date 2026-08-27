@@ -110,6 +110,15 @@ void FQuestlineGraphCompiler::FlattenRewardSets(const TArray<TSoftObjectPtr<URew
 	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode,
 	TArray<TObjectPtr<UQuestRewardBase>>& Out)
 {
+	// The path stack is the recursion's business, not a caller's - both call sites pass exactly what they always did.
+	TArray<const URewardSetDataAsset*> OnPath;
+	FlattenRewardSetsInternal(Sets, Outer, NamePrefix, ContextLabel, DiagnosticNode, OnPath, Out);
+}
+
+void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets, UObject* Outer,
+	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode,	TArray<const URewardSetDataAsset*>& OnPath,
+	TArray<TObjectPtr<UQuestRewardBase>>& Out)
+{
 	for (int32 SetIndex = 0; SetIndex < Sets.Num(); ++SetIndex)
 	{
 		const URewardSetDataAsset* Set = Sets[SetIndex].LoadSynchronous();
@@ -122,14 +131,56 @@ void FQuestlineGraphCompiler::FlattenRewardSets(const TArray<TSoftObjectPtr<URew
 				*Sets[SetIndex].ToString(), *ContextLabel), DiagnosticNode);
 			continue;
 		}
-		
+
+		// ON THE CURRENT PATH, not merely seen before. Including the same base bundle from two sibling branches is a
+		// designer's choice and grants twice; including one that already includes you never terminates.
+		if (OnPath.Contains(Set))
+		{
+			AddWarning(FString::Printf(TEXT("Reward set '%s' on %s includes itself and was skipped - a set cannot "
+				"include a set that already includes it."),
+				*Set->GetName(), *ContextLabel), DiagnosticNode);
+			continue;
+		}
+
+		// *** THE PREFIX GROWS ONE SEGMENT PER LEVEL, AND THAT IS A CRASH GUARD RATHER THAN TIDINESS. *** Recursing
+		// with the caller's prefix would name a nested set's first reward exactly what the outer set's first reward is
+		// already called, and two duplicates claiming one name in one Outer is a hard crash when their classes differ.
+		// At depth zero this produces the same names it always did, so nothing already compiled churns.
+		const FString NestedPrefix  = FString::Printf(TEXT("%s_%d"), *NamePrefix, SetIndex);
+		const FString NestedContext = FString::Printf(TEXT("%s -> '%s'"), *ContextLabel, *Set->GetName());
+
+		// DEPTH FIRST: an included set's contents land before this set's own rewards, which is the same rule the node
+		// follows one level up. The label carries the chain so a failure two levels down is still findable.
+		OnPath.Push(Set);
+		FlattenRewardSetsInternal(Set->Sets, Outer, NestedPrefix, NestedContext, DiagnosticNode, OnPath, Out);
+		OnPath.Pop();
+
 		for (int32 RewardIndex = 0; RewardIndex < Set->Rewards.Num(); ++RewardIndex)
 		{
 			const TObjectPtr<UQuestRewardBase>& FromSet = Set->Rewards[RewardIndex];
-			Out.Add(FromSet
-				? DuplicateObject<UQuestRewardBase>(FromSet, Outer,
-					*FString::Printf(TEXT("%s_%d_%d"), *NamePrefix, SetIndex, RewardIndex))
-				: nullptr);
+			if (!FromSet)
+			{
+				// Null slots are preserved as null and skipped at runtime, the same as an authored gap.
+				Out.Add(nullptr);
+				continue;
+			}
+
+			// *** A TAKEN NAME IS A CRASH INSIDE DuplicateObject, NOT A RENAME. *** That makes a naming-scheme
+			// regression unobservable: the editor dies inside Compile, before anything can report it or assert on it.
+			// One lookup per reward at compile time converts that into an error a person can read - and, just as
+			// importantly, into something a deliberate sabotage can demonstrate instead of merely killing the process.
+			// It should never fire in correct operation: the name IS the reward's whole path, so a duplicate means the
+			// path stopped being encoded somewhere above.
+			const FString RewardName = FString::Printf(TEXT("%s_%d"), *NestedPrefix, RewardIndex);
+			if (StaticFindObjectFast(nullptr, Outer, FName(*RewardName)))
+			{
+				AddError(FString::Printf(TEXT("Reward set flattening produced the duplicate subobject name '%s' on %s. "
+					"This is a compiler fault in the nesting path rather than an authoring error; the reward was skipped."),
+					*RewardName, *NestedContext), DiagnosticNode);
+				continue;
+			}
+
+			Out.Add(DuplicateObject<UQuestRewardBase>(FromSet, Outer, *RewardName));
 		}
 	}
 }
@@ -789,7 +840,11 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
                 const FString Label = ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString();
                 AddWarning(FString::Printf(
                     TEXT("[%s] Node '%s' has a stale pin '%s' with %d active connection(s). These wires will be ignored at runtime. Right-click the node to remove stale pins."),
-                    *TagPrefix, *Label, *Pin->PinName.ToString(), Pin->LinkedTo.Num()), ContentNode);
+                    *TagPrefix,
+                    *Label,
+                    *Pin->PinName.ToString(),
+                    Pin->LinkedTo.Num()),
+                    ContentNode);
             }
         }
     }
@@ -858,12 +913,10 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
         if (!ContentNode) continue;
         OutContentNodes.Add(ContentNode);
     	
-    	/**
-		 * LinkedQuestline's GetNodeTitle is driven by the referenced asset's name (so multiple placements of the same asset share
-		 * a title); use NodeLabel directly to guarantee per-placement uniqueness. Other content nodes' GetNodeTitle already reflects
-		 * NodeLabel via the base ContentBase path, so behavior is unchanged for them.
-		 */
-    	const FString Label = Cast<UQuestlineNode_LinkedQuestline>(ContentNode)
+    	// LinkedQuestline's GetNodeTitle is driven by the referenced asset's name (so multiple placements of the same asset share
+		// a title); use NodeLabel directly to guarantee per-placement uniqueness. Other content nodes' GetNodeTitle already reflects
+		// NodeLabel via the base ContentBase path, so behavior is unchanged for them.
+		const FString Label = Cast<UQuestlineNode_LinkedQuestline>(ContentNode)
 			? SanitizeTagSegment(ContentNode->NodeLabel.ToString())
 			: SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
     	
@@ -1003,11 +1056,9 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 				const FString LinkedPath = LinkedGraph->GetPathName();
 				if (VisitedAssetPaths.Contains(LinkedPath))
 				{
-					/**
-					 * Reconstruct the cycle path for the error: slice VisitedAssetPaths from the cycling asset's prior entry to
-					 * the end, then close with the cycling asset name again. The cycle is a property of the chain as a whole -
-					 * this link is not uniquely at fault, it just happens to be the one that closes the loop during recursion.
-					 */
+					// Reconstruct the cycle path for the error: slice VisitedAssetPaths from the cycling asset's prior entry to
+					// the end, then close with the cycling asset name again. The cycle is a property of the chain as a whole -
+					// this link is not uniquely at fault, it just happens to be the one that closes the loop during recursion.
 					const int32 CycleStart = VisitedAssetPaths.IndexOfByKey(LinkedPath);
 					FString CyclePath;
 					for (int32 i = CycleStart; i < VisitedAssetPaths.Num(); ++i)
@@ -1028,27 +1079,21 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 
 				UQuest* QuestInstance = NewObject<UQuest>(RootGraph);
 				QuestInstance->bIsLinkedQuestlinePlacement = true;
-
-				/**
-				 * Per-path boundary tag map for the linked graph. Keys are completion path identities as FNames (matching
-				 * the upstream pin name - outcome tag's full FName for static placements; sanitized PathName for dynamic
-				 * placements once Bundle Y lands). "Any Outcome" pin stored under NAME_None as a catch-all.
-				 */
+				
+				// Per-path boundary tag map for the linked graph. Keys are completion path identities as FNames (matching
+				// the upstream pin name - outcome tag's full FName for static placements; sanitized PathName for dynamic
+				// placements once Bundle Y lands). "Any Outcome" pin stored under NAME_None as a catch-all.
 				TMap<FName, TArray<FQuestBoundaryCompletion>> LinkedBoundaryCompletionsByPath;
 				ComputeInnerBoundaryMaps(LinkedNode, TagPrefix, Label, BoundaryCompletionsByPath, VisitedAssetPaths, LinkedBoundaryCompletionsByPath);
 
-				/**
-				 * Compile the linked asset's graph as the UQuest's inner graph. TagPrefix for the inner compile is the
-				 * LinkedQuestline's own compiled path - same pattern as inline Quest. Linked content nodes' compiled tags
-				 * thus nest under this LinkedQuestline's tag (Quest.<ParentID>.<NodeLabel>.<InnerNodeLabel>), keeping a
-				 * stable per-parent namespace when the same linked asset is referenced from multiple places.
-				 */
+				// Compile the linked asset's graph as the UQuest's inner graph. TagPrefix for the inner compile is the
+				// LinkedQuestline's own compiled path - same pattern as inline Quest. Linked content nodes' compiled tags
+				// thus nest under this LinkedQuestline's tag (Quest.<ParentID>.<NodeLabel>.<InnerNodeLabel>), keeping a
+				// stable per-parent namespace when the same linked asset is referenced from multiple places.
 				VisitedAssetPaths.Add(LinkedPath);
-
-				/**
-				 * Push the linked placement's GUID onto the chain so inner content nodes produce placement-unique compound
-				 * GUIDs. Save/restore with local so nested LinkedQuestlines accumulate correctly through multiple levels.
-				 */
+				
+				// Push the linked placement's GUID onto the chain so inner content nodes produce placement-unique compound
+				// GUIDs. Save/restore with local so nested LinkedQuestlines accumulate correctly through multiple levels.
 				const FGuid PreviousGuidChain = CurrentOuterGuidChain;
 				CurrentOuterGuidChain = CombineGuids(CurrentOuterGuidChain, LinkedNode->QuestGuid);
 
@@ -1748,12 +1793,10 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
 		        }
 		    }
 		}
-
-		/**
-		 * Per-spec routing for QuestOutcome pins. Iterate IncomingSignals directly - pin names are disambiguated and not
-		 * parseable as gameplay tags. Each exposed spec produces one FQuestEntryDestination per resolved downstream tag, each
-		 * tagged with the compiled ContextualTag of the source content node as SourceFilter.
-		 */
+		
+		// Per-spec routing for QuestOutcome pins. Iterate IncomingSignals directly - pin names are disambiguated and not
+		// parseable as gameplay tags. Each exposed spec produces one FQuestEntryDestination per resolved downstream tag, each
+		// tagged with the compiled ContextualTag of the source content node as SourceFilter.
 		if (OutEntryTagsByPath)
 		{
 			const UQuestlineGraph* ChildAsset = FQuestlineGraphTraversalPolicy::ResolveContainingAsset(Graph);
@@ -1796,11 +1839,9 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
 				TArray<FName> DestTags;
 				ResolvePinToTags(SpecPin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, DestTags, UnusedBoundaryCompletions);
 
-				/**
-				 * Bucket key: specific outcome for specific specs, FGameplayTag() (invalid) for any-outcome specs. The runtime looks
-				 * up both the specific bucket (for matching IncomingOutcomeTag) and the invalid bucket (for source-only matches)
-				 * when activating entry destinations.
-				 */
+				// Bucket key: specific outcome for specific specs, FGameplayTag() (invalid) for any-outcome specs. The runtime looks
+				// up both the specific bucket (for matching IncomingOutcomeTag) and the invalid bucket (for source-only matches)
+				// when activating entry destinations.
 				FQuestEntryRouteList& RouteList = OutEntryTagsByPath->FindOrAdd(Spec.Outcome.GetTagName());
 				for (const FName& DestTag : DestTags)
 				{
@@ -1808,13 +1849,11 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
 					Dest.DestTag = DestTag;
 					Dest.SourceFilter = SourceFilter;
 					RouteList.Destinations.Add(Dest);
-					
-					/**
-					 * Entry source-qualified routing is a direct signal flow at runtime - the compiled source tag (SourceFilter)
-					 * delivers Spec.Outcome to DestTag without any group dispatch. Record alongside content-outcome-pin direct reaches so
-					 * cross-asset parallel-path collisions are detectable at analysis time. Spec.Outcome may be invalid for any-outcome-
-					 * from-source specs; the collision test absorbs that via ParallelPathKeysCollide.
-					 */
+
+					// Entry source-qualified routing is a direct signal flow at runtime - the compiled source tag (SourceFilter)
+					// delivers Spec.Outcome to DestTag without any group dispatch. Record alongside content-outcome-pin direct reaches so
+					// cross-asset parallel-path collisions are detectable at analysis time. Spec.Outcome may be invalid for any-outcome-
+					// from-source specs; the collision test absorbs that via ParallelPathKeysCollide.
 					DirectReachesByDest.FindOrAdd(DestTag).Add(FSourcePathKey{ SourceFilter, Spec.Outcome.GetTagName() });
 				}
 			}
@@ -2052,10 +2091,8 @@ void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, 
 
 		UEdGraphNode* SourceNode = Source.Pin->GetOwningNode();
 
-		/**
-		 * Case A: source is a content-node outcome pin (or Any Outcome). Concrete terminal - record the compiled source tag
-		 * and outcome, stop walking this branch.
-		 */
+		// Case A: source is a content-node outcome pin (or Any Outcome). Concrete terminal - record the compiled source tag
+		// and outcome, stop walking this branch.
 		if (const UQuestlineNode_ContentBase* SourceContent = Cast<UQuestlineNode_ContentBase>(SourceNode))
 		{
 			const FName SourceTag = ComputeCompiledTagForContentNode(SourceContent, Source.Asset);
@@ -2071,9 +2108,7 @@ void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, 
 			continue;
 		}
 
-		/**
-		 * Case B: source is an Entry pin, transitive continuation.
-		 */
+		// Case B: source is an Entry pin, transitive continuation.
 		if (const UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(SourceNode))
 		{
 			// B1: Entered sentinel - climb to this Entry's graph and gather its parent sources recursively.
@@ -2083,11 +2118,9 @@ void FQuestlineGraphCompiler::CollectTransitiveParentSources(UEdGraph* InGraph, 
 				continue;
 			}
 
-			/**
-			 * B2: Source-qualified spec pin. The spec's SourceNodeGuid already encodes the original content source (that's
-			 * the whole point of specs), so no recursion needed - resolve the source tag directly and record. Match the pin
-			 * to its spec by recomputing the disambiguated pin name.
-			 */
+			// B2: Source-qualified spec pin. The spec's SourceNodeGuid already encodes the original content source (that's
+			// the whole point of specs), so no recursion needed - resolve the source tag directly and record. Match the pin
+			// to its spec by recomputing the disambiguated pin name.
 			if (Source.Pin->PinType.PinCategory == TEXT("QuestOutcome"))
 			{
 				for (const FIncomingSignalPinSpec& Spec : EntryNode->IncomingSignals)
@@ -2113,10 +2146,8 @@ FName FQuestlineGraphCompiler::ComputeCompiledTagForContentNode(const UQuestline
 {
 	if (!SourceNode || !ContainingAsset) return NAME_None;
 
-	/**
-	 * Walk up the Outer chain collecting sanitized labels. A content node either lives directly in the top-level asset graph
-	 * or is nested inside one or more Quest node inner graphs. Each level contributes its label to the compiled tag path.
-	 */
+	// Walk up the Outer chain collecting sanitized labels. A content node either lives directly in the top-level asset graph
+	// or is nested inside one or more Quest node inner graphs. Each level contributes its label to the compiled tag path.
 	TArray<FString> LabelsTopDown;
 	const UEdGraphNode* Cursor = SourceNode;
 	while (Cursor)
@@ -2146,10 +2177,8 @@ FName FQuestlineGraphCompiler::ResolveSourceFilterTag(const FIncomingSignalPinSp
 {
 	if (!Spec.SourceNodeGuid.IsValid()) return NAME_None;
 
-	/**
-	 * Determine which asset contains the source. Same-asset (empty ParentAsset) uses ChildAsset; cross-asset sync-loads the
-	 * referenced asset. Then recursively search all graphs in that asset for a content node with matching QuestGuid.
-	 */
+	// Determine which asset contains the source. Same-asset (empty ParentAsset) uses ChildAsset; cross-asset sync-loads the
+	// referenced asset. Then recursively search all graphs in that asset for a content node with matching QuestGuid.
 	UQuestlineGraph* SourceAsset = nullptr;
 	if (Spec.ParentAsset.IsNull())
 	{
@@ -2197,16 +2226,14 @@ int32 FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin(
 	if (!OutputPin) return INDEX_NONE;
 	UEdGraphNode* Node = OutputPin->GetOwningNode();
 	if (!Node) return INDEX_NONE;
-
-	/**
-	 * A RECURSION STACK, not a visited set. A prerequisite OUTPUT may legitimately feed more than one parent, so the
-	 * same node can be reached twice by different paths - a shared sub-expression, which must compile into a subtree
-	 * at EACH occurrence because the expression is a tree of appended nodes. A permanent visited set would return INDEX_NONE
-	 * the second time and SILENTLY DROP a branch, trading a loud crash for a quiet wrong answer. Marking on entry and
-	 * clearing on exit separates "seen before" from "seen on the way here", and only the second is a cycle. The schema
-	 * refuses most cycles at authoring time but not all of them, and this walk must not depend on that: a graph can also
-	 * arrive from the resolver, from a hand-edited asset, or from an authoring path added later.
-	 */
+	
+	// A RECURSION STACK, not a visited set. A prerequisite OUTPUT may legitimately feed more than one parent, so the
+	// same node can be reached twice by different paths - a shared sub-expression, which must compile into a subtree
+	// at EACH occurrence because the expression is a tree of appended nodes. A permanent visited set would return INDEX_NONE
+	// the second time and SILENTLY DROP a branch, trading a loud crash for a quiet wrong answer. Marking on entry and
+	// clearing on exit separates "seen before" from "seen on the way here", and only the second is a cycle. The schema
+	// refuses most cycles at authoring time but not all of them, and this walk must not depend on that: a graph can also
+	// arrive from the resolver, from a hand-edited asset, or from an authoring path added later.
 	if (OnPath.Contains(Node))
 	{
 		AddError(FString::Printf(TEXT("[%s] Circular prerequisite wiring at '%s' - a prerequisite chain cannot feed back into itself."),
@@ -2631,11 +2658,9 @@ void FQuestlineGraphCompiler::EmitParallelPathWarnings()
 	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("Surface D: %d setter group(s), %d getter group(s), %d direct-reach destination(s)"),
 		GroupSetterSourcesByTag.Num(), GroupGetterDestsByTag.Num(), DirectReachesByDest.Num());
 
-	/**
-	 * Cross-reference pass. For each group tag that has both setters and getters: for every destination the getters reach,
-	 * check if any direct-reach source at that destination collides with any setter source for the group (under AnyOutcome
-	 * absorption). Each collision emits one tokenized warning pointing at source, destination, setter, and getter.
-	 */
+	// Cross-reference pass. For each group tag that has both setters and getters: for every destination the getters reach,
+	// check if any direct-reach source at that destination collides with any setter source for the group (under AnyOutcome
+	// absorption). Each collision emits one tokenized warning pointing at source, destination, setter, and getter.
 	for (const auto& [GroupTag, GetterDests] : GroupGetterDestsByTag)
 	{
 		const TSet<FSourcePathKey>* SetterSources = GroupSetterSourcesByTag.Find(GroupTag);
@@ -2696,12 +2721,10 @@ void FQuestlineGraphCompiler::EmitDuplicateOutcomeRoutingWarning(const UEdGraphN
 
 void FQuestlineGraphCompiler::EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourcePathKey& SetterSource, const FSourcePathKey& DirectSource, const FName& DestTag)
 {
-	/**
-	 * Resolve editor-node refs for the navigation tokens. Source and destination come from the compile-tree-wide editor-node
-	 * map keyed by compiled tag. Setter and getter come from the per-group editor-node maps populated during collection. If
-	 * any ref is missing, the corresponding slot falls back to a plain-text token showing the tag/name so the message is
-	 * still readable and informative.
-	 */
+	// Resolve editor-node refs for the navigation tokens. Source and destination come from the compile-tree-wide editor-node
+	// map keyed by compiled tag. Setter and getter come from the per-group editor-node maps populated during collection. If
+	// any ref is missing, the corresponding slot falls back to a plain-text token showing the tag/name so the message is
+	// still readable and informative.
 	UEdGraphNode* SourceEdNode = AllCompiledEditorNodes.FindRef(SetterSource.SourceTag);
 	UEdGraphNode* DestEdNode = AllCompiledEditorNodes.FindRef(DestTag);
 
@@ -2755,11 +2778,9 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 
 	for (UEdGraphNode* Node : Graph->Nodes)
 	{
-		/**
-		 * ActivationGroupSetter: walk backward from the Activate input to find every (source, outcome) pair that feeds this setter.
-		 * CollectEffectiveSources handles knots, utility Forward, setter-Forward chains, and dereferences getters to their same-graph
-		 * setters - transitive sources are captured so a parallel path through a chained group is still detected as a collision.
-		 */
+		// ActivationGroupSetter: walk backward from the Activate input to find every (source, outcome) pair that feeds this setter.
+		// CollectEffectiveSources handles knots, utility Forward, setter-Forward chains, and dereferences getters to their same-graph
+		// setters - transitive sources are captured so a parallel path through a chained group is still detected as a collision.
 		if (UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node))
 		{
 			const FGameplayTag GroupTag = Setter->GetGroupTag();
@@ -2767,12 +2788,10 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 
 			UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 			if (!ActivatePin) continue;
-			
-			/**
-			 * CollectEffectiveSources expects an output-side pin it can walk through (knots, utility Forward, setter Forward,
-			 * getter Forward). Our ActivatePin is an input, so iterate its LinkedTo (each element is an output pin on an upstream
-			 * node) and call the walker per-link. Sources accumulate into SourcePins across iterations via the shared out-set.
-			 */
+
+			// CollectEffectiveSources expects an output-side pin it can walk through (knots, utility Forward, setter Forward,
+			// getter Forward). Our ActivatePin is an input, so iterate its LinkedTo (each element is an output pin on an upstream
+			// node) and call the walker per-link. Sources accumulate into SourcePins across iterations via the shared out-set.
 			TSet<const UEdGraphPin*> SourcePins;
 			TSet<const UEdGraphNode*> VisitedNodes;
 			for (const UEdGraphPin* Linked : ActivatePin->LinkedTo)
@@ -2792,10 +2811,8 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 				const FName SourceTag = MakeNodeTagName(TagPrefix, Label);
 				if (SourceTag.IsNone()) continue;
 
-				/**
-				 * Outcome extraction: QuestOutcome pins carry a specific tag; QuestActivation "Any Outcome" leaves the outcome
-				 * invalid to encode "any outcome from this source" - the collision test absorbs specific keys from the same source.
-				 */
+				// Outcome extraction: QuestOutcome pins carry a specific tag; QuestActivation "Any Outcome" leaves the outcome
+				// invalid to encode "any outcome from this source" - the collision test absorbs specific keys from the same source.
 				FGameplayTag OutcomeTag;
 				if (SourcePin->PinType.PinCategory == TEXT("QuestOutcome"))
 				{
@@ -2809,12 +2826,10 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 			}
 		}
 
-		/**
-		 * ActivationGroupGetter: walk forward from the Forward output to find every destination it reaches. CollectActivationTerminals
-		 * terminates at content/exit Activate or Deactivate pins, passing transparently through knots, utility Forward, and
-		 * setter-Forward chains. Destinations are recorded under the group tag so the analysis pass can cross-reference with
-		 * setter sources for the same tag.
-		 */
+		// ActivationGroupGetter: walk forward from the Forward output to find every destination it reaches. CollectActivationTerminals
+		// terminates at content/exit Activate or Deactivate pins, passing transparently through knots, utility Forward, and
+		// setter-Forward chains. Destinations are recorded under the group tag so the analysis pass can cross-reference with
+		// setter sources for the same tag.
 		if (UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node))
 		{
 			const FGameplayTag GroupTag = Getter->GetGroupTag();

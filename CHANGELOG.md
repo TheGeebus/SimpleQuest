@@ -5,26 +5,67 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.0] — *In Development* — Driving It From Outside
+## [0.8.0] — *In Development* — Composition and Control
 
-Two things game code couldn't previously do: pause quest advancement while
-something plays out, and drive the data resolver without a console command.
+Three things that were out of reach before: pausing quest advancement while
+something plays out, driving the data resolver without a console command, and
+composing rewards - defining a bundle once, including one bundle inside another,
+and transforming what a reward grants without writing a new class for it.
 
 ### Added
+
+- **The data resolver is drivable from your own code.** Exporting a questline,
+  importing one, planning an in-place import and applying it are all on
+  `ISimpleQuestEditorModule` now. Previously the only entry points were console
+  commands, so an external tool could deserialize a plan but never produce one.
+  Driving the resolver meant issuing a command and reading the log to find out
+  whether it had worked. Everything here returns what happened instead of
+  merely narrating it in the log.
+
+  - **Nothing here touches disk.** Export hands back each file's name paired
+    with its text - `edges.tsv` and the TSV itself - and import takes the same
+    shape. These used to read and write a folder, so a tool that only wanted the
+    data still had to stage it somewhere and clean up afterward. Now it can
+    export a questline, change a value in memory, and apply it with no temporary
+    directory ever existing. If you *do* want folders, the helpers for that moved
+    to `Resolver/QuestDataFormatIO.h`.
+
+  - ***Apply* refuses data the plan was not built from.** A plan carries a
+    fingerprint of the files it was built from, and applying different ones is
+    refused rather than performed. In-memory data has no source to re-read, so the
+    caller passing the same files twice is the only thing making the second run
+    match the first - this makes that checkable instead of assumed.
+
+  - ***Import* creates; it will not overwrite.** `ImportQuestline` builds a new
+    questline asset and refuses if one already exists at that path. Updating an
+    existing questline is what plan and apply are for.
 
 - **Quest advancement can be held and released.** A questline normally advances
   the instant a step completes - the next step activates, prerequisites resolve,
   and anything waiting on that completion proceeds. That leaves nowhere to put an
   outro line, a reward popup, or a beat of silence, because the gap between
   "finished" and "what's next" is zero. `Hold Quest Advancement` makes that gap
-  addressable: place a hold when a step completes, play whatever should play, and
-  release it when you're done.
+  addressable: place a hold when a step completes, play whatever should play, then
+  hand the handle it returned to `Release Quest Advancement` when you're done.
+  Releasing a handle twice is harmless. `Is Quest Advancement Held` and
+  `Get Active Hold Reasons` answer what is currently pausing what.
+
+  - **Place the hold no later than the completion event itself**, and never in
+  anything that event schedules. Earlier is fine; later is too late. The hold
+  has to exist before the cascade activates the next node, and both happen in
+  the same synchronous call: a Delay, a timer or an async callback all return
+  control first, and by then the next node is already live. The usual shape is
+  hold on the completion event, start the audio, release in the audio's finished
+  callback - the hold is what makes that second yield safe. In a networked game
+  this is **server-side**: a client sees a completion only after the server has
+  already advanced past it, so client-driven pacing has to request the hold
+  ahead of the transition rather than reacting to it.
 
   - A hold names **the node whose downstream flow pauses**, not a node to freeze.
-  Holding a step doesn't stop the player finishing that step - it stops what the
-  step feeds. So game code reacting to a completion holds the thing that just
-  finished, without needing to know what comes next or being broken when someone
-  rewires the graph. Holding a container holds everything inside it, and holding
+  Holding a step doesn't stop the player finishing that step - it stops what comes
+  next. So game code reacting to a completion holds the thing that just finished,
+  without needing to know what comes next or being broken when someone rewires
+  the graph. Holding a container holds everything inside it, and holding
   a questline's own tag holds the questline.
 
   - Holds compose: an audio hold and a cutscene hold don't cancel each other, and
@@ -42,30 +83,11 @@ something plays out, and drive the data resolver without a console command.
   things to a player - one says go do something, the other says it's done, wait.
 
   - Holds pause advancement; they don't refuse the player. Preventing a quest from
-  being started at all is still `Set Quest Blocked`.
+  being started or progressed at all is still `Set Quest Blocked`.
 
-- **The data resolver is drivable from your own code.** Exporting a questline,
-  importing one, planning an in-place import and applying it are all on
-  `ISimpleQuestEditorModule` now. Previously the only entry points were console
-  commands, so an external tool could deserialize a plan but never produce one -
-  driving the resolver meant issuing a command and reading the log to find out
-  whether it had worked. Everything here returns what happened instead of
-  narrating it.
-
-  - **Files are a name-to-content map, and nothing touches disk.** A caller that
-  wants folders uses the helpers in `Resolver/QuestDataFormatIO.h` on either
-  side. That is what lets a tool hold a bundle in memory, change it, and apply
-  it without staging anything through a temporary directory.
-
-  - **Apply refuses data the plan was not built from.** A plan carries a
-  fingerprint of the files it was built from, and applying different ones is
-  refused rather than performed. In-memory data has no source to re-read, so the
-  caller passing the same files twice is the only thing making the second run
-  match the first - this makes that checkable instead of assumed.
-
-  - **Import creates; it will not overwrite.** `ImportQuestline` builds a new
-  questline asset and refuses if one already exists at that path. Updating an
-  existing questline is what plan and apply are for.
+  - Thanks to **Buckley603**, who provided the prototype this was built from, and
+  who also demonstrated the console-command shortfall that the resolver work above
+  addresses.
 
 - **Reward sets can be defined once and referenced from many places.** A Reward
   Set data asset holds a reward composition - the same inline-configured rewards
@@ -73,6 +95,13 @@ something plays out, and drive the data resolver without a console command.
   per-outcome rewards can reference one. Previously the only way to grant the
   same bundle in ten quests was to author it ten times, and changing it meant
   editing ten graphs.
+
+  - **A set can include other sets.** Their contents flatten depth-first, ahead
+  of the including set's own rewards, so a chapter bundle pulls in a shared base
+  bundle instead of re-authoring it. A set that includes itself, directly or
+  through a chain, is refused at compile with a warning naming the chain -
+  while including the same set from two different branches is legal and grants
+  it twice, because that is a choice rather than a mistake.
 
   - **Compilation flattens the reference away.** A referenced set's rewards are
   copied into the compiled node alongside any inline ones, so the runtime sees a
@@ -87,6 +116,34 @@ something plays out, and drive the data resolver without a console command.
   rewards inside a referenced set are edited in the asset, in one place; rewards
   left inline on a node still export as they always have, so a node granting a
   shared bundle plus a unique item still carries the unique one in its data.
+
+  - Thanks to **AproposRobin**, whose compositional-rewards proposal opened the
+  design conversation this came out of - along with the reward modifiers and the
+  Quest asset category below.
+
+- **Rewards can be transformed without writing a new reward class.** A reward
+  decides *what* to grant; a **modifier** changes it on the way out - scale by
+  level, cap at a maximum, redirect the recipient, or drop the grant unless a
+  condition holds. Modifiers are an instanced list on the reward itself, so a
+  designer adds one to a single placement without touching code.
+
+  - **Scaled loot is authorable now, and wasn't before.** A loot table computes
+  its amounts internally, per rolled row, so there was no field to reach -
+  scaling loot meant writing a fused class for it. A modifier runs after the
+  grants are queued and catches every one of them, so one modifier works on XP,
+  currency, loot, and anything you write yourself.
+
+  - **They apply in the order you list them**, stated rather than incidental,
+  because scale-then-clamp and clamp-then-scale are different numbers.
+
+  - **A modifier declares the payload it operates on, and refuses visibly.**
+  Clamping an amount is meaningful; clamping a "start the cutscene" payload is
+  not, and a modifier that quietly did nothing would look exactly like one that
+  worked. A mismatch names both types in the log and leaves the grant untouched.
+
+  - **Blueprint-authorable, like rewards.** Subclass Quest Reward Amount
+  Modifier, override Modify Amount, return a number - that is an entire
+  modifier. Clamp Amount ships as a reference implementation.
 
 - **SimpleQuest's assets have a browser category of their own.** Reward Set,
   Quest Loot Table, Quest Display Data, Quest Objective Config, Quest Import
@@ -103,14 +160,17 @@ something plays out, and drive the data resolver without a console command.
 
 ### Changed
 
-- **`ISimpleQuestDataFormat` speaks file name to file content.** A provider now
-  implements `WriteBundle` and `ReadBundle` over a `TMap<FString, FString>`
-  instead of reading and writing a folder. **This is a breaking change if you
-  have written a custom format provider.** Folder round-trips moved to
-  `Resolver/QuestDataFormatIO.h`, so a provider that genuinely wants a directory
-  calls one helper on either side, and every other caller stops needing a
-  filesystem at all. The two shipped providers produce byte-identical output to
-  before.
+- **A format provider is handed files, not a folder.** `WriteBundle` used to
+  receive a directory path and write into it; it now fills a
+  `TMap<FString, FString>` of file name to file contents, and `ReadBundle` takes
+  that map instead of scanning a directory. **This is a breaking change if you
+  wrote a custom provider**, though a mechanical one - wherever the body built a
+  path and wrote a file, it now adds an entry to the map. Serializing a bundle
+  and putting bytes on disk became separate decisions, and a provider only makes
+  the first; a caller that wants the second uses `WriteFilesToFolder` or
+  `ReadFilesFromFolder` from `Resolver/QuestDataFormatIO.h`. Every in-tree caller
+  does, so folder behavior is unchanged - it just is not the only option any
+  more. The two shipped providers produce byte-identical output to before.
 
 - **`FQuestlineGraphCompiler::HarvestQuestlineRewards` is no longer static.** It
   resolves reward-set references and reports a failed load as a compile warning,

@@ -44,6 +44,81 @@ something plays out, and drive the data resolver without a console command.
   - Holds pause advancement; they don't refuse the player. Preventing a quest from
   being started at all is still `Set Quest Blocked`.
 
+- **The data resolver is drivable from your own code.** Exporting a questline,
+  importing one, planning an in-place import and applying it are all on
+  `ISimpleQuestEditorModule` now. Previously the only entry points were console
+  commands, so an external tool could deserialize a plan but never produce one -
+  driving the resolver meant issuing a command and reading the log to find out
+  whether it had worked. Everything here returns what happened instead of
+  narrating it.
+
+  - **Files are a name-to-content map, and nothing touches disk.** A caller that
+  wants folders uses the helpers in `Resolver/QuestDataFormatIO.h` on either
+  side. That is what lets a tool hold a bundle in memory, change it, and apply
+  it without staging anything through a temporary directory.
+
+  - **Apply refuses data the plan was not built from.** A plan carries a
+  fingerprint of the files it was built from, and applying different ones is
+  refused rather than performed. In-memory data has no source to re-read, so the
+  caller passing the same files twice is the only thing making the second run
+  match the first - this makes that checkable instead of assumed.
+
+  - **Import creates; it will not overwrite.** `ImportQuestline` builds a new
+  questline asset and refuses if one already exists at that path. Updating an
+  existing questline is what plan and apply are for.
+
+- **Reward sets can be defined once and referenced from many places.** A Reward
+  Set data asset holds a reward composition - the same inline-configured rewards
+  a Grant Rewards node holds - and both a Grant Rewards node and a questline's
+  per-outcome rewards can reference one. Previously the only way to grant the
+  same bundle in ten quests was to author it ten times, and changing it meant
+  editing ten graphs.
+
+  - **Compilation flattens the reference away.** A referenced set's rewards are
+  copied into the compiled node alongside any inline ones, so the runtime sees a
+  single flat list and never loads the asset. Referenced sets come first, in the
+  order listed, then the node's own rewards - grant sequence is meaning, so the
+  order is fixed rather than incidental.
+
+  - **Editing a shared set requires recompiling the questlines that use it**,
+  which is already true of every other authored change.
+
+  - **A questline's data export names the set rather than describing it.** The
+  rewards inside a referenced set are edited in the asset, in one place; rewards
+  left inline on a node still export as they always have, so a node granting a
+  shared bundle plus a unique item still carries the unique one in its data.
+
+### Changed
+
+- **`ISimpleQuestDataFormat` speaks file name to file content.** A provider now
+  implements `WriteBundle` and `ReadBundle` over a `TMap<FString, FString>`
+  instead of reading and writing a folder. **This is a breaking change if you
+  have written a custom format provider.** Folder round-trips moved to
+  `Resolver/QuestDataFormatIO.h`, so a provider that genuinely wants a directory
+  calls one helper on either side, and every other caller stops needing a
+  filesystem at all. The two shipped providers produce byte-identical output to
+  before.
+
+- **`FQuestlineGraphCompiler::HarvestQuestlineRewards` is no longer static.** It
+  resolves reward-set references and reports a failed load as a compile warning,
+  both of which need an instance. **This only affects you if you called it
+  statically**, which is unlikely - it is an internal step of compilation rather
+  than an entry point. Subclassing the compiler through
+  `RegisterCompilerFactory` is unaffected.
+
+- **Instanced struct properties export as their own rows rather than one opaque
+  cell.** A Generic Reward's payload used to serialize as a single `(Amount=42)`
+  literal inside the reward's row - readable, but not editable, because a
+  spreadsheet cannot reach a value buried in a blob. It now gets a row of its
+  own with a column per field, so reward amounts are cells you can retune across
+  a whole corpus at once. **This changes the export format**, so files exported
+  before this release describe payloads the old way.
+
+  - **They still import, and re-exporting upgrades them.** The old form is read
+  exactly as it always was, and the new form is written on the way out. So
+  importing an old bundle and exporting it again is the entire migration - there
+  is nothing to run and no flag to set.
+
 ---
 
 ## [0.7.2] — 2026-08-21 — UE 5.8 Support and Honest Surfaces

@@ -88,6 +88,19 @@ something plays out, and drive the data resolver without a console command.
   left inline on a node still export as they always have, so a node granting a
   shared bundle plus a unique item still carries the unique one in its data.
 
+- **SimpleQuest's assets have a browser category of their own.** Reward Set,
+  Quest Loot Table, Quest Display Data, Quest Objective Config, Quest Import
+  Mapping and Questline Graph now file under **Quest** instead of being spread
+  across Gameplay and Miscellaneous, so create menus and filters find them in
+  one place. The Questline Graph moved out of Gameplay to join them, which is
+  worth knowing if you had muscle memory for where it lived.
+
+  - **Asset colors follow what a type derives from.** Each takes the engine's
+  color for its base class, so a data asset reads as a data asset and a data
+  table reads as a data table at a glance. The Questline Graph keeps a color of
+  its own, being the only one of these that is not a derivative of an engine
+  type.
+
 ### Changed
 
 - **`ISimpleQuestDataFormat` speaks file name to file content.** A provider now
@@ -118,6 +131,27 @@ something plays out, and drive the data resolver without a console command.
   exactly as it always was, and the new form is written on the way out. So
   importing an old bundle and exporting it again is the entire migration - there
   is nothing to run and no flag to set.
+
+- **A Quest Loot Table is a Data Table.** It was a data asset holding an array
+  of rows, so loot could only be edited one row at a time in the details panel -
+  no row editor, no CSV or JSON round-trip, and nothing the data resolver could
+  see. Creating one now gives you a real table, with all three.
+
+  - **Nothing breaks and nothing has to move yet.** The old data asset still
+  loads and existing questlines keep working untouched. A Loot Table Reward now
+  has two fields: **Loot Table**, which takes the new asset, and **Loot Table
+  (legacy)**, holding whatever it pointed at before. The new one wins whenever
+  it is set, so assigning it is the entire migration - there is no need to clear
+  the old field first.
+
+  - **Compiling tells you what is left.** A questline whose rewards still point
+  at the old data asset warns on every compile, naming the node and the asset. A
+  reward carrying both warns differently, because the legacy reference is then
+  ignored rather than used.
+
+  - **The data asset form is removed in 0.9** - the `UQuestLootTable` class, the
+  legacy field, and the fallback that reads it. Re-author your rows as a Loot
+  Table before then; the compile warnings are the checklist.
 
 ---
 

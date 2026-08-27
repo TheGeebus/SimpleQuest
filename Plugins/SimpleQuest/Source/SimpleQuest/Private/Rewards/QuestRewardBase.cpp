@@ -4,6 +4,7 @@
 #include "Rewards/QuestRewardBase.h"
 
 #include "SimpleQuestLog.h"
+#include "Rewards/QuestRewardModifier.h"
 #include "UObject/ObjectSaveContext.h"
 
 void UQuestRewardBase::DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming)
@@ -20,7 +21,7 @@ void UQuestRewardBase::TryGrantReward_Implementation(const FQuestRewardActivatio
 
 TArray<FQuestRewardPreview> UQuestRewardBase::DescribeReward_Implementation(AActor* Viewer) const
 {
-	return {};						// pure adapter — nothing to advertise; concrete rewards override this
+	return {};						// pure adapter - nothing to advertise; concrete rewards override this
 }
 
 TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer) const
@@ -73,7 +74,45 @@ void UQuestRewardBase::DeliverReward(FGameplayTag InRewardType, const FInstanced
 
 	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestRewardBase::DeliverReward queued grant '%s' (explicit recipient: %s)"),
 		*InRewardType.ToString(),
-		Recipient ? TEXT("yes") : TEXT("no — defaults to instigator"));
+		Recipient ? TEXT("yes") : TEXT("no - defaults to instigator"));
 
 	PendingGrants.Add(MoveTemp(Grant));
 }
+
+bool UQuestRewardBase::ApplyModifiers(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const
+{
+	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
+	{
+		if (!Modifier) continue;
+
+		// THE GATE IS HERE, ONCE, rather than inside each modifier: a modifier that silently did nothing to a payload
+		// it cannot handle is indistinguishable from one that worked. Name both structs so the fix is obvious from the
+		// log alone - the answer is either a different modifier or a different reward.
+		//
+		// *** IT IS NOT WHAT KEEPS THE GRANT INTACT. *** UQuestRewardAmountModifier checks the payload again before
+		// touching it, so a shipped amount modifier is guarded twice and deleting this would corrupt nothing. What it
+		// protects is a THIRD-PARTY modifier that declares a payload type and has no second guard of its own - plus the
+		// diagnostic itself. Verified by removing it: the grant survived untouched and only the warning was lost.
+		if (const UScriptStruct* Required = Modifier->GetRequiredPayloadType())
+		{
+			const UScriptStruct* Actual = Grant.CustomData.GetScriptStruct();
+			if (Actual != Required)
+			{
+				UE_LOG(LogSimpleQuestActivation, Warning,
+					TEXT("%s on %s expects payload '%s' but the grant carries '%s' - modifier skipped, grant unchanged."),
+					*Modifier->GetClass()->GetName(), *GetClass()->GetName(), *Required->GetName(),
+					Actual ? *Actual->GetName() : TEXT("none"));
+				continue;
+			}
+		}
+
+		if (!Modifier->DispatchModifyGrant(Grant, Incoming))
+		{
+			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("%s on %s dropped the grant."),
+				*Modifier->GetClass()->GetName(), *GetClass()->GetName());
+			return false;
+		}
+	}
+	return true;
+}
+

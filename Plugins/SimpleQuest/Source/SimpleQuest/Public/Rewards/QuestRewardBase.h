@@ -11,12 +11,16 @@
 #include "Quests/Types/QuestRewardPreview.h"
 #include "QuestRewardBase.generated.h"
 
+class UQuestRewardModifier;
+
 /**
- * Base class for a reward — the adapter between "quest flow reached this point" and "apply this effect to a recipient."
+ * Base class for a reward - the adapter between "quest flow reached this point" and "apply this effect to a recipient."
  * The framework doesn't define what a reward IS: subclass (C++ or Blueprint) and override TryGrantReward to compute
- * loot / XP / currency / anything, pack it into a payload struct, and call DeliverReward. Abstract — the base carries
- * no authoring surface of its own; every reward is a concrete subclass. For the no-code path (configure a type + a raw
- * payload struct, no subclass), use UGenericReward.
+ * loot / XP / currency / anything, pack it into a payload struct, and call DeliverReward. Abstract - every reward is a
+ * concrete subclass. For the no-code path (configure a type + a raw payload struct, no subclass), use UGenericReward.
+ *
+ * The base carries one authoring surface of its own: Modifiers, the transforms applied to whatever this reward
+ * delivers. A reward decides WHAT to grant; a modifier changes it on the way out. See UQuestRewardModifier.
  *
  * EditInlineNew + Blueprintable: rewards are authored inline as an Instanced array on a reward node (each entry a
  * configured instance), and a designer can subclass in Blueprint to add typed fields + logic with no C++.
@@ -26,9 +30,12 @@ class SIMPLEQUEST_API UQuestRewardBase : public UObject
 {
 	GENERATED_BODY()
 
+	/** Modifier tests reach in for Modifiers. */
+	friend class FQuestRewardModifierTestAccess;
+
 public:
 	/**
-	 * Node-facing entry point. Thin C++ forwarder to the protected BlueprintNativeEvent TryGrantReward — routes through
+	 * Node-facing entry point. Thin C++ forwarder to the protected BlueprintNativeEvent TryGrantReward - routes through
 	 * the engine's UFunction thunk so Blueprint overrides fire. The reward node calls this on activation, then drains
 	 * the queued deliveries via TakePendingGrants.
 	 */
@@ -39,6 +46,16 @@ public:
 
 	/** Drains the grants queued by DeliverReward during the last TryGrantReward. The reward node finalizes + publishes each. */
 	TArray<FQuestRewardContext> TakePendingGrants() { return MoveTemp(PendingGrants); }
+
+	/**
+	 * Runs this reward's modifiers over one drained grant, in array order. Returns FALSE when a modifier dropped it, in
+	 * which case the caller publishes nothing.
+	 *
+	 * Lives here rather than in the reward node because the payload gate and the ordering belong next to the data that
+	 * declares them - and because both grant paths (the node, and the manager for questline-level rewards) go through
+	 * one implementation rather than two that can drift.
+	 */
+	bool ApplyModifiers(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const;
 
 	/**
 	 * STABLE PER-INSTANCE IDENTITY, the same job UQuestlineNodeBase::QuestGuid does for a graph node. A reward is
@@ -58,8 +75,19 @@ public:
 
 protected:
 	/**
+	 * Transforms applied to every grant this reward delivers, in ARRAY ORDER - stated rather than emergent, because
+	 * scale-then-clamp and clamp-then-scale are different numbers. Instanced, so each entry is its own configured
+	 * instance and the compiler's deep copy carries them along with the reward.
+	 *
+	 * Empty on almost every reward. A modifier is for the case a source cannot express: scaling loot, capping a
+	 * placement, redirecting a recipient, or dropping a grant unless a condition holds.
+	 */
+	UPROPERTY(EditAnywhere, Instanced, Category = "Reward")
+	TArray<TObjectPtr<UQuestRewardModifier>> Modifiers;
+
+	/**
 	 * Compute + deliver the grant(s). Fires when the reward node activates. Read Incoming ("how the flow reached me"),
-	 * compute (roll loot, scale by context), and call DeliverReward — once, or multiple times for a multi-part grant.
+	 * compute (roll loot, scale by context), and call DeliverReward - once, or multiple times for a multi-part grant.
 	 * Declining (delivering nothing) is legal and never affects graph flow. The base is a no-op; every concrete reward
 	 * overrides this (or uses UGenericReward's configured auto-deliver).
 	 *
@@ -69,10 +97,10 @@ protected:
 	void TryGrantReward(const FQuestRewardActivationContext& Incoming);
 
 	/**
-	 * Preview hook — the reward's second verb, beside TryGrantReward. Returns display lines describing what this reward
+	 * Preview hook - the reward's second verb, beside TryGrantReward. Returns display lines describing what this reward
 	 * WOULD grant, WITHOUT granting: pure, no event, no chain. For "do this task, get this reward" UI. Return an EMPTY
 	 * array to opt out of advertisement (a delivered-but-hidden reward). Association is compile-time; DESCRIPTION is
-	 * query-time — read the Viewer to compute a live value. Base returns nothing; concrete rewards override.
+	 * query-time - read the Viewer to compute a live value. Base returns nothing; concrete rewards override.
 	 *
 	 * BlueprintProtected: call via the public DispatchDescribeReward from C++; subclass BPs override normally.
 	 */
@@ -80,8 +108,8 @@ protected:
 	TArray<FQuestRewardPreview> DescribeReward(AActor* Viewer) const;
 	
 	/**
-	 * Emit one grant — "send the struct out." Queues it for the reward node to finalize (fill lineage, default Recipient)
-	 * and publish on the InRewardType channel. Call from within TryGrantReward. void — a grant's result never gates graph
+	 * Emit one grant - "send the struct out." Queues it for the reward node to finalize (fill lineage, default Recipient)
+	 * and publish on the InRewardType channel. Call from within TryGrantReward. void - a grant's result never gates graph
 	 * flow, and pub/sub means the publisher can't know its recipients.
 	 *
 	 * @param InRewardType  the kind granted (the publish channel; e.g. SimpleQuest.Reward.Currency.Gold)

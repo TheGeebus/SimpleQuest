@@ -66,10 +66,15 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 		Reward->DispatchTryGrantReward(Incoming);
 		for (FQuestRewardContext& Grant : Reward->TakePendingGrants())
 		{
+			// Modifiers run BEFORE the validity check and before lineage is stamped. Before the check so one test
+			// covers both what the reward produced and what a modifier turned it into; before the stamp so provenance
+			// is written last and a modifier cannot corrupt it.
+			if (!Reward->ApplyModifiers(Grant, Incoming)) continue;
+
 			if (!Grant.RewardType.IsValid())
 			{
 				UE_LOG(LogSimpleQuestActivation, Warning,
-					TEXT("GrantRewardSet: a reward delivered a grant with no RewardType — dropped (nothing to route on)."));
+					TEXT("GrantRewardSet: a reward or one of its modifiers produced a grant with no RewardType — dropped (nothing to route on)."));
 				continue;
 			}
 

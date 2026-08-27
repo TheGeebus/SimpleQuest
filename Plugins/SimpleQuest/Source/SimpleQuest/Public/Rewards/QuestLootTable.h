@@ -1,46 +1,22 @@
-﻿// Copyright (c) 2026 Greg Bussell
-// SPDX-License-Identifier: MIT
-
-#pragma once
-
-#include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
+﻿#include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Rewards/QuestLootDataTable.h"
 #include "QuestLootTable.generated.h"
 
 /**
- * One weighted row in a loot table. When picked, grants a random amount in [MinAmount, MaxAmount] of RewardType. If
- * RequiredOutcome is set, the row is only eligible when the completion outcome that reached the reward matches it
- * (hierarchically) — this is how a table is parameterized off the completion path.
- */
-USTRUCT(BlueprintType)
-struct FQuestLootEntry
-{
-	GENERATED_BODY()
-
-	/** What this row grants (Experience, Currency.Gold, …). Delivered on this channel like any other reward. */
-	UPROPERTY(EditAnywhere, meta = (Categories = "SimpleQuest.Reward"), Category = "Loot")
-	FGameplayTag RewardType;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"), Category = "Loot")
-	int32 MinAmount = 1;
-
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"), Category = "Loot")
-	int32 MaxAmount = 1;
-
-	/** Relative selection weight. Higher = more likely. Rows with weight <= 0 are skipped. */
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0.0"), Category = "Loot")
-	float Weight = 1.0f;
-
-	/** Optional gate: row is eligible only when the completion outcome matches this tag (empty = always eligible). */
-	UPROPERTY(EditAnywhere, Category = "Loot")
-	FGameplayTag RequiredOutcome;
-};
-
-/**
- * Reference data asset: a weighted table of loot rows. This is the "designer uses a DataAsset" path from the rewards
- * design — the reward UObject (ULootTableReward) reads this asset rather than hardcoding drops, so the loot content is
- * pure data an artist can edit without touching a reward class.
+ * DEPRECATED - superseded by UQuestLootDataTable, which is an actual DataTable. This held its rows in an array on a
+ * data asset, so loot could only be edited one row at a time in the details panel: no row editor, no CSV round-trip,
+ * and invisible to the data resolver.
+ *
+ * It survives one release so existing assets keep loading and existing questlines keep working untouched.
+ * ULootTableReward reads one only when no Loot Table is set, and warns when it does. Removed in 0.9, along with that
+ * fallback.
+ *
+ * Deliberately NOT UCLASS(Deprecated), which is the obvious move and the wrong one. That specifier forces any property
+ * referencing the class to be deprecated too, and a deprecated property is READ but never WRITTEN - ShouldSerializeValue
+ * skips CPF_Deprecated whenever the archive is saving. A questline holding a legacy reference would load it correctly
+ * and then lose it the next time it was saved, which happens on every compile. The specifier means "this data is going
+ * away"; this has to keep working for one release, and those are not the same thing.
  */
 UCLASS(BlueprintType)
 class SIMPLEQUEST_API UQuestLootTable : public UDataAsset

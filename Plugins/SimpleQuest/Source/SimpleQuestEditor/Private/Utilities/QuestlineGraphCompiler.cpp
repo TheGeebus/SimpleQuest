@@ -53,6 +53,7 @@
 #include "Quests/ClearFactNode.h"
 #include "Quests/RemoveFactNode.h"
 #include "Quests/Types/QuestOutcomeTags.h"
+#include "Rewards/LootTableReward.h"
 #include "Rewards/QuestRewardBase.h"
 #include "Rewards/RewardSetDataAsset.h"
 #include "Serialization/ArchiveObjectCrc32.h"
@@ -133,6 +134,25 @@ void FQuestlineGraphCompiler::FlattenRewardSets(const TArray<TSoftObjectPtr<URew
 	}
 }
 
+void FQuestlineGraphCompiler::WarnOnLegacyLootTables(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
+	const FString& ContextLabel, const UEdGraphNode* DiagnosticNode)
+{
+	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
+	{
+		const ULootTableReward* Loot = Cast<ULootTableReward>(Reward);
+		if (!Loot) continue;
+
+		// The reward decides whether there is a complaint and what it says; this decides only where it shows up. A
+		// warning rather than an error on purpose: it fires on every compile until the reference is cleared, which is
+		// pressure an adopter can act on - where dropping the reference quietly would give them nothing to act on.
+		const FString Complaint = Loot->DescribeLegacyLootTableUse();
+		if (!Complaint.IsEmpty())
+		{
+			AddWarning(FString::Printf(TEXT("A Loot Table Reward on %s %s."), *ContextLabel, *Complaint), DiagnosticNode);
+		}
+	}
+}
+
 /**
  * Duplicate a questline's authored QuestlineRewards onto OwnerGraph (the enclosing/root graph that owns all compiled
  * instances) and record them under IdentityName in OwnerGraph->CompiledQuestlineRewards, so the runtime can deliver and
@@ -180,6 +200,12 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 				? DuplicateObject<UQuestRewardBase>(Authored_Reward, OwnerGraph, *RewardName)
 				: nullptr);
 		}
+
+		// Before the move and after the inline rewards - this is the only point where the array is both complete
+		// and still readable.
+		WarnOnLegacyLootTables(DuplicatedSet.Rewards,
+			FString::Printf(TEXT("outcome '%s'"), *OutcomePair.Key.ToString()), nullptr);
+
 		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
 	}
 
@@ -1431,7 +1457,11 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(
 					? DuplicateObject<UQuestRewardBase>(Authored, Inst, *FString::Printf(TEXT("Reward_%d"), RewardIndex))
 					: nullptr);
         	}
-        	
+
+        	// After the inline rewards rather than beside FlattenRewardSets: an authored reward node is exactly where a
+        	// legacy reference sits, and those land in the array below the flattened sets.
+        	WarnOnLegacyLootTables(Inst->Rewards, RewardEdNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), RewardEdNode);
+
         	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;
         }

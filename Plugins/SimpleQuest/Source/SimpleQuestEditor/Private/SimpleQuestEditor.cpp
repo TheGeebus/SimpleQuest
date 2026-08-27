@@ -76,7 +76,7 @@
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestImportOperations.h"
-#include "Rewards/QuestLootTable.h"
+#include "Rewards/QuestLootDataTable.h"
 #include "Rewards/RewardSetDataAsset.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
@@ -209,17 +209,30 @@ void FSimpleQuestEditor::StartupModule()
 		QuestAssetTypeActions.Add(Actions);
 	};
 
-	// Colours are deliberately near the Questline Graph's green so the group reads as one family in the browser.
+	// Colors follow what a type DERIVES from rather than a house palette, so each asset reads as what it is at a glance
+	// and the category carries the grouping. These are the engine's own values for UDataAsset and UDataTable - matching
+	// them agrees with what the browser would have shown anyway, minus our name and our category. Questline Graph keeps
+	// a color of its own because it is the one type here that is genuinely ours rather than a derivative.
+	constexpr FColor QuestDataAssetColor(201, 29, 85);
+	constexpr FColor QuestDataTableColor(62, 140, 35);
+
 	RegisterQuestAsset(URewardSetDataAsset::StaticClass(),
-		NSLOCTEXT("SimpleQuestEditor", "RewardSetAssetName", "Reward Set"), FColor(200, 165, 60), QuestCategory);
-	RegisterQuestAsset(UQuestLootTable::StaticClass(),
-		NSLOCTEXT("SimpleQuestEditor", "LootTableAssetName", "Quest Loot Table"), FColor(200, 130, 60), QuestCategory);
+		NSLOCTEXT("SimpleQuestEditor", "RewardSetAssetName", "Reward Set"), QuestDataAssetColor, QuestCategory);
+	// Its own actions class rather than the shared one, so double-click reaches the row editor; see the comment there.
+	// The deprecated data asset is deliberately absent: it still loads, but nothing should be able to create another.
+	{
+		const TSharedRef<IAssetTypeActions> LootActions = MakeShared<FQuestLootDataTableAssetTypeActions>(
+			UQuestLootDataTable::StaticClass(),
+			NSLOCTEXT("SimpleQuestEditor", "LootTableAssetName", "Quest Loot Table"), QuestDataTableColor, QuestCategory);
+		AssetTools.RegisterAssetTypeActions(LootActions);
+		QuestAssetTypeActions.Add(LootActions);
+	}
 	RegisterQuestAsset(UQuestDisplayData::StaticClass(),
-		NSLOCTEXT("SimpleQuestEditor", "DisplayDataAssetName", "Quest Display Data"), FColor(70, 150, 190), QuestCategory);
+		NSLOCTEXT("SimpleQuestEditor", "DisplayDataAssetName", "Quest Display Data"), QuestDataAssetColor, QuestCategory);
 	RegisterQuestAsset(UQuestObjectiveConfig::StaticClass(),
-		NSLOCTEXT("SimpleQuestEditor", "ObjectiveConfigAssetName", "Quest Objective Config"), FColor(110, 140, 190), QuestCategory);
+		NSLOCTEXT("SimpleQuestEditor", "ObjectiveConfigAssetName", "Quest Objective Config"), QuestDataAssetColor, QuestCategory);
 	RegisterQuestAsset(UQuestImportMapping::StaticClass(),
-		NSLOCTEXT("SimpleQuestEditor", "ImportMappingAssetName", "Quest Import Mapping"), FColor(140, 140, 150), QuestCategory);
+		NSLOCTEXT("SimpleQuestEditor", "ImportMappingAssetName", "Quest Import Mapping"), QuestDataAssetColor, QuestCategory);
 
 	QuestlineGraphNodeFactory = MakeShared<FQuestlineGraphNodeFactory>();
 	FEdGraphUtilities::RegisterVisualNodeFactory(QuestlineGraphNodeFactory);

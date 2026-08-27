@@ -37,11 +37,11 @@ public:
 };
 
 UCLASS()
-class UQuestLootTableFactory : public UQuestDataAssetFactoryBase
+class UQuestLootDataTableFactory : public UQuestDataAssetFactoryBase
 {
 	GENERATED_BODY()
 public:
-	UQuestLootTableFactory();
+	UQuestLootDataTableFactory();
 };
 
 UCLASS()

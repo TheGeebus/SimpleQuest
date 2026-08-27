@@ -14,9 +14,6 @@ class UQuestRewardBase;
  * that grants them, so ten quests granting the same bundle means authoring it ten times - and changing that bundle
  * means editing ten graphs.
  *
- * Holds the same Instanced array a Grant Rewards node holds, so nothing about a reward changes by living here: the
- * same classes, the same inline configuration, the same C++ or Blueprint subclassing.
- *
  * THE COMPILER FLATTENS IT. A node holds a soft REFERENCE, and compilation deep-copies this asset's rewards into the
  * compiled node exactly as it already does for inline ones - so the runtime never sees this asset, the reward manifest
  * is unchanged, and there is no indirection for the advertisement query to resolve through. The cost is that editing a

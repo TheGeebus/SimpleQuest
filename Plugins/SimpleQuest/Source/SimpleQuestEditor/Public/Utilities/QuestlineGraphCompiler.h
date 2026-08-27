@@ -56,7 +56,17 @@ public:
 		const FString& ContextLabel,
 		const UEdGraphNode* DiagnosticNode,
 		TArray<TObjectPtr<UQuestRewardBase>>& Out);
-	
+
+	/**
+	 * Reports rewards still pointing at the deprecated Quest Loot Table data asset. Call once the reward array is
+	 * COMPLETE - after the inline rewards, not merely after FlattenRewardSets - because a legacy reference is far more
+	 * likely on an authored reward than inside a shared set. ContextLabel names the owner in the diagnostic;
+	 * DiagnosticNode is optional and makes the entry clickable.
+	 */
+	void WarnOnLegacyLootTables(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
+		const FString& ContextLabel,
+		const UEdGraphNode* DiagnosticNode);
+
 	void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName);
 	FQuestlineGraphCompiler();
 	virtual ~FQuestlineGraphCompiler();

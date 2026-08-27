@@ -7,7 +7,7 @@ public class SimpleQuestEditor: ModuleRules
 {
 	public SimpleQuestEditor(ReadOnlyTargetRules Target) : base(Target)
 	{
-		PublicDependencyModuleNames.AddRange(new string[] { "GameplayTags", "SimpleQuest" });
+		PublicDependencyModuleNames.AddRange(new string[] { "GameplayTags", "SimpleQuest", "DataTableEditor" });
 		
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{

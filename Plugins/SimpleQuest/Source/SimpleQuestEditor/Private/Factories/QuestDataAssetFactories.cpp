@@ -4,7 +4,7 @@
 #include "Factories/QuestDataAssetFactories.h"
 
 #include "Resolver/QuestImportMapping.h"
-#include "Rewards/QuestLootTable.h"
+#include "Rewards/QuestLootDataTable.h"
 #include "Rewards/RewardSetDataAsset.h"
 
 UQuestDataAssetFactoryBase::UQuestDataAssetFactoryBase()
@@ -21,7 +21,7 @@ UObject* UQuestDataAssetFactoryBase::FactoryCreateNew(UClass* InClass, UObject* 
 	return NewObject<UObject>(InParent, InClass, InName, Flags);
 }
 
-URewardSetDataAssetFactory::URewardSetDataAssetFactory()   { SupportedClass = URewardSetDataAsset::StaticClass(); }
-UQuestLootTableFactory::UQuestLootTableFactory()           { SupportedClass = UQuestLootTable::StaticClass(); }
-UQuestImportMappingFactory::UQuestImportMappingFactory()   { SupportedClass = UQuestImportMapping::StaticClass(); }
+URewardSetDataAssetFactory::URewardSetDataAssetFactory() { SupportedClass = URewardSetDataAsset::StaticClass(); }
+UQuestLootDataTableFactory::UQuestLootDataTableFactory() { SupportedClass = UQuestLootDataTable::StaticClass(); }
+UQuestImportMappingFactory::UQuestImportMappingFactory() { SupportedClass = UQuestImportMapping::StaticClass(); }
 

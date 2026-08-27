@@ -5,6 +5,9 @@
 
 #include "CoreMinimal.h"
 #include "AssetTypeActions_Base.h"
+#include "DataTableEditorModule.h"
+#include "Engine/DataTable.h"
+#include "Modules/ModuleManager.h"
 
 /**
  * Browser identity for a SimpleQuest asset type - its name, its colour, and the category it files under. One
@@ -31,5 +34,30 @@ private:
 	FText Name;
 	FColor Color = FColor::White;
 	uint32 Category = 0;
+};
+
+/**
+ * Browser identity for the Quest Loot Table, which needs one thing the others do not. A UQuestLootDataTable IS a
+ * UDataTable, and an exact class match outranks the engine's handler for the base class - so registering it through
+ * FQuestAssetTypeActions alone would file it under Quest correctly and then open it in a plain details panel instead
+ * of the row editor. Forwarding OpenAssetEditor to the DataTable editor keeps both: our category, their table UI.
+ */
+class FQuestLootDataTableAssetTypeActions : public FQuestAssetTypeActions
+{
+public:
+	using FQuestAssetTypeActions::FQuestAssetTypeActions;
+
+	virtual void OpenAssetEditor(const TArray<UObject*>& InObjects, TSharedPtr<IToolkitHost> EditWithinLevelEditor) override
+	{
+		FDataTableEditorModule& Editor = FModuleManager::LoadModuleChecked<FDataTableEditorModule>(TEXT("DataTableEditor"));
+		const EToolkitMode::Type Mode = EditWithinLevelEditor.IsValid() ? EToolkitMode::WorldCentric : EToolkitMode::Standalone;
+		for (UObject* Object : InObjects)
+		{
+			if (UDataTable* Table = Cast<UDataTable>(Object))
+			{
+				Editor.CreateDataTableEditor(Mode, EditWithinLevelEditor, Table);
+			}
+		}
+	}
 };
 

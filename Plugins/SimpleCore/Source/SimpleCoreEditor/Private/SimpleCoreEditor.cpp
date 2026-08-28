@@ -22,7 +22,7 @@ DEFINE_LOG_CATEGORY(LogSimpleCoreEditor);
 namespace
 {
     /** Set true when FCoreDelegates::OnExit fires. Read by SpawnFactsPanelTab's OnTabClosed handler to skip
-     *  the persisted-state cleanup during editor shutdown — docked tabs in the saved layout need their state
+     *  the persisted-state cleanup during editor shutdown - docked tabs in the saved layout need their state
      *  preserved for next-session restore; only user-initiated closes should wipe state. File-scope static so
      *  the OnTabClosed lambda doesn't need to capture `this` (which would dangle if module unloads before the
      *  tab destructs). */
@@ -59,7 +59,7 @@ void FSimpleCoreEditorModule::StartupModule()
         .SetMenuType(ETabSpawnerMenuType::Enabled)
         .SetReuseTabMethod(FOnFindTabToReuse::CreateLambda([](const FTabId&) -> TSharedPtr<SDockTab> { return nullptr; }));
 
-    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::StartupModule — PIE debug channel initialized, WorldState facts view registered, Facts Panel tab registered"));
+    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::StartupModule - PIE debug channel initialized, WorldState facts view registered, Facts Panel tab registered"));
 }
 
 void FSimpleCoreEditorModule::ShutdownModule()
@@ -83,7 +83,7 @@ void FSimpleCoreEditorModule::ShutdownModule()
         PIEDebugChannel.Reset();
     }
 
-    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::ShutdownModule — Facts Panel tab unregistered, WorldState view deregistered, PIE debug channel torn down"));
+    UE_LOG(LogSimpleCoreEditor, Display, TEXT("FSimpleCoreEditorModule::ShutdownModule - Facts Panel tab unregistered, WorldState view deregistered, PIE debug channel torn down"));
 }
 
 FSimpleCorePIEDebugChannel* FSimpleCoreEditorModule::GetPIEDebugChannel()
@@ -100,7 +100,7 @@ TSharedRef<SDockTab> FSimpleCoreEditorModule::SpawnFactsPanelTab(const FSpawnTab
     // Per-panel persistence key derived from spawn order within the editor session. Layout-restored tabs spawn
     // in the same order each session (depth-first walk of the saved dock tree), so Panel_N consistently maps
     // to the same docked panel across editor restarts. Menu-spawned ephemeral tabs pick up wherever the docked
-    // count leaves off — no saved entry for that key on first spawn, so they fall through to FallbackViewID
+    // count leaves off - no saved entry for that key on first spawn, so they fall through to FallbackViewID
     // (WorldState).
     //
     // Counter-based rather than InstanceId-based because FTabId.InstanceId for nomad tabs isn't reliably
@@ -124,7 +124,7 @@ TSharedRef<SDockTab> FSimpleCoreEditorModule::SpawnFactsPanelTab(const FSpawnTab
         {
             // Clear persisted state on user-initiated close so the next menu-spawn at this counter slot
             // starts at FallbackViewID (WorldState) rather than inheriting whatever the previous occupant
-            // left behind. Skip during editor shutdown — docked layout tabs need their state preserved for
+            // left behind. Skip during editor shutdown - docked layout tabs need their state preserved for
             // next-session restore.
             if (GFactsPanelEditorShuttingDown) return;
 

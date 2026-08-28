@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.0] — *In Development* — Composition and Control
+## [0.8.0] — 2026-08-27 — Composition and Control
 
 Three things that were out of reach before: pausing quest advancement while
 something plays out, driving the data resolver without a console command, and
@@ -78,7 +78,7 @@ and transforming what a reward grants without writing a new class for it.
   - **A hold nobody releases eventually says so.** One active longer than
   **Abandoned Hold Warning** - Project Settings, Plugins, Simple Quest,
   Diagnostics; five minutes by default, zero to disable - logs a warning naming
-  its Reason, once per hold rather than once per check. It never releases
+  its Reason, once rather than repeatedly. It never releases
   anything: a HUD widget torn down while still holding would otherwise stall a
   questline silently and forever, and auto-releasing would hide that behind a
   game that mostly works. Measured in world time, so a paused game doesn't
@@ -112,14 +112,11 @@ and transforming what a reward grants without writing a new class for it.
   while including the same set from two different branches is legal and grants
   it twice, because that is a choice rather than a mistake.
 
-  - **Compilation flattens the reference away.** A referenced set's rewards are
-  copied into the compiled node alongside any inline ones, so the runtime sees a
-  single flat list and never loads the asset. Referenced sets come first, in the
-  order listed, then the node's own rewards - grant sequence is meaning, so the
-  order is fixed rather than incidental.
-
-  - **Editing a shared set requires recompiling the questlines that use it**,
-  which is already true of every other authored change.
+  - **Set contents come first, then the node's own rewards**, in the order
+  listed - grant sequence is meaning, so it is fixed rather than incidental. A
+  set is resolved when you compile, so the runtime never loads it, and **editing
+  a shared set means recompiling the questlines that use it** - already true of
+  every other authored change.
 
   - **A questline's data export names the set rather than describing it.** The
   rewards inside a referenced set are edited in the asset, in one place; rewards
@@ -138,9 +135,9 @@ and transforming what a reward grants without writing a new class for it.
 
   - **Scaled loot is authorable now, and wasn't before.** A loot table computes
   its amounts internally, per rolled row, so there was no field to reach -
-  scaling loot meant writing a fused class for it. A modifier runs after the
-  grants are queued and catches every one of them, so one modifier works on XP,
-  currency, loot, and anything you write yourself.
+  scaling loot meant writing a fused class for it. A modifier applies to every
+  grant a reward produces, so one modifier works on XP, currency, loot, and
+  anything you write yourself.
 
   - **They apply in the order you list them**, stated rather than incidental,
   because scale-then-clamp and clamp-then-scale are different numbers. The
@@ -179,14 +176,9 @@ and transforming what a reward grants without writing a new class for it.
   Quest Loot Table, Quest Display Data, Quest Objective Config, Quest Import
   Mapping and Questline Graph now file under **Quest** instead of being spread
   across Gameplay and Miscellaneous, so create menus and filters find them in
-  one place. The Questline Graph moved out of Gameplay to join them, which is
-  worth knowing if you had muscle memory for where it lived.
-
-  - **Asset colors follow what a type derives from.** Each takes the engine's
-  color for its base class, so a data asset reads as a data asset and a data
-  table reads as a data table at a glance. The Questline Graph keeps a color of
-  its own, being the only one of these that is not a derivative of an engine
-  type.
+  one place, colored by what each one is - a data asset reads as a data asset, a
+  data table as a data table. The Questline Graph moved out of Gameplay to join
+  them, which is worth knowing if you had muscle memory for where it lived.
 
 ### Changed
 
@@ -202,12 +194,10 @@ and transforming what a reward grants without writing a new class for it.
   does, so folder behavior is unchanged - it just is not the only option any
   more. The two shipped providers produce byte-identical output to before.
 
-- **`FQuestlineGraphCompiler::HarvestQuestlineRewards` is no longer static.** It
-  resolves reward-set references and reports a failed load as a compile warning,
-  both of which need an instance. **This only affects you if you called it
-  statically**, which is unlikely - it is an internal step of compilation rather
-  than an entry point. Subclassing the compiler through
-  `RegisterCompilerFactory` is unaffected.
+- **`FQuestlineGraphCompiler::HarvestQuestlineRewards` is no longer static**, so
+  it can resolve reward-set references and report a failed load as a compile
+  warning. Subclassing the compiler through `RegisterCompilerFactory` is
+  unaffected.
 
 - **Instanced struct properties export as their own rows rather than one opaque
   cell.** A Generic Reward's payload used to serialize as a single `(Amount=42)`

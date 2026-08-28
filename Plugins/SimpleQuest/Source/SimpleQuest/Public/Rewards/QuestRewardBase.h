@@ -57,6 +57,17 @@ public:
 	 */
 	bool ApplyModifiers(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const;
 
+#if WITH_EDITOR
+	/**
+	 * Editor diagnostic: why this reward, as configured, should stop being used - or an empty string when there is
+	 * nothing to say. The questline compiler asks every compiled reward and reports whatever comes back, so a reward
+	 * on its way out declares that ITSELF and the compiler never carries a list of class names.
+	 *
+	 * Return a fragment that completes "A <Reward Name> on <where> ___", without trailing punctuation.
+	 */
+	virtual FString DescribeDeprecation() const { return FString(); }
+#endif
+
 	/**
 	 * STABLE PER-INSTANCE IDENTITY, the same job UQuestlineNodeBase::QuestGuid does for a graph node. A reward is
 	 * addressed by the data pipeline as a child row, and until this existed that row was keyed by the reward's ARRAY
@@ -76,8 +87,9 @@ public:
 protected:
 	/**
 	 * Transforms applied to every grant this reward delivers, in ARRAY ORDER - stated rather than emergent, because
-	 * scale-then-clamp and clamp-then-scale are different numbers. Instanced, so each entry is its own configured
-	 * instance and the compiler's deep copy carries them along with the reward.
+	 * scale-then-clamp and clamp-then-scale are different numbers. A cap of 100 listed BEFORE a doubling grants 200:
+	 * the cap saw a number that had not been scaled yet. Put a ceiling last if that is what it is meant to be.
+	 * Instanced, so each entry is its own configured instance and the compiler's deep copy carries them with the reward.
 	 *
 	 * Empty on almost every reward. A modifier is for the case a source cannot express: scaling loot, capping a
 	 * placement, redirecting a recipient, or dropping a grant unless a condition holds.
@@ -120,6 +132,12 @@ protected:
 	void DeliverReward(FGameplayTag InRewardType, const FInstancedStruct& InPayload, AActor* Recipient = nullptr);
 
 private:
+	/**
+	 * The advertisement twin, applied inside DispatchDescribeReward rather than by callers. Returns false when a
+	 * modifier hid the preview.
+	 */
+	bool ApplyModifiersToPreview(FQuestRewardPreview& Preview, AActor* Viewer) const;
+	
 	/** Grants queued by DeliverReward during TryGrantReward; drained by the reward node via TakePendingGrants. */
 	UPROPERTY()
 	TArray<FQuestRewardContext> PendingGrants;

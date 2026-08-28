@@ -7,6 +7,7 @@
 #include "Quests/Types/QuestRewardActivationContext.h"
 #include "Quests/Types/QuestRewardContext.h"
 #include "Quests/Types/QuestRewardPayloads.h"
+#include "Rewards/QuestLootDataTable.h"
 #include "Rewards/QuestRewardBase.h"
 #include "Rewards/QuestRewardModifier.h"
 #include "Rewards/XPReward.h"
@@ -101,27 +102,32 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestRewardModifier_RefusesForeignPayload, "Si
 bool FQuestRewardModifier_RefusesForeignPayload::RunTest(const FString& Parameters)
 {
 	// Asserted rather than merely tolerated: a silent skip is the failure mode this whole contract exists to prevent.
-	AddExpectedMessagePlain(TEXT("expects payload 'QuestRewardAmount'"), ELogVerbosity::Warning);
+	AddExpectedMessagePlain(TEXT("does not operate on payload 'QuestLootEntry'"), ELogVerbosity::Warning);
 
 	UPackage* Package = CreatePackage(TEXT("/Temp/QuestRewardModifierPayload"));
 	UXPReward* Reward = NewObject<UXPReward>(Package);
 	FQuestRewardModifierTestAccess::Modifiers(*Reward).Add(FQuestRewardModifierTestAccess::MakeClamp(Reward, 0, 5));
 
-	// A range rather than an amount - the payload a loot table's DescribeReward already produces, so this is a shape
-	// the framework genuinely passes around rather than one invented to fail the check.
+	// A loot ROW, which is a real struct the reward system passes around and plainly not an amount. It deliberately
+	// carries int fields the modifier could have mangled had the gate let it through - a payload with nothing to
+	// scale would pass this test even with the gate removed.
+	FQuestLootEntry Foreign;
+	Foreign.MinAmount = 7;
+	Foreign.MaxAmount = 9;
+
 	FQuestRewardContext Grant;
-	Grant.CustomData = FInstancedStruct::Make<FQuestRewardAmountRange>(FQuestRewardAmountRange{ 10, 25 });
+	Grant.CustomData = FInstancedStruct::Make<FQuestLootEntry>(Foreign);
 
 	TestTrue(TEXT("grant survived a modifier that could not handle it"),
 		Reward->ApplyModifiers(Grant, FQuestRewardActivationContext()));
 
-	const FQuestRewardAmountRange* Range = Grant.CustomData.GetPtr<FQuestRewardAmountRange>();
-	if (!TestNotNull(TEXT("payload is still a range"), Range))
+	const FQuestLootEntry* Untouched = Grant.CustomData.GetPtr<FQuestLootEntry>();
+	if (!TestNotNull(TEXT("payload is still a loot row"), Untouched))
 	{
 		return false;
 	}
-	TestEqual(TEXT("range min untouched"), Range->Min, 10);
-	TestEqual(TEXT("range max untouched"), Range->Max, 25);
+	TestEqual(TEXT("loot row min untouched"), Untouched->MinAmount, 7);
+	TestEqual(TEXT("loot row max untouched"), Untouched->MaxAmount, 9);
 
 	return true;
 }

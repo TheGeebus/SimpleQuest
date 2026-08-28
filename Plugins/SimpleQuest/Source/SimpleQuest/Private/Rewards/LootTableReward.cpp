@@ -140,7 +140,7 @@ TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(AAct
 }
 
 #if WITH_EDITOR
-FString ULootTableReward::DescribeLegacyLootTableUse() const
+FString ULootTableReward::DescribeDeprecation() const
 {
 	if (LootTable.IsNull())
 	{

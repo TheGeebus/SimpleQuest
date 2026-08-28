@@ -58,3 +58,13 @@ TArray<FQuestRewardPreview> UScaledAmountReward::DescribeReward_Implementation(A
 	P.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ FMath::RoundToInt(BaseAmount * Scale) });
 	return { P };
 }
+
+#if WITH_EDITOR
+FString UScaledAmountReward::DescribeDeprecation() const
+{
+	return TEXT("is deprecated - it fuses a source with a transform, so it can only ever scale its own fixed amount. "
+		"Replace it with an Amount Reward carrying the same type and base value, plus a Scale By Recipient modifier; "
+		"the pair grants the same amounts and the modifier also composes with loot. Removed in 0.9");
+}
+#endif
+

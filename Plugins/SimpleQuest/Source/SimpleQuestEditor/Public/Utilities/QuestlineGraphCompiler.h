@@ -63,9 +63,7 @@ public:
 	 * likely on an authored reward than inside a shared set. ContextLabel names the owner in the diagnostic;
 	 * DiagnosticNode is optional and makes the entry clickable.
 	 */
-	void WarnOnLegacyLootTables(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
-		const FString& ContextLabel,
-		const UEdGraphNode* DiagnosticNode);
+	void WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode);
 
 	void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName);
 	FQuestlineGraphCompiler();

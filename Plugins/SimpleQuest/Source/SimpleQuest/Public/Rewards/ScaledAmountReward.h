@@ -9,19 +9,22 @@
 #include "ScaledAmountReward.generated.h"
 
 /**
- * Reference reward: grants an amount scaled by the recipient's own state. The COMPUTED-FROM-EXTERNAL-CONTEXT pattern —
- * where LootTable computes from the incoming quest context, this computes from another game system, read off the
- * activation Instigator via IRewardScalingSource. The delivered amount is BaseAmount * the instigator's GetRewardScale()
- * (level curve, difficulty, prestige — whatever the game returns), so one reward node grants more to a higher-level
- * player with no per-level authoring.
+ * DEPRECATED - fuses a SOURCE with a TRANSFORM, which is why "scaled loot" would need a whole second class today.
+ * Replace with an Amount Reward carrying the same type and base value, plus a Scale By Recipient modifier on it; the
+ * pair behaves identically and the modifier composes with every other source. Removed in 0.9.
  *
- * Offers an example of how to access external gameplay data at runtime from within the quest framework without coupling
- * it to other game systems.
+ * HideDropdown keeps it out of the class picker so no new one can be authored, while existing ones keep working. The
+ * questline compiler warns once per node still using one - a clean compile is the all-clear.
  */
-UCLASS(meta = (DisplayName = "Scaled Amount Reward"))
+UCLASS(HideDropdown, meta = (DisplayName = "Scaled Amount Reward"))
 class SIMPLEQUEST_API UScaledAmountReward : public UQuestRewardBase
 {
 	GENERATED_BODY()
+
+#if WITH_EDITOR
+public:
+	virtual FString DescribeDeprecation() const override;
+#endif
 
 protected:
 	/** What to grant (Experience, Currency.Gold, …). */

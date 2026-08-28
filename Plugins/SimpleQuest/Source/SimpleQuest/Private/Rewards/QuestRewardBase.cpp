@@ -26,7 +26,49 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DescribeReward_Implementation(AAct
 
 TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer) const
 {
-	return DescribeReward(Viewer);		// routes to BP overrides
+	TArray<FQuestRewardPreview> Previews = DescribeReward(Viewer);		// routes to BP overrides
+
+	// *** MODIFIERS RUN HERE, not at the call sites. *** Three places ask a reward what it advertises - the reward
+	// node, the manager's questline-level query, and the Blueprint library - and a pass added to each is a pass one of
+	// them eventually forgets, leaving that surface promising a number nobody will receive. The grant path is the
+	// asymmetric one on purpose: it lives in the node because lineage and publishing have to interleave with it.
+	// Backwards so a hidden preview can be removed without disturbing the indices still to come.
+	for (int32 Index = Previews.Num() - 1; Index >= 0; --Index)
+	{
+		if (!ApplyModifiersToPreview(Previews[Index], Viewer))
+		{
+			Previews.RemoveAt(Index);
+		}
+	}
+	return Previews;
+}
+
+bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, AActor* Viewer) const
+{
+	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
+	{
+		if (!Modifier) continue;
+
+		// Same gate as the grant path, and deliberately at the same severity: an advertisement that silently skipped a
+		// modifier is a number a player will not receive, which is worth as much noise as a grant that skipped one.
+		const UScriptStruct* Payload = Preview.PreviewData.GetScriptStruct();
+		if (!Modifier->HandlesPayload(Payload))
+		{
+			UE_LOG(LogSimpleQuestActivation, Warning,
+				TEXT("%s on %s does not operate on payload '%s' - modifier skipped, preview unchanged."),
+				*Modifier->GetClass()->GetName(), *GetClass()->GetName(),
+				Payload ? *Payload->GetName() : TEXT("none"));
+			continue;
+		}
+
+		if (!Modifier->DispatchModifyPreview(Preview, Viewer))
+		{
+			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("%s on %s hid the preview."),
+				*Modifier->GetClass()->GetName(), *GetClass()->GetName());
+			return false;
+		}
+	}
+	return true;
 }
 
 void UQuestRewardBase::PostLoad()
@@ -93,17 +135,14 @@ bool UQuestRewardBase::ApplyModifiers(FQuestRewardContext& Grant, const FQuestRe
 		// touching it, so a shipped amount modifier is guarded twice and deleting this would corrupt nothing. What it
 		// protects is a THIRD-PARTY modifier that declares a payload type and has no second guard of its own - plus the
 		// diagnostic itself. Verified by removing it: the grant survived untouched and only the warning was lost.
-		if (const UScriptStruct* Required = Modifier->GetRequiredPayloadType())
+		const UScriptStruct* Payload = Grant.CustomData.GetScriptStruct();
+		if (!Modifier->HandlesPayload(Payload))
 		{
-			const UScriptStruct* Actual = Grant.CustomData.GetScriptStruct();
-			if (Actual != Required)
-			{
-				UE_LOG(LogSimpleQuestActivation, Warning,
-					TEXT("%s on %s expects payload '%s' but the grant carries '%s' - modifier skipped, grant unchanged."),
-					*Modifier->GetClass()->GetName(), *GetClass()->GetName(), *Required->GetName(),
-					Actual ? *Actual->GetName() : TEXT("none"));
-				continue;
-			}
+			UE_LOG(LogSimpleQuestActivation, Warning,
+				TEXT("%s on %s does not operate on payload '%s' - modifier skipped, grant unchanged."),
+				*Modifier->GetClass()->GetName(), *GetClass()->GetName(),
+				Payload ? *Payload->GetName() : TEXT("none"));
+			continue;
 		}
 
 		if (!Modifier->DispatchModifyGrant(Grant, Incoming))
@@ -115,4 +154,5 @@ bool UQuestRewardBase::ApplyModifiers(FQuestRewardContext& Grant, const FQuestRe
 	}
 	return true;
 }
+
 

@@ -185,21 +185,22 @@ void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObject
 	}
 }
 
-void FQuestlineGraphCompiler::WarnOnLegacyLootTables(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
+void FQuestlineGraphCompiler::WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
 	const FString& ContextLabel, const UEdGraphNode* DiagnosticNode)
 {
 	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
 	{
-		const ULootTableReward* Loot = Cast<ULootTableReward>(Reward);
-		if (!Loot) continue;
+		if (!Reward) continue;
 
-		// The reward decides whether there is a complaint and what it says; this decides only where it shows up. A
-		// warning rather than an error on purpose: it fires on every compile until the reference is cleared, which is
-		// pressure an adopter can act on - where dropping the reference quietly would give them nothing to act on.
-		const FString Complaint = Loot->DescribeLegacyLootTableUse();
+		// The reward decides whether there is a complaint and what it says; this decides only where it appears. That is
+		// why there is no cast here: retiring a reward class is an override on that class, not a case added to the
+		// compiler. A warning rather than an error on purpose - it fires on every compile until the authoring changes,
+		// which is pressure an adopter can act on, where breaking their content outright would give them nothing to act on.
+		const FString Complaint = Reward->DescribeDeprecation();
 		if (!Complaint.IsEmpty())
 		{
-			AddWarning(FString::Printf(TEXT("A Loot Table Reward on %s %s."), *ContextLabel, *Complaint), DiagnosticNode);
+			AddWarning(FString::Printf(TEXT("A %s on %s %s."),
+				*Reward->GetClass()->GetDisplayNameText().ToString(), *ContextLabel, *Complaint), DiagnosticNode);
 		}
 	}
 }
@@ -254,7 +255,7 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 
 		// Before the move and after the inline rewards - this is the only point where the array is both complete
 		// and still readable.
-		WarnOnLegacyLootTables(DuplicatedSet.Rewards,
+		WarnOnDeprecatedRewards(DuplicatedSet.Rewards,
 			FString::Printf(TEXT("outcome '%s'"), *OutcomePair.Key.ToString()), nullptr);
 
 		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
@@ -1505,7 +1506,7 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(
 
         	// After the inline rewards rather than beside FlattenRewardSets: an authored reward node is exactly where a
         	// legacy reference sits, and those land in the array below the flattened sets.
-        	WarnOnLegacyLootTables(Inst->Rewards, RewardEdNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), RewardEdNode);
+        	WarnOnDeprecatedRewards(Inst->Rewards, RewardEdNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString(), RewardEdNode);
 
         	Inst->AuthoredNodeGuid = RewardEdNode->QuestGuid;
         	Instance = Inst;

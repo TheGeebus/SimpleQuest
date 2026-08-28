@@ -30,7 +30,7 @@ public:
 	 * The judgement lives here rather than in the compiler because which of the two properties wins is this class's
 	 * business - the compiler only needs to know whether there is something to report and what it should print.
 	 */
-	FString DescribeLegacyLootTableUse() const;
+	virtual FString DescribeDeprecation() const override;
 #endif
 
 protected:

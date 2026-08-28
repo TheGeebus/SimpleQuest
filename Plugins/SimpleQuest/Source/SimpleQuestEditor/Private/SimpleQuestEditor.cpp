@@ -820,6 +820,10 @@ void FSimpleQuestEditor::EndCompileBatch()
 	WriteCompiledTagsIni();
 	FlushCompiledDisplayIni();
 
+	// After both writes, before the tree work below - the reconcile feeds orphaned names into BatchStaleNames so the
+	// existing three-case rebuild handles them, rather than triggering a second rebuild of its own.
+	ReconcileGeneratedDataAgainstAssets();
+
 	// Tree rebuild path. Three cases, cheapest-first:
 	//   - Stale tags removed -> full reset+refresh (must PRUNE the removed tags from the tree).
 	//   - New tags added (no stale) -> ConstructGameplayTagTree to fold the incrementally-added natives into the tree.
@@ -1305,6 +1309,76 @@ void FSimpleQuestEditor::RemoveCompiledDisplaySection(const FString& EffectiveID
 	if (!FFileHelper::LoadFileToString(Existing, *IniPath)) return;
 	TMap<FString, TArray<FString>> Sections = ParseDisplaySections(Existing);
 	if (Sections.Remove(EffectiveID) > 0) { WriteSectionsToDisk(IniPath, Sections); }
+}
+
+void FSimpleQuestEditor::ReconcileGeneratedDataAgainstAssets()
+{
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+	// *** REFUSE RATHER THAN GUESS. *** A registry still scanning reports most questlines as nonexistent, and this
+	// would then cheerfully delete their generated data. Skipping leaves a stale entry until the next compile; getting
+	// it wrong costs display names that only a recompile of every questline can rebuild.
+	if (AssetRegistry.IsLoadingAssets())
+	{
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ReconcileGeneratedData - asset registry still scanning, skipped."));
+		return;
+	}
+
+	TArray<FAssetData> Questlines;
+	AssetRegistry.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), Questlines, /*bSearchSubClasses*/ true);
+
+	TSet<FString> LiveEffectiveIDs;
+	TSet<FString> LivePackagePaths;
+	for (const FAssetData& Asset : Questlines)
+	{
+		LivePackagePaths.Add(Asset.PackageName.ToString());
+		const FString EffectiveID = Asset.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
+		if (!EffectiveID.IsEmpty()) LiveEffectiveIDs.Add(EffectiveID);
+	}
+
+	// DISPLAY DATA. FlushCompiledDisplayIni deliberately touches only the sections a batch compiled, so that compiling
+	// one questline cannot erase another's - which leaves nothing to remove a section whose asset is gone. This is it.
+	const FString IniPath = GetCompiledDisplayIniPath();
+	FString Existing;
+	if (FFileHelper::LoadFileToString(Existing, *IniPath))
+	{
+		TMap<FString, TArray<FString>> Sections = ParseDisplaySections(Existing);
+		TArray<FString> Orphans;
+		for (const TPair<FString, TArray<FString>>& Section : Sections)
+		{
+			if (!LiveEffectiveIDs.Contains(Section.Key)) Orphans.Add(Section.Key);
+		}
+		if (Orphans.Num() > 0)
+		{
+			for (const FString& Key : Orphans) Sections.Remove(Key);
+			WriteSectionsToDisk(IniPath, Sections);
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("ReconcileGeneratedData - dropped %d display section(s) with no questline: %s"),
+				Orphans.Num(), *FString::Join(Orphans, TEXT(", ")));
+		}
+	}
+
+	// TAG REGISTRY. The same leak, one file over: OnAssetRemoved prunes this by package path, and an out-of-editor
+	// deletion never calls it. Orphaned names go to BatchStaleNames rather than straight to RemoveNativeTagsForGraph,
+	// so the caller's rebuild logic sees them alongside the batch's own stale names and rebuilds the tree once.
+	TArray<FString> DeadPaths;
+	for (const TPair<FString, TArray<FName>>& Pair : CompiledTagRegistry)
+	{
+		if (!LivePackagePaths.Contains(Pair.Key)) DeadPaths.Add(Pair.Key);
+	}
+	if (DeadPaths.Num() > 0)
+	{
+		for (const FString& Path : DeadPaths)
+		{
+			TArray<FName> Removed;
+			if (CompiledTagRegistry.RemoveAndCopyValue(Path, Removed))
+			{
+				for (const FName& Name : Removed) BatchStaleNames.Add(Name);
+			}
+		}
+		WriteCompiledTagsIni();
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("ReconcileGeneratedData - dropped %d tag registry entr%s with no questline."),
+			DeadPaths.Num(), DeadPaths.Num() == 1 ? TEXT("y") : TEXT("ies"));
+	}
 }
 
 void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)

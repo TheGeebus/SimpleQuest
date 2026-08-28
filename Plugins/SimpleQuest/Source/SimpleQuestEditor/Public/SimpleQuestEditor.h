@@ -104,6 +104,16 @@ private:
 	void FlushCompiledDisplayIni();                                                  // one read-modify-write per batch
 	void RemoveCompiledDisplaySection(const FString& EffectiveID) const;             // immediate (asset removal)
 	void RebuildNativeTags(bool bRefreshTree = false);
+
+	/**
+	 * Drops generated data for questlines that no longer exist. Deletion outside the editor - a git checkout, a file
+	 * removed by hand, a harness cleaning up - never fires OnAssetRemoved, so display sections and tag registry
+	 * entries accumulate with nothing to remove them.
+	 *
+	 * Keyed on the ASSET REGISTRY, never on what compiled: a questline that failed to compile still exists, and
+	 * pruning by "did I see it this batch" would delete the display data of everything that errored.
+	 */
+	void ReconcileGeneratedDataAgainstAssets();
 	
 	/**
 	 * Bound to FCoreUObjectDelegates::OnAssetLoaded in StartupModule. When any asset loads, scans it for top-level FGameplayTag /

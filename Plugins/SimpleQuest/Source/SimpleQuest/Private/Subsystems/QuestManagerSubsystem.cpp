@@ -1550,6 +1550,11 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
 // Advancement holds
 // -------------------------------------------------------------------------------------------------
 
+
+// How often the abandonment check runs while any hold is active. NOT the threshold - only the resolution at which the
+// threshold gets noticed, and cheap enough at this cadence to not be worth configuring.
+static constexpr float AbandonedHoldCheckIntervalSeconds = 5.f;
+
 FQuestAdvancementHold UQuestManagerSubsystem::HoldQuestAdvancement(FGameplayTag QuestTag, FName Reason, bool bHoldDeactivation)
 {
     FQuestAdvancementHold Handle;
@@ -1565,6 +1570,16 @@ FQuestAdvancementHold UQuestManagerSubsystem::HoldQuestAdvancement(FGameplayTag 
     Record.Reason            = Reason;
     Record.bHoldDeactivation = bHoldDeactivation;
     Record.PlacedAtSeconds   = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+
+    // Started here and nowhere else; an idle game pays nothing for this net because the timer does not exist until
+    // something is actually held.
+    if (!AbandonedHoldTimer.IsValid())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().SetTimer(AbandonedHoldTimer, this, &UQuestManagerSubsystem::CheckForAbandonedHolds, AbandonedHoldCheckIntervalSeconds, true);
+        }
+    }
 
     AddStateFactAcrossPerspectives(QuestTag, EQuestStateLeaf::Held);
 
@@ -1594,6 +1609,51 @@ void UQuestManagerSubsystem::ReleaseQuestAdvancement(const FQuestAdvancementHold
 
     ReplayParkedActivations();
     RetryDeferredActivations();
+}
+
+void UQuestManagerSubsystem::CheckForAbandonedHolds()
+{
+    // *** STOPS ITSELF RATHER THAN BEING STOPPED. *** Holds leave ActiveHolds in three places - a single release, the
+    // bulk drop a save capture performs (ReleaseAllQuestAdvancementHolds), and ClearHoldsForEndedQuest - and a stop
+    // condition spread across three sites is one a fourth site added later will forget, leaking a repeating timer.
+    if (ActiveHolds.IsEmpty())
+    {
+        if (UWorld* World = GetWorld())
+        {
+            World->GetTimerManager().ClearTimer(AbandonedHoldTimer);
+        }
+        AbandonedHoldTimer.Invalidate();
+        return;
+    }
+
+    if (const UWorld* World = GetWorld())
+    {
+        WarnOnHoldsOlderThan(World->GetTimeSeconds());
+    }
+}
+
+void UQuestManagerSubsystem::WarnOnHoldsOlderThan(double Now)
+{
+    const float Threshold = GetDefault<USimpleQuestSettings>()->AbandonedHoldWarningSeconds;
+    if (Threshold <= 0.f) return;
+
+    for (TPair<int32, FQuestHoldRecord>& Pair : ActiveHolds)
+    {
+        FQuestHoldRecord& Record = Pair.Value;
+        if (Record.bWarned) continue;
+
+        const double Elapsed = Now - Record.PlacedAtSeconds;
+        if (Elapsed < Threshold) continue;
+        
+        // Once per hold. A hold this old is stuck for the rest of the session, and repeating the warning every few
+        // seconds would bury the thing it exists to surface.
+        Record.bWarned = true;
+        UE_LOG(LogSimpleQuestActivation, Warning,
+            TEXT("Advancement hold '%s' on '%s' has been active for %.0f seconds and is still holding. Whatever placed it "
+                 "has most likely gone away without releasing - the questline will not advance until something does. Holds "
+                 "are never released automatically, because that would hide this rather than report it."),
+            *Record.Reason.ToString(), *Record.QuestTag.ToString(), Elapsed);
+    }
 }
 
 bool UQuestManagerSubsystem::IsQuestAdvancementHeld(FGameplayTag QuestTag) const

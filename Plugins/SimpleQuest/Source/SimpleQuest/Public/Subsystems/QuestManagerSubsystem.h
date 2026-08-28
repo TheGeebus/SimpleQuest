@@ -362,6 +362,9 @@ private:
 		FName        Reason;
 		bool         bHoldDeactivation = true;
 		double       PlacedAtSeconds = 0.0;
+
+		/** Latched once the abandonment warning has fired, so a stuck hold reports itself once rather than forever. */
+		bool         bWarned = false;
 	};
 
 	/**
@@ -381,6 +384,18 @@ private:
 
 	/** Active holds by id. Authority-side mechanism - never replicates; the Held FACT is what clients see. */
 	TMap<int32, FQuestHoldRecord> ActiveHolds;
+
+	/** Runs only while something is held; see CheckForAbandonedHolds, which starts nothing and stops itself. */
+	FTimerHandle AbandonedHoldTimer;
+
+	/** Timer entry. Reads the clock, delegates, and clears its own timer when nothing is held. */
+	void CheckForAbandonedHolds();
+
+	/**
+	 * The comparison itself, taking the current time rather than fetching it. That is what lets a test hand it a time
+	 * far past a hold's placement and call it directly, with no world to advance.
+	 */
+	void WarnOnHoldsOlderThan(double NowSeconds);
 
 	/** Monotonic. Zero is never issued, so a default-constructed FQuestAdvancementHold can never match a live hold. */
 	int32 NextHoldId = 1;

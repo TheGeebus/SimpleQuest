@@ -9,6 +9,7 @@
 #include "Quests/QuestStep.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "Quests/Types/QuestAdvancementHold.h"
+#include "Settings/SimpleQuestSettings.h"
 #include "Subsystems/QuestManagerSubsystem.h"
 
 /**
@@ -53,6 +54,7 @@ public:
 		M->ActivateNodeByTag(Tag, P, FGameplayTag(), SourceTag);
 	}
 	static int32 ParkedCount(const UQuestManagerSubsystem* M)                   { return M->ParkedActivations.Num(); }
+	static void WarnOlderThan(UQuestManagerSubsystem* M, double Now)            { M->WarnOnHoldsOlderThan(Now); }
 	static FName ParkedTagAt(const UQuestManagerSubsystem* M, int32 Index)      { return M->ParkedActivations[Index].NodeTagName; }
 };
 
@@ -290,6 +292,48 @@ bool FQuestHold_ParksCascadeInArrivalOrder::RunTest(const FString& Parameters)
 	// by deliberately breaking them: the run has to survive the thing it is trying to catch.
 	// Re-parking on a partial release, and resuming on a full one, belong with the cascade-level harness. See the
 	// runtime-harness item.
+	return true;
+}
+
+/**
+ * A hold nobody released eventually says so - once.
+ *
+ * The ONCE is the real assertion, and it is why the expectation is pinned to exactly one occurrence: the check runs on
+ * a repeating timer, so a warning that fired every pass would bury the very thing it exists to surface. Calling it
+ * twice and still expecting one message is what proves the latch, and a broken latch fails on the count rather than
+ * quietly producing noise nobody reads.
+ *
+ * No world here, so a held record's PlacedAtSeconds is zero; handing the check a later "now" is the same arithmetic
+ * the timer performs, without needing time to pass.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestHold_AbandonedHoldWarnsOnce, "SimpleQuest.Hold.AbandonedHoldWarnsOnce", HoldTestFlags)
+bool FQuestHold_AbandonedHoldWarnsOnce::RunTest(const FString& Parameters)
+{
+	AddExpectedMessagePlain(TEXT("has been active for"), ELogVerbosity::Warning,
+		EAutomationExpectedMessageFlags::Contains, 1);
+
+	FHoldFixture Fixture;
+	if (!TestTrue(TEXT("Fixture builds"), Fixture.IsValid())) return false;
+	FGCObjectScopeGuard InstanceGuard(Fixture.GameInstance);
+	FGCObjectScopeGuard ManagerGuard(Fixture.Manager);
+
+	// Set rather than assumed: the shipped default is a product decision that can move, and a test that silently
+	// depends on it stops testing what it claims the day somebody tunes it.
+	USimpleQuestSettings* Settings = GetMutableDefault<USimpleQuestSettings>();
+	const float Original = Settings->AbandonedHoldWarningSeconds;
+	Settings->AbandonedHoldWarningSeconds = 60.f;
+	ON_SCOPE_EXIT { Settings->AbandonedHoldWarningSeconds = Original; };
+
+	FQuestAdvancementHoldTestAccess::Hold(Fixture.Manager, TAG_HoldFixture_Container, TEXT("AbandonedAudio"));
+
+	FQuestAdvancementHoldTestAccess::WarnOlderThan(Fixture.Manager, 120.0);
+	FQuestAdvancementHoldTestAccess::WarnOlderThan(Fixture.Manager, 240.0);
+
+	// Still held: warning is a report, never a release. Auto-releasing would hide the bug behind a questline that
+	// mostly works, which is the whole reason this is a log line rather than a fix.
+	TestTrue(TEXT("the hold is still in force after warning"),
+		FQuestAdvancementHoldTestAccess::IsHeld(Fixture.Manager, TAG_HoldFixture_Container));
+
 	return true;
 }
 

@@ -180,6 +180,10 @@ and transforming what a reward grants without writing a new class for it.
   data table as a data table. The Questline Graph moved out of Gameplay to join
   them, which is worth knowing if you had muscle memory for where it lived.
 
+- **A contribution policy.** `CONTRIBUTING.md` covers what's useful to send, how
+  a contribution falls under the licensing terms, and the `Signed-off-by` line
+  the project uses. It's a guideline rather than a contract.
+
 ### Changed
 
 - **A format provider is handed files, not a folder.** `WriteBundle` used to
@@ -232,6 +236,21 @@ and transforming what a reward grants without writing a new class for it.
   - **The data asset form is removed in 0.9** - the `UQuestLootTable` class, the
   legacy field, and the fallback that reads it. Re-author your rows as a Loot
   Table before then; the compile warnings are the checklist.
+
+### Fixes
+
+- **Compile warnings about questline-level rewards can be acted on.** Rewards
+  keyed to a questline's outcomes belong to the asset rather than to any node, so
+  their warnings had nothing to click and named only the outcome - which during a
+  Compile All could mean any questline in the project. They now name the
+  questline and open it.
+
+- **Generated tag and display data drops questlines that no longer exist.** The
+  files under your project's `Config/SimpleQuest` kept an entry for every
+  questline that had ever compiled. Deleting an asset in the editor removed its
+  entry, but deleting it any other way - a branch switch, a file removed by hand,
+  a tool cleaning up - left it there permanently. Compile All now reconciles both
+  files against the questlines that actually exist.
 
 ---
 

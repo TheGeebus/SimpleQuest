@@ -107,17 +107,17 @@ static bool DoesPinReachEntryThroughKnots(const UEdGraphPin* Pin, TSet<const UEd
 }
 
 void FQuestlineGraphCompiler::FlattenRewardSets(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets, UObject* Outer,
-	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode,
-	TArray<TObjectPtr<UQuestRewardBase>>& Out)
+	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode,	TArray<TObjectPtr<UQuestRewardBase>>& Out,
+	const UObject* DiagnosticAsset)
 {
 	// The path stack is the recursion's business, not a caller's - both call sites pass exactly what they always did.
 	TArray<const URewardSetDataAsset*> OnPath;
-	FlattenRewardSetsInternal(Sets, Outer, NamePrefix, ContextLabel, DiagnosticNode, OnPath, Out);
+	FlattenRewardSetsInternal(Sets, Outer, NamePrefix, ContextLabel, DiagnosticNode, OnPath, Out, DiagnosticAsset);
 }
 
 void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets, UObject* Outer,
-	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode,	TArray<const URewardSetDataAsset*>& OnPath,
-	TArray<TObjectPtr<UQuestRewardBase>>& Out)
+	const FString& NamePrefix, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode, TArray<const URewardSetDataAsset*>& OnPath,
+	TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset)
 {
 	for (int32 SetIndex = 0; SetIndex < Sets.Num(); ++SetIndex)
 	{
@@ -128,7 +128,7 @@ void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObject
 			// designer asked for is the one outcome worth refusing to produce quietly.
 			AddWarning(FString::Printf(TEXT("Reward set '%s' on %s could not be loaded and was skipped - only the "
 				"remaining rewards are granted."),
-				*Sets[SetIndex].ToString(), *ContextLabel), DiagnosticNode);
+				*Sets[SetIndex].ToString(), *ContextLabel), DiagnosticNode, DiagnosticAsset);
 			continue;
 		}
 
@@ -138,7 +138,7 @@ void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObject
 		{
 			AddWarning(FString::Printf(TEXT("Reward set '%s' on %s includes itself and was skipped - a set cannot "
 				"include a set that already includes it."),
-				*Set->GetName(), *ContextLabel), DiagnosticNode);
+				*Set->GetName(), *ContextLabel), DiagnosticNode, DiagnosticAsset);
 			continue;
 		}
 
@@ -185,8 +185,8 @@ void FQuestlineGraphCompiler::FlattenRewardSetsInternal(const TArray<TSoftObject
 	}
 }
 
-void FQuestlineGraphCompiler::WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards,
-	const FString& ContextLabel, const UEdGraphNode* DiagnosticNode)
+void FQuestlineGraphCompiler::WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards, const FString& ContextLabel,
+	const UEdGraphNode* DiagnosticNode, const UObject* DiagnosticAsset)
 {
 	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
 	{
@@ -200,7 +200,7 @@ void FQuestlineGraphCompiler::WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQ
 		if (!Complaint.IsEmpty())
 		{
 			AddWarning(FString::Printf(TEXT("A %s on %s %s."),
-				*Reward->GetClass()->GetDisplayNameText().ToString(), *ContextLabel, *Complaint), DiagnosticNode);
+				*Reward->GetClass()->GetDisplayNameText().ToString(), *ContextLabel, *Complaint), DiagnosticNode, DiagnosticAsset);
 		}
 	}
 }
@@ -234,11 +234,15 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 
 		// REFERENCED SETS FIRST, in the order listed, then the inline rewards below - the same rule the Grant Rewards
 		// node follows, through the same helper, so the two cannot drift apart.
-		// No node to point at: questline-level rewards belong to the asset rather than to any node, so the outcome tag
-		// is what makes the diagnostic actionable.
+		// No node to point at, so no clickable navigation token: questline-level rewards belong to the ASSET rather
+		// than to any node. The label therefore has to carry enough to find them by hand, and an outcome tag alone
+		// does not - across a Compile All the same outcome appears on many questlines. Name the questline too.
+		const FString RewardContext = FString::Printf(TEXT("questline '%s' outcome '%s'"),
+			*SourceGraph->GetName(), *OutcomePair.Key.ToString());
+
 		FlattenRewardSets(OutcomePair.Value.RewardSets, OwnerGraph,
 			FString::Printf(TEXT("QuestlineSetReward_%s_%s"), *SourceSegment, *OutcomeSegment),
-			FString::Printf(TEXT("outcome '%s'"), *OutcomePair.Key.ToString()), nullptr, DuplicatedSet.Rewards);
+			RewardContext, nullptr, DuplicatedSet.Rewards, SourceGraph);
 
 		for (int32 RewardIndex = 0; RewardIndex < OutcomePair.Value.Rewards.Num(); ++RewardIndex)
 		{
@@ -255,8 +259,7 @@ void FQuestlineGraphCompiler::HarvestQuestlineRewards(const UQuestlineGraph* Sou
 
 		// Before the move and after the inline rewards - this is the only point where the array is both complete
 		// and still readable.
-		WarnOnDeprecatedRewards(DuplicatedSet.Rewards,
-			FString::Printf(TEXT("outcome '%s'"), *OutcomePair.Key.ToString()), nullptr);
+		WarnOnDeprecatedRewards(DuplicatedSet.Rewards, RewardContext, nullptr, SourceGraph);
 
 		Compiled.RewardsByOutcome.Add(OutcomePair.Key, MoveTemp(DuplicatedSet));
 	}
@@ -2050,11 +2053,13 @@ void FQuestlineGraphCompiler::AddError(const FString& Message, const UEdGraphNod
     UE_LOG(LogSimpleQuestCompiler, Error, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
 
-void FQuestlineGraphCompiler::AddWarning(const FString& Message, const UEdGraphNode* Node)
+void FQuestlineGraphCompiler::AddWarning(const FString& Message, const UEdGraphNode* Node, const UObject* Asset)
 {
-    NumWarnings++;
-    TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning, FText::FromString(Message));
-    if (Node) AddNodeNavigationToken(Msg, Node);
+	NumWarnings++;
+	TSharedRef<FTokenizedMessage> Msg = FTokenizedMessage::Create(EMessageSeverity::Warning, FText::FromString(Message));
+	// A node is the more precise target when there is one; the asset is what is left when the data does not live on a node.
+	if (Node) AddNodeNavigationToken(Msg, Node);
+	else if (Asset) AddAssetNavigationToken(Msg, Asset);
     Messages.Add(Msg);
     UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("QuestlineGraphCompiler: %s"), *Message);
 }
@@ -2644,6 +2649,25 @@ void FQuestlineGraphCompiler::AddNodeNavigationToken(TSharedRef<FTokenizedMessag
             }
         })
     ));
+}
+
+void FQuestlineGraphCompiler::AddAssetNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UObject* Asset)
+{
+	TWeakObjectPtr<UObject> WeakAsset = const_cast<UObject*>(Asset);
+
+	Msg->AddToken(FActionToken::Create(
+		FText::FromString(Asset->GetName()),
+		NSLOCTEXT("SimpleQuestEditor", "GoToAsset", "Open this asset"),
+		FOnActionTokenExecuted::CreateLambda([WeakAsset]()
+		{
+			UObject* PinnedAsset = WeakAsset.Get();
+			if (!PinnedAsset || !GEditor) return;
+
+			// No location to navigate to, unlike the node token - questline-level rewards are authored in the asset's
+			// own details, so opening it is as specific as this can get.
+			GEditor->GetEditorSubsystem<UAssetEditorSubsystem>()->OpenEditorForAsset(PinnedAsset);
+		})
+	));
 }
 
 bool FQuestlineGraphCompiler::ParallelPathKeysCollide(const FSourcePathKey& A, const FSourcePathKey& B)

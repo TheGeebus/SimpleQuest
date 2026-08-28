@@ -55,7 +55,8 @@ public:
 		const FString& NamePrefix,
 		const FString& ContextLabel,
 		const UEdGraphNode* DiagnosticNode,
-		TArray<TObjectPtr<UQuestRewardBase>>& Out);
+		TArray<TObjectPtr<UQuestRewardBase>>& Out,
+		const UObject* DiagnosticAsset = nullptr);
 
 	/**
 	 * Reports rewards still pointing at the deprecated Quest Loot Table data asset. Call once the reward array is
@@ -63,7 +64,7 @@ public:
 	 * likely on an authored reward than inside a shared set. ContextLabel names the owner in the diagnostic;
 	 * DiagnosticNode is optional and makes the entry clickable.
 	 */
-	void WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode);
+	void WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode, const UObject* DiagnosticAsset = nullptr);
 
 	void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName);
 	FQuestlineGraphCompiler();
@@ -161,12 +162,12 @@ private:
 	 * two and silently drop the second legitimate inclusion.
 	 */
 	void FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
-		UObject* Outer,
-		const FString& NamePrefix,
-		const FString& ContextLabel,
-		const UEdGraphNode* DiagnosticNode,
-		TArray<const URewardSetDataAsset*>& OnPath,
-		TArray<TObjectPtr<UQuestRewardBase>>& Out);
+	                               UObject* Outer,
+	                               const FString& NamePrefix,
+	                               const FString& ContextLabel,
+	                               const UEdGraphNode* DiagnosticNode,
+	                               TArray<const URewardSetDataAsset*>& OnPath,
+	                               TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
 
 	/**
 	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during
@@ -264,8 +265,11 @@ private:
 	/** Logs a compile error and sets the internal error flag. */
 	void AddError(const FString& Message, const UEdGraphNode* Node = nullptr);
 
-	/** Logs a compile warning without setting the internal error flag. */
-	void AddWarning(const FString& Message, const UEdGraphNode* Node = nullptr);
+	/**
+	 * Asset is the fallback target when there is no node to point at - questline-level rewards belong to the graph
+	 * asset rather than to any node, and a diagnostic with nothing clickable is one a designer has to hunt for.
+	 */
+	void AddWarning(const FString& Message, const UEdGraphNode* Node = nullptr, const UObject* Asset = nullptr);
 
 	/** Internal questline compiler error flag. Returned by the main Compile function. */
 	bool bHasErrors = false;
@@ -346,6 +350,8 @@ private:
 	
 	/** Appends a clickable action token that navigates to the given node in the graph editor. */
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
+	/** Appends a clickable action token that navigates to the given editor asset. */
+	void AddAssetNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UObject* Asset);
 
 	/** Pass 1: iterate content nodes, validate labels, create runtime instances, assign tags. */
 	void CompileNodeRegistration(

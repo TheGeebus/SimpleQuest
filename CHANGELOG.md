@@ -75,6 +75,15 @@ and transforming what a reward grants without writing a new class for it.
   releases them first, so a save taken mid-pause restores a running game rather
   than a stuck one.
 
+  - **A hold nobody releases eventually says so.** One active longer than
+  **Abandoned Hold Warning** - Project Settings, Plugins, Simple Quest,
+  Diagnostics; five minutes by default, zero to disable - logs a warning naming
+  its Reason, once per hold rather than once per check. It never releases
+  anything: a HUD widget torn down while still holding would otherwise stall a
+  questline silently and forever, and auto-releasing would hide that behind a
+  game that mostly works. Measured in world time, so a paused game doesn't
+  accrue toward it.
+
   - Prerequisites treat a held quest as **unreadable rather than unmet**, which is
   the distinction that makes `OR` behave. A step requiring "A or B" with A held
   and B genuinely satisfied still proceeds, because B never needed anything from

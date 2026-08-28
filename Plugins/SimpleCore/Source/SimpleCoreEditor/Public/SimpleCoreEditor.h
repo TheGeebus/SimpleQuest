@@ -16,7 +16,7 @@ class SDockTab;
  * generic facts-panel registry, and registers a multi-instance Facts Panel as a nomad tab under Window → Developer
  * Tools.
  *
- * Independent of SimpleQuest — a project using SimpleCore without SimpleQuest still gets the WorldState view and the
+ * Independent of SimpleQuest - a project using SimpleCore without SimpleQuest still gets the WorldState view and the
  * panel shell.
  */
 class SIMPLECOREEDITOR_API FSimpleCoreEditorModule : public IModuleInterface

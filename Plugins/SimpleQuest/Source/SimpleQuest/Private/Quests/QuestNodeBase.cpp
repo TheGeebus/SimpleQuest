@@ -9,6 +9,7 @@
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Events/QuestResolutionRecordedEvent.h"
 #include "Events/QuestEntryRecordedEvent.h"
+#include "Subsystems/QuestManagerSubsystem.h"
 
 
 UWorld* UQuestNodeBase::GetWorld() const
@@ -22,7 +23,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
     // per-event-ID dedup. PendingActivationContext was populated by the manager before Activate runs.
     LastIncomingEventID = PendingActivationContext.IncomingContext.OriginatingEventID;
     
-    // Prerequisite bypass — a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
+    // Prerequisite bypass - a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
     // Consume the one-shot flag and, crucially, cancel any deferral this instance is still holding from an earlier
     // armed activation. Without the cancel, that lingering subscription would fire a SECOND ActivateInternal later
     // when the skipped prereq belatedly satisfies (player jumps ahead, then finishes the chapter they skipped).
@@ -47,10 +48,10 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
         return;
     }
     
-    // Reached ONLY when a non-Always PrerequisiteExpression currently evaluates false — the sole reason an
+    // Reached ONLY when a non-Always PrerequisiteExpression currently evaluates false - the sole reason an
     // activation defers rather than going Live. Named at Verbose so a "nothing happened on activate" symptom
-    // (with no authored prereq in view — e.g. a compiler-injected chapter-chain gate) surfaces the responsible node.
-    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::Activate : '%s' deferring — prerequisite unsatisfied (bBypassPrerequisites would force it Live)"),
+    // (with no authored prereq in view - e.g. a compiler-injected chapter-chain gate) surfaces the responsible node.
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestNodeBase::Activate : '%s' deferring - prerequisite unsatisfied (bBypassPrerequisites would force it Live)"),
         *InContextualTag.ToString());
     
     OnNodeActivationRefused.ExecuteIfBound(this, InContextualTag);
@@ -80,7 +81,7 @@ void UQuestNodeBase::ForwardActivation()
 
 void UQuestNodeBase::ResetTransientState()
 {
-    // Handles reference a SignalSubsystem from the previous PIE session — now dead. Clearing the map without
+    // Handles reference a SignalSubsystem from the previous PIE session - now dead. Clearing the map without
     // unsubscribing is safe: the owning subsystem is gone, there's nothing left to unsubscribe from.
     PrereqSubscriptionHandles.Reset();
     DeferredContextualTag = FGameplayTag::EmptyTag;
@@ -93,7 +94,7 @@ void UQuestNodeBase::ResetTransientState()
 void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
 {
     // Cancel any prior deferred subscriptions before re-subscribing. Re-defer means "the cascade is asking us to
-    // wait on prereqs again — latest takes precedence." Without this, the subscribe helper's MergeSlot overwrites
+    // wait on prereqs again - latest takes precedence." Without this, the subscribe helper's MergeSlot overwrites
     // tracked handles in PrereqSubscriptionHandles with the new ones, orphaning the originals (still firing in the
     // SignalSubsystem, no longer tracked here, can't be cleaned up via UnsubscribeAll). The orphan would call
     // OnPrereq*Handler on future fact events, hitting TryActivateDeferred with a cleared DeferredContextualTag and
@@ -105,7 +106,7 @@ void UQuestNodeBase::DeferActivation(FGameplayTag InContextualTag)
     if (UseSymmetricPrereqSubscription())
     {
         // Symmetric path: Fact leaves get the Removed handler too, so NOT(Fact) wakes when the fact is removed.
-        // Path / Resolution / Entry / Outcome leaves are append-only by registry shape — no corresponding "removed"
+        // Path / Resolution / Entry / Outcome leaves are append-only by registry shape - no corresponding "removed"
         // channel exists for them, so the symmetric overload degenerates to monotonic for those leaf kinds.
         FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
             PrerequisiteExpression,
@@ -193,9 +194,14 @@ void UQuestNodeBase::TryActivateDeferred()
     UQuestStateSubsystem* StateSubsystem = CachedGameInstance->GetSubsystem<UQuestStateSubsystem>();
     if (!WorldState || !StateSubsystem) return;
 
-    const bool bSatisfied = PrerequisiteExpression.Evaluate(WorldState, StateSubsystem);
+    // Hold-aware from here down. A held leaf source reads as Indeterminate, which falls through the same door as
+    // unsatisfied: do not activate, do not unsubscribe, keep waiting. A deferred node already knows how to wait, so a
+    // hold only changes WHEN it stops waiting, never how.
+    const UQuestManagerSubsystem* Manager = CachedGameInstance->GetSubsystem<UQuestManagerSubsystem>();
+    const auto IsSourceHeld = [Manager](FGameplayTag Source) { return Manager && Manager->IsQuestAdvancementHeld(Source); };
+    const bool bSatisfied = PrerequisiteExpression.EvaluateWithHolds(WorldState, StateSubsystem, IsSourceHeld) == EPrereqTriState::Satisfied;
     UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("TryActivateDeferred: subscriber='%s' expression %s — handles=%d"),
+        TEXT("TryActivateDeferred: subscriber='%s' expression %s - handles=%d"),
         DeferredContextualTag.IsValid() ? *DeferredContextualTag.ToString() : TEXT("(utility)"),
         bSatisfied ? TEXT("SATISFIED, will activate") : TEXT("UNSATISFIED, staying deferred"),
         PrereqSubscriptionHandles.Num());
@@ -221,7 +227,7 @@ void UQuestNodeBase::ResolveContextualTag(FName TagName)
     if (!ContextualTag.IsValid())
     {
         UE_LOG(LogSimpleQuestActivation, Warning,
-            TEXT("ResolveContextualTag: '%s' is not registered in the runtime tag manager — stale compiled node, skipping. ")
+            TEXT("ResolveContextualTag: '%s' is not registered in the runtime tag manager - stale compiled node, skipping. ")
             TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
             *TagName.ToString());
         return;
@@ -241,7 +247,7 @@ void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
         if (!Resolved.IsValid())
         {
             UE_LOG(LogSimpleQuestActivation, Warning,
-                TEXT("ResolveAssetScopedAliasTags: '%s' is not registered in the runtime tag manager — stale compiled alias, skipping. ")
+                TEXT("ResolveAssetScopedAliasTags: '%s' is not registered in the runtime tag manager - stale compiled alias, skipping. ")
                 TEXT("Recompile the owning questline to refresh; if the problem persists, use Stale Quest Tags (Window → Developer Tools → Debug)."),
                 *TagName.ToString());
             continue;

@@ -38,7 +38,7 @@ FString QuestNodeIdentityKey(const FString& Guid, const TMap<FString, FString>& 
 
 /**
  * Index every node under BOTH names a source can legitimately address it by: its GUID and, when it has one, its
- * studio-authored key. Which name a source uses depends on how that source was produced, not on the node — a canonical
+ * studio-authored key. Which name a source uses depends on how that source was produced, not on the node - a canonical
  * export writes GUID keys for every node, while a studio's own file writes semantic ones.
  * A key claimed by more than one node, or a node claimed by more than one key, is AMBIGUOUS: it is reported and left out
  * of the index entirely, so a caller refuses rather than picking a winner by hash order.
@@ -53,28 +53,50 @@ void BuildQuestNodeKeyIndex(
 FString ResolveQuestLevelToGuid(const FString& LevelName, const TMap<FString, FString>& GuidByKey);
 
 /**
- * True when a property's value(s) are Instanced UObjects — the shapes that must explode to child rows rather than
+ * True when a property's value(s) are Instanced UObjects - the shapes that must explode to child rows rather than
  * serialize as a dangling object path. Recurses array inners, map values and struct fields, so container-wrapped instanced
  * data (e.g. TMap<FGameplayTag, FQuestRewardSet> wrapping an instanced array) classifies correctly.
  */
 bool IsQuestInstancedBearing(const FProperty* Prop);
 
 /**
+ * One child the instanced walk found. Two shapes, because two things are authored in place: a UObject subobject
+ * (a reward) and the contents of an FInstancedStruct (a generic reward's payload). Carried in one descriptor rather
+ * than walked twice, so a consumer cannot learn about one kind and silently ignore the other - which for the planner
+ * would read as "the source describes children this owner does not have" and report deletions.
+ */
+struct FQuestInstancedChild
+{
+	const UObject* Object = nullptr;             // set when the child is a subobject
+	const UScriptStruct* StructType = nullptr;   // set, with Memory, when the child is an FInstancedStruct's contents
+	const void* Memory = nullptr;
+
+	bool IsStruct() const { return StructType != nullptr; }
+
+	/** The reflection layout to resolve this child's property names against, whichever shape it is. */
+	const UStruct* Layout() const { return IsStruct() ? static_cast<const UStruct*>(StructType) : (Object ? Object->GetClass() : nullptr); }
+
+	/** Short type name for the type cell and for diagnostics - "class" for objects, "struct" for struct contents. */
+	FString TypeName() const { return IsStruct() ? StructType->GetName() : (Object ? Object->GetClass()->GetName() : FString()); }
+};
+
+/**
  * Visit every instanced child reachable from Prop, deriving the SAME key the writer emits for it. ONE level: a child's own
  * instanced properties are the caller's to descend, which is what lets the export and the planner do different things at
  * each level while agreeing exactly on names.
- * Both directions walk this — the export to emit a row per child, the planner to find the live child a row refers to.
+ * Both directions walk this - the export to emit a row per child, the planner to find the live child a row refers to.
  * A key derived two ways is a key that eventually disagrees, and a child addressed by a name nobody else uses is a child
  * that silently disappears.
+ * 
  * @param PathPrefix  the property path so far, relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards").
  */
 void ForEachQuestInstancedChild(
 	const FProperty* Prop,
-    const void* ValuePtr,
-    const FString& OwnerKey,
-    const FString& PathPrefix,
-    TFunctionRef<void(const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)> Visit,
-    int32 ArrayOrdinal = INDEX_NONE);
+	const void* ValuePtr,
+	const FString& OwnerKey,
+	const FString& PathPrefix,
+	TFunctionRef<void(const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)> Visit,
+	int32 ArrayOrdinal = INDEX_NONE);
 
 /** Wire-edge verb for a source pin category. Every edge is written output->input, and the verbs read true in that direction. */
 FString QuestEdgeVerb(FName PinCategory);
@@ -93,7 +115,7 @@ void CollectQuestWireEdges(const UQuestlineNodeBase* Node, const FQuestlineGraph
  * Which wire edges would a re-import add, and which would it remove? Both sides are canonicalized through the key index
  * first: live edges are always GUID-keyed, while a source's edges carry whatever keys that source uses, so comparing them
  * raw reports every unchanged edge as both an addition AND a removal.
- * 'contains' edges are ignored — an inner-graph membership is covered by the graph-level comparison, and an instanced
+ * 'contains' edges are ignored - an inner-graph membership is covered by the graph-level comparison, and an instanced
  * child by the child diff, so including them here would double-report.
  * An endpoint naming no known node passes through unresolved, which correctly makes an edge touching a to-be-created node
  * an addition rather than a match.

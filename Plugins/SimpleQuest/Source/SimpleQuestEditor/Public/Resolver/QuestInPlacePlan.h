@@ -121,6 +121,15 @@ struct FQuestInPlacePlan
 	 * alone" is not something a reviewer can act on when "there" is missing.
 	 */
 	FString DestinationAssetPath;
+	
+	/**
+	 * Fingerprint of the in-memory files this plan was built from. Zero for a plan read from a folder or a Data Table,
+	 * where the source is still there to be re-read and compared directly.
+	 *
+	 * Applying a memory-sourced plan requires handing back the same files. This is what makes that checkable: a caller
+	 * who passes a different map gets a refusal naming the mismatch, rather than an apply of data nobody reviewed.
+	 */
+	uint32 SourceFingerprint = 0;
 
 	TArray<FQuestNodePlanEntry> Entries;
 	TArray<FString> Warnings;

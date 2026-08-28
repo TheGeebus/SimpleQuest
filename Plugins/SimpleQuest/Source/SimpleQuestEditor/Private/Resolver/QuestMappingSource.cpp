@@ -8,6 +8,7 @@
 #include "Engine/DataTable.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestDataValueBuilder.h"
 #include "UObject/StructOnScope.h"
@@ -47,8 +48,17 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 		return Result;
 	}
 
+	TMap<FString, FString> Files;
+	FString GatherError;
+	if (!QuestDataFormatIO::ReadFilesFromFolder(SourceFolder, Format->FileExtension(), Files, GatherError))
+	{
+		Result.Error = FText::Format(LOCTEXT("Ungatherable", "Couldn't read source at '{0}': {1}"),
+			FText::FromString(SourceFolder), FText::FromString(GatherError));
+		return Result;
+	}
+
 	FQuestDataBundle Bundle;
-	if (!Format->ReadBundle(SourceFolder, Bundle))
+	if (!Format->ReadBundle(Files, Bundle))
 	{
 		Result.Error = FText::Format(LOCTEXT("Unreadable", "Couldn't read source at '{0}' as {1}."),
 			FText::FromString(SourceFolder), FText::FromString(Format->FormatName()));
@@ -75,7 +85,7 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 			if (WithinTable.Contains(ColName))
 			{
 				Result.bHasDuplicateColumns = true;
-				Result.Error = FText::Format(LOCTEXT("DupColumn", "Source table '{0}' has a duplicate column '{1}' — its data is ambiguous."),
+				Result.Error = FText::Format(LOCTEXT("DupColumn", "Source table '{0}' has a duplicate column '{1}' - its data is ambiguous."),
 					FText::FromString(TablePair.Key), FText::FromName(ColName));
 				return Result;   // refuse the whole source; a duplicate is a hard source-validity error
 			}
@@ -87,7 +97,7 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 	Result.Columns = Seen.Array();
 	Result.Columns.Sort(FNameLexicalLess());   // stable, alphabetical for the dropdown
 
-	// One agreed name is an answer. Several is not, and picking one would be a coin flip on TMap iteration order — so leave it
+	// One agreed name is an answer. Several is not, and picking one would be a coin flip on TMap iteration order - so leave it
 	// unset and say so. Unset shows up as nothing to choose, which is the truth, rather than an arbitrary name that looks decided.
 	if (KeyNames.Num() == 1)
 	{
@@ -100,7 +110,7 @@ FQuestSourceColumns EnumerateForeignFileColumns(const FString& FormatName, const
 		TArray<FString> AsText;
 		for (const FName& Name : Sorted) { AsText.Add(Name.ToString()); }
 		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("EnumerateForeignFileColumns: '%s' does not agree on its key column across "
-			"its tables (%s) — leaving it unset."), *SourceFolder, *FString::Join(AsText, TEXT(", ")));
+			"its tables (%s) - leaving it unset."), *SourceFolder, *FString::Join(AsText, TEXT(", ")));
 	}
 
 	Result.bReadable = true;
@@ -115,8 +125,12 @@ TArray<FString> EnumerateColumnDistinctValues(const FString& FormatName, const F
 	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
 	if (!Format) return Distinct;
 
+	TMap<FString, FString> Files;
+	FString GatherError;
+	if (!QuestDataFormatIO::ReadFilesFromFolder(SourceFolder, Format->FileExtension(), Files, GatherError)) return Distinct;
+
 	FQuestDataBundle Bundle;
-	if (!Format->ReadBundle(SourceFolder, Bundle)) return Distinct;
+	if (!Format->ReadBundle(Files, Bundle)) return Distinct;
 
 	// Collect distinct values of the column across every content table (same self-row exclusion as the column enumerator).
 	// First-seen order keeps the row list stable as the designer works; a Set guards the "seen" test without reordering.
@@ -128,7 +142,7 @@ TArray<FString> EnumerateColumnDistinctValues(const FString& FormatName, const F
 		for (const FQuestDataRow& Row : TablePair.Value.Rows)
 		{
 			const FString Value = Row.Get(ColKey);
-			if (Value.IsEmpty()) continue;               // an absent/empty discriminator cell names no kind — skip it
+			if (Value.IsEmpty()) continue;               // an absent/empty discriminator cell names no kind - skip it
 			if (Seen.Contains(Value)) continue;
 			Seen.Add(Value);
 			Distinct.Add(Value);
@@ -192,7 +206,7 @@ bool BuildDiscriminatorClassMap(const UQuestImportMapping& Mapping, TMap<FString
 			if (const FString* Prior = NormToRaw.Find(Norm))
 			{
 				OutErrors.Add(FText::Format(
-					LOCTEXT("NormKeyCollision", "Discriminator values '{0}' and '{1}' are the same after normalization — one would silently override the other."),
+					LOCTEXT("NormKeyCollision", "Discriminator values '{0}' and '{1}' are the same after normalization - one would silently override the other."),
 					FText::FromString(*Prior), FText::FromString(RawValue)));
 				continue;
 			}
@@ -230,7 +244,7 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 			if (B.AbsentPolicy == EQuestAbsentFieldPolicy::Require)
 			{
 				OutErrors.Add(FText::Format(
-					LOCTEXT("NoneRequire", "Binding to '{0}' is unmapped (None) but its policy is Require — a value can't be required from a column that isn't mapped."),
+					LOCTEXT("NoneRequire", "Binding to '{0}' is unmapped (None) but its policy is Require - a value can't be required from a column that isn't mapped."),
 					FText::FromName(B.TargetProperty)));
 			}
 			continue;
@@ -248,13 +262,13 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 		if (!ClassByNormValue.Contains(NormalizeDiscriminatorValue(ActualValue)))
 		{
 			OutErrors.Add(FText::Format(
-				LOCTEXT("UnmappedValue", "Discriminator value '{0}' appears in the source but has no class mapping — its rows would be dropped."),
+				LOCTEXT("UnmappedValue", "Discriminator value '{0}' appears in the source but has no class mapping - its rows would be dropped."),
 				FText::FromString(ActualValue)));
 		}
 	}
 
-	// Advisory (non-fatal): the discriminator column is also bound to a property. Legal — the value populates the property AND
-	// still routes the row (routing reads the column independently, so this can't corrupt anything) — but unusual enough to
+	// Advisory (non-fatal): the discriminator column is also bound to a property. Legal - the value populates the property AND
+	// still routes the row (routing reads the column independently, so this can't corrupt anything) - but unusual enough to
 	// flag, since an accidental bind to the type column is an easy mistake. Never changes the return.
 	if (OutWarnings && !Mapping.DiscriminatorColumn.IsNone())
 	{
@@ -263,7 +277,7 @@ bool ValidateMappingAgainstSource(const UQuestImportMapping& Mapping, const TArr
 			if (B.SourceColumn == Mapping.DiscriminatorColumn)
 			{
 				OutWarnings->Add(FText::Format(
-					LOCTEXT("DiscriminatorAlsoBound", "Column '{0}' is the discriminator and is also bound to property '{1}'. This is allowed (the value will both route the row and fill the property) — confirm you intend it."),
+					LOCTEXT("DiscriminatorAlsoBound", "Column '{0}' is the discriminator and is also bound to property '{1}'. This is allowed (the value will both route the row and fill the property) - confirm you intend it."),
 					FText::FromName(Mapping.DiscriminatorColumn), FText::FromName(B.TargetProperty)));
 			}
 		}
@@ -303,7 +317,7 @@ TUniquePtr<ISimpleQuestDataFormat> MakeQuestDataFormat(const TArray<FString>& Ar
 namespace
 {
 	// A DataTable maps onto the bundle convention exactly: the ROW NAME is Row.Key, each row-struct property is a value
-	// column. Unlike a text provider, this source has the FProperty in hand — so cells are built TYPED (Tag/Enum/Reference/
+	// column. Unlike a text provider, this source has the FProperty in hand - so cells are built TYPED (Tag/Enum/Reference/
 	// Array/StructLiteral) through the same builder the graph export uses, never degraded to strings.
 	void BuildDataTableContent(const UDataTable& Table, const UScriptStruct& RowStruct, FQuestDataTable& OutContent)
 	{
@@ -314,7 +328,7 @@ namespace
 			OutContent.Columns.Add(RowStruct.GetAuthoredNameForField(*It));
 		}
 
-		// A default-constructed row is the comparison basis, so a member sitting at its struct default emits Kind::Empty —
+		// A default-constructed row is the comparison basis, so a member sitting at its struct default emits Kind::Empty -
 		// the same "absent == at-default" contract an omitted TSV cell carries. FStructOnScope handles alignment,
 		// construction and teardown for us.
 		FStructOnScope DefaultRow(&RowStruct);
@@ -330,7 +344,7 @@ namespace
 				const void* ValuePtr   = It->ContainerPtrToValuePtr<void>(RowPair.Value);
 				const void* DefaultPtr = It->ContainerPtrToValuePtr<void>(DefaultRow.GetStructMemory());
 
-				// A DataTable row HAS a value for every field of its struct — absence is not expressible here at all. An
+				// A DataTable row HAS a value for every field of its struct - absence is not expressible here at all. An
 				// at-default field therefore yields an Empty cell that is still PRESENT: the source declared it and left it
 				// at its default. Dropping it would make a typed source look narrower than it is, and would erase exactly the
 				// distinction a re-import needs to tell "the author cleared this" from "the source never mentioned it".
@@ -341,7 +355,7 @@ namespace
 		}
 	}
 
-	// A DataTable carries no self-row table, but the routing core requires exactly one. Synthesize it from the ASSET NAME —
+	// A DataTable carries no self-row table, but the routing core requires exactly one. Synthesize it from the ASSET NAME -
 	// the natural analogue of the folder name a file source is read from. Sanitized so it is a valid tag segment / package
 	// name, matching what the export writes for a file round-trip.
 	void SynthesizeDataTableSelfRow(const UDataTable& Table, FQuestDataBundle& OutBundle)
@@ -359,7 +373,7 @@ namespace
 		Self.Rows.Add(MoveTemp(SelfRow));
 
 		OutBundle.TablesByType.Add(TEXT("questline_graph"), MoveTemp(Self));
-		OutBundle.bSelfRowSynthesized = true;   // this identity is the framework's, not the author's — consumers must not diff it
+		OutBundle.bSelfRowSynthesized = true;   // this identity is the framework's, not the author's - consumers must not diff it
 	}
 }
 
@@ -400,15 +414,23 @@ bool ReadEndpointBundle(const FQuestDataEndpoint& Endpoint, FQuestDataBundle& Ou
 			OutError = FString::Printf(TEXT("format '%s' is not registered"), *Endpoint.FormatName);
 			return false;
 		}
-		if (!Format->ReadBundle(Endpoint.Folder, OutBundle))
+		TMap<FString, FString> Files;
+		FString GatherError;
+		if (!QuestDataFormatIO::ReadFilesFromFolder(Endpoint.Folder, Format->FileExtension(), Files, GatherError))
 		{
-			OutError = FString::Printf(TEXT("could not read '%s' as %s"), *Endpoint.Folder, *Format->FormatName());
+			OutError = FString::Printf(TEXT("could not read '%s': %s"), *Endpoint.Folder, *GatherError);
+			return false;
+		}
+		if (!Format->ReadBundle(Files, OutBundle))
+		{
+			OutError = FString::Printf(TEXT("could not parse '%s' as %s (%d file(s))"),
+				*Endpoint.Folder, *Format->FormatName(), Files.Num());
 			return false;
 		}
 		return true;
 	}
 
-	// DataTable arm — no format, no file I/O; the row struct is the authority.
+	// DataTable arm - no format, no file I/O; the row struct is the authority.
 	const UDataTable* Table = Endpoint.Table.LoadSynchronous();
 	if (!Table)
 	{

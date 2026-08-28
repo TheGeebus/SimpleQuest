@@ -5,6 +5,255 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.0] — 2026-08-27 — Composition and Control
+
+Three things that were out of reach before: pausing quest advancement while
+something plays out, driving the data resolver without a console command, and
+composing rewards - defining a bundle once, including one bundle inside another,
+and transforming what a reward grants without writing a new class for it.
+
+### Added
+
+- **The data resolver is drivable from your own code.** Exporting a questline,
+  importing one, planning an in-place import and applying it are all on
+  `ISimpleQuestEditorModule` now. Previously the only entry points were console
+  commands, so an external tool could deserialize a plan but never produce one.
+  Driving the resolver meant issuing a command and reading the log to find out
+  whether it had worked. Everything here returns what happened instead of
+  merely narrating it in the log.
+
+  - **Nothing here touches disk.** Export hands back each file's name paired
+    with its text - `edges.tsv` and the TSV itself - and import takes the same
+    shape. These used to read and write a folder, so a tool that only wanted the
+    data still had to stage it somewhere and clean up afterward. Now it can
+    export a questline, change a value in memory, and apply it with no temporary
+    directory ever existing. If you *do* want folders, the helpers for that moved
+    to `Resolver/QuestDataFormatIO.h`.
+
+  - ***Apply* refuses data the plan was not built from.** A plan carries a
+    fingerprint of the files it was built from, and applying different ones is
+    refused rather than performed. In-memory data has no source to re-read, so the
+    caller passing the same files twice is the only thing making the second run
+    match the first - this makes that checkable instead of assumed.
+
+  - ***Import* creates; it will not overwrite.** `ImportQuestline` builds a new
+    questline asset and refuses if one already exists at that path. Updating an
+    existing questline is what plan and apply are for.
+
+- **Quest advancement can be held and released.** A questline normally advances
+  the instant a step completes - the next step activates, prerequisites resolve,
+  and anything waiting on that completion proceeds. That leaves nowhere to put an
+  outro line, a reward popup, or a beat of silence, because the gap between
+  "finished" and "what's next" is zero. `Hold Quest Advancement` makes that gap
+  addressable: place a hold when a step completes, play whatever should play, then
+  hand the handle it returned to `Release Quest Advancement` when you're done.
+  Releasing a handle twice is harmless. `Is Quest Advancement Held` and
+  `Get Active Hold Reasons` answer what is currently pausing what.
+
+  - **Place the hold no later than the completion event itself**, and never in
+  anything that event schedules. Earlier is fine; later is too late. The hold
+  has to exist before the cascade activates the next node, and both happen in
+  the same synchronous call: a Delay, a timer or an async callback all return
+  control first, and by then the next node is already live. The usual shape is
+  hold on the completion event, start the audio, release in the audio's finished
+  callback - the hold is what makes that second yield safe. In a networked game
+  this is **server-side**: a client sees a completion only after the server has
+  already advanced past it, so client-driven pacing has to request the hold
+  ahead of the transition rather than reacting to it.
+
+  - A hold names **the node whose downstream flow pauses**, not a node to freeze.
+  Holding a step doesn't stop the player finishing that step - it stops what comes
+  next. So game code reacting to a completion holds the thing that just finished,
+  without needing to know what comes next or being broken when someone rewires
+  the graph. Holding a container holds everything inside it, and holding
+  a questline's own tag holds the questline.
+
+  - Holds compose: an audio hold and a cutscene hold don't cancel each other, and
+  advancement resumes when the last one clears. Each carries a Reason, which the
+  log and the debug overlay name - a pause nobody releases is otherwise
+  impossible to diagnose. Holds are session state, never saved: capturing a save
+  releases them first, so a save taken mid-pause restores a running game rather
+  than a stuck one.
+
+  - **A hold nobody releases eventually says so.** One active longer than
+  **Abandoned Hold Warning** - Project Settings, Plugins, Simple Quest,
+  Diagnostics; five minutes by default, zero to disable - logs a warning naming
+  its Reason, once rather than repeatedly. It never releases
+  anything: a HUD widget torn down while still holding would otherwise stall a
+  questline silently and forever, and auto-releasing would hide that behind a
+  game that mostly works. Measured in world time, so a paused game doesn't
+  accrue toward it.
+
+  - Prerequisites treat a held quest as **unreadable rather than unmet**, which is
+  the distinction that makes `OR` behave. A step requiring "A or B" with A held
+  and B genuinely satisfied still proceeds, because B never needed anything from
+  A. A step requiring A alone waits. Quests blocked this way report
+  `HeldForAdvancement` rather than `PrereqUnmet`, because the two mean opposite
+  things to a player - one says go do something, the other says it's done, wait.
+
+  - Holds pause advancement; they don't refuse the player. Preventing a quest from
+  being started or progressed at all is still `Set Quest Blocked`.
+
+  - Thanks to **Buckley603**, who provided the prototype this was built from, and
+  who also demonstrated the console-command shortfall that the resolver work above
+  addresses.
+
+- **Reward sets can be defined once and referenced from many places.** A Reward
+  Set data asset holds a reward composition - the same inline-configured rewards
+  a Grant Rewards node holds - and both a Grant Rewards node and a questline's
+  per-outcome rewards can reference one. Previously the only way to grant the
+  same bundle in ten quests was to author it ten times, and changing it meant
+  editing ten graphs.
+
+  - **A set can include other sets.** Their contents flatten depth-first, ahead
+  of the including set's own rewards, so a chapter bundle pulls in a shared base
+  bundle instead of re-authoring it. A set that includes itself, directly or
+  through a chain, is refused at compile with a warning naming the chain -
+  while including the same set from two different branches is legal and grants
+  it twice, because that is a choice rather than a mistake.
+
+  - **Set contents come first, then the node's own rewards**, in the order
+  listed - grant sequence is meaning, so it is fixed rather than incidental. A
+  set is resolved when you compile, so the runtime never loads it, and **editing
+  a shared set means recompiling the questlines that use it** - already true of
+  every other authored change.
+
+  - **A questline's data export names the set rather than describing it.** The
+  rewards inside a referenced set are edited in the asset, in one place; rewards
+  left inline on a node still export as they always have, so a node granting a
+  shared bundle plus a unique item still carries the unique one in its data.
+
+  - Thanks to **AproposRobin**, whose compositional-rewards proposal opened the
+  design conversation this came out of - along with the reward modifiers and the
+  Quest asset category below.
+
+- **Rewards can be transformed without writing a new reward class.** A reward
+  decides *what* to grant; a **modifier** changes it on the way out - scale by
+  level, cap at a maximum, redirect the recipient, or drop the grant unless a
+  condition holds. Modifiers are an instanced list on the reward itself, so a
+  designer adds one to a single placement without touching code.
+
+  - **Scaled loot is authorable now, and wasn't before.** A loot table computes
+  its amounts internally, per rolled row, so there was no field to reach -
+  scaling loot meant writing a fused class for it. A modifier applies to every
+  grant a reward produces, so one modifier works on XP, currency, loot, and
+  anything you write yourself.
+
+  - **They apply in the order you list them**, stated rather than incidental,
+  because scale-then-clamp and clamp-then-scale are different numbers. The
+  second order is the one that surprises people: a cap of 100 followed by a
+  doubling grants 200, because the cap was applied to a number that had not
+  been scaled yet. Both are legitimate, so put the cap last if you mean it as a
+  ceiling.
+
+  - **They change what a reward advertises, not just what it grants.** A modifier
+  runs on the "do this, get this" preview too, so a capped or scaled reward shows
+  the number a player will actually receive rather than the number before the
+  transform. A modifier can also hide a preview outright, which is what a
+  drop-unless-condition one should do when its condition already fails - a
+  promise that will not be kept is worse than no promise.
+
+  - **A modifier declares the payload it operates on, and refuses visibly.**
+  Clamping an amount is meaningful; clamping a "start the cutscene" payload is
+  not, and a modifier that quietly did nothing would look exactly like one that
+  worked. A mismatch names both types in the log and leaves the grant untouched.
+
+  - **Blueprint-authorable, like rewards.** Subclass Quest Reward Amount
+  Modifier, override Modify Amount, return a number - that is an entire
+  modifier. Clamp Amount ships as a reference implementation.
+
+  - **Amount Reward and Scale By Recipient replace Scaled Amount Reward**, which
+  is now deprecated. That class fused a source with a transform, so it could
+  only ever scale its own fixed amount - scaling a loot roll would have needed a
+  second class nobody had written. The pair grants the same amounts and composes
+  with anything: scale a loot table, or scale and then clamp, neither of which
+  the fused class could do. **Existing ones keep working and warn once per node
+  at compile time; the class is removed in 0.9.** One deliberate difference -
+  where the old class advertised "0" when a scale rounded a reward away, the
+  pair hides the advertisement instead of promising nothing.
+
+- **SimpleQuest's assets have a browser category of their own.** Reward Set,
+  Quest Loot Table, Quest Display Data, Quest Objective Config, Quest Import
+  Mapping and Questline Graph now file under **Quest** instead of being spread
+  across Gameplay and Miscellaneous, so create menus and filters find them in
+  one place, colored by what each one is - a data asset reads as a data asset, a
+  data table as a data table. The Questline Graph moved out of Gameplay to join
+  them, which is worth knowing if you had muscle memory for where it lived.
+
+- **A contribution policy.** `CONTRIBUTING.md` covers what's useful to send, how
+  a contribution falls under the licensing terms, and the `Signed-off-by` line
+  the project uses. It's a guideline rather than a contract.
+
+### Changed
+
+- **A format provider is handed files, not a folder.** `WriteBundle` used to
+  receive a directory path and write into it; it now fills a
+  `TMap<FString, FString>` of file name to file contents, and `ReadBundle` takes
+  that map instead of scanning a directory. **This is a breaking change if you
+  wrote a custom provider**, though a mechanical one - wherever the body built a
+  path and wrote a file, it now adds an entry to the map. Serializing a bundle
+  and putting bytes on disk became separate decisions, and a provider only makes
+  the first; a caller that wants the second uses `WriteFilesToFolder` or
+  `ReadFilesFromFolder` from `Resolver/QuestDataFormatIO.h`. Every in-tree caller
+  does, so folder behavior is unchanged - it just is not the only option any
+  more. The two shipped providers produce byte-identical output to before.
+
+- **`FQuestlineGraphCompiler::HarvestQuestlineRewards` is no longer static**, so
+  it can resolve reward-set references and report a failed load as a compile
+  warning. Subclassing the compiler through `RegisterCompilerFactory` is
+  unaffected.
+
+- **Instanced struct properties export as their own rows rather than one opaque
+  cell.** A Generic Reward's payload used to serialize as a single `(Amount=42)`
+  literal inside the reward's row - readable, but not editable, because a
+  spreadsheet cannot reach a value buried in a blob. It now gets a row of its
+  own with a column per field, so reward amounts are cells you can retune across
+  a whole corpus at once. **This changes the export format**, so files exported
+  before this release describe payloads the old way.
+
+  - **They still import, and re-exporting upgrades them.** The old form is read
+  exactly as it always was, and the new form is written on the way out. So
+  importing an old bundle and exporting it again is the entire migration - there
+  is nothing to run and no flag to set.
+
+- **A Quest Loot Table is a Data Table.** It was a data asset holding an array
+  of rows, so loot could only be edited one row at a time in the details panel -
+  no row editor, no CSV or JSON round-trip, and nothing the data resolver could
+  see. Creating one now gives you a real table, with all three.
+
+  - **Nothing breaks and nothing has to move yet.** The old data asset still
+  loads and existing questlines keep working untouched. A Loot Table Reward now
+  has two fields: **Loot Table**, which takes the new asset, and **Loot Table
+  (legacy)**, holding whatever it pointed at before. The new one wins whenever
+  it is set, so assigning it is the entire migration - there is no need to clear
+  the old field first.
+
+  - **Compiling tells you what is left.** A questline whose rewards still point
+  at the old data asset warns on every compile, naming the node and the asset. A
+  reward carrying both warns differently, because the legacy reference is then
+  ignored rather than used.
+
+  - **The data asset form is removed in 0.9** - the `UQuestLootTable` class, the
+  legacy field, and the fallback that reads it. Re-author your rows as a Loot
+  Table before then; the compile warnings are the checklist.
+
+### Fixes
+
+- **Compile warnings about questline-level rewards can be acted on.** Rewards
+  keyed to a questline's outcomes belong to the asset rather than to any node, so
+  their warnings had nothing to click and named only the outcome - which during a
+  Compile All could mean any questline in the project. They now name the
+  questline and open it.
+
+- **Generated tag and display data drops questlines that no longer exist.** The
+  files under your project's `Config/SimpleQuest` kept an entry for every
+  questline that had ever compiled. Deleting an asset in the editor removed its
+  entry, but deleting it any other way - a branch switch, a file removed by hand,
+  a tool cleaning up - left it there permanently. Compile All now reconciles both
+  files against the questlines that actually exist.
+
+---
+
 ## [0.7.2] — 2026-08-21 — UE 5.8 Support and Honest Surfaces
 
 SimpleQuest now runs on Unreal Engine 5.8 alongside 5.6 and 5.7.

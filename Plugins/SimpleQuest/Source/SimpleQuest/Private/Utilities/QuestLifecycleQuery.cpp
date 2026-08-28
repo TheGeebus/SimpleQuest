@@ -24,6 +24,7 @@ namespace FQuestLifecycleQuery
 	bool IsPendingGiver (const UWorldStateSubsystem* WS, FGameplayTag QuestTag) { return ProbeLeaf(WS, QuestTag, EQuestStateLeaf::PendingGiver); }
 	bool IsDeactivated (const UWorldStateSubsystem* WS, FGameplayTag QuestTag) { return ProbeLeaf(WS, QuestTag, EQuestStateLeaf::Deactivated); }
 	bool IsBlocked (const UWorldStateSubsystem* WS, FGameplayTag QuestTag) { return ProbeLeaf(WS, QuestTag, EQuestStateLeaf::Blocked); }
+	bool IsHeld (const UWorldStateSubsystem* WS, FGameplayTag QuestTag) { return ProbeLeaf(WS, QuestTag, EQuestStateLeaf::Held); }
 
 	bool HasActiveLifecycle(const UWorldStateSubsystem* WS, FGameplayTag QuestTag)
 	{

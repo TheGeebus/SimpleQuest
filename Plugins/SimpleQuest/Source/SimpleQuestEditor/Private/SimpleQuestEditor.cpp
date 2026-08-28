@@ -64,12 +64,20 @@
 #include "Widgets/Notifications/SNotificationList.h"
 #include "WorkspaceMenuStructure.h"
 #include "WorkspaceMenuStructureModule.h"
+#include "AssetTypes/QuestAssetTypeActions.h"
 #include "DetailCustomizations/QuestImportMappingDetailsCustomization.h"
 #include "DetailCustomizations/QuestlineGraphRewardsDetailsCustomization.h"
+#include "Display/QuestDisplayData.h"
 #include "FactsPanel/FactsPanelRegistry.h"
 #include "K2Nodes/K2Node_ObserveQuestLifecycle.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
+#include "Quests/Types/QuestObjectiveConfig.h"
+#include "Resolver/QuestDataFormatIO.h"
+#include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportMapping.h"
+#include "Resolver/QuestImportOperations.h"
+#include "Rewards/QuestLootDataTable.h"
+#include "Rewards/RewardSetDataAsset.h"
 #include "Widgets/SQuestStateView.h"
 #include "Widgets/SStaleQuestTagsPanel.h"
 
@@ -185,8 +193,46 @@ class FQuestlineGraphNodeFactory : public FGraphPanelNodeFactory
 void FSimpleQuestEditor::StartupModule()
 {
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
-	QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>();
+
+	// One category for everything SimpleQuest adds, so a designer finds quest content in one place rather than
+	// hunting it out of Gameplay and Miscellaneous. Registered before any actions, since they carry the bit it returns.
+	const EAssetTypeCategories::Type QuestCategory = AssetTools.RegisterAdvancedAssetCategory(
+		FName(TEXT("SimpleQuest")), NSLOCTEXT("SimpleQuestEditor", "QuestAssetCategory", "SimpleQuest"));
+
+	QuestlineGraphAssetTypeActions = MakeShared<FQuestlineGraphAssetTypeActions>(QuestCategory);
 	AssetTools.RegisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
+
+	auto RegisterQuestAsset = [&AssetTools, this](UClass* Class, FText Name, FColor Color, uint32 Category)
+	{
+		const TSharedRef<IAssetTypeActions> Actions = MakeShared<FQuestAssetTypeActions>(Class, MoveTemp(Name), Color, Category);
+		AssetTools.RegisterAssetTypeActions(Actions);
+		QuestAssetTypeActions.Add(Actions);
+	};
+
+	// Colors follow what a type DERIVES from rather than a house palette, so each asset reads as what it is at a glance
+	// and the category carries the grouping. These are the engine's own values for UDataAsset and UDataTable - matching
+	// them agrees with what the browser would have shown anyway, minus our name and our category. Questline Graph keeps
+	// a color of its own because it is the one type here that is genuinely ours rather than a derivative.
+	constexpr FColor QuestDataAssetColor(201, 29, 85);
+	constexpr FColor QuestDataTableColor(62, 140, 35);
+
+	RegisterQuestAsset(URewardSetDataAsset::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "RewardSetAssetName", "Reward Set"), QuestDataAssetColor, QuestCategory);
+	// Its own actions class rather than the shared one, so double-click reaches the row editor; see the comment there.
+	// The deprecated data asset is deliberately absent: it still loads, but nothing should be able to create another.
+	{
+		const TSharedRef<IAssetTypeActions> LootActions = MakeShared<FQuestLootDataTableAssetTypeActions>(
+			UQuestLootDataTable::StaticClass(),
+			NSLOCTEXT("SimpleQuestEditor", "LootTableAssetName", "Quest Loot Table"), QuestDataTableColor, QuestCategory);
+		AssetTools.RegisterAssetTypeActions(LootActions);
+		QuestAssetTypeActions.Add(LootActions);
+	}
+	RegisterQuestAsset(UQuestDisplayData::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "DisplayDataAssetName", "Quest Display Data"), QuestDataAssetColor, QuestCategory);
+	RegisterQuestAsset(UQuestObjectiveConfig::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "ObjectiveConfigAssetName", "Quest Objective Config"), QuestDataAssetColor, QuestCategory);
+	RegisterQuestAsset(UQuestImportMapping::StaticClass(),
+		NSLOCTEXT("SimpleQuestEditor", "ImportMappingAssetName", "Quest Import Mapping"), QuestDataAssetColor, QuestCategory);
 
 	QuestlineGraphNodeFactory = MakeShared<FQuestlineGraphNodeFactory>();
 	FEdGraphUtilities::RegisterVisualNodeFactory(QuestlineGraphNodeFactory);
@@ -219,10 +265,10 @@ void FSimpleQuestEditor::StartupModule()
 #undef LOCTEXT_NAMESPACE
 
 	// The compiled questline tags aren't in the tag tree yet when the startup map deserializes (the authoritative
-	// registrar, RegisterTagsFromAssetRegistry, runs later on OnFilesLoaded) — so map/asset load emits a burst of
+	// registrar, RegisterTagsFromAssetRegistry, runs later on OnFilesLoaded) - so map/asset load emits a burst of
 	// "Invalid GameplayTag SimpleQuest.Questline.*" warnings that LOOK broken but aren't: the tags register moments
 	// later and everything resolves; nothing consumes them in the interim. Silence LogGameplayTags for the startup
-	// window ONLY, restored in RegisterTagsFromAssetRegistry — so genuine stale-tag warnings still surface afterward.
+	// window ONLY, restored in RegisterTagsFromAssetRegistry - so genuine stale-tag warnings still surface afterward.
 	// (Root cause is an unresolved config-load quirk on the compiled-tags .ini; see notes blocker A. Time-boxed, not
 	// a blanket config mute, which would also hide real stale-tag issues.)
 	LogGameplayTags.SetVerbosity(ELogVerbosity::Error);
@@ -231,7 +277,7 @@ void FSimpleQuestEditor::StartupModule()
 	// Register the compiled-tags search path after native-tag loading completes (AddTagIniSearchPath must run
 	// post-DoneAddingNativeTags, else HandleGameplayTagTreeChanged no-ops but still marks the path added, and the
 	// DoneAddingNativeTags self-check then skips the finalizing rebuild). NOTE: this .ini channel does NOT currently
-	// materialize tags into the queryable tree at startup — LoadConfig reads zero rows from the compiled .ini for a
+	// materialize tags into the queryable tree at startup - LoadConfig reads zero rows from the compiled .ini for a
 	// reason not yet root-caused (see notes blocker A). The authoritative registrar is RegisterTagsFromAssetRegistry
 	// -> RebuildNativeTags (on OnFilesLoaded); the stale tag warning flood on startup from this gap is suppressed below.
 	const FString CompiledTagsDir = FPaths::GetPath(GetCompiledTagsIniPath());
@@ -247,7 +293,7 @@ void FSimpleQuestEditor::StartupModule()
 	FAssetRegistryModule& ARModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AR = ARModule.Get();
 	
-	// Always subscribe — OnFilesLoaded fires when async loading finishes, whenever that is. If the AR is already done loading
+	// Always subscribe - OnFilesLoaded fires when async loading finishes, whenever that is. If the AR is already done loading
 	// when we subscribe, the delegate will not fire, so we also call immediately as a fallback for that case.
 	AR.OnFilesLoaded().AddRaw(this, &FSimpleQuestEditor::RegisterTagsFromAssetRegistry);
 	AR.OnAssetRemoved().AddRaw(this, &FSimpleQuestEditor::OnAssetRemoved);
@@ -256,7 +302,7 @@ void FSimpleQuestEditor::StartupModule()
 		RegisterTagsFromAssetRegistry();
 	}
 
-	// On UBlueprint load, marks the asset dirty if any FGameplayTag UPROPERTY's value matches a redirect target — a heuristic for
+	// On UBlueprint load, marks the asset dirty if any FGameplayTag UPROPERTY's value matches a redirect target - a heuristic for
 	// "PostSerialize transparently healed this field during load." Save All then writes the healed name to disk, so the asset stops
 	// depending on the redirect entry to resolve correctly on future loads.
 	OnAssetLoadedHandle = FCoreUObjectDelegates::OnAssetLoaded.AddRaw(this, &FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad);
@@ -264,7 +310,7 @@ void FSimpleQuestEditor::StartupModule()
 	// When changing the filter categories for a tag picker, walks all open blueprints and rebuilds their tag picker trees immediately
 	PickerCategoriesChangedHandle = USimpleQuestSettings::OnPickerCategoriesChanged.AddRaw(this, &FSimpleQuestEditor::HandlePickerCategoriesChanged);
 	
-	// Blueprint compile check requires a fully initialized editor — keep in delegate.
+	// Blueprint compile check requires a fully initialized editor - keep in delegate.
 	FEditorDelegates::OnEditorInitialized.AddLambda([this](double)
 	{
 		const USimpleQuestSettings* Settings = GetDefault<USimpleQuestSettings>();
@@ -284,7 +330,7 @@ void FSimpleQuestEditor::StartupModule()
 		}
 	});
 
-	// Register the built-in data-format providers through the public registry — the same interface a studio's provider
+	// Register the built-in data-format providers through the public registry - the same interface a studio's provider
 	// uses. TSV is the default; JSON is the second built-in. A studio adds its own from its module's StartupModule.
 	FQuestDataFormatRegistry::Get().RegisterFormat(TEXT("TSV"),
 		FQuestDataFormatFactoryDelegate::CreateLambda([]() -> TUniquePtr<ISimpleQuestDataFormat> { return MakeUnique<FTsvQuestDataFormat>(); }));
@@ -330,7 +376,7 @@ void FSimpleQuestEditor::StartupModule()
 
 	// Quest State view registration with the generic Facts Panel registry. Each SFactsPanel instance gets its own
 	// SQuestStateView via this factory, so per-panel filter / sort / active-tab / scroll state stays isolated across
-	// docked panels. Sibling registration to SWorldStateFactsView (registered by SimpleCoreEditor) — both views share
+	// docked panels. Sibling registration to SWorldStateFactsView (registered by SimpleCoreEditor) - both views share
 	// the same Facts Panel tab + dropdown.
 #define LOCTEXT_NAMESPACE "SimpleQuestEditor"
 	FFactsPanelRegistry::Get().RegisterView(
@@ -341,6 +387,193 @@ void FSimpleQuestEditor::StartupModule()
 			return SNew(SQuestStateView).PersistenceKey(PanelPersistenceKey);
 		});
 #undef LOCTEXT_NAMESPACE
+}
+
+namespace
+{
+	/**
+	 * Files -> validated bundle, through the same provider and the same validation the folder path uses. Shared by
+	 * plan and apply so the two cannot diverge: apply re-reads deliberately, and "what was reviewed is what executes"
+	 * only holds if both readings run identical code.
+	 */
+	bool ReadFilesIntoBundle(const TMap<FString, FString>& Files, const FString& FormatName, const UQuestImportMapping* Mapping, FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys, TArray<FString>& OutWarnings, FString& OutError)
+	{
+		if (Files.IsEmpty())
+		{
+			OutError = TEXT("no files given.");
+			return false;
+		}
+
+		const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
+		if (!Format)
+		{
+			OutError = FString::Printf(TEXT("format '%s' is not registered."), *FormatName);
+			return false;
+		}
+
+		if (!Format->ReadBundle(Files, OutBundle))
+		{
+			OutError = FString::Printf(TEXT("the %s provider could not parse the %d file(s) given."),
+				*Format->FormatName(), Files.Num());
+			return false;
+		}
+
+		return QuestImport_ValidateBundle(Mapping, OutBundle, OutNodeRowsByKey, OutAllRowKeys, OutWarnings, OutError);
+	}
+}
+
+bool FSimpleQuestEditor::ExportQuestline(UQuestlineGraph* Graph, const FString& FormatName,	const UQuestImportMapping* Mapping, TMap<FString, FString>& OutFiles, TArray<FString>& OutWarnings, FString& OutError)
+{
+	OutFiles.Reset();
+	OutWarnings.Reset();
+
+	// Endpoint stays default on purpose: BuildBundle reads only Graph and Mapping, and there is no endpoint here - the
+	// caller asked for files, not a destination. The format is resolved directly from the name for the same reason.
+	FQuestExportRequest Request;
+	Request.Graph = Graph;
+	Request.Mapping = Mapping;
+
+	FQuestDataBundle Bundle;
+	FQuestExportOutcome Outcome;
+	const bool bBuilt = QuestExport_BuildBundle(Request, Bundle, Outcome);
+
+	// Carried out even on failure - a reverse mapping can warn about rows it could not restate and then still refuse.
+	OutWarnings = MoveTemp(Outcome.Warnings);
+	if (!bBuilt)
+	{
+		OutError = Outcome.Error;
+		return false;
+	}
+
+	const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
+	if (!Format)
+	{
+		OutError = FString::Printf(TEXT("no data format named '%s' is registered. Registered: %s. Nothing exported."),
+			*FormatName, *FString::Join(FQuestDataFormatRegistry::Get().GetRegisteredNames(), TEXT(", ")));
+		return false;
+	}
+
+	if (!Format->WriteBundle(Bundle, OutFiles))
+	{
+		OutError = FString::Printf(TEXT("format '%s' could not serialize the questline. Nothing exported."), *FormatName);
+		OutFiles.Reset();
+		return false;
+	}
+
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ExportQuestline: '%s' produced %d file(s) via format '%s'."),
+		*Graph->GetPathName(), OutFiles.Num(), *FormatName);
+	return true;
+}
+
+bool FSimpleQuestEditor::ImportQuestline(const TMap<FString, FString>& Files, const FString& FormatName,
+	const FString& DestPackagePath, const UQuestImportMapping* Mapping, FString& OutAssetPath,
+	TArray<FString>& OutWarnings, FString& OutError)
+{
+	OutAssetPath.Reset();
+	OutWarnings.Reset();
+
+	FQuestDataBundle Bundle;
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	TSet<FString> AllRowKeys;
+	if (!ReadFilesIntoBundle(Files, FormatName, Mapping, Bundle, NodeRowsByKey, AllRowKeys, OutWarnings, OutError))
+	{
+		return false;
+	}
+
+	// EMPTY suffix, unlike the console's round-trip path: an adopter importing into a fresh project has no source asset
+	// to collide with, and would have no idea why they got 'QL_Chapter1_RT'.
+	FQuestCreateOutcome Created;
+	if (!QuestImport_CreateFromBundle(Bundle, NodeRowsByKey, DestPackagePath, FString(), Created, OutWarnings, OutError))
+	{
+		return false;
+	}
+
+	OutAssetPath = Created.AssetPath;
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("ImportQuestline: created '%s' - %d node(s), %d edge(s), compile %s."),
+		*Created.AssetPath, Created.NodeCount, Bundle.Edges.Num(), Created.bCompiled ? TEXT("OK") : TEXT("FAILED"));
+	return true;
+}
+
+bool FSimpleQuestEditor::PlanInPlaceImport(const TMap<FString, FString>& Files, const FString& FormatName, UQuestlineGraph* Target, const UQuestImportMapping* Mapping, bool bResetAbsent, FQuestInPlacePlan& OutPlan, FString& OutError)
+{
+	if (!Target)
+	{
+		OutError = TEXT("no target questline.");
+		return false;
+	}
+
+	FQuestDataBundle Bundle;
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	TSet<FString> AllRowKeys;
+	FQuestImportOutcome Outcome;
+
+	if (!ReadFilesIntoBundle(Files, FormatName, Mapping, Bundle, NodeRowsByKey, AllRowKeys, Outcome.Warnings, OutError))
+	{
+		return false;
+	}
+
+	const FQuestAbsentPolicyResolver Policies = QuestImport_ResolvePolicies(Mapping, bResetAbsent);
+	if (!QuestImport_RunInPlaceFromBundle(*Target, Bundle, NodeRowsByKey, AllRowKeys, Mapping, Policies,
+		/*bDeleteOrphans*/ false, /*bApply*/ false, Outcome))
+	{
+		OutError = Outcome.Error;
+		return false;
+	}
+
+	OutPlan = MoveTemp(Outcome.Plan);
+
+	// Stamped here and checked on apply. In-memory data has no source to re-read from, so the caller handing back the
+	// same files is the only thing making the second run match the first - this is what makes that checkable.
+	OutPlan.SourceFingerprint = QuestDataFormatIO::FingerprintFiles(Files);
+	return true;
+}
+
+bool FSimpleQuestEditor::ApplyInPlaceImport(const TMap<FString, FString>& Files, const FString& FormatName,
+	UQuestlineGraph* Target, const UQuestImportMapping* Mapping, bool bResetAbsent, bool bDeleteOrphans,
+	const FQuestInPlacePlan& ReviewedPlan, FQuestInPlacePlan& OutAppliedPlan, FString& OutError)
+{
+	if (!Target)
+	{
+		OutError = TEXT("no target questline.");
+		return false;
+	}
+
+	// REFUSE rather than apply data nobody reviewed. A zero fingerprint on the reviewed plan means the caller did not
+	// pass one, which is permitted - but it is them choosing to skip the check, not us forgetting to make it.
+	if (ReviewedPlan.SourceFingerprint != 0)
+	{
+		const uint32 Now = QuestDataFormatIO::FingerprintFiles(Files);
+		if (Now != ReviewedPlan.SourceFingerprint)
+		{
+			OutError = FString::Printf(
+				TEXT("the files given do not match the plan that was reviewed (0x%08X vs 0x%08X). Nothing applied. ")
+				TEXT("Re-plan against the current files and review that plan instead."),
+				Now, ReviewedPlan.SourceFingerprint);
+			return false;
+		}
+	}
+
+	FQuestDataBundle Bundle;
+	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
+	TSet<FString> AllRowKeys;
+	FQuestImportOutcome Outcome;
+
+	if (!ReadFilesIntoBundle(Files, FormatName, Mapping, Bundle, NodeRowsByKey, AllRowKeys, Outcome.Warnings, OutError))
+	{
+		return false;
+	}
+
+	const FQuestAbsentPolicyResolver Policies = QuestImport_ResolvePolicies(Mapping, bResetAbsent);
+	if (!QuestImport_RunInPlaceFromBundle(*Target, Bundle, NodeRowsByKey, AllRowKeys, Mapping, Policies,
+		bDeleteOrphans, /*bApply*/ true, Outcome))
+	{
+		OutError = Outcome.Error;
+		return false;
+	}
+
+	OutAppliedPlan = MoveTemp(Outcome.Plan);
+	OutAppliedPlan.SourceFingerprint = QuestDataFormatIO::FingerprintFiles(Files);
+	return true;
 }
 
 FQuestPIEDebugChannel* FSimpleQuestEditor::GetPIEDebugChannel()
@@ -369,14 +602,14 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 	TArray<FAssetData> QuestlineAssets;
 	AR.GetAssets(Filter, QuestlineAssets);
 
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: RegisterTagsFromAssetRegistry — found %d questline asset(s)"), QuestlineAssets.Num());
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: RegisterTagsFromAssetRegistry - found %d questline asset(s)"), QuestlineAssets.Num());
 
 	for (const FAssetData& AssetData : QuestlineAssets)
 	{
 		FAssetTagValueRef TagValue = AssetData.TagsAndValues.FindTag(TEXT("CompiledQuestTags"));
 		if (!TagValue.IsSet() || TagValue.GetValue().IsEmpty())
 		{
-			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s — no CompiledQuestTags metadata (not yet compiled+saved)"), *AssetData.AssetName.ToString());
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s - no CompiledQuestTags metadata (not yet compiled+saved)"), *AssetData.AssetName.ToString());
 			continue;
 		}
 
@@ -391,7 +624,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 		}
 
 		CompiledTagRegistry.Add(AssetData.PackageName.ToString(), MoveTemp(TagNames));
-		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s — loaded %d tag(s)"), *AssetData.AssetName.ToString(), TagStrings.Num());
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("  %s - loaded %d tag(s)"), *AssetData.AssetName.ToString(), TagStrings.Num());
 	}
 	
 	// The INI is the authoritative compiled state. Only generate it from AR metadata when it doesn't already exist (first
@@ -404,7 +637,7 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 	}
 	RebuildNativeTags();
 
-	// Tags are now registered — restore normal gameplay-tag logging (fires on OnFilesLoaded, after the startup map's
+	// Tags are now registered - restore normal gameplay-tag logging (fires on OnFilesLoaded, after the startup map's
 	// benign Invalid-tag burst). Real stale-tag warnings surface normally for the rest of the session. See StartupModule.
 	LogGameplayTags.SetVerbosity(ELogVerbosity::All);
 	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
@@ -418,7 +651,7 @@ void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)
 	TArray<FName> RemovedTags;
 	if (CompiledTagRegistry.RemoveAndCopyValue(RemovedPath, RemovedTags))
 	{
-		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved — removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::OnAssetRemoved - removed %s from tag registry, rewriting INI"), *AssetData.AssetName.ToString());
 		WriteCompiledTagsIni();
 		// Surgical: unregister only this graph's now-orphaned tags. RemoveAndCopyValue already dropped it from the
 		// registry, so the "still claimed by another" check sees the correct remaining set.
@@ -482,7 +715,12 @@ void FSimpleQuestEditor::ShutdownModule()
 	{
 		IAssetTools& AssetTools = FModuleManager::GetModuleChecked<FAssetToolsModule>("AssetTools").Get();
 		AssetTools.UnregisterAssetTypeActions(QuestlineGraphAssetTypeActions.ToSharedRef());
+		for (const TSharedRef<IAssetTypeActions>& Actions : QuestAssetTypeActions)
+		{
+			AssetTools.UnregisterAssetTypeActions(Actions);
+		}
 	}
+	QuestAssetTypeActions.Empty();
 	
 	FEdGraphUtilities::UnregisterVisualNodeFactory(QuestlineGraphNodeFactory);
 	QuestlineGraphNodeFactory.Reset();
@@ -536,7 +774,7 @@ void FSimpleQuestEditor::RegisterCompiledTags(const FString& GraphPath, const TA
 	}
 	const bool bHasStaleTags = StaleNames.Num() > 0;
 
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags — %s (%d tag(s)%s%s)"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RegisterCompiledTags - %s (%d tag(s)%s%s)"),
 		*GraphPath, TagNames.Num(),
 		bHasStaleTags ? TEXT(", stale tags cleaned") : TEXT(""),
 		bBatchActive ? TEXT(", batched") : TEXT(""));
@@ -582,10 +820,14 @@ void FSimpleQuestEditor::EndCompileBatch()
 	WriteCompiledTagsIni();
 	FlushCompiledDisplayIni();
 
+	// After both writes, before the tree work below - the reconcile feeds orphaned names into BatchStaleNames so the
+	// existing three-case rebuild handles them, rather than triggering a second rebuild of its own.
+	ReconcileGeneratedDataAgainstAssets();
+
 	// Tree rebuild path. Three cases, cheapest-first:
 	//   - Stale tags removed -> full reset+refresh (must PRUNE the removed tags from the tree).
 	//   - New tags added (no stale) -> ConstructGameplayTagTree to fold the incrementally-added natives into the tree.
-	//   - NOTHING changed (no new, no stale — e.g. a re-import/recompile of already-registered content) -> SKIP the
+	//   - NOTHING changed (no new, no stale - e.g. a re-import/recompile of already-registered content) -> SKIP the
 	//     tree rebuild entirely. The tree already contains exactly these tags; rebuilding pure redundant work.
 	//     This is the common case for the round-trip harness + any recompile of unchanged content.
 	if (BatchStaleNames.Num() > 0)
@@ -642,8 +884,8 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 	TMap<FName, FName> AllRenames;
 
 	// Single batch covers all per-graph compiles + the one coalesced WriteGameplayTagRedirects call. Native-tag registrations
-	// queued by RegisterCompiledTags during each Compile() flush in EndCompileBatch's RebuildNativeTags — fired AFTER the
-	// redirect write below — so rebuilt tags register under the new redirect map, not the pre-rename one. ON_SCOPE_EXIT covers
+	// queued by RegisterCompiledTags during each Compile() flush in EndCompileBatch's RebuildNativeTags - fired AFTER the
+	// redirect write below - so rebuilt tags register under the new redirect map, not the pre-rename one. ON_SCOPE_EXIT covers
 	// early-return / SlowTask cancel paths.
 	{
 		BeginCompileBatch();
@@ -661,7 +903,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 			TUniquePtr<FQuestlineGraphCompiler> Compiler = CreateCompiler();
 			const bool bSuccess = Compiler->Compile(Graph);
 
-			// Capture rename intent regardless of compile success. Renames are detected via the GUID bridge — a
+			// Capture rename intent regardless of compile success. Renames are detected via the GUID bridge - a
 			// structural property of the graph that's valid whether or not unrelated nodes failed validation in
 			// the same compile. Gating behind success silently drops the rename when ANY error fires elsewhere
 			// in the graph: RegisterCompiledTags still registers the new tag (so the picker updates), but the
@@ -727,7 +969,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 		}
 	}
 
-	// Swap helpers run AFTER the batch closes — the tag tree reflects the new redirects and the new canonical names are registered
+	// Swap helpers run AFTER the batch closes - the tag tree reflects the new redirects and the new canonical names are registered
 	// as themselves, so RequestGameplayTag lookups inside the helpers return valid tags rather than silently clearing adopter data.
 	if (AllRenames.Num() > 0)
 	{
@@ -739,7 +981,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     // Summary notification
     if (TotalErrors > 0 || TotalWarnings > 0)
     {
-        // Clickable toast — opens the MessageLog with all per-graph pages
+        // Clickable toast - opens the MessageLog with all per-graph pages
         CompilerLog.Notify(FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Issues", "Compiled {0} questline(s): {1} error(s), {2} warning(s)"),
             FText::AsNumber(SuccessCount + FailCount),
             FText::AsNumber(TotalErrors),
@@ -747,7 +989,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
     }
     else
     {
-        // Clean run — simple success toast
+        // Clean run - simple success toast
         const FText Summary = FText::Format(NSLOCTEXT("SimpleQuestEditor", "CompileAll_Summary", "Compiled {0} questline(s) successfully"), FText::AsNumber(SuccessCount + FailCount));
         FNotificationInfo Info(Summary);
         Info.ExpireDuration = 5.f;
@@ -768,7 +1010,7 @@ void FSimpleQuestEditor::CompileAllQuestlineGraphs()
 namespace
 {
     /** Walks an asset's editor graph (recursive through Quest inner graphs) and collects every LinkedGraph target
-     it finds on LinkedQuestline nodes. Reads in-memory authoring state — current, not last-saved. */
+     it finds on LinkedQuestline nodes. Reads in-memory authoring state - current, not last-saved. */
     static void CollectLinkedQuestlineTargets(UQuestlineGraph* Asset, TSet<UQuestlineGraph*>& OutTargets)
     {
         if (!Asset || !Asset->QuestlineEdGraph) return;
@@ -814,7 +1056,7 @@ void FSimpleQuestEditor::CollectLinkedNeighborhood(UQuestlineGraph* Primary, TAr
     AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
 
     // Forward-ref index: source asset → set of assets it LinkedQuestlines into (from in-memory authoring).
-    // O(total assets × nodes per asset) — matches the cost profile of CollectActivationGroupTopology.
+    // O(total assets × nodes per asset) - matches the cost profile of CollectActivationGroupTopology.
     TMap<UQuestlineGraph*, TSet<UQuestlineGraph*>> ForwardRefs;
     for (const FAssetData& Data : QuestlineAssets)
     {
@@ -947,7 +1189,7 @@ void FSimpleQuestEditor::MigrateLegacyTagsIni()
 		{
 			IFileManager::Get().Delete(*LegacyPath);
 			UE_LOG(LogSimpleQuestCompiler, Display,
-				TEXT("MigrateLegacyTagsIni — deleted legacy INI at '%s'. Tags now managed via plugin Config/Tags/."),
+				TEXT("MigrateLegacyTagsIni - deleted legacy INI at '%s'. Tags now managed via plugin Config/Tags/."),
 				*LegacyPath);
 		}
 	}
@@ -1016,18 +1258,18 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
 
 	if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
     {
-        UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
+        UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
     }
     else
     {
-        UE_LOG(LogSimpleQuestCompiler, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni — write FAILED for: %s"), *IniPath);
+        UE_LOG(LogSimpleQuestCompiler, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - write FAILED for: %s"), *IniPath);
     }
 }
 
 
 FString FSimpleQuestEditor::GetCompiledDisplayIniPath()
 {
-	// Same project-local home as the compiled-tags ini (see GetCompiledTagsIniPath) — generated, per-project data
+	// Same project-local home as the compiled-tags ini (see GetCompiledTagsIniPath) - generated, per-project data
 	// lives with the consuming project, not the plugin folder, so an engine-installed plugin stays writable/isolated.
 	return FPaths::ConvertRelativePathToFull(FPaths::ProjectConfigDir() / TEXT("SimpleQuest/SimpleQuestCompiledDisplay.ini"));
 }
@@ -1048,7 +1290,7 @@ void FSimpleQuestEditor::FlushCompiledDisplayIni()
 	FFileHelper::LoadFileToString(Existing, *IniPath);                       // one read
 	TMap<FString, TArray<FString>> Sections = ParseDisplaySections(Existing);
 
-	// Apply only the sections this batch touched — replace if it has records, drop it if the graph lost all display data.
+	// Apply only the sections this batch touched - replace if it has records, drop it if the graph lost all display data.
 	for (TPair<FString, TArray<FString>>& Pending : PendingDisplaySections)
 	{
 		if (Pending.Value.Num() > 0) { Sections.FindOrAdd(Pending.Key) = MoveTemp(Pending.Value); }
@@ -1056,7 +1298,7 @@ void FSimpleQuestEditor::FlushCompiledDisplayIni()
 	}
 
 	WriteSectionsToDisk(IniPath, Sections);                                  // one write
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FlushCompiledDisplayIni — %d section(s) coalesced → %s"), PendingDisplaySections.Num(), *IniPath);
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FlushCompiledDisplayIni - %d section(s) coalesced → %s"), PendingDisplaySections.Num(), *IniPath);
 	PendingDisplaySections.Empty();
 }
 
@@ -1067,6 +1309,76 @@ void FSimpleQuestEditor::RemoveCompiledDisplaySection(const FString& EffectiveID
 	if (!FFileHelper::LoadFileToString(Existing, *IniPath)) return;
 	TMap<FString, TArray<FString>> Sections = ParseDisplaySections(Existing);
 	if (Sections.Remove(EffectiveID) > 0) { WriteSectionsToDisk(IniPath, Sections); }
+}
+
+void FSimpleQuestEditor::ReconcileGeneratedDataAgainstAssets()
+{
+	IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+	// *** REFUSE RATHER THAN GUESS. *** A registry still scanning reports most questlines as nonexistent, and this
+	// would then cheerfully delete their generated data. Skipping leaves a stale entry until the next compile; getting
+	// it wrong costs display names that only a recompile of every questline can rebuild.
+	if (AssetRegistry.IsLoadingAssets())
+	{
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("ReconcileGeneratedData - asset registry still scanning, skipped."));
+		return;
+	}
+
+	TArray<FAssetData> Questlines;
+	AssetRegistry.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), Questlines, /*bSearchSubClasses*/ true);
+
+	TSet<FString> LiveEffectiveIDs;
+	TSet<FString> LivePackagePaths;
+	for (const FAssetData& Asset : Questlines)
+	{
+		LivePackagePaths.Add(Asset.PackageName.ToString());
+		const FString EffectiveID = Asset.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
+		if (!EffectiveID.IsEmpty()) LiveEffectiveIDs.Add(EffectiveID);
+	}
+
+	// DISPLAY DATA. FlushCompiledDisplayIni deliberately touches only the sections a batch compiled, so that compiling
+	// one questline cannot erase another's - which leaves nothing to remove a section whose asset is gone. This is it.
+	const FString IniPath = GetCompiledDisplayIniPath();
+	FString Existing;
+	if (FFileHelper::LoadFileToString(Existing, *IniPath))
+	{
+		TMap<FString, TArray<FString>> Sections = ParseDisplaySections(Existing);
+		TArray<FString> Orphans;
+		for (const TPair<FString, TArray<FString>>& Section : Sections)
+		{
+			if (!LiveEffectiveIDs.Contains(Section.Key)) Orphans.Add(Section.Key);
+		}
+		if (Orphans.Num() > 0)
+		{
+			for (const FString& Key : Orphans) Sections.Remove(Key);
+			WriteSectionsToDisk(IniPath, Sections);
+			UE_LOG(LogSimpleQuestCompiler, Display, TEXT("ReconcileGeneratedData - dropped %d display section(s) with no questline: %s"),
+				Orphans.Num(), *FString::Join(Orphans, TEXT(", ")));
+		}
+	}
+
+	// TAG REGISTRY. The same leak, one file over: OnAssetRemoved prunes this by package path, and an out-of-editor
+	// deletion never calls it. Orphaned names go to BatchStaleNames rather than straight to RemoveNativeTagsForGraph,
+	// so the caller's rebuild logic sees them alongside the batch's own stale names and rebuilds the tree once.
+	TArray<FString> DeadPaths;
+	for (const TPair<FString, TArray<FName>>& Pair : CompiledTagRegistry)
+	{
+		if (!LivePackagePaths.Contains(Pair.Key)) DeadPaths.Add(Pair.Key);
+	}
+	if (DeadPaths.Num() > 0)
+	{
+		for (const FString& Path : DeadPaths)
+		{
+			TArray<FName> Removed;
+			if (CompiledTagRegistry.RemoveAndCopyValue(Path, Removed))
+			{
+				for (const FName& Name : Removed) BatchStaleNames.Add(Name);
+			}
+		}
+		WriteCompiledTagsIni();
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("ReconcileGeneratedData - dropped %d tag registry entr%s with no questline."),
+			DeadPaths.Num(), DeadPaths.Num() == 1 ? TEXT("y") : TEXT("ies"));
+	}
 }
 
 void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
@@ -1091,18 +1403,17 @@ void FSimpleQuestEditor::RebuildNativeTags(bool bRefreshTree)
 		UGameplayTagsManager::Get().ConstructGameplayTagTree();
 	}
 
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags — registered %d native tag(s)%s"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RebuildNativeTags - registered %d native tag(s)%s"),
 		CompiledNativeTags.Num(),
 		bRefreshTree ? TEXT(" (tree refreshed)") : TEXT(""));
 }
 
 namespace
 {
-	// Recursive detection walk — returns true on the first field whose value is in RedirectTargets, and reports WHICH tag on which
+	// Recursive detection walk - returns true on the first field whose value is in RedirectTargets, and reports WHICH tag on which
 	// field so the log can name it. Recurses into nested USTRUCT fields. Cycle-free (no by-value struct self-references in UE).
-	// Mirrors ApplyTagRenamesToStructLayout in shape — the apply path and the detect path walk the same structural territory.
-	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets,
-		FName& OutMatchedTag, FString& OutMatchedField)
+	// Mirrors ApplyTagRenamesToStructLayout in shape - the apply path and the detect path walk the same structural territory.
+	bool HasFieldMatchingRedirectTarget(const UStruct* Struct, const void* ContainerPtr, const TSet<FName>& RedirectTargets, FName& OutMatchedTag, FString& OutMatchedField)
 	{
 		if (!Struct || !ContainerPtr) return false;
 
@@ -1170,7 +1481,7 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 
 	// Build a set of every NewTagName in the active redirect map. A field that holds one of these names AFTER deserialization
 	// MAY have been transparently rewritten by FGameplayTag::PostSerialize from a corresponding OldTagName on disk. We can't
-	// distinguish "redirected on load" from "always had this name" without comparing to the on-disk bytes — the heuristic accepts
+	// distinguish "redirected on load" from "always had this name" without comparing to the on-disk bytes - the heuristic accepts
 	// occasional no-op saves in exchange for catching the real cases.
 	TSet<FName> RedirectTargets;
 	RedirectTargets.Reserve(Settings->GameplayTagRedirects.Num());
@@ -1196,7 +1507,7 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 					if (!RowPair.Value) continue;
 					if (HasFieldMatchingRedirectTarget(RowStruct, RowPair.Value, RedirectTargets, MatchedTag, MatchedField))
 					{
-						// Name the row as well — a row match is otherwise indistinguishable from a match on the table's own fields.
+						// Name the row as well - a row match is otherwise indistinguishable from a match on the table's own fields.
 						MatchedField = FString::Printf(TEXT("Row[%s].%s"), *RowPair.Key.ToString(), *MatchedField);
 						bMatched = true;
 						break;
@@ -1208,7 +1519,7 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 
 	if (bMatched)
 	{
-		// UPackage::MarkPackageDirty silently no-ops while UE is routing PostLoad calls — OnAssetLoaded fires from inside that phase,
+		// UPackage::MarkPackageDirty silently no-ops while UE is routing PostLoad calls - OnAssetLoaded fires from inside that phase,
 		// so a direct mark here is suppressed by design (UE doesn't want load-time changes to flag assets as user-modified). Defer to
 		// the next tick to escape the routing context. The mark goes on the loaded asset (what UE will serialize), regardless of
 		// whether the matching field lived on the asset directly or on its generated-class CDO.
@@ -1221,11 +1532,11 @@ void FSimpleQuestEditor::MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset)
 				// Display, not Verbose: this is the only account of why an asset the designer never touched is asking to be saved.
 				// Naming the tag AND the field is what separates "a rename landed here" from the known false positive.
 				UE_LOG(LogSimpleQuestCompiler, Display,
-					TEXT("MarkDirtyOnRedirectedTagLoad: '%s' (%s) holds redirect TARGET '%s' on field '%s' — marked dirty so a save persists the "
+					TEXT("MarkDirtyOnRedirectedTagLoad: '%s' (%s) holds redirect TARGET '%s' on field '%s' - marked dirty so a save persists the "
 						"healed value. If that asset never held the OLD name, this is the known false positive and only retiring the redirect ends it."),
 					*DeferredAsset->GetName(), *DeferredAsset->GetClass()->GetName(), *MatchedTag.ToString(), *MatchedField);
 			}
-			return false; // one-shot — unregister after firing
+			return false; // one-shot - unregister after firing
 		}), 0.0f);
 	}
 }
@@ -1253,14 +1564,14 @@ void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
 			if (CompiledNativeTagNames.Contains(TagName)) return;
 
 			// Skip the FNativeGameplayTag construction if the tag is already registered with the
-			// manager — typically from the runtime module's startup RegisterCompiledQuestTags pass,
+			// manager - typically from the runtime module's startup RegisterCompiledQuestTags pass,
 			// which registers every compiled tag via AR metadata at editor launch. We still mark
 			// CompiledNativeTagNames so subsequent batches' Contains check fast-paths through.
 			//
 			// Construction is ~3ms per tag (manager bookkeeping + tree-update side effects); for the
 			// ~3000 native tags a typical project registers, skipping already-known ones saves the
 			// bulk of Compile All Questlines time. Fresh tags (new content authored since last
-			// editor session) still pay full construction cost — that's the actual structural floor.
+			// editor session) still pay full construction cost - that's the actual structural floor.
 			if (TagsManager.RequestGameplayTag(TagName, false).IsValid())
 			{
 				CompiledNativeTagNames.Add(TagName);
@@ -1284,10 +1595,10 @@ void FSimpleQuestEditor::AddNativeTagsForGraph(const TArray<FName>& TagNames)
 	}
 }
 
-// Surgically unregister native tags a removed/recompiled graph no longer owns — but ONLY those no OTHER still-registered
+// Surgically unregister native tags a removed/recompiled graph no longer owns - but ONLY those no OTHER still-registered
 // graph claims (shared tags like SimpleQuest.Outcome.Reached are registered by many graphs; unregistering one on a single
 // removal would silently break every other graph resolving against it). Destroys just the orphaned FNativeGameplayTags +
-// one tree refresh — O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
+// one tree refresh - O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
 // Registry must ALREADY reflect the post-change state (removed graph gone / recompiled graph's new tags in), so the
 // "still claimed by another" check sees the correct remaining set.
 void FSimpleQuestEditor::RemoveNativeTagsForGraph(const TArray<FName>& RemovedTagNames)
@@ -1295,7 +1606,7 @@ void FSimpleQuestEditor::RemoveNativeTagsForGraph(const TArray<FName>& RemovedTa
 	if (RemovedTagNames.IsEmpty()) return;
 
 	// Set of names STILL claimed by any remaining registered graph (incl. each identity tag's state-fact leaves, mirroring
-	// AddNativeTagsForGraph's expansion — a still-used identity tag keeps its derived state facts alive).
+	// AddNativeTagsForGraph's expansion - a still-used identity tag keeps its derived state facts alive).
 	TSet<FName> StillClaimed;
 	for (const TPair<FString, TArray<FName>>& Pair : CompiledTagRegistry)
 	{
@@ -1330,7 +1641,7 @@ void FSimpleQuestEditor::RemoveNativeTagsForGraph(const TArray<FName>& RemovedTa
 		}
 	}
 
-	if (Orphaned.IsEmpty()) return;   // all still claimed elsewhere — tree unchanged, nothing to do.
+	if (Orphaned.IsEmpty()) return;   // all still claimed elsewhere - tree unchanged, nothing to do.
 
 	// Destroy just the orphaned natives (destructor unregisters from the manager) + drop from the lockstep name set.
 	CompiledNativeTags.RemoveAll([&](const TUniquePtr<FNativeGameplayTag>& Native)
@@ -1344,7 +1655,7 @@ void FSimpleQuestEditor::RemoveNativeTagsForGraph(const TArray<FName>& RemovedTa
 
 	UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
 
-	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RemoveNativeTagsForGraph — unregistered %d orphaned tag(s), %d native(s) remain (tree refreshed)"),
+	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::RemoveNativeTagsForGraph - unregistered %d orphaned tag(s), %d native(s) remain (tree refreshed)"),
 		Orphaned.Num(), CompiledNativeTags.Num());
 }
 
@@ -1376,11 +1687,10 @@ void FSimpleQuestEditor::HandlePickerCategoriesChanged()
 			}
 		}
 	}
-
 	if (ReconstructedCount > 0)
 	{
 		UE_LOG(LogSimpleQuest, Verbose,
-			TEXT("FSimpleQuestEditor::HandlePickerCategoriesChanged — refreshed %d K2 node(s) across open Blueprint editors."),
+			TEXT("FSimpleQuestEditor::HandlePickerCategoriesChanged - refreshed %d K2 node(s) across open Blueprint editors."),
 			ReconstructedCount);
 	}
 }

@@ -19,13 +19,13 @@ enum class EQuestActivationBlocker : uint8
 	/** One or more prereq leaves are unsatisfied. UnsatisfiedLeafTags lists which. */
 	PrereqUnmet,
 
-	/** Quest's Blocked fact is set — externally locked out via SetBlocked. ClearBlocked required to re-enable. */
+	/** Quest's Blocked fact is set - externally locked out via SetBlocked. ClearBlocked required to re-enable. */
 	Blocked,
 
-	/** Quest's Live fact is set — already running. Cannot be re-given while active. */
+	/** Quest's Live fact is set - already running. Cannot be re-given while active. */
 	AlreadyLive,
 
-	/** Quest is not in a giver-gated PendingGiver state — the giver isn't currently offering it. */
+	/** Quest is not in a giver-gated PendingGiver state - the giver isn't currently offering it. */
 	NotPendingGiver,
 
 	/** ContextualTag isn't registered in the runtime tag manager. Stale or never-compiled tag. */
@@ -34,9 +34,21 @@ enum class EQuestActivationBlocker : uint8
 	/**
 	 * Quest IS already in PendingGiver state and a re-activation cascade tried to re-fire the gate. Surfaced as
 	 * an FQuestActivationFailedEvent reason; not used by give-time blocker queries (the give-flow checks
-	 * NotPendingGiver as its symmetric partner — that's "no gate to consume", this is "gate still pending").
+	 * NotPendingGiver as its symmetric partner - that's "no gate to consume", this is "gate still pending").
 	 */
 	AlreadyPendingGiver,
+
+	/**
+	 * This quest's prerequisite cannot currently be evaluated, because an advancement hold names something it depends
+	 * on. Distinct from PrereqUnmet, and the distinction matters to a player: PrereqUnmet means "go do the thing this
+	 * depends on", while this means "that thing IS done - wait." UnsatisfiedLeafTags is empty here for exactly that
+	 * reason, since every leaf really is satisfied.
+	 *
+	 * NOT reported for the quest a hold NAMES. A hold pauses what flows OUT of a node, so the named node itself is
+	 * unaffected and stays completable - refusing the player is what Blocked is for. This appears only on nodes
+	 * DOWNSTREAM of held content.
+	 */
+	HeldForAdvancement,
 };
 
 /**

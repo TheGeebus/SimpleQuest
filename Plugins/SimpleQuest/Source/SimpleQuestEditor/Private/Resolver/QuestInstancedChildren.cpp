@@ -6,6 +6,7 @@
 #include "Resolver/QuestDataBundle.h"
 #include "Resolver/QuestRowRestore.h"
 #include "Rewards/QuestRewardBase.h"
+#include "StructUtils/InstancedStruct.h"
 #include "UObject/UnrealType.h"
 
 
@@ -73,6 +74,42 @@ static UObject* BuildChildObject(UObject* Owner, const FString& ChildKey, const 
 	return Sub;
 }
 
+// Resolve a script struct named by a bundle cell. Short names, same as classes - see ResolveQuestBundleClass for why
+// the format carries them and what that costs. Kept separate from the class resolver rather than unified: a row naming
+// a type that exists as BOTH would otherwise resolve to whichever lookup ran first.
+static UScriptStruct* ResolveQuestBundleStruct(const FString& StructName)
+{
+	if (StructName.IsEmpty()) return nullptr;
+	return FindFirstObject<UScriptStruct>(*StructName, EFindFirstObjectOptions::NativeFirst);
+}
+
+/**
+ * Rebuild one FInstancedStruct's contents from its row. The struct sibling of BuildChildObject, and simpler: no
+ * NewObject, no Outer, no RF flags, and no identity - a struct's contents are addressed entirely by their owner's
+ * property path, so the key needs no GUID segment.
+ */
+static bool BuildChildStruct(FInstancedStruct& OutInstance, const FString& ChildKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+{
+	FString TypeName;
+	const FQuestDataRow* Row = FindQuestChildRow(Bundle, ChildKey, TypeName);
+	if (!Row) { OutWarnings.Add(FString::Printf(TEXT("child row missing for key '%s'"), *ChildKey)); return false; }
+
+	// The row was found by key, but FindQuestChildRow reports the "class" cell. A struct row names its type in "struct",
+	// so read it directly - and a row carrying neither is malformed rather than empty.
+	const FString StructName = Row->Get(TEXT("struct"));
+	UScriptStruct* Type = ResolveQuestBundleStruct(StructName);
+	if (!Type)
+	{
+		OutWarnings.Add(FString::Printf(TEXT("could not resolve child struct '%s' for key '%s'"), *StructName, *ChildKey));
+		return false;
+	}
+
+	OutInstance.InitializeAs(Type);
+	RestoreQuestRowProperties(Type, OutInstance.GetMutableMemory(), *Row);
+	OutConsumed.Add(ChildKey);
+	return true;
+}
+
 /**
  * Every child row sitting directly under Prefix, ordered by its bracketed index parsed as a NUMBER. Both callers order
  * a reward GRANT SEQUENCE - one for a node's Rewards, one for the array nested inside each QuestlineRewards entry - so
@@ -89,6 +126,13 @@ static void GatherIndexedChildKeys(const FQuestDataBundle& Bundle, const FString
 		{	
 			if (R.Key.StartsWith(Open))
 			{
+				// DIRECTLY under, which this never had to enforce before: nothing nested deeper than one bracketed
+				// segment, so StartsWith was sufficient. A decomposed struct's key ("<owner>/Rewards[<guid>]/Payload")
+				// also starts with this prefix while being a child OF an element rather than an element - handing it
+				// on asks BuildChildObject to resolve a "class" cell that a struct row does not carry.
+				const int32 CloseIdx = R.Key.Find(TEXT("]"), ESearchCase::CaseSensitive, ESearchDir::FromStart, Open.Len());
+				if (CloseIdx != R.Key.Len() - 1) continue;
+
 				// ORDER COMES FROM THE index CELL now that the bracket holds identity. Parsing the bracket would be
 				// worse than useless here: a GUID starting with digits Atoi's to a large plausible number, so the
 				// ordering would look computed and be wrong.
@@ -121,6 +165,34 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 		if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
 
 		const FString PropPrefix = FString::Printf(TEXT("%s/%s"), *OwnerKey, *Prop->GetName());
+
+		// An FInstancedStruct property: one child row, keyed by the property path with no bracket segment.
+		// THE GUARD BELOW IS ABOUT NOISE, NOT CORRECTNESS - BuildChildStruct already leaves the value untouched when no
+		// row exists. What it prevents is a spurious "child row missing" warning on every LEGACY bundle, where the
+		// payload arrived as a StructLiteral cell on this owner's row and the absence of a child row is expected
+		// rather than wrong.
+		if (FStructProperty* AsStruct = CastField<FStructProperty>(Prop))
+		{
+			// SABOTAGE
+			if (AsStruct->Struct == FInstancedStruct::StaticStruct())
+			{
+				FInstancedStruct& Live = *AsStruct->ContainerPtrToValuePtr<FInstancedStruct>(Owner);
+				BuildChildStruct(Live, PropPrefix, Bundle, OutConsumed, OutWarnings);
+				continue;
+			}
+			/*
+			if (AsStruct->Struct == FInstancedStruct::StaticStruct())
+			{
+				FString UnusedClass;
+				if (FindQuestChildRow(Bundle, PropPrefix, UnusedClass))
+				{
+					FInstancedStruct& Live = *AsStruct->ContainerPtrToValuePtr<FInstancedStruct>(Owner);
+					BuildChildStruct(Live, PropPrefix, Bundle, OutConsumed, OutWarnings);
+				}
+				continue;
+			}
+			*/
+		}
 
 		// Array of instanced objects: rebuild elements in [i] order (children whose key starts with "<owner>/<prop>[").
 		if (FArrayProperty* Arr = CastField<FArrayProperty>(Prop))

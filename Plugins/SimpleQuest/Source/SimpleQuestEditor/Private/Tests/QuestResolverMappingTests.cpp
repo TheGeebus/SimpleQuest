@@ -34,6 +34,7 @@
 #include "Rewards/XPReward.h"
 #include "ScopedTransaction.h"
 #include "Kismet2/StructureEditorUtils.h"
+#include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/QuestExportOutput.h"
 #include "Resolver/QuestPlanReport.h"
 #include "Rewards/LootTableReward.h"
@@ -596,7 +597,10 @@ bool FQuestResolver_BlankColumnIsDeclared::RunTest(const FString& Parameters)
 
 	FQuestDataBundle Bundle;
 	FTsvQuestDataFormat Format;
-	TestTrue(TEXT("Fixture read"), Format.ReadBundle(TempDir, Bundle));
+	TMap<FString, FString> Files;
+	FString GatherError;
+	TestTrue(TEXT("Fixture gathered"), QuestDataFormatIO::ReadFilesFromFolder(TempDir, Format.FileExtension(), Files, GatherError));
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(Files, Bundle));
 
 	const FQuestDataTable* Content = Bundle.TablesByType.Find(TEXT("content"));
 	TestNotNull(TEXT("Content table parsed"), Content);
@@ -657,7 +661,10 @@ bool FQuestResolver_BlankGateColumnsAreSilent::RunTest(const FString& Parameters
 
 	FQuestDataBundle Bundle;
 	FTsvQuestDataFormat Format;
-	TestTrue(TEXT("Fixture read"), Format.ReadBundle(TempDir, Bundle));
+	TMap<FString, FString> Files;
+	FString GatherError;
+	TestTrue(TEXT("Fixture gathered"), QuestDataFormatIO::ReadFilesFromFolder(TempDir, Format.FileExtension(), Files, GatherError));
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(Files, Bundle));
 
 	auto CountRows = [&Bundle]()
 	{
@@ -713,7 +720,10 @@ bool FQuestResolver_KeyHeaderSurvivesAWrite::RunTest(const FString& Parameters)
 
 	FTsvQuestDataFormat Format;
 	FQuestDataBundle Bundle;
-	TestTrue(TEXT("Fixture read"), Format.ReadBundle(ReadDir, Bundle));
+	TMap<FString, FString> ReadFiles;
+	FString ReadGatherError;
+	TestTrue(TEXT("Fixture gathered"), QuestDataFormatIO::ReadFilesFromFolder(ReadDir, Format.FileExtension(), ReadFiles, ReadGatherError));
+	TestTrue(TEXT("Fixture read"), Format.ReadBundle(ReadFiles, Bundle));
 
 	if (const FQuestDataTable* Content = Bundle.TablesByType.Find(TEXT("content")))
 	{
@@ -729,7 +739,10 @@ bool FQuestResolver_KeyHeaderSurvivesAWrite::RunTest(const FString& Parameters)
 	}
 
 	// THE LIVE ARM: a table that knows its key's name writes that name back.
-	TestTrue(TEXT("Read bundle written"), Format.WriteBundle(Bundle, WriteDir));
+	TMap<FString, FString> WrittenFiles;
+	FString WriteError;
+	TestTrue(TEXT("Read bundle serialized"), Format.WriteBundle(Bundle, WrittenFiles));
+	TestTrue(TEXT("Read bundle written"), QuestDataFormatIO::WriteFilesToFolder(WrittenFiles, WriteDir, WriteError));
 	FString ReadBack;
 	TestTrue(TEXT("Written file loaded"), FFileHelper::LoadFileToString(ReadBack, *(WriteDir / TEXT("content.tsv"))));
 	TArray<FString> ReadBackLines;
@@ -753,7 +766,10 @@ bool FQuestResolver_KeyHeaderSurvivesAWrite::RunTest(const FString& Parameters)
 
 	IFileManager::Get().DeleteDirectory(*WriteDir, /*RequireExists*/ false, /*Tree*/ true);
 	IFileManager::Get().MakeDirectory(*WriteDir, /*Tree*/ true);
-	TestTrue(TEXT("Built bundle written"), Format.WriteBundle(Built, WriteDir));
+	TMap<FString, FString> BuiltFiles;
+	FString BuiltWriteError;
+	TestTrue(TEXT("Built bundle serialized"), Format.WriteBundle(Built, BuiltFiles));
+	TestTrue(TEXT("Built bundle written"), QuestDataFormatIO::WriteFilesToFolder(BuiltFiles, WriteDir, BuiltWriteError));
 	FString BuiltBack;
 	TestTrue(TEXT("Built file loaded"), FFileHelper::LoadFileToString(BuiltBack, *(WriteDir / TEXT("content.tsv"))));
 	TArray<FString> BuiltLines;

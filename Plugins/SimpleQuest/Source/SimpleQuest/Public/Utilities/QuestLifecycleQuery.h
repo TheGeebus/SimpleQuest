@@ -16,7 +16,7 @@ class UWorldStateSubsystem;
  * "is this state asserted?" routes through a single named predicate rather than hand-rolling the two-step
  * resolve+probe at the call site.
  *
- * Predicates are side-effect-free — no per-call logging, no tag registration, no allocation. Null WS or
+ * Predicates are side-effect-free - no per-call logging, no tag registration, no allocation. Null WS or
  * invalid ContextualTag returns false (defensive default for early-shutdown / late-construction call sites).
  *
  * Distinct from FQuestActivationGuard, which evaluates compound activation policy (the diamond + giver-gate
@@ -30,7 +30,7 @@ namespace FQuestLifecycleQuery
     SIMPLEQUEST_API bool IsLive(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
     /**
-	 * True if QuestState.<Tag>.Started is asserted in WS. The append-only "has gone Live at least once" anchor —
+	 * True if QuestState.<Tag>.Started is asserted in WS. The append-only "has gone Live at least once" anchor -
 	 * unlike Live it is never cleared, so it stays true across inner-node limbo and completion, and is restored
 	 * from a save. Answers "has this quest ever begun in the current session?" independent of whether it's still running.
 	 */
@@ -39,17 +39,26 @@ namespace FQuestLifecycleQuery
     /** True if QuestState.<Tag>.Completed is asserted in WS. Survives across loop iterations on re-resolvable quests. */
     SIMPLEQUEST_API bool IsCompleted(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
-    /** True if QuestState.<Tag>.PendingGiver is asserted in WS — the giver-side waypoint between Activated and Live. */
+    /** True if QuestState.<Tag>.PendingGiver is asserted in WS - the giver-side waypoint between Activated and Live. */
     SIMPLEQUEST_API bool IsPendingGiver(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
     /** True if QuestState.<Tag>.Deactivated is asserted in WS. Cleared when the node re-enters via its Activate input. */
     SIMPLEQUEST_API bool IsDeactivated(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
     /** True if QuestState.<Tag>.Blocked is asserted in WS. ClearBlocked is the only path back. */
-    SIMPLEQUEST_API bool IsBlocked(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
+	SIMPLEQUEST_API bool IsBlocked(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
+
+	/**
+	 * True when an advancement hold is active on this exact tag. Does NOT walk ancestors - a Step inside a held
+	 * container answers false here, because the fact is written on the tag the hold names.
+	 *
+	 * For "would an activation of this node be held", ask the manager instead: it evaluates ancestry across every tag
+	 * perspective the node answers to, which is the question the cascade actually needs answered.
+	 */
+	SIMPLEQUEST_API bool IsHeld(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
     /**
-     * True if the quest currently has an active lifecycle to interrupt — Live or PendingGiver. Used by
+     * True if the quest currently has an active lifecycle to interrupt - Live or PendingGiver. Used by
      * SetQuestDeactivated as the precondition to its cleanup work: an "active lifecycle" is the answer to
      * "is there anything here for deactivation to undo?" Correctly handles loopable quests where Completed
      * may co-exist with a freshly-set Live.
@@ -57,7 +66,7 @@ namespace FQuestLifecycleQuery
     SIMPLEQUEST_API bool HasActiveLifecycle(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
 
     /**
-     * True if the quest is in a terminal state — Completed or Deactivated. Used by HandleResolveRequest's
+     * True if the quest is in a terminal state - Completed or Deactivated. Used by HandleResolveRequest's
      * already-terminal guard. Note that Completed alone does NOT preclude re-entry (loopable quests stay
      * Completed across iterations); the "is this re-resolve allowed?" check belongs at the resolution-request
      * layer, not the activation layer.

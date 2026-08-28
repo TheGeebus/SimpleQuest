@@ -58,9 +58,14 @@ struct FQuestImportOutcome
  * mapping, wire bindings, flow conventions, structural validation - has exactly one definition and cannot drift between
  * them. OutNodeRowsByKey holds pointers INTO OutBundle, so the two must outlive each other's use together.
  */
-bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint, const UQuestImportMapping* Mapping,
-	FQuestDataBundle& OutBundle, TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey, TSet<FString>& OutAllRowKeys,
-	TArray<FString>& OutWarnings, FString& OutError);
+bool QuestImport_ReadAndValidate(const FQuestDataEndpoint& Endpoint,
+	const UQuestImportMapping* Mapping,
+	FQuestDataBundle& OutBundle,
+	TMap<FString,
+	const FQuestDataRow*>& OutNodeRowsByKey,
+	TSet<FString>& OutAllRowKeys,
+	TArray<FString>& OutWarnings,
+	FString& OutError);
 
 /**
  * The absent-cell policy a run will use. Resolved by the CALLER rather than inside the run, because the caller reports
@@ -75,3 +80,56 @@ FQuestAbsentPolicyResolver QuestImport_ResolvePolicies(const UQuestImportMapping
  * The caller owns the transaction; ApplyQuestPlan deliberately does not open one.
  */
 bool QuestImport_RunInPlace(UQuestlineGraph& Target, const FQuestImportRequest& Request, bool bApply, FQuestImportOutcome& Out);
+
+/**
+ * Everything the read pipeline does once a bundle exists - mapping, wire bindings, flow conventions, validation.
+ * Split from QuestImport_ReadAndValidate so a caller supplying files in memory runs this exact path.
+ */
+bool QuestImport_ValidateBundle(const UQuestImportMapping* Mapping,
+	FQuestDataBundle& OutBundle,
+	TMap<FString, const FQuestDataRow*>& OutNodeRowsByKey,
+	TSet<FString>& OutAllRowKeys,
+	TArray<FString>& OutWarnings,
+	FString& OutError);
+
+/**
+ * What creating a questline from a bundle produced. Counts are returned rather than logged so each caller reports in its
+ * own voice - the console prints its round-trip verification hint, the module API logs a plain line.
+ */
+struct FQuestCreateOutcome
+{
+	UQuestlineGraph* Graph = nullptr;
+	FString AssetName;
+	FString AssetPath;
+	int32 NodeCount = 0;
+	bool bCompiled = false;
+};
+
+/**
+ * Creates a NEW questline asset from a bundle: asset via the factory, self row, nodes, pins, edges, then a double
+ * compile. DELIBERATELY REFUSES rather than overwriting - updating an existing questline is what plan and apply are for.
+ *
+ * AssetNameSuffix is appended to BOTH the asset name and the authored QuestlineID field. The round-trip harness passes
+ * "_RT" so a re-imported asset cannot collide with its source's compiled tag namespace; a plain import passes EMPTY,
+ * because an adopter importing into a fresh project has no source to collide with. An empty QuestlineID cell stays
+ * empty either way - GetEffectiveID() then falls back to the asset name, which already carries the suffix.
+ */
+bool QuestImport_CreateFromBundle(const FQuestDataBundle& Bundle,
+	const TMap<FString, const FQuestDataRow*>& NodeRowsByKey,
+	const FString& DestPackagePath,
+	const FString& AssetNameSuffix,
+	FQuestCreateOutcome& Out,
+	TArray<FString>& OutWarnings,
+	FString& OutError);
+
+/** The in-place operation from an already-read bundle. QuestImport_RunInPlace is this plus the endpoint read. */
+bool QuestImport_RunInPlaceFromBundle(UQuestlineGraph& Target,
+	FQuestDataBundle& Bundle,
+	const TMap<FString, const FQuestDataRow*>& NodeRowsByKey,
+	const TSet<FString>& AllRowKeys,
+	const UQuestImportMapping* Mapping,
+	const FQuestAbsentPolicyResolver& Policies,
+	bool bDeleteOrphans,
+	bool bApply,
+	FQuestImportOutcome& Out);
+

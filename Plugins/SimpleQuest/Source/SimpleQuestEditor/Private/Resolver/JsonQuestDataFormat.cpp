@@ -213,10 +213,8 @@ namespace
 	}
 }
 
-bool FJsonQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder)
+bool FJsonQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, TMap<FString, FString>& OutFiles)
 {
-	IFileManager::Get().MakeDirectory(*DestFolder, /*Tree*/ true);
-
 	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
 
 	// tablesByType: { "<stem>": { "columns": [...], "rows": [ {key, cells}, ... ] } }  — stems sorted for determinism.
@@ -280,31 +278,30 @@ bool FJsonQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, const FSt
 		return false;
 	}
 
-	const FString Path = DestFolder / TEXT("questline.json");
-	if (!FFileHelper::SaveStringToFile(Out, *Path))
-	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to write '%s'."), *Path);
-		return false;
-	}
-	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("JsonQuestDataFormat: wrote '%s'."), *Path);
+	OutFiles.Add(BundleFileName(), MoveTemp(Out));
+	UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("JsonQuestDataFormat: serialized '%s'."), *BundleFileName());
 	return true;
 }
 
-bool FJsonQuestDataFormat::ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle)
+bool FJsonQuestDataFormat::ReadBundle(const TMap<FString, FString>& Files, FQuestDataBundle& OutBundle)
 {
-	const FString Path = SrcFolder / TEXT("questline.json");
-	FString Text;
-	if (!FFileHelper::LoadFileToString(Text, *Path))
+	// One file, by name. A folder gather hands over everything with a .json extension, so an unrelated .json sitting
+	// beside ours is ignored rather than parsed and rejected.
+	const FString* Found = Files.Find(BundleFileName());
+	if (!Found)
 	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: could not read '%s'."), *Path);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: no '%s' among %d file(s)."),
+			*BundleFileName(), Files.Num());
 		return false;
 	}
+	const FString& Text = *Found;
 
 	TSharedPtr<FJsonObject> Root;
 	const TSharedRef<TJsonReader<TCHAR>> Reader = TJsonReaderFactory<TCHAR>::Create(Text);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to parse '%s'."), *Path);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("JsonQuestDataFormat: failed to parse '%s' (%d character(s))."),
+			*BundleFileName(), Text.Len());
 		return false;
 	}
 

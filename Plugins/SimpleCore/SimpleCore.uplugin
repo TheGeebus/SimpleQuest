@@ -1,7 +1,7 @@
 ﻿{
     "FileVersion": 3,
     "Version": 1,
-    "VersionName": "0.7.2",
+    "VersionName": "0.8.0",
     "FriendlyName": "Simple Core",
     "Description": "Lightweight signal bus and world state coordination layer. Foundation for the Simple suite of plugins.",
     "Category": "Gameplay",

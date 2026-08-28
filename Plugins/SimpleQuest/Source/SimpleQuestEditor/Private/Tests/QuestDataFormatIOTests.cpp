@@ -1,0 +1,417 @@
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+#include "HAL/FileManager.h"
+#include "ISimpleQuestEditorModule.h"
+#include "Misc/AutomationTest.h"
+#include "Quests/Types/QuestRewardPayloads.h"
+#include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestBundleDiff.h"
+#include "Resolver/QuestDataBundle.h"
+#include "Resolver/QuestDataFormatIO.h"
+#include "Resolver/QuestDataFormatRegistry.h"
+#include "Resolver/QuestExportOperations.h"
+#include "Resolver/QuestImportOperations.h"
+#include "Resolver/QuestInPlaceApply.h"
+#include "Resolver/QuestInstancedChildren.h"
+#include "Resolver/QuestRowRestore.h"
+#include "Rewards/GenericReward.h"
+#include "StructUtils/InstancedStruct.h"
+#include "Tests/QuestGraphFixture.h"
+
+namespace
+{
+	constexpr EAutomationTestFlags FormatIOTestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter;
+}
+
+/**
+ * The fingerprint exists to answer one question: are these the same files the plan was built from?
+ *
+ * It is the only thing standing between a reviewed plan and an apply of data nobody looked at. A folder source can be
+ * re-read and compared directly; in-memory data cannot, so the caller handing back the same map is the entire
+ * guarantee - and this turns that from an assumption into something checkable.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_FingerprintDistinguishesContent, "SimpleQuest.Resolver.FingerprintDistinguishesContent", FormatIOTestFlags)
+bool FQuestFormatIO_FingerprintDistinguishesContent::RunTest(const FString& Parameters)
+{
+	using namespace QuestDataFormatIO;
+
+	TMap<FString, FString> Base;
+	Base.Add(TEXT("content.tsv"), TEXT("key\tgraph\nn_a\troot\n"));
+	Base.Add(TEXT("edges.tsv"),   TEXT("from\ttype\tto\nn_a\tflow\tn_b\n"));
+
+	// Identical contents must agree, or every apply refuses and the feature is unusable.
+	TMap<FString, FString> Same = Base;
+	TestEqual(TEXT("identical maps fingerprint the same"), FingerprintFiles(Same), FingerprintFiles(Base));
+
+	// ORDER-INDEPENDENT. The two maps below are built by inserting in opposite orders. A hash that folded in map
+	// iteration order would refuse a caller who assembled the same data differently - a false refusal that would look
+	// like data corruption and be impossible to reproduce.
+	TMap<FString, FString> Reordered;
+	Reordered.Add(TEXT("edges.tsv"),   TEXT("from\ttype\tto\nn_a\tflow\tn_b\n"));
+	Reordered.Add(TEXT("content.tsv"), TEXT("key\tgraph\nn_a\troot\n"));
+	TestEqual(TEXT("insertion order does not change the fingerprint"), FingerprintFiles(Reordered), FingerprintFiles(Base));
+
+	// CONTENT SENSITIVITY - the case the guard exists for. One edited cell must not fingerprint the same.
+	TMap<FString, FString> EditedCell = Base;
+	EditedCell[TEXT("content.tsv")] = TEXT("key\tgraph\nn_a\tOTHER\n");
+	TestNotEqual(TEXT("an edited cell changes the fingerprint"), FingerprintFiles(EditedCell), FingerprintFiles(Base));
+
+	// NAME SENSITIVITY. Renaming a file changes what gets imported just as surely as editing one does - a table read
+	// under a different stem lands as a different type - so a fingerprint over contents alone would miss it.
+	// The new name must SORT TO THE SAME POSITION as the old one. Rename content.tsv to something that sorts after
+	// edges.tsv and the content sequence flips too, so the fingerprint changes whether or not names are hashed - and
+	// the assertion passes without ever testing names. "contentx.tsv" still sorts before "edges.tsv", so contents
+	// arrive in the same order and the NAME is the only thing that differs.
+	TMap<FString, FString> RenamedFile;
+	RenamedFile.Add(TEXT("contentx.tsv"), Base[TEXT("content.tsv")]);
+	RenamedFile.Add(TEXT("edges.tsv"),    Base[TEXT("edges.tsv")]);
+	TestNotEqual(TEXT("a renamed file changes the fingerprint"), FingerprintFiles(RenamedFile), FingerprintFiles(Base));
+
+	// A DROPPED FILE. Fewer files means fewer rows imported, which is a different plan.
+	TMap<FString, FString> Dropped = Base;
+	Dropped.Remove(TEXT("edges.tsv"));
+	TestNotEqual(TEXT("dropping a file changes the fingerprint"), FingerprintFiles(Dropped), FingerprintFiles(Base));
+
+	// An empty map is a legitimate input to fingerprint even though it is not a legitimate import - the guard must not
+	// crash on it, and it must not collide with real content.
+	const TMap<FString, FString> Empty;
+	TestNotEqual(TEXT("an empty map does not collide with real content"), FingerprintFiles(Empty), FingerprintFiles(Base));
+
+	return true;
+	return true;
+}
+
+/**
+ * The public ExportQuestline and the shipped folder export must be the same export.
+ *
+ * They are two entry points onto one bundle: ExportQuestline serializes it in memory, QuestExport_Run serializes it and
+ * then writes a folder around it. Nothing but discipline keeps the first from quietly diverging - a guard added to one
+ * path, a mapping applied in one and not the other - and an adopter driving the module API would get a subtly different
+ * export from the one the console produces, with nothing to point at.
+ *
+ * Compared against EACH OTHER rather than against a golden file, so it cannot go stale when a format changes its
+ * layout: both sides move together, and only a difference BETWEEN the paths fails.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_PublicExportMatchesFolderExport, "SimpleQuest.Resolver.PublicExportMatchesFolderExport", FormatIOTestFlags)
+bool FQuestFormatIO_PublicExportMatchesFolderExport::RunTest(const FString& Parameters)
+{
+	// Driven off the registry rather than a literal list, so a format added later is covered without touching this test.
+	const TArray<FString> FormatNames = FQuestDataFormatRegistry::Get().GetRegisteredNames();
+	if (!TestTrue(TEXT("at least one data format is registered"), FormatNames.Num() > 0))
+	{
+		// Without this the loop below runs zero times and the test passes having asserted nothing.
+		return false;
+	}
+
+	for (const FString& FormatName : FormatNames)
+	{
+		const FString Tag = FString::Printf(TEXT("[%s]"), *FormatName);
+		QuestTestFixtures::FCompileFixture Fixture(TEXT("/Temp/QuestExportEquivalence"));
+		if (!TestTrue(*FString::Printf(TEXT("%s fixture built"), *Tag), Fixture.IsValid()))
+		{
+			continue;
+		}
+
+		// PATH A - the public module API. Nothing touches disk.
+		TMap<FString, FString> ApiFiles;
+		TArray<FString> ApiWarnings;
+		FString ApiError;
+		const bool bApiOk = ISimpleQuestEditorModule::Get().ExportQuestline(
+			Fixture.Graph, FormatName, /*Mapping=*/nullptr, ApiFiles, ApiWarnings, ApiError);
+		if (!TestTrue(*FString::Printf(TEXT("%s ExportQuestline succeeded (%s)"), *Tag, *ApiError), bApiOk))
+		{
+			continue;
+		}
+
+		// PATH B - the shipped folder export. Endpoint.Folder is left EMPTY so the destination derives, which is the
+		// route the console and the round-trip harness take and the one the containment guard was written for.
+		FQuestExportRequest Request;
+		Request.Graph = Fixture.Graph;
+		Request.Endpoint.FormatName = FormatName;
+
+		FQuestExportOutcome Outcome;
+		const bool bRunOk = QuestExport_Run(Request, Outcome);
+		if (!TestTrue(*FString::Printf(TEXT("%s QuestExport_Run succeeded (%s)"), *Tag, *Outcome.Error), bRunOk))
+		{
+			continue;
+		}
+
+		// Read back through the same helper an adopter would use, and ask the provider for its extension rather than
+		// assuming it derives from the name - FileExtension() is overridable.
+		const TUniquePtr<ISimpleQuestDataFormat> Format = FQuestDataFormatRegistry::Get().Create(FormatName);
+		TMap<FString, FString> FolderFiles;
+		FString ReadError;
+		const bool bReadOk = Format.IsValid()
+			&& QuestDataFormatIO::ReadFilesFromFolder(Outcome.OutDir, Format->FileExtension(), FolderFiles, ReadError);
+
+		if (TestTrue(*FString::Printf(TEXT("%s folder export read back (%s)"), *Tag, *ReadError), bReadOk))
+		{
+			// NOT a file count. An EMPTY bundle still serializes to a file in both shipped formats - JSON writes an
+			// empty tablesByType, TSV writes its edges table - so "produced files" is true of an export carrying
+			// nothing, and a guard that cannot fail is not a guard. The export has to be shown to contain the
+			// FIXTURE'S OWN AUTHORED CONTENT before any comparison below means anything.
+			FString AllFolderContent;
+			for (const TPair<FString, FString>& File : FolderFiles) { AllFolderContent += File.Value; }
+			TestTrue(*FString::Printf(TEXT("%s folder export carries the fixture's authored content"), *Tag), AllFolderContent.Contains(QuestTestFixtures::FixtureDisplayName));
+			TestEqual(*FString::Printf(TEXT("%s same file count"), *Tag), ApiFiles.Num(), FolderFiles.Num());
+
+			for (const TPair<FString, FString>& File : FolderFiles)
+			{
+				const FString* ApiContent = ApiFiles.Find(File.Key);
+				if (TestNotNull(*FString::Printf(TEXT("%s API export contains '%s'"), *Tag, *File.Key), ApiContent))
+				{
+					TestEqual(*FString::Printf(TEXT("%s '%s' matches byte for byte"), *Tag, *File.Key),
+						*ApiContent, File.Value);
+				}
+			}
+		}
+
+		// The derived destination is under the export root and this test put it there, so clearing it is ours to do.
+		IFileManager::Get().DeleteDirectory(*Outcome.OutDir, false, true);
+	}
+
+	return true;
+}
+
+/**
+ * The create path must refuse an existing asset rather than overwrite it or let CreateAsset quietly mint a numbered
+ * variant. Both alternatives are worse than stopping: an overwrite destroys authored work, and 'QL_QuickStart_2'
+ * appearing in the content browser names the collision nowhere a designer would look.
+ *
+ * Safe to run against shipped content BECAUSE it refuses - nothing is created, so there is nothing to clean up. If this
+ * test ever starts leaving an asset behind, that is itself the failure.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestImport_CreateRefusesExistingAsset,
+	"SimpleQuest.Resolver.CreateRefusesExistingAsset", FormatIOTestFlags)
+bool FQuestImport_CreateRefusesExistingAsset::RunTest(const FString& Parameters)
+{
+	// Aimed at shipped content that is known to exist on disk. If QuickStart is ever renamed this test fails loudly
+	// rather than silently passing, which is the right way round.
+	const FString DestPackagePath = TEXT("/SimpleQuest/QuickStart");
+	const FString ExistingName = TEXT("QL_QuickStart");
+	const FString FullPath = DestPackagePath / ExistingName;
+
+	// CONTROL. Without this, "refused" and "the fixture was wrong about what exists" are the same result.
+	if (!TestTrue(*FString::Printf(TEXT("precondition: '%s' exists on disk"), *FullPath),
+		FPackageName::DoesPackageExist(FullPath)))
+	{
+		return false;
+	}
+
+	FQuestDataBundle Bundle;
+	FQuestDataTable& SelfTable = Bundle.TablesByType.Add(TEXT("questline_graph"));
+	FQuestDataRow SelfRow;
+	SelfRow.Key = ExistingName;
+	SelfTable.Rows.Add(SelfRow);
+
+	const TMap<FString, const FQuestDataRow*> NoNodeRows;
+	FQuestCreateOutcome Created;
+	TArray<FString> Warnings;
+	FString Error;
+	const bool bCreated = QuestImport_CreateFromBundle(Bundle, NoNodeRows, DestPackagePath, FString(),
+		Created, Warnings, Error);
+
+	TestFalse(TEXT("creating over an existing asset is refused"), bCreated);
+	TestNull(TEXT("nothing was created"), Created.Graph);
+
+	// Refused BY OUR GUARD, not by AssetTools. Both refuse unattended and both name the path, so the path alone cannot
+	// tell them apart - only our wording points at plan and apply. The distinction matters because AssetTools refuses
+	// ONLY when unattended: in a live editor CanCreateAsset can prompt, and a designer clicking through would get the
+	// overwrite this guard exists to prevent. Automation is always unattended, so this string is the only evidence
+	// available here that the guard ran at all.
+	TestTrue(*FString::Printf(TEXT("refused by the guard, naming the existing asset (got: %s)"), *Error),
+		Error.Contains(FullPath) && Error.Contains(TEXT("plan and apply")));
+
+	return true;
+}
+
+/**
+ * Bundles written BEFORE struct decomposition must still import, and must not lose the payload.
+ *
+ * The old form carried an FInstancedStruct as a StructLiteral CELL on the owner's row; the new form gives it a child
+ * ROW of its own. Import reads both, and the compatibility is not a shim - it falls out of the order the two restore
+ * passes already run in. RestoreQuestRowProperties populates the cell first, then ReattachQuestInstancedChildren finds
+ * no child row and leaves the value alone, because SILENCE IS NOT AN ASSERTION OF EMPTINESS.
+ *
+ * That makes migration free: an old bundle imports, and the next export writes the new form. Running the pipeline once
+ * IS the migration. This test is what keeps that true - the two behaviors it depends on live in different files and
+ * neither one's author would see this consequence.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_LegacyStructLiteralStillImports,
+	"SimpleQuest.Resolver.LegacyStructLiteralStillImports", FormatIOTestFlags)
+bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Parameters)
+{
+	const FStructProperty* PayloadProp =
+		CastField<FStructProperty>(UGenericReward::StaticClass()->FindPropertyByName(FName(TEXT("Payload"))));
+	if (!TestNotNull(TEXT("UGenericReward has a Payload property"), PayloadProp))
+	{
+		return false;
+	}
+
+	// PRODUCE the legacy literal rather than hardcoding one, so this test cannot drift if ExportTextItem's syntax
+	// changes - what it asserts is that whatever the old exporter WROTE is still readable, not that one string is.
+	FString LegacyLiteral;
+	{
+		UGenericReward* Source = NewObject<UGenericReward>(GetTransientPackage());
+		FInstancedStruct& SourcePayload = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Source);
+		SourcePayload.InitializeAs<FQuestRewardAmount>();
+		SourcePayload.GetMutable<FQuestRewardAmount>().Amount = 42;
+		PayloadProp->ExportTextItem_Direct(LegacyLiteral, &SourcePayload, nullptr, nullptr, PPF_None);
+	}
+	// Without this the bundle below carries an empty cell, RestoreQuestCell's empty arm declines it, and the whole test
+	// would be asserting against a payload nothing ever tried to write.
+	if (!TestTrue(TEXT("the legacy literal is non-empty"), !LegacyLiteral.IsEmpty()))
+	{
+		return false;
+	}
+
+	// A bundle in the OLD shape: the payload is a cell on the reward's own row, and there is no child table for it.
+	const FString RewardKey = TEXT("node_a/Rewards[0]");
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable& Table = Bundle.TablesByType.Add(TEXT("generic_reward"));
+		Table.Columns = { TEXT("class"), TEXT("RewardType"), TEXT("Payload") };
+
+		FQuestDataRow Row;
+		Row.Key = RewardKey;
+
+		FQuestDataValue ClassCell;
+		ClassCell.Kind = EQuestDataValueKind::String;
+		ClassCell.StringForm = TEXT("GenericReward");
+		Row.Cells.Add(TEXT("class"), ClassCell);
+
+		FQuestDataValue PayloadCell;
+		PayloadCell.Kind = EQuestDataValueKind::StructLiteral;
+		PayloadCell.StringForm = LegacyLiteral;
+		Row.Cells.Add(TEXT("Payload"), PayloadCell);
+
+		Table.Rows.Add(MoveTemp(Row));
+	}
+
+	UGenericReward* Target = NewObject<UGenericReward>(GetTransientPackage());
+	FInstancedStruct& TargetPayload = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Target);
+
+	// CONTROL. "It holds 42 afterwards" proves nothing unless it held nothing beforehand.
+	if (!TestFalse(TEXT("the target payload starts unset"), TargetPayload.IsValid()))
+	{
+		return false;
+	}
+
+	// The two passes, in the order the real import runs them.
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	RestoreQuestRowProperties(Target, Bundle.TablesByType[TEXT("generic_reward")].Rows[0]);
+	ReattachQuestInstancedChildren(Target, RewardKey, Bundle, Consumed, Warnings);
+
+	if (TestTrue(TEXT("the legacy payload survived both passes"), TargetPayload.IsValid()))
+	{
+		TestEqual(TEXT("the payload is the type the literal named"), TargetPayload.GetScriptStruct()->GetName(), FQuestRewardAmount::StaticStruct()->GetName());
+
+		if (const FQuestRewardAmount* Amount = TargetPayload.GetPtr<FQuestRewardAmount>())
+		{
+			TestEqual(TEXT("the payload's value survived"), Amount->Amount, 42);
+		}
+	}
+
+	return true;
+}
+
+/**
+ * The whole point of decomposition: a payload field is a cell a designer can edit in a sheet, and that edit has to
+ * survive plan AND apply. Part 1 made it exportable and importable; without this it is still read-only in place.
+ *
+ * A UGenericReward is used as the OWNER rather than a node, because it is one - its Payload is a direct
+ * FInstancedStruct property, so the walk, the diff and the apply all run their real paths with no graph fixture.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_StructChildPlansAndApplies,
+	"SimpleQuest.Resolver.StructChildPlansAndApplies", FormatIOTestFlags)
+bool FQuestFormatIO_StructChildPlansAndApplies::RunTest(const FString& Parameters)
+{
+	const FStructProperty* PayloadProp =
+		CastField<FStructProperty>(UGenericReward::StaticClass()->FindPropertyByName(FName(TEXT("Payload"))));
+	if (!TestNotNull(TEXT("UGenericReward has a Payload property"), PayloadProp))
+	{
+		return false;
+	}
+
+	UGenericReward* Reward = NewObject<UGenericReward>(GetTransientPackage());
+	{
+		FInstancedStruct& Live = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Reward);
+		Live.InitializeAs<FQuestRewardAmount>();
+		Live.GetMutable<FQuestRewardAmount>().Amount = 42;
+	}
+
+	// The source describes the SAME payload with a different amount - the edit a designer makes in a spreadsheet.
+	const FString OwnerKey = TEXT("node_a/Rewards[0]");
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable& Table = Bundle.TablesByType.Add(TEXT("quest_reward_amount"));
+		Table.Columns = { TEXT("struct"), TEXT("Amount") };
+
+		FQuestDataRow Row;
+		Row.Key = OwnerKey + TEXT("/Payload");
+
+		FQuestDataValue StructCell;
+		StructCell.Kind = EQuestDataValueKind::String;
+		StructCell.StringForm = TEXT("QuestRewardAmount");
+		Row.Cells.Add(TEXT("struct"), StructCell);
+
+		FQuestDataValue AmountCell;
+		AmountCell.Kind = EQuestDataValueKind::Number;
+		AmountCell.StringForm = TEXT("99");
+		Row.Cells.Add(TEXT("Amount"), AmountCell);
+
+		Table.Rows.Add(MoveTemp(Row));
+	}
+
+	// PLAN. Goes through the UObject forwarder, so that path is exercised too.
+	FQuestNodePlanEntry Entry;
+	FQuestInPlacePlan Plan;
+	DiffQuestInstancedChildren(Reward, OwnerKey, Bundle, Entry, Plan);
+
+	if (!TestEqual(TEXT("the plan reports exactly one change"), Entry.Changes.Num(), 1))
+	{
+		for (const FQuestPropertyChange& C : Entry.Changes)
+		{
+			AddInfo(FString::Printf(TEXT("change: '%s' '%s' -> '%s'"), *C.Property, *C.CurrentText, *C.IncomingText));
+		}
+		return false;
+	}
+	TestEqual(TEXT("the change names the payload's field, not the payload"), Entry.Changes[0].Property, TEXT("Payload.Amount"));
+
+	// An EDIT specifically. Without this the count above is satisfied by any single change - and there is a plausible
+	// wrong one: skip the struct in the walk and it never reaches LiveKeys, so the additions loop reports the payload
+	// row as a spurious ChildAdded. One change, entirely the wrong change.
+	TestTrue(TEXT("it is an edit, not a child add or remove"), Entry.Changes[0].Kind == EQuestPropertyChangeKind::Edit);
+
+	// Reads the LIVE struct, not the row. Contains rather than equals - the display formatting is not what is under test.
+	TestTrue(*FString::Printf(TEXT("the change reports the live value (got '%s')"), *Entry.Changes[0].CurrentText),
+		Entry.Changes[0].CurrentText.Contains(TEXT("42")));
+
+	// APPLY.
+	TArray<FString> Skipped;
+	const int32 Written = ApplyQuestChangesToObject(Reward, OwnerKey, Entry.Changes, Skipped);
+	TestEqual(TEXT("one write landed"), Written, 1);
+	for (const FString& S : Skipped)
+	{
+		AddError(FString::Printf(TEXT("unexpectedly skipped: %s"), *S));
+	}
+
+	// Re-fetched rather than reusing the earlier reference, so the assertion reads the property as it stands now.
+	const FInstancedStruct& After = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Reward);
+	if (TestTrue(TEXT("the payload is still valid after apply"), After.IsValid()))
+	{
+		if (const FQuestRewardAmount* Amount = After.GetPtr<FQuestRewardAmount>())
+		{
+			TestEqual(TEXT("the edit landed in the struct's memory"), Amount->Amount, 99);
+		}
+	}
+
+	return true;
+}
+
+#endif
+

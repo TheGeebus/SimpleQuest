@@ -16,6 +16,7 @@
 #include "Display/QuestDisplayData.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
+#include "Subsystems/QuestManagerSubsystem.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
@@ -27,13 +28,13 @@ namespace
 	/**
 	 * State-side multichannel publish helper. Builds the channel set as canonical + each registered alias from
 	 * the reverse-alias map and forwards to the bus's multichannel publish primitive. Treats the call
-	 * as one event instance addressable under all channels — subscribers bound to any perspective receive once
+	 * as one event instance addressable under all channels - subscribers bound to any perspective receive once
 	 * (default deduplication-on), with matched-channel attribution in the callback's first arg per the channels-route /
 	 * payloads-decide contract. Event.QuestTag (set canonically by the caller's event constructor) stays invariant
 	 * across deliveries; payload identity vs delivery metadata are kept distinct.
 	 *
 	 * Sibling pattern to FQuestPublish::OnAllNodeTags, but uses the state subsystem's tag-keyed alias map rather
-	 * than per-node alias arrays — the state subsystem's events don't carry a node reference at this layer.
+	 * than per-node alias arrays - the state subsystem's events don't carry a node reference at this layer.
 	 */
 	template <typename EventType>
 	void PublishWithAliases(USignalSubsystem* Signals, FGameplayTag CanonicalTag, const TMap<FGameplayTag, TArray<FGameplayTag>>& AliasReverseMap,
@@ -51,7 +52,7 @@ namespace
 			}
 		}
 		
-		// Cross-cutting channels — for resolution / entry events these include the outcome tag (and incoming
+		// Cross-cutting channels - for resolution / entry events these include the outcome tag (and incoming
 		// outcome tag, respectively) so subscribers can bind by outcome semantically without filtering payloads
 		// on a quest-tag-keyed subscription. Bus dedup-on-by-default collapses delivery to one callback per
 		// subscriber when they bind on multiple matched channels.
@@ -249,7 +250,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 {
 	TArray<FQuestActivationBlocker> Out;
 
-	// 1. UnknownQuest — early return; no other checks meaningful for unregistered tags.
+	// 1. UnknownQuest - early return; no other checks meaningful for unregistered tags.
 	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
 		FQuestActivationBlocker Blocker;
@@ -263,7 +264,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 
 	// Resolve canonical placements so quest-by-name lifecycle checks consider every active placement (standalone
 	// + every aliased contextual). Without this, a quest reached only through a LinkedQuestline can never be given
-	// — the giver fires against the standalone-perspective tag (which has no PendingGiver fact set when only the
+	// - the giver fires against the standalone-perspective tag (which has no PendingGiver fact set when only the
 	// inlined placement is active), and an exact-match check would refuse the give with NotPendingGiver despite
 	// the inlined placement being ready to receive. Top-level / non-aliased input collapses to a single iteration.
 	const TArray<FGameplayTag> CanonicalTags = ResolveCanonicalTags(QuestTag);
@@ -276,11 +277,11 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		return false;
 	};
 
-	// State-fact blockers (in declared priority order — designer can early-return on first match).
+	// State-fact blockers (in declared priority order - designer can early-return on first match).
 
-	// 2. AlreadyLive — terminal for Steps. Containers (UQuest wrappers) are exempt: their Live fact is derived
+	// 2. AlreadyLive - terminal for Steps. Containers (UQuest wrappers) are exempt: their Live fact is derived
 	//    from inner Step state, so a give forwarding activation to a Live wrapper with mixed-Live inner Steps is
-	//    valid — exactly the path the path-aware giver gate targets. Step Live blocks because Steps own
+	//    valid - exactly the path the path-aware giver gate targets. Step Live blocks because Steps own
 	//    their Live state directly and re-activation while Live would corrupt lifecycle invariants.
 	if (AnyCanonical([WS, this](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsLive(WS, Tag) && !IsContainerTag(Tag); }))
 	{
@@ -289,7 +290,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		Out.Add(Blocker);
 	}
 
-	// 3. Blocked — terminal until ClearBlocked.
+	// 3. Blocked - terminal until ClearBlocked.
 	if (AnyCanonical([WS](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsBlocked(WS, Tag); }))
 	{
 		FQuestActivationBlocker Blocker;
@@ -297,7 +298,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		Out.Add(Blocker);
 	}
 
-	// 4. NotPendingGiver — quest hasn't been activated to giver-offer state on any placement. The give can target
+	// 4. NotPendingGiver - quest hasn't been activated to giver-offer state on any placement. The give can target
 	//    whichever placement is in PendingGiver; only refuse when none is.
 	if (!AnyCanonical([WS](const FGameplayTag& Tag) { return FQuestLifecycleQuery::IsPendingGiver(WS, Tag); }))
 	{
@@ -306,7 +307,7 @@ TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlocke
 		Out.Add(Blocker);
 	}
 
-	// 5. PrereqUnmet — read cached prereq status. Manager pushes this on giver-branch entry and on enablement-
+	// 5. PrereqUnmet - read cached prereq status. Manager pushes this on giver-branch entry and on enablement-
 	//    watch transitions, so the cache reflects the current evaluation. Walk canonicals so the cache entry from
 	//    whichever placement was activated is found, even when the give event fires against the standalone-form
 	//    alias and the inlined placement holds the cached status.
@@ -342,7 +343,7 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 	if (!QuestTag.IsValid()) return;
 
 	// Multi-perspective registry write: append the resolution entry at the canonical AND every AssetScopedAlias.
-	// Symmetric with WorldState's multi-perspective fact write and the bus's multichannel publish — registry
+	// Symmetric with WorldState's multi-perspective fact write and the bus's multichannel publish - registry
 	// iterators (QSV, future telemetry) see the resolution at every perspective without per-row alias-walking.
 	// F.3's event-keyed deduplication gate in the cascade ensures one logical RecordResolution call per logical event;
 	// the splay across perspectives is a single write fanned out, not multiple cascade-driven calls.
@@ -372,7 +373,7 @@ void UQuestStateSubsystem::RecordResolution(FGameplayTag QuestTag, FGameplayTag 
 		}
 	});
 	
-	// Session-wide flat outcome index (new) — one insert; perspectives don't affect the outcome itself
+	// Session-wide flat outcome index (new) - one insert; perspectives don't affect the outcome itself
 	if (OutcomeTag.IsValid())
 	{
 		ResolvedOutcomes.Add(OutcomeTag);
@@ -432,7 +433,7 @@ void UQuestStateSubsystem::RecordEntry(
 {
 	if (!QuestTag.IsValid()) return;
 
-	// Multi-perspective registry write — see RecordResolution for the symmetry rationale.
+	// Multi-perspective registry write - see RecordResolution for the symmetry rationale.
 	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
 		FQuestEntryRecord& Record = QuestEntries.FindOrAdd(Perspective);
@@ -470,7 +471,7 @@ void UQuestStateSubsystem::RecordEntry(
 	// PrereqLeafSubscription consumers routed by Leaf_Entry listen here and trigger expression re-evaluation;
 	// designers can also subscribe directly for cascade-attribution audit / logging or to react when ANY quest
 	// is entered via a specific outcome route (matched at the outcome-tag channel). The event's payload
-	// preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime) shape — subscribers
+	// preserves the legacy (QuestTag, SourceQuestTag, IncomingOutcomeTag, EntryTime) shape - subscribers
 	// wanting the new provenance / snapshot fields read the latest entry from the registry on receipt.
 	// Bus deduplication collapses delivery to one callback per subscriber across the channel set.
 	const TArray<FGameplayTag> IncomingOutcomeChannels = { IncomingOutcomeTag };
@@ -490,10 +491,10 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 	if (!Prefix.IsValid()) return Out;
 	Out.Reserve(KnownQuests.Num() + ContextualTagsByAssetScopedTag.Num());
 
-	// ContextualTags from KnownQuests — the parent-context perspective on each compiled node.
+	// ContextualTags from KnownQuests - the parent-context perspective on each compiled node.
 	for (const TPair<FGameplayTag, FQuestRuntimeRecord>& Pair : KnownQuests)
 	{
-		// MatchesTag returns true when the iterated key is Prefix or a descendant of Prefix — the live signal
+		// MatchesTag returns true when the iterated key is Prefix or a descendant of Prefix - the live signal
 		// bus's hierarchical-walk semantic, applied to the registered-tag set rather than the publish stream.
 		if (Pair.Key.MatchesTag(Prefix))
 		{
@@ -501,7 +502,7 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 		}
 	}
 
-	// AssetScopedAliasTags — the inner-asset perspective. Cross-asset subscribers binding to an alias-shape
+	// AssetScopedAliasTags - the inner-asset perspective. Cross-asset subscribers binding to an alias-shape
 	// prefix expect to enumerate the canonicals their subscription would legitimately reach via the bus's
 	// hierarchical-walk semantic. Resolve alias-prefix matches to their underlying canonicals (the value side
 	// of the forward map) so callers get a uniform canonical-tag set for fact lookups, instance lookups, and
@@ -525,7 +526,7 @@ bool UQuestStateSubsystem::IsKnownQuestTag(FGameplayTag QuestTag) const
 {
 	if (!QuestTag.IsValid()) return false;
 	if (KnownQuests.Contains(QuestTag)) return true;
-	// Alias case — registered through the alias index even though not in KnownQuests directly.
+	// Alias case - registered through the alias index even though not in KnownQuests directly.
 	return ContextualTagsByAssetScopedTag.Contains(QuestTag);
 }
 
@@ -679,7 +680,7 @@ bool UQuestStateSubsystem::IsContainerTag(FGameplayTag QuestTag) const
 void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag)
 {
 	if (!AssetScopedTag.IsValid() || !ContextualTag.IsValid()) return;
-	if (AssetScopedTag == ContextualTag) return;  // top-level content — no aliasing needed
+	if (AssetScopedTag == ContextualTag) return;  // top-level content - no aliasing needed
 
 	ContextualTagsByAssetScopedTag.FindOrAdd(AssetScopedTag).AddUnique(ContextualTag);
 	AssetScopedAliasTagsByContextualTag.FindOrAdd(ContextualTag).AddUnique(AssetScopedTag);
@@ -691,7 +692,7 @@ void UQuestStateSubsystem::RegisterAlias(FGameplayTag AssetScopedTag, FGameplayT
 		ContextualTagsByAssetScopedTag.Num(),
 		AssetScopedAliasTagsByContextualTag.Num());
 	
-	// An alias IS a perspective tag in its own right — every alias must also appear in KnownQuests so any-perspective
+	// An alias IS a perspective tag in its own right - every alias must also appear in KnownQuests so any-perspective
 	// queries resolve uniformly. Folded in here so the invariant is enforced at the API boundary rather than relying on
 	// every caller to remember the pairing. RegisterQuestTag is idempotent (Contains guard); calling it on an already-
 	// known alias is a no-op.
@@ -703,14 +704,14 @@ TArray<FGameplayTag> UQuestStateSubsystem::ResolveCanonicalTags(FGameplayTag Inp
 	TArray<FGameplayTag> Result;
 	if (!InputTag.IsValid()) return Result;
 
-	// Always include the direct InputTag — it may be a ContextualTag with its own registry entries even when it
+	// Always include the direct InputTag - it may be a ContextualTag with its own registry entries even when it
 	// ALSO appears as a registered alias key (e.g., when both the home asset and a linking asset are active in
 	// the same session, the home asset's standalone-form tag is a ContextualTag in the home compile AND an alias
 	// key from the linking compile). Without this, the alias-walk shadows the direct lookup and any prereq leaf
 	// referencing the home asset's standalone-form tag fails to see resolutions from the home's own compile.
 	Result.Add(InputTag);
 
-	// Alias case — append the canonical ContextualTags this alias represents. AddUnique avoids duplicates if
+	// Alias case - append the canonical ContextualTags this alias represents. AddUnique avoids duplicates if
 	// InputTag happens to also appear in the alias-walk results (e.g., self-aliasing edge cases).
 	if (const TArray<FGameplayTag>* Contextuals = ContextualTagsByAssetScopedTag.Find(InputTag))
 	{
@@ -741,7 +742,7 @@ FText UQuestStateSubsystem::GetDisplayName(FGameplayTag Tag) const
 		return Record->DisplayName;
 	}
 	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayName : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning empty."),
+		TEXT("UQuestStateSubsystem::GetDisplayName : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning empty."),
 		*Tag.ToString());
 	return FText::GetEmpty();
 }
@@ -754,7 +755,7 @@ FText UQuestStateSubsystem::GetDisplayDescription(FGameplayTag Tag) const
 		return Record->Description;
 	}
 	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayDescription : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning empty."),
+		TEXT("UQuestStateSubsystem::GetDisplayDescription : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning empty."),
 		*Tag.ToString());
 	return FText::GetEmpty();
 }
@@ -767,7 +768,7 @@ UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
 		return Record->DisplayData;
 	}
 	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayData : no display-data record for tag '%s' — tag may be unregistered or compile may have missed it. Returning null."),
+		TEXT("UQuestStateSubsystem::GetDisplayData : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning null."),
 		*Tag.ToString());
 	return nullptr;
 }
@@ -787,8 +788,8 @@ FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
 	Snapshot.Resolutions = QuestResolutions;
 	// Entries carry FQuestEntryArrival::ActivationContextSnapshot, which IS SaveGame-flagged and persists across the
 	// disk round-trip (only its Instigator weak-ptr is un-flagged; actor attribution rides InstigatorRef instead). The
-	// restore path relies on this — RestoreQuestlineGraph re-derives an objective's IncomingContext from the persisted
-	// snapshot — so do not un-flag it or stop capturing it here.
+	// restore path relies on this - RestoreQuestlineGraph re-derives an objective's IncomingContext from the persisted
+	// snapshot - so do not un-flag it or stop capturing it here.
 	Snapshot.Entries = QuestEntries;
 	return Snapshot;
 }
@@ -798,7 +799,7 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 	if (Snapshot.Version != FSimpleQuestSaveSnapshot::CurrentVersion)
 	{
 		// Session A is single-version; future versions migrate here. Best-effort restore for now.
-		UE_LOG(LogSimpleQuestState, Warning, TEXT("ApplySnapshot: snapshot version %d != current %d — restoring best-effort"),
+		UE_LOG(LogSimpleQuestState, Warning, TEXT("ApplySnapshot: snapshot version %d != current %d - restoring best-effort"),
 			Snapshot.Version, FSimpleQuestSaveSnapshot::CurrentVersion);
 	}
 
@@ -806,11 +807,11 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 	{
 		if (UWorldStateSubsystem* WorldState = GI->GetSubsystem<UWorldStateSubsystem>())
 		{
-			WorldState->RestoreFacts(Snapshot.WorldFacts);   // Layer 1 — fires OnAnyFactChanged
+			WorldState->RestoreFacts(Snapshot.WorldFacts);   // Layer 1 - fires OnAnyFactChanged
 		}
 	}
 
-	QuestResolutions = Snapshot.Resolutions;   // Layer 2 — direct overwrite of the histories
+	QuestResolutions = Snapshot.Resolutions;   // Layer 2 - direct overwrite of the histories
 	QuestEntries = Snapshot.Entries;
 	RebuildRegistryIndices();
 
@@ -987,7 +988,7 @@ TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::QueryRoleSources(
 	TArray<FQuestRoleSourceInfo> Results;
 	if (!QueryTag.IsValid()) return Results;
 
-	// Walk every synonym of QueryTag — canonical-or-alias, in either direction. Component registration at
+	// Walk every synonym of QueryTag - canonical-or-alias, in either direction. Component registration at
 	// BeginPlay can race ahead of the manager's lazy graph registration (WarmReachableGraphs cascade), leaving
 	// the role-source registry holding only the authored form. Bidirectional walk at query time catches the
 	// registered key regardless of which form the designer authored against.
@@ -1022,7 +1023,7 @@ void UQuestStateSubsystem::RegisterRoleSource(
 	if (!Component || AuthoredTags.IsEmpty()) return;
 
 	// Register only under the authored tag form. Bidirectional synonym walks at query time
-	// (BuildTagSynonymSet) resolve the registered key regardless of which form the caller passes — keeping
+	// (BuildTagSynonymSet) resolve the registered key regardless of which form the caller passes - keeping
 	// registration uncoupled from manager graph-registration timing (which is lazy via WarmReachableGraphs and
 	// may not have populated the alias index by the component's BeginPlay).
 	const TWeakObjectPtr<UActorComponent> WeakComp(Component);

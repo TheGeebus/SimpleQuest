@@ -20,13 +20,13 @@ class FQuestlineGraphTraversalPolicy;
  * recurse its instanced sub-objects into rows of their own. Used for both a node and the questline asset itself, so the
  * row shape has one definition rather than one per caller.
  */
-void CollectQuestEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells,
-						   FQuestDataBundle& Bundle);
+void CollectQuestEntityRow(const UObject* Entity, const FString& Key, const TMap<FString, FString>& ExtraCells, FQuestDataBundle& Bundle);
+
+void CollectQuestStructRow(const UScriptStruct* Type, const void* Memory, const FString& Key, const TMap<FString, FString>& ExtraCells, FQuestDataBundle& Bundle);
 
 /**
  * Walk one graph level into the bundle: a row and its wire edges per node, then recursion into any container's inner
  * graph under the container's own key. GraphCell names the level a row belongs to, "root" at the top.
  */
-void CollectQuestGraphBundle(const UEdGraph* Graph, const FString& GraphCell,
-							 const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle);
+void CollectQuestGraphBundle(const UEdGraph* Graph, const FString& GraphCell, const FQuestlineGraphTraversalPolicy& Policy, FQuestDataBundle& Bundle);
 

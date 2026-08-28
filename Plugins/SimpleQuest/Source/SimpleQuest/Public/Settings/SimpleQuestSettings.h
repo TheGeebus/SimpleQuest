@@ -42,6 +42,17 @@ public:
 	virtual FName GetCategoryName() const override { return FName("Plugins"); }
 
 	/**
+	 * Seconds a single advancement hold may stay active before the log warns, naming its Reason. A HUD widget torn
+	 * down while still holding would otherwise stall a questline silently and for the rest of the session, and this
+	 * warning is the only thing that makes that visible.
+	 *
+	 * It NEVER releases the hold. Auto-releasing would hide the bug behind a questline that mostly works; a loud log
+	 * will not. Measured in world time, so a paused game does not accrue toward it. Zero disables the check.
+	 */
+	UPROPERTY(Config, EditAnywhere, Category="Diagnostics", meta=(DisplayName="Abandoned Hold Warning (seconds)", ClampMin="0.0"))
+	float AbandonedHoldWarningSeconds = 300.f;
+
+	/**
 	 * Quest manager class loaded when the game starts. Set to a Blueprint or C++ subclass of UQuestManagerSubsystem
 	 * to customize manager behavior; defaults to the native UQuestManagerSubsystem.
 	 */
@@ -49,35 +60,35 @@ public:
 	TSoftClassPtr<UQuestManagerSubsystem> QuestManagerClass = TSoftClassPtr<UQuestManagerSubsystem>(UQuestManagerSubsystem::StaticClass());
 
 	/**
-	 * Manager activation flow — cascade entry, chain advancement, live-state writers, container Live derivation.
+	 * Manager activation flow - cascade entry, chain advancement, live-state writers, container Live derivation.
 	 * Raise to Verbose when debugging "why isn't my quest going Live" or chain-advancement issues.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Activation"))
 	EQuestLogVerbosity LogSimpleQuestActivationVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Subscriber wiring — Observer/Trigger/Giver registration, K2 node subscriptions, catch-up fanout, prereq-leaf
+	 * Subscriber wiring - Observer/Trigger/Giver registration, K2 node subscriptions, catch-up fanout, prereq-leaf
 	 * enablement watches. Raise to Verbose when debugging "bound but never fires" or catch-up replay behavior.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Subscription"))
 	EQuestLogVerbosity LogSimpleQuestSubscriptionVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Compile-time output — graph compile, native tag registration, rename-redirect machinery, stale-tag warnings.
+	 * Compile-time output - graph compile, native tag registration, rename-redirect machinery, stale-tag warnings.
 	 * Bulk of the historical Verbose noise; raise selectively when investigating compile or rename behavior.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Compiler"))
 	EQuestLogVerbosity LogSimpleQuestCompilerVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Import/export pipeline — reading and writing external tables, mapping columns onto node properties, and the
+	 * Import/export pipeline - reading and writing external tables, mapping columns onto node properties, and the
 	 * in-place re-import plan. Raise to Verbose when debugging "why didn't my column land on the node I expected."
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Resolver"))
 	EQuestLogVerbosity LogSimpleQuestResolverVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * UQuestStateSubsystem registry mutations — resolutions, entries, tag/alias registrations. The durable record of
+	 * UQuestStateSubsystem registry mutations - resolutions, entries, tag/alias registrations. The durable record of
 	 * what happened (becomes load-bearing once save/load lands in 0.5.0). Raise to Verbose when debugging "what's
 	 * persisted vs ephemeral."
 	 */
@@ -85,7 +96,7 @@ public:
 	EQuestLogVerbosity LogSimpleQuestStateVerbosity = EQuestLogVerbosity::Log;
 
 	/**
-	 * Umbrella channel — module startup, settings, debug overlay, and anything not covered by the specialized channels
+	 * Umbrella channel - module startup, settings, debug overlay, and anything not covered by the specialized channels
 	 * above. Live-applied: changes take effect immediately without restart.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Logging", meta=(DisplayName="Module"))
@@ -96,7 +107,7 @@ public:
 	// Designer-facing pickers (K2 node Outcome / Questline pins) narrow their gameplay-tag filter to
 	// SimpleQuest-internal namespaces by default so designers don't scroll through every project tag.
 	// Adopters bridging quest outcomes / identities with their own game tag trees can extend these
-	// filters via the two arrays below — no source fork required.
+	// filters via the two arrays below - no source fork required.
 
 	/**
 	 * Additional gameplay-tag namespaces shown in K2 node Outcome pickers alongside the default
@@ -105,9 +116,9 @@ public:
 	 * Affects K2Node_CompleteObjectiveWithOutcome's OutcomeTag pin picker; runtime behavior unchanged.
 	 *
 	 * Two rules enforced at compose time (violations are dropped with a warning log):
-	 *  - Entries under the framework-owned SimpleQuest namespace are rejected — extend with your own
+	 *  - Entries under the framework-owned SimpleQuest namespace are rejected - extend with your own
 	 *    namespace ("Game.*", "MyStudio.*", etc.).
-	 *  - Entries that overlap each other (duplicates, parent/child pairs) are pruned to one — the
+	 *  - Entries that overlap each other (duplicates, parent/child pairs) are pruned to one - the
 	 *    underlying gameplay-tag picker can't render overlapping namespace roots without crashing.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category="Authoring", meta=(DisplayName="Additional Outcome Picker Categories"))
@@ -165,7 +176,7 @@ private:
 	 * Shared composition body for both picker-category helpers. Always keeps DefaultNamespace; iterates
 	 * AdditionalCategories in authored order, keeping each entry only when it doesn't overlap (identity,
 	 * ancestor, or descendant in tag-namespace hierarchy) with any already-kept entry. Overlapping
-	 * entries are dropped with a warning log — SGameplayTagPicker's STreeView crashes when the
+	 * entries are dropped with a warning log - SGameplayTagPicker's STreeView crashes when the
 	 * Categories list contains overlapping roots.
 	 */
 	static FString ComposePickerCategories(const FString& DefaultNamespace, const TArray<FName>& AdditionalCategories);

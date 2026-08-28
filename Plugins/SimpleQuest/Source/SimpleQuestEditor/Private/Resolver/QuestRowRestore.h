@@ -27,6 +27,13 @@ UClass* ResolveQuestBundleClass(const FString& ClassName);
 bool RestoreQuestCell(const FProperty* Prop, void* ValuePtr, const FQuestDataValue& Value);
 
 /**
+ * Restore a row's cells onto any reflected layout - a UObject's class or a script struct's contents. The UObject
+ * overload forwards here; the split exists because an FInstancedStruct's contents are a child row exactly as a
+ * subobject's are, and only the container type differs.
+ */
+void RestoreQuestRowProperties(const UStruct* Layout, void* Memory, const FQuestDataRow& Row);
+
+/**
  * Apply every cell in Row to Target's matching UPROPERTY by column name. Skips structural columns and any column with no
  * matching property, so a stale table column cannot abort an import.
  */

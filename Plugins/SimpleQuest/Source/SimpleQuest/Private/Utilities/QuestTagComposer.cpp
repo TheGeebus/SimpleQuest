@@ -17,6 +17,7 @@ const FString& FQuestTagComposer::LeafToString(EQuestStateLeaf Leaf)
 	static const FString S_PendingGiver = TEXT("PendingGiver");
 	static const FString S_Deactivated  = TEXT("Deactivated");
 	static const FString S_Blocked      = TEXT("Blocked");
+	static const FString S_Held         = TEXT("Held");
 	static const FString S_Unknown      = TEXT("Unknown");
 
 	switch (Leaf)
@@ -27,6 +28,7 @@ const FString& FQuestTagComposer::LeafToString(EQuestStateLeaf Leaf)
 	case EQuestStateLeaf::PendingGiver: return S_PendingGiver;
 	case EQuestStateLeaf::Deactivated:  return S_Deactivated;
 	case EQuestStateLeaf::Blocked:      return S_Blocked;
+	case EQuestStateLeaf::Held:         return S_Held;
 	}
 	return S_Unknown;
 }
@@ -193,7 +195,7 @@ FGameplayTagContainer FQuestTagComposer::FilterToRegisteredTags(const FGameplayT
 	{
 		if (IsTagRegisteredInRuntime(Tag)) { Result.AddTag(Tag); continue; }
 		UE_LOG(LogSimpleQuestCompiler, Warning,
-			TEXT("%s : filtering stale tag '%s' — no longer registered. ")
+			TEXT("%s : filtering stale tag '%s' - no longer registered. ")
 			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 			*ContextLabel, *Tag.ToString());
 	}

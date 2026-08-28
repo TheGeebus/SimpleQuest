@@ -18,7 +18,7 @@ struct FQuestRewardActivationContext;
  * self-configuring UQuestRewardBase adapters; on activation it dispatches each (TryGrantReward), finalizes every queued
  * grant with the activation lineage, and publishes it as an FQuestRewardGrantedEvent on the grant's RewardType channel.
  *
- * Tagless + fire-when-reached (no Live / Started / Completed) — grant-once across save is free because restore never
+ * Tagless + fire-when-reached (no Live / Started / Completed) - grant-once across save is free because restore never
  * re-reaches a fire-and-forward node. Compiled from UQuestlineNode_Reward (standalone) and synthesized from an Outcome
  * node's inline rewards, both via FQuestlineGraphCompiler. QuestContentGuid is the only durable identity handle.
  */
@@ -29,16 +29,22 @@ class SIMPLEQUEST_API UQuestRewardNode : public UQuestNodeBase
 
 	friend class FQuestlineGraphCompiler;
 
+	/**
+	 * Reward-set compilation tests. Reaches in for the same reason the hold tests do: Rewards is protected because a
+	 * compiled node's contents are the compiler's to write, not because they are secret.
+	 */
+	friend class FQuestRewardSetTestAccess;
+
 public:
 	/**
-	 * Preview aggregation — ask every reward this node holds what it WOULD grant, without granting. Iterates the
+	 * Preview aggregation - ask every reward this node holds what it WOULD grant, without granting. Iterates the
 	 * Instanced Rewards and dispatches DescribeReward on each, concatenating the results. Pure: no delivery, no event,
 	 * no forward. Backs the advertisement query (UQuestStateSubsystem::GetAdvertisedRewardsForAnyOutcome).
 	 */
 	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer) const;
 
 	/**
-	 * Source-agnostic advertised-rewards walk — the shared core of both the live query (manager: nodes from
+	 * Source-agnostic advertised-rewards walk - the shared core of both the live query (manager: nodes from
 	 * LoadedNodeInstances) and the cold query (asset: nodes from CompiledNodes). Given a completing node's manifest and
 	 * the node map to resolve keys against, gathers the requested path's reward-node keys (plus the any-outcome bucket
 	 * when merging), resolves each to a UQuestRewardNode, and aggregates DescribeReward. Pure: no grant, no event.
@@ -52,7 +58,7 @@ public:
 		bool bIncludeAnyOutcome);
 
 	/**
-	 * Grant a reward set — shared core of node grants (ActivateInternal) and questline-level grants (at resolution).
+	 * Grant a reward set - shared core of node grants (ActivateInternal) and questline-level grants (at resolution).
 	 * Dispatches each reward's TryGrantReward against Incoming, finalizes every queued grant with the completion lineage
 	 * (Instigator / Origin*, recipient defaulting to the Instigator), publishes each on its RewardType channel. Signals
 	 * passed explicitly so a non-node caller (the manager) grants without a node's CachedGameInstance.

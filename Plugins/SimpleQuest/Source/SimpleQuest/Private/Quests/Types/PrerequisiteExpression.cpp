@@ -50,24 +50,24 @@ FPrereqLeafFieldContract GetPrereqFieldContract(EPrerequisiteExpressionType Type
 
 #if !UE_BUILD_SHIPPING
 // bSourceTagsResolvable == false means the caller derived this node's tag fields from legitimate, non-None source
-// NAMES that simply are not registered in the GameplayTag registry yet — the expected state on the FIRST compile of a
+// NAMES that simply are not registered in the GameplayTag registry yet - the expected state on the FIRST compile of a
 // never-before-registered asset (the identity + state tags don't exist until that pass creates them; a second pass
 // then sees them valid). In that window an invalid tag is NOT builder drift, so the registry-dependent checks are
 // downgraded to a Verbose log: a genuinely-missing field still surfaces, but the benign first-pass transient stays
 // quiet. The registry-INDEPENDENT checks (LeafPathIdentity is a plain FName the builder either set or didn't) always
-// ensure — those catch real drift regardless of registration timing. Callers with pre-resolved tags pass true.
+// ensure - those catch real drift regardless of registration timing. Callers with pre-resolved tags pass true.
 static void ValidatePrereqNodeAgainstContract(const FPrerequisiteExpressionNode& Node, bool bSourceTagsResolvable = true)
 {
 	const FPrereqLeafFieldContract C = GetPrereqFieldContract(Node.Type);
 	auto RequiresTag = [](EPrereqLeafFieldRole Role) { return Role != EPrereqLeafFieldRole::Unused
 		&& Role != EPrereqLeafFieldRole::BridgeDisplayOnly && Role != EPrereqLeafFieldRole::MirrorFact; };
 
-	// Registry-INDEPENDENT: LeafPathIdentity is a plain FName the builder sets directly — its absence is always drift.
+	// Registry-INDEPENDENT: LeafPathIdentity is a plain FName the builder sets directly - its absence is always drift.
 	ensureMsgf(C.LeafPathIdentity == EPrereqLeafFieldRole::Unused || !Node.LeafPathIdentity.IsNone(),
 		TEXT("Prereq node Type=%d requires LeafPathIdentity but it is None"), (int32)Node.Type);
 
 	// Registry-DEPENDENT: a contract-required tag field must be valid ONCE its source name is registered. Before that
-	// (first-compile transient) an invalid tag is expected, not drift — log Verbose instead of ensuring.
+	// (first-compile transient) an invalid tag is expected, not drift - log Verbose instead of ensuring.
 	auto CheckTag = [&](bool bRequired, bool bValid, const TCHAR* Field)
 	{
 		if (!bRequired || bValid) return;
@@ -75,7 +75,7 @@ static void ValidatePrereqNodeAgainstContract(const FPrerequisiteExpressionNode&
 			ensureMsgf(false, TEXT("Prereq node Type=%d requires %s but it is invalid"), (int32)Node.Type, Field);
 		else
 			UE_LOG(LogSimpleQuest, Verbose,
-				TEXT("Prereq node Type=%d: %s unresolved (source tag not yet registered — expected on first compile)"),
+				TEXT("Prereq node Type=%d: %s unresolved (source tag not yet registered - expected on first compile)"),
 				(int32)Node.Type, Field);
 	};
 	CheckTag(RequiresTag(C.LeafQuestTag),   Node.LeafQuestTag.IsValid(),   TEXT("LeafQuestTag"));
@@ -217,7 +217,7 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 	case EPrerequisiteExpressionType::Leaf_Path:
 		{
 			// Resettable path leaves read the per-run mirror fact (cleared on replay reset); permanent ones read
-			// the append-only resolution registry. The two agree until a reset clears the mirror — that gap is
+			// the append-only resolution registry. The two agree until a reset clears the mirror - that gap is
 			// exactly what re-gates a replayed chapter.
 			const bool bSatisfied = Node.bResettableRead
 				? (WorldState && Node.LeafTag.IsValid() && WorldState->HasFact(Node.LeafTag))
@@ -259,6 +259,80 @@ bool FPrerequisiteExpression::EvaluateNode(int32 NodeIndex, const UWorldStateSub
 	return true;
 }
 
+EPrereqTriState FPrerequisiteExpression::EvaluateWithHolds(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem, const TFunctionRef<bool(FGameplayTag)>& IsSourceHeld) const
+{
+	return EvaluateNodeWithHolds(RootIndex, WorldState, StateSubsystem, IsSourceHeld);
+}
+
+EPrereqTriState FPrerequisiteExpression::EvaluateNodeWithHolds(int32 NodeIndex, const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem, const TFunctionRef<bool(FGameplayTag)>& IsSourceHeld) const
+{
+	if (!Nodes.IsValidIndex(NodeIndex)) return EPrereqTriState::Satisfied;
+	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
+
+	switch (Node.Type)
+	{
+	case EPrerequisiteExpressionType::And:
+		{
+			// Unsatisfied dominates: one unsatisfied child settles it regardless of what the others are doing. Only
+			// when nothing is unsatisfied does an unreadable child matter.
+			bool bAnyIndeterminate = false;
+			for (const int32 ChildIdx : Node.ChildIndices)
+			{
+				switch (EvaluateNodeWithHolds(ChildIdx, WorldState, StateSubsystem, IsSourceHeld))
+				{
+				case EPrereqTriState::Unsatisfied:   return EPrereqTriState::Unsatisfied;
+				case EPrereqTriState::Indeterminate: bAnyIndeterminate = true; break;
+				default: break;
+				}
+			}
+			return bAnyIndeterminate ? EPrereqTriState::Indeterminate : EPrereqTriState::Satisfied;
+		}
+
+	case EPrerequisiteExpressionType::Or:
+		{
+			// Satisfied dominates, and this is the whole reason for three values: a satisfied branch releases the node
+			// even while another branch is held, because that branch needed nothing from the held quest.
+			bool bAnyIndeterminate = false;
+			for (const int32 ChildIdx : Node.ChildIndices)
+			{
+				switch (EvaluateNodeWithHolds(ChildIdx, WorldState, StateSubsystem, IsSourceHeld))
+				{
+				case EPrereqTriState::Satisfied:     return EPrereqTriState::Satisfied;
+				case EPrereqTriState::Indeterminate: bAnyIndeterminate = true; break;
+				default: break;
+				}
+			}
+			return bAnyIndeterminate ? EPrereqTriState::Indeterminate : EPrereqTriState::Unsatisfied;
+		}
+
+	case EPrerequisiteExpressionType::Not:
+		{
+			if (Node.ChildIndices.Num() == 0) return EPrereqTriState::Unsatisfied;
+			switch (EvaluateNodeWithHolds(Node.ChildIndices[0], WorldState, StateSubsystem, IsSourceHeld))
+			{
+			case EPrereqTriState::Satisfied:   return EPrereqTriState::Unsatisfied;
+			case EPrereqTriState::Unsatisfied: return EPrereqTriState::Satisfied;
+			default:                           return EPrereqTriState::Indeterminate;
+			}
+		}
+
+	default:
+		{
+			// Every leaf kind, plus Always. The leaf's SOURCE decides readability; its TRUTH is still decided by
+			// EvaluateNode, so there is exactly one definition of what each leaf kind means and the two cannot drift.
+			// LeafQuestTag is empty for Always and for Leaf_Outcome, and both are simply never holdable.
+			if (Node.LeafQuestTag.IsValid() && IsSourceHeld(Node.LeafQuestTag))
+			{
+				UE_LOG(LogSimpleQuestActivation, VeryVerbose,
+					TEXT("Prereq leaf source '%s' is HELD - evaluating as Indeterminate"), *Node.LeafQuestTag.ToString());
+				return EPrereqTriState::Indeterminate;
+			}
+			return EvaluateNode(NodeIndex, WorldState, StateSubsystem)
+				? EPrereqTriState::Satisfied : EPrereqTriState::Unsatisfied;
+		}
+	}
+}
+
 void FPrerequisiteExpression::CollectLeafTags(TArray<FGameplayTag>& OutTags) const
 {
 	if (Nodes.IsEmpty()) return;
@@ -271,7 +345,7 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	const FPrerequisiteExpressionNode& Node = Nodes[NodeIndex];
 
 	// Leaf kinds that emit a bridge LeafTag get counted here. Subscription wiring on the call sites continues
-	// to subscribe via the type-appropriate channel — this helper is used by leaf-count logging, not by the
+	// to subscribe via the type-appropriate channel - this helper is used by leaf-count logging, not by the
 	// subscription path (which uses CollectLeaves with the typed descriptor).
 	if (Node.Type == EPrerequisiteExpressionType::Leaf
 	 || Node.Type == EPrerequisiteExpressionType::Leaf_Resolution
@@ -282,7 +356,7 @@ void FPrerequisiteExpression::CollectLeafTagsFromNode(int32 NodeIndex, TArray<FG
 	}
 	if (Node.Type == EPrerequisiteExpressionType::Leaf_Outcome)
 	{
-		// Outcome leaves have no node-context bridge — the outcome tag itself is the identifier. LeafTag is
+		// Outcome leaves have no node-context bridge - the outcome tag itself is the identifier. LeafTag is
 		// populated by AddOutcomeLeaf directly to the outcome tag for examiner display compatibility.
 		OutTags.AddUnique(Node.LeafOutcomeTag);
 		return;
@@ -445,12 +519,12 @@ int32 FPrerequisiteExpression::AddResolutionLeaf(FName NodeTagName, const FGamep
 
 int32 FPrerequisiteExpression::AddPathLeaf(FName NodeTagName, FName PathIdentity, bool bResettable)
 {
-	// Bridge LeafTag preserved for Prereq Examiner display compat — same MakeNodePathFact mechanism as
+	// Bridge LeafTag preserved for Prereq Examiner display compat - same MakeNodePathFact mechanism as
 	// AddResolutionLeaf, keyed on the path identity directly rather than the outcome tag's name. Runtime
 	// evaluation reads LeafQuestTag / LeafPathIdentity via UQuestStateSubsystem::HasResolvedAtPath; the bridge
 	// tag is editor-side only UNLESS bResettable is set, in which case the same LeafTag doubles as the per-run
 	// mirror fact the runtime reads (the resettable-replay projection). Path leaves are satisfied only when the
-	// named quest resolved through this specific authored path — distinct from Leaf_Resolution which is
+	// named quest resolved through this specific authored path - distinct from Leaf_Resolution which is
 	// outcome-keyed and satisfies on any path producing the named outcome.
 	FPrerequisiteExpressionNode Node;
 	Node.Type = EPrerequisiteExpressionType::Leaf_Path;
@@ -485,7 +559,7 @@ int32 FPrerequisiteExpression::AddEntryLeaf(FName NodeTagName, const FGameplayTa
 
 int32 FPrerequisiteExpression::AddOutcomeLeaf(const FGameplayTag& OutcomeTag)
 {
-	// Context-free outcome leaf — no quest-tag scoping. LeafOutcomeTag is BOTH the match criterion (passed to
+	// Context-free outcome leaf - no quest-tag scoping. LeafOutcomeTag is BOTH the match criterion (passed to
 	// HasAnyQuestResolvedWith at evaluation time) AND the subscribe channel (Phase 6a's outcome-channel publish
 	// target). LeafTag mirrors the outcome tag so CollectLeafTags + examiner display can render the leaf identity
 	// without a synthesized bridge fact (the outcome tag IS the identifier here, no node context to encode).

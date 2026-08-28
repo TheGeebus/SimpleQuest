@@ -80,7 +80,7 @@ void FQuestPIEDebugChannel::HandlePostPIEStarted(bool bIsSimulating)
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE started (simulating=%d, subsystems resolved=%d)"),
 		bIsSimulating ? 1 : 0, bResolved ? 1 : 0);
 
-	// Always begin a new session even if QuestState didn't resolve — the snapshot fields stay empty in that case
+	// Always begin a new session even if QuestState didn't resolve - the snapshot fields stay empty in that case
 	// (graceful degradation). This matches IsActive()'s policy: WorldState + QuestManager are load-bearing, QuestState
 	// is optional. Subscribe to OnAnyRegistryChanged only if the subsystem resolved.
 	if (bResolved)
@@ -96,7 +96,7 @@ void FQuestPIEDebugChannel::HandlePostPIEStarted(bool bIsSimulating)
 
 void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 {
-	// Finalize before resetting CachedQuestState — finalize reads the live subsystem to capture registry maps.
+	// Finalize before resetting CachedQuestState - finalize reads the live subsystem to capture registry maps.
 	FinalizeInFlightSession();
 
 	if (UQuestStateSubsystem* QS = CachedQuestState.Get())
@@ -124,7 +124,7 @@ bool FQuestPIEDebugChannel::ResolvePIESubsystems()
 		return false;
 	}
 
-	// Primary path: GEditor->PlayWorld — canonical access to the PIE/SIE world while play is active. Non-null for both
+	// Primary path: GEditor->PlayWorld - canonical access to the PIE/SIE world while play is active. Non-null for both
 	// Play In Editor and Simulate In Editor. Avoids the world-context iteration edge cases (RunAsDedicated semantics,
 	// multi-instance PIE) that complicate the loop-based path.
 	UWorld* PIEWorld = GEditor->PlayWorld;
@@ -132,7 +132,7 @@ bool FQuestPIEDebugChannel::ResolvePIESubsystems()
 	if (!PIEWorld)
 	{
 		// Fallback: iterate world contexts looking for any PIE-type world. Covers edge cases where PlayWorld isn't set
-		// but a PIE context exists (rare — certain dedicated-server-only startup flows).
+		// but a PIE context exists (rare - certain dedicated-server-only startup flows).
 		for (const FWorldContext& Ctx : GEditor->GetWorldContexts())
 		{
 			if (Ctx.WorldType == EWorldType::PIE && Ctx.World())
@@ -187,7 +187,7 @@ EQuestNodeDebugState FQuestPIEDebugChannel::QueryNodeState(const UEdGraphNode* E
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	if (!WorldState) return EQuestNodeDebugState::Unknown;
 
-	// Priority order: PendingGiver > Live > Completed > Deactivated — current activity outranks history. The
+	// Priority order: PendingGiver > Live > Completed > Deactivated - current activity outranks history. The
 	// Completed fact is append-only and never clears, and a container holds its Live fact across loop iterations, so a
 	// node running again asserts both at once; ranking Completed first paints "done" over something actively running.
 	// Routes through FQuestLifecycleQuery so this surface answers the same "is this state asserted?" question every
@@ -212,6 +212,20 @@ TArray<FQuestActivationBlocker> FQuestPIEDebugChannel::QueryNodeGating(const UEd
 	if (RuntimeTag.IsValid() && FQuestLifecycleQuery::IsBlocked(WorldState, RuntimeTag))
 	{
 		Out.AddDefaulted_GetRef().Reason = EQuestActivationBlocker::Blocked;
+	}
+
+	// Asked of the MANAGER rather than read as a fact, and the distinction matters. The Held fact is written on the
+	// tag the hold NAMES; a node paused by a hold placed on a container above it carries no fact of its own. Only the
+	// manager walks ancestry across every tag perspective, which is the question this overlay actually needs answered.
+	if (RuntimeTag.IsValid())
+	{
+		if (const UQuestManagerSubsystem* Manager = CachedQuestManager.Get())
+		{
+			if (Manager->IsQuestAdvancementHeld(RuntimeTag))
+			{
+				Out.AddDefaulted_GetRef().Reason = EQuestActivationBlocker::HeldForAdvancement;
+			}
+		}
 	}
 
 	// Prereq state is evaluated live rather than read from the state subsystem's blocker query, which sources its
@@ -268,7 +282,7 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 	if (!Instance)
 	{
 		// The opened asset can be a standalone questline whose placement runs under a parent's namespace. Facts publish on
-		// every perspective, so ResolveRuntimeTag's own contextual swap does not fire here — but the instance registry is
+		// every perspective, so ResolveRuntimeTag's own contextual swap does not fire here - but the instance registry is
 		// keyed by the running placement's contextual tag alone, so resolve through the runtime alias index instead.
 		for (const FGameplayTag& Canonical : StateSubsystem->ResolveCanonicalTags(RuntimeTag))
 		{
@@ -341,7 +355,7 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 
 	// Contextual resolution: if PIE is running and own-asset tag has no live state, the asset may be opened
 	// while a parent LinkedQuestline placement is the actively running instance. Consult the state subsystem's
-	// runtime alias index (ResolveCanonicalTags) instead of the editor-utility's asset-registry walk — the
+	// runtime alias index (ResolveCanonicalTags) instead of the editor-utility's asset-registry walk - the
 	// runtime index reflects post-game-start registrations (including listener auto-load), whereas the asset-
 	// registry walk only sees compile-time data and can disagree with what the manager has actually registered.
 	// Closes the "halo doesn't update post-listener" symptom.
@@ -388,7 +402,7 @@ void FQuestPIEDebugChannel::BeginNewSession()
 	NewSession.bInFlight = true;
 	SessionHistory.Add(MoveTemp(NewSession));
 
-	// FIFO trim — drop oldest until under the cap. RemoveAt(0) preserves chronological index order.
+	// FIFO trim - drop oldest until under the cap. RemoveAt(0) preserves chronological index order.
 	while (SessionHistory.Num() > MaxStoredSessions)
 	{
 		SessionHistory.RemoveAt(0);

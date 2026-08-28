@@ -13,6 +13,7 @@
 class FNativeGameplayTag;
 #endif
 
+class URewardSetDataAsset;
 class UEdGraph;
 class UQuestDisplayData;
 class UQuestNodeBase;
@@ -63,6 +64,16 @@ struct FQuestRewardSet
     /** Rewards granted for this outcome, in order. Same Instanced adapters as a Grant Rewards node's array. */
     UPROPERTY(EditAnywhere, Instanced, Category = "Reward")
     TArray<TObjectPtr<UQuestRewardBase>> Rewards;
+
+    /**
+     * Shared reward compositions this outcome also grants. Compilation flattens each set's contents in alongside the
+     * inline rewards above, referenced sets first in the order listed, so the runtime sees one flat list.
+     *
+     * Soft on purpose: the compiler resolves it and the runtime never needs the asset, so a hard reference would drag
+     * it into the cook for nothing. Same reasoning as a loot reward's table.
+     */
+    UPROPERTY(EditAnywhere, Category = "Reward")
+    TArray<TSoftObjectPtr<URewardSetDataAsset>> RewardSets;
 };
 
 /**

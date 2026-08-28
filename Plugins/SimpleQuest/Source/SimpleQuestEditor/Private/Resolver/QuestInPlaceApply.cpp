@@ -18,47 +18,71 @@
 
 
 /**
- * Every object a change's path could name, keyed by the path that names it: "" for the entity itself, then each instanced
- * descendant under the path the WRITER gives it. Built by the same walk the plan used, so any path the plan produced
- * resolves here by construction. The children are reached from a non-const owner, so widening them back is sound.
+ * Where a change lands. A path resolves to either a UObject or the contents of an FInstancedStruct nested inside one;
+ * both are addressed by the same dotted paths and written through the same reflection call.
+ *
+ * OWNER IS KEPT SEPARATELY FROM MEMORY because undo and property notification are UOBJECT concerns and a struct has
+ * neither. A write into a struct still has to mark and notify the object that holds it, or the edit is untracked by
+ * undo and invisible to the handler that would react to it.
  */
-static void CollectApplyTargets(UObject* Owner, const FString& OwnerKey, const FString& PathPrefix, TMap<FString, UObject*>& OutByPath)
+struct FQuestApplyTarget
 {
-	OutByPath.Add(PathPrefix, Owner);
-	for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
+	UObject* Owner = nullptr;
+	const UStruct* Layout = nullptr;
+	void* Memory = nullptr;
+
+	bool IsStructContents() const { return Memory != static_cast<const void*>(Owner); }
+};
+
+static void CollectApplyTargets(UObject* Owner, const UStruct* Layout, void* Container,
+	const FString& OwnerKey, const FString& PathPrefix, TMap<FString, FQuestApplyTarget>& OutByPath)
+{
+	if (!Owner || !Layout || !Container) return;
+
+	OutByPath.Add(PathPrefix, FQuestApplyTarget{ Owner, Layout, Container });
+	for (TFieldIterator<FProperty> It(Layout); It; ++It)
 	{
 		FProperty* Prop = *It;
 		if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
 		if (!IsQuestInstancedBearing(Prop)) continue;
 
-		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Owner), OwnerKey, Prop->GetName(),
-		[&OutByPath](const FString& ChildKey, const FString& Path, const UObject* Child, int32 ArrayOrdinal)
-	        {
-	            CollectApplyTargets(const_cast<UObject*>(Child), ChildKey, Path, OutByPath);
-	        });
+		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Container), OwnerKey, Prop->GetName(),
+		[&OutByPath, Owner](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
+		{
+			// A struct child's OWNER stays the object we are already inside - it is the thing undo and notification
+			// have to reach. Only the layout and the memory descend.
+			if (Child.IsStruct())
+			{
+				CollectApplyTargets(Owner, Child.StructType, const_cast<void*>(Child.Memory), ChildKey, Path, OutByPath);
+				return;
+			}
+			UObject* ChildObject = const_cast<UObject*>(Child.Object);
+			CollectApplyTargets(ChildObject, ChildObject->GetClass(), ChildObject, ChildKey, Path, OutByPath);
+		});
 	}
 }
 
 /**
- * Which object owns this change, and under what property name? LONGEST matching path wins, and the candidate must
+ * Which target owns this change, and under what property name? LONGEST matching path wins, and the candidate must
  * actually have a property by the remaining name - that pair of conditions is what makes this safe without parsing a
  * path whose segments can contain dots and brackets of their own.
  */
-static UObject* FindApplyTarget(const TMap<FString, UObject*>& ByPath, const FString& ChangePath, FString& OutPropertyName)
+static const FQuestApplyTarget* FindApplyTarget(const TMap<FString, FQuestApplyTarget>& ByPath, const FString& ChangePath,
+	FString& OutPropertyName)
 {
-	UObject* Best = nullptr;
+	const FQuestApplyTarget* Best = nullptr;
 	int32 BestLen = -1;
-	for (const TPair<FString, UObject*>& Pair : ByPath)
+	for (const TPair<FString, FQuestApplyTarget>& Pair : ByPath)
 	{
 		FString Remainder;
-		if (Pair.Key.IsEmpty())                                    { Remainder = ChangePath; }
+		if (Pair.Key.IsEmpty())                              { Remainder = ChangePath; }
 		else if (ChangePath.StartsWith(Pair.Key + TEXT("."))) { Remainder = ChangePath.RightChop(Pair.Key.Len() + 1); }
-		else                                                       { continue; }
+		else                                                  { continue; }
 
 		if (Remainder.IsEmpty() || Pair.Key.Len() <= BestLen) continue;
-		if (Pair.Value->GetClass()->FindPropertyByName(FName(*Remainder)))
+		if (Pair.Value.Layout->FindPropertyByName(FName(*Remainder)))
 		{
-			Best = Pair.Value;
+			Best = &Pair.Value;
 			BestLen = Pair.Key.Len();
 			OutPropertyName = Remainder;
 		}
@@ -72,17 +96,17 @@ static UObject* FindApplyTarget(const TMap<FString, UObject*>& ByPath, const FSt
  * collide with another asset. A rename is a deliberate operation with consequences a property write cannot express, so
  * apply reports it and declines. The plan still SHOWS the difference; it simply is not something this step performs.
  */
-static bool IsIdentityBearingProperty(const UObject* Target, const FString& PropertyName)
+static bool IsIdentityBearingProperty(const FQuestApplyTarget& Target, const FString& PropertyName)
 {
-	return Target && Target->IsA<UQuestlineGraph>() && PropertyName == TEXT("QuestlineID");
+	return !Target.IsStructContents() && Target.Owner && Target.Owner->IsA<UQuestlineGraph>() && PropertyName == TEXT("QuestlineID");
 }
 
 int32 ApplyQuestChangesToObject(UObject* Owner, const FString& OwnerKey, const TArray<FQuestPropertyChange>& Changes, TArray<FString>& OutSkipped)
 {
 	if (!Owner) return 0;
 
-	TMap<FString, UObject*> ByPath;
-	CollectApplyTargets(Owner, OwnerKey, FString(), ByPath);
+	TMap<FString, FQuestApplyTarget> ByPath;
+	CollectApplyTargets(Owner, Owner->GetClass(), Owner, OwnerKey, FString(), ByPath);;
 
 	int32 Written = 0;
 	
@@ -94,41 +118,36 @@ int32 ApplyQuestChangesToObject(UObject* Owner, const FString& OwnerKey, const T
 	for (const FQuestPropertyChange& Change : Changes)
 	{
 		FString PropertyName;
-		UObject* Target = FindApplyTarget(ByPath, Change.Property, PropertyName);
+		const FQuestApplyTarget* Target = FindApplyTarget(ByPath, Change.Property, PropertyName);
 		if (!Target)
 		{
-			// The structure moved between planning and applying, or the plan came from elsewhere. Either way, say so -
-			// a change that silently evaporates is worse than one that fails, because the plan already promised it.
 			OutSkipped.Add(FString::Printf(TEXT("'%s' names no property reachable from '%s'"), *Change.Property, *OwnerKey));
 			continue;
 		}
-		FProperty* Prop = Target->GetClass()->FindPropertyByName(FName(*PropertyName));
+		FProperty* Prop = Target->Layout->FindPropertyByName(FName(*PropertyName));
 		if (!Prop)
 		{
 			OutSkipped.Add(FString::Printf(TEXT("'%s' resolved to no property"), *Change.Property));
 			continue;
 		}
 
-		if (IsIdentityBearingProperty(Target, PropertyName))
+		if (IsIdentityBearingProperty(*Target, PropertyName))
 		{
 			OutSkipped.Add(FString::Printf(TEXT("'%s' is identity-bearing - rewriting it would move the questline's compiled "
 				"tag namespace and orphan save data keyed on it. Rename deliberately instead."), *Change.Property));
 			continue;
 		}
 
-		Target->Modify();   // per-object, so undo restores instanced children as well as the node
-		// Write the value the PLAN computed, not a re-reading of the row. Once the restore path can decline to write,
-		// those are different questions, and answering the second one here is how an apply drifts from its own preview.
-		if (!RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target), Change.IncomingValue))
+		// Modify the OWNING OBJECT even when the write lands in a struct inside it - undo records objects, and a struct
+		// has nothing of its own to record.
+		Target->Owner->Modify();
+		if (!RestoreQuestCell(Prop, Prop->ContainerPtrToValuePtr<void>(Target->Memory), Change.IncomingValue))
 		{
-			// Counting this would report a change that did not happen, and the plan already promised it would. Named
-			// rather than merely uncounted - a value the source states and the asset refuses is a source the author
-			// needs to fix, not a silent no-op.
 			OutSkipped.Add(FString::Printf(TEXT("'%s' could not be written to '%s' - the value does not fit that property"),
 				*Change.Property, *OwnerKey));
 			continue;
 		}
-		PendingNotifies.Emplace(Target, Prop);
+		PendingNotifies.Emplace(Target->Owner, Prop);
 		++Written;
 	}
 

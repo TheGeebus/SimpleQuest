@@ -13,7 +13,7 @@ FText FQuestlineGraphAssetTypeActions::GetName() const
 
 FColor FQuestlineGraphAssetTypeActions::GetTypeColor() const
 {
-	return FColor(45, 170, 130);
+	return FColor(55, 200, 150);
 }
 
 UClass* FQuestlineGraphAssetTypeActions::GetSupportedClass() const
@@ -23,7 +23,7 @@ UClass* FQuestlineGraphAssetTypeActions::GetSupportedClass() const
 
 uint32 FQuestlineGraphAssetTypeActions::GetCategories()
 {
-	return EAssetTypeCategories::Gameplay;
+	return Category;
 }
 
 void FQuestlineGraphAssetTypeActions::OpenAssetEditor(const TArray<UObject*>& InObjects, TSharedPtr<IToolkitHost> EditWithinLevelEditor)

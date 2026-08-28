@@ -37,12 +37,51 @@ public:
 	
 	FOnQuestlineCompiled QuestlineCompiledDelegate;
 	virtual FOnQuestlineCompiled& OnQuestlineCompiled() override { return QuestlineCompiledDelegate; }
+	
+	virtual bool ExportQuestline(UQuestlineGraph* Graph,
+		const FString& FormatName,
+		const UQuestImportMapping* Mapping,
+		TMap<FString, FString>& OutFiles,
+		TArray<FString>& OutWarnings,
+		FString& OutError) override;
+	
+	virtual bool ImportQuestline(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		const FString& DestPackagePath,
+		const UQuestImportMapping* Mapping,
+		FString& OutAssetPath,
+		TArray<FString>& OutWarnings,
+		FString& OutError) override;
+	
+	virtual bool PlanInPlaceImport(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		UQuestlineGraph* Target,
+		const UQuestImportMapping* Mapping,
+		bool bResetAbsent,
+		FQuestInPlacePlan& OutPlan,
+		FString& OutError) override;
 
+	virtual bool ApplyInPlaceImport(const TMap<FString, FString>& Files,
+		const FString& FormatName,
+		UQuestlineGraph* Target,
+		const UQuestImportMapping* Mapping,
+		bool bResetAbsent,
+		bool bDeleteOrphans,
+		const FQuestInPlacePlan& ReviewedPlan,
+		FQuestInPlacePlan& OutAppliedPlan,
+		FString& OutError) override;
+	
 	/** Editor-side PIE debug channel. Lifetime managed by this module. Access via GetPIEDebugChannel(). */
 	static FQuestPIEDebugChannel* GetPIEDebugChannel();
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
+
+	/**
+	 * Every other SimpleQuest asset's browser identity, registered together and unregistered together so the two
+	 * lists cannot fall out of step.
+	 */
+	TArray<TSharedRef<class IAssetTypeActions>> QuestAssetTypeActions;
 	TSharedPtr<FQuestlineGraphNodeFactory> QuestlineGraphNodeFactory;
 	TSharedPtr<FGraphPanelPinConnectionFactory> QuestlineConnectionFactory;
 	
@@ -65,11 +104,21 @@ private:
 	void FlushCompiledDisplayIni();                                                  // one read-modify-write per batch
 	void RemoveCompiledDisplaySection(const FString& EffectiveID) const;             // immediate (asset removal)
 	void RebuildNativeTags(bool bRefreshTree = false);
+
+	/**
+	 * Drops generated data for questlines that no longer exist. Deletion outside the editor - a git checkout, a file
+	 * removed by hand, a harness cleaning up - never fires OnAssetRemoved, so display sections and tag registry
+	 * entries accumulate with nothing to remove them.
+	 *
+	 * Keyed on the ASSET REGISTRY, never on what compiled: a questline that failed to compile still exists, and
+	 * pruning by "did I see it this batch" would delete the display data of everything that errored.
+	 */
+	void ReconcileGeneratedDataAgainstAssets();
 	
 	/**
 	 * Bound to FCoreUObjectDelegates::OnAssetLoaded in StartupModule. When any asset loads, scans it for top-level FGameplayTag /
 	 * FGameplayTagContainer UPROPERTYs whose stored FName matches a NewTagName on the active redirect map. A match indicates the
-	 * field MAY have been transparently rewritten by FGameplayTag::PostSerialize during deserialization — the asset's disk bytes
+	 * field MAY have been transparently rewritten by FGameplayTag::PostSerialize during deserialization - the asset's disk bytes
 	 * still reference the OldTagName, and UE doesn't mark the asset dirty for that hidden rewrite. Marking dirty here surfaces the
 	 * asset in the Content Browser so Save All persists the healed value and the redirect can later be cleaned up without orphaning
 	 * unloaded-at-rename-time assets.
@@ -78,7 +127,7 @@ private:
 	 * asset types (UDataAsset, UDataTable, adopter custom asset classes) hold their fields on the asset object itself. The dirty
 	 * mark always goes on the loaded asset (the thing UE will serialize), regardless of where the matching field lived.
 	 *
-	 * Heuristic accepts false positives — an asset whose FGameplayTag was already at the redirect's NewTagName on disk gets a no-op
+	 * Heuristic accepts false positives - an asset whose FGameplayTag was already at the redirect's NewTagName on disk gets a no-op
 	 * save, which UE handles cleanly.
 	 */
 	void MarkDirtyOnRedirectedTagLoad(UObject* LoadedAsset);
@@ -112,10 +161,10 @@ private:
 	void AddNativeTagsForGraph(const TArray<FName>& TagNames);
 
 	/**
-	 * Surgically unregister native tags a removed/recompiled graph no longer owns — but ONLY those no OTHER still-registered
+	 * Surgically unregister native tags a removed/recompiled graph no longer owns - but ONLY those no OTHER still-registered
 	 * graph claims (shared tags like SimpleQuest.Outcome.Reached are registered by many graphs; unregistering one on a single
 	 * removal would silently break every other graph resolving against it). Destroys just the orphaned FNativeGameplayTags +
-	 * one tree refresh — O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
+	 * one tree refresh - O(removed) not the full O(all-tags) RebuildNativeTags(true) teardown. CALLER CONTRACT: CompiledTag-
 	 * Registry must ALREADY reflect the post-change state (removed graph gone / recompiled graph's new tags in), so the
 	 * "still claimed by another" check sees the correct remaining set.
 	 */
@@ -132,7 +181,7 @@ private:
 
 	/**
 	 * Display records accumulated during a compile (keyed by EffectiveID), coalesced to one ini write in
-	 * EndCompileBatch — mirrors how CompiledTagRegistry defers WriteCompiledTagsIni.
+	 * EndCompileBatch - mirrors how CompiledTagRegistry defers WriteCompiledTagsIni.
 	 */
 	TMap<FString, TArray<FString>> PendingDisplaySections;
 

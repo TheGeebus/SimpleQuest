@@ -7,6 +7,8 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
+class UQuestRewardBase;
+class URewardSetDataAsset;
 enum class EResettableReplay : uint8;
 
 struct FQuestGraphResolution;
@@ -28,7 +30,7 @@ class FQuestlineGraphTraversalPolicy;
  *
  * A single recursive CompileGraph call (do not call directly, prefer Compile) handles all linked Quest and Step node
  * objects. LinkedQuestline graph nodes compile to UQuest runtime instances under a nested tag namespace
- * (SimpleQuest.Questline.<ParentID>.<NodeLabel>.<InnerNode>) — the linked asset's content is inlined as the UQuest's inner
+ * (SimpleQuest.Questline.<ParentID>.<NodeLabel>.<InnerNode>) - the linked asset's content is inlined as the UQuest's inner
  * routing but the LinkedQuestline itself retains a first-class compiled tag, lifecycle events, and save identity.
  *
  * - Call Compile as the entry point to both validate the questline graph asset and initiate recursive compilation.
@@ -39,8 +41,32 @@ class FQuestlineGraphTraversalPolicy;
 class SIMPLEQUESTEDITOR_API FQuestlineGraphCompiler
 {
 public:
-	static void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph,
-	                                    FName IdentityName);
+	/**
+	 * Flatten referenced reward sets into Out, in listed order, ahead of whatever inline rewards the caller appends
+	 * after. Shared by the two authoring surfaces that can reference a set - a Grant Rewards node and a questline's
+	 * per-outcome rewards - so a fix to one cannot drift from the other.
+	 *
+	 * Names each duplicate "<NamePrefix>_<set>_<reward>". The two indices are both load-bearing: the outer object is
+	 * shared, and a name colliding with an inline reward's is a hard crash whenever their classes differ.
+	 * ContextLabel names the owner in a diagnostic; DiagnosticNode is optional and makes the log entry clickable.
+	 */
+	void FlattenRewardSets(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+		UObject* Outer,
+		const FString& NamePrefix,
+		const FString& ContextLabel,
+		const UEdGraphNode* DiagnosticNode,
+		TArray<TObjectPtr<UQuestRewardBase>>& Out,
+		const UObject* DiagnosticAsset = nullptr);
+
+	/**
+	 * Reports rewards still pointing at the deprecated Quest Loot Table data asset. Call once the reward array is
+	 * COMPLETE - after the inline rewards, not merely after FlattenRewardSets - because a legacy reference is far more
+	 * likely on an authored reward than inside a shared set. ContextLabel names the owner in the diagnostic;
+	 * DiagnosticNode is optional and makes the entry clickable.
+	 */
+	void WarnOnDeprecatedRewards(const TArray<TObjectPtr<UQuestRewardBase>>& Rewards, const FString& ContextLabel, const UEdGraphNode* DiagnosticNode, const UObject* DiagnosticAsset = nullptr);
+
+	void HarvestQuestlineRewards(const UQuestlineGraph* SourceGraph, UQuestlineGraph* OwnerGraph, FName IdentityName);
 	FQuestlineGraphCompiler();
 	virtual ~FQuestlineGraphCompiler();
 
@@ -129,6 +155,19 @@ protected:
 	virtual void RegisterCompiledTags(UQuestlineGraph* InGraph);
 	
 private:
+	/**
+	 * The recursion behind FlattenRewardSets. OnPath is the stack of sets currently being expanded - deliberately a
+	 * PATH rather than a visited set, because a base bundle included by two different chapter sets is legitimate and
+	 * should be granted twice, while a set reachable from itself never terminates. A visited set would conflate the
+	 * two and silently drop the second legitimate inclusion.
+	 */
+	void FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+	                               UObject* Outer,
+	                               const FString& NamePrefix,
+	                               const FString& ContextLabel,
+	                               const UEdGraphNode* DiagnosticNode,
+	                               TArray<const URewardSetDataAsset*>& OnPath,
+	                               TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
 
 	/**
 	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during
@@ -166,7 +205,7 @@ private:
 	TSet<FGameplayTag> CompiledListenerGroupTags;
 	
 	/**
-	 * Post-compile pass — populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and
+	 * Post-compile pass - populates UQuest::InnerStepTags + UQuest::ReachableStepsByActivatePin and
 	 * UQuestStep::AncestorContainerTags. Called from Compile() after RegisterCompiledTags so FGameplayTag
 	 * resolution succeeds.
 	 */
@@ -204,7 +243,7 @@ private:
 	/**
 	 * Given a spec's (SourceNodeGuid, ParentAsset), resolves the compiled ContextualTag of the source content node. Used as the
 	 * SourceFilter on entry destinations so runtime routing can discriminate per-source. Returns NAME_None when the source
-	 * cannot be located (unresolvable asset, missing node, etc.) — caller emits a warning and skips the spec.
+	 * cannot be located (unresolvable asset, missing node, etc.) - caller emits a warning and skips the spec.
 	 */
 	FName ResolveSourceFilterTag(const FIncomingSignalPinSpec& Spec, const UQuestlineGraph* ChildAsset) const;
 
@@ -212,22 +251,25 @@ private:
 	 * Recursively collects content-node (source, outcome) pairs that transitively reach a graph's boundary via any combination
 	 * of direct wires, Entered-pin passthroughs, and Entry-spec-pin passthroughs. Extends the one-level `CollectEntryReachingSources`
 	 * by continuing the walk up through Entry indirections until a concrete content-node source is found or the walk escapes
-	 * the compile tree (filtered by VisitedAssetPaths). Cycle-guarded via VisitedGraphs — a graph visited once doesn't re-emit.
+	 * the compile tree (filtered by VisitedAssetPaths). Cycle-guarded via VisitedGraphs - a graph visited once doesn't re-emit.
 	 */
 	void CollectTransitiveParentSources(UEdGraph* InGraph, const TArray<FString>& VisitedAssetPaths, TSet<FSourcePathKey>& OutKeys, TSet<UEdGraph*>& VisitedGraphs);
 	
 	/**
 	 * Walks the Outer chain from a content node up to its containing asset, collecting sanitized ancestor labels, then composes
 	 * the compiled ContextualTag: SimpleQuest.Questline.<QuestlineID>.<AncestorLabel>...<NodeLabel>. Independent of compile pass
-	 * ordering — uses editor-time data only.
+	 * ordering - uses editor-time data only.
 	 */
 	FName ComputeCompiledTagForContentNode(const UQuestlineNode_ContentBase* SourceNode, const UQuestlineGraph* ContainingAsset) const;
 
 	/** Logs a compile error and sets the internal error flag. */
 	void AddError(const FString& Message, const UEdGraphNode* Node = nullptr);
 
-	/** Logs a compile warning without setting the internal error flag. */
-	void AddWarning(const FString& Message, const UEdGraphNode* Node = nullptr);
+	/**
+	 * Asset is the fallback target when there is no node to point at - questline-level rewards belong to the graph
+	 * asset rather than to any node, and a diagnostic with nothing clickable is one a designer has to hunt for.
+	 */
+	void AddWarning(const FString& Message, const UEdGraphNode* Node = nullptr, const UObject* Asset = nullptr);
 
 	/** Internal questline compiler error flag. Returned by the main Compile function. */
 	bool bHasErrors = false;
@@ -262,7 +304,7 @@ private:
 	
 	/**
 	 * Maps utility editor nodes to their compile-time FName keys. Keyed by editor node pointer; values are GUID-derived FNames
-	 * (Util_<NodeGuid>) used as AllCompiledNodes lookup keys. Not gameplay tags — utility nodes are internal routing only,
+	 * (Util_<NodeGuid>) used as AllCompiledNodes lookup keys. Not gameplay tags - utility nodes are internal routing only,
 	 * not tracked quest states.
 	 */
 	TMap<UEdGraphNode*, FName> UtilityNodeKeyMap;
@@ -296,7 +338,7 @@ private:
 	/**
 	 * Emits a tokenized compile-time warning when a single content-node output pin reaches two or more distinct Outcome
 	 * terminals sharing the same OutcomeTag. The compiler accepts the union of reached destinations, but the authoring
-	 * is ambiguous — one outcome should route through one terminal. Called from the outcome-routing pass after
+	 * is ambiguous - one outcome should route through one terminal. Called from the outcome-routing pass after
 	 * ResolvePinToTags returns the visited-exits collection.
 	 */
 	void EmitDuplicateOutcomeRoutingWarning(
@@ -308,6 +350,8 @@ private:
 	
 	/** Appends a clickable action token that navigates to the given node in the graph editor. */
 	void AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node);
+	/** Appends a clickable action token that navigates to the given editor asset. */
+	void AddAssetNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UObject* Asset);
 
 	/** Pass 1: iterate content nodes, validate labels, create runtime instances, assign tags. */
 	void CompileNodeRegistration(
@@ -320,7 +364,7 @@ private:
 		TMap<UQuestlineNode_ContentBase*, UQuestNodeBase*>& OutNodeInstanceMap,
 		bool bIncomingResettable);
 
-	/** Pass 1b: compile all group nodes — prereq setters (merged), activation setters, activation getters. */
+	/** Pass 1b: compile all group nodes - prereq setters (merged), activation setters, activation getters. */
 	void CompileGroupSetters(
 		UEdGraph* Graph,
 		const FString& TagPrefix,
@@ -352,7 +396,7 @@ private:
 	/** GUID-bridge rename detection: chain-collapse existing ledger, add new renames, prune identities. */
 	void DetectAndRecordTagRenames(UQuestlineGraph* InGraph, const TMap<FGuid, FName>& OldTagsByGuid);
 
-	/** Shared handler for AND/OR combinator nodes — creates expression node and recurses into all input pins. */
+	/** Shared handler for AND/OR combinator nodes - creates expression node and recurses into all input pins. */
 	int32 CompileCombinatorNode(
 		EPrerequisiteExpressionType Type,
 		UEdGraphNode* Node,
@@ -381,7 +425,7 @@ private:
 	/**
 	 * Accumulates linked-placement GUIDs as compilation recurses through LinkedQuestline nodes. Combined with each content
 	 * node's own GUID at instance assignment time so that multiple placements of the same linked asset produce runtime
-	 * instances with distinct QuestContentGuids — required for both rename detection and per-instance save state.
+	 * instances with distinct QuestContentGuids - required for both rename detection and per-instance save state.
 	 * Zero at top-level; push/pop save-restore around each LinkedQuestline recursion.
 	 */
 	FGuid CurrentOuterGuidChain;
@@ -404,7 +448,7 @@ private:
 
 	/**
 	 * Getter editor-node lookup keyed by group tag and then by destination tag. Lets the warning emitter identify the specific
-	 * getter that reaches THIS collision's destination rather than picking an arbitrary getter with a matching tag — important
+	 * getter that reaches THIS collision's destination rather than picking an arbitrary getter with a matching tag - important
 	 * when multiple linked assets each contribute a getter for the same group but reach different destinations.
 	 */
 	TMap<FGameplayTag, TMap<FName, UEdGraphNode*>> GetterEdNodeByGroupAndDest;
@@ -426,7 +470,7 @@ private:
 	void EmitParallelPathCollisionWarning(const FGameplayTag& GroupTag, const FSourcePathKey& SetterSource, const FSourcePathKey& DirectSource, const FName& DestTag);
 	
 	/**
-	 * Activation Group metadata collection pass — iterates graph nodes for ActivationGroupSetters and ActivationGroupGetters,
+	 * Activation Group metadata collection pass - iterates graph nodes for ActivationGroupSetters and ActivationGroupGetters,
 	 * walks their input/output chains via the traversal policy, and records setter source-outcome pairs and getter destinations
 	 * keyed by group tag. Called from CompileGraph per graph (including recursive linked compiles), so the compiler-level maps
 	 * accumulate entries from the entire compile tree.
@@ -437,7 +481,7 @@ private:
 	static bool ResolveResettable(EResettableReplay Flag, bool bIncoming);
 	
 	/**
-	 * True if the node compiled under this canonical tag resolved to resettable-replay scope — i.e. its runtime
+	 * True if the node compiled under this canonical tag resolved to resettable-replay scope - i.e. its runtime
 	 * instance (registered in Pass 1) was stamped resettable. Read at prereq-compile time to mark Leaf_Path leaves
 	 * that should read the per-run mirror fact. Unknown tags (utility keys, anything not registered) return false,
 	 * so the leaf defaults to registry-read / permanent.

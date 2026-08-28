@@ -29,6 +29,8 @@ The last one matters more than it sounds. "Only in mine" is still a valid bug re
 
 For anything beyond a small, self-evident fix, open an issue or a Discord thread first and describe the change you have in mind.
 
+The exception is anything already labelled **help wanted** on the [issue tracker](https://github.com/TheGeebus/SimpleQuest/issues). Those are pre-cleared - the shape is settled and whatever's tricky about them is written into the issue, so you don't need to ask first. A comment saying you've picked one up is enough, and saves two people doing the same work.
+
 This isn't gatekeeping. SimpleQuest's design decisions are reasoned through before they're coded, and a fair number of them aren't necessarily visible from the call site - the manager's protected-virtual seam, the event deduplication contract, the ordering guarantee that state completes before an event broadcasts. A PR can be well-written, well-tested, and still unmergeable because it violates one of the less apparent design tenets. I'd rather spend ten minutes telling you up front where the landmines are buried than have you find out after a weekend of work.
 
 I'm always glad to discuss the direction of the framework, happy to walk through my rationale behind various decisions, and open to being challenged that there may be a better way. No implementation is sacred, and an idea that yields a more modular framework that's easier to build with and scales well has a great chance of being adopted. 

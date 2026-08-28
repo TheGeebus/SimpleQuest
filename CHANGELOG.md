@@ -134,7 +134,18 @@ and transforming what a reward grants without writing a new class for it.
   currency, loot, and anything you write yourself.
 
   - **They apply in the order you list them**, stated rather than incidental,
-  because scale-then-clamp and clamp-then-scale are different numbers.
+  because scale-then-clamp and clamp-then-scale are different numbers. The
+  second order is the one that surprises people: a cap of 100 followed by a
+  doubling grants 200, because the cap was applied to a number that had not
+  been scaled yet. Both are legitimate, so put the cap last if you mean it as a
+  ceiling.
+
+  - **They change what a reward advertises, not just what it grants.** A modifier
+  runs on the "do this, get this" preview too, so a capped or scaled reward shows
+  the number a player will actually receive rather than the number before the
+  transform. A modifier can also hide a preview outright, which is what a
+  drop-unless-condition one should do when its condition already fails - a
+  promise that will not be kept is worse than no promise.
 
   - **A modifier declares the payload it operates on, and refuses visibly.**
   Clamping an amount is meaningful; clamping a "start the cutscene" payload is
@@ -144,6 +155,16 @@ and transforming what a reward grants without writing a new class for it.
   - **Blueprint-authorable, like rewards.** Subclass Quest Reward Amount
   Modifier, override Modify Amount, return a number - that is an entire
   modifier. Clamp Amount ships as a reference implementation.
+
+  - **Amount Reward and Scale By Recipient replace Scaled Amount Reward**, which
+  is now deprecated. That class fused a source with a transform, so it could
+  only ever scale its own fixed amount - scaling a loot roll would have needed a
+  second class nobody had written. The pair grants the same amounts and composes
+  with anything: scale a loot table, or scale and then clamp, neither of which
+  the fused class could do. **Existing ones keep working and warn once per node
+  at compile time; the class is removed in 0.9.** One deliberate difference -
+  where the old class advertised "0" when a scale rounded a reward away, the
+  pair hides the advertisement instead of promising nothing.
 
 - **SimpleQuest's assets have a browser category of their own.** Reward Set,
   Quest Loot Table, Quest Display Data, Quest Objective Config, Quest Import

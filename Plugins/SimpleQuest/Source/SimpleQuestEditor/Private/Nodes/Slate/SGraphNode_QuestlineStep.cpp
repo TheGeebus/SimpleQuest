@@ -427,7 +427,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 			.AutoWidth()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("Targets: %d"), ActorCount)))
+				.Text(FText::FromString(FString::Printf(TEXT("Triggers: %d"), ActorCount)))
 				.ColorAndOpacity(FSlateColor(STEP_ACTOR_COLOR))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 			];
@@ -508,7 +508,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		.Padding(0.f, 2.f)
 		[
 			FQuestNodeSlateHelpers::BuildLabeledExpandableList(
-				LOCTEXT("TargetActorsLabel", "Targets"),
+				LOCTEXT("TargetActorsLabel", "Triggers"),
 				ActorNames,
 				STEP_ACTOR_COLOR,
 				[this]() { return StepNode && StepNode->bTargetActorsExpanded; },

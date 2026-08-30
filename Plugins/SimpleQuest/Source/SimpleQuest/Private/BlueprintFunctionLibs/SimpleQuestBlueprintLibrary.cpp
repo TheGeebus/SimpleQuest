@@ -384,7 +384,7 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFr
     // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) - matches the live
     // GetAdvertisedRewardsForAnyOutcome (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
     // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
-    return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true);
+    return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true, ContentTag);
 }
 
 TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer)
@@ -399,7 +399,7 @@ TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQue
         FQuestRewardPreviewList List;
         for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
         {
-            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer));
+            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer, Questline->GetIdentityTag()));
         }
         if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
     }

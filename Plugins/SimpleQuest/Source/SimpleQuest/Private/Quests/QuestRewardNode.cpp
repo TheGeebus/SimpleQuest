@@ -8,12 +8,12 @@
 #include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
 
-TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer) const
+TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer, FGameplayTag ResolvingQuestTag) const
 {
 	TArray<FQuestRewardPreview> Previews;
 	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
 	{
-		if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer));
+		if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer, ResolvingQuestTag));
 	}
 	return Previews;
 }
@@ -23,7 +23,7 @@ TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
 	const TMap<FName, TObjectPtr<UQuestNodeBase>>& NodeMap,
 	FName PathIdentity,
 	AActor* Viewer,
-	bool bIncludeAnyOutcome)
+	bool bIncludeAnyOutcome, FGameplayTag ResolvingQuestTag)
 {
 	// The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
 	// that sits in both buckets (a reward on Any Outcome AND the named path).
@@ -45,7 +45,7 @@ TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
 	{
 		if (const UQuestRewardNode* RewardNode = Cast<UQuestRewardNode>(NodeMap.FindRef(Key)))
 		{
-			Previews.Append(RewardNode->DescribeRewards(Viewer));
+			Previews.Append(RewardNode->DescribeRewards(Viewer, ResolvingQuestTag));
 		}
 	}
 	return Previews;
@@ -98,6 +98,9 @@ void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 	static_cast<FQuestContextBase&>(Incoming) = PendingActivationContext.IncomingContext;
 	Incoming.Provenance                       = PendingActivationContext.Provenance;
 	Incoming.IncomingOutcomeTag               = PendingActivationContext.IncomingOutcomeTag;
+	// A reward node is tagless, so the nearest thing carrying a resolution history is whatever cascaded into it - which is
+	// what OriginTag already holds. Reached from something that records no resolution, the count stays zero and nothing gates.
+	Incoming.ResolvingQuestTag                = Incoming.OriginTag;
 
 	UGameInstance* GI = CachedGameInstance.Get();
 	USignalSubsystem* Signals = GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;

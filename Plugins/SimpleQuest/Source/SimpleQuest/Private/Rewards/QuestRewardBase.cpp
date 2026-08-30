@@ -4,7 +4,7 @@
 #include "Rewards/QuestRewardBase.h"
 
 #include "SimpleQuestLog.h"
-#include "Rewards/QuestRewardModifier.h"
+#include "Rewards/Modifiers/QuestRewardModifier.h"
 #include "UObject/ObjectSaveContext.h"
 
 void UQuestRewardBase::DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming)
@@ -24,9 +24,18 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DescribeReward_Implementation(AAct
 	return {};						// pure adapter - nothing to advertise; concrete rewards override this
 }
 
-TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer) const
+TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer, FGameplayTag ResolvingQuestTag) const
 {
 	TArray<FQuestRewardPreview> Previews = DescribeReward(Viewer);		// routes to BP overrides
+
+	// BUILT ONCE, HERE, rather than inside a modifier that happens to need it. Nothing has activated, so Provenance stays
+	// Unknown and no outcome routed here - but the Viewer IS the actor this reward is about, and the resolving quest is the
+	// same one the grant path names. Synthesizing it at the top is what lets a modifier answer both paths from one shape:
+	// when this was a bare Viewer, a modifier could branch on the quest while granting and was blind to it while
+	// advertising, which is how a reward ends up promising something the grant will refuse.
+	FQuestRewardActivationContext AsIfActivating;
+	AsIfActivating.Instigator        = Viewer;
+	AsIfActivating.ResolvingQuestTag = ResolvingQuestTag;
 
 	// *** MODIFIERS RUN HERE, not at the call sites. *** Three places ask a reward what it advertises - the reward
 	// node, the manager's questline-level query, and the Blueprint library - and a pass added to each is a pass one of
@@ -35,7 +44,7 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Vie
 	// Backwards so a hidden preview can be removed without disturbing the indices still to come.
 	for (int32 Index = Previews.Num() - 1; Index >= 0; --Index)
 	{
-		if (!ApplyModifiersToPreview(Previews[Index], Viewer))
+		if (!ApplyModifiersToPreview(Previews[Index], AsIfActivating))
 		{
 			Previews.RemoveAt(Index);
 		}
@@ -43,7 +52,7 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Vie
 	return Previews;
 }
 
-bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, AActor* Viewer) const
+bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) const
 {
 	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
 	{
@@ -61,7 +70,7 @@ bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, AAc
 			continue;
 		}
 
-		if (!Modifier->DispatchModifyPreview(Preview, Viewer))
+		if (!Modifier->DispatchModifyPreview(Preview, AsIfActivating))
 		{
 			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("%s on %s hid the preview."),
 				*Modifier->GetClass()->GetName(), *GetClass()->GetName());

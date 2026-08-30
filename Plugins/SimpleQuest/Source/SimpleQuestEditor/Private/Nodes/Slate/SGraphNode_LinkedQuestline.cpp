@@ -48,7 +48,7 @@ static TArray<FString> BuildLinkedRewardSummaryLines(const UQuestlineGraph* Link
 		for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
 		{
 			if (!Reward) continue;
-			for (const FQuestRewardPreview& P : Reward->DispatchDescribeReward(nullptr))
+			for (const FQuestRewardPreview& P : Reward->DispatchDescribeReward(nullptr, LinkedGraph->GetIdentityTag()))
 			{
 				Types.AddUnique(FQuestTagComposer::GetLeafSegment(P.RewardType.GetTagName()));
 			}

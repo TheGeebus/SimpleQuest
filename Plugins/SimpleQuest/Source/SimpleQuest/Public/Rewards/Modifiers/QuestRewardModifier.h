@@ -6,11 +6,9 @@
 #include "CoreMinimal.h"
 #include "Quests/Types/QuestRewardActivationContext.h"
 #include "Quests/Types/QuestRewardContext.h"
-#include "Quests/Types/QuestRewardPayloads.h"
 #include "Quests/Types/QuestRewardPreview.h"
 #include "QuestRewardModifier.generated.h"
 
-struct FQuestRewardPreview;
 
 /**
  * Base class for a reward modifier - the TRANSFORM half of the reward model. A SOURCE (UQuestRewardBase) decides what
@@ -39,7 +37,7 @@ public:
 	bool DispatchModifyGrant(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming);
 
 	/** Advertisement twin of DispatchModifyGrant. Returns false when the modifier hid the preview. */
-	bool DispatchModifyPreview(FQuestRewardPreview& Preview, AActor* Viewer);
+	bool DispatchModifyPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
 
 	/**
 	 * Whether this modifier operates on a given payload struct; the default accepts anything. Checked BEFORE either
@@ -72,85 +70,12 @@ protected:
 	 * Return FALSE to hide the preview, which is what a drop-unless-condition modifier should do when its condition
 	 * already fails - promising something that will not arrive is worse than promising nothing.
 	 *
-	 * Takes a Viewer rather than an activation context because nothing has activated: this is a question about a
-	 * player, asked ahead of time. A scaling modifier reads the Viewer here and the Instigator when granting; usually
-	 * the same actor, and where they differ each path is asking about the right one.
+	 * TAKES A CONTEXT RATHER THAN A VIEWER, and the symmetry with ModifyGrant is the point: whatever a modifier can
+	 * branch on while granting, it can branch on while advertising. Nothing has activated, so Provenance stays Unknown
+	 * and no outcome routed here; Instigator carries the VIEWER (a scaling modifier reads it exactly as it reads the
+	 * Instigator when granting), and ResolvingQuestTag carries the same quest the grant path names.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
-	bool ModifyPreview(UPARAM(ref) FQuestRewardPreview& Preview, AActor* Viewer);
-};
-
-/**
- * Base for the common case: a modifier that changes an integer amount. Unpacks FQuestRewardAmount, hands the number to
- * ModifyAmount, and repacks - so a subclass writes one function returning a number instead of reaching into an
- * FInstancedStruct.
- *
- * It also declares the payload contract ONCE, here, so every amount modifier refuses non-amount payloads correctly
- * without each subclass reimplementing the check.
- */
-UCLASS(Abstract, Blueprintable, EditInlineNew)
-class SIMPLEQUEST_API UQuestRewardAmountModifier : public UQuestRewardModifier
-{
-	GENERATED_BODY()
-
-public:
-	virtual bool HandlesPayload(const UScriptStruct* PayloadType) const override;
-
-protected:
-	/** Unpacks, calls ModifyAmount, repacks. Override ModifyAmount rather than this. */
-	virtual bool ModifyGrant_Implementation(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) override;
-
-	/** The same, for the advertised form - a fixed amount, or both ends of a range. Override ModifyAmount, not this. */
-	virtual bool ModifyPreview_Implementation(FQuestRewardPreview& Preview, AActor* Viewer) override;
-
-	/**
-	 * The whole authoring surface for the common case: given the amount, return the new one. Return zero or less to
-	 * drop the grant - a reward worth nothing is worth not publishing. Incoming is here because the reference case
-	 * needs it: scaling reads the recipient's own state off the activation Instigator.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
-	int32 ModifyAmount(int32 Amount, const FQuestRewardActivationContext& Incoming);
-};
-
-/**
- * Reference modifier: clamps an amount into [MinAmount, MaxAmount]. Deliberately the simplest useful one - it exists to
- * demonstrate the layer and to give the order-matters case something concrete to test with, since scale-then-clamp and
- * clamp-then-scale produce different numbers from the same two modifiers.
- */
-UCLASS(meta = (DisplayName = "Clamp Amount"))
-class SIMPLEQUEST_API UClampAmountModifier : public UQuestRewardAmountModifier
-{
-	GENERATED_BODY()
-
-	/** Tests author the bounds the way a designer would; see FQuestRewardModifierTestAccess. */
-	friend class FQuestRewardModifierTestAccess;
-
-protected:
-	/** Lower bound. A grant below this is raised to it; set both bounds equal to force a fixed amount. */
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"), Category = "Modifier")
-	int32 MinAmount = 0;
-
-	/** Upper bound. A grant above this is lowered to it. */
-	UPROPERTY(EditAnywhere, meta = (ClampMin = "0"), Category = "Modifier")
-	int32 MaxAmount = 1000;
-
-	virtual int32 ModifyAmount_Implementation(int32 Amount, const FQuestRewardActivationContext& Incoming) override;
-};
-
-/**
- * Reference modifier: multiplies an amount by the recipient's own scale, read through IRewardScalingSource. This is the
- * transform half of what Scaled Amount Reward used to do inside one class - and unlike that class it composes with any
- * source, so scaled loot is a loot table with this attached rather than a class nobody has written.
- *
- * An actor that does not implement the interface scales by one, so attaching this is safe before the game supplies a
- * value.
- */
-UCLASS(meta = (DisplayName = "Scale By Recipient"))
-class SIMPLEQUEST_API UScaleByRecipientModifier : public UQuestRewardAmountModifier
-{
-	GENERATED_BODY()
-
-protected:
-	virtual int32 ModifyAmount_Implementation(int32 Amount, const FQuestRewardActivationContext& Incoming) override;
+	bool ModifyPreview(UPARAM(ref) FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
 };
 

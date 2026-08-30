@@ -42,7 +42,7 @@ public:
 	void DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming);
 	
 	/** Public C++ forwarder (thunk-routes to the BP-native event so subclass overrides fire). Mirrors DispatchTryGrantReward. */
-	TArray<FQuestRewardPreview> DispatchDescribeReward(AActor* Viewer) const;
+	TArray<FQuestRewardPreview> DispatchDescribeReward(AActor* Viewer, FGameplayTag ResolvingQuestTag) const;
 
 	/** Drains the grants queued by DeliverReward during the last TryGrantReward. The reward node finalizes + publishes each. */
 	TArray<FQuestRewardContext> TakePendingGrants() { return MoveTemp(PendingGrants); }
@@ -136,7 +136,7 @@ private:
 	 * The advertisement twin, applied inside DispatchDescribeReward rather than by callers. Returns false when a
 	 * modifier hid the preview.
 	 */
-	bool ApplyModifiersToPreview(FQuestRewardPreview& Preview, AActor* Viewer) const;
+	bool ApplyModifiersToPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) const;
 	
 	/** Grants queued by DeliverReward during TryGrantReward; drained by the reward node via TakePendingGrants. */
 	UPROPERTY()

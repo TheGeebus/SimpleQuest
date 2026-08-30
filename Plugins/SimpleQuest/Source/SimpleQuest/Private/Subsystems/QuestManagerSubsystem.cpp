@@ -335,10 +335,10 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
     if (!Graph) return;
 
     // Register this graph under its identity tag so questline-level reward delivery (PublishGraphResolutions) can resolve
-    // a resolution's GraphTag back to the asset and read its QuestlineRewards. Identity = the same composition used by
-    // ActivateQuestlineGraph's idempotency gate.
-    const FString IdentityString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
-    if (const FGameplayTag IdentityTag = FGameplayTag::RequestGameplayTag(FName(*IdentityString), false); IdentityTag.IsValid())
+    // a resolution's GraphTag back to the asset and read its QuestlineRewards. Read the identity the compiler stamped
+    // rather than recomposing it: the old composition used the RAW QuestlineID, so a questline relying on the documented
+    // empty-ID asset-name fallback composed "SimpleQuest.Questline." and never registered here at all.
+    if (const FGameplayTag IdentityTag = Graph->GetIdentityTag(); IdentityTag.IsValid())
     {
         LiveGraphsByIdentity.Add(IdentityTag, Graph);
     }
@@ -461,8 +461,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
     // some unrelated registry write); the asset's authored fields are silently dropped.
     if (UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr)
     {
-        const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
-        const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
+        const FGameplayTag QuestlineTag = Graph->GetIdentityTag();
         if (QuestlineTag.IsValid())
         {
             StateSubsystem->RegisterQuestTag(QuestlineTag);
@@ -473,7 +472,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             UE_LOG(LogSimpleQuestActivation, Warning,
                 TEXT("RegisterQuestlineGraph: '%s' - composed questline tag '%s' isn't registered; asset-level display data not stored. "
                      "Adopters querying display data on this tag will receive empty + Warning."),
-                *Graph->GetName(), *QuestlineTagString);
+                     *Graph->GetName(), *Graph->GetEffectiveID());
         }
     }
     
@@ -746,10 +745,11 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
 {
     if (!Graph) return;
 
-    // Resolve the questline's own identity tag up front - used by the idempotency gate here and the asset-level
-    // lifecycle publish further down.
-    const FString QuestlineTagString = FQuestTagComposer::IdentityNamespace + Graph->GetQuestlineID();
-    const FGameplayTag QuestlineTag = FGameplayTag::RequestGameplayTag(FName(*QuestlineTagString), false);
+    // Resolve the questline's own identity tag up front - used by the idempotency gate here and the asset-level lifecycle
+    // publish further down. *** THE GATE BELOW FAILS OPEN ON AN INVALID TAG, *** so this has to be the identity the
+    // compiler actually stamped: recomposing it dropped the empty-ID fallback, and a questline that composed an invalid
+    // tag skipped the Started check entirely and restarted over its own restored save on every BeginPlay.
+    const FGameplayTag QuestlineTag = Graph->GetIdentityTag();
 
     // Idempotent start - a fresh activation on a questline that has already begun in this session would clobber it,
     // whether it's still running or was restored from a save. The append-only Started anchor is the signal: written on
@@ -836,7 +836,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
                 TEXT("ActivateQuestlineGraph: '%s' - composed tag '%s' isn't registered with the runtime tag manager. "
                      "Asset-level Activated publish skipped; adopters bound on the questline tag won't receive a start signal."),
                 *Graph->GetName(),
-                *QuestlineTagString);
+                *Graph->GetEffectiveID());
         }
     }
 
@@ -2328,7 +2328,7 @@ TArray<FQuestRewardPreview> UQuestManagerSubsystem::ResolveAdvertisedRewards(FGa
     }
 
     TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
-        Owner->GetReachableRewardsByPath(), LoadedNodeInstances, PathIdentity, Viewer, bIncludeAnyOutcome);
+        Owner->GetReachableRewardsByPath(), LoadedNodeInstances, PathIdentity, Viewer, bIncludeAnyOutcome, ContentTag);
 
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAdvertisedRewards: tag '%s' path '%s' (merge=%d) -> %d preview(s)"),
         *ContentTag.ToString(), *PathIdentity.ToString(), bIncludeAnyOutcome ? 1 : 0, Previews.Num());
@@ -2345,11 +2345,13 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
     // LinkedInnerIdentityTag - the bridge to the inner asset's identity, under which its rewards were harvested. Resolve
     // through it so a placement tag isn't a dead end to the identity-keyed reward map.
     FName IdentityName = QuestlineTag.GetTagName();
+    FGameplayTag IdentityTag = QuestlineTag;
     if (const UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestlineTag.GetTagName()))
     {
         if (Node->LinkedInnerIdentityTag.IsValid())
         {
             IdentityName = Node->LinkedInnerIdentityTag.GetTagName();
+            IdentityTag  = Node->LinkedInnerIdentityTag;
         }
     }
 
@@ -2361,7 +2363,7 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
         FQuestRewardPreviewList List;
         for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
         {
-            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer));
+            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer, IdentityTag));
         }
         if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
     }
@@ -2389,7 +2391,7 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveAllAd
 
         // Same shared walk the point queries use: this outcome's path + the any-outcome bucket (merge=true).
         TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
-            Owner->GetReachableRewardsByPath(), LoadedNodeInstances, Pair.Key, Viewer, true);
+            Owner->GetReachableRewardsByPath(), LoadedNodeInstances, Pair.Key, Viewer, true, ContentTag);
 
         if (Previews.Num() > 0)
         {
@@ -3585,6 +3587,9 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
             FQuestRewardActivationContext RewardIncoming;
             static_cast<FQuestContextBase&>(RewardIncoming) = CompleterContext;
             RewardIncoming.IncomingOutcomeTag = Resolution.OutcomeTag;
+            // The QUESTLINE's identity, not the completing Step's - the base copy above brought the Step's lineage across,
+            // and a questline reachable through two Exits resolves a second time via a Step on its first.
+            RewardIncoming.ResolvingQuestTag = Resolution.GraphTag;
 
             if (const FQuestRewardSet* Set = Compiled->RewardsByOutcome.Find(Resolution.OutcomeTag); Set && !Set->Rewards.IsEmpty())
             {

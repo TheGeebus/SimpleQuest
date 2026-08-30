@@ -23,7 +23,7 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"), EffectiveID, FAssetRegistryTag::TT_Alphabetical));
 
 	// Publish DisplayName so content-browser tooltips and similar surfaces can show it without loading the asset.
-	// Empty when no DisplayName is set — consumers fall back to the asset's short name.
+	// Empty when no DisplayName is set - consumers fall back to the asset's short name.
 	Context.AddTag(FAssetRegistryTag(TEXT("DisplayName"), DisplayName.ToString(), FAssetRegistryTag::TT_Alphabetical));
 
 	if (!CompiledQuestTags.IsEmpty())
@@ -37,7 +37,7 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledQuestTags"), FString::Join(TagStrings, TEXT("|")),	FAssetRegistryTag::TT_Hidden));
 	}
 	
-	// CompiledNodeAliases — pipe-separated list of "Contextual=Alias" pairs. Lets editor utilities discriminate cross-asset
+	// CompiledNodeAliases - pipe-separated list of "Contextual=Alias" pairs. Lets editor utilities discriminate cross-asset
 	// inlinings from coincidental leaf-name matches when scanning the asset registry without loading each candidate asset.
 	if (!CompiledNodeAliases.IsEmpty())
 	{
@@ -97,8 +97,8 @@ TArray<FString> UQuestlineGraph::GetCompiledDisplayRecords() const
 
 	TArray<FString> Records;
 
-	// Questline-self: the standalone identity tag carries the graph's own title/blurb/art. RAW authored name — empty
-	// means "no title," which the UI honors — not the asset-name fallback GetDisplayName() applies.
+	// Questline-self: the standalone identity tag carries the graph's own title/blurb/art. RAW authored name - empty
+	// means "no title," which the UI honors - not the asset-name fallback GetDisplayName() applies.
 	if (HasPayload(GetAuthoredDisplayName(), Description, DisplayData))
 	{
 		Records.Add(FormatRecord(FQuestTagComposer::IdentityNamespace + GetEffectiveID(), GetAuthoredDisplayName(), Description, DisplayData));
@@ -165,7 +165,7 @@ void UQuestlineGraph::PostLoad()
 		}
 	}
 
-	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("UQuestlineGraph::PostLoad [%s] — registered %d native tag(s) "
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("UQuestlineGraph::PostLoad [%s] - registered %d native tag(s) "
 		"(incl. state facts)"), *GetName(), RegisteredNativeTags.Num());
 #endif
 }
@@ -202,7 +202,7 @@ void UQuestlineGraph::PostDuplicate(bool bDuplicateForPIE)
 	if (bHadCompiledModel)
 	{
 		UE_LOG(LogSimpleQuestCompiler, Display,
-			   TEXT("UQuestlineGraph::PostDuplicate [%s] — cleared the compiled model inherited from its source. Recompile before use."),
+			   TEXT("UQuestlineGraph::PostDuplicate [%s] - cleared the compiled model inherited from its source. Recompile before use."),
 			   *GetName());
 	}
 
@@ -212,10 +212,17 @@ void UQuestlineGraph::PostDuplicate(bool bDuplicateForPIE)
 	if (!QuestlineID.IsEmpty())
 	{
 		UE_LOG(LogSimpleQuestCompiler, Warning,
-			   TEXT("UQuestlineGraph::PostDuplicate [%s] — inherited QuestlineID '%s' from its source. Two assets sharing a "
+			   TEXT("UQuestlineGraph::PostDuplicate [%s] - inherited QuestlineID '%s' from its source. Two assets sharing a "
 					"QuestlineID compile into one tag namespace; change one before compiling."),
 			   *GetName(), *QuestlineID);
 	}
+}
+
+FGameplayTag UQuestlineGraph::GetIdentityTag() const
+{
+	// An unregistered tag is a real answer rather than an error - an uncompiled asset has no identity to give, and every
+	// caller branches on validity instead of assuming one exists.
+	return CompiledIdentityTag.IsNone() ? FGameplayTag() : FGameplayTag::RequestGameplayTag(CompiledIdentityTag, false);
 }
 
 void UQuestlineGraph::SetQuestlineID(const FString& InQuestlineID)

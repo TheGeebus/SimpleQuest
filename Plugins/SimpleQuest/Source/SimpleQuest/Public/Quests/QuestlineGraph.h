@@ -34,7 +34,7 @@ struct FQuestTagRename
 };
 
 /**
- * Compiler-stamped contextual→alias pair. One entry per (ContextualTag, AssetScopedAliasTag) pair on a node — a node with N
+ * Compiler-stamped contextual→alias pair. One entry per (ContextualTag, AssetScopedAliasTag) pair on a node - a node with N
  * aliases (i.e., N enclosing LinkedQuestline depths) produces N entries here. Top-level nodes (no aliases) produce zero entries.
  * Persisted alongside CompiledQuestTags and exposed via GetAssetRegistryTags so editor utilities can discriminate legitimate
  * cross-asset inlinings from coincidental leaf-name collisions when walking the asset registry.
@@ -52,7 +52,7 @@ struct FQuestCompiledNodeAlias
 };
 
 /**
- * A set of rewards granted together. Exists only because a TArray can't be a TMap value directly — it's the wrapper
+ * A set of rewards granted together. Exists only because a TArray can't be a TMap value directly - it's the wrapper
  * that lets questline-level rewards be keyed by outcome tag in a map. Authoring-side twin of the runtime
  * FQuestReachableRewards; each entry is a configured UQuestRewardBase (C++/Blueprint subclass or Generic), edited inline.
  */
@@ -78,8 +78,8 @@ struct FQuestRewardSet
 
 /**
  * A questline's own reward sets, compiled to a form the runtime can read without loading the source asset. A linked
- * questline is erased at compile time — its nodes are inlined into the enclosing graph and its own UQuestlineGraph is
- * never loaded at runtime — so its authored QuestlineRewards (which live only on that asset) would otherwise be
+ * questline is erased at compile time - its nodes are inlined into the enclosing graph and its own UQuestlineGraph is
+ * never loaded at runtime - so its authored QuestlineRewards (which live only on that asset) would otherwise be
  * unreachable when it completes while embedded. The compiler duplicates each reward onto the owning (enclosing) graph
  * and records it here, keyed by outcome, so completion delivery and advertisement queries resolve rewards uniformly
  * whether the questline runs standalone or embedded.
@@ -115,6 +115,17 @@ private:
      */
     UPROPERTY()
     TArray<FName> CompiledQuestTags;
+
+    /**
+     * This questline's own identity tag name - SimpleQuest.Questline.<sanitized EffectiveID>. Stamped by the compiler
+     * alongside the node tags above, because runtime CANNOT recompose it: turning an ID into a tag segment needs
+     * SanitizeQuestlineTagSegment, which lives in the editor module. Every consumer reads this rather than rebuilding
+     * the string, which is how three manager sites ended up composing a tag the compiler never minted.
+     * FName for the same reason CompiledQuestTags is - written at compile time, where FGameplayTag is unreliable.
+     * NAME_None on an asset not compiled since this field existed; the next compile fills it in.
+     */
+    UPROPERTY()
+    FName CompiledIdentityTag;
     
     /**
      * Parallel to CompiledQuestTags: each entry pairs a node's ContextualTag with one AssetScopedAliasTag it carries. Empty
@@ -134,7 +145,7 @@ private:
     TArray<FName> EntryNodeTags;
     
     /**
-     * Checksum of the authoring input this asset's compiled data was built from — this graph plus every questline it
+     * Checksum of the authoring input this asset's compiled data was built from - this graph plus every questline it
      * links, transitively. Compared against a freshly computed value when the editor opens the asset to decide whether
      * the compiled data is current. Zero on assets compiled before this existed; the next compile fills it in.
      */
@@ -142,7 +153,7 @@ private:
     uint32 CompiledSourceHash = 0;
 
     /**
-     * All compiled node instances, keyed by tag. Owned by this asset. Populated by the compiler — includes nodes inlined from
+     * All compiled node instances, keyed by tag. Owned by this asset. Populated by the compiler - includes nodes inlined from
      * linked questline graphs. The subsystem looks up and activates nodes directly from this map. This is created at graph
      * compilation time, so we use FName because FGameplayTag is unreliable in an editor context.
      */
@@ -166,7 +177,7 @@ private:
      * startup and async-load listener graphs reachable from any currently-loaded graph's setters. Inherits via
      * LinkedQuestline inlining: a wrapper asset whose linked inner contains a listener carries the inner's listener
      * tags too (the inner's listener instances end up in the wrapper's CompiledNodes with their original GroupTags
-     * preserved — ActivationGroup tags are authored, not contextualized).
+     * preserved - ActivationGroup tags are authored, not contextualized).
      */
     UPROPERTY()
     TArray<FGameplayTag> ListenerGroupTags;
@@ -174,7 +185,7 @@ private:
     /**
      * GroupTags this graph's UActivationGroupSetterNode instances publish on. Stamped by the compiler post-registration.
      * Surfaced via GetAssetRegistryTags so the manager can match this graph's outward signal surface against the global
-     * listener-graph index when this graph registers — driving the reachability-walk that async-loads any listener graph
+     * listener-graph index when this graph registers - driving the reachability-walk that async-loads any listener graph
      * reachable from one of these tags. Inherits via LinkedQuestline inlining for the same reason as ListenerGroupTags.
      */
     UPROPERTY()
@@ -191,9 +202,9 @@ private:
     FString QuestlineID;
 
     /**
-     * Designer-facing display name shown in editor surfaces that need a human-readable label — LinkedQuestline node
+     * Designer-facing display name shown in editor surfaces that need a human-readable label - LinkedQuestline node
      * titles, outliner roots, asset tooltips. Falls back to the asset short name when empty. Unlike QuestlineID, this
-     * is purely presentational — changing it never affects compiled tag identity, so designers can rename freely.
+     * is purely presentational - changing it never affects compiled tag identity, so designers can rename freely.
      */
     UPROPERTY(EditAnywhere)
     FText DisplayName;
@@ -214,7 +225,7 @@ private:
     TObjectPtr<UQuestDisplayData> DisplayData;
     
     /**
-     * Asset-level default for per-run resettability — the root rung of this questline's inherit walk. Inherit
+     * Asset-level default for per-run resettability - the root rung of this questline's inherit walk. Inherit
      * (default) defers to the nearest ancestor: the host LinkedQuestline node when this graph is embedded, otherwise
      * Off (permanent) at the top level. On / Off overrides that, opting the whole questline's content in / out.
      * Content nodes and inner containers override this further (nearest wins). The compiler folds it into the
@@ -243,6 +254,12 @@ public:
     uint32 GetCompiledSourceHash() const { return CompiledSourceHash; }
 
     /**
+     * This questline's own identity tag - what resolutions of its root-scope Exits attribute to, and the key its
+     * questline-level rewards are filed under. Invalid until the asset has been compiled; callers branch on validity.
+     */
+    FGameplayTag GetIdentityTag() const;
+
+    /**
      * Sets the tag-namespace identity for this questline, applying the same normalization the details panel does - a
      * whitespace-only ID is not empty, so it would defeat the asset-name fallback and compose a tag with an empty leaf.
      *
@@ -260,12 +277,12 @@ public:
     FString GetEffectiveID() const { return QuestlineID.IsEmpty() ? GetName() : QuestlineID; }
 
     /**
-     * Rewards granted on THIS QUESTLINE's completion, keyed by its top-level Exit outcome tags — first-class "the whole
+     * Rewards granted on THIS QUESTLINE's completion, keyed by its top-level Exit outcome tags - first-class "the whole
      * questline pays this," distinct from a reward node before the final step (that's the final step's reward) and from
      * rewards wired on a linked-node's pins in a linking asset (that's per-placement as a step in another questline). Fires
-     * on EVERY instantiation, standalone or linked, with no container required. Optional — leave empty for a questline
+     * on EVERY instantiation, standalone or linked, with no container required. Optional - leave empty for a questline
      * with no inherent completion reward that is independent of its placement in other graphs. This authored map IS the
-     * runtime home — read directly at questline resolution (the manager resolves the questline's identity tag to this
+     * runtime home - read directly at questline resolution (the manager resolves the questline's identity tag to this
      * graph and grants these rewards for the resolved outcome). Whole-questline data on the whole-questline object.
      */
     UPROPERTY(EditAnywhere, Category = "Rewards")
@@ -279,19 +296,19 @@ public:
      */
     TArray<FString> GetCompiledDisplayRecords() const;
     
-    /** Normalizes QuestlineID on edit — see the implementation for why surrounding whitespace can't be allowed to survive. */
+    /** Normalizes QuestlineID on edit - see the implementation for why surrounding whitespace can't be allowed to survive. */
     virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
 
     /**
      * DisplayName if set, otherwise the asset's short name. The single entry point for any editor surface that wants a human-readable
-     * label for this questline — avoids scattered "is DisplayName empty?" checks.
+     * label for this questline - avoids scattered "is DisplayName empty?" checks.
      */
     FText GetDisplayName() const;
 
     /**
      * Returns the raw authored DisplayName field WITHOUT the asset-short-name fallback. Use when empty
-     * carries semantic meaning — e.g., runtime registry writes where adopter sidebars rely on "empty
+     * carries semantic meaning - e.g., runtime registry writes where adopter sidebars rely on "empty
      * means drop this entry from the UI." GetDisplayName() above is for editor surfaces (outliner,
      * tooltips, asset chips) that always want a renderable label and don't carry the empty-as-meaningful
      * convention.
@@ -308,7 +325,7 @@ public:
     TObjectPtr<UEdGraph> QuestlineEdGraph;
 
     /**
-     * Compiled editor nodes, keyed by tag — mirrors CompiledNodes but holds the UEdGraphNode* for navigation.
+     * Compiled editor nodes, keyed by tag - mirrors CompiledNodes but holds the UEdGraphNode* for navigation.
      * Populated by the compiler alongside CompiledNodes. Serialized so navigation works without recompiling after reload.
      */
     UPROPERTY(Transient)

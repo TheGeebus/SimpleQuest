@@ -677,6 +677,12 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	AllCompiledQuestTags.Add(RootAssetIdentityName);
 	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(RootAssetIdentityName, false);
 
+	// Stamp it on the asset as well, so consumers read the identity rather than rebuilding it. TagPrefix has already been
+	// through SanitizeQuestlineTagSegment and the empty-ID asset-name fallback - neither of which runtime code can
+	// perform - so a recomposed identity elsewhere can only be right by coincidence.
+	InGraph->CompiledIdentityTag = RootAssetIdentityName;
+	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(RootAssetIdentityName, false);
+
     // Refresh outcome pins on all step nodes so that changes to outcomes on an objective class are reflected without
     // the designer having to touch ObjectiveClass again.
     for (UEdGraphNode* Node : InGraph->QuestlineEdGraph->Nodes)

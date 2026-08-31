@@ -755,6 +755,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// structural containment rather than re-deriving it at runtime.
 	ComputeContainerReachability(InGraph);
 	BuildRewardManifest(InGraph);
+	// Reads only - no compiled state written, so the fingerprint window below is unaffected.
+	RefuseOverlappingExitAttribution(InGraph);
 
 	// Stamp the authoring input's checksum BEFORE the comparison below, so it sits inside the compared window: a source
 	// edit moves the hash, the comparison sees it, and the asset dirties. Outside the window it would silently diverge
@@ -3185,6 +3187,36 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("BuildRewardManifest: '%s' advertises rewards on %d path(s)"),
 			*Node->GetName(),
 			Node->ReachableRewardsByPath.Num());
+	}
+}
+
+void FQuestlineGraphCompiler::RefuseOverlappingExitAttribution(UQuestlineGraph* InGraph)
+{
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : InGraph->CompiledNodes)
+	{
+		UQuestNodeBase* Node = Pair.Value;
+		if (!Node || Node->ResolvedGraphsOnAnyOutcome.IsEmpty()) continue;
+
+		// The two collections are appended in separate branches of the pin walk, each AddUnique WITHIN itself and never
+		// across, so an overlap is representable in the data even though it is nonsense at runtime.
+		for (const TPair<FName, FQuestPathNodeList>& PathPair : Node->NextNodesByPath)
+		{
+			for (const FQuestGraphResolution& Resolution : PathPair.Value.ResolvedGraphs)
+			{
+				if (!Node->ResolvedGraphsOnAnyOutcome.Contains(Resolution)) continue;
+
+				const UEdGraphNode* DiagnosticNode = InGraph->CompiledEditorNodes.FindRef(Pair.Key);
+				AddError(FString::Printf(
+					TEXT("[%s] reaches a questline end node resolving with '%s' from BOTH its '%s' pin and its Any Outcome pin. "
+						 "Any Outcome already fires on every completion, so the questline would resolve TWICE for a single "
+						 "completion - granting its questline-level rewards twice and recording two resolutions, which makes "
+						 "grant-once rewards and any prerequisite counting completions read wrong. Remove one of the two wires."),
+					*Pair.Key.ToString(),
+					*Resolution.OutcomeTag.ToString(),
+					*PathPair.Key.ToString()),
+					DiagnosticNode);
+			}
+		}
 	}
 }
 

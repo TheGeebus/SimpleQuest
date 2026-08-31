@@ -7,8 +7,7 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
-class UQuestRewardBase;
-class URewardSetDataAsset;
+
 enum class EResettableReplay : uint8;
 
 struct FQuestGraphResolution;
@@ -20,6 +19,8 @@ class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
 class UQuestlineNode_UtilityBase;
 class UQuestNodeBase;
+class UQuestRewardBase;
+class URewardSetDataAsset;
 class UQuest;
 class UEdGraphPin;
 class FQuestlineGraphTraversalPolicy;
@@ -218,6 +219,17 @@ private:
 	 * next content node (whose rewards belong to it). Steps AND containers advertise.
 	 */
 	static void BuildRewardManifest(UQuestlineGraph* InGraph);
+
+	/**
+	 * Refuses a node that reaches the same questline end node from BOTH a named outcome pin and its Any Outcome pin.
+	 * Any Outcome fires on every completion, so the pair overlaps and the questline resolves TWICE for one completion.
+	 *
+	 * The graph schema already refuses to DRAW this, but the schema is editor-only and the resolver's apply path links
+	 * pins raw (QuestInPlaceApply's AddedEdges loop calls MakeLinkTo without consulting CanCreateConnection), so an
+	 * imported bundle can author what the editor forbids. Compiled data is what the runtime consumes, which makes this
+	 * the one checkpoint every authoring route has to pass.
+	 */
+	void RefuseOverlappingExitAttribution(UQuestlineGraph* InGraph);
 
 	/**
 	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed

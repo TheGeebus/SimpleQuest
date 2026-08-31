@@ -5,6 +5,191 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.1] — 2026-08-30 — Conditions and Answers
+
+Rewards learned to say no, and advertisements learned to say why. A reward can
+now fire on a first completion only, pay across a range of runs, require
+something to be true, or scale by a number you author - none of which needed a
+new reward class. An advertisement no longer hides what it cannot grant: every
+reward comes back, and an unavailable one carries the reason, so a journal can
+show "50 XP - already collected" rather than showing nothing at all. And asking
+what a quest pays became one question, where six answered it in pieces and each
+expected you to know where the reward had been authored.
+
+### Added
+
+- **A reward can pay once and never again.** Attach **Grant Once** to a reward
+  and it fires on a first completion only. Replaying the content - a chapter
+  select, a Resettable Replay step, a second run through a questline - no longer
+  pays it again. It counts the quest's own resolution history rather than
+  recording anything of its own, so there is no second bookkeeping to drift out
+  of step with the first, and it works on any reward regardless of what it
+  grants.
+
+  - **Its advertisement says so rather than vanishing.** A collected reward
+  still comes back from an advertisement query, marked "Already collected" -
+  see the blocker change below.
+
+- **A reward can pay on some runs and not others.** **Require Completion
+  Count** takes a first and last completion, so a reward can start paying on the
+  third run, stop after the fifth, or cover any range between. Grant Once is
+  this with both bounds at one, and stays its own class because that case wants
+  no configuration and reads instantly in the picker.
+
+- **A reward can require something to be true.** **Require Fact** drops a grant
+  unless a world state fact holds - guild membership, a difficulty flag, a story
+  beat reached. The condition is written in the same fact vocabulary
+  prerequisites already use, so gating a *reward* asks nothing new of anyone who
+  has gated a *step*. Facts are counted rather than boolean, so **Minimum Count**
+  asks "at least this many" and the default of 1 is the plain has-it-or-not case;
+  **Require Absent** inverts the test.
+
+  - **It describes the present, and for gating on quest progress you want
+  Require Completion Count instead.** A fact gate reports whether the condition
+  holds right now, which is exactly right for a fact a completion does not
+  touch. It cannot predict what a completion will do to an arbitrary world fact,
+  so gating on a fact that completions themselves advance describes a state one
+  completion behind. Doing that warns and names the modifier to use.
+
+- **A reward can be scaled by a number you choose.** **Scale Amount** multiplies
+  by an authored constant - a double-XP event, a harder difficulty paying more,
+  one placement of a shared questline worth less than another. Its companion
+  Scale By Recipient reads its factor off the recipient through an interface;
+  there was no way to simply say ×1.5 until now.
+
+- **An advertised reward can be traced back to what pays it.** Previews carry
+  **Source Tag** - the completion they were resolved from - so a list drawn from
+  both a graph's reward nodes and a questline's own rewards can still be told
+  apart.
+
+- **An advertised reward and the payout that arrives can be matched up.** Both
+  now carry **Reward Guid**, identifying which reward produced them. A journal
+  that showed "50 XP" can flash the line that just paid out instead of guessing
+  from a type and a number two different rewards could both produce. It also
+  gives a preview a stable identity it never had: advertised values are computed
+  live, so a UI re-queries constantly, and two 50-XP rewards used to be
+  indistinguishable from one reward recomputed.
+
+### Changed
+
+- **An advertisement never hides a reward for being unavailable.** A modifier
+  that would drop the grant used to remove the reward from "do this, get this"
+  entirely, so a player saw nothing and had no way to know the reward existed.
+  Every possible reward now comes back, and an unavailable one carries
+  **Blockers** saying why - "Already collected", "Requires Guild membership",
+  "Available on run 3". Whether to grey it, filter it out or render the reason
+  is a presentation decision, and it belongs to your UI rather than to us.
+
+  - Each blocker carries a **tag** under `SimpleQuest.RewardBlocker` alongside
+  its text, so a UI branches on the kind for an icon or a color instead of
+  parsing prose. Write a modifier of your own and it adds its own tags there.
+  More than one modifier can block the same reward, so it is a list.
+
+  - **This also removed a class of bug rather than just a limitation.** Deciding
+  *whether* to show a reward meant answering "would this be granted if the
+  completion happened now" - a prediction, and modifiers were getting it wrong
+  by one completion in both directions. Describing what currently blocks a
+  reward needs no prediction at all.
+
+- **A reward modifier's preview hook changed shape twice over.** `ModifyPreview`
+  now takes an activation context instead of a bare actor - the same shape
+  `ModifyGrant` receives, so whatever a modifier can branch on while granting it
+  can branch on while advertising - and it returns nothing, marking the preview
+  through `AddBlocker` rather than reporting a hide-or-show verdict.
+  `ModifyGrant` still returns a verdict, because a grant is a decision and an
+  advertisement is a description. **This is a breaking change if you subclassed
+  a modifier**; the viewer is on the context as `Instigator`, and anywhere the
+  old body returned `false` now adds a blocker.
+
+- **Asking what something pays is one question now.** `Get Advertised Rewards`
+  takes any tag - a step, a container, a linked placement, or a questline - and
+  returns everything that completion pays, keyed by outcome. Rewards used to
+  live in two channels a caller had to choose between: those wired into a graph,
+  and a questline's own completion rewards. Choosing wrongly returned an empty
+  result rather than an error, and choosing rightly required knowing whether a
+  tag named a node or an asset. That distinction is an authoring detail and it
+  is no longer yours to track.
+
+  - **Any Outcome is a key of its own** in the returned map, rather than being
+  folded into each named outcome. Completing with a given outcome pays that
+  outcome's list *plus* the Any Outcome list, which is exactly how delivery
+  grants them - so unioning those two is a real total, while summing the whole
+  map is a number nobody receives.
+
+  - **Four functions are deprecated and removed in 0.9**:
+  `Get Advertised Rewards For Any Outcome`, `Get All Advertised Rewards By
+  Outcome`, `Get Questline Rewards`, and `Get Questline Rewards From Asset`.
+  Each names its replacement when you compile against it. All four still work
+  until then.
+
+- **`Get Advertised Rewards From Asset` returns a map instead of an array**, the
+  same outcome-keyed shape the live query returns, and it reads both channels.
+  **This breaks Blueprints calling it** - deliberately, on a pin type mismatch,
+  so the change is impossible to miss rather than quietly handing back a
+  different shape.
+
+- **`Get Advertised Rewards For Outcome` sees both channels.** Its name and
+  signature are unchanged, but it now folds in questline-level rewards the same
+  way the whole-map query does. Asking one outcome what it pays previously
+  answered from graph-wired rewards alone.
+
+- **The reference modifiers live one per file** under `Rewards/Modifiers/`,
+  matching how the rewards themselves are organized. Update the include path if
+  you referenced `Rewards/QuestRewardModifier.h` directly.
+
+### Fixes
+
+- **A questline with no Questline ID had no runtime identity of its own.** The
+  field is documented as optional, falling back to the asset name - but three
+  places rebuilt the questline's identity tag by hand without that fallback,
+  composing a tag that did not exist. Such a questline wrote no `Live` or
+  `Started` fact under its own tag, published no asset-level Activated event,
+  and answered its display name with nothing, so anything bound to the questline
+  itself rather than to a node inside it heard and saw nothing. The guard that
+  stops `Start Questline` re-running over restored progress reads the same tag
+  and fails open, though steps refuse re-entry independently, so completed
+  progress was not lost.
+
+  - **The compiler stamps that identity now**, and every consumer reads it
+  rather than rebuilding it. Turning an ID into a tag segment involves
+  sanitizing that exists only in the editor, so runtime code could never have
+  reproduced the composition correctly - it had to be recorded at compile time
+  rather than recomputed at every call site.
+
+- **A reward wired to both an outcome pin and Any Outcome paid twice.** Both
+  routes fire on a completion, and each activated whatever it reached without
+  checking whether the other already had. One arrival per destination per
+  completion now.
+
+- **Advertised rewards came back empty for a node that plainly had them.**
+  Rewards on the Any Outcome pin were merged into named outcomes and never
+  reported on their own, so a node whose only rewards were any-outcome answered
+  with nothing at all.
+
+- **Asking for Any Outcome rewards by name returned them twice**, once from the
+  outcome you asked for and again from the flag that includes them.
+
+- **Compiling refuses a node that reaches one questline end node from both a
+  named outcome pin and Any Outcome.** Any Outcome already fires on every
+  completion, so the pair overlaps and the questline would resolve twice for a
+  single completion - paying its rewards twice and recording two resolutions,
+  which makes grant-once rewards and anything counting completions read wrong.
+  The graph editor has always refused to draw this; the compiler refuses it now
+  as well, because an imported bundle is not drawn.
+
+- **Step nodes say "Triggers"** where they said "Targets", matching what the
+  component has been called since the trigger and observer split.
+
+### QuickStart
+
+- **The tutorial is eleven chapters and teaches rewards.** A Rewards chapter
+  sits second, right after the first trigger, and the chapters that followed it
+  shift down one. Chapter 1 is back to a single trigger and a single ending -
+  it had accumulated activation groups, a second exit and two reward types from
+  being used as a test bed, which is a poor first thing to read.
+
+---
+
 ## [0.8.0] — 2026-08-27 — Composition and Control
 
 Three things that were out of reach before: pausing quest advancement while

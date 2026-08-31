@@ -104,7 +104,7 @@ struct FQuestPathNodeList
      * Per-Exit attribution of questline-asset resolutions reached via this path. Populated by the compiler
      * when a pin-walk visits an Exit at an asset's root scope; each entry pairs the asset identity with the
      * Exit's authored OutcomeTag. Read by ChainToNextNodes to drive PublishGraphResolutions's per-entry
-     * outcome value — the questline resolves with the Exit's OutcomeTag, not the cascading path's outcome.
+     * outcome value - the questline resolves with the Exit's OutcomeTag, not the cascading path's outcome.
      */
     UPROPERTY(VisibleDefaultsOnly)
     TArray<FQuestGraphResolution> ResolvedGraphs;
@@ -125,7 +125,7 @@ struct FQuestReachableSteps
 };
 
 /**
- * A completion path's advertised rewards — the reward-node keys reachable from one of this node's outcome routes,
+ * A completion path's advertised rewards - the reward-node keys reachable from one of this node's outcome routes,
  * plus a display label for that path. Compile-time populated (mirrors ReachableStepsByActivatePin). Keyed by
  * PathIdentity in the owning node's map: NAME_None is the any-outcome route; other keys match NextNodesByPath.
  */
@@ -173,7 +173,7 @@ public:
     virtual UWorld* GetWorld() const override;
     
     /**
-     * True for the concrete UQuestStep leaf class — the only node type that bears intrinsic lifecycle state
+     * True for the concrete UQuestStep leaf class - the only node type that bears intrinsic lifecycle state
      * (PendingGiver / Live / Deactivated mutually exclusive). Read by lifecycle methods to gate behavior that
      * applies only to state-bearing leaves (e.g. publishing FQuestStartedEvent on the per-Step channel,
      * mutating the Live boolean fact directly).
@@ -182,7 +182,7 @@ public:
 
     /**
      * True for UQuest container wrappers (inline Quest placements + LinkedQuestline placements). Container Live
-     * is DERIVED from inner Step state rather than tracked as an intrinsic boolean fact — see UQuest::InnerStepTags
+     * is DERIVED from inner Step state rather than tracked as an intrinsic boolean fact - see UQuest::InnerStepTags
      * for the data backing the derivation. Read by lifecycle methods to skip direct Live-fact writes on containers
      * and instead route through the auto-propagation walk over UQuestStep::AncestorContainerTags.
      */
@@ -206,7 +206,7 @@ public:
     /**
      * Entry point for node activation. Base implementation evaluates PrerequisiteExpression against WorldState; activates immediately
      * if satisfied, otherwise defers. UQuestStep overrides this to bypass prerequisite gating for non-giver steps (prerequisites gate
-     * progression or completion instead — see EPrerequisiteGateMode).
+     * progression or completion instead - see EPrerequisiteGateMode).
      */
     virtual void Activate(FGameplayTag InContextualTag);
     
@@ -215,7 +215,7 @@ public:
 
     /**
      * Resolve a list of raw, editor-time FName tags created by the graph compiler into registered runtime
-     * FGameplayTags for AssetScopedAliasTags — the array of asset-scoped routing aliases for cross-asset
+     * FGameplayTags for AssetScopedAliasTags - the array of asset-scoped routing aliases for cross-asset
      * subscribers. One alias per enclosing LinkedQuestline asset above the leaf, ordered outermost-first
      * (excluding the top-level compile asset whose perspective IS ContextualTag). Empty list for content
      * compiled at the top level of its asset.
@@ -237,10 +237,10 @@ protected:
     virtual void DeactivateInternal(FGameplayTag InContextualTag);
 
     /**
-     * Returns true to opt into symmetric prereq leaf subscription — DeferActivation wires the FactRemovedHandler
+     * Returns true to opt into symmetric prereq leaf subscription - DeferActivation wires the FactRemovedHandler
      * alongside the added/resolution/entry handlers so NOT(Fact) leaves wake on fact removal. Default false matches
      * the monotonic content-node behavior. Override on subclasses whose semantic requires waking when a previously 
-     * satisfied condition flips false again (e.g., UPrereqGateNode under the Path-vs-Fact ontology — Facts are
+     * satisfied condition flips false again (e.g., UPrereqGateNode under the Path-vs-Fact ontology - Facts are
      * reversible state; Paths are append-only history).
      */
     virtual bool UseSymmetricPrereqSubscription() const { return false; }
@@ -253,7 +253,7 @@ protected:
 
     /**
      * Clears every member set during an earlier Activate / Deactivate cycle. Called by
-     * UQuestManagerSubsystem::ActivateQuestlineGraph before each PIE session wires the node back into a live subsystem —
+     * UQuestManagerSubsystem::ActivateQuestlineGraph before each PIE session wires the node back into a live subsystem -
      * the compiled instances persist across PIE sessions (they live on the UQuestlineGraph asset), so any delegate
      * handles or scratch state from a prior session are stale and must be dropped. Override on subclasses that add
      * their own transient members; always call Super first.
@@ -262,23 +262,23 @@ protected:
     
     /**
      * Stable per-placement save key. Composed at compile time as CombineGuids(outer-placement-chain, AuthoredNodeGuid),
-     * so the same authored node placed in N linked contexts yields N distinct keys — each placement is its own saved
+     * so the same authored node placed in N linked contexts yields N distinct keys - each placement is its own saved
      * instance. Never hand-edited.
      *
-     * Save-key contract (for save-state tooling and data pipelines): this GUID is a one-way composition — you CANNOT
+     * Save-key contract (for save-state tooling and data pipelines): this GUID is a one-way composition - you CANNOT
      * recover "which node, which placement" from the value alone. Save-state maps keyed by it (DeferredActivations,
      * ObjectiveStates) are therefore resolved to their nodes by looking the GUID up against the compiled node set
-     * (the running game, or a resolver that holds the compiled graph, provides that forward map) — not by inverting the
+     * (the running game, or a resolver that holds the compiled graph, provides that forward map) - not by inverting the
      * key. AuthoredNodeGuid is the placement-independent component: two instances of the same authored node share it,
      * so it is the handle for "this node regardless of where it's placed." Runtime save STATE is thus addressed through
-     * the compiled graph, not as free-standing human-readable rows — by design: a readable companion identity on save
+     * the compiled graph, not as free-standing human-readable rows - by design: a readable companion identity on save
      * rows was considered and deferred until a concrete consumer needs it.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     FGuid QuestContentGuid;
     
     /**
-     * Authored node identity — equals the editor node's QuestGuid before any placement-chain combination. Multi-tag-stable:
+     * Authored node identity - equals the editor node's QuestGuid before any placement-chain combination. Multi-tag-stable:
      * inlined and standalone instances of the same authored node share this value, whereas QuestContentGuid combines the
      * outer placement chain and differs per compile context. Used as the AuthoredNodeGuid component of the cascade event
      * ID that gates redundant wrapper-completion records under multi-tag fanout (see FOriginatingEventID, F.3 Chunk B).
@@ -296,11 +296,11 @@ protected:
 
     /**
      * For a LinkedQuestline placement wrapper (bIsLinkedQuestlinePlacement == true), the identity tag of the inner
-     * questline asset this wrapper instantiates — SimpleQuest.Questline.<InnerQuestlineID>, with no node-label leaf.
+     * questline asset this wrapper instantiates - SimpleQuest.Questline.<InnerQuestlineID>, with no node-label leaf.
      * Empty for inline placements and for a wrapper whose linked asset failed to resolve. This is the runtime bridge
      * from a placement's ContextualTag to the inner asset's own identity: the inner asset is never loaded at runtime
-     * (its nodes are inlined here), so its identity-keyed data — e.g. questline-level rewards in
-     * LiveQuestlineRewardsByIdentity — is otherwise unreachable from the placement. Matches the identity the compiler
+     * (its nodes are inlined here), so its identity-keyed data - e.g. questline-level rewards in
+     * LiveQuestlineRewardsByIdentity - is otherwise unreachable from the placement. Matches the identity the compiler
      * harvests the inner questline's rewards under.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
@@ -319,16 +319,16 @@ protected:
     
     /**
      * Asset-scoped routing aliases for cross-asset subscribers. One entry per enclosing LinkedQuestline asset
-     * above the leaf, ordered outermost-first — i.e., for a chain Project → links X → links Y → links Z →
+     * above the leaf, ordered outermost-first - i.e., for a chain Project → links X → links Y → links Z →
      * contains this node, the array is [X-perspective, Y-perspective, Z-perspective]. ContextualTag carries the
      * Project (top-level) perspective; the array carries every other perspective.
      *
-     * Use case: a observer placed in a level binds to "SimpleQuest.Questline.Y.LinkZ.S" — Y's natural perspective on
-     * Step S — and receives events from EVERY placement of Y across the project, regardless of how deeply Y is
+     * Use case: a observer placed in a level binds to "SimpleQuest.Questline.Y.LinkZ.S" - Y's natural perspective on
+     * Step S - and receives events from EVERY placement of Y across the project, regardless of how deeply Y is
      * nested in the parent compile chain. The bus's hierarchical walk handles parent-prefix subscription within
      * each tag's chain; multi-publish covers cross-chain subscribers.
      *
-     * Empty for content compiled at the top level of its asset (no LinkedQuestline ancestor) — the multi-publish
+     * Empty for content compiled at the top level of its asset (no LinkedQuestline ancestor) - the multi-publish
      * silently degenerates to single publish on ContextualTag alone.
      *
      * Format per entry: SimpleQuest.Questline.<EnclosingAssetQuestlineID>.<RemainingLinkChain>.<...>.<SanitizedNodeLabel>
@@ -340,7 +340,7 @@ protected:
      * Transient scratch slot for activation-time context stamped by the manager before Activate runs. Populated by
      * ChainToNextNodes (cascade pre-stamp), HandleGiveQuestEvent, HandleActivationRequest, and ActivateNodeByTag's
      * Quest-boundary forwarder. Consumed and cleared by the concrete subclass during its activation (UQuestStep packs
-     * it as the runtime half handed to the objective; UQuest forwards to inner entries). Not serialized — save/load
+     * it as the runtime half handed to the objective; UQuest forwards to inner entries). Not serialized - save/load
      * restoration republishes the activation event rather than persisting this stash.
      */
     UPROPERTY(Transient)
@@ -374,8 +374,8 @@ protected:
     TArray<FQuestBoundaryCompletion> BoundaryCompletionsOnAnyOutcome;
 
     /**
-     * Any-Outcome parallel to FQuestPathNodeList::ResolvedGraphs. Same per-Exit attribution shape — pairs of
-     * (asset identity, Exit OutcomeTag) — populated when this node resolves on the Any-Outcome path.
+     * Any-Outcome parallel to FQuestPathNodeList::ResolvedGraphs. Same per-Exit attribution shape - pairs of
+     * (asset identity, Exit OutcomeTag) - populated when this node resolves on the Any-Outcome path.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TArray<FQuestGraphResolution> ResolvedGraphsOnAnyOutcome;
@@ -395,7 +395,7 @@ protected:
     /**
      * Boundary completions to fire when this utility node's forward output crosses one or more wrapper Exits.
      * Each entry triggers SetQuestResolved on the wrapper tag (Completed + Path facts + resolution record) and
-     * publishes FQuestEndedEvent. Order is innermost-first — the compiler's ResolvePinToTags walk accumulates
+     * publishes FQuestEndedEvent. Order is innermost-first - the compiler's ResolvePinToTags walk accumulates
      * deepest crosses first as it traverses outward. Empty for utility nodes whose forward output doesn't
      * cross a wrapper boundary.
      */
@@ -423,7 +423,7 @@ protected:
      * Effective per-run resettability, resolved by the compiler from the authored EResettableReplay tri-state via
      * the alias-hierarchy inherit walk. When true, this node's structural resolution is mirrored to a clearable
      * WorldState fact (the per-run projection) alongside the permanent registry record, and gates wired from it read
-     * the mirror so they re-gate on replay. False (default) = permanent, registry-only — current behavior.
+     * the mirror so they re-gate on replay. False (default) = permanent, registry-only - current behavior.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     bool bResettableReplay = false;
@@ -450,7 +450,7 @@ protected:
     /**
      * UI-friendly title for this node. Compiler-populated from the matching UQuestlineNode_ContentBase's DisplayName
      * UPROPERTY at compile time; empty FText when the designer didn't author one. Empty passes through to the QSS
-     * query as-is — no fallback to NodeLabel or to a derived leaf-name reformat. Empty means the designer chose not
+     * query as-is - no fallback to NodeLabel or to a derived leaf-name reformat. Empty means the designer chose not
      * to pipeline display content; UI consumers branch on IsEmpty if they want to hide the entry entirely.
      */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly, Category = "Display")
@@ -479,7 +479,7 @@ private:
     TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> PrereqSubscriptionHandles;
 
     /**
-     * Cascade event ID associated with the most recent wake-up of this node — either a cascade arrival
+     * Cascade event ID associated with the most recent wake-up of this node - either a cascade arrival
      * (stamped via PendingActivationContext.IncomingContext.OriginatingEventID) or a prereq-subscription wake-up
      * (from the triggering FQuestResolutionRecordedEvent / FQuestEntryRecordedEvent payload).
      * Read by subclasses with per-event-ID deduplication logic (UPrereqGateNode); invalid when the wake-up was
@@ -495,7 +495,7 @@ private:
 
     /**
      * Set by the manager when this node enters PendingGiver state. When true, prerequisites gate actual activation (giver semantics).
-     * When false, prerequisites gate progression only — activation is immediate.
+     * When false, prerequisites gate progression only - activation is immediate.
      */
     bool bWasGiverGated = false;
 
@@ -508,8 +508,8 @@ private:
 
 public:
     /**
-     * True while this node is prereq-deferred — armed on its prerequisite leaves, waiting to activate. Reliable across
-     * content AND utility nodes: a Prereq Gate defers with an invalid contextual tag, so this — not DeferredContextualTag —
+     * True while this node is prereq-deferred - armed on its prerequisite leaves, waiting to activate. Reliable across
+     * content AND utility nodes: a Prereq Gate defers with an invalid contextual tag, so this - not DeferredContextualTag -
      * is the signal save/load uses to detect a node that must be re-armed on load.
      */
     bool IsAwaitingPrerequisite() const { return PrereqSubscriptionHandles.Num() > 0; }
@@ -530,6 +530,16 @@ public:
     const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
 
     void RegisterWithGameInstance(UGameInstance* InGameInstance) { CachedGameInstance = InGameInstance; }
+
+    /**
+     * For a LinkedQuestline placement, the identity tag of the questline asset it embeds - the bridge from a
+     * placement's CONTEXTUAL tag to the asset IDENTITY its questline-level rewards are filed under. Invalid on any node
+     * that is not a placement.
+     *
+     * Public because closing the reward-query topology leak depends on callers outside the manager being able to follow
+     * it; the field stays protected so only the compiler writes it.
+     */
+    FGameplayTag GetLinkedInnerIdentityTag() const { return LinkedInnerIdentityTag; }
     
     FORCEINLINE FGuid GetQuestGuid() const { return QuestContentGuid; }
     FORCEINLINE FGuid GetAuthoredNodeGuid() const { return AuthoredNodeGuid; }
@@ -556,4 +566,5 @@ public:
     FORCEINLINE const FText& GetDescription() const { return Description; }
     FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     FORCEINLINE const FOriginatingEventID& GetLastIncomingEventID() const { return LastIncomingEventID; }
+    
 };

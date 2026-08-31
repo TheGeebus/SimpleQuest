@@ -5,6 +5,7 @@
 
 #include "Quests/Types/QuestRewardPayloads.h"
 #include "SimpleQuestLog.h"
+#include "Quests/Types/QuestRewardBlockerTags.h"
 
 
 bool UQuestRewardAmountModifier::HandlesPayload(const UScriptStruct* PayloadType) const
@@ -14,19 +15,23 @@ bool UQuestRewardAmountModifier::HandlesPayload(const UScriptStruct* PayloadType
 		|| PayloadType == FQuestRewardAmountRange::StaticStruct();
 }
 
-bool UQuestRewardAmountModifier::ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
+void UQuestRewardAmountModifier::ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
 {
 	// The context arrives built - see UQuestRewardBase::DispatchDescribeReward, which synthesizes it once for every
 	// modifier rather than leaving each to invent its own and disagree about what a preview knows.
 	if (const FQuestRewardAmount* Fixed = Preview.PreviewData.GetPtr<FQuestRewardAmount>())
 	{
 		const int32 NewAmount = ModifyAmount(Fixed->Amount, AsIfActivating);
+		Preview.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ FMath::Max(NewAmount, 0) });
+
+		// An amount modified away to nothing is still ADVERTISED, carrying its real zero. The grant drops it, and saying
+		// so is more use to a player than a line that silently disappears - "this pays nothing right now" is an answer.
 		if (NewAmount <= 0)
 		{
-			return false;
+			AddBlocker(Preview, TAG_RewardBlocker_NoValue.GetTag(),
+				NSLOCTEXT("SimpleQuest", "RewardBlockedNoValue", "Currently worth nothing"));
 		}
-		Preview.PreviewData = FInstancedStruct::Make<FQuestRewardAmount>(FQuestRewardAmount{ NewAmount });
-		return true;
+		return;
 	}
 
 	if (const FQuestRewardAmountRange* Range = Preview.PreviewData.GetPtr<FQuestRewardAmountRange>())
@@ -35,16 +40,15 @@ bool UQuestRewardAmountModifier::ModifyPreview_Implementation(FQuestRewardPrevie
 		// re-deriving the ends would advertise a range the roll cannot actually produce.
 		const int32 NewMin = ModifyAmount(Range->Min, AsIfActivating);
 		const int32 NewMax = ModifyAmount(Range->Max, AsIfActivating);
+		Preview.PreviewData = FInstancedStruct::Make<FQuestRewardAmountRange>(
+			FQuestRewardAmountRange{ FMath::Max(NewMin, 0), FMath::Max(NewMax, 0) });
+
 		if (NewMax <= 0)
 		{
-			return false;
+			AddBlocker(Preview, TAG_RewardBlocker_NoValue.GetTag(),
+				NSLOCTEXT("SimpleQuest", "RewardBlockedNoValue", "Currently worth nothing"));
 		}
-		Preview.PreviewData = FInstancedStruct::Make<FQuestRewardAmountRange>(
-			FQuestRewardAmountRange{ FMath::Max(NewMin, 0), NewMax });
-		return true;
 	}
-
-	return true;
 }
 
 bool UQuestRewardAmountModifier::ModifyGrant_Implementation(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming)

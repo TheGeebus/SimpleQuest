@@ -28,7 +28,7 @@ protected:
 	virtual bool ModifyGrant_Implementation(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) override;
 
 	/** The same, for the advertised form - a fixed amount, or both ends of a range. Override ModifyAmount, not this. */
-	virtual bool ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) override;
+	virtual void ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) override;
 
 	/**
 	 * The whole authoring surface for the common case: given the amount, return the new one. Return zero or less to

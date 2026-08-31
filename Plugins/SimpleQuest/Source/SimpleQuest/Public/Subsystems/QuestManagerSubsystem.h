@@ -281,6 +281,29 @@ protected:
 	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
 	 */
 	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
+	
+	/**
+	 * Everything a tag pays on completion, keyed by the outcome that pays it - rewards wired into the graph AND the
+	 * questline's own completion rewards, merged into one answer. Backs the Blueprint library's Get Advertised Rewards.
+	 *
+	 * TAKES WHATEVER TAG THE CALLER HAS: a Step, a container, a linked placement, or a questline identity. The node
+	 * channel comes from that tag's own reachability manifest; the questline channel is delegated to
+	 * ResolveQuestlineRewards, which resolves a placement's CONTEXTUAL tag to its inner asset IDENTITY through
+	 * LinkedInnerIdentityTag. Choosing between those channels used to be the CALLER's job, and required knowing
+	 * node-versus-asset and contextual-versus-identity in order to ask a single question.
+	 *
+	 * *** SimpleQuest.Outcome.AnyOutcome IS A KEY IN ITS OWN RIGHT, NOT FOLDED INTO THE NAMED OUTCOMES. *** Completing
+	 * with outcome X pays X's list PLUS the Any-Outcome list, which is exactly how delivery grants them -
+	 * PublishGraphResolutions looks the two up separately and grants both. So the union of one outcome with
+	 * Any-Outcome is a real total, while the sum of the whole map is a number no completion ever pays.
+	 *
+	 * Every preview carries SourceTag (which completion it was resolved from) and RewardGuid (which reward produced
+	 * it), so a merged list stays traceable and a UI that re-queries keeps its identities across refreshes.
+	 *
+	 * PURE: computes previews for the Viewer, grants nothing, publishes nothing. An outcome with no rewards has no key
+	 * rather than an empty list; a tag with no loaded node yields an empty map, and the Verbose log says which.
+	 */
+	TMap<FGameplayTag, FQuestRewardPreviewList> ResolveAllRewards(FGameplayTag Tag, AActor* Viewer) const;
 
 	/**
 	 * Whole-node advertised rewards, grouped by outcome - every static-outcome path of a completing node and what each

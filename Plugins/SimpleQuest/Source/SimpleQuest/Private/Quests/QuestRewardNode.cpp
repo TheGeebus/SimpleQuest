@@ -55,7 +55,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 {
 	if (!Signals)
 	{
-		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("GrantRewardSet: no SignalSubsystem — %d reward(s) not published."), Rewards.Num());
+		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("GrantRewardSet: no SignalSubsystem - %d reward(s) not published."), Rewards.Num());
 		return;
 	}
 
@@ -74,7 +74,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 			if (!Grant.RewardType.IsValid())
 			{
 				UE_LOG(LogSimpleQuestActivation, Warning,
-					TEXT("GrantRewardSet: a reward or one of its modifiers produced a grant with no RewardType — dropped (nothing to route on)."));
+					TEXT("GrantRewardSet: a reward or one of its modifiers produced a grant with no RewardType - dropped (nothing to route on)."));
 				continue;
 			}
 
@@ -82,6 +82,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 			Grant.OriginTag          = Incoming.OriginTag;
 			Grant.OriginChain        = Incoming.OriginChain;
 			Grant.OriginatingEventID = Incoming.OriginatingEventID;
+			Grant.RewardGuid         = Reward->RewardGuid;   // pairs with the advertisement's stamp; see FQuestRewardContext
 			if (!Grant.Recipient.IsValid()) Grant.Recipient = Incoming.Instigator;
 
 			UE_LOG(LogSimpleQuestActivation, Log, TEXT("GrantRewardSet: granting '%s' (recipient: %s)"),

@@ -22,6 +22,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
 #include "Quests/QuestRewardNode.h"
+#include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
 
 
@@ -373,18 +374,54 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFo
     return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, NAME_None, Viewer, true) : TArray<FQuestRewardPreview>{};
 }
 
-TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag ContentTag, AActor* Viewer)
+TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag Tag, AActor* Viewer)
 {
-    if (!Questline) return {};
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+    if (!Questline) return Out;
 
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& Nodes = Questline->GetCompiledNodes();
-    const UQuestNodeBase* Owner = Nodes.FindRef(ContentTag.GetTagName());
-    if (!Owner) return {};
+    const UQuestNodeBase* Owner = Nodes.FindRef(Tag.GetTagName());
 
-    // Cold catalog reads the any-outcome bucket (what completing this pays regardless of branch) - matches the live
-    // GetAdvertisedRewardsForAnyOutcome (no-path) overload. Manager-free by design: sources the manifest off the asset's compiled
-    // nodes, delegates the walk to the shared UQuestRewardNode::ResolveAdvertisedFromManifest (same core the live path uses).
-    return UQuestRewardNode::ResolveAdvertisedFromManifest(Owner->GetReachableRewardsByPath(), Nodes, NAME_None, Viewer, true, ContentTag);
+    // Node channel - the same shared walk the live path uses, sourced from the asset's compiled nodes rather than the
+    // manager's live map, so cold and live cannot drift apart.
+    if (Owner)
+    {
+        UGameplayTagsManager& TagManager = UGameplayTagsManager::Get();
+        for (const TPair<FName, FQuestReachableRewards>& Pair : Owner->GetReachableRewardsByPath())
+        {
+            const FGameplayTag OutcomeTag = Pair.Key.IsNone()
+                ? TAG_Outcome_AnyOutcome.GetTag()
+                : TagManager.RequestGameplayTag(Pair.Key, false);
+            if (!OutcomeTag.IsValid()) continue;   // dynamic PathName - no author-time outcome tag to key on
+
+            TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+                Owner->GetReachableRewardsByPath(), Nodes, Pair.Key, Viewer, false, Tag);
+            if (Previews.Num() > 0) Out.FindOrAdd(OutcomeTag).Previews.Append(MoveTemp(Previews));
+        }
+    }
+
+    // Questline channel - cold has no manager, so the identity resolution the live path delegates to
+    // ResolveQuestlineRewards happens here against the asset's own compiled map.
+    FGameplayTag IdentityTag = Tag;
+    if (Owner && Owner->GetLinkedInnerIdentityTag().IsValid())
+    {
+        IdentityTag = Owner->GetLinkedInnerIdentityTag();
+    }
+
+    if (const FQuestCompiledQuestlineRewards* Compiled = Questline->GetCompiledQuestlineRewards().Find(IdentityTag.GetTagName()))
+    {
+        for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Compiled->RewardsByOutcome)
+        {
+            TArray<FQuestRewardPreview> Previews;
+            for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
+            {
+                if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer, IdentityTag));
+            }
+            if (Previews.Num() > 0) Out.FindOrAdd(Pair.Key).Previews.Append(MoveTemp(Previews));
+        }
+    }
+
+    return Out;
 }
 
 TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer)
@@ -412,12 +449,33 @@ TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQue
     return Manager ? Manager->ResolveQuestlineRewards(QuestlineTag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
 }
 
+TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag Tag, AActor* Viewer)
+{
+    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
+    return Manager ? Manager->ResolveAllRewards(Tag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
+}
+
 TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome)
 {
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
-    // A static outcome's PathIdentity is its tag-name (the manifest key). Dynamic PathNames aren't reachable from a tag
-    // by design - the any-outcome overload covers that case.
-    return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, OutcomeTag.GetTagName(), Viewer, bIncludeAnyOutcome) : TArray<FQuestRewardPreview>{};
+    if (!Manager) return {};
+
+    // Filtered off the MERGED map rather than the node manifest alone, so asking about one outcome folds in
+    // questline-level rewards exactly as the whole-map query does. Any-Outcome is a separate key there, so the union
+    // that bIncludeAnyOutcome asks for happens here rather than inside the walk.
+    const TMap<FGameplayTag, FQuestRewardPreviewList> All = Manager->ResolveAllRewards(ContentTag, Viewer);
+
+    TArray<FQuestRewardPreview> Out;
+    if (const FQuestRewardPreviewList* Named = All.Find(OutcomeTag)) Out.Append(Named->Previews);
+
+    // *** ASKING FOR ANY-OUTCOME ALREADY RETURNED THE ANY-OUTCOME LIST. *** The flag means "also include the rewards
+    // that fire regardless of outcome" - when that IS the outcome asked about, there is nothing further to add, and
+    // unioning it would advertise every any-outcome reward twice. Idempotent rather than additive.
+    if (bIncludeAnyOutcome && OutcomeTag != TAG_Outcome_AnyOutcome.GetTag())
+    {
+        if (const FQuestRewardPreviewList* Any = All.Find(TAG_Outcome_AnyOutcome.GetTag())) Out.Append(Any->Previews);
+    }
+    return Out;
 }
 
 TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)

@@ -12,6 +12,7 @@
 #include "Rewards/Modifiers/QuestRewardModifier.h"
 #include "Rewards/Modifiers/ClampAmountModifier.h"
 #include "Rewards/XPReward.h"
+#include "Rewards/Modifiers/ScaleAmountModifier.h"
 #include "StructUtils/InstancedStruct.h"
 #include "UObject/Package.h"
 
@@ -35,6 +36,13 @@ public:
 		Clamp->MinAmount = Min;
 		Clamp->MaxAmount = Max;
 		return Clamp;
+	}
+
+	static UScaleAmountModifier* MakeScale(UObject* Outer, float Multiplier)
+	{
+		UScaleAmountModifier* Scale = NewObject<UScaleAmountModifier>(Outer);
+		Scale->Multiplier = Multiplier;
+		return Scale;
 	}
 };
 
@@ -129,6 +137,63 @@ bool FQuestRewardModifier_RefusesForeignPayload::RunTest(const FString& Paramete
 	}
 	TestEqual(TEXT("loot row min untouched"), Untouched->MinAmount, 7);
 	TestEqual(TEXT("loot row max untouched"), Untouched->MaxAmount, 9);
+
+	return true;
+}
+
+/**
+ * Scale Amount multiplies, rounds half-up, and drops a grant it rounds away.
+ *
+ * The order block is the part worth having: the existing order test uses two CLAMPS because when it was written no
+ * scale modifier existed to pair with one. Scale-then-cap and cap-then-scale is the pairing that comment was describing,
+ * and it exercises a different second modifier rather than the same class twice.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestRewardModifier_ScaleAmount, "SimpleQuest.Reward.ScaleAmountModifier", ModifierTestFlags)
+bool FQuestRewardModifier_ScaleAmount::RunTest(const FString& Parameters)
+{
+	UPackage* Package = CreatePackage(TEXT("/Temp/QuestRewardModifierScale"));
+	const FQuestRewardActivationContext Incoming;
+
+	// Scales, and rounds half-up rather than truncating: 3 x 0.5 is 1.5, which pays 2.
+	{
+		UXPReward* Reward = NewObject<UXPReward>(Package);
+		FQuestRewardModifierTestAccess::Modifiers(*Reward).Add(FQuestRewardModifierTestAccess::MakeScale(Reward, 0.5f));
+
+		FQuestRewardContext Grant = MakeAmountGrant(3);
+		TestTrue(TEXT("halving kept the grant"), Reward->ApplyModifiers(Grant, Incoming));
+		TestEqual(TEXT("3 x 0.5 rounds up to 2"), Grant.CustomData.Get<FQuestRewardAmount>().Amount, 2);
+	}
+
+	// Rounded away entirely - the amount layer drops at zero, so this is a DROP and not a grant of nothing.
+	{
+		UXPReward* Reward = NewObject<UXPReward>(Package);
+		FQuestRewardModifierTestAccess::Modifiers(*Reward).Add(FQuestRewardModifierTestAccess::MakeScale(Reward, 0.25f));
+
+		FQuestRewardContext Grant = MakeAmountGrant(1);
+		TestFalse(TEXT("1 x 0.25 rounds to zero and drops"), Reward->ApplyModifiers(Grant, Incoming));
+	}
+
+	// Order matters, and the two arrangements have to land on DIFFERENT numbers or the run proves nothing.
+	{
+		UXPReward* Reward = NewObject<UXPReward>(Package);
+		TArray<TObjectPtr<UQuestRewardModifier>>& Mods = FQuestRewardModifierTestAccess::Modifiers(*Reward);
+		Mods.Add(FQuestRewardModifierTestAccess::MakeScale(Reward, 3.0f));
+		Mods.Add(FQuestRewardModifierTestAccess::MakeClamp(Reward, 0, 5));
+
+		FQuestRewardContext Grant = MakeAmountGrant(4);
+		TestTrue(TEXT("scale-then-cap kept the grant"), Reward->ApplyModifiers(Grant, Incoming));
+		TestEqual(TEXT("scale-then-cap hits the cap"), Grant.CustomData.Get<FQuestRewardAmount>().Amount, 5);
+	}
+	{
+		UXPReward* Reward = NewObject<UXPReward>(Package);
+		TArray<TObjectPtr<UQuestRewardModifier>>& Mods = FQuestRewardModifierTestAccess::Modifiers(*Reward);
+		Mods.Add(FQuestRewardModifierTestAccess::MakeClamp(Reward, 0, 5));
+		Mods.Add(FQuestRewardModifierTestAccess::MakeScale(Reward, 3.0f));
+
+		FQuestRewardContext Grant = MakeAmountGrant(4);
+		TestTrue(TEXT("cap-then-scale kept the grant"), Reward->ApplyModifiers(Grant, Incoming));
+		TestEqual(TEXT("cap-then-scale scales past the cap"), Grant.CustomData.Get<FQuestRewardAmount>().Amount, 12);
+	}
 
 	return true;
 }

@@ -136,7 +136,8 @@ private:
 	 * The advertisement twin, applied inside DispatchDescribeReward rather than by callers. Returns false when a
 	 * modifier hid the preview.
 	 */
-	bool ApplyModifiersToPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) const;
+	void ApplyModifiersToPreview(FQuestRewardPreview& Preview,
+	                             const FQuestRewardActivationContext& AsIfActivating) const;
 	
 	/** Grants queued by DeliverReward during TryGrantReward; drained by the reward node via TakePendingGrants. */
 	UPROPERTY()

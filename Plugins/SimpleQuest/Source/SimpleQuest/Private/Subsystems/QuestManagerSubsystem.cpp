@@ -470,8 +470,8 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         else
         {
             UE_LOG(LogSimpleQuestActivation, Warning,
-                TEXT("RegisterQuestlineGraph: '%s' - composed questline tag '%s' isn't registered; asset-level display data not stored. "
-                     "Adopters querying display data on this tag will receive empty + Warning."),
+                TEXT("RegisterQuestlineGraph: '%s' - no compiled identity tag for questline ID '%s'; recompile the asset if that is "
+                     "unexpected. Asset-level display data not stored; adopters querying display data on this tag receive empty."),
                      *Graph->GetName(), *Graph->GetEffectiveID());
         }
     }
@@ -823,7 +823,7 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
                 FQuestStartedEvent(QuestlineTag, Payload, nullptr));
 
             // Asset-level Live fact write - symmetric with PublishGraphResolutions's Completed fact write at
-            // resolution (§4.36). Persists past the transient publishes above so late subscribers reconstruct
+            // resolution. Persists past the transient publishes above so late subscribers reconstruct
             // Activated + Started via UQuestLifecycleObserver's catch-up. Uses AddStateFactAcrossPerspectives
             // (matching the close-out pattern) to handle alias forms; for top-level asset tags this is
             // effectively a single-tag write.
@@ -833,15 +833,16 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
         else
         {
             UE_LOG(LogSimpleQuestActivation, Warning,
-                TEXT("ActivateQuestlineGraph: '%s' - composed tag '%s' isn't registered with the runtime tag manager. "
-                     "Asset-level Activated publish skipped; adopters bound on the questline tag won't receive a start signal."),
+                TEXT("ActivateQuestlineGraph: '%s' - no compiled identity tag for questline ID '%s'; recompile the asset if that is "
+                     "unexpected. Asset-level Activated publish skipped; adopters bound on the questline tag won't receive a start signal."),
                 *Graph->GetName(),
                 *Graph->GetEffectiveID());
         }
     }
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("ActivateQuestlineGraph: '%s' - firing %d entry tag(s) (CustomData %s, Instigator %s)"),
-        *Graph->GetName(), Graph->GetEntryNodeTags().Num(),
+        *Graph->GetName(),
+        Graph->GetEntryNodeTags().Num(),
         Params.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"),
         Params.Instigator.IsValid() ? *Params.Instigator->GetName() : TEXT("null"));
 
@@ -2273,8 +2274,25 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ForwardChain.Add(Node->GetContextualTag());
     }
 
-    auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node, &OriginatingEventID](const FName& DestTagName)
+    // *** ONE ACTIVATION PER DESTINATION PER COMPLETION. *** A destination reachable from BOTH the resolved path and
+    // the Any-Outcome route appears in both lists below, and each loop activates unconditionally - so a Grant Rewards
+    // node wired to an outcome pin AND to Any Outcome was reached twice and paid twice. Wiring two routes into one node
+    // asks for one arrival, not two. Scoped to this call, so a later completion activates the same destination again as
+    // normal - this dedups a single cascade, not the node's lifetime.
+    TSet<FName> ActivatedThisCompletion;
+
+    auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node, &OriginatingEventID, &ActivatedThisCompletion](const FName& DestTagName)
     {
+        bool bAlreadyActivated = false;
+        ActivatedThisCompletion.Add(DestTagName, &bAlreadyActivated);
+        if (bAlreadyActivated)
+        {
+            UE_LOG(LogSimpleQuestActivation, Verbose,
+                TEXT("ChainToNextNodes: '%s' is reachable from both the resolved path and Any-Outcome - activating once."),
+                *DestTagName.ToString());
+            return;
+        }
+
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(DestTagName))
         {
             DestInstance->PendingActivationContext.IncomingContext = ForwardPayload;
@@ -2367,6 +2385,51 @@ TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveQuest
         }
         if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
     }
+    return Out;
+}
+
+TMap<FGameplayTag, FQuestRewardPreviewList> UQuestManagerSubsystem::ResolveAllRewards(FGameplayTag Tag, AActor* Viewer) const
+{
+    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
+
+    // ── Channel 1: rewards wired into nodes, from this tag's reachability manifest ──
+    if (const UQuestNodeBase* Owner = LoadedNodeInstances.FindRef(Tag.GetTagName()))
+    {
+        UGameplayTagsManager& TagManager = UGameplayTagsManager::Get();
+        for (const TPair<FName, FQuestReachableRewards>& Pair : Owner->GetReachableRewardsByPath())
+        {
+            // *** THE ANY-OUTCOME BUCKET IS A KEY NOW, NOT SOMETHING FOLDED INTO THE NAMED ONES. *** Delivery treats
+            // the two as disjoint sets that BOTH fire - PublishGraphResolutions grants the resolved outcome's set and
+            // the Any-Outcome set in separate calls - so a query that duplicated one into the other would report a
+            // total no completion ever pays. It also matches how questline-level rewards have always been keyed.
+            const FGameplayTag OutcomeTag = Pair.Key.IsNone()
+                ? TAG_Outcome_AnyOutcome.GetTag()
+                : TagManager.RequestGameplayTag(Pair.Key, false);
+            if (!OutcomeTag.IsValid()) continue;   // dynamic PathName - no author-time outcome tag to key on
+
+            TArray<FQuestRewardPreview> Previews = UQuestRewardNode::ResolveAdvertisedFromManifest(
+                Owner->GetReachableRewardsByPath(), LoadedNodeInstances, Pair.Key, Viewer, false, Tag);
+            if (Previews.Num() > 0) Out.FindOrAdd(OutcomeTag).Previews.Append(MoveTemp(Previews));
+        }
+    }
+
+    // ── Channel 2: the questline's own completion rewards ──
+    // Delegated rather than reimplemented: ResolveQuestlineRewards already resolves a linked placement's CONTEXTUAL
+    // tag to the inner asset IDENTITY through LinkedInnerIdentityTag. That bridge is the thing this merge exists to
+    // hide from callers, and there is no reason for two copies of it.
+    TMap<FGameplayTag, FQuestRewardPreviewList> QuestlineLevel = ResolveQuestlineRewards(Tag, Viewer);
+    for (TPair<FGameplayTag, FQuestRewardPreviewList>& Pair : QuestlineLevel)
+    {
+        Out.FindOrAdd(Pair.Key).Previews.Append(MoveTemp(Pair.Value.Previews));
+    }
+
+    // One line rather than silence: an empty result has several causes and they are indistinguishable to a caller.
+    UE_LOG(LogSimpleQuestActivation, Verbose,
+        TEXT("ResolveAllRewards: '%s' -> %d outcome(s)%s"),
+        *Tag.ToString(), Out.Num(),
+        Out.IsEmpty() && !LoadedNodeInstances.Contains(Tag.GetTagName())
+            ? TEXT(" (no loaded node for this tag - is the questline running?)") : TEXT(""));
+
     return Out;
 }
 

@@ -41,18 +41,23 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Vie
 	// node, the manager's questline-level query, and the Blueprint library - and a pass added to each is a pass one of
 	// them eventually forgets, leaving that surface promising a number nobody will receive. The grant path is the
 	// asymmetric one on purpose: it lives in the node because lineage and publishing have to interleave with it.
-	// Backwards so a hidden preview can be removed without disturbing the indices still to come.
-	for (int32 Index = Previews.Num() - 1; Index >= 0; --Index)
+	// NOTHING IS REMOVED HERE. A modifier that would drop the grant marks the preview with a blocker instead, so every
+	// advertised reward survives to be rendered and the UI decides whether an unavailable one is greyed, filtered or
+	// explained. That is why this walks forward now - there are no indices to protect from removal.
+	for (FQuestRewardPreview& Preview : Previews)
 	{
-		if (!ApplyModifiersToPreview(Previews[Index], AsIfActivating))
-		{
-			Previews.RemoveAt(Index);
-		}
+		ApplyModifiersToPreview(Preview, AsIfActivating);
+
+		// Stamped AFTER the modifiers, mirroring the grant path's rule that provenance is written last and a modifier
+		// cannot corrupt it.
+		Preview.SourceTag  = ResolvingQuestTag;
+		Preview.RewardGuid = RewardGuid;
 	}
 	return Previews;
 }
 
-bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) const
+void UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview,
+                                               const FQuestRewardActivationContext& AsIfActivating) const
 {
 	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
 	{
@@ -70,14 +75,8 @@ bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, con
 			continue;
 		}
 
-		if (!Modifier->DispatchModifyPreview(Preview, AsIfActivating))
-		{
-			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("%s on %s hid the preview."),
-				*Modifier->GetClass()->GetName(), *GetClass()->GetName());
-			return false;
-		}
+		Modifier->DispatchModifyPreview(Preview, AsIfActivating);
 	}
-	return true;
 }
 
 void UQuestRewardBase::PostLoad()
@@ -133,7 +132,7 @@ void UQuestRewardBase::DeliverReward(FGameplayTag InRewardType, const FInstanced
 bool UQuestRewardBase::ApplyModifiers(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const
 {
 	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
-	{
+	{ 
 		if (!Modifier) continue;
 
 		// THE GATE IS HERE, ONCE, rather than inside each modifier: a modifier that silently did nothing to a payload

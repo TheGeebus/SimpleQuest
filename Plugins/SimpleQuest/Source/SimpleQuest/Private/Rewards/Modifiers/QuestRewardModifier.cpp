@@ -11,6 +11,7 @@
 #include "Rewards/RewardScalingSource.h"
 #include "Subsystems/QuestStateSubsystem.h"
 
+
 bool UQuestRewardModifier::DispatchModifyGrant(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming)
 {
 	// Through the UFunction thunk rather than calling _Implementation directly, so a Blueprint override actually runs.
@@ -24,19 +25,39 @@ bool UQuestRewardModifier::ModifyGrant_Implementation(FQuestRewardContext& Grant
 	return true;
 }
 
-bool UQuestRewardModifier::DispatchModifyPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
+void UQuestRewardModifier::DispatchModifyPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
 {
-	return ModifyPreview(Preview, AsIfActivating);
+	ModifyPreview(Preview, AsIfActivating);
 }
 
-bool UQuestRewardModifier::ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
+void UQuestRewardModifier::ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating)
 {
-	// Pass-through, like ModifyGrant. A modifier that only cares about grants leaves the advertisement alone rather
-	// than hiding it - silence here would make a reward vanish from "do this, get this" for no stated reason.
-	return true;
+	// Pass-through, like ModifyGrant. A modifier that only cares about grants leaves the advertisement alone.
 }
 
+void UQuestRewardModifier::AddBlocker(FQuestRewardPreview& Preview, const FGameplayTag BlockerType, const FText& Description)
+{
+	Preview.Blockers.Add(FQuestRewardBlocker{ BlockerType, Description });
+}
 
+const UGameInstance* UQuestRewardModifier::FindGameInstanceForGrant(const FQuestRewardActivationContext& Context)
+{
+	const AActor* Actor = Context.Instigator.Get();
+	const UWorld* World = Actor ? Actor->GetWorld() : nullptr;
+	return World ? World->GetGameInstance() : nullptr;
+}
 
+int32 UQuestRewardModifier::GetCompletionCount(const FQuestRewardActivationContext& Context, const bool bThisCompletionAlreadyCounted) const
+{
+	if (!Context.ResolvingQuestTag.IsValid()) return INDEX_NONE;
 
+	const UGameInstance* GameInstance = FindGameInstanceForGrant(Context);
+	const UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+	if (!StateSubsystem) return INDEX_NONE;
+
+	// No record at all is a real zero - a quest that has never resolved has resolved zero times.
+	const FQuestResolutionRecord* Record = StateSubsystem->GetQuestResolution(Context.ResolvingQuestTag);
+	const int32 Recorded = Record ? Record->GetCount() : 0;
+	return bThisCompletionAlreadyCounted ? Recorded : Recorded + 1;
+}
 

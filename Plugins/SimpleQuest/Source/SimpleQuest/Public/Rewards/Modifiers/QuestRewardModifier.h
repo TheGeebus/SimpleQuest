@@ -36,8 +36,8 @@ public:
 	 */
 	bool DispatchModifyGrant(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming);
 
-	/** Advertisement twin of DispatchModifyGrant. Returns false when the modifier hid the preview. */
-	bool DispatchModifyPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
+	/** Advertisement twin of DispatchModifyGrant. Annotates rather than deciding - see ModifyPreview. */
+	void DispatchModifyPreview(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
 
 	/**
 	 * Whether this modifier operates on a given payload struct; the default accepts anything. Checked BEFORE either
@@ -66,16 +66,49 @@ protected:
 	bool ModifyGrant(UPARAM(ref) FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming);
 
 	/**
-	 * Transform what the reward ADVERTISES, so "do this, get this" shows the number a player will actually receive.
-	 * Return FALSE to hide the preview, which is what a drop-unless-condition modifier should do when its condition
-	 * already fails - promising something that will not arrive is worse than promising nothing.
+	 * Transform what the reward ADVERTISES, and record anything standing in the way of it being granted.
 	 *
-	 * TAKES A CONTEXT RATHER THAN A VIEWER, and the symmetry with ModifyGrant is the point: whatever a modifier can
-	 * branch on while granting, it can branch on while advertising. Nothing has activated, so Provenance stays Unknown
-	 * and no outcome routed here; Instigator carries the VIEWER (a scaling modifier reads it exactly as it reads the
-	 * Instigator when granting), and ResolvingQuestTag carries the same quest the grant path names.
+	 * *** THIS DOES NOT DECIDE WHETHER THE REWARD IS SHOWN. *** ModifyGrant returns a verdict because a grant is a
+	 * decision; a preview is a DESCRIPTION, so a modifier that would drop the grant adds a blocker via AddBlocker
+	 * instead of suppressing the entry. Hiding an unavailable reward is a presentation choice that belongs to the UI,
+	 * which can then render "50 XP - already collected" rather than showing nothing at all.
+	 *
+	 * A useful consequence: describing the present needs no prediction. Asking whether a reward WOULD be granted after
+	 * a completion that has not happened is a question a modifier generally cannot answer; saying what blocks it right
+	 * now is one it always can.
+	 *
+	 * TAKES A CONTEXT RATHER THAN A VIEWER, symmetric with ModifyGrant: nothing has activated, so Provenance stays
+	 * Unknown, but Instigator carries the VIEWER and ResolvingQuestTag the same quest the grant path names.
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
-	bool ModifyPreview(UPARAM(ref) FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
+	void ModifyPreview(UPARAM(ref) FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating);
+
+	/** Records a reason this reward would not currently be granted. Several modifiers may each add their own. */
+	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Reward")
+	static void AddBlocker(UPARAM(ref) FQuestRewardPreview& Preview, FGameplayTag BlockerType, const FText& Description);
+
+	/**
+	 * The GameInstance a grant belongs to, reached through whoever the grant is about. A modifier is a subobject of a
+	 * reward on a questline graph ASSET, so its own GetWorld() is null and this walk is the only route to the live game -
+	 * which is why it lives here once rather than in each modifier that needs a subsystem.
+	 *
+	 * Null when the Instigator is gone or carries no world. Callers decide what that means for them; a grant and a
+	 * preview do not want the same answer.
+	 */
+	static const UGameInstance* FindGameInstanceForGrant(const FQuestRewardActivationContext& Context);
+
+	/**
+	 * Resolutions of the context's quest AS OF THE COMPLETION THIS CALL IS ABOUT - the shared reference point that lets
+	 * a grant and its own advertisement compare identically.
+	 *
+	 * *** A PREVIEW IS A LOOKAHEAD. *** It answers "given this completion, what do you get," so it must count the
+	 * completion it describes. A grant runs with its own resolution already recorded and so is already correct; a
+	 * preview is asked beforehand and is one behind, and the pending completion is added here. Getting this wrong is
+	 * precisely the off-by-one that makes an advertisement promise what the grant then refuses.
+	 *
+	 * INDEX_NONE when it cannot be established - no resolving quest on the context, or no reachable state subsystem.
+	 * Silent, because a grant wants a warning and a preview asked every frame by a tooltip does not.
+	 */
+	int32 GetCompletionCount(const FQuestRewardActivationContext& Context, bool bThisCompletionAlreadyCounted) const;
 };
 

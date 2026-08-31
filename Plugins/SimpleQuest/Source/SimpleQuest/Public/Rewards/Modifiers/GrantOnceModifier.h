@@ -21,13 +21,11 @@
  * do with what it carries. This gates currency, XP, loot and payload-less rewards identically.
  *
  * IT HIDES THE ADVERTISEMENT ONCE COLLECTED. A reward that will not be granted again must stop appearing in "do this,
- * get this" - a journal still promising a payout the player already holds is a visible lie. The preview path carries the
- * same quest identity the grant path does, precisely so both halves can agree.
+ * get this" - a journal still promising a payout the player already holds is a visible lie.
  *
- * THE TWO PATHS COMPARE DIFFERENTLY, AND THAT IS NOT AN INCONSISTENCY. A grant runs with its own resolution already
- * recorded, so a first grant sees a count of one; a preview is asked with nothing in flight, so any recorded resolution
- * means the payout has already happened. Both answer "has this been granted before now" - they just count from different
- * starting points, which is why each states its own comparison rather than sharing one constant.
+ * ONE COMPARISON SERVES BOTH PATHS, because GetCompletionCount normalizes them to the same reference point. An earlier
+ * version carried two different thresholds to compensate for the preview reading one completion behind; that was a
+ * workaround for a contract the base class should have been enforcing at the read, and it is gone.
  */
 UCLASS(meta = (DisplayName = "Grant Once"))
 class SIMPLEQUEST_API UGrantOnceModifier : public UQuestRewardModifier
@@ -36,13 +34,6 @@ class SIMPLEQUEST_API UGrantOnceModifier : public UQuestRewardModifier
 
 protected:
 	virtual bool ModifyGrant_Implementation(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) override;
-	virtual bool ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) override;
-
-private:
-	/**
-	 * Resolutions recorded so far for the context's anchoring quest, or INDEX_NONE when that cannot be established (no
-	 * anchor tag, or no reachable state subsystem). Deliberately silent - an unknown means different things to the two
-	 * callers, and a preview can be asked every frame by a tooltip, so each logs at the severity its own path warrants.
-	 */
-	int32 GetResolutionCount(const FQuestRewardActivationContext& Context) const;
+	virtual void ModifyPreview_Implementation(FQuestRewardPreview& Preview, const FQuestRewardActivationContext& AsIfActivating) override;
+	
 };

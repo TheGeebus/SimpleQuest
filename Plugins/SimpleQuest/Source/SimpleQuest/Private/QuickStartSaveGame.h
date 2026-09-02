@@ -50,6 +50,12 @@ public:
 	// -----------------------------------------------------------------------------------------------------------------
 	//   Game-specific save data - player positioning and reward totals for the QuickStart tutorial scenario
 	// -----------------------------------------------------------------------------------------------------------------
+
+	/**
+	 * The level this save was taken in, opened on restore.
+	 */
+	UPROPERTY(BlueprintReadWrite, SaveGame)
+	FName LevelName;
 	
 	UPROPERTY(BlueprintReadWrite, SaveGame)
 	FTransform PlayerTransform;
@@ -58,9 +64,8 @@ public:
 	FRotator ControlRotation;
 
 	/**
-	 * Running reward totals for the HUD. They live here because the framework deliberately keeps none: a grant is an
-	 * event, not a balance, so what a player has accumulated is the game's own bookkeeping. Without these a load
-	 * restores completed chapters beside an empty bar, and grant-once XP will not pay again to refill it.
+	 * Running reward totals for the HUD. They're attributes owned by the game, not the framework. Grants are never replayed
+	 * when a save is restored. They are transient events that may add to the totals, which must be persisted by the game.
 	 */
 	UPROPERTY(BlueprintReadWrite, SaveGame)
 	int32 GoldTotal = 0;

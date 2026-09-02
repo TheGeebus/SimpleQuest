@@ -24,8 +24,7 @@
 #define LOCTEXT_NAMESPACE "SimpleQuestEditor"
 
 // Reserved tag for the "fires on every completion regardless of outcome" case. Matches the runtime NAME_None any-outcome
-// bucket conceptually; here it needs a real tag so it can be a map key. (If a canonical SimpleQuest.Outcome.Any tag is
-// later introduced by the 0.7 Path/Outcome un-fuse, swap this to it.)
+// bucket conceptually; here it needs a real tag so it can be a map key.
 static FGameplayTag GetAnyOutcomeTag()
 {
 	return TAG_Outcome_AnyOutcome.GetTag();
@@ -63,7 +62,7 @@ void FQuestlineGraphRewardsDetailsCustomization::CustomizeDetails(IDetailLayoutB
 			[
 				SNew(STextBlock)
 				.Text(LOCTEXT("QuestlineRewardsHeader", "Questline-Level Rewards"))
-				.ToolTipText(LOCTEXT("QuestlineRewardsHeaderTip", "Rewards granted when this questline completes via the given outcome — on every use, standalone or linked. Add an outcome (only this questline's Exit outcomes, plus Any Outcome, are selectable)."))
+				.ToolTipText(LOCTEXT("QuestlineRewardsHeaderTip", "Rewards granted when this questline completes via the given outcome - on every use, standalone or linked. Add an outcome (only this questline's Exit outcomes, plus Any Outcome, are selectable)."))
 				.Font(IDetailLayoutBuilder::GetDetailFontBold())
 			]
 			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
@@ -162,8 +161,17 @@ void FQuestlineGraphRewardsDetailsCustomization::CustomizeDetails(IDetailLayoutB
 				]
 			];
 
-		// Body: the FQuestRewardSet.Rewards array, via the value handle's child — full inline reward-instance editor,
-		// but nested ONE level under the flat outcome row instead of four.
+		// Body: BOTH halves of FQuestRewardSet, via the value handle's children - the full inline reward-instance
+		// editor and the shared-set references - each nested ONE level under the flat outcome row instead of four.
+		//
+		// SETS FIRST, because that is the order they GRANT in: compilation flattens referenced sets ahead of the inline
+		// rewards, and reading the panel top to bottom should tell you what a completion pays and in what sequence.
+		const TSharedPtr<IPropertyHandle> SetsHandle = ElementHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FQuestRewardSet, RewardSets));
+		if (SetsHandle.IsValid())
+		{
+			Group.AddPropertyRow(SetsHandle.ToSharedRef());
+		}
+
 		const TSharedPtr<IPropertyHandle> RewardsHandle = ElementHandle->GetChildHandle(GET_MEMBER_NAME_CHECKED(FQuestRewardSet, Rewards));
 		if (RewardsHandle.IsValid())
 		{
@@ -190,7 +198,7 @@ TArray<FGameplayTag> FQuestlineGraphRewardsDetailsCustomization::GetAvailableOut
 		}
 	}
 
-	// Any Outcome — always offered unless already keyed.
+	// Any Outcome - always offered unless already keyed.
 	if (const FGameplayTag AnyTag = GetAnyOutcomeTag(); AnyTag.IsValid() && !Graph->QuestlineRewards.Contains(AnyTag))
 	{
 		Available.AddUnique(AnyTag);
@@ -202,7 +210,7 @@ TArray<FGameplayTag> FQuestlineGraphRewardsDetailsCustomization::GetAvailableOut
 bool FQuestlineGraphRewardsDetailsCustomization::IsOutcomeStale(const FGameplayTag& OutcomeKey) const
 {
 	// Stale = has rewards keyed on an outcome no current top-level Exit produces (and isn't Any Outcome). Same
-	// predicate the compiler errors on — computed live here from the graph, so it flags the instant an Exit changes.
+	// predicate the compiler errors on - computed live here from the graph, so it flags the instant an Exit changes.
 	UQuestlineGraph* Graph = CustomizedGraph.Get();
 	if (!Graph || !Graph->QuestlineEdGraph) return false;
 	if (OutcomeKey == GetAnyOutcomeTag()) return false;
@@ -211,7 +219,7 @@ bool FQuestlineGraphRewardsDetailsCustomization::IsOutcomeStale(const FGameplayT
 	{
 		if (const UQuestlineNode_Exit* Exit = Cast<UQuestlineNode_Exit>(Node))
 		{
-			if (Exit->OutcomeTag == OutcomeKey) return false;   // a current Exit produces it — not stale
+			if (Exit->OutcomeTag == OutcomeKey) return false;   // a current Exit produces it - not stale
 		}
 	}
 	return true;
@@ -227,7 +235,7 @@ TSharedRef<SWidget> FQuestlineGraphRewardsDetailsCustomization::BuildAddOutcomeM
 	{
 		Menu.AddWidget(
 			SNew(SBox)
-			.Padding(FMargin(12.f, 0.f))   // menu widgets get no item padding by default — pad so it doesn't touch the edges
+			.Padding(FMargin(12.f, 0.f))   // menu widgets get no item padding by default - pad so it doesn't touch the edges
 			[
 				SNew(STextBlock)
 				.Text(LOCTEXT("NoAvailableOutcomes", "No unused Exit outcomes on this questline."))
@@ -255,7 +263,7 @@ void FQuestlineGraphRewardsDetailsCustomization::OnAddOutcome(FGameplayTag Outco
 	UQuestlineGraph* Graph = CustomizedGraph.Get();
 	if (!Graph || !Outcome.IsValid() || Graph->QuestlineRewards.Contains(Outcome)) return;
 
-	// Direct transacted mutation — the engine map handle's AddItem can't add a chosen key.
+	// Direct transacted mutation - the engine map handle's AddItem can't add a chosen key.
 	const FScopedTransaction Transaction(LOCTEXT("AddQuestlineReward", "Add Questline Reward Outcome"));
 	Graph->Modify();
 	Graph->QuestlineRewards.Add(Outcome, FQuestRewardSet());
@@ -284,7 +292,7 @@ void FQuestlineGraphRewardsDetailsCustomization::OnRekeyOutcome(FGameplayTag Old
 	const FScopedTransaction Transaction(LOCTEXT("RekeyQuestlineReward", "Re-key Questline Reward Outcome"));
 	Graph->Modify();
 
-	// Move the reward set intact to the new key — the designer keeps every reward they authored; only the outcome changes.
+	// Move the reward set intact to the new key - the designer keeps every reward they authored; only the outcome changes.
 	FQuestRewardSet Moved = MoveTemp(Graph->QuestlineRewards.FindChecked(OldOutcome));
 	Graph->QuestlineRewards.Remove(OldOutcome);
 	Graph->QuestlineRewards.Add(NewOutcome, MoveTemp(Moved));
@@ -299,12 +307,12 @@ TSharedRef<SWidget> FQuestlineGraphRewardsDetailsCustomization::BuildRekeyMenu(F
 	const TArray<FGameplayTag> Available = GetAvailableOutcomes();
 	const FGameplayTag AnyTag = GetAnyOutcomeTag();
 
-	// "(none)" — park this entry: free its outcome tag, keep the rewards, so the tag can move to another entry. Only
+	// "(none)" - park this entry: free its outcome tag, keep the rewards, so the tag can move to another entry. Only
 	// offered when THIS entry is keyed (not already parked) AND no other entry is parked (a TMap holds one None key).
 	if (OldOutcome.IsValid() && !HasParkedEntry())
 	{
 		Menu.AddMenuEntry(
-			LOCTEXT("RekeyToNone", "(none) — free this outcome"),
+			LOCTEXT("RekeyToNone", "(none) - free this outcome"),
 			LOCTEXT("RekeyToNoneTip", "Unassign this entry (rewards kept) so its outcome frees up for another entry. It won't grant and will error on compile until you re-key it."),
 			FSlateIcon(),
 			FUIAction(FExecuteAction::CreateSP(const_cast<FQuestlineGraphRewardsDetailsCustomization*>(this),
@@ -339,7 +347,7 @@ TSharedRef<SWidget> FQuestlineGraphRewardsDetailsCustomization::BuildRekeyMenu(F
 }
 
 // Is some entry already parked (keyed on None/invalid)? A TMap holds only one such key, so at most one entry can be
-// parked — a second Clear would collide on the None key and clobber the first. Used to gate the Clear affordance.
+// parked - a second Clear would collide on the None key and clobber the first. Used to gate the Clear affordance.
 bool FQuestlineGraphRewardsDetailsCustomization::HasParkedEntry() const
 {
 	UQuestlineGraph* Graph = CustomizedGraph.Get();
@@ -358,7 +366,7 @@ void FQuestlineGraphRewardsDetailsCustomization::OnClearOutcome(FGameplayTag Out
 	if (Graph->QuestlineRewards.Contains(FGameplayTag())) return;   // a parked (None-key) entry already exists
 
 	// Park: free the outcome tag but keep the rewards, re-keyed onto the invalid/None tag. Leaves the entry stale
-	// (flagged + a compile error) until it's re-keyed to a valid outcome — intentional; parking is a mid-edit state.
+	// (flagged + a compile error) until it's re-keyed to a valid outcome - intentional; parking is a mid-edit state.
 	const FScopedTransaction Transaction(LOCTEXT("ClearQuestlineRewardKey", "Free Questline Reward Outcome"));
 	Graph->Modify();
 	FQuestRewardSet Moved = MoveTemp(Graph->QuestlineRewards.FindChecked(Outcome));
@@ -371,7 +379,7 @@ void FQuestlineGraphRewardsDetailsCustomization::OnClearOutcome(FGameplayTag Out
 TSharedRef<SWidget> FQuestlineGraphRewardsDetailsCustomization::MakeIconButton(const FSlateBrush* Icon, const FText& Tooltip, bool bIsComboMenu, FGameplayTag OutcomeKey)
 {
 	// Muted-at-rest / bright-on-hover via the button style's foreground, with the image inheriting UseForeground().
-	// The style is STATIC because .ButtonStyle() stores a POINTER, not a copy — a local FButtonStyle would dangle and
+	// The style is STATIC because .ButtonStyle() stores a POINTER, not a copy - a local FButtonStyle would dangle and
 	// crash on paint. Same style for every icon button, so one shared instance is correct.
 	static const FButtonStyle IconButtonStyle = []()
 	{

@@ -139,6 +139,22 @@ expected you to know where the reward had been authored.
 
 ### Fixes
 
+- **Three ensures no longer fire on editor startup.** The advancement-hold
+  tests declared their fixture tags natively from the editor module, and a
+  native gameplay tag has to be declared from a runtime module - client and
+  server tag tables must match, and an editor-only module ships to neither. Each
+  ensure paid for a stack walk and a crash-report submission, so this was costing
+  roughly nine seconds of every editor start. The tests moved to the runtime
+  module, where the tags are legal in a development build and compile away
+  entirely in a shipping one, so nothing new reaches your tag table.
+
+- **Questline-level rewards can reference Reward Sets.** An outcome's rewards
+  could always be a mix of inline rewards and shared sets, and the compiler has
+  always flattened both - but the questline's Rewards panel only ever showed the
+  inline half, so a set was unreachable there unless you routed it through a
+  Grant Rewards node instead. Sets are listed above the inline rewards, because
+  that is the order they grant in.
+
 - **A questline with no Questline ID had no runtime identity of its own.** The
   field is documented as optional, falling back to the asset name - but three
   places rebuilt the questline's identity tag by hand without that fallback,
@@ -187,6 +203,26 @@ expected you to know where the reward had been authored.
   shift down one. Chapter 1 is back to a single trigger and a single ending -
   it had accumulated activation groups, a second exit and two reward types from
   being used as a test bed, which is a poor first thing to read.
+
+- **There is an experience bar and a gold readout.** Gold pays on every chapter
+  completion and varies; experience pays once per chapter, so finishing all
+  eleven fills the bar exactly and the level-up is the total crossing its
+  threshold rather than a reward of its own. Grant Once is what makes that safe -
+  replaying a chapter cannot grind the bar.
+
+- **Saving and loading moved onto a Game Instance subsystem.** The sample used
+  to route it through a custom Game Instance that reached into the character to
+  read and write its fields. Anything with state to persist now implements a
+  small interface and registers itself; the subsystem drives the flow and never
+  learns what a pawn is. It is worth a read if you are wiring your own save,
+  because it also shows where the quest snapshot has to sit relative to opening
+  the level - the snapshot is applied *before* the level opens, so the world
+  reconstructs itself on the reload.
+
+  - A target registering while a restore is staged is handed its data on the
+  spot, so a character calls in from BeginPlay without knowing whether it
+  spawned into a fresh game or a restored one - the same catch-up behavior quest
+  components already have.
 
 ---
 

@@ -15,6 +15,9 @@
 struct FQuestGiveBlockedEvent;
 struct FQuestDisabledEvent;
 struct FQuestActivatedEvent;
+struct FQuestActivationFailedEvent;
+struct FQuestProgressRefusedEvent;
+struct FQuestObjectiveTriggerContext;
 struct FQuestEnabledEvent;
 struct FQuestStartedEvent;
 struct FQuestEndedEvent;
@@ -43,13 +46,13 @@ class UWorldStateSubsystem;
  * originating the event. It may not be a direct descendant of the bound tag.
  *  - It answers: what graph asset and node sent me this event?
  *
- * MatchedChannel is delivery metadata — the channel from this publish set most specific to this
+ * MatchedChannel is delivery metadata - the channel from this publish set most specific to this
  * subscription's bound tag (longest descendant where the bound tag is a prefix). Guaranteed to be either
  * the bound tag or a descendant of the bound tag.
  *  - It answers: what's the address of this event in the context I cared about?
  *
  * In single-channel publishes the two are equal; in multi-channel publishes (e.g., a Step inlined
- * under multiple LinkedQuestline contexts) they diverge — QuestTag stays canonical across all
+ * under multiple LinkedQuestline contexts) they diverge - QuestTag stays canonical across all
  * subscribers, MatchedChannel reflects each subscriber's own perspective. Branch on QuestTag for "what quest
  * instance sent me this"; branch on MatchedChannel for "how was this relevant to my subscription"
  * Mirrors UQuestObserverComponent's delegate contract; same shape, same semantics.
@@ -58,7 +61,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FQuestSubscriptionLifecycleDelega
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context);
 
 /**
- * Completion variant — adds the OutcomeTag. Designers typically branch on OutcomeTag with a Switch or equality
+ * Completion variant - adds the OutcomeTag. Designers typically branch on OutcomeTag with a Switch or equality
  * check rather than filtering at subscription time, matching the observer's post-Piece-C pattern. See the
  * lifecycle-delegate doc comment above for the QuestTag vs MatchedChannel contract.
  */
@@ -66,14 +69,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionCompletedDelegat
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FGameplayTag, OutcomeTag, FQuestEventPayload, Context);
 
 /**
- * Activated variant — adds the PrereqStatus payload so designers don't need to query separately. See the
+ * Activated variant - adds the PrereqStatus payload so designers don't need to query separately. See the
  * lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionActivatedDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, FQuestPrereqStatus, PrereqStatus);
 
 /**
- * Started variant — adds the GiverActor payload. Populated when the quest was given via a giver; null when
+ * Started variant - adds the GiverActor payload. Populated when the quest was given via a giver; null when
  * the quest started from a non-giver activation path. See the lifecycle-delegate doc comment for the QuestTag
  * vs MatchedChannel contract.
  */
@@ -81,7 +84,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionStartedDelegate,
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestEventPayload, Context, AActor*, GiverActor);
 
 /**
- * Give-blocked variant — carries the structured blocker array and the giver actor that initiated the refused
+ * Give-blocked variant - carries the structured blocker array and the giver actor that initiated the refused
  * attempt. AActor* (raw pointer) for BP friendliness; the underlying TWeakObjectPtr is resolved in the handler
  * before broadcast. See the lifecycle-delegate doc comment for the QuestTag vs MatchedChannel contract.
  */
@@ -89,17 +92,38 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionGiveBlockedDeleg
     FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers, AActor*, GiverActor);
 
 /**
- * Async BP action — "Observe Quest Lifecycle". Subscribes to the lifecycle channels selected via the K2 node's
+ * Activation-failed variant - an activation attempt against this quest was refused. Reason carries the
+ * EQuestActivationBlocker (UnknownQuest / AlreadyLive / AlreadyPendingGiver / Blocked). AttemptedTagName is the raw
+ * FName of the attempted tag and is populated even when QuestTag is invalid, which is the stale-tag UnknownQuest
+ * case - read it when you need to report what was asked for rather than what resolved. See the lifecycle-delegate
+ * doc comment for the QuestTag vs MatchedChannel contract.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(FQuestSubscriptionActivationFailedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FName, AttemptedTagName, EQuestActivationBlocker, Reason,
+    FQuestEventPayload, Context);
+
+/**
+ * Progress-refused variant - a trigger fired against a Live quest whose gate isn't open. Blockers carries one entry
+ * per distinct blocking condition; TriggerContext identifies what attempted the progress. Partner to GiveBlocked at
+ * the run phase, and it shares the Blockers parameter name with it by design. See the lifecycle-delegate doc
+ * comment for the QuestTag vs MatchedChannel contract.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(FQuestSubscriptionProgressRefusedDelegate,
+    FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, const TArray<FQuestActivationBlocker>&, Blockers,
+    const FQuestObjectiveTriggerContext&, TriggerContext);
+
+/**
+ * Async BP action - "Observe Quest Lifecycle". Subscribes to the lifecycle channels selected via the K2 node's
  * Details-panel checkboxes (or the factory's ExposedEvents bitmask) on the given tag and stays bound until
  * Cancel() is called or the GameInstance is torn down.
  *
  * Because USignalSubsystem publishes hierarchically, subscribing on a parent tag (e.g., "SimpleQuest.Questline.MyLine")
- * receives events from every descendant quest tag — each child's lifecycle will fire this action's output pins.
+ * receives events from every descendant quest tag - each child's lifecycle will fire this action's output pins.
  * Pins fire once per matching live event, not one-shot.
  *
  * Catch-up: on Activate(), any quest-state fact already asserted for QuestTag at subscription time fires the
  * corresponding pin immediately (mirrors UQuestObserverComponent::RegisterQuestObserver). Catch-up runs once;
- * subsequent events flow through the live subscriptions. Catch-up is also gated by ExposedEventsMask — phases
+ * subsequent events flow through the live subscriptions. Catch-up is also gated by ExposedEventsMask - phases
  * the K2 node didn't expose are skipped.
  *
  * Designers who want tighter lifetime (cancel on BP actor destruction, etc.) should call Cancel() explicitly from
@@ -138,6 +162,14 @@ public:
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionGiveBlockedDelegate OnGiveBlocked;
 
+    /**
+     * Fires when an activation attempt against this quest was refused. Debug-leaning by default; useful for
+     * lock-feedback / refusal-fanfare gameplay. Transient - no catch-up, refusals are interaction events rather
+     * than recoverable state.
+     */
+    UPROPERTY(BlueprintAssignable)
+    FQuestSubscriptionActivationFailedDelegate OnActivationFailed;
+
     // ── Run Phase ─────────────────────────────────────────────────────────────────────────────────
     /** Fires when the subscribed quest enters the Live state. Its objectives are bound. */
     UPROPERTY(BlueprintAssignable)
@@ -146,6 +178,13 @@ public:
     /** Fires on objective progress ticks during the Live phase. Transient: no catch-up. */
     UPROPERTY(BlueprintAssignable)
     FQuestSubscriptionLifecycleDelegate OnProgress;
+
+    /**
+     * Fires when a trigger fired against a Live quest whose gate isn't open (prereq unsatisfied, Blocked state,
+     * etc.). The run-phase partner to OnGiveBlocked. Transient - no catch-up.
+     */
+    UPROPERTY(BlueprintAssignable)
+    FQuestSubscriptionProgressRefusedDelegate OnProgressRefused;;
 
     // ── End Phase ─────────────────────────────────────────────────────────────────────────────────
     /** Fires when the subscribed quest resolves with an outcome. */
@@ -172,7 +211,7 @@ public:
     FQuestSubscriptionLifecycleDelegate OnUnblocked;
 
     /**
-     * Plain C++ initializer used by the BP library's factory wrapper. Not a UFUNCTION — the library owns the
+     * Plain C++ initializer used by the BP library's factory wrapper. Not a UFUNCTION - the library owns the
      * BP-facing entry point so UK2Node_AsyncAction's subclass iteration doesn't auto-register a duplicate
      * palette entry for us.
      */
@@ -196,7 +235,7 @@ private:
     int32 ExposedEventsMask = 0;
     /**
      * Per-subscription routing mode applied to every internal SubscribeMessage call. Defaults to
-     * Descendants (hierarchical — preserves the prior per-quest-event behavior). Designers narrow via
+     * Descendants (hierarchical - preserves the prior per-quest-event behavior). Designers narrow via
      * the ObserveQuestLifecycle K2 node's Routing pin when ancestor-walk delivery is noise.
      */
     ESignalRoutingMode Routing = ESignalRoutingMode::Descendants;
@@ -205,8 +244,10 @@ private:
     FDelegateHandle EnabledHandle;
     FDelegateHandle DisabledHandle;
     FDelegateHandle GiveBlockedHandle;
+    FDelegateHandle ActivationFailedHandle;
     FDelegateHandle StartedHandle;
     FDelegateHandle ProgressHandle;
+    FDelegateHandle ProgressRefusedHandle;
     FDelegateHandle EndedHandle;
     FDelegateHandle DeactivatedHandle;
     FDelegateHandle BlockedHandle;
@@ -216,15 +257,15 @@ private:
 
     /**
      * Per-phase "we already broadcast this lifecycle live" guards, keyed by publish-tag (Event.GetQuestTag()
-     * — the descendant tag the event published on, not necessarily the QuestTag the subscription was bound to).
+     * - the descendant tag the event published on, not necessarily the QuestTag the subscription was bound to).
      * Catch-up skips any phase that already fired live for a given tag during the one-tick deferral window.
      *
      * Per-tag tracking matters under hierarchical / parent-prefix subscriptions: catch-up fans out across every
      * known descendant via FQuestCatchUpFanout::EnumerateTagsForCatchUp. Without per-tag dedup, a single
      * descendant firing live during the deferral window would suppress catch-up for every other descendant in
-     * the fan-out — under-firing the historical recovery the §1.1 fix exists to deliver.
+     * the fan-out - under-firing the historical recovery the §1.1 fix exists to deliver.
      *
-     * No sets for Disabled / GiveBlocked / Given / Progress / Unblocked — those are transient or don't have
+     * No sets for Disabled / GiveBlocked / Given / Progress / Unblocked - those are transient or don't have
      * catch-up semantics.
      */
     TSet<FGameplayTag> TagsWithLiveActivatedSeen;
@@ -238,8 +279,10 @@ private:
     void HandleEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event);
     void HandleDisabled(FGameplayTag Channel, const FQuestDisabledEvent& Event);
     void HandleGiveBlocked(FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
+    void HandleActivationFailed(FGameplayTag Channel, const FQuestActivationFailedEvent& Event);
     void HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event);
     void HandleProgress(FGameplayTag Channel, const FQuestProgressEvent& Event);
+    void HandleProgressRefused(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
     void HandleEnded(FGameplayTag Channel, const FQuestEndedEvent& Event);
     void HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
     void HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event);

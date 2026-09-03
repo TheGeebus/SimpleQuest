@@ -57,10 +57,14 @@ public:
      *   - On Enabled - quest became accept-ready (Activated AND prereqs satisfy).
      *   - On Disabled - accept-ready quest became no-longer-ready (NOT-prereq edge cases; rare).
      *   - On Give Blocked - a give attempt was refused. Blockers carries the structured reasons.
+     *   - On Activation Failed - an activation attempt was refused. Reason says why; Attempted Tag Name is
+     *     populated even when Quest Tag is empty, which is the stale-tag Unknown Quest case.
      *
      *  Run phase:
      *   - On Started - quest entered Live state; objectives are bound and ticking.
-     *   - On Progress - objective progress tick (transient, no catch-up).
+     *   - On Progress - objective progress tick.
+     *   - On Progress Refused - a trigger fired at a Live quest whose gate isn't open. Run-phase partner to
+     *     On Give Blocked, and it shares the same Blockers pin.
      *
      *  End phase:
      *   - On Completed - quest resolved with an outcome. Outcome Tag tells you which (Victory / Defeat / etc.).
@@ -74,8 +78,12 @@ public:
      * output gives the canonical event identity (where the event originated); Matched Channel output gives
      * the address relative to what you subscribed to.
      *
-     * Catch-up: if the quest already reached one of these states before you subscribed, the matching pin
-     * fires immediately on bind. Late binders aren't left waiting on events that already happened.
+     * Catch-up: if the quest already reached one of these STATES before you subscribed, the matching pin fires
+     * immediately on bind, so late binders aren't left waiting on something that already happened. This covers
+     * On Activated, On Enabled, On Started, On Completed, On Deactivated and On Blocked - the events backed by
+     * a state fact that can be read back. The rest are transient: On Disabled, On Give Blocked, On Activation
+     * Failed, On Progress, On Progress Refused, and On Unblocked describe a moment rather than a state, so there
+     * is nothing to replay and they only ever fire live.
      *
      * Context output carries the full event payload - Triggered Actor, Instigator, Node Info, Custom Data -
      * so you don't need a separate lookup for who triggered the event or what payload came with it.
@@ -89,8 +97,8 @@ public:
             DisplayName = "Observe Quest Lifecycle"))
     static UQuestLifecycleObserver* ObserveQuestLifecycle(
         UObject* WorldContextObject,
-        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255,
+        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,        
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 0,
         ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
@@ -185,7 +193,7 @@ public:
     static TArray<FQuestRewardPreview> GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
 
     /**
-     * Cold twin of GetAdvertisedRewards — everything a tag pays, both channels, read off a questline ASSET with no
+     * Cold twin of GetAdvertisedRewards - everything a tag pays, both channels, read off a questline ASSET with no
      * running game. For catalog UI (quest-giver hub, bounty board) showing what a quest pays before it is accepted.
      * Viewer-dependent rewards compute off the compiled template; a cold catalog may pass null.
      *
@@ -218,7 +226,7 @@ public:
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
 
     /**
-     * Everything a tag pays on completion, keyed by outcome — rewards wired into the graph AND the questline's own
+     * Everything a tag pays on completion, keyed by outcome - rewards wired into the graph AND the questline's own
      * completion rewards, in one answer. Pass a Step, a container, a linked placement, or a questline identity; the
      * framework resolves which channels apply.
      *

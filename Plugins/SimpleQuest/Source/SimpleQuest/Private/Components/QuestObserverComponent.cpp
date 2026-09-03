@@ -94,6 +94,7 @@ void UQuestObserverComponent::HandleQuestActivationFailed(FGameplayTag Channel, 
 	{
 		OnQuestActivationFailed.Broadcast(Event.GetQuestTag(), Event.AttemptedTagName, Channel, Event.Reason, Event.Payload);
 	}
+	BroadcastAnyQuestEvent(Event.GetQuestTag(), Channel, EQuestLifecycleEventType::ActivationFailed, Event.Payload);
 }
 
 void UQuestObserverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)

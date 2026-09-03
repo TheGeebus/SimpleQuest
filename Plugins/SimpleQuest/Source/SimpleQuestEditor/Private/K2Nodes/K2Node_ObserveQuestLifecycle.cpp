@@ -13,6 +13,7 @@
 #include "KismetCompiler.h"
 #include "SimpleQuestLog.h"
 #include "BlueprintFunctionLibs/SimpleQuestBlueprintLibrary.h"
+#include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "UObject/WeakObjectPtr.h"
 
@@ -47,8 +48,10 @@ void UK2Node_ObserveQuestLifecycle::AllocateDefaultPins()
         }
     }
 
-    // Defensive: Blockers pin (unique to On Give Blocked) - array of FQuestActivationBlocker.
-    if (bExposeOnGiveBlocked && !FindPin(TEXT("Blockers")))
+    // Defensive: Blockers pin, SHARED by On Give Blocked and On Progress Refused - both delegates declare a
+    // parameter of that name and type, and the base expansion aggregates pins by name across delegates. Create it
+    // when either exec is exposed, same rule GiverActor already follows below.
+    if ((bExposeOnGiveBlocked || bExposeOnProgressRefused) && !FindPin(TEXT("Blockers")))
     {
         FCreatePinParams PinParams;
         PinParams.ContainerType = EPinContainerType::Array;
@@ -57,6 +60,39 @@ void UK2Node_ObserveQuestLifecycle::AllocateDefaultPins()
         if (Pin)
         {
             Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "BlockersLabel", "Blockers");
+        }
+    }
+
+    // Defensive: TriggerContext pin (unique to On Progress Refused).
+    if (bExposeOnProgressRefused && !FindPin(TEXT("TriggerContext")))
+    {
+        FCreatePinParams PinParams;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct,
+            FQuestObjectiveTriggerContext::StaticStruct(), TEXT("TriggerContext"), PinParams);
+        if (Pin)
+        {
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "TriggerContextLabel", "Trigger Context");
+        }
+    }
+
+    // Defensive: AttemptedTagName + Reason pins (unique to On Activation Failed).
+    if (bExposeOnActivationFailed && !FindPin(TEXT("AttemptedTagName")))
+    {
+        FCreatePinParams PinParams;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Name, TEXT("AttemptedTagName"), PinParams);
+        if (Pin)
+        {
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "AttemptedTagNameLabel", "Attempted Tag Name");
+        }
+    }
+    if (bExposeOnActivationFailed && !FindPin(TEXT("Reason")))
+    {
+        FCreatePinParams PinParams;
+        UEdGraphPin* Pin = CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Byte,
+            StaticEnum<EQuestActivationBlocker>(), TEXT("Reason"), PinParams);
+        if (Pin)
+        {
+            Pin->PinFriendlyName = NSLOCTEXT("SimpleQuestEditor", "ReasonLabel", "Reason");
         }
     }
 
@@ -88,25 +124,37 @@ void UK2Node_ObserveQuestLifecycle::AllocateDefaultPins()
             }
         }
     };
-    StripIfHidden(TEXT("OnActivated"),   bExposeOnActivated);
-    StripIfHidden(TEXT("OnEnabled"),     bExposeOnEnabled);
-    StripIfHidden(TEXT("OnDisabled"),    bExposeOnDisabled);
-    StripIfHidden(TEXT("OnGiveBlocked"), bExposeOnGiveBlocked);
-    StripIfHidden(TEXT("OnStarted"),     bExposeOnStarted);
-    StripIfHidden(TEXT("OnCompleted"),   bExposeOnCompleted);
-    StripIfHidden(TEXT("OnDeactivated"), bExposeOnDeactivated);
-    StripIfHidden(TEXT("OnProgress"),    bExposeOnProgress);
-    StripIfHidden(TEXT("OnBlocked"),     bExposeOnBlocked);
-    StripIfHidden(TEXT("OnUnblocked"),   bExposeOnUnblocked);
+    StripIfHidden(TEXT("OnActivated"),        bExposeOnActivated);
+    StripIfHidden(TEXT("OnEnabled"),          bExposeOnEnabled);
+    StripIfHidden(TEXT("OnDisabled"),         bExposeOnDisabled);
+    StripIfHidden(TEXT("OnGiveBlocked"),      bExposeOnGiveBlocked);
+    StripIfHidden(TEXT("OnActivationFailed"), bExposeOnActivationFailed);
+    StripIfHidden(TEXT("OnStarted"),          bExposeOnStarted);
+    StripIfHidden(TEXT("OnCompleted"),        bExposeOnCompleted);
+    StripIfHidden(TEXT("OnDeactivated"),      bExposeOnDeactivated);
+    StripIfHidden(TEXT("OnProgress"),         bExposeOnProgress);
+    StripIfHidden(TEXT("OnProgressRefused"),  bExposeOnProgressRefused);
+    StripIfHidden(TEXT("OnBlocked"),          bExposeOnBlocked);
+    StripIfHidden(TEXT("OnUnblocked"),        bExposeOnUnblocked);
     
     // Strip exec-unique data pins when their owning exec is hidden.
     if (!bExposeOnActivated)
     {
         if (UEdGraphPin* Pin = FindPin(TEXT("PrereqStatus"))) RemovePin(Pin);
     }
-    if (!bExposeOnGiveBlocked)
+    // Blockers is shared by On Give Blocked and On Progress Refused. Strip only when BOTH are hidden.
+    if (!bExposeOnGiveBlocked && !bExposeOnProgressRefused)
     {
         if (UEdGraphPin* Pin = FindPin(TEXT("Blockers"))) RemovePin(Pin);
+    }
+    if (!bExposeOnProgressRefused)
+    {
+        if (UEdGraphPin* Pin = FindPin(TEXT("TriggerContext"))) RemovePin(Pin);
+    }
+    if (!bExposeOnActivationFailed)
+    {
+        if (UEdGraphPin* Pin = FindPin(TEXT("AttemptedTagName"))) RemovePin(Pin);
+        if (UEdGraphPin* Pin = FindPin(TEXT("Reason"))) RemovePin(Pin);
     }
     // GiverActor is shared by On Given and On Give Blocked. Strip only when BOTH are hidden.
     if (!bExposeOnStarted && !bExposeOnGiveBlocked)
@@ -143,16 +191,18 @@ void UK2Node_ObserveQuestLifecycle::ExpandNode(FKismetCompilerContext& CompilerC
             TempPinNames.Add(PinName);
         }
     };
-    EnsureExecPin(TEXT("OnActivated"),   bExposeOnActivated);
-    EnsureExecPin(TEXT("OnEnabled"),     bExposeOnEnabled);
-    EnsureExecPin(TEXT("OnDisabled"),    bExposeOnDisabled);
-    EnsureExecPin(TEXT("OnGiveBlocked"), bExposeOnGiveBlocked);
-    EnsureExecPin(TEXT("OnStarted"),     bExposeOnStarted);
-    EnsureExecPin(TEXT("OnCompleted"),   bExposeOnCompleted);
-    EnsureExecPin(TEXT("OnDeactivated"), bExposeOnDeactivated);
-    EnsureExecPin(TEXT("OnProgress"),    bExposeOnProgress);
-    EnsureExecPin(TEXT("OnBlocked"),     bExposeOnBlocked);
-    EnsureExecPin(TEXT("OnUnblocked"),   bExposeOnUnblocked);
+    EnsureExecPin(TEXT("OnActivated"),          bExposeOnActivated);
+    EnsureExecPin(TEXT("OnEnabled"),            bExposeOnEnabled);
+    EnsureExecPin(TEXT("OnDisabled"),           bExposeOnDisabled);
+    EnsureExecPin(TEXT("OnGiveBlocked"),        bExposeOnGiveBlocked);
+    EnsureExecPin(TEXT("OnActivationFailed"),   bExposeOnActivationFailed);
+    EnsureExecPin(TEXT("OnStarted"),            bExposeOnStarted);
+    EnsureExecPin(TEXT("OnCompleted"),          bExposeOnCompleted);
+    EnsureExecPin(TEXT("OnDeactivated"),        bExposeOnDeactivated);
+    EnsureExecPin(TEXT("OnProgress"),           bExposeOnProgress);
+    EnsureExecPin(TEXT("OnProgressRefused"),    bExposeOnProgressRefused);
+    EnsureExecPin(TEXT("OnBlocked"),            bExposeOnBlocked);
+    EnsureExecPin(TEXT("OnUnblocked"),          bExposeOnUnblocked);
 
     // Same recreate for the unique-to-one-delegate data pins. Super's iteration also looks for the delegate's
     // parameter pins by name when expanding each handler; if PrereqStatus / Blockers / GiverActor / OutcomeTag
@@ -164,13 +214,33 @@ void UK2Node_ObserveQuestLifecycle::ExpandNode(FKismetCompilerContext& CompilerC
             TEXT("PrereqStatus"), Params);
         TempPinNames.Add(TEXT("PrereqStatus"));
     }
-    if (!bExposeOnGiveBlocked && !FindPin(TEXT("Blockers")))
+    if (!bExposeOnGiveBlocked && !bExposeOnProgressRefused && !FindPin(TEXT("Blockers")))
     {
         FCreatePinParams Params;
         Params.ContainerType = EPinContainerType::Array;
         CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FQuestActivationBlocker::StaticStruct(),
             TEXT("Blockers"), Params);
         TempPinNames.Add(TEXT("Blockers"));
+    }
+    if (!bExposeOnProgressRefused && !FindPin(TEXT("TriggerContext")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Struct, FQuestObjectiveTriggerContext::StaticStruct(),
+            TEXT("TriggerContext"), Params);
+        TempPinNames.Add(TEXT("TriggerContext"));
+    }
+    if (!bExposeOnActivationFailed && !FindPin(TEXT("AttemptedTagName")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Name, TEXT("AttemptedTagName"), Params);
+        TempPinNames.Add(TEXT("AttemptedTagName"));
+    }
+    if (!bExposeOnActivationFailed && !FindPin(TEXT("Reason")))
+    {
+        FCreatePinParams Params;
+        CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Byte, StaticEnum<EQuestActivationBlocker>(),
+            TEXT("Reason"), Params);
+        TempPinNames.Add(TEXT("Reason"));
     }
     if (!bExposeOnStarted && !bExposeOnGiveBlocked && !FindPin(TEXT("GiverActor")))
     {
@@ -208,7 +278,7 @@ void UK2Node_ObserveQuestLifecycle::ExpandNode(FKismetCompilerContext& CompilerC
     }
     if (!AsyncTaskTemp)
     {
-        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] AsyncTask temp variable not found — base didn't generate one"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] AsyncTask temp variable not found - base didn't generate one"));
         return;
     }
 
@@ -271,13 +341,13 @@ void UK2Node_ObserveQuestLifecycle::ExpandNode(FKismetCompilerContext& CompilerC
     }
     else
     {
-        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] ExposedEvents pin not found on factory call — exposure mask not applied"));
+        UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[ObserveQuestLifecycle::ExpandNode] ExposedEvents pin not found on factory call - exposure mask not applied"));
     }
 
     if (Mask == 0)
     {
         CompilerContext.MessageLog.Warning(*FString::Printf(TEXT(
-            "@@: Observe Quest Lifecycle has no exposed event pins — subscription will be a no-op. ")
+            "@@: Observe Quest Lifecycle has no exposed event pins - subscription will be a no-op. ")
             TEXT("Enable at least one event under Pins | <phase> in the Details panel.")), this);
     }
 
@@ -362,7 +432,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "On Activated\n"
                 "Exec\n\n"
                 "Fires when execution reaches a giver-gated quest. Always fires on first wire arrival, "
-                "regardless of prereq state. Read PrereqStatus to decide UI affordance immediately — "
+                "regardless of prereq state. Read PrereqStatus to decide UI affordance immediately - "
                 "branch on PrereqStatus.bSatisfied for ready-vs-locked indicators, or read PrereqStatus.Leaves "
                 "for contextual hints about which prereqs the player still needs to satisfy.");
             return;
@@ -384,7 +454,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "On Disabled\n"
                 "Exec\n\n"
                 "Fires when a previously accept-ready quest becomes no-longer-ready (sat → unsat transition). "
-                "Symmetric partner to On Enabled; rare in practice — typically only fires for NOT-prereq cases "
+                "Symmetric partner to On Enabled; rare in practice - typically only fires for NOT-prereq cases "
                 "where a fact gets added that inverts a NOT(...) clause. Bind alongside On Enabled for "
                 "bidirectional UI sync.");
             return;
@@ -397,8 +467,20 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Fires when a give attempt was refused by the manager. Blockers carries the structured array "
                 "of blocker reasons (PrereqUnmet, AlreadyLive, Blocked, etc.); designer branches on Reason for "
                 "contextual refusal dialogue. GiverActor identifies which actor's component initiated the "
-                "attempt — useful for telemetry, party UI, multi-giver scenarios. Always-subscribed (not "
+                "attempt - useful for telemetry, party UI, multi-giver scenarios. Always-subscribed (not "
                 "per-attempt one-shot like the giver component); use this for global / observer subscriptions.");
+            return;
+        }
+        if (PinName == TEXT("OnActivationFailed"))
+        {
+            HoverTextOut = TEXT(
+                "On Activation Failed\n"
+                "Exec\n\n"
+                "Fires when an activation attempt against this quest was refused. Reason carries why "
+                "(UnknownQuest, AlreadyLive, AlreadyPendingGiver, Blocked). Attempted Tag Name is the raw name that "
+                "was asked for and is populated even when Quest Tag is empty - which is exactly the UnknownQuest "
+                "stale-tag case, so read it when you need to report what was requested rather than what resolved. "
+                "Debug-leaning by default; also useful for refusal-fanfare gameplay.");
             return;
         }
         if (PinName == TEXT("OnStarted"))
@@ -406,7 +488,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
             HoverTextOut = TEXT(
                 "On Started\n"
                 "Exec\n\n"
-                "Fires when the subscribed quest enters the Live state — its objectives are bound and ticking. "
+                "Fires when the subscribed quest enters the Live state - its objectives are bound and ticking. "
                 "Typical wiring: music swap, target activation, gameplay-state changes, anything that should run "
                 "only once the quest is truly underway.");
             return;
@@ -417,8 +499,19 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "On Progress\n"
                 "Exec\n\n"
                 "Fires on objective progress ticks during the Live phase. Context.CompletionContext carries "
-                "CurrentCount / RequiredCount / TriggeredActor / Instigator — break the struct to read them. "
+                "CurrentCount / RequiredCount / TriggeredActor / Instigator - break the struct to read them. "
                 "Fires once per progress tick, not just on milestones.");
+            return;
+        }
+        if (PinName == TEXT("OnProgressRefused"))
+        {
+            HoverTextOut = TEXT(
+                "On Progress Refused\n"
+                "Exec\n\n"
+                "Fires when a trigger fired at a Live quest whose gate isn't open - prereq unsatisfied, Blocked "
+                "state, and similar mid-Live refusals. The run-phase partner to On Give Blocked, and it shares the "
+                "same Blockers pin. Trigger Context identifies what attempted the progress. Use it for 'that didn't "
+                "work, and here's why' feedback at the point of interaction.");
             return;
         }
         if (PinName == TEXT("OnCompleted"))
@@ -426,7 +519,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
             HoverTextOut = TEXT(
                 "On Completed\n"
                 "Exec\n\n"
-                "Fires when the subscribed quest resolves. Outcome Tag tells you which outcome fired — switch "
+                "Fires when the subscribed quest resolves. Outcome Tag tells you which outcome fired - switch "
                 "on it to branch by Victory / Defeat / Negotiated / etc. The subscription stays bound after this "
                 "event; if you only want to react once, wire Cancel into the Async Task pin.");
             return;
@@ -437,7 +530,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "On Deactivated\n"
                 "Exec\n\n"
                 "Fires when the subscribed quest is interrupted before completing (abandon, faction shift, "
-                "external Deactivate request). Useful for cleanup — dismiss UI, deactivate markers, revert "
+                "external Deactivate request). Useful for cleanup - dismiss UI, deactivate markers, revert "
                 "music. For the specific Blocked-state case, also expose On Blocked if you need to distinguish.");
             return;
         }
@@ -448,7 +541,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Exec\n\n"
                 "Fires when the quest enters Blocked state via a SetBlocked utility node. Co-fires with "
                 "On Deactivated when both pins are exposed (Blocked is a kind of deactivation). Read this when "
-                "the Blocked-vs-other-deactivation distinction matters — e.g. to surface a 'this quest is "
+                "the Blocked-vs-other-deactivation distinction matters - e.g. to surface a 'this quest is "
                 "locked out' UI distinct from 'this quest was abandoned'.");
             return;
         }
@@ -463,7 +556,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Quest Tag\n"
                 "Gameplay Tag Structure\n\n"
                 "The canonical address of this event from the perspective of the graph asset that originated "
-                "it — answers 'what graph asset and node sent me this event?' When the publishing node lives "
+                "it - answers 'what graph asset and node sent me this event?' When the publishing node lives "
                 "in a LinkedQuestline graph that's been inlined under another, this can be the inlining outer "
                 "graph's address rather than the linked asset's, and may not be a descendant of your actual "
                 "subscription tag. Use Matched Channel for the address relative to what you subscribed to.");
@@ -474,7 +567,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
             HoverTextOut = TEXT(
                 "Matched Channel\n"
                 "Gameplay Tag Structure\n\n"
-                "The address of this event in the context you actually subscribed to — the longest channel "
+                "The address of this event in the context you actually subscribed to - the longest channel "
                 "from the publish set where your subscription tag is a prefix. Guaranteed to be either your "
                 "subscription tag itself or a descendant of it. Answers 'what's the address of this event "
                 "in the context I cared about?' For subscribers bound at a parent tag, this is the specific "
@@ -489,7 +582,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Outcome Tag\n"
                 "Gameplay Tag Structure\n\n"
                 "Only relevant to On Completed.\n\n"
-                "The outcome the quest resolved with — only meaningful on the On Completed pin. For catch-up "
+                "The outcome the quest resolved with - only meaningful on the On Completed pin. For catch-up "
                 "notifications (quest already resolved before binding), the outcome is recovered from this "
                 "session's resolution registry. Empty (no tag) only when no record exists for this quest "
                 "(e.g., it never resolved this session, or registry state was reset).");
@@ -500,7 +593,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
             HoverTextOut = TEXT(
                 "Context\n"
                 "Quest Event Context Structure\n\n"
-                "The full event payload — Triggered Actor, Instigator, Node Info (quest tag + display name), "
+                "The full event payload - Triggered Actor, Instigator, Node Info (quest tag + display name), "
                 "and Custom Data. Break the struct (right-click → Split Struct Pin) or use member-access nodes "
                 "to read individual fields. On the On Progress pin, Context.CompletionContext carries the progress "
                 "counters.");
@@ -514,7 +607,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Reference to this subscription instance. Wire directly to a Cancel call when an exec pin fires "
                 "(e.g. cancel-after-first-completion), or promote to a variable to hold the reference for later "
                 "cancellation from elsewhere (e.g. End Play, player death). The subscription is otherwise "
-                "GameInstance-scoped — it stays bound until manually cancelled or the game tears down.");
+                "GameInstance-scoped - it stays bound until manually cancelled or the game tears down.");
             return;
         }
         if (PinName == TEXT("PrereqStatus"))
@@ -547,7 +640,7 @@ void UK2Node_ObserveQuestLifecycle::GetPinHoverText(const UEdGraphPin& Pin, FStr
                 "Actor Object Reference\n\n"
                 "Only relevant to On Started or On Give Blocked.\n\n"
                 "The giver actor associated with this event. On On Started, this is the actor whose component "
-                "delivered the quest — null if the quest started without giver involvement (non-giver "
+                "delivered the quest - null if the quest started without giver involvement (non-giver "
                 "activation path). On On Give Blocked, this is the actor whose component initiated the refused "
                 "attempt. Useful for attributing the event to a specific NPC in dialogue / telemetry / "
                 "multi-giver coordination.");
@@ -641,7 +734,7 @@ void UK2Node_ObserveQuestLifecycle::GetNodeContextMenuActions(UToolMenu* Menu, U
 
     {
         FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_Offer",
-            NSLOCTEXT("ObserveQuestLifecycle", "OfferPhase", "Exposed Events — Offer Phase"));
+            NSLOCTEXT("ObserveQuestLifecycle", "OfferPhase", "Exposed Events - Offer Phase"));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnActivated", "On Activated"),
             const_cast<bool*>(&bExposeOnActivated));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnEnabled", "On Enabled"),
@@ -650,18 +743,22 @@ void UK2Node_ObserveQuestLifecycle::GetNodeContextMenuActions(UToolMenu* Menu, U
             const_cast<bool*>(&bExposeOnDisabled));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnGiveBlocked", "On Give Blocked"),
             const_cast<bool*>(&bExposeOnGiveBlocked));
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnActivationFailed", "On Activation Failed"),
+            const_cast<bool*>(&bExposeOnActivationFailed));
     }
     {
         FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_Run",
-            NSLOCTEXT("ObserveQuestLifecycle", "RunPhase", "Exposed Events — Run Phase"));
+            NSLOCTEXT("ObserveQuestLifecycle", "RunPhase", "Exposed Events - Run Phase"));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnStarted", "On Started"),
             const_cast<bool*>(&bExposeOnStarted));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnProgress", "On Progress"),
             const_cast<bool*>(&bExposeOnProgress));
+        AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnProgressRefused", "On Progress Refused"),
+            const_cast<bool*>(&bExposeOnProgressRefused));
     }
     {
         FToolMenuSection& Section = Menu->AddSection("ObserveQuestLifecycle_End",
-            NSLOCTEXT("ObserveQuestLifecycle", "EndPhase", "Exposed Events — End Phase"));
+            NSLOCTEXT("ObserveQuestLifecycle", "EndPhase", "Exposed Events - End Phase"));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnCompleted", "On Completed"),
             const_cast<bool*>(&bExposeOnCompleted));
         AddToggle(Section, NSLOCTEXT("ObserveQuestLifecycle", "OnDeactivated", "On Deactivated"),
@@ -689,16 +786,18 @@ FString UK2Node_ObserveQuestLifecycle::GetPinMetaData(FName InPinName, FName InK
 int32 UK2Node_ObserveQuestLifecycle::ComputeExposureMask() const
 {
     int32 Mask = 0;
-    if (bExposeOnActivated)   Mask |= static_cast<int32>(EQuestEventTypes::Activated);
-    if (bExposeOnEnabled)     Mask |= static_cast<int32>(EQuestEventTypes::Enabled);
-    if (bExposeOnDisabled)    Mask |= static_cast<int32>(EQuestEventTypes::Disabled);
-    if (bExposeOnGiveBlocked) Mask |= static_cast<int32>(EQuestEventTypes::GiveBlocked);
-    if (bExposeOnStarted)     Mask |= static_cast<int32>(EQuestEventTypes::Started);
-    if (bExposeOnProgress)    Mask |= static_cast<int32>(EQuestEventTypes::Progress);
-    if (bExposeOnCompleted)   Mask |= static_cast<int32>(EQuestEventTypes::Completed);
-    if (bExposeOnDeactivated) Mask |= static_cast<int32>(EQuestEventTypes::Deactivated);
-    if (bExposeOnBlocked)     Mask |= static_cast<int32>(EQuestEventTypes::Blocked);
-    if (bExposeOnUnblocked)   Mask |= static_cast<int32>(EQuestEventTypes::Unblocked);
+    if (bExposeOnActivated)         Mask |= static_cast<int32>(EQuestEventTypes::Activated);
+    if (bExposeOnEnabled)           Mask |= static_cast<int32>(EQuestEventTypes::Enabled);
+    if (bExposeOnDisabled)          Mask |= static_cast<int32>(EQuestEventTypes::Disabled);
+    if (bExposeOnGiveBlocked)       Mask |= static_cast<int32>(EQuestEventTypes::GiveBlocked);
+    if (bExposeOnActivationFailed)  Mask |= static_cast<int32>(EQuestEventTypes::ActivationFailed);
+    if (bExposeOnStarted)           Mask |= static_cast<int32>(EQuestEventTypes::Started);
+    if (bExposeOnProgress)          Mask |= static_cast<int32>(EQuestEventTypes::Progress);
+    if (bExposeOnProgressRefused)   Mask |= static_cast<int32>(EQuestEventTypes::ProgressRefused);
+    if (bExposeOnCompleted)         Mask |= static_cast<int32>(EQuestEventTypes::Completed);
+    if (bExposeOnDeactivated)       Mask |= static_cast<int32>(EQuestEventTypes::Deactivated);
+    if (bExposeOnBlocked)           Mask |= static_cast<int32>(EQuestEventTypes::Blocked);
+    if (bExposeOnUnblocked)         Mask |= static_cast<int32>(EQuestEventTypes::Unblocked);
     return Mask;
 }
 

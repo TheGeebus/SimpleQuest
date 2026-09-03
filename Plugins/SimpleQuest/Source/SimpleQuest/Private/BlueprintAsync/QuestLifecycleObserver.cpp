@@ -6,7 +6,9 @@
 #include "Engine/World.h"
 #include "Engine/GameInstance.h"
 #include "Events/QuestActivatedEvent.h"
+#include "Events/QuestActivationFailedEvent.h"
 #include "Events/QuestBlockedEvent.h"
+#include "Events/QuestProgressRefusedEvent.h"
 #include "Events/QuestDisabledEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
@@ -16,12 +18,10 @@
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestUnblockedEvent.h"
 #include "Utilities/QuestCatchUpFanout.h"
-#include "GameplayTagsManager.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Utilities/QuestTagComposer.h"
-#include "Utilities/SignalChannelUtils.h"
 #include "Subsystems/WorldStateSubsystem.h"
 
 
@@ -30,7 +30,7 @@ void UQuestLifecycleObserver::Activate()
     if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestLifecycleObserver: stale or invalid QuestTag '%s' — aborting subscription."),
+            TEXT("UQuestLifecycleObserver: stale or invalid QuestTag '%s' - aborting subscription."),
             *QuestTag.ToString());
         SetReadyToDestroy();
         return;
@@ -39,8 +39,10 @@ void UQuestLifecycleObserver::Activate()
     if (ExposedEventsMask == 0)
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestLifecycleObserver: '%s' has no exposed events — subscription is a no-op. ")
-            TEXT("Enable at least one event under Pins | <phase> in the ObserveQuestLifecycle node's Details panel."),
+            TEXT("UQuestLifecycleObserver: '%s' has no exposed events - subscription is a no-op. ")
+            TEXT("From Blueprint, enable at least one event under Pins | <phase> in the ObserveQuestLifecycle node's ")
+            TEXT("Details panel. From C++, pass an ExposedEvents mask - it has no default, because there is no ")
+            TEXT("sensible event set to assume on your behalf."),
             *QuestTag.ToString());
         SetReadyToDestroy();
         return;
@@ -51,7 +53,7 @@ void UQuestLifecycleObserver::Activate()
     if (!Signals || !WorldState)
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestLifecycleObserver: could not resolve SignalSubsystem or WorldStateSubsystem from world context — aborting. ")
+            TEXT("UQuestLifecycleObserver: could not resolve SignalSubsystem or WorldStateSubsystem from world context - aborting. ")
             TEXT("Common causes: ObserveQuestLifecycle fired before the world finished initializing, or the WorldContextObject pin is wired to an actor whose UWorld isn't valid."));
         SetReadyToDestroy();
         return;
@@ -59,7 +61,7 @@ void UQuestLifecycleObserver::Activate()
 
     // Subscribe only to the channels the K2 node has exposed. Each guard saves both the SubscribeMessage cost and
     // a per-event broadcast call when the corresponding pin doesn't exist on the consumer side. Routing applies
-    // uniformly to all ten subscriptions — designer chose at the ObserveQuestLifecycle call site whether they want
+    // uniformly to all twelve subscriptions - designer chose at the ObserveQuestLifecycle call site whether they want
     // hierarchical (Descendants) or narrow (ExactMatch) delivery for this subscription instance.
 
     // Offer phase
@@ -79,6 +81,10 @@ void UQuestLifecycleObserver::Activate()
     {
         GiveBlockedHandle = Signals->SubscribeMessage<FQuestGiveBlockedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleGiveBlocked, Routing);
     }
+    if (IsExposed(EQuestEventTypes::ActivationFailed))
+    {
+        ActivationFailedHandle = Signals->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleActivationFailed, Routing);
+    }
 
     // Run phase
     if (IsExposed(EQuestEventTypes::Started))
@@ -88,6 +94,10 @@ void UQuestLifecycleObserver::Activate()
     if (IsExposed(EQuestEventTypes::Progress))
     {
         ProgressHandle = Signals->SubscribeMessage<FQuestProgressEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleProgress, Routing);
+    }
+    if (IsExposed(EQuestEventTypes::ProgressRefused))
+    {
+        ProgressRefusedHandle = Signals->SubscribeMessage<FQuestProgressRefusedEvent>(QuestTag, this, &UQuestLifecycleObserver::HandleProgressRefused, Routing);
     }
 
     // End phase
@@ -109,7 +119,7 @@ void UQuestLifecycleObserver::Activate()
     }
     
     // Defer the catch-up broadcast to next tick. The K2 node's standard async expansion calls Activate() *before*
-    // firing the user's Then exec output — so any designer who wires the AsyncTask pin into a "Set <var>" off the
+    // firing the user's Then exec output - so any designer who wires the AsyncTask pin into a "Set <var>" off the
     // primary Then chain hasn't cached it yet at the moment Activate runs. If catch-up fires a lifecycle delegate
     // synchronously inside Activate (e.g., a quest already resolved before this binding), the user's downstream
     // chain (Print → Cancel(<var>)) reads the still-null cache → Accessed-None. Deferring to next tick guarantees
@@ -119,7 +129,7 @@ void UQuestLifecycleObserver::Activate()
     if (!World)
     {
         UE_LOG(LogSimpleQuestSubscription, Verbose,
-            TEXT("UQuestLifecycleObserver: no world available for deferred catch-up — running inline (acceptable: no BP execution stack to race with)."));
+            TEXT("UQuestLifecycleObserver: no world available for deferred catch-up - running inline (acceptable: no BP execution stack to race with)."));
         RunCatchUp(Signals, WorldState);
         return;
     }
@@ -173,6 +183,25 @@ void UQuestLifecycleObserver::HandleGiveBlocked(FGameplayTag Channel, const FQue
     }
 }
 
+void UQuestLifecycleObserver::HandleActivationFailed(FGameplayTag Channel, const FQuestActivationFailedEvent& Event)
+{
+    if (bCancelled) return;
+    // No TagsWithLive*Seen entry: refusals are transient and have no catch-up to dedup against.
+    if (OnActivationFailed.IsBound())
+    {
+        OnActivationFailed.Broadcast(Event.GetQuestTag(), Channel, Event.AttemptedTagName, Event.Reason, Event.Payload);
+    }
+}
+
+void UQuestLifecycleObserver::HandleProgressRefused(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
+{
+    if (bCancelled) return;
+    if (OnProgressRefused.IsBound())
+    {
+        OnProgressRefused.Broadcast(Event.GetQuestTag(), Channel, Event.Blockers, Event.TriggerContext);
+    }
+}
+
 void UQuestLifecycleObserver::HandleStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
     if (bCancelled) return;
@@ -188,7 +217,7 @@ void UQuestLifecycleObserver::HandleEnded(FGameplayTag Channel, const FQuestEnde
     if (bCancelled) return;
     TagsWithLiveCompletedSeen.Add(Event.GetQuestTag());
     if (OnCompleted.IsBound()) OnCompleted.Broadcast(Event.GetQuestTag(), Channel, Event.OutcomeTag, Event.Payload);
-    // Persistent — no finalize here. Parent-tag subscriptions need to stay alive across multiple child completions.
+    // Persistent - no finalize here. Parent-tag subscriptions need to stay alive across multiple child completions.
 }
 
 void UQuestLifecycleObserver::HandleDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
@@ -196,11 +225,11 @@ void UQuestLifecycleObserver::HandleDeactivated(FGameplayTag Channel, const FQue
     if (bCancelled) return;
     TagsWithLiveDeactivatedSeen.Add(Event.GetQuestTag());
 
-    // OnBlocked fires from its own direct subscription on FQuestBlockedEvent (HandleBlocked) — no longer
+    // OnBlocked fires from its own direct subscription on FQuestBlockedEvent (HandleBlocked) - no longer
     // piggybacks on FQuestDeactivatedEvent + Blocked-fact inspection.
 
     if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(Event.GetQuestTag(), Channel, Event.Payload);
-    // Persistent — no finalize here. Same rationale as HandleEnded.
+    // Persistent - no finalize here. Same rationale as HandleEnded.
 }
 
 void UQuestLifecycleObserver::HandleBlocked(FGameplayTag Channel, const FQuestBlockedEvent& Event)
@@ -227,17 +256,20 @@ void UQuestLifecycleObserver::UnbindAll()
 {
     USignalSubsystem* Signals = ResolveSignalSubsystem();
     if (!Signals) return;
-    if (ActivatedHandle.IsValid())   Signals->UnsubscribeMessage(QuestTag, ActivatedHandle);
-    if (EnabledHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, EnabledHandle);
-    if (DisabledHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, DisabledHandle);
-    if (GiveBlockedHandle.IsValid()) Signals->UnsubscribeMessage(QuestTag, GiveBlockedHandle);
-    if (StartedHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, StartedHandle);
-    if (ProgressHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, ProgressHandle);
-    if (EndedHandle.IsValid())       Signals->UnsubscribeMessage(QuestTag, EndedHandle);
-    if (DeactivatedHandle.IsValid()) Signals->UnsubscribeMessage(QuestTag, DeactivatedHandle);
-    if (BlockedHandle.IsValid())     Signals->UnsubscribeMessage(QuestTag, BlockedHandle);
-    if (UnblockedHandle.IsValid())   Signals->UnsubscribeMessage(QuestTag, UnblockedHandle);
+    if (ActivatedHandle.IsValid())          Signals->UnsubscribeMessage(QuestTag, ActivatedHandle);
+    if (EnabledHandle.IsValid())            Signals->UnsubscribeMessage(QuestTag, EnabledHandle);
+    if (DisabledHandle.IsValid())           Signals->UnsubscribeMessage(QuestTag, DisabledHandle);
+    if (GiveBlockedHandle.IsValid())        Signals->UnsubscribeMessage(QuestTag, GiveBlockedHandle);
+    if (ActivationFailedHandle.IsValid())   Signals->UnsubscribeMessage(QuestTag, ActivationFailedHandle);
+    if (StartedHandle.IsValid())            Signals->UnsubscribeMessage(QuestTag, StartedHandle);
+    if (ProgressHandle.IsValid())           Signals->UnsubscribeMessage(QuestTag, ProgressHandle);
+    if (ProgressRefusedHandle.IsValid())    Signals->UnsubscribeMessage(QuestTag, ProgressRefusedHandle);
+    if (EndedHandle.IsValid())              Signals->UnsubscribeMessage(QuestTag, EndedHandle);
+    if (DeactivatedHandle.IsValid())        Signals->UnsubscribeMessage(QuestTag, DeactivatedHandle);
+    if (BlockedHandle.IsValid())            Signals->UnsubscribeMessage(QuestTag, BlockedHandle);
+    if (UnblockedHandle.IsValid())          Signals->UnsubscribeMessage(QuestTag, UnblockedHandle);
     ActivatedHandle = EnabledHandle = DisabledHandle = GiveBlockedHandle = FDelegateHandle();
+    ActivationFailedHandle = ProgressRefusedHandle = FDelegateHandle();
     StartedHandle = ProgressHandle = EndedHandle = DeactivatedHandle = FDelegateHandle();
     BlockedHandle = UnblockedHandle = FDelegateHandle();
 }
@@ -250,7 +282,7 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     // and probes each one in turn, mirroring the signal bus's hierarchical broadcast on the live side. Each pin
     // is gated by ExposedEventsMask AND the per-tag TagsWith*Seen sets so unexposed phases skip entirely and
     // exposed phases that already fired live for that specific tag during the deferral window don't double-broadcast.
-    // Doesn't terminate the subscription — live events continue to flow through afterward.
+    // Doesn't terminate the subscription - live events continue to flow through afterward.
     UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem();
     const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Routing);
 

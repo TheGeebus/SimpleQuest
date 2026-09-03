@@ -5,12 +5,13 @@
 #include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Groups/QuestlineNode_PortalExitBase.h"
 #include "SGraphPin.h"
-#include "Widgets/SQuestTagPicker.h"
 #include "ScopedTransaction.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
+#include "SGameplayTagCombo.h"
 #include "TutorialMetaData.h"
+#include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Layout/SBorder.h"
@@ -378,8 +379,8 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreateTagPickerWidget()
 	if (SetterNode) FilterString = SetterNode->GetTagFilterString();
 	else if (GetterNode) FilterString = GetterNode->GetTagFilterString();
 
-	return SNew(SQuestTagPicker)
-		.Filter(*FilterString)
+	return SNew(SGameplayTagCombo)
+		.Filter(FilterString)
 		.Tag_Lambda([this]()
 		{
 			if (SetterNode) return SetterNode->GetGroupTag();
@@ -426,20 +427,16 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreateAddPinButton()
 
 void SGraphNode_GroupNode::OnGroupTagChanged(const FGameplayTag NewTag)
 {
-	if (!GraphNode) return;
+	TWeakObjectPtr<UQuestlineNode_PortalEntryBase> WeakSetter = SetterNode;
+	TWeakObjectPtr<UQuestlineNode_PortalExitBase>  WeakGetter = GetterNode;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeGroupTag", "Change Group Tag"));
-	GraphNode->Modify();
-
-	if (SetterNode) SetterNode->SetGroupTag(NewTag);
-	else if (GetterNode) GetterNode->SetGroupTag(NewTag);
-
-	UpdateGraphNode();
-
-	if (UEdGraph* Graph = GraphNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(GraphNode,
+		LOCTEXT("ChangeGroupTag", "Change Group Tag"),
+		[WeakSetter, WeakGetter, NewTag]()
+		{
+			if (UQuestlineNode_PortalEntryBase* Setter = WeakSetter.Get())     Setter->SetGroupTag(NewTag);
+			else if (UQuestlineNode_PortalExitBase* Getter = WeakGetter.Get()) Getter->SetGroupTag(NewTag);
+		});
 }
 
 FReply SGraphNode_GroupNode::OnAddPinClicked()

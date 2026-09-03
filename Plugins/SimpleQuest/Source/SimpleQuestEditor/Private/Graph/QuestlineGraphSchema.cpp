@@ -1605,6 +1605,23 @@ void UQuestlineGraphSchema::ClearActiveDragFromPin()
 	GActiveDragFromPinName = NAME_None;
 }
 
+int32 UQuestlineGraphSchema::CurrentCacheRefreshID = 0;
+
+bool UQuestlineGraphSchema::IsCacheVisualizationOutOfDate(int32 InVisualizationCacheID) const
+{
+	return CurrentCacheRefreshID != InVisualizationCacheID;
+}
+
+int32 UQuestlineGraphSchema::GetCurrentVisualizationCacheID() const
+{
+	return CurrentCacheRefreshID;
+}
+
+void UQuestlineGraphSchema::ForceVisualizationCacheClear() const
+{
+	++CurrentCacheRefreshID;
+}
+
 FConnectionDrawingPolicy* UQuestlineGraphSchema::CreateConnectionDrawingPolicy(int32 InBackLayerID, int32 InFrontLayerID,
 	float InZoomFactor, const FSlateRect& InClippingRect, FSlateWindowElementList& InDrawElements, UEdGraph* InGraphObj) const
 {

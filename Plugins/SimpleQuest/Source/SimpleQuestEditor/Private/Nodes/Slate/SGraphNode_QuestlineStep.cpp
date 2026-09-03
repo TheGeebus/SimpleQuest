@@ -59,7 +59,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		}
 		else
 		{
-			// Query using the old compiled tag — still valid in the dictionary and still referenced by actors until next compile propagates renames
+			// Query using the old compiled tag - still valid in the dictionary and still referenced by actors until next compile propagates renames
 			const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
 			if (CompiledTag.IsValid())
 			{
@@ -217,7 +217,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			CreateNodeContentArea()
 		]
 		
-		// Stale tag warning bar (visible after rename, before recompile) — shared helper, flag on the node.
+		// Stale tag warning bar (visible after rename, before recompile) - shared helper, flag on the node.
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(FMargin(4.f, 2.f, 4.f, 0.f))
@@ -284,7 +284,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				// Red border wrapper — draws a tinted body brush behind the node. When ObjectiveClass is null, the outer
+				// Red border wrapper - draws a tinted body brush behind the node. When ObjectiveClass is null, the outer
 				// brush is bright red, creating a visible outline through the 2px padding gap. When set, the outer brush matches
 				// the body color and the border is invisible.
 				SNew(SOverlay)
@@ -378,7 +378,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 	int32 ClassCount = 0;
 	for (const TSoftClassPtr<AActor>& SoftClass : StepNode->TargetClasses)
 	{
-		// IsNull checks the path without loading — count authored entries, ignore the ones designer cleared
+		// IsNull checks the path without loading - count authored entries, ignore the ones designer cleared
 		if (!SoftClass.IsNull()) ClassCount++;
 	}
 
@@ -477,7 +477,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		{
 			if (!SoftClass.IsNull())
 			{
-				// GetAssetName returns the short class name without loading the class asset — ideal for node-header display
+				// GetAssetName returns the short class name without loading the class asset - ideal for node-header display
 				FString Name = SoftClass.GetAssetName();
 				Name.RemoveFromEnd(TEXT("_C"));
 				ClassNames.Add(Name);
@@ -657,19 +657,26 @@ void SGraphNode_QuestlineStep::OnObjectiveClassChanged(const UClass* NewClass)
 {
 	if (!StepNode) return;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeObjective", "Change Objective Class"));
-	StepNode->Modify();
-	StepNode->ObjectiveClass = const_cast<UClass*>(NewClass);
+	TWeakObjectPtr<UQuestlineNode_Step> WeakStep = StepNode;
+	TWeakObjectPtr<const UClass> WeakClass = NewClass;
 
-	// Outcome pins may change — refresh them
-	StepNode->RefreshOutcomePins();
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(StepNode,
+		LOCTEXT("ChangeObjective", "Change Objective Class"),
+		[WeakStep, WeakClass]()
+		{
+			UQuestlineNode_Step* Step = WeakStep.Get();
+			if (!Step) return;
 
-	// Always notify even if pins didn't change — our visual state did
-	// (red border, target summary, details panel sync)
-	if (UEdGraph* Graph = StepNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+			Step->ObjectiveClass = const_cast<UClass*>(WeakClass.Get());
+			Step->RefreshOutcomePins();
+
+			// Structural, same as LinkedQuestline: outcome pins may have changed, and the node's visual state
+			// (red border, target summary, details sync) depends on the rebuild.
+			if (UEdGraph* Graph = Step->GetGraph())
+			{
+				Graph->NotifyGraphChanged();
+			}
+		});
 }
 
 void SGraphNode_QuestlineStep::OnUseSelectedObjectiveClass()
@@ -709,7 +716,7 @@ void SGraphNode_QuestlineStep::OnBrowseToObjectiveClass()
 {
 	if (!StepNode || StepNode->ObjectiveClass.IsNull() || !GEditor) return;
 
-	// LoadSynchronous on the soft ref — the designer just asked to browse to the asset, so loading now is expected.
+	// LoadSynchronous on the soft ref - the designer just asked to browse to the asset, so loading now is expected.
 	UClass* Loaded = StepNode->ObjectiveClass.LoadSynchronous();
 	if (!Loaded) return;
 

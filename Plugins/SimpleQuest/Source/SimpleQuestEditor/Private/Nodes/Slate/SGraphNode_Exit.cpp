@@ -5,12 +5,13 @@
 
 #include "Nodes/QuestlineNode_Exit.h"
 #include "SGraphPin.h"
-#include "Widgets/SQuestTagPicker.h"
 #include "ScopedTransaction.h"
 #include "GraphEditorSettings.h"
 #include "IDocumentation.h"
 #include "SCommentBubble.h"
+#include "SGameplayTagCombo.h"
 #include "TutorialMetaData.h"
+#include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
 #include "Widgets/Images/SImage.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
@@ -210,7 +211,7 @@ TSharedRef<SWidget> SGraphNode_Exit::CreateTagPickerWidget()
 {
 	// Filter matches the UPROPERTY meta = (Categories = "SimpleQuest.Outcome") on UQuestlineNode_Exit::OutcomeTag —
 	// picker surfaces only tags under that root, same as the Details-panel picker.
-	return SNew(SQuestTagPicker)
+	return SNew(SGameplayTagCombo)
 		.Filter(TEXT("SimpleQuest.Outcome"))
 		.Tag_Lambda([this]()
 		{
@@ -224,20 +225,17 @@ TSharedRef<SWidget> SGraphNode_Exit::CreateTagPickerWidget()
 
 void SGraphNode_Exit::OnOutcomeTagChanged(const FGameplayTag NewTag)
 {
-	if (!GraphNode || !ExitNode) return;
+	TWeakObjectPtr<UQuestlineNode_Exit> WeakExit = ExitNode;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeOutcomeTag", "Change Outcome Tag"));
-	GraphNode->Modify();
-
-	ExitNode->OutcomeTag = NewTag;
-
-	// NotifyGraphChanged triggers SNodeTitle to re-query GetNodeTitle so the "Outcome - <leaf>" title updates
-	// immediately. Matches the existing PostEditChangeProperty path used when the Details panel picker drives
-	// the change.
-	if (UEdGraph* Graph = GraphNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(GraphNode,
+		LOCTEXT("ChangeOutcomeTag", "Change Outcome Tag"),
+		[WeakExit, NewTag]()
+		{
+			if (UQuestlineNode_Exit* Exit = WeakExit.Get())
+			{
+				Exit->OutcomeTag = NewTag;
+			}
+		});
 }
 
 #undef LOCTEXT_NAMESPACE

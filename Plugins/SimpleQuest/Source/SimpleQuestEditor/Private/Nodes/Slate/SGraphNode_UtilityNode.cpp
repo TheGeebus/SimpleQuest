@@ -387,17 +387,17 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateRewardSummaryWidget()
 
 void SGraphNode_UtilityNode::OnTargetTagsChanged(const FGameplayTagContainer& NewTags)
 {
-	if (!GraphNode || !UtilityNode) return;
+	TWeakObjectPtr<UQuestlineNode_UtilityBase> WeakUtility = UtilityNode;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeUtilityTags", "Change Utility Target Tags"));
-	GraphNode->Modify();
-
-	UtilityNode->SetTargetQuestTags(NewTags);
-
-	if (UEdGraph* Graph = GraphNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(GraphNode,
+		LOCTEXT("ChangeUtilityTags", "Change Utility Target Tags"),
+		[WeakUtility, NewTags]()
+		{
+			if (UQuestlineNode_UtilityBase* Utility = WeakUtility.Get())
+			{
+				Utility->SetTargetQuestTags(NewTags);
+			}
+		});
 }
 
 TSharedRef<SWidget> SGraphNode_UtilityNode::CreateAlsoDeactivateToggleWidget()
@@ -434,17 +434,20 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateAlsoDeactivateToggleWidget()
 void SGraphNode_UtilityNode::OnAlsoDeactivateChanged(ECheckBoxState NewState)
 {
 	UQuestlineNode_SetBlocked* SetBlockedNode = Cast<UQuestlineNode_SetBlocked>(UtilityNode);
-	if (!SetBlockedNode || !GraphNode) return;
+	if (!SetBlockedNode) return;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeAlsoDeactivate", "Toggle Also Deactivate Targets"));
-	GraphNode->Modify();
+	TWeakObjectPtr<UQuestlineNode_SetBlocked> WeakSetBlocked = SetBlockedNode;
+	const bool bNewValue = (NewState == ECheckBoxState::Checked);
 
-	SetBlockedNode->bAlsoDeactivateTargets = (NewState == ECheckBoxState::Checked);
-
-	if (UEdGraph* Graph = GraphNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(GraphNode,
+		LOCTEXT("ChangeAlsoDeactivate", "Toggle Also Deactivate Targets"),
+		[WeakSetBlocked, bNewValue]()
+		{
+			if (UQuestlineNode_SetBlocked* SetBlocked = WeakSetBlocked.Get())
+			{
+				SetBlocked->bAlsoDeactivateTargets = bNewValue;
+			}
+		});
 }
 
 bool SGraphNode_UtilityNode::UsesGraphAssetPicker() const
@@ -486,17 +489,20 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateGraphAssetPickerWidget()
 void SGraphNode_UtilityNode::OnGraphAssetChanged(const FAssetData& AssetData)
 {
 	UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilityNode);
-	if (!StartNode || !GraphNode) return;
+	if (!StartNode) return;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeStartQuestlineGraph", "Change Questline Graph"));
-	GraphNode->Modify();
+	TWeakObjectPtr<UQuestlineNode_StartQuestline> WeakStart = StartNode;
+	const FSoftObjectPath NewPath = AssetData.GetSoftObjectPath();
 
-	StartNode->Graph = TSoftObjectPtr<UQuestlineGraph>(AssetData.GetSoftObjectPath());
-
-	if (UEdGraph* Graph = GraphNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(GraphNode,
+		LOCTEXT("ChangeStartQuestlineGraph", "Change Questline Graph"),
+		[WeakStart, NewPath]()
+		{
+			if (UQuestlineNode_StartQuestline* Start = WeakStart.Get())
+			{
+				Start->Graph = TSoftObjectPtr<UQuestlineGraph>(NewPath);
+			}
+		});
 }
 
 #undef LOCTEXT_NAMESPACE

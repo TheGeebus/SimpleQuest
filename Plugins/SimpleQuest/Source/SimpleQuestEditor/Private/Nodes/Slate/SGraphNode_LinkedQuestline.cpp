@@ -29,7 +29,7 @@
 static const FLinearColor LINKED_GIVER_COLOR(0.75f, 0.4f, 1.f);
 static const FLinearColor LINKED_REWARD_COLOR(0.85f, 0.70f, 0.25f);
 
-// "Outcome: TypeA, TypeB" lines for a linked questline's QuestlineRewards — surfaces what the linked questline grants on
+// "Outcome: TypeA, TypeB" lines for a linked questline's QuestlineRewards - surfaces what the linked questline grants on
 // completion (authored on the OTHER asset) so it isn't invisible where the questline is USED. Viewer-free (editor context).
 static TArray<FString> BuildLinkedRewardSummaryLines(const UQuestlineGraph* LinkedGraph)
 {
@@ -98,7 +98,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 
 	// ── Title area ─────────────────────────────────────────────
 	// Mirrors SGraphNode_QuestlineStep's title boilerplate so custom content nodes share a consistent look.
-	// Factoring this into a shared helper becomes worthwhile once a third consumer lands — premature now.
+	// Factoring this into a shared helper becomes worthwhile once a third consumer lands - premature now.
 	TSharedPtr<SNodeTitle> NodeTitle = SNew(SNodeTitle, GraphNode);
 
 	IconColor = FLinearColor::White;
@@ -165,7 +165,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		]
 
-		// Asset picker — the primary body of this node.
+		// Asset picker - the primary body of this node.
 		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(10.f, 4.f, 10.f, 4.f))
 		[
 			CreateAssetPickerWidget()
@@ -184,7 +184,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 				TAttribute<bool>::CreateLambda([this]() { return LinkedNode && LinkedNode->bTagStale; }))
 		]
 
-		// Givers section — empty-list collapses to SNullWidget automatically via the helper.
+		// Givers section - empty-list collapses to SNullWidget automatically via the helper.
 		+ SVerticalBox::Slot().AutoHeight().Padding(FMargin(14.f, 2.f, 10.f, 10.f))
 		[
 			FQuestNodeSlateHelpers::BuildLabeledExpandableList(
@@ -195,7 +195,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 				[this]() { if (LinkedNode) LinkedNode->bGiversExpanded = !LinkedNode->bGiversExpanded; })
 		];
 
-	// Linked questline's own completion rewards ("Grants") — surfaced here so a reward that fires on every use of the
+	// Linked questline's own completion rewards ("Grants") - surfaced here so a reward that fires on every use of the
 	// linked questline (but is authored on THAT asset) is visible where it's placed. Same expandable idiom as Givers.
 	{
 		const UQuestlineGraph* LinkedGraph = LinkedNode ? LinkedNode->LinkedGraph.LoadSynchronous() : nullptr;
@@ -304,26 +304,33 @@ void SGraphNode_LinkedQuestline::OnAssetChanged(const FAssetData& NewAsset)
 {
 	if (!LinkedNode) return;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeLinkedQuestline", "Change Linked Questline"));
-	LinkedNode->Modify();
+	TWeakObjectPtr<UQuestlineNode_LinkedQuestline> WeakLinked = LinkedNode;
+	const FSoftObjectPath NewPath = NewAsset.GetSoftObjectPath();
 
-	// NewAsset.GetAsset() sync-loads on first access — expected when the designer is actively selecting.
-	UQuestlineGraph* NewGraph = Cast<UQuestlineGraph>(NewAsset.GetAsset());
-	LinkedNode->LinkedGraph = NewGraph;
-	LinkedNode->RebuildOutcomePinsFromLinkedGraph();
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(LinkedNode,
+		LOCTEXT("ChangeLinkedQuestline", "Change Linked Questline"),
+		[WeakLinked, NewPath]()
+		{
+			UQuestlineNode_LinkedQuestline* Linked = WeakLinked.Get();
+			if (!Linked) return;
 
-	// NotifyGraphChanged drives SNodeTitle to re-query GetNodeTitle, so "Linked Questline - <name>" reflects the
-	// new asset's DisplayName immediately.
-	if (UEdGraph* Graph = LinkedNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+			// Sync-loads on first access - expected when the designer is actively selecting.
+			Linked->LinkedGraph = Cast<UQuestlineGraph>(NewPath.TryLoad());
+			Linked->RebuildOutcomePinsFromLinkedGraph();
+
+			// NotifyGraphChanged STAYS here, unlike the cosmetic sites: pins actually changed, so the panel must
+			// rebuild this node. Safe now only because we are a tick past the input event that reached us.
+			if (UEdGraph* Graph = Linked->GetGraph())
+			{
+				Graph->NotifyGraphChanged();
+			}
+		});
 }
 
 bool SGraphNode_LinkedQuestline::OnShouldFilterAsset(const FAssetData& AssetData) const
 {
-	// Reject self-reference (this node's owning questline asset picking itself). Deeper cycle detection — chains
-	// that route back to the same asset through one or more intermediate LinkedQuestlines — is a compile-time concern.
+	// Reject self-reference (this node's owning questline asset picking itself). Deeper cycle detection - chains
+	// that route back to the same asset through one or more intermediate LinkedQuestlines - is a compile-time concern.
 	if (!LinkedNode) return false;
 	UEdGraph* MyGraph = LinkedNode->GetGraph();
 	if (!MyGraph) return false;
@@ -339,7 +346,7 @@ bool SGraphNode_LinkedQuestline::OnShouldFilterAsset(const FAssetData& AssetData
 int32 SGraphNode_LinkedQuestline::OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
 	FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
 {
-	// Red shadow outline when no asset is assigned — matches Step's ObjectiveClass-null affordance so incomplete
+	// Red shadow outline when no asset is assigned - matches Step's ObjectiveClass-null affordance so incomplete
 	// configuration reads as a visible error at a glance.
 	if (LinkedNode && LinkedNode->LinkedGraph.IsNull())
 	{

@@ -21,7 +21,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineGraphSchema : public UEdGraphSchema
 public:
 	UQuestlineGraphSchema();
 	
-	/** Called when the graph is first created — populates it with the entry node */
+	/** Called when the graph is first created - populates it with the entry node */
 	virtual void CreateDefaultNodesForGraph(UEdGraph& Graph) const override;
 	
 	static TSharedPtr<FGraphPanelPinConnectionFactory> MakeQuestlineConnectionFactory();
@@ -82,6 +82,21 @@ public:
 	static void SetActiveDragFromPin(UEdGraphPin* Pin);
 	static UEdGraphPin* GetActiveDragFromPin();
 	static void ClearActiveDragFromPin();
+
+	// Node-title cache invalidation. SNodeTitle re-queries GetNodeTitle on its next Tick whenever the schema's
+	// visualization cache ID has moved. UEdGraphSchema no-ops these, so without them a title only ever refreshes
+	// via a full node rebuild - which is what forced NotifyGraphChanged into every inline-edit callback, and what
+	// made those callbacks close an open picker dropdown. Same mechanism UEdGraphSchema_K2 uses for Blueprints.
+	virtual bool IsCacheVisualizationOutOfDate(int32 InVisualizationCacheID) const override;
+	virtual int32 GetCurrentVisualizationCacheID() const override;
+	virtual void ForceVisualizationCacheClear() const override;
+
+private:
+	/**
+	 * Bumped by ForceVisualizationCacheClear; compared against each SNodeTitle's cached ID. Static because the
+	 * accessors are const and the schema is a CDO - matches EdGraphSchema_K2's CurrentCacheRefreshID exactly.
+	 */
+	static int32 CurrentCacheRefreshID;
 
 private:
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;

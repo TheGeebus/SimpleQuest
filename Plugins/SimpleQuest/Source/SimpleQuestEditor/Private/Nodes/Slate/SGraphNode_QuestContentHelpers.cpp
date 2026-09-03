@@ -3,6 +3,7 @@
 
 #include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
 
+#include "SGraphNode.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
@@ -24,7 +25,7 @@ namespace FQuestNodeSlateHelpers
 	{
 		if (Items.Num() == 0)
 		{
-			// Collapsed visibility — SVerticalBox skips the whole slot (padding included) rather than reserving
+			// Collapsed visibility - SVerticalBox skips the whole slot (padding included) rather than reserving
 			// slot padding around a zero-size child. SNullWidget is Visible by default, which left an empty row's
 			// padding contributing vertical gap to the node body. One SBox per rebuild is cheap.
 			return SNew(SBox).Visibility(EVisibility::Collapsed);
@@ -152,6 +153,31 @@ namespace FQuestNodeSlateHelpers
 					]
 				]
 			];
+	}
+
+	void FQuestNodeSlateHelpers::CommitNodeEditDeferred(UEdGraphNode* Node, const FText& TransactionText, TFunction<void()> Apply)
+	{
+		if (!Node || !GEditor) return;
+
+		TWeakObjectPtr<UEdGraphNode> WeakNode = Node;
+		GEditor->GetTimerManager()->SetTimerForNextTick(FTimerDelegate::CreateLambda(
+			[WeakNode, TransactionText, Apply = MoveTemp(Apply)]()
+			{
+				UEdGraphNode* LiveNode = WeakNode.Get();
+				if (!LiveNode) return;
+
+				const FScopedTransaction Transaction(TransactionText);
+				LiveNode->Modify();
+				Apply();
+
+				// Title refresh WITHOUT a rebuild: bumping the schema's cache ID makes every SNodeTitle re-query on
+				// its next Tick. NotifyGraphChanged would also do it, by rebuilding the node - which closes an open
+				// picker dropdown the instant a value is chosen.
+				if (const UEdGraphSchema* Schema = LiveNode->GetSchema())
+				{
+					Schema->ForceVisualizationCacheClear();
+				}
+			}));
 	}
 }
 

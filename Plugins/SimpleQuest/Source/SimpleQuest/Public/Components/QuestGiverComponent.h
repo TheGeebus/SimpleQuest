@@ -8,7 +8,7 @@
 #include "QuestTriggerComponent.h"
 #include "Components/ActorComponent.h"
 #include "Quests/Types/PrerequisiteExpression.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestGiverComponent.generated.h"
 
 
@@ -170,7 +170,7 @@ public:
 	 * @param Context    Per-call activation context. Empty default carries no extra data.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
-	void GiveQuest(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Context = FQuestObjectiveActivationContext());
+	void GiveQuest(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Context = FQuestObjectiveActivationParams());
 
 	/**
 	 * Give every currently-enabled quest in QuestTagsToGive. Iterates in authored order and
@@ -179,7 +179,7 @@ public:
 	 * individually.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (AutoCreateRefTerm = "Context"))
-	void GiveAllQuests(const FQuestObjectiveActivationContext& Context = FQuestObjectiveActivationContext());
+	void GiveAllQuests(const FQuestObjectiveActivationParams& Context = FQuestObjectiveActivationParams());
 
 	/**
 	 * Runtime: start offering quest tags. If already registered, subscribes + catches up (PendingGiver state) and

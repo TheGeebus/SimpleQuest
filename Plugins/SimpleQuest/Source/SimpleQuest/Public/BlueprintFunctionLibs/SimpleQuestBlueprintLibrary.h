@@ -8,7 +8,7 @@
 #include "Events/QuestEventBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Quests/Types/QuestEventPayload.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
@@ -280,7 +280,7 @@ public:
     //
     // Each action accepts an optional payload - Context (FQuestEventPayload) for lifecycle-control ops carries
     // attribution data (Instigator / CustomData / OriginTag / OriginChain) that the manager threads through into
-    // the resulting lifecycle event's Payload field; Params (FQuestObjectiveActivationContext) for activation-side
+    // the resulting lifecycle event's Payload field; Params (FQuestObjectiveActivationParams) for activation-side
     // ops carries Authored override + Dynamic context stamped onto the destination Step's activation. BP pins are
     // optional via AutoCreateRefTerm; callers that don't supply one publish with an empty payload.
     // -------------------------------------------------------------------------------------------------------------
@@ -293,12 +293,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void GiveQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void ActivateQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext(),
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams(),
         bool bBypassPrerequisites = false);
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
@@ -325,7 +325,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
     
     /**
      * Restore a questline from a loaded save. Call AFTER Apply Snapshot (on the Quest State subsystem) has restored the

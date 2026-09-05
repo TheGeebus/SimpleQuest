@@ -12,7 +12,7 @@
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
 #include "GameplayTagsManager.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObservedTagSpec.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
@@ -293,7 +293,7 @@ void UQuestGiverComponent::OnQuestGiveBlockedEventReceived(FGameplayTag Channel,
 	UnsubscribePendingGiveBlocked(Channel);
 }
 
-void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestObjectiveActivationContext& Context)
+void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestObjectiveActivationParams& Context)
 {
 	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
@@ -319,7 +319,7 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 
 	// Default the Instigator to this giver's owner if the caller didn't set one. Objectives commonly
 	// need a "who activated me" reference; cheap default saves designers from remembering to set it.
-	FQuestObjectiveActivationContext OutgoingContext = Context;
+	FQuestObjectiveActivationParams OutgoingContext = Context;
 	if (!OutgoingContext.Instigator.IsValid())
 	{
 		OutgoingContext.Instigator = GetOwner();
@@ -332,7 +332,7 @@ void UQuestGiverComponent::GiveQuest(const FGameplayTag& QuestTag, const FQuestO
 	SignalSubsystem->PublishMessage(Tag_Channel_QuestGiven, FQuestGivenEvent(QuestTag, OutgoingContext));
 }
 
-void UQuestGiverComponent::GiveAllQuests(const FQuestObjectiveActivationContext& Context)
+void UQuestGiverComponent::GiveAllQuests(const FQuestObjectiveActivationParams& Context)
 {
 	if (EnabledQuestTags.IsEmpty())
 	{

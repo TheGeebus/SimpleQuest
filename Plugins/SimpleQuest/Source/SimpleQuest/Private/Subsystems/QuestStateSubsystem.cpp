@@ -427,7 +427,7 @@ void UQuestStateSubsystem::RecordEntry(
 	FGameplayTag IncomingOutcomeTag,
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
-	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
+	const FQuestObjectiveActivationParams& ActivationParamsSnapshot,
 	FName PathIdentity,
 	const FOriginatingEventID& OriginatingEventID)
 {
@@ -442,7 +442,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.IncomingOutcomeTag = IncomingOutcomeTag;
 		Entry.EntryTime = EntryTime;
 		Entry.Provenance = Provenance;
-		Entry.ActivationContextSnapshot = ActivationParamsSnapshot;
+		Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
 		Entry.InstigatorRef = ActivationParamsSnapshot.Instigator.Get();   // save-stable soft form of the live giver/instigator
 		Entry.PathIdentity = PathIdentity;
 
@@ -564,16 +564,16 @@ EQuestActivationProvenance UQuestStateSubsystem::GetLastActivationProvenance(FGa
 	return EQuestActivationProvenance::Unknown;
 }
 
-FQuestObjectiveActivationContext UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
+FQuestObjectiveActivationParams UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
 {
 	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationContextSnapshot;
+			return Latest->ActivationParamsSnapshot;
 		}
 	}
-	return FQuestObjectiveActivationContext();
+	return FQuestObjectiveActivationParams();
 }
 
 FName UQuestStateSubsystem::GetLastPathIdentity(FGameplayTag QuestTag) const
@@ -786,9 +786,9 @@ FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
 		}
 	}
 	Snapshot.Resolutions = QuestResolutions;
-	// Entries carry FQuestEntryArrival::ActivationContextSnapshot, which IS SaveGame-flagged and persists across the
+	// Entries carry FQuestEntryArrival::ActivationParamsSnapshot, which IS SaveGame-flagged and persists across the
 	// disk round-trip (only its Instigator weak-ptr is un-flagged; actor attribution rides InstigatorRef instead). The
-	// restore path relies on this - RestoreQuestlineGraph re-derives an objective's IncomingContext from the persisted
+	// restore path relies on this - RestoreQuestlineGraph re-derives an objective's IncomingParams from the persisted
 	// snapshot - so do not un-flag it or stop capturing it here.
 	Snapshot.Entries = QuestEntries;
 	return Snapshot;

@@ -47,7 +47,7 @@ namespace
 		Arrival.EntryTime          = 9876.54321;   // deliberately NOT exactly representable in float
 		Arrival.Provenance         = EQuestActivationProvenance::ChainCascade;
 		Arrival.PathIdentity       = TestPathIdentity;
-		Arrival.ActivationContextSnapshot.Config.NumElementsRequired = 7;   // two structs deep
+		Arrival.ActivationParamsSnapshot.Config.NumElementsRequired = 7;   // two structs deep
 		Snapshot.Entries.FindOrAdd(QuestTag).History.Add(Arrival);
 
 		FSimpleQuestObjectiveSaveState ObjectiveState;
@@ -116,8 +116,8 @@ bool FSimpleQuestSaveLoad_SnapshotRoundTrip::RunTest(const FString& Parameters)
 		TestTrue (TEXT("arrival outcome tag survived"), Arrival.IncomingOutcomeTag == OutcomeTag);
 		TestEqual(TEXT("arrival time survived"), static_cast<double>(Arrival.EntryTime), 9876.54321, 1e-6);
 		TestTrue (TEXT("provenance enum survived"), Arrival.Provenance == EQuestActivationProvenance::ChainCascade);
-		// Two structs deep: FQuestEntryArrival -> FQuestObjectiveActivationContext -> FQuestObjectiveAuthoredConfig.
-		TestEqual(TEXT("nested activation config survived"), Arrival.ActivationContextSnapshot.Config.NumElementsRequired, 7);
+		// Two structs deep: FQuestEntryArrival -> FQuestObjectiveActivationParams -> FQuestObjectiveAuthoredConfig.
+		TestEqual(TEXT("nested activation config survived"), Arrival.ActivationParamsSnapshot.Config.NumElementsRequired, 7);
 	}
 	else
 	{

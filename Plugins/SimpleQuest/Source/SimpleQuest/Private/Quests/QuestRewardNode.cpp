@@ -96,7 +96,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 {
 	FQuestRewardActivationContext Incoming;
-	static_cast<FQuestContextBase&>(Incoming) = PendingActivationContext.IncomingContext;
+	static_cast<FQuestContextBase&>(Incoming) = PendingActivationContext.IncomingParams;
 	Incoming.Provenance                       = PendingActivationContext.Provenance;
 	Incoming.IncomingOutcomeTag               = PendingActivationContext.IncomingOutcomeTag;
 	// A reward node is tagless, so the nearest thing carrying a resolution history is whatever cascaded into it - which is

@@ -3,13 +3,13 @@
 
 #include "Objectives/CountingQuestObjective.h"
 #include "SimpleQuestLog.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 
 
 void UCountingQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime)
 {
 	Super::OnObjectiveActivated_Implementation(Authored, Runtime);
-	MaxElements = Authored.NumElementsRequired + Runtime.IncomingContext.Config.NumElementsRequired;
+	MaxElements = Authored.NumElementsRequired + Runtime.IncomingParams.Config.NumElementsRequired;
 	CurrentElements = 0;
 }
 

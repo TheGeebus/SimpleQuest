@@ -6,11 +6,11 @@
 #include "CoreMinimal.h"
 #include "QuestContextBase.h"
 #include "QuestObjectiveAuthoredConfig.h"
-#include "QuestObjectiveActivationContext.generated.h"
+#include "QuestObjectiveActivationParams.generated.h"
 
 
 USTRUCT(BlueprintType)
-struct SIMPLEQUEST_API FQuestObjectiveActivationContext : public FQuestContextBase
+struct SIMPLEQUEST_API FQuestObjectiveActivationParams : public FQuestContextBase
 {
 	GENERATED_BODY()
 

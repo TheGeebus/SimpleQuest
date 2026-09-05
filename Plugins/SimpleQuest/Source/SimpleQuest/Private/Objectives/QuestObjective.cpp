@@ -5,7 +5,7 @@
 #include "Objectives/QuestObjective.h"
 #include "GameplayTagContainer.h"
 #include "SimpleQuestLog.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestOutcomeTags.h"
 #include "Subsystems/QuestStateSubsystem.h"
 
@@ -32,7 +32,7 @@ void UQuestObjective::OnObjectiveActivated_Implementation(const FQuestObjectiveA
 	// Subclasses override to compose differently - they have both halves with full provenance.
 	TargetClasses = Authored.TargetClasses;
 	TargetActors = Authored.TargetActors;
-	TargetActors.Append(Runtime.IncomingContext.Config.TargetActors);
+	TargetActors.Append(Runtime.IncomingParams.Config.TargetActors);
 }
 
 void UQuestObjective::DispatchOnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InOwningStepTag)
@@ -102,7 +102,7 @@ bool UQuestObjective::WarnIfReleased(const TCHAR* EntryPoint) const
 	return true;
 }
 
-void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveTriggerContext& InCompletionContext, const FQuestObjectiveActivationContext& InForwardParams)
+void UQuestObjective::CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity, const FQuestObjectiveTriggerContext& InCompletionContext, const FQuestObjectiveActivationParams& InForwardParams)
 {
 	// *** ONE COMPLETION PER ACTIVATION. *** Set before the broadcast, not after, so a re-entrant call from inside
 	// the cascade is refused too. This is the same rule RefuseOverlappingExitAttribution enforces at compile time

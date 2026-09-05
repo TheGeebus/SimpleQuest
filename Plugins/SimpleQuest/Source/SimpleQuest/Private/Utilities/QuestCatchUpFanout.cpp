@@ -63,7 +63,7 @@ namespace FQuestCatchUpFanout
 		Out.MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, SubscribedTag);
 
 		// Payload: tag + CatchUp delivery + rich fields rehydrated from the persisted entry snapshot (the same activation
-		// IncomingContext the live publish forwards via AssembleEventContext) and the display registry. CompletionTrigger
+		// IncomingParams the live publish forwards via AssembleEventContext) and the display registry. CompletionTrigger
 		// stays default — a reconstruction has no live trigger.
 		Out.Payload.NodeInfo.QuestTag = CanonicalTag;
 		Out.Payload.Delivery = EQuestEventDelivery::CatchUp;
@@ -75,7 +75,7 @@ namespace FQuestCatchUpFanout
 			{
 				if (const FQuestEntryArrival* Latest = EntryRec->GetLatest())
 				{
-					const FQuestObjectiveActivationContext& Snap = Latest->ActivationContextSnapshot;
+					const FQuestObjectiveActivationParams& Snap = Latest->ActivationParamsSnapshot;
 					Out.Payload.CustomData         = Snap.CustomData;
 					Out.Payload.CustomTag          = Snap.CustomTag;
 					Out.Payload.OriginTag          = Snap.OriginTag;

@@ -6,7 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "NativeGameplayTags.h"
 #include "QuestEventBase.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestActivationRequestEvent.generated.h"
 
 UE_DECLARE_GAMEPLAY_TAG_EXTERN(Tag_Channel_QuestActivationRequest)
@@ -26,13 +26,13 @@ struct SIMPLEQUEST_API FQuestActivationRequestEvent : public FQuestEventBase
 	GENERATED_BODY()
 
 	FQuestActivationRequestEvent() = default;
-	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationContext& InParams)
+	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationParams& InParams)
 		: FQuestEventBase(InQuestTag), Params(InParams) {}
-	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationContext& InParams, bool bInBypassPrerequisites)
+	FQuestActivationRequestEvent(FGameplayTag InQuestTag, const FQuestObjectiveActivationParams& InParams, bool bInBypassPrerequisites)
 		: FQuestEventBase(InQuestTag), Params(InParams), bBypassPrerequisites(bInBypassPrerequisites) {}
 
 	UPROPERTY(BlueprintReadWrite)
-	FQuestObjectiveActivationContext Params;
+	FQuestObjectiveActivationParams Params;
 
 	/**
 	 * When true, the activation skips prerequisite evaluation on the target and tears down any deferral it is already

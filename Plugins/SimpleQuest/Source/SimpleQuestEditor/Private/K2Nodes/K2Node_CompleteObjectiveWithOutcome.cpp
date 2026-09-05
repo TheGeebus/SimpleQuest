@@ -54,7 +54,7 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 
 	FEdGraphPinType ForwardParamsPinType;
 	ForwardParamsPinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-	ForwardParamsPinType.PinSubCategoryObject = FQuestObjectiveActivationContext::StaticStruct();
+	ForwardParamsPinType.PinSubCategoryObject = FQuestObjectiveActivationParams::StaticStruct();
 	UEdGraphPin* ForwardPin = CreatePin(EGPD_Input, ForwardParamsPinType, TEXT("ForwardParams"));
 	ForwardPin->PinFriendlyName = LOCTEXT("ForwardPin", "Forward Params");
 	ForwardPin->PinToolTip = LOCTEXT("ForwardPinTooltip",

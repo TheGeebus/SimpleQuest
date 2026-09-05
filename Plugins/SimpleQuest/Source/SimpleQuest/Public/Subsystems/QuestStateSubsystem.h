@@ -10,7 +10,7 @@
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestActivationProvenance.h"
 #include "Quests/Types/QuestEntryRecord.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/QuestRuntimeRecord.h"
 #include "Quests/Types/QuestDisplayDataRecord.h"
@@ -195,7 +195,7 @@ public:
 	const FQuestRuntimeRecord* GetQuestRuntimeRecord(FGameplayTag QuestTag) const;
 
 	/**
-	 * The actor that initiated the most-recent start of this quest (UQuestStep::ReceivedActivationContext.Instigator
+	 * The actor that initiated the most-recent start of this quest (UQuestStep::ReceivedRuntimeContext.Instigator
 	 * captured at start time, preserved past the live step's deactivation). Null for non-Step starts (containers
 	 * have no objective; no params snapshot) and for starts where no Instigator was supplied.
 	 */
@@ -210,12 +210,12 @@ public:
 	EQuestActivationProvenance GetLastActivationProvenance(FGameplayTag QuestTag) const;
 
 	/**
-	 * By-value snapshot of the merged final FQuestObjectiveActivationContext delivered to the objective at the most-
-	 * recent start (UQuestStep::ReceivedActivationContext). Default-constructed for non-Step starts and for quests that
+	 * By-value snapshot of the merged final FQuestObjectiveActivationParams delivered to the objective at the most-
+	 * recent start (UQuestStep::ReceivedRuntimeContext). Default-constructed for non-Step starts and for quests that
 	 * haven't started this session. Sufficient to reconstitute the live questline's objective state for save/load.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
-	FQuestObjectiveActivationContext GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const;
+	FQuestObjectiveActivationParams GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const;
 
 	/**
 	 * Per-source routing identity from the most-recent start. NAME_None for entry-tag fires and any start that didn't
@@ -506,7 +506,7 @@ private:
 	    FGameplayTag IncomingOutcomeTag,
 	    double EntryTime,
 	    EQuestActivationProvenance Provenance,
-	    const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
+	    const FQuestObjectiveActivationParams& ActivationParamsSnapshot,
 	    FName PathIdentity,
 	    const FOriginatingEventID& OriginatingEventID = {});
 

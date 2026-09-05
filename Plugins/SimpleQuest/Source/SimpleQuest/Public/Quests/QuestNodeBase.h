@@ -480,7 +480,7 @@ private:
 
     /**
      * Cascade event ID associated with the most recent wake-up of this node - either a cascade arrival
-     * (stamped via PendingActivationContext.IncomingContext.OriginatingEventID) or a prereq-subscription wake-up
+     * (stamped via PendingActivationContext.IncomingParams.OriginatingEventID) or a prereq-subscription wake-up
      * (from the triggering FQuestResolutionRecordedEvent / FQuestEntryRecordedEvent payload).
      * Read by subclasses with per-event-ID deduplication logic (UPrereqGateNode); invalid when the wake-up was
      * not cascade-driven (raw Fact event with no OriginatingEventID plumbed).

@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveDeactivationReason.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
@@ -224,7 +224,7 @@ protected:
 	 * with full provenance over which values are authored vs caller-supplied.
 	 *
 	 * @param Authored design-time config packed from the Step's UPROPERTYs (target classes/actors, element count, config asset)
-	 * @param Runtime  the caller's IncomingContext (instigator, custom data, lineage, target overrides) + Provenance + IncomingOutcomeTag
+	 * @param Runtime  the caller's IncomingParams (instigator, custom data, lineage, target overrides) + Provenance + IncomingOutcomeTag
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, meta = (BlueprintProtected = "true"), Category = "Quest|Objectives")
 	void OnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime);
@@ -273,7 +273,7 @@ protected:
 	 * auto-derive fallback via the default argument.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (BlueprintInternalUseOnly = "true", AutoCreateRefTerm = "InCompletionContext,InForwardParams"), Category = "Quest|Objectives")
-	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationContext& InForwardParams = FQuestObjectiveActivationContext());
+	void CompleteObjectiveWithOutcome(FGameplayTag OutcomeTag, FName PathIdentity = NAME_None, const FQuestObjectiveTriggerContext& InCompletionContext = FQuestObjectiveTriggerContext(), const FQuestObjectiveActivationParams& InForwardParams = FQuestObjectiveActivationParams());
 	
 	/**
 	 * Broadcasts an objective-progress signal to the framework via OnQuestObjectiveProgress. Progress events
@@ -373,7 +373,7 @@ private:
 	 * fields get forwarded on handoff.
 	 */
 	UPROPERTY()
-	FQuestObjectiveActivationContext ForwardActivationParams;
+	FQuestObjectiveActivationParams ForwardActivationParams;
 
 	/**
 	 * Cached identity of the Step that hosts this Objective. Set by UQuestStep::ActivateInternal via
@@ -421,7 +421,7 @@ public:
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FQuestObjectiveTriggerContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
-	FQuestObjectiveActivationContext TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
+	FQuestObjectiveActivationParams TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
 	
 	/**
 	 * True once this objective has resolved. The Step reads it to avoid re-firing deactivation hooks, and the

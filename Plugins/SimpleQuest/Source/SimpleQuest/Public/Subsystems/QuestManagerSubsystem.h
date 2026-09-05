@@ -11,7 +11,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
@@ -139,7 +139,7 @@ protected:
 	virtual void RegisterQuestlineGraph(UQuestlineGraph* Graph);
 	
 	/** Registers all compiled node instances from the graph into LoadedNodeInstances and activates its entry nodes. */
-	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
 
 	/**
 	 * Load-time counterpart to ActivateQuestlineGraph. Registers the graph's compiled instances, then - instead of
@@ -167,7 +167,7 @@ protected:
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
-	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
+	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedRuntimeContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
 	 * catch-up subscribers and save/load reconstitution access to "how was this activation initiated?"
 	 *
@@ -198,7 +198,7 @@ protected:
 	 *
 	 * @see UQuestStateSubsystem::RecordEntry
 	 * @see UQuestManagerSubsystem::HandleOnNodeStarted
-	 * @see FQuestObjectiveActivationContext::Provenance
+	 * @see FQuestObjectiveRuntimeContext::Provenance
 	 */
 	virtual void ActivateNodeByTag(
 		FName NodeTagName,
@@ -264,7 +264,7 @@ protected:
 		FGameplayTag OutcomeTag,
 		FName PathIdentity,
 		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
-		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+		const FQuestObjectiveActivationParams& InheritedForward = FQuestObjectiveActivationParams());
 
 	/**
 	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
@@ -559,7 +559,7 @@ private:
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationContext& CompleterContext = FQuestObjectiveActivationContext()) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationParams& CompleterContext = FQuestObjectiveActivationParams()) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -921,7 +921,7 @@ private:
 	 * OriginatingEventID is inherited from the cascade and threaded through the recursive
 	 * ChainToNextNodes call.
 	 */
-	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationParams& InheritedForward = FQuestObjectiveActivationParams());
 
 	/**
 	 * Per-questline-asset resolution registry write + bus publish. Each FQuestGraphResolution entry carries the
@@ -930,7 +930,7 @@ private:
 	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
 	 * questline-level lifecycle event.
 	 */
-	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext& CompleterContext);
+	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationParams& CompleterContext);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

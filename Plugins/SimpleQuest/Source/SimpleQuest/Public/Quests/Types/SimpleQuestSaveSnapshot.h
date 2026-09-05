@@ -19,7 +19,7 @@
  * or not the flag is present, so it cannot be used to keep something out of a save.
  *
  * Layers captured: WorldState facts (the primary state store) and the QSS resolution + entry history registries,
- * including each entry's ActivationContextSnapshot. The parallel lookup indices (ResolvedOutcomesByQuest, etc.)
+ * including each entry's ActivationParamsSnapshot. The parallel lookup indices (ResolvedOutcomesByQuest, etc.)
  * are NOT stored - they rebuild from the histories on apply.
  */
 USTRUCT(BlueprintType)

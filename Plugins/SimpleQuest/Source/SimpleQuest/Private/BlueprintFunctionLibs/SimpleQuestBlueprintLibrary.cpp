@@ -133,7 +133,7 @@ void USimpleQuestBlueprintLibrary::DeactivateQuest(const UObject* WorldContext, 
     }
 }
 
-void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationContext& Params)
+void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationParams& Params)
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {
@@ -141,7 +141,7 @@ void USimpleQuestBlueprintLibrary::GiveQuest(const UObject* WorldContext, FGamep
     }
 }
 
-void USimpleQuestBlueprintLibrary::ActivateQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationContext& Params, bool bBypassPrerequisites)
+void USimpleQuestBlueprintLibrary::ActivateQuest(const UObject* WorldContext, FGameplayTag QuestTag, const FQuestObjectiveActivationParams& Params, bool bBypassPrerequisites)
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {
@@ -181,7 +181,7 @@ void USimpleQuestBlueprintLibrary::ResolveQuest(const UObject* WorldContext, FGa
     }
 }
 
-void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph, const FQuestObjectiveActivationContext& Params)
+void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph, const FQuestObjectiveActivationParams& Params)
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
     {

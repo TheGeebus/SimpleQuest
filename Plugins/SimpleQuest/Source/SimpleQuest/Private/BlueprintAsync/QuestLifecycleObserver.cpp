@@ -286,46 +286,64 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
     UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem();
     const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, StateSubsystem, Routing);
 
-	for (const FGameplayTag& EachTag : CatchUpTags)
-	{
-		const FQuestCatchUpFanout::FTagReconstruction R =
-			FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, StateSubsystem);
+    for (const FGameplayTag& EachTag : CatchUpTags)
+    {
+        // Cancel() is BlueprintCallable and reachable through the node's Subscription proxy, so a handler on any pin
+        // below can cancel us mid-fan-out. The guard in the deferred lambda only covers cancellation that happened
+        // before catch-up started - re-check every pass, or "stop" leaves the rest of the fan-out still firing.
+        if (bCancelled) return;
 
-		// Emission + gating stay here: the exposure mask + the per-tag TagsWith*Seen live-dedup (which the component
-		// deliberately lacks) are this node's own. Event eligibility + rehydrated payload are shared via ReconstructTag.
-		for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
-		{
+        const FQuestCatchUpFanout::FTagReconstruction R = FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, StateSubsystem);
+
+        // Emission + gating stay here: the exposure mask + the per-tag TagsWith*Seen live-dedup (which the component
+        // deliberately lacks) are this node's own. Event eligibility + rehydrated payload are shared via ReconstructTag.
+        for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
+        {
+            if (bCancelled) return;
+
 			switch (Event.EventType)
 			{
 			case EQuestLifecycleEventType::Activated:
 				if (IsExposed(EQuestEventTypes::Activated) && !TagsWithLiveActivatedSeen.Contains(EachTag))
-					if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, R.MatchedChannel, R.Payload, R.PrereqStatus);
-				break;
+				{
+				    if (OnActivated.IsBound()) OnActivated.Broadcast(EachTag, R.MatchedChannel, R.Payload, R.PrereqStatus);
+				}
+			    break;
 
 			case EQuestLifecycleEventType::Enabled:
 				if (IsExposed(EQuestEventTypes::Enabled) && !TagsWithLiveEnabledSeen.Contains(EachTag))
-					if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, R.MatchedChannel, R.Payload);
-				break;
+				{
+				    if (OnEnabled.IsBound()) OnEnabled.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				}
+			    break;
 
 			case EQuestLifecycleEventType::Started:
 				if (IsExposed(EQuestEventTypes::Started) && !TagsWithLiveStartedSeen.Contains(EachTag))
-					if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, R.MatchedChannel, R.Payload, Event.RecoveredGiver);
-				break;
+				{
+				    if (OnStarted.IsBound()) OnStarted.Broadcast(EachTag, R.MatchedChannel, R.Payload, Event.RecoveredGiver);
+				}
+			    break;
 
 			case EQuestLifecycleEventType::Completed:
 				if (IsExposed(EQuestEventTypes::Completed) && !TagsWithLiveCompletedSeen.Contains(EachTag))
-					if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, R.MatchedChannel, Event.OutcomeTag, R.Payload);
-				break;
+				{
+				    if (OnCompleted.IsBound()) OnCompleted.Broadcast(EachTag, R.MatchedChannel, Event.OutcomeTag, R.Payload);
+				}
+			    break;
 
 			case EQuestLifecycleEventType::Deactivated:
 				if (IsExposed(EQuestEventTypes::Deactivated) && !TagsWithLiveDeactivatedSeen.Contains(EachTag))
-					if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, R.MatchedChannel, R.Payload);
-				break;
+				{
+				    if (OnDeactivated.IsBound()) OnDeactivated.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				}
+			    break;
 
 			case EQuestLifecycleEventType::Blocked:
 				if (IsExposed(EQuestEventTypes::Blocked) && !TagsWithLiveBlockedSeen.Contains(EachTag))
-					if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, R.MatchedChannel, R.Payload);
-				break;
+				{
+				    if (OnBlocked.IsBound()) OnBlocked.Broadcast(EachTag, R.MatchedChannel, R.Payload);
+				}
+			    break;
 
 			default:
 				break;

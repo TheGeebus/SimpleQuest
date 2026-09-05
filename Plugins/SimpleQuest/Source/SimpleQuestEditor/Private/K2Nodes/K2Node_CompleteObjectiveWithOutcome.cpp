@@ -26,7 +26,7 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 	CreatePin(EGPD_Input, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Execute);
 	CreatePin(EGPD_Output, UEdGraphSchema_K2::PC_Exec, UEdGraphSchema_K2::PN_Then);
 
-	// OutcomeTag input pin — wireable. Pin's DefaultValue widget is UE's standard FGameplayTag picker;
+	// OutcomeTag input pin - wireable. Pin's DefaultValue widget is UE's standard FGameplayTag picker;
 	// wiring auto-hides the picker (UE built-in pin behavior). Picker filter comes from GetPinMetaData.
 	FEdGraphPinType OutcomePinType;
 	OutcomePinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
@@ -62,11 +62,11 @@ void UK2Node_CompleteObjectiveWithOutcome::AllocateDefaultPins()
 		"Quest Objective Activation Params Structure\n\n"
 		"Optional activation payload passed forward into any step(s) this completion activates next. Merges additively with\n"
 		"the downstream step's authored defaults (TargetActors union, NumElementsRequired sums, CustomData / Instigator\n"
-		"take caller-if-set). OriginChain is extended system-side regardless of whether this pin is connected — this payload\n"
+		"take caller-if-set). OriginChain is extended system-side regardless of whether this pin is connected - this payload\n"
 		"is for the rest of the activation data you want propagated.\n\n"
 		"Common uses: seeding a downstream kill-counter with actors the current step's objective discovered dynamically,\n"
 		"carrying a dialogue-choice struct forward as CustomData, or stamping an Instigator the next objective needs.\n"
-		"Leave unconnected to forward only the chain — the common case.").ToString();
+		"Leave unconnected to forward only the chain - the common case.").ToString();
 }
 
 FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(FGameplayTag* OutOutcome) const
@@ -92,7 +92,7 @@ FName UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity(FGameplayTag* Ou
 		return FName(*FString::Printf(TEXT("Dynamic %d"), DisplayNumber));
 	}
 
-	// 3. Static placement: parse the OutcomeTag pin's DefaultValue — this IS the outcome tag.
+	// 3. Static placement: parse the OutcomeTag pin's DefaultValue - this IS the outcome tag.
 	if (OutcomeTagPin->DefaultValue.IsEmpty())
 	{
 		return NAME_None;
@@ -207,12 +207,12 @@ FText UK2Node_CompleteObjectiveWithOutcome::GetTooltipText() const
 	return LOCTEXT("Tooltip",
 		"Completes this objective with the specified outcome tag.\n\n"
 		"Pins:\n"
-		"  • Outcome Tag — a gameplay tag representing the named Outcome for this Completion Path. Outcomes are reusable\n"
+		"  • Outcome Tag - a gameplay tag representing the named Outcome for this Completion Path. Outcomes are reusable\n"
 		"       broadcast channels independent of Quest event hierarchy. Subscribers may listen for all events of a given\n"
 		"       Outcome type or filter Quest event broadcasts by Outcome as needed.\n"
-		"  • Completion Context — per-trigger telemetry (actors, counts, typed payload) that rides the outbound QuestEndedEvent\n"
+		"  • Completion Context - per-trigger telemetry (actors, counts, typed payload) that rides the outbound QuestEndedEvent\n"
 		"		and is readable on the completed step via GetCompletionContext. Leave unconnected for empty.\n"
-		"  • Forward Params — optional activation payload propagated into the next step(s) this completion activates.\n"
+		"  • Forward Params - optional activation payload propagated into the next step(s) this completion activates.\n"
 		"       Merges additively with the downstream step's authored defaults. OriginChain is always extended system-side,\n"
 		"       so leaving this unconnected still forwards chain-of-activation info to downstream objectives.\n\n"
 		"Outcome tags set via the tag picker on these nodes are automatically discovered and reflected as output pins on the\n"
@@ -288,7 +288,7 @@ bool UK2Node_CompleteObjectiveWithOutcome::IsConnectionDisallowed(const UEdGraph
 
 
 // ---------------------------------------------------------------------------
-// UK2Node — compilation
+// UK2Node - compilation
 // ---------------------------------------------------------------------------
 
 void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph)
@@ -300,10 +300,10 @@ void UK2Node_CompleteObjectiveWithOutcome::ExpandNode(FKismetCompilerContext& Co
 	const bool bHasStaticTag = OutcomeTagPin && !OutcomeTagPin->DefaultValue.IsEmpty();
 
 	// Static placement validation: must have a tag set OR be wired. Wired-without-PathName is no longer
-	// an error — the path identity auto-falls-back to "Dynamic" via ResolvePathIdentity.
+	// an error - the path identity auto-falls-back to "Dynamic" via ResolvePathIdentity.
 	if (!bOutcomeTagWired && !bHasStaticTag)
 	{
-		CompilerContext.MessageLog.Error(*LOCTEXT("Err_NoTag", "@@: No outcome tag set (and no wired override) — node cannot compile.").ToString(), this);
+		CompilerContext.MessageLog.Error(*LOCTEXT("Err_NoTag", "@@: No outcome tag set (and no wired override) - node cannot compile.").ToString(), this);
 		BreakAllNodeLinks();
 		return;
 	}
@@ -362,11 +362,11 @@ void UK2Node_CompleteObjectiveWithOutcome::ValidateNodeDuringCompilation(FCompil
 
 	if (bHasStaticTag) return;  // picker resolves it, nothing to check
 
-	// LinkedTo is unreliable here — UE's compile pipeline runs validation on a transient graph copy
+	// LinkedTo is unreliable here - UE's compile pipeline runs validation on a transient graph copy
 	// that preserves DefaultValue but strips pin connections. Use the input exec pin as a canary: a
 	// real K2 node in an execution flow has its exec input connected. If it's empty, we're in the
 	// stripped-state copy and wire-presence checks would produce false positives. Defer to ExpandNode
-	// (which runs on the populated source graph) — it produces a hard Error if neither wire nor
+	// (which runs on the populated source graph) - it produces a hard Error if neither wire nor
 	// picker resolves at code-gen time, so real misconfigurations still surface.
 	const UEdGraphPin* ExecInPin = FindPin(UEdGraphSchema_K2::PN_Execute);
 	const bool bGraphStateIsReliable = ExecInPin && ExecInPin->LinkedTo.Num() > 0;
@@ -380,7 +380,7 @@ void UK2Node_CompleteObjectiveWithOutcome::ValidateNodeDuringCompilation(FCompil
 }
 
 // ---------------------------------------------------------------------------
-// UK2Node — palette registration
+// UK2Node - palette registration
 // ---------------------------------------------------------------------------
 
 void UK2Node_CompleteObjectiveWithOutcome::GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const
@@ -431,7 +431,7 @@ FString UK2Node_CompleteObjectiveWithOutcome::GetPinMetaData(FName InPinName, FN
 {
 	// FGameplayTag struct-pin customization reads "Categories" key to filter the picker namespace.
 	// Composes the default SimpleQuest.Outcome namespace with adopter-configured additional namespaces
-	// from USimpleQuestSettings — lets adopters bridge their own outcome tag trees into quest pickers
+	// from USimpleQuestSettings - lets adopters bridge their own outcome tag trees into quest pickers
 	// without forking source.
 	if (InPinName == TEXT("OutcomeTag") && InKey == TEXT("Categories"))
 	{

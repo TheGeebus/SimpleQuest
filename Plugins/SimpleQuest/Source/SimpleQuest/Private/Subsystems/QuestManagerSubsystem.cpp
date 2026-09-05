@@ -271,7 +271,7 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     if (!NodePtr) return;
 
     UQuestStep* Step = Cast<UQuestStep>(*NodePtr);
-    if (!Step || !Step->GetLiveObjective()) return;
+    if (!Step || !Step->GetLiveObjective() || Step->GetLiveObjective()->HasCompleted()) return;
 
     // Build the trigger context - reused by both refusal-feedback publishes below and the completion dispatch.
     FQuestObjectiveTriggerContext Context;
@@ -414,8 +414,29 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
             const FGameplayTag ResolvedTag = Instance->GetContextualTag();
             if (ResolvedTag.IsValid() && QuestSignalSubsystem)
             {
-                FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(ResolvedTag, this, &UQuestManagerSubsystem::HandleNodeDeactivatedEvent);
-                DeactivationSubscriptionHandles.Add(ResolvedTag, Handle);
+                // ONE SUBSCRIPTION PER CONTEXTUAL TAG. The handle map is keyed by tag, so a second subscribe on the same
+                // tag would overwrite the stored handle and orphan the first on the bus - still delivering, with nothing
+                // left holding the handle Deinitialize needs to reach it. Whether one tag can arrive here twice depends
+                // on how LoadedNodeInstances is keyed, and the two comments describing that (this function's, and
+                // ActivateNodeByTag's) currently disagree - so name the collision rather than assume it can't happen.
+                if (DeactivationSubscriptionHandles.Contains(ResolvedTag))
+                {
+                    UE_LOG(LogSimpleQuestActivation, Warning,
+                        TEXT("ActivateQuestlineGraph: '%s' already holds a deactivation subscription; instance '%s' in graph '%s' would "
+                             "orphan it. Skipping the duplicate subscribe - investigate why two instances share this ContextualTag."),
+                        *ResolvedTag.ToString(), *Instance->GetName(), *Graph->GetName());
+                }
+                else
+                {
+                    // *** EXACT CHANNEL ONLY. *** The default Descendants routing would also deliver every INNER node's
+                    // deactivation to this subscription, because an inner Step's tag is a descendant of its container's.
+                    // The handler resolves its node from the delivered channel, so those extra deliveries don't do
+                    // container work - they redo the STEP's work, activating NextNodesOnDeactivation once per ancestor
+                    // container. A node's own deactivation still publishes on its own tag, so container behavior is
+                    // unaffected. This is the case ESignalRoutingMode::ExactMatch was added for.
+                    FDelegateHandle Handle = QuestSignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(ResolvedTag, this, &UQuestManagerSubsystem::HandleNodeDeactivatedEvent, FSignalRoutingDefaults::ExactOnly);
+                    DeactivationSubscriptionHandles.Add(ResolvedTag, Handle);
+                }
             }
             if (UQuestStep* Step = Cast<UQuestStep>(Instance))
             {
@@ -1031,14 +1052,21 @@ TMap<FGuid, FSimpleQuestObjectiveSaveState> UQuestManagerSubsystem::CaptureObjec
 {
     TMap<FGuid, FSimpleQuestObjectiveSaveState> Out;
     TSet<const UQuestNodeBase*> Seen;
+    int32 WithObjective = 0;
+    int32 SkippedCompleted = 0;
     for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
     {
         UQuestStep* Step = Cast<UQuestStep>(Pair.Value);
         if (!Step || Seen.Contains(Step)) continue;   // alias-duplicate keys; visit each Step once
         Seen.Add(Step);
 
+        // A completed objective now outlives its completion so post-completion work can publish, but it has nothing
+        // worth persisting - restore only re-instantiates objectives for steps that are Live. Capturing it would
+        // grow the snapshot with entries that can never be applied.
         UQuestObjective* Objective = Step->GetLiveObjective();
         if (!Objective) continue;
+        ++WithObjective;
+        if (Objective->HasCompleted()) { ++SkippedCompleted; continue; }
 
         const FSimpleQuestObjectiveSaveState State = Objective->CaptureObjectiveState();
         if (State.bHasState && Step->GetQuestGuid().IsValid())
@@ -1046,6 +1074,18 @@ TMap<FGuid, FSimpleQuestObjectiveSaveState> UQuestManagerSubsystem::CaptureObjec
             Out.Add(Step->GetQuestGuid(), State);
         }
     }
+
+    // Objective state is written blind - this map goes straight into a binary save with nothing that reads it back
+    // at editor time. This is the only place its size is observable, and the number carries meaning: it should
+    // track how many steps are LIVE, never how many have been COMPLETED. A count that climbs across a playthrough
+    // means completed objectives are being persisted for a restore path that can never apply them.
+    UE_LOG(LogSimpleQuestState, Verbose,
+        TEXT("CaptureObjectiveStates: %d step(s) loaded, %d holding an objective, %d skipped as completed, %d contributed state"),
+        Seen.Num(),
+        WithObjective,
+        SkippedCompleted,
+        Out.Num());
+    
     return Out;
 }
 

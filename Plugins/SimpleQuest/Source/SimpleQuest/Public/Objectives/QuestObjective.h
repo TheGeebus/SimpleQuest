@@ -70,7 +70,7 @@ public:
 	 * Outcome Tag Discovery																						<br>
 	 * ---------------------																						<br>
 	 * The editor discovers outcome tags from two primary sources. All results merge
-	 * into a single deduplicated set — pins on the Step node reflect the union.
+	 * into a single deduplicated set - pins on the Step node reflect the union.
 	 *
 	 * 1. K2 Node Scan (Blueprint subclasses):																		
 	 *    - Place UK2Node_CompleteObjectiveWithOutcome nodes in event graphs.							
@@ -97,7 +97,7 @@ public:
 	 *			   CompleteObjectiveWithOutcome(Outcome_Reached);											
 	 *																									
 	 *    - Categories="Quest.Outcome" filters the tag picker to the outcome namespace.					
-	 *    - ObjectiveOutcome marks the property for discovery — no value needed,
+	 *    - ObjectiveOutcome marks the property for discovery - no value needed,
 	 *      presence is sufficient.
 	 *
 	 * Both sources are additive across the inheritance chain. A Blueprint subclass of a
@@ -106,7 +106,7 @@ public:
 	 * call to any C++ implementation on the appropriate branch in the child Objective blueprint.
 	 *
 	 * Override this virtual as a fallback for programmatic or dynamic outcomes that cannot be
-	 * expressed as individual UPROPERTY members or K2 nodes — e.g. configuration-driven outcomes
+	 * expressed as individual UPROPERTY members or K2 nodes - e.g. configuration-driven outcomes
 	 * computed at CDO construction time. Tags returned here are not constrained to the
 	 * SimpleQuest.Outcome namespace. Base implementation returns an empty array.
 	 *
@@ -115,10 +115,10 @@ public:
 	 */
 	virtual TArray<FGameplayTag> GetPossibleOutcomes() const;
 
-	// ── §4.33 Phase 1 — runtime self-introspection ─────────────────────────────────────────────────────────
+	// ── §4.33 Phase 1 - runtime self-introspection ─────────────────────────────────────────────────────────
 	//
 	// Lets an Objective discover its own identity in the framework's address space and find authored actors
-	// targeting its Step. OwningStepTag is cached at activation dispatch (lifetime-stable — the Objective
+	// targeting its Step. OwningStepTag is cached at activation dispatch (lifetime-stable - the Objective
 	// doesn't migrate between Steps). Alias-tag and trigger / giver lookups chain through the QuestState-
 	// Subsystem's existing query surface; no per-instance caching for the rare-cheap cases.
 
@@ -137,16 +137,16 @@ public:
 	EQuestObjectiveDeactivationReason GetDeactivationReason() const { return DeactivationReason; }
 
 	/**
-	 * Returns the AssetScopedAliasTags for this Objective's owning Step — every additional perspective tag
+	 * Returns the AssetScopedAliasTags for this Objective's owning Step - every additional perspective tag
 	 * that LinkedQuestline ancestors have registered for the Step. Empty for top-level content (typical case).
-	 * Uncached — lookup-per-call via QSS's existing alias index.
+	 * Uncached - lookup-per-call via QSS's existing alias index.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
 	TArray<FGameplayTag> GetOwningStepAliasTags() const;
 
 	/**
 	 * Convenience: every Trigger source currently registered against this Objective's owning Step (canonical
-	 * + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag — closes the "where are
+	 * + aliases). Pure composition over QuestStateSubsystem::GetActiveTriggersForTag - closes the "where are
 	 * the actors targeting me?" loop without adopters maintaining a parallel tag → actor registry.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|Objectives")
@@ -158,7 +158,7 @@ public:
 
 	/**
 	 * Step-facing entry point for initializing objective target parameters. Thin C++ forwarder to the protected
-	 * BlueprintNativeEvent SetObjectiveTarget — routes through the engine's UFunction thunk so BP overrides in
+	 * BlueprintNativeEvent SetObjectiveTarget - routes through the engine's UFunction thunk so BP overrides in
 	 * subclass objectives fire correctly. Not UFUNCTION; intentionally invisible to BP.
 	 */
 	void DispatchOnObjectiveActivated(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InOwningStepTag);
@@ -188,10 +188,18 @@ public:
 	 */
 	void DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason Reason);
 	
-	// ── Save/load — per-instance state hook ───────────────────────────────────────────────────────────────
+	/**
+	 * Step-facing entry point marking this Objective as released: its owning Step has unbound from it and dropped its
+	 * reference. Called from UQuestStep::ReleaseLiveObjective at the end of the frame the Objective completed in, or
+	 * immediately if the Step was interrupted. Every publish entry point checks the flag and warns, so work landing
+	 * past the boundary is audible instead of quietly reaching nobody. Not UFUNCTION; intentionally invisible to BP.
+	 */
+	void MarkReleased() { bIsReleased = true; }
+	
+	// ── Save/load - per-instance state hook ───────────────────────────────────────────────────────────────
 	//
 	// Objectives that carry durable per-instance progress (e.g. a running count) override these so save/load can
-	// persist and re-apply it. Base returns empty / no-op — a stateless objective needs nothing. Capture runs at save;
+	// persist and re-apply it. Base returns empty / no-op - a stateless objective needs nothing. Capture runs at save;
 	// Restore runs AFTER the objective is rebuilt on load (which has already reset it), so the override re-applies the
 	// saved values. BlueprintNativeEvent: C++ override appends _Implementation.
 
@@ -212,7 +220,7 @@ protected:
 	 * DispatchSetObjectiveTarget from C++; subclass BPs override normally (the Override dropdown still lists it).
 	 *
  	 * Delivered as two parts: Authored (this Step's design-time config) and Runtime (the caller's incoming context plus
-	 * framework-stamped provenance/outcome). The framework does NOT merge them — the objective composes whatever it needs,
+	 * framework-stamped provenance/outcome). The framework does NOT merge them - the objective composes whatever it needs,
 	 * with full provenance over which values are authored vs caller-supplied.
 	 *
 	 * @param Authored design-time config packed from the Step's UPROPERTYs (target classes/actors, element count, config asset)
@@ -226,9 +234,10 @@ protected:
 	 * objective: both the interruption path (abandon, blocked, cascade-deactivated) AND the completion
 	 * path. Override to unsubscribe from external event sources, tear down UI handles, release timers, etc.
 	 *
-	 * The objective is still live when this fires; LiveObjective on the step is nulled AFTER this dispatch
-	 * returns. Inside the override you can still call EnableQuestTargetActors(false), inspect TargetActors,
-	 * read state stored during OnObjectiveActivated, etc.
+	 * The objective is still live when this fires, and STAYS live for the rest of the frame, so work placed after a
+	 * Complete Objective node still reaches its listeners. The Step releases it at the end of the completing frame,
+	 * or immediately if the step was interrupted. Inside the override you can call EnableQuestTargetActors(false),
+	 * inspect TargetActors, read state stored during OnObjectiveActivated.
 	 *
 	 * BlueprintProtected: not callable from BP outside the UQuestObjective class hierarchy. Call via the
 	 * public DispatchOnObjectiveDeactivated from C++; subclass BPs override normally.
@@ -244,7 +253,7 @@ protected:
 	 * (via the K2 Complete Objective node in BP) to signal completion. Base class has no default implementation; override
 	 * in C++ or Blueprint subclasses.
 	 *
-	 * BlueprintProtected — not callable from BP outside the UQuestObjective class hierarchy. Call via the public
+	 * BlueprintProtected - not callable from BP outside the UQuestObjective class hierarchy. Call via the public
 	 * DispatchTryCompleteObjective from C++; subclass BPs override normally.
 	 *
 	 * Example child objectives: UGoToQuestObjective and UKillClassQuestObjective
@@ -268,13 +277,13 @@ protected:
 	
 	/**
 	 * Broadcasts an objective-progress signal to the framework via OnQuestObjectiveProgress. Progress events
-	 * are PURELY EXPLICIT — the framework never auto-fires Progress as part of completion or any other
+	 * are PURELY EXPLICIT - the framework never auto-fires Progress as part of completion or any other
 	 * implicit lifecycle path. Objectives that want a "final X/X tick" before completing call ReportProgress
 	 * with the final state, then CompleteObjectiveWithOutcome.
 	 *
 	 * Some objectives have no per-fire progress semantic at all (e.g., a binary "interacted yes/no" objective)
 	 * and never call this method. Listeners receive zero Progress events for those objectives, exactly as
-	 * intended — no event-shape filtering required at the listener side.
+	 * intended - no event-shape filtering required at the listener side.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Objectives")
 	void ReportProgress(const FQuestObjectiveTriggerContext& ProgressContext);
@@ -285,7 +294,7 @@ protected:
 	 * incoming fire doesn't satisfy game-logic conditions (wrong actor, missing item, wrong phase) and should be
 	 * surfaced to the trigger actor's UI rather than silently dropped.
 	 *
-	 * RefusalReason is designer-defined and consumed by the trigger actor's response handler — typically a
+	 * RefusalReason is designer-defined and consumed by the trigger actor's response handler - typically a
 	 * SimpleQuest.Refusal.* descendant or any tag whose subscribers know how to translate to UI / audio.
 	 *
 	 * Echoes the originating TriggerContext through to the published event so UQuestTriggerComponent's filter
@@ -299,10 +308,10 @@ protected:
 	 * Manually signals "the trigger side of this step's lifecycle is wrapping" without affecting the step's own
 	 * lifecycle. Step forwards to manager, which publishes FQuestTriggerDeactivatedEvent with EndReason = Manual.
 	 * Distinct from the auto-publish path fired by the manager adjacent to FQuestEndedEvent / FQuestDeactivatedEvent
-	 * (EndReason = Completed / Interrupted) — Manual fires don't change the step's state, only notify trigger-side
+	 * (EndReason = Completed / Interrupted) - Manual fires don't change the step's state, only notify trigger-side
 	 * subscribers.
 	 *
-	 * Use when an objective wants to release trigger-side audiences early — e.g., a multiphase objective that's
+	 * Use when an objective wants to release trigger-side audiences early - e.g., a multiphase objective that's
 	 * done with one trigger volume's input but isn't yet ready to complete the step.
 	 */
 	UFUNCTION(BlueprintCallable, meta = (BlueprintProtected = "true", AutoCreateRefTerm = "FinalContext"), Category = "Quest|Objectives")
@@ -342,7 +351,7 @@ private:
 	/**
 	 * Cached InContext from the most-recent DispatchTryCompleteObjective call. Used by ResolveTriggerContext to
 	 * auto-forward TriggeredActor / Instigator / CustomData when adopters call ReportProgress / Complete /
-	 * RefuseTrigger / PublishTriggerDeactivation without passing context — AND to force the framework-stamped
+	 * RefuseTrigger / PublishTriggerDeactivation without passing context - AND to force the framework-stamped
 	 * OriginatingTriggerComponent through immune to adopter mutation, guaranteeing the publishing trigger
 	 * component receives its own feedback.
 	 */
@@ -360,7 +369,7 @@ private:
 	
 	/**
 	 * Optional designer-supplied params to forward to downstream step activations on completion. Read by the step
-	 * via TakeForwardActivationParams. Empty (default) is the common case — in which only the chain propagation
+	 * via TakeForwardActivationParams. Empty (default) is the common case - in which only the chain propagation
 	 * fields get forwarded on handoff.
 	 */
 	UPROPERTY()
@@ -369,10 +378,32 @@ private:
 	/**
 	 * Cached identity of the Step that hosts this Objective. Set by UQuestStep::ActivateInternal via
 	 * DispatchOnObjectiveActivated before the BP event fires; cleared in DispatchOnObjectiveDeactivated.
-	 * Owning Step doesn't migrate during the Objective's lifetime — single cache, trivial property getter.
+	 * Owning Step doesn't migrate during the Objective's lifetime - single cache, trivial property getter.
 	 */
 	UPROPERTY(VisibleAnywhere)
 	FGameplayTag OwningStepTag;
+
+	/**
+	 * Set the moment CompleteObjectiveWithOutcome begins, before its broadcast, so a re-entrant call from inside
+	 * that broadcast is caught as well. Gates COMPLETION ONLY - every other publish entry point keeps working
+	 * afterward, which is what makes post-completion work a supported authoring pattern rather than a trap.
+	 */
+	UPROPERTY()
+	bool bHasCompleted = false;
+	
+	/**
+	 * Set by the owning Step when it releases this Objective. Distinct from bHasCompleted: an interrupted Objective is
+	 * released without ever completing, and a completed one stays unreleased for the remainder of its frame.
+	 */
+	UPROPERTY()
+	bool bIsReleased = false;
+
+	/**
+	 * Logs a Warning naming EntryPoint when this Objective has already been released, and reports whether it had. The
+	 * pure publishes warn and carry on - a delegate an adopter bound directly is still theirs to receive - while
+	 * CompleteObjectiveWithOutcome refuses, because it is the one that mutates state.
+	 */
+	bool WarnIfReleased(const TCHAR* EntryPoint) const;
 
 	/**
 	 * Set by DispatchOnObjectiveDeactivated before the BP event fires and cleared immediately after, so the getter is
@@ -391,4 +422,18 @@ public:
 	FORCEINLINE const TSet<TSoftClassPtr<AActor>>& GetTargetClasses() const { return TargetClasses; }
 	FQuestObjectiveTriggerContext TakeCompletionContext() { return MoveTemp(CompletionContext); }
 	FQuestObjectiveActivationContext TakeForwardActivationParams() { return MoveTemp(ForwardActivationParams); }
+	
+	/**
+	 * True once this objective has resolved. The Step reads it to avoid re-firing deactivation hooks, and the
+	 * save path reads it to skip capturing state for objectives that are done.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Quest|Objectives")
+	FORCEINLINE bool HasCompleted() const { return bHasCompleted; }
+	
+	/**
+	 * True once the owning Step has unbound from this Objective. Nothing published after this point reaches the
+	 * framework - the Objective says so rather than failing silently.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Quest|Objectives")
+	FORCEINLINE bool IsReleased() const { return bIsReleased; }
 };

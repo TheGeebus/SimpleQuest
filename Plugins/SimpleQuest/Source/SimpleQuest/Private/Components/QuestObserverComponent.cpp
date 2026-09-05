@@ -321,6 +321,9 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	//   - Apply implicit defaults (bObserveProgress / bObserveBlocked / bObserveUnblocked) ONLY on fresh
 	//     entries — Progress for run-phase UI auto-binding, Blocked/Unblocked as a symmetric pair for
 	//     block-state UI. Designer-authored entries keep their authored flag values for these.
+	// Deliberate copy, and load-bearing beyond the overlay below: RegisterSingleObservedTag hands Pair.Value on as a
+	// const reference that survives across BP broadcasts during catch-up. Iterating ObservedTags directly would let a
+	// handler calling RemoveObservedTag dangle it mid-fan-out.
 	TMap<FGameplayTag, FObservedQuestEventSettings> EffectiveObserved = ObservedTags;
 	for (const FQuestObservedTagSpec& Spec : GetImplicitlyObservedTags())
 	{
@@ -458,11 +461,18 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 
 	for (const FGameplayTag& EachTag : CatchUpTags)
 	{
-		const FQuestCatchUpFanout::FTagReconstruction R =
-			FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, QuestState);
+		// RemoveObservedTag is BlueprintCallable, so a handler on any pin below can unregister this tag mid-fan-out.
+		// SubscriptionHandlesByTag is written just before catch-up runs and cleared by UnregisterSingleObservedTag,
+		// which makes its absence the honest "we were stopped" signal. Settings is a reference into the caller's
+		// local EffectiveObserved copy, so returning here strands nothing.
+		if (!SubscriptionHandlesByTag.Contains(QuestTag)) return;
+
+		const FQuestCatchUpFanout::FTagReconstruction R = FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, QuestState);
 
 		for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
 		{
+			if (!SubscriptionHandlesByTag.Contains(QuestTag)) return;
+
 			switch (Event.EventType)
 			{
 			case EQuestLifecycleEventType::Activated:

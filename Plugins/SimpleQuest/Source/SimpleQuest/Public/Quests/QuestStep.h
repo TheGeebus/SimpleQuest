@@ -40,7 +40,7 @@ public:
 	
 	/**
 	 * Fired by OnObjectiveTriggerDeactivation (forwarded from the live objective's OnQuestObjectiveTriggerDeactivation
-	 * broadcast — manual fires only; the Completed / Interrupted auto-publishes happen manager-side adjacent to
+	 * broadcast - manual fires only; the Completed / Interrupted auto-publishes happen manager-side adjacent to
 	 * FQuestEndedEvent / FQuestDeactivatedEvent). Manager binds and publishes FQuestTriggerDeactivatedEvent(Manual).
 	 */
 	FOnNodeTriggerDeactivation OnNodeTriggerDeactivation;
@@ -59,7 +59,7 @@ public:
 	
 	/**
 	 * Save-restore replay. Rebuilds the live objective from a saved activation snapshot WITHOUT firing the lifecycle
-	 * (no OnNodeStarted, so no SetQuestLive / lifecycle events / entry record — those fired at the original start and
+	 * (no OnNodeStarted, so no SetQuestLive / lifecycle events / entry record - those fired at the original start and
 	 * were restored in bulk). Stamps EQuestActivationProvenance::Restored on the runtime context so the objective can
 	 * distinguish a load from a fresh start. Called by UQuestManagerSubsystem::RestoreQuestlineGraph for each Step the
 	 * restored WorldState marks Live. IncomingContext is the caller's saved runtime input (FQuestEntryArrival::
@@ -86,7 +86,7 @@ protected:
 	int32 NumberOfElements = 0;
 
 	/**
-	 * Designer-attached "blank slate" config for this Step's objective — the authored-side analog of the runtime
+	 * Designer-attached "blank slate" config for this Step's objective - the authored-side analog of the runtime
 	 * CustomData instanced struct. Point it at a UQuestObjectiveConfig subclass asset holding whatever typed
 	 * configuration the objective wants; the objective casts it on read. The picker filters to UQuestObjectiveConfig
 	 * and its descendants.
@@ -108,7 +108,7 @@ protected:
 	
 public:
 	/**
-	 * The runtime half of the activation context handed to the objective — the caller's IncomingContext plus the
+	 * The runtime half of the activation context handed to the objective - the caller's IncomingContext plus the
 	 * framework-stamped Provenance and IncomingOutcomeTag. Set in ActivateInternal before OnNodeStarted fires, so
 	 * HandleOnNodeStarted's RecordEntry captures a populated snapshot for the registry's start record. Also drives
 	 * chain propagation: ChainToNextNodes reads IncomingContext.OriginChain to extend the forwarded chain for
@@ -153,11 +153,25 @@ private:
 
 	/**
 	 * Instantiates LiveObjective, wires its delegates, registers it with the state subsystem, and dispatches
-	 * OnObjectiveActivated. The instantiation half of activation with no lifecycle side effects — shared by the normal
+	 * OnObjectiveActivated. The instantiation half of activation with no lifecycle side effects - shared by the normal
 	 * ActivateInternal path and the save-restore RestoreObjective path.
 	 */
 	void InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& Authored, const FQuestObjectiveRuntimeContext& Runtime, FGameplayTag InContextualTag);
 
+	/**
+	 * Unbinds this Step from LiveObjective, marks the objective released, and drops the reference. The single place the
+	 * Step lets go of an objective: at the end of the frame a completion happened in, immediately on interruption, and
+	 * defensively if a new activation arrives while an old objective is still held.
+	 */
+	void ReleaseLiveObjective();
+
+	/**
+	 * Queues ReleaseLiveObjective for the next tick, so the completing frame's execution chain - the Blueprint work
+	 * placed after a Complete Objective node, and the manager's whole resolution cascade - runs with this Step still
+	 * listening. Releases immediately when there is no world to schedule against.
+	 */
+	void ScheduleCompletedObjectiveRelease();
+	
 public:
 	FORCEINLINE TSoftClassPtr<UQuestObjective> GetQuestObjective() const { return QuestObjective; }
 	FORCEINLINE const TSet<TSoftObjectPtr<AActor>>& GetTargetActors() const { return TargetActors; }

@@ -7,7 +7,7 @@
 #include "Engine/GameInstance.h"
 #include "Kismet/GameplayStatics.h"
 #include "UObject/GCObjectScopeGuard.h"
-#include "QuickStartSaveGame.h"
+#include "Demo/QuickStartSaveGame.h"
 #include "Events/QuestGivenEvent.h"
 #include "Objectives/CountingQuestObjective.h"
 #include "Quests/Types/QuestOutcomeTags.h"

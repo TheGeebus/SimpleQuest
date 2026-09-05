@@ -38,16 +38,24 @@ public:
 
 	/**
 	 * Announce that this object has state to persist. Call it from BeginPlay: if a restore is staged, the target's data
-	 * is applied immediately, so the caller never has to ask whether a load is in progress.
+	 * is applied immediately, so the caller never has to time its registration against the load.
+	 *
+	 * Returns true when saved state was applied during this call - branch on it to decide whether to initialize
+	 * defaults. False means either nothing was staged (a fresh game) or the target was unset, which warns.
+	 *
+	 * A staged restore is deliberately never cleared, so a target registering long after a load is also handed
+	 * save-time state and told it was restored. Fine for actors that spawn at level start; a game spawning targets
+	 * mid-session would want the restore consumed or scoped.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "QuickStart|Save")
-	void RegisterSaveTarget(const TScriptInterface<IQuickStartSaveTarget>& Target);
+	UFUNCTION(BlueprintCallable, Category = "QuickStart|Save", meta = (ReturnDisplayName = "Restored"))
+	bool RegisterSaveTarget(const TScriptInterface<IQuickStartSaveTarget>& Target);
+
+	virtual void Deinitialize() override;
 
 private:
 	/**
-	 * The save being restored, held across the level reload - which is the whole reason this lives on the GameInstance.
-	 * Deliberately NOT cleared once applied, so a target registering later still catches up; a subsequent load replaces
-	 * it. Simplification worth knowing: an actor spawned long after a load would also be handed save-time state.
+	 * The save being restored, held from the load until the end of the frame after the level opens, so targets
+	 * registering from BeginPlay catch up. Consumed after that: a later registration is a fresh spawn.
 	 */
 	UPROPERTY()
 	TObjectPtr<UQuickStartSaveGame> PendingRestore;
@@ -56,5 +64,10 @@ private:
 	TArray<TWeakObjectPtr<UObject>> SaveTargets;
 
 	void ForEachLiveTarget(TFunctionRef<void(UObject&)> Visit);
+
+	void ArmRestoreConsumption();
+	void HandleWorldInitForRestore(UWorld* World, const UWorld::InitializationValues IVS);
+
+	FDelegateHandle PostWorldInitHandle;
 };
 

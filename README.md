@@ -246,7 +246,7 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
             // Wire up listeners, subscribe to signals, store local tracking state, spawn UI, etc.
             // Authored: design-time config from the Step's UPROPERTYs (target classes/actors, element count,
             //           config asset). Owned by the Step, not the caller.
-            // Runtime:  caller's IncomingContext (instigator, custom data, lineage, target overrides) plus
+            // Runtime:  caller's IncomingParams (instigator, custom data, lineage, target overrides) plus
             //           Provenance and IncomingOutcomeTag stamped by the framework.
             // The framework does NOT merge these - compose what you need, with full provenance over which
             // values are authored vs caller-supplied.
@@ -281,7 +281,13 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
         }
     };
 ```
-`UGoToQuestObjective` and `UInteractAllTargetsObjective` in `Objectives/Examples/` are working references for this pattern.
+`UGoToQuestObjective`, `UInteractAllTargetsObjective` and `UKillClassQuestObjective` in `Objectives/Examples/` are working references for this pattern.
+
+**A Step resolves once per activation, and work placed after the completion still runs.** Calling `CompleteObjectiveWithOutcome` a second time on the same activation is refused and logged - the first outcome sticks. But the nodes after a Complete Objective node are not dead ends: the Objective stays live for the rest of that frame, so a trailing `PublishTriggerSatisfied`, a cleanup publish, or any other work reaches its listeners normally. The owning Step releases the Objective at the end of the completing frame.
+
+Ordering is yours to author. Publishing trigger-satisfied *after* completing means a watching Trigger hears Deactivated before Satisfied, because the deactivation publish rides the completion. That is visible and accountable-for, so the framework allows the arrangement rather than forbidding it.
+
+Anything reaching the Objective after that release warns rather than failing silently. Objectives are asset-owned and have no world of their own, so `Delay` and the timer nodes are unavailable inside one - the only way to act on a later frame is a delegate bound to something world-owned. If such a callback publishes after the release, you get a warning naming the entry point instead of a call that quietly reaches nobody.
 
 ### Completion Path discovery
 

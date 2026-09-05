@@ -5,7 +5,17 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.1] — 2026-08-30 — Conditions and Answers
+## [0.9.0] — Unreleased — Conditions and Endings
+
+> **Unreleased.** The last tagged version is 0.8.0, and both `.uplugin` files
+> still read `0.8.0`. Everything below ships when this is tagged.
+
+An Objective's life got a defined ending. Work placed after a completion is now
+a supported pattern with a boundary rather than something that silently reached
+nobody, a Step resolves once per activation and says so if you ask twice, and a
+questline's Deactivated wire finally does what it says instead of compiling into
+an activation route. The structs that describe an activation also got named for
+what they are.
 
 Rewards learned to say no, and advertisements learned to say why. A reward can
 now fire on a first completion only, pay across a range of runs, require
@@ -69,6 +79,12 @@ expected you to know where the reward had been authored.
   gives a preview a stable identity it never had: advertised values are computed
   live, so a UI re-queries constantly, and two 50-XP rewards used to be
   indistinguishable from one reward recomputed.
+
+- **Observe Quest Lifecycle exposes Activation Failed and Progress Refused.**
+  The observer component has always published both; the Blueprint async node
+  omitted them, so the same two refusals were reachable from a component and
+  invisible from a node. Anything that can be observed one way can now be
+  observed the other.
 
 ### Changed
 
@@ -137,6 +153,43 @@ expected you to know where the reward had been authored.
   matching how the rewards themselves are organized. Update the include path if
   you referenced `Rewards/QuestRewardModifier.h` directly.
 
+- **Work placed after a Complete Objective node now runs, and has a defined
+  end.** Completing used to tear the Objective down on the spot, so a trailing
+  `Publish Trigger Satisfied` or cleanup publish reached nobody - no error, no
+  warning, just nothing. The Objective now stays live for the remainder of the
+  completing frame and its Step releases it at the end of that frame. Anything
+  arriving later warns and names the entry point rather than failing silently.
+
+  - **A Step resolves once per activation.** A second `Complete Objective With
+  Outcome` on the same activation is refused and logged; the first outcome
+  sticks. Put mutually exclusive completions on separate branches.
+
+  - **Completing with `Any Outcome` is refused.** It describes a pin that fires
+  regardless of outcome, not an outcome a Step can end on - completing with it
+  resolved the Step on a path nothing could match, so downstream prerequisites
+  and outcome filters never fired while the routing still looked correct.
+
+  - **Ordering after a completion is yours.** Publishing trigger-satisfied after
+  completing means a watching Trigger hears Deactivated before Satisfied. That
+  is visible and accountable-for, so it is allowed rather than forbidden.
+
+- **Three framework-stamped fields are no longer writable from Blueprint.**
+  `OriginatingEventID`, `Provenance` and `IncomingOutcomeTag` were documented as
+  framework-owned but exposed as Make-node inputs and details-panel fields.
+  `OriginatingEventID` in particular feeds the wrapper-boundary deduplication
+  gate, where a hand-authored duplicate would silently suppress a legitimate
+  completion. All three stay readable on Break nodes and in the details panel.
+  `OriginTag` and `OriginChain` remain writable - both have real caller-side
+  entry points.
+
+- **`FQuestObjectiveActivationContext` is now `FQuestObjectiveActivationParams`,
+  and `FQuestObjectiveRuntimeContext::IncomingContext` is `IncomingParams`.**
+  The type is an argument list handed forward to the next activation, not a
+  description of circumstances like the Trigger and Runtime contexts - and it
+  nested inside one under a Context-shaped name. Every call site already said
+  Params. **Core redirects ship with the plugin**, so assets and Blueprints heal
+  on load; C++ referring to the old names needs the rename.
+
 ### Fixes
 
 - **Three ensures no longer fire on editor startup.** The advancement-hold
@@ -196,6 +249,35 @@ expected you to know where the reward had been authored.
 - **Step nodes say "Triggers"** where they said "Targets", matching what the
   component has been called since the trigger and observer split.
 
+- **A questline's Deactivated wire had no effect.** Wiring the Start node's
+  Deactivated pin to a Step's Deactivate input compiled into an *entry* route
+  instead of a deactivation route, so deactivating the questline left everything
+  inside it running. The wire read as broken rather than absent - anyone who
+  authored one got silence. It works now for all three boundary kinds: inline
+  Quest containers, Linked Questline placements, and a graph's own Start node.
+  The cascade travels transitively, including through an already-completed
+  linked questline into the chapter beyond it.
+
+- **Deactivation fired once per enclosing container instead of once.** A Step's
+  deactivation reached the manager's handler through its own subscription and
+  again through every ancestor container's, because the subscription accepted
+  descendant channels. Each extra delivery re-ran the *Step's* work, so a
+  Deactivated-to-Activate wire activated its target once per nesting level -
+  publishing a spurious activation-refused event each time.
+
+- **Cancelling an observer mid-catch-up did not stop it.** `Observe Quest
+  Lifecycle` replays existing state when it starts; calling `Cancel` from a
+  handler on one of those pins unsubscribed the node but the replay kept firing
+  the remaining pins. Worst on a subscription bound to a parent tag, where the
+  replay covers every descendant. The observer component had the same shape with
+  `Remove Observed Tag`.
+
+- **Right-clicking a tag in an inline picker crashed the editor.** Opening the
+  tag picker on a graph node and right-clicking an entry brought down the
+  session ("Window Creation Failed"). The selection rebuilt the node's widgets
+  synchronously, destroying the window the context menu was about to parent
+  itself to. Seven pickers were affected.
+
 ### QuickStart
 
 - **The tutorial is eleven chapters and teaches rewards.** A Rewards chapter
@@ -223,6 +305,19 @@ expected you to know where the reward had been authored.
   spot, so a character calls in from BeginPlay without knowing whether it
   spawned into a fresh game or a restored one - the same catch-up behavior quest
   components already have.
+
+- **The chapters teach, rather than only demonstrate.** Chapters one through
+  seven carry narrative beats for the player and graph comments written for the
+  author, so a chapter explains the concept it exhibits instead of leaving the
+  graph to speak for itself. The remaining chapters are in progress.
+
+- **`OBJ_InteractWithTarget` is an annotated reference for writing an
+  Objective.** It walks the basic flow - receive a trigger event, notify the
+  trigger it was counted, complete on an outcome - and carries the surrounding
+  surface an author needs but would otherwise have to find: the events that
+  refuse or report progress, what the Authored Config and Runtime Context each
+  carry, and how to declare an outcome dynamically at runtime. The unwired nodes
+  are deliberate; they are the palette, kept beside the flow that uses them.
 
 ---
 

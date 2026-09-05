@@ -661,6 +661,8 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	InGraph->EntryNodeTags.Empty();
 	InGraph->CompiledQuestTags.Empty();
 	InGraph->CompiledNodeAliases.Empty();
+	InGraph->EntryDeactivatedActivateTags.Empty();
+	InGraph->EntryDeactivatedDeactivateTags.Empty();
 	AllCompiledNodes.Empty();
 	UtilityNodeKeyMap.Empty();
 	CompiledAliasFNamesByContextualTag.Empty();
@@ -714,6 +716,12 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// This graph's own questline-level rewards, harvested under its root identity (linked children are harvested
 	// separately inside the LinkedQuestline recursion below, each under its own inner identity).
 	HarvestQuestlineRewards(InGraph, InGraph, RootAssetIdentityName);
+
+	// This graph's OWN Entry-node Deactivated routing. The output-wiring loop handles the same pin for inner graphs
+	// wrapped by a Quest container or a LinkedQuestline placement, landing it on those nodes' instances - a top-level
+	// graph has no instance at its identity tag to carry it, so it is filed on the asset and dispatched by identity.
+	// TagPrefix unqualified here, not TagPrefix + label: the root graph's own nodes compile directly under it.
+	MergeEntryDeactivatedRouting(InGraph->QuestlineEdGraph, TagPrefix, VisitedAssetPaths, InGraph->EntryDeactivatedActivateTags, InGraph->EntryDeactivatedDeactivateTags);
 
 	// Flatten contextual→alias map into the persisted pairs array. One entry per (Contextual, Alias) pair so a node with
 	// N aliases produces N entries; nodes without aliases (top-level, no LinkedQuestline ancestors) produce none.

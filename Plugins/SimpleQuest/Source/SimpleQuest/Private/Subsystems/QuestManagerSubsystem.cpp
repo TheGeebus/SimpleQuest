@@ -2654,17 +2654,46 @@ void UQuestManagerSubsystem::SetQuestDeactivated(FGameplayTag QuestTag, EDeactiv
 
 void UQuestManagerSubsystem::CascadeDeactivation(FGameplayTag QuestTag, EDeactivationSource Source)
 {
-    UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName());
-    if (!Node) return;
-
     // Each compile-time FName is in the source node's compile-context perspective; ResolveToCanonicalTag converts to
     // the perspective IsDeactivated lookups use. Recurses into SetQuestDeactivated, whose visited guard breaks cycles.
-    for (const FName& Tag : Node->GetNextNodesToDeactivateOnDeactivation())
+    auto DeactivateEach = [this, Source](const auto& TagNames)
     {
-        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
-        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
-        if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, Source);
+        for (const FName& Tag : TagNames)
+        {
+            const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+            const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+            if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, Source);
+        }
+    };
+
+    if (UQuestNodeBase* Node = LoadedNodeInstances.FindRef(QuestTag.GetTagName()))
+    {
+        DeactivateEach(Node->GetNextNodesToDeactivateOnDeactivation());
+        return;
     }
+
+    // No instance at this tag, which is the top-level questline case: UQuestlineNode_Entry mints no runtime node, so
+    // an asset's identity tag has facts and publishes but nothing to dispatch through. Its Entry routing lives on the
+    // asset instead, reachable through the by-identity registry RegisterQuestlineGraph already maintains.
+    // BOTH halves run here. The activate half has nowhere else to go either - HandleNodeDeactivatedEvent is
+    // subscribed per node, and an identity tag has no subscription to deliver to.
+    const TWeakObjectPtr<UQuestlineGraph>* GraphPtr = LiveGraphsByIdentity.Find(QuestTag);
+    UQuestlineGraph* Graph = GraphPtr ? GraphPtr->Get() : nullptr;
+    if (!Graph) return;
+
+    const int32 ActivateCount = Graph->GetEntryDeactivatedActivateTags().Num();
+    const int32 DeactivateCount = Graph->GetEntryDeactivatedDeactivateTags().Num();
+    if (ActivateCount == 0 && DeactivateCount == 0) return;
+
+    UE_LOG(LogSimpleQuestActivation, Log,
+        TEXT("CascadeDeactivation: questline '%s' - activating %d, cascading deactivation to %d"),
+        *QuestTag.ToString(), ActivateCount, DeactivateCount);
+
+    for (const FName& Tag : Graph->GetEntryDeactivatedActivateTags())
+    {
+        ActivateNodeByTag(Tag, EQuestActivationProvenance::DeactivationCascade);
+    }
+    DeactivateEach(Graph->GetEntryDeactivatedDeactivateTags());
 }
 
 void UQuestManagerSubsystem::HandleNodeDeactivatedEvent(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)

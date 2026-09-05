@@ -51,7 +51,8 @@ public:
 	 * shared, and a name colliding with an inline reward's is a hard crash whenever their classes differ.
 	 * ContextLabel names the owner in a diagnostic; DiagnosticNode is optional and makes the log entry clickable.
 	 */
-	void FlattenRewardSets(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+	void FlattenRewardSets(
+		const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
 		UObject* Outer,
 		const FString& NamePrefix,
 		const FString& ContextLabel,
@@ -162,13 +163,14 @@ private:
 	 * should be granted twice, while a set reachable from itself never terminates. A visited set would conflate the
 	 * two and silently drop the second legitimate inclusion.
 	 */
-	void FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
-	                               UObject* Outer,
-	                               const FString& NamePrefix,
-	                               const FString& ContextLabel,
-	                               const UEdGraphNode* DiagnosticNode,
-	                               TArray<const URewardSetDataAsset*>& OnPath,
-	                               TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
+	void FlattenRewardSetsInternal(
+		const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+		UObject* Outer,
+		const FString& NamePrefix,
+		const FString& ContextLabel,
+		const UEdGraphNode* DiagnosticNode,
+		TArray<const URewardSetDataAsset*>& OnPath,
+		TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
 
 	/**
 	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during

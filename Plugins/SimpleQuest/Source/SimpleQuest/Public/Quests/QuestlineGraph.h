@@ -172,6 +172,21 @@ private:
     TMap<FName, FQuestCompiledQuestlineRewards> CompiledQuestlineRewards;
     
     /**
+     * Destinations wired from THIS questline's own Entry node Deactivated pin, split the way a content node's
+     * Deactivated pin is: wires into Activate inputs in the first set, into Deactivate inputs in the second.
+     * A top-level graph has no runtime node at its identity tag - UQuestlineNode_Entry mints no instance, and the
+     * asset-level lifecycle is manager-owned (ActivateQuestlineGraph publishes Activated/Started and writes Live;
+     * PublishGraphResolutions writes Completed) - so this routing is filed on the asset and dispatched by identity,
+     * the same shape CompiledQuestlineRewards uses for the same reason. A Quest container or LinkedQuestline
+     * placement carries its inner graph's equivalent on the node instance instead.
+     */
+    UPROPERTY()
+    TArray<FName> EntryDeactivatedActivateTags;
+
+    UPROPERTY()
+    TArray<FName> EntryDeactivatedDeactivateTags;
+    
+    /**
      * GroupTags this graph's UActivationGroupListenerNode instances subscribe to. Stamped by the compiler after
      * registration. Surfaced via GetAssetRegistryTags so the manager can build an inverted GroupTag→graphs index at
      * startup and async-load listener graphs reachable from any currently-loaded graph's setters. Inherits via
@@ -252,6 +267,8 @@ public:
     const TArray<FGameplayTag>& GetListenerGroupTags() const { return ListenerGroupTags; }
     const TMap<FName, FQuestCompiledQuestlineRewards>& GetCompiledQuestlineRewards() const { return CompiledQuestlineRewards; }
     uint32 GetCompiledSourceHash() const { return CompiledSourceHash; }
+    const TArray<FName>& GetEntryDeactivatedActivateTags() const { return EntryDeactivatedActivateTags; }
+    const TArray<FName>& GetEntryDeactivatedDeactivateTags() const { return EntryDeactivatedDeactivateTags; }
 
     /**
      * This questline's own identity tag - what resolutions of its root-scope Exits attribute to, and the key its

@@ -1687,32 +1687,32 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
         	}        	
         }
 
-        // Entry Deactivated pin: merge inner Entry node's deactivation routing into this Quest instance
-        if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
-        {
-            if (UEdGraph* InnerGraph = QuestEdNode->GetInnerGraph())
-            {
-                for (UEdGraphNode* InnerNode : InnerGraph->Nodes)
-                {
-                    if (UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode))
-                    {
-						if (UEdGraphPin* DeactivatedPin = EntryNode->GetPinByRole(EQuestPinRole::DeactivatedOut))
-                        {
-                            if (!DeactivatedPin->bOrphanedPin && DeactivatedPin->LinkedTo.Num() > 0)
-                            {
-                                const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-                                const FString InnerPrefix = TagPrefix + TEXT(".") + Label;
-                                TArray<FName> ActivateTags, DeactivateTags;
-                                ResolveDeactivatedPinToTags(DeactivatedPin, InnerPrefix, VisitedAssetPaths, ActivateTags, DeactivateTags);
-                                for (const FName& Tag : ActivateTags)  Instance->NextNodesOnDeactivation.Add(Tag);
-                                for (const FName& Tag : DeactivateTags) Instance->NextNodesToDeactivateOnDeactivation.Add(Tag);
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
+		// Entry Deactivated pin: merge an inner graph's Entry-node deactivation routing onto THIS instance. Runs for
+		// both boundary kinds that have a runtime instance - an inline Quest container and a LinkedQuestline
+		// placement. A top-level graph has no instance at its identity tag; its Entry routing is filed on the asset
+		// instead (see UQuestlineGraph::EntryDeactivated*Tags).
+		{
+			TArray<FName> ActivateTags, DeactivateTags;
+
+			if (UQuestlineNode_Quest* QuestEdNode = Cast<UQuestlineNode_Quest>(ContentNode))
+			{
+				const FString InnerPrefix = TagPrefix + TEXT(".") + SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+				MergeEntryDeactivatedRouting(QuestEdNode->GetInnerGraph(), InnerPrefix, VisitedAssetPaths, ActivateTags, DeactivateTags);
+			}
+			else if (UQuestlineNode_LinkedQuestline* LinkedEdNode = Cast<UQuestlineNode_LinkedQuestline>(ContentNode))
+			{
+				// LinkedQuestline's tag segment comes from NodeLabel, not GetNodeTitle - the title is the referenced
+				// asset's name, which multiple placements share. Same rule the label formula uses at registration.
+				const FString InnerPrefix = TagPrefix + TEXT(".") + SanitizeTagSegment(ContentNode->NodeLabel.ToString());
+				if (const UQuestlineGraph* LinkedAsset = LinkedEdNode->LinkedGraph.LoadSynchronous())
+				{
+					MergeEntryDeactivatedRouting(LinkedAsset->QuestlineEdGraph, InnerPrefix, VisitedAssetPaths, ActivateTags, DeactivateTags);
+				}
+			}
+
+			for (const FName& Tag : ActivateTags)   Instance->NextNodesOnDeactivation.Add(Tag);
+			for (const FName& Tag : DeactivateTags) Instance->NextNodesToDeactivateOnDeactivation.Add(Tag);
+		}
         
         // Mark nodes whose output chain reaches an exit - they complete their parent graph
         {
@@ -1757,8 +1757,15 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
 		{
 		    if (Pin->Direction != EGPD_Output) continue;
 		    if (Pin->bOrphanedPin) continue;
-		    if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
+			if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
 
+			// Deactivated is a routing SOURCE, not an entry route. ResolvePinToTags is destination-agnostic - it
+			// collects destination tags without consulting which input pin the wire landed on - so letting this pin
+			// through would compile "deactivate X when this boundary ends" into "activate X on entry."
+			// MergeEntryDeactivatedRouting handles it, splitting destinations the way a content node's own
+			// Deactivated pin is split.
+			if (Pin->PinType.PinCategory == TEXT("QuestDeactivated")) continue;
+			
 		    TArray<FName> PinDests;
 		    ResolvePinToTags(Pin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, PinDests, UnusedBoundaryCompletions);
 		    EntryTags.Append(PinDests);
@@ -2624,6 +2631,27 @@ void FQuestlineGraphCompiler::ResolveDeactivatedPinToTags(
             OutActivateTags.AddUnique(*UtilKey);
         }
     }
+}
+
+void FQuestlineGraphCompiler::MergeEntryDeactivatedRouting(
+	const UEdGraph* InnerGraph,
+	const FString& InnerPrefix,
+	TArray<FString>& VisitedAssetPaths,
+	TArray<FName>& OutActivateTags,
+	TArray<FName>& OutDeactivateTags)
+{
+	if (!InnerGraph) return;
+
+	for (UEdGraphNode* InnerNode : InnerGraph->Nodes)
+	{
+		UQuestlineNode_Entry* EntryNode = Cast<UQuestlineNode_Entry>(InnerNode);
+		if (!EntryNode) continue;
+
+		UEdGraphPin* DeactivatedPin = EntryNode->GetPinByRole(EQuestPinRole::DeactivatedOut);
+		if (!DeactivatedPin || DeactivatedPin->bOrphanedPin || DeactivatedPin->LinkedTo.Num() == 0) continue;
+
+		ResolveDeactivatedPinToTags(DeactivatedPin, InnerPrefix, VisitedAssetPaths, OutActivateTags, OutDeactivateTags);
+	}
 }
 
 void FQuestlineGraphCompiler::AddNodeNavigationToken(TSharedRef<FTokenizedMessage>& Msg, const UEdGraphNode* Node)

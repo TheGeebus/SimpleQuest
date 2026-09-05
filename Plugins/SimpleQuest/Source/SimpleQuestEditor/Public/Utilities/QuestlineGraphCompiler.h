@@ -348,6 +348,18 @@ private:
 		TArray<FName>& OutDeactivateTags);
 
 	/**
+	 * Resolves an inner graph's Entry-node Deactivated pin into the two routing sets a boundary instance carries.
+	 * Shared by the inline-Quest and LinkedQuestline paths - both wrap an inner graph whose Entry node describes what
+	 * happens when that boundary deactivates.
+	 */
+	void MergeEntryDeactivatedRouting(
+		const UEdGraph* InnerGraph,
+		const FString& InnerPrefix,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<FName>& OutActivateTags,
+		TArray<FName>& OutDeactivateTags);
+
+	/**
 	 * Emits a tokenized compile-time warning when a single content-node output pin reaches two or more distinct Outcome
 	 * terminals sharing the same OutcomeTag. The compiler accepts the union of reached destinations, but the authoring
 	 * is ambiguous - one outcome should route through one terminal. Called from the outcome-routing pass after

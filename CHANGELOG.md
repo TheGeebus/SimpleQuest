@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.9.0] — Unreleased — Conditions and Endings
+## [0.8.1] — Unreleased — Conditions and Endings
 
 > **Unreleased.** The last tagged version is 0.8.0, and both `.uplugin` files
 > still read `0.8.0`. Everything below ships when this is tagged.

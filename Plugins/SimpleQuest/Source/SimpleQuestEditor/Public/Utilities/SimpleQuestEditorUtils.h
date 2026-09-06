@@ -241,10 +241,10 @@ public:
 
 	/**
 	 * Finds givers attached to this node's CONTEXTUAL inlined compiled tags, i.e., tags emitted by OUTER questline assets
-	 * that LinkedQuestline-reference this node's home asset. Walks the Asset Registry's CompiledQuestTags AR tag on every
-	 * questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative path
-	 * (everything past "SimpleQuest.Questline.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids double-counting
-	 * entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
+	 * that LinkedQuestline-reference this node's home asset at any depth. Walks the Asset Registry's CompiledQuestTags AR
+	 * tag on every questline asset except the home asset, matching by literal-dot-prefixed suffix on the node's relative
+	 * path (everything past "SimpleQuest.Questline.<HomeQuestlineID>."). AR reads only, no sync-load. Home-asset skip avoids
+	 * double-counting entries already surfaced via FindActorNamesGivingTag on the node's standalone compiled tag.
 	 *
 	 * Outer asset display name sources from the DisplayName AR tag when present, falling back to the asset short name.
 	 * Results sorted by (OuterAssetDisplayName, ActorName) and deduped on that pair.
@@ -254,8 +254,8 @@ public:
 	/**
 	 * Scans the Asset Registry for other questline assets whose CompiledQuestTags list contains an entry that ends with
 	 * this node's relative path (post home-ID prefix strip). Returns the matching runtime tags — i.e., the contextual
-	 * nested variants of this node's tag under every OUTER asset that LinkedQuestline-references the home. Empty when
-	 * the node is used only in its own asset.
+	 * nested variants of this node's tag under every OUTER asset that LinkedQuestline-references the home, directly or
+	 * through intermediate assets. Empty when the node is used only in its own asset.
 	 */
 	static TArray<FGameplayTag> CollectContextualNodeTagsForEditorNode(const UQuestlineNode_ContentBase* ContentNode);
 	

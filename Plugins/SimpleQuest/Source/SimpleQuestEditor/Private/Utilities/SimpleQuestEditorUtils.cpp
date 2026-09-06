@@ -47,19 +47,22 @@
 
 namespace
 {
-    /** (ContextualTag, ParentAssetDisplayName) pairs — shared output of the AR walk for a single editor node. */
+    /** (ContextualTag, ParentAssetDisplayName) pairs - shared output of the AR walk for a single editor node. */
     struct FQuestContextualTagMatch
     {
         FGameplayTag Tag;
         FText ParentAssetDisplayName;
     };
 
-    /**
-     * Scans the Asset Registry for questline assets (other than this node's home) whose CompiledQuestTags contain an
-     * entry ending with this node's relative path. Returns one match per compiled-tag hit, with the parent asset's
-     * display name (DisplayName override if present, otherwise asset name). Used by both the tag-only and
-     * actor-entry public accessors below.
-     */
+	/**
+	 * Scans the Asset Registry for questline assets (other than this node's home) whose CompiledQuestTags contain an
+	 * entry ending with this node's relative path. Returns one match per compiled-tag hit, with the parent asset's
+	 * display name (DisplayName override if present, otherwise asset name). Used by both the tag-only and
+	 * actor-entry public accessors below.
+	 *
+	 * Reaches assets that link the home INDIRECTLY, not just its immediate parents - a chapter that links a routine
+	 * which in turn links a shared sub-questline still contributes its perspective on that sub-questline's nodes.
+	 */
     TArray<FQuestContextualTagMatch> CollectContextualTagMatchesForEditorNode(const UQuestlineNode_ContentBase* ContentNode)
     {
         TArray<FQuestContextualTagMatch> Result;
@@ -93,15 +96,42 @@ namespace
     	TArray<FAssetData> QuestlineAssets;
     	AR.GetAssetsByClass(UQuestlineGraph::StaticClass()->GetClassPathName(), QuestlineAssets);
 
-    	// Filter to assets that actually reference the home asset's package. An asset that doesn't reference
-    	// the home asset can't have a LinkedQuestline node pointing at it, so its tags can't legitimately be
-    	// contextualized inlinings of this node. They're at most coincidental leaf-name collisions. Without
-    	// this filter, two unrelated graphs with same-named leaf nodes (e.g. both have a "Step") cross-attribute
-    	// each other's actor observers via the suffix-match logic below, producing false "(via OtherAsset)"
-    	// entries on the expanded node panel.
-    	TArray<FName> ReferencerPackageNames;
-    	AR.GetReferencers(HomePackageName, ReferencerPackageNames);
-    	const TSet<FName> ReferencerSet(ReferencerPackageNames);
+    	// Filter to assets that reach the home asset's package through a chain of questline references. An asset with no
+    	// such chain can't have a LinkedQuestline node reaching this node, so its tags can't legitimately be contextualized
+    	// inlinings of it. They're at most coincidental leaf-name collisions. Without this filter, two unrelated graphs
+    	// with same-named leaf nodes (e.g. both have a "Step") cross-attribute each other's actor observers via the
+    	// suffix-match logic below, producing false "(via OtherAsset)" entries on the expanded node panel.
+    	//
+    	// The walk is TRANSITIVE because LinkedQuestline placements nest. A Step inside an asset that is linked by an asset
+    	// that is itself linked by a third asset carries a contextual tag rooted at that third asset, and only that asset's
+    	// compile emits it. Asking for direct referencers alone finds the immediate parent and stops, hiding every
+    	// perspective above it - and with it every actor subscribed through one. Expansion continues only through packages
+    	// that are themselves questline assets, so the frontier stays bounded by the questline count, not the project's.
+    	TSet<FName> QuestlinePackageNames;
+    	QuestlinePackageNames.Reserve(QuestlineAssets.Num());
+    	for (const FAssetData& AssetData : QuestlineAssets) QuestlinePackageNames.Add(AssetData.PackageName);
+
+    	TSet<FName> ReferencerSet;
+    	TArray<FName> PackagesToExpand;
+    	PackagesToExpand.Add(HomePackageName);
+    	while (!PackagesToExpand.IsEmpty())
+    	{
+    		const FName PackageToExpand = PackagesToExpand.Pop(EAllowShrinking::No);
+    		TArray<FName> DirectReferencers;
+    		AR.GetReferencers(PackageToExpand, DirectReferencers);
+
+    		for (const FName& ReferencerPackage : DirectReferencers)
+    		{
+    			if (ReferencerPackage == HomePackageName || !QuestlinePackageNames.Contains(ReferencerPackage)) continue;
+
+    			bool bAlreadySeen = false;
+    			ReferencerSet.Add(ReferencerPackage, &bAlreadySeen);
+    			if (!bAlreadySeen) PackagesToExpand.Add(ReferencerPackage);
+    		}
+    	}
+
+    	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("CollectContextualTagMatches: home package '%s' - %d questline asset(s) "
+    		"reference it directly or transitively"), *HomePackageName.ToString(), ReferencerSet.Num());
 
     	for (const FAssetData& AssetData : QuestlineAssets)
     	{
@@ -117,7 +147,7 @@ namespace
             // Compute the outer asset's expected prefix. Each outer asset's CompiledQuestTags carries both
             // ContextualTag-form entries (rooted at the outer's own QuestlineID) AND asset-scoped alias entries
             // that root at descendant home assets. Without the prefix filter below, suffix-matching would catch
-            // the aliases too — producing false-positive "(via OuterAsset)" attributions for observers / givers
+            // the aliases too - producing false-positive "(via OuterAsset)" attributions for observers / givers
             // that subscribe through the home asset's own compile only.
             const FString OuterAssetID = AssetData.GetTagValueRef<FString>(TEXT("QuestlineEffectiveID"));
             const FString EffectiveOuterID = OuterAssetID.IsEmpty() ? AssetData.AssetName.ToString() : OuterAssetID;
@@ -245,7 +275,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 	// Each K2 placement resolves via UK2Node_CompleteObjectiveWithOutcome::ResolvePathIdentity (single source
 	// of truth across the K2 node, the title-display path, and discovery here):
 	//   PathName (dynamic) > "Dynamic N" (dynamic, wired no PathName) > OutcomeTag.GetTagName() (static).
-	// The out-param tells us which branch fired so we can stamp bIsRegisteredTag at the source — the
+	// The out-param tells us which branch fired so we can stamp bIsRegisteredTag at the source - the
 	// compiler then registers only registered-tag identities at the tag manager root, without relying
 	// on string-shape heuristics that a designer-authored dotted PathName could defeat.
 	if (UBlueprint* Blueprint = Cast<UBlueprint>(ObjectiveClass->ClassGeneratedBy))
@@ -300,7 +330,7 @@ TArray<FObjectivePathDescriptor> FSimpleQuestEditorUtilities::DiscoverObjectiveP
 
 	if (AllPaths.Num() > 0)
 	{
-		// Deterministic pin order regardless of discovery source — prevents pin shuffling across rebuilds
+		// Deterministic pin order regardless of discovery source - prevents pin shuffling across rebuilds
 		AllPaths.Sort([](const FObjectivePathDescriptor& A, const FObjectivePathDescriptor& B)
 		{
 			return A.Identity.LexicalLess(B.Identity);
@@ -453,7 +483,7 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 		}
 	}
 
-	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("%s: Node '%s' — %d contextual match(es) across OUTER assets"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("%s: Node '%s' - %d contextual match(es) across OUTER assets"),
 		LogLabel, *ContentNode->NodeLabel.ToString(), Result.Num());
 
 	return Result;
@@ -481,7 +511,7 @@ TArray<FSimpleQuestEditorUtilities::FQuestContextualActor> FSimpleQuestEditorUti
 
 namespace
 {
-	// Recursive struct-layout walk. Handles FGameplayTag and FGameplayTagContainer at any depth — recurses into
+	// Recursive struct-layout walk. Handles FGameplayTag and FGameplayTagContainer at any depth - recurses into
 	// nested USTRUCT fields so adopter types with embedded structs get covered without per-class hooks. Cycle-free
 	// because UE forbids by-value struct self-references (a struct can't contain itself; pointers go through
 	// FObjectProperty, not FStructProperty, and we don't iterate those).
@@ -603,7 +633,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 			{
 				Actor->Modify();
 				ActorSwapCount += ActorLevelSwaps;
-				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated (actor-level field)"),
+				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' - %d tag(s) updated (actor-level field)"),
 					*Actor->GetClass()->GetName(), *Actor->GetActorLabel(), ActorLevelSwaps);
 			}
 
@@ -629,7 +659,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 				{
 					Comp->Modify();
 					ActorSwapCount += CompSwaps;
-					UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' — %d tag(s) updated"),
+					UE_LOG(LogSimpleQuestCompiler, Log, TEXT("  Tag rename: %s on '%s' - %d tag(s) updated"),
 						*Comp->GetClass()->GetName(), *Actor->GetActorLabel(), CompSwaps);
 				}
 			}
@@ -698,7 +728,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		}
 	}
 
-	// Classify each incoming rename. Skip if OldName already maps to something — UE's resolver walks the map
+	// Classify each incoming rename. Skip if OldName already maps to something - UE's resolver walks the map
 	// transitively at lookup time, so a stale reference is already covered by the existing entry.
 	//
 	// Three collision shapes need surgery to avoid breaking adopter resolution:
@@ -706,7 +736,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 	// 1. Cycle closure: walking the existing redirect map from NewName eventually reaches OldName. Adding the new
 	//    entry would close the chain back into a non-terminating loop.
 	// 2. Cross-chain collision against existing redirects: NewName currently has an outgoing redirect that belongs
-	//    to a different node's rename history. Adding the new entry would extend that other chain — adopters of the
+	//    to a different node's rename history. Adding the new entry would extend that other chain - adopters of the
 	//    new rename's node would end up at the other chain's terminal.
 	// 3. In-batch collision: OldName of this rename is also the NewName of another rename in this same compile.
 	//    Neither redirect is in the existing map yet, so case 2's check against ExistingRedirects misses it. If both
@@ -717,11 +747,11 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 	//   - Cases 1 + 2: remove the existing redirect originating at NewName, knit predecessors past it, add the new
 	//     entry.
 	//   - Case 3: drop this rename entirely so the OTHER rename's canonical claim wins. Adopters of THIS rename's
-	//     node at OldName orphan to whoever now owns the colliding name — the unavoidable cost of two nodes claiming
+	//     node at OldName orphan to whoever now owns the colliding name - the unavoidable cost of two nodes claiming
 	//     the same name in one compile.
 	//
 	// Adopter references at NewName itself become ambiguous after any of these surgeries when the original chain had
-	// adopters using that name — they previously walked through NewName to reach some other terminal and now resolve
+	// adopters using that name - they previously walked through NewName to reach some other terminal and now resolve
 	// to the new canonical instead.
 
 	// Pre-build the set of new-names in this batch so the case-3 check is O(1) per rename.
@@ -739,7 +769,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		const FName NewOld = NewPair.Key;
 		const FName NewNew = NewPair.Value;
 
-		if (NewOld == NewNew) continue;  // identity rename — should be pruned upstream, guard defensively
+		if (NewOld == NewNew) continue;  // identity rename - should be pruned upstream, guard defensively
 		if (ExistingRedirects.Contains(NewOld)) continue;
 
 		// Case 3: in-batch collision. OldName is also the new canonical of another rename in this compile.
@@ -747,7 +777,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		if (InBatchNewNames.Contains(NewOld))
 		{
 			UE_LOG(LogSimpleQuestCompiler, Warning,
-				TEXT("WriteGameplayTagRedirects: %s to %s — in-batch collision (%s is the new canonical of another rename in this compile); this shouldn't fire with up-front validation — please report"),
+				TEXT("WriteGameplayTagRedirects: %s to %s - in-batch collision (%s is the new canonical of another rename in this compile); this shouldn't fire with up-front validation - please report"),
 				*NewOld.ToString(), *NewNew.ToString(), *NewOld.ToString());
 			continue;
 		}
@@ -777,7 +807,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 			Current = *Next;
 		}
 
-		// Find every existing entry pointing TO NewName — these are the predecessors we need to knit past it.
+		// Find every existing entry pointing TO NewName - these are the predecessors we need to knit past it.
 		TArray<FName> Predecessors;
 		for (const TPair<FName, FName>& Entry : ExistingRedirects)
 		{
@@ -797,7 +827,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		RedirectsToAdd.Add(NewOld, NewNew);
 
 		UE_LOG(LogSimpleQuestCompiler, Log,
-			TEXT("WriteGameplayTagRedirects: %s to %s — %s (chain depth %d); removed %s to %s, knit %d predecessor(s) past the removed link"),
+			TEXT("WriteGameplayTagRedirects: %s to %s - %s (chain depth %d); removed %s to %s, knit %d predecessor(s) past the removed link"),
 			*NewOld.ToString(),
 			*NewNew.ToString(),
 			bCycleDetected ? TEXT("cycle closure") : TEXT("cross-chain collision"),
@@ -850,7 +880,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 	}
 	NewSectionContent += LINE_TERMINATOR;
 
-	// Reassemble the file. If the section didn't exist before (uncommon — UE projects ship with this section),
+	// Reassemble the file. If the section didn't exist before (uncommon - UE projects ship with this section),
 	// append a fresh one at the end.
 	if (SectionStart == INDEX_NONE)
 	{
@@ -908,7 +938,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		// when this compilation cycle changes a tag's redirect-chain membership: compilation's own RebuildNativeTags ran
 		// BEFORE this write, registering native tags under the prior redirect map. Without this refresh, the new
 		// canonical name can stay unregistered (or registered under its previous redirect target) until the next
-		// compile reaches it again — and any in-session swap that queries it would get an invalid FGameplayTag back
+		// compile reaches it again - and any in-session swap that queries it would get an invalid FGameplayTag back
 		// and silently clear adopter data.
 		UGameplayTagsManager::Get().EditorRefreshGameplayTagTree();
 
@@ -995,7 +1025,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedBlueprintCDOs(const TM
 			BP->Modify();
 			BP->MarkPackageDirty();
 			++ModifiedBPs;
-			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' — %d field(s) updated on CDO"),
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedBlueprintCDOs: '%s' - %d field(s) updated on CDO"),
 				*BP->GetName(), SwapsInBP);
 		}
 	}
@@ -1022,7 +1052,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedAssets(const TMap<FNam
 			Asset->Modify();
 			Asset->MarkPackageDirty();
 			++ModifiedAssets;
-			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedAssets: '%s' (%s) — %d field(s) updated"),
+			UE_LOG(LogSimpleQuestCompiler, Log, TEXT("ApplyTagRenamesToLoadedAssets: '%s' (%s) - %d field(s) updated"),
 				*Asset->GetName(), *Asset->GetClass()->GetName(), Swaps);
 		}
 	}
@@ -1057,7 +1087,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
 	if (!QuestlineAsset)
 	{
-		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("FindCompiledTagForNode: Node '%s' — Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
+		UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("FindCompiledTagForNode: Node '%s' - Outer chain did not terminate at a UQuestlineGraph (final Outer class=%s)"),
 			*ContentNode->NodeLabel.ToString(), Outer ? *Outer->GetClass()->GetName() : TEXT("null"));
 		return FGameplayTag();
 	}
@@ -1075,7 +1105,7 @@ FGameplayTag FSimpleQuestEditorUtilities::FindCompiledTagForNode(const UQuestlin
 		}
 	}
 
-	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s — no matching compiled instance"),
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("FindCompiledTagForNode: Node '%s' QuestGuid=%s - no matching compiled instance"),
 		*ContentNode->NodeLabel.ToString(), *ContentNode->QuestGuid.ToString());
 	return FGameplayTag();
 }
@@ -1090,7 +1120,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	if (!ContentNode) return FGameplayTag(); // Entry/Rule nodes / combinators not covered in Session B's MVP.
 
 	// Walk Outer chain to the containing UQuestlineGraph, then look up the source node's compiled runtime tag via
-	// QuestGuid — same resolution path used by FQuestPIEDebugChannel::ResolveRuntimeTag and FindCompiledTagForNode.
+	// QuestGuid - same resolution path used by FQuestPIEDebugChannel::ResolveRuntimeTag and FindCompiledTagForNode.
 	UObject* Outer = OwningNode->GetGraph() ? OwningNode->GetGraph()->GetOuter() : nullptr;
 	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
 	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
@@ -1109,7 +1139,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 
 	OutSourceTag = FGameplayTag::RequestGameplayTag(SourceTagName, false);
 
-	// Build the leaf fact per pin role — matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
+	// Build the leaf fact per pin role - matches FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin content-node
 	// branch. AnyOutcome → SimpleQuest.State.<src>.Completed (source done, regardless of path). Named path →
 	// SimpleQuest.State.<src>.Path.<leaf>.
 	const EQuestPinRole Role = UQuestlineNodeBase::GetPinRoleOf(OutputPin);
@@ -1120,7 +1150,7 @@ FGameplayTag FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(const UEdG
 	}
 
 	// PinName IS the path identity (FName matching the upstream K2 node's outcome tag for static placements,
-	// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip needed —
+	// or the sanitized PathName for dynamic placements once Bundle Y lands). No FGameplayTag round-trip needed -
 	// MakeNodePathFact takes the FName directly and handles prefix stripping internally.
 	const FName FactName = FQuestTagComposer::MakeNodePathFact(SourceTagName, OutputPin->PinName);
 	if (FactName.IsNone()) return FGameplayTag();
@@ -1132,7 +1162,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag CompiledTag = FindCompiledTagForNode(ContentNode);
 	if (!CompiledTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' - FindCompiledTagForNode returned invalid (node likely not yet compiled)"),
 			ContentNode ? *ContentNode->NodeLabel.ToString() : TEXT("(null)"));
 		return false;
 	}
@@ -1140,7 +1170,7 @@ bool FSimpleQuestEditorUtilities::IsContentNodeTagCurrent(const UQuestlineNode_C
 	const FGameplayTag ReconstructedTag = ReconstructNodeTagInternal(ContentNode);
 	if (!ReconstructedTag.IsValid())
 	{
-		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' — Reconstructed tag invalid (label empty or Outer chain broken)"),
+		UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("IsContentNodeTagCurrent: '%s' - Reconstructed tag invalid (label empty or Outer chain broken)"),
 			*ContentNode->NodeLabel.ToString());
 		return false;
 	}
@@ -1278,7 +1308,7 @@ void FSimpleQuestEditorUtilities::SyncPinsByCategory(UEdGraphNode* Node, EEdGrap
                 ByName.Remove(Name);
             }
         }
-        // Orphans — preserve original relative order
+        // Orphans - preserve original relative order
         for (UEdGraphPin* Pin : CategoryPins)
         {
             if (ByName.Contains(Pin->PinName))
@@ -1333,7 +1363,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 			/**
 			 * Setter: backward-walk each LinkedTo of the Activate input. CollectEffectiveSources expects output-side pins
 			 * it can walk through (knots, utility Forward, setter Forward, getter tag dereference). Transitive group-chain
-			 * sources are naturally captured — a getter-dereference chain surfaces the ultimate content-node sources.
+			 * sources are naturally captured - a getter-dereference chain surfaces the ultimate content-node sources.
 			 */
 			if (UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node))
 			{
@@ -1346,7 +1376,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 				if (!ActivatePin)
 				{
-					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Entry '%s' in '%s' has no ExecIn role pin - topology will list zero sources."),
 						*Setter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -1363,7 +1393,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 						if (!SourcePin) continue;
 						FGroupExaminerReference Ref;
 						Ref.Node = SourcePin->GetOwningNode();
-						Ref.Asset = QuestlineGraph; // walker stays within-graph — containing asset is the current one
+						Ref.Asset = QuestlineGraph; // walker stays within-graph - containing asset is the current one
 						Ref.PinLabel = SourcePin->PinName.ToString();
 						Endpoint.References.Add(Ref);
 					}
@@ -1388,7 +1418,7 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
 				if (!ForwardPin)
 				{
-					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin — topology will list zero sources."),
+					UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("[GroupExaminer] Activation Group Exit '%s' in '%s' has no ExecForwardOut role pin - topology will list zero sources."),
 						*Getter->GetNodeTitle(ENodeTitleType::ListView).ToString(), *QuestlineGraph->GetName());
 				}
 				else
@@ -1457,7 +1487,7 @@ namespace PrereqExaminer_Internal
         return nullptr;
     }
 
-    /** Forward declaration — recursion inside the namespace. */
+    /** Forward declaration - recursion inside the namespace. */
     int32 WalkFromOutputPin(const UEdGraphPin* OutputPin, FPrereqExaminerTree& Tree, TSet<const UEdGraphNode*>& RuleEntriesVisited);
 
     /** Adds a combinator node (And/Or/Not) and recursively walks its PrereqIn pins into ChildIndices. */
@@ -1490,7 +1520,7 @@ namespace PrereqExaminer_Internal
         UEdGraphNode* OwningNode = OutputPin->GetOwningNode();
         if (!OwningNode) return INDEX_NONE;
 
-        // Knots: transparent passthrough — walk through KnotIn's upstream.
+        // Knots: transparent passthrough - walk through KnotIn's upstream.
         if (UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(OwningNode))
         {
             if (UEdGraphPin* KnotIn = Knot->FindPin(TEXT("KnotIn"), EGPD_Input))
@@ -1517,7 +1547,7 @@ namespace PrereqExaminer_Internal
                 NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNot", "NOT"), Tree, RuleEntriesVisited);
         }
 
-        // Rule Entry Forward: direct-eval — inline the Entry's Enter expression (no RuleRef emitted).
+        // Rule Entry Forward: direct-eval - inline the Entry's Enter expression (no RuleRef emitted).
         if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(OwningNode))
         {
             if (UEdGraphPin* EnterPin = Entry->GetPinByRole(EQuestPinRole::PrereqIn))
@@ -1565,7 +1595,7 @@ namespace PrereqExaminer_Internal
     	Leaf.SourceNode = OwningNode;
 
     	// Populate the compiler-equivalent fact tag and source runtime tag so the panel can query PIE state per leaf.
-    	// Both stay invalid for node types the helper doesn't cover (Entry outcome leaves, etc.) — the panel then
+    	// Both stay invalid for node types the helper doesn't cover (Entry outcome leaves, etc.) - the panel then
     	// renders neutral for those leaves rather than a misleading "NotStarted" grey.
     	Leaf.LeafTag = FSimpleQuestEditorUtilities::ResolveLeafFactForOutputPin(OutputPin, Leaf.LeafSourceTag);
 
@@ -1746,7 +1776,7 @@ void FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(FToolMenuSecti
 		TEXT("ExamineGroupConnections"),
 		NSLOCTEXT("SimpleQuestEditor", "ExamineGroupConnections_Label", "Examine Group Connections"),
 		NSLOCTEXT("SimpleQuestEditor", "ExamineGroupConnections_Tooltip",
-			"Open the Group Examiner panel and pin this group — shows all setters, getters, and their connections across the project. Disabled when this node has no group tag set."),
+			"Open the Group Examiner panel and pin this group - shows all setters, getters, and their connections across the project. Disabled when this node has no group tag set."),
 		FSlateIcon(),
 		FUIAction(
 			FExecuteAction::CreateLambda([WeakNode = TWeakObjectPtr<UEdGraphNode>(Node), GroupTag]()
@@ -1768,7 +1798,7 @@ void FSimpleQuestEditorUtilities::AddExamineGroupConnectionsEntry(FToolMenuSecti
 
 namespace
 {
-	/** Builds the project-wide compiled-tag universe via Asset Registry scan — no sync-load. */
+	/** Builds the project-wide compiled-tag universe via Asset Registry scan - no sync-load. */
 	TSet<FName> BuildCompiledTagUniverse()
 	{
 		TSet<FName> Universe;
@@ -1812,7 +1842,7 @@ namespace
 		return Msg;
 	}
 
-	/** Recursively collects every UEdGraphNode reachable from this graph — through Quest inner graphs, etc. */
+	/** Recursively collects every UEdGraphNode reachable from this graph - through Quest inner graphs, etc. */
 	void CollectAllNodesRecursive(const UEdGraph* Graph, TArray<UEdGraphNode*>& OutNodes)
 	{
 		if (!Graph) return;
@@ -1932,7 +1962,7 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 
 	        const FText Lead = FText::Format(
 	            NSLOCTEXT("SimpleQuestEditor", "ValidateRuleExitOrphanLead",
-	                "[{0}] Rule Exit references rule '{1}' — no Rule Entry in the project provides this tag:"),
+	                "[{0}] Rule Exit references rule '{1}' - no Rule Entry in the project provides this tag:"),
 	            FText::FromString(AssetNameForNode(ExitNode)),
 	            FText::FromName(ExitPair.Key));
 
@@ -2023,12 +2053,12 @@ namespace
 	}
 
 	/**
-	 * Actor Blueprint CDO surface — Tier 2. For each actor-derived UBlueprint asset, gathers components from
+	 * Actor Blueprint CDO surface - Tier 2. For each actor-derived UBlueprint asset, gathers components from
 	 * three sources and runs the shared ScanComponentsForStaleTags over the merged list:
 	 *   1. Native components on the CDO (C++ CreateDefaultSubobject in the constructor chain).
-	 *   2. SimpleConstructionScript nodes — components added via this BP's Components panel. These are template
+	 *   2. SimpleConstructionScript nodes - components added via this BP's Components panel. These are template
 	 *      instances whose property values represent what an actor instance gets at construction time.
-	 *   3. InheritableComponentHandler records — overrides this BP applies to components inherited from a parent
+	 *   3. InheritableComponentHandler records - overrides this BP applies to components inherited from a parent
 	 *      BP. The override-template carries the authored property values used for instances of THIS BP.
 	 *
 	 * Walking all three is necessary because Actor->GetComponents on a CDO is unreliable for SCS / ICH-sourced
@@ -2056,7 +2086,7 @@ namespace
 		TArray<FAssetData> BlueprintAssets;
 		AR.GetAssets(Filter, BlueprintAssets);
 
-		// Pre-filter to actor-derived BPs via AR-cached NativeParentClass tag — avoids sync-loading UMG / anim /
+		// Pre-filter to actor-derived BPs via AR-cached NativeParentClass tag - avoids sync-loading UMG / anim /
 		// widget blueprints. Tag value is in "Class'/Script/Engine.Actor'" wrapped form; ExportTextPathToObjectPath
 		// strips the wrapper. FindObject<UClass> resolves against the in-memory class registry without loading.
 		static const FName NativeParentClassTag(TEXT("NativeParentClass"));
@@ -2181,9 +2211,9 @@ namespace
 	 * carry a quest tag.
 	 *
 	 * Two-pass build:
-	 *   1. Native UClass walk via TObjectIterator — catches AActor descendants with C++-added quest
+	 *   1. Native UClass walk via TObjectIterator - catches AActor descendants with C++-added quest
 	 *      components (no BP wrapper required). Cheap; no asset loads.
-	 *   2. Actor-derived BP walk via the AR — catches BP-authored quest components. Sync-loads each
+	 *   2. Actor-derived BP walk via the AR - catches BP-authored quest components. Sync-loads each
 	 *      actor BP; same cost model as ScanActorBlueprintCDOs's BP walk.
 	 *
 	 * Built only when the caller opts into the filter (comprehensive mode skips the build entirely).
@@ -2199,7 +2229,7 @@ namespace
 			if (!Cls || Cls->HasAnyClassFlags(CLASS_Abstract | CLASS_Deprecated)) continue;
 			if (!Cls->IsChildOf(AActor::StaticClass())) continue;
 
-			// Skip BP-generated classes — Pass 2 handles those via the BP iteration which gets the full
+			// Skip BP-generated classes - Pass 2 handles those via the BP iteration which gets the full
 			// component tree (SCS + ICH). The CDO-only walk here would miss SCS/ICH-added components.
 			if (Cls->ClassGeneratedBy != nullptr) continue;
 
@@ -2259,7 +2289,7 @@ namespace
 	/**
 	 * WP-level actor scanner. Iterates every WP actor descriptor via FWorldPartitionHelpers::ForEachActorWithLoading
 	 * (load → callback → unload per actor, the same iteration the cooker uses). Optional class filter skips
-	 * descriptors whose actor class isn't in the quest-component class set — set to nullptr for comprehensive mode.
+	 * descriptors whose actor class isn't in the quest-component class set - set to nullptr for comprehensive mode.
 	 *
 	 * The comprehensive path sync-loads every WP actor; on a 10k-actor WP level this is slow but thorough. The
 	 * filtered path resolves the class from the descriptor before loading the actor, skipping most of the cost.
@@ -2291,7 +2321,7 @@ namespace
 					{
 						ActorClass = NativeClass;
 					}
-					// Some UE 5.6 descriptor variants expose GetBaseClass / GetActorClass / GetActorClassPath —
+					// Some UE 5.6 descriptor variants expose GetBaseClass / GetActorClass / GetActorClassPath -
 					// if NativeClass alone misses BP-generated subclasses, the LoadClass fallback below catches
 					// them. (Bridge code; remove the LoadClass branch if NativeClass is already the BP class.)
 
@@ -2319,14 +2349,14 @@ namespace
 			});
 
 		UE_LOG(LogSimpleQuestCompiler, Display,
-			TEXT("ScanWorldPartitionActors: %s — %d descriptors, %d scanned, %d filtered by class (filter=%s)"),
+			TEXT("ScanWorldPartitionActors: %s - %d descriptors, %d scanned, %d filtered by class (filter=%s)"),
 			*PackagePath, NumDescriptors, NumScanned, NumFilteredByClass,
 			ClassFilter ? TEXT("on") : TEXT("off"));
 	}
 
 	/**
-	 * Unloaded-level surface — Tier 2. Iterates every UWorld asset in the project via the Asset Registry,
-	 * skips any that are currently loaded (those are covered by ScanLoadedLevels — avoid double-counting),
+	 * Unloaded-level surface - Tier 2. Iterates every UWorld asset in the project via the Asset Registry,
+	 * skips any that are currently loaded (those are covered by ScanLoadedLevels - avoid double-counting),
 	 * sync-loads each remaining umap, and dispatches by world type:
 	 *   - Non-WP world: walks PersistentLevel->Actors and runs each through ScanActorForStaleTags.
 	 *   - WP-enabled world: hands off to ScanWorldPartitionActors, which uses
@@ -2337,7 +2367,7 @@ namespace
 	 *     actor.
 	 *
 	 * Loading semantics: FAssetData::GetAsset sync-loads the umap as an asset (NOT as the editor's current
-	 * world — no PIE init, no BeginPlay, no sublevel streaming). For non-WP worlds, persistent-level actor
+	 * world - no PIE init, no BeginPlay, no sublevel streaming). For non-WP worlds, persistent-level actor
 	 * iteration gives us the design-time actor set authored into the umap. For WP worlds, the descriptor
 	 * walk gives us the full external-actor set without needing to load actors that won't be scanned.
 	 *
@@ -2347,8 +2377,8 @@ namespace
 	 * per-actor unload via FWorldPartitionHelpers, so memory pressure scales with class-filter strictness
 	 * rather than total actor count.
 	 *
-	 * Class-filter gap (only when bComprehensiveWPScan = false): per-instance component additions —
-	 * dropping a UQuestComponentBase onto a single placed actor instance without modifying its BP — won't
+	 * Class-filter gap (only when bComprehensiveWPScan = false): per-instance component additions -
+	 * dropping a UQuestComponentBase onto a single placed actor instance without modifying its BP - won't
 	 * pass the filter because the instance's class isn't in the quest-component class set. Comprehensive
 	 * mode catches it. Documented as a deliberate trade in FStaleTagScanScope::bComprehensiveWPScan.
 	 */
@@ -2362,7 +2392,7 @@ namespace
 			AR.WaitForCompletion();
 		}
 
-		// Build class filter set lazily — only when the user opted out of comprehensive WP mode AND we'll
+		// Build class filter set lazily - only when the user opted out of comprehensive WP mode AND we'll
 		// actually encounter a WP level. Cheaper to defer than to build unconditionally.
 		TOptional<TSet<UClass*>> ClassFilter;
 		auto EnsureClassFilter = [&]() -> const TSet<UClass*>*
@@ -2372,11 +2402,11 @@ namespace
 			return &ClassFilter.GetValue();
 		};
 
-		// Build a snapshot of editor-active world packages — these are Tier 1's territory and should not be
+		// Build a snapshot of editor-active world packages - these are Tier 1's territory and should not be
 		// re-scanned here. Note we deliberately do NOT use FindPackage as the skip predicate: a world that
 		// was sync-loaded by a previous ScanUnloadedLevels call stays resident in memory (per the documented
 		// "stays resident until GC" behavior) and FindPackage would return non-null for it on subsequent
-		// scans — but that world is NOT an active editor world, so Tier 1 wouldn't pick it up either. Using
+		// scans - but that world is NOT an active editor world, so Tier 1 wouldn't pick it up either. Using
 		// GetWorldContexts ensures we only skip worlds Tier 1 actually covers; everything else gets scanned,
 		// regardless of whether it happens to already be in memory.
 		TSet<FName> EditorWorldPackages;
@@ -2416,7 +2446,7 @@ namespace
 			}
 
 			// Either truly unloaded, OR in memory from a prior ScanUnloadedLevels run. Either way we want to
-			// scan it now — reuse the already-resident world if possible to skip a redundant sync-load.
+			// scan it now - reuse the already-resident world if possible to skip a redundant sync-load.
 			UWorld* World = nullptr;
 			if (UPackage* ExistingPkg = FindPackage(nullptr, *PackagePath))
 			{
@@ -2435,12 +2465,12 @@ namespace
 			if (World->IsPartitionedWorld() && World->GetWorldPartition())
 			{
 				// Sync-loading a UWorld asset via FAssetData::GetAsset doesn't initialize the world or populate
-				// its WP actor descriptor container — those happen during the editor's Map_Load pipeline, which
+				// its WP actor descriptor container - those happen during the editor's Map_Load pipeline, which
 				// we're not on. Without init, FWorldPartitionHelpers::ForEachActorWithLoading walks an empty
 				// container and finds nothing.
 				//
 				// Lifecycle is messier than just InitWorld: in commandlet mode the helper's per-batch and
-				// end-of-iteration GC passes use RF_NoFlags as KeepFlags (WorldPartitionHelpers.cpp:268) — only
+				// end-of-iteration GC passes use RF_NoFlags as KeepFlags (WorldPartitionHelpers.cpp:268) - only
 				// root-set objects survive. Our sync-loaded World has no rooted referencer, so it goes
 				// unreachable mid-scan; UWorldPartition::BeginDestroy / UTickableWorldSubsystem::BeginDestroy
 				// then assert because the WP and its tickable subsystems are still initialized.
@@ -2450,7 +2480,7 @@ namespace
 				// UpdateModelComponents, UpdateWorldComponents, UpdateLevelStreaming on construction; and
 				// DestroyWorld (which routes through CleanupWorld + subsystem deinit + WP Uninitialize) +
 				// RemoveFromRoot + GWorld restore on destruction. We init as Editor type and disable all
-				// play-mode subsystems — we just want WP iteration, no physics / nav / AI / audio overhead.
+				// play-mode subsystems - we just want WP iteration, no physics / nav / AI / audio overhead.
 				if (!World->bIsWorldInitialized)
 				{
 					FScopedEditorWorld ScopedWorld(World, UWorld::InitializationValues()
@@ -2466,7 +2496,7 @@ namespace
 				else
 				{
 					// Already-initialized (resident from a prior run still pending GC, or some external owner
-					// holds it). Scan directly without taking ownership of the lifecycle — FScopedEditorWorld
+					// holds it). Scan directly without taking ownership of the lifecycle - FScopedEditorWorld
 					// asserts on already-initialized worlds and would interfere with the real owner anyway.
 					UE_LOG(LogSimpleQuestCompiler, Verbose,
 						TEXT("ScanUnloadedLevels: '%s' already initialized; scanning without lifecycle wrapper"),
@@ -2485,7 +2515,7 @@ namespace
 					++NumActorsInLevel;
 				}
 				UE_LOG(LogSimpleQuestCompiler, Display,
-					TEXT("ScanUnloadedLevels: non-WP world '%s' — %d actors walked"),
+					TEXT("ScanUnloadedLevels: non-WP world '%s' - %d actors walked"),
 					*PackagePath, NumActorsInLevel);
 				++NumNonWPScanned;
 			}
@@ -2499,7 +2529,7 @@ namespace
 	}
 
 	/**
-	 * Loaded-level surface — Tier 1 baseline. Walks GEditor->GetWorldContexts and scans every actor in every
+	 * Loaded-level surface - Tier 1 baseline. Walks GEditor->GetWorldContexts and scans every actor in every
 	 * editor-type world. Carries the world's package path on each entry for consistency with the Tier 2 surfaces
 	 * (the panel doesn't currently use it for loaded entries since the actor pointer is enough, but the field
 	 * is populated for the commandlet's structured output).

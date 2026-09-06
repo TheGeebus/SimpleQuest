@@ -1597,6 +1597,8 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
 		Instance->BoundaryCompletionsOnAnyOutcome.Empty();
         Instance->NextNodesOnDeactivation.Empty();
         Instance->NextNodesToDeactivateOnDeactivation.Empty();
+		Instance->NextNodesToDeactivateByPath.Empty();
+		Instance->NextNodesToDeactivateOnAnyOutcome.Empty();
 		
 		// Source tag for this content node, reconstructed from the compile-time label formula. LinkedQuestlines
 		// are already `continue`d past at the top of this loop, so GetNodeTitle-based labeling is the right choice for
@@ -1620,10 +1622,11 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
             }
 
         	TArray<FName> ResolvedTags;
+        	TArray<FName> ResolvedDeactivateTags;
         	TArray<FQuestBoundaryCompletion> ResolvedBoundaryCompletions;
         	TArray<FQuestGraphResolution> ResolvedGraphs;
         	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>> VisitedExitsByPath;
-        	ResolvePinToTags(Pin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ResolvedTags, ResolvedBoundaryCompletions, &VisitedExitsByPath, &ResolvedGraphs);
+        	ResolvePinToTags(Pin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ResolvedTags, ResolvedBoundaryCompletions, &VisitedExitsByPath, &ResolvedGraphs, &ResolvedDeactivateTags);
 
         	// Duplicate-path-routing check: one outcome pin reaching multiple distinct Outcome terminals that share
         	// a path identity is almost always an authoring mistake. The compiler accepts the union of their destinations
@@ -1641,7 +1644,7 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
         	// resolved. Common when the LinkedQuestline's outer-side outcome pin only feeds a prereq expression
         	// (no QuestActivation wire), and for the outermost root-asset Exit case where the chain has no
         	// downstream destinations at all but still needs the asset-resolution publish to fire.
-        	if (ResolvedTags.IsEmpty() && ResolvedBoundaryCompletions.IsEmpty() && ResolvedGraphs.IsEmpty()) continue;
+        	if (ResolvedTags.IsEmpty() && ResolvedBoundaryCompletions.IsEmpty() && ResolvedGraphs.IsEmpty() && ResolvedDeactivateTags.IsEmpty()) continue;
         	
         	if (Pin->PinType.PinCategory == TEXT("QuestOutcome"))
         	{
@@ -1671,6 +1674,15 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
         		{
         			DirectReachesByDest.FindOrAdd(Tag).Add(Key);
         		}
+
+        		if (!ResolvedDeactivateTags.IsEmpty())
+        		{
+        			FQuestNodeTagList& DeactivateList = Instance->NextNodesToDeactivateByPath.FindOrAdd(Pin->PinName);
+        			for (const FName& Tag : ResolvedDeactivateTags)
+        			{
+        				DeactivateList.NodeTags.AddUnique(Tag);
+        			}
+        		}
         	}
         	else if (UQuestlineNodeBase::GetPinRoleOf(Pin) == EQuestPinRole::AnyOutcomeOut)
         	{
@@ -1687,6 +1699,11 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
         		for (const FQuestGraphResolution& Resolution : ResolvedGraphs)
         		{
         			Instance->ResolvedGraphsOnAnyOutcome.AddUnique(Resolution);
+        		}
+
+        		for (const FName& Tag : ResolvedDeactivateTags)
+        		{
+        			Instance->NextNodesToDeactivateOnAnyOutcome.Add(Tag);
         		}
         		// Record per-destination direct reach for (source, any-path). NAME_None encodes "any path from
         		// this source" - collision test absorbs specific-path keys from the same source.
@@ -1948,7 +1965,8 @@ void FQuestlineGraphCompiler::ResolvePinToTags(
 	TArray<FName>& OutTags,
 	TArray <FQuestBoundaryCompletion>& OutBoundaryCompletions,
 	TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath,
-	TArray<FQuestGraphResolution>* OutResolvedGraphs)
+	TArray<FQuestGraphResolution>* OutResolvedGraphs, 
+	TArray<FName>* OutDeactivateTags)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FQuestlineGraphCompiler_ResolvePinToTags);
 	
@@ -1961,7 +1979,7 @@ void FQuestlineGraphCompiler::ResolvePinToTags(
         {
             if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output))
             {
-                ResolvePinToTags(KnotOut, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, OutTags, OutBoundaryCompletions, OutVisitedExitsByPath, OutResolvedGraphs);
+                ResolvePinToTags(KnotOut, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, OutTags, OutBoundaryCompletions, OutVisitedExitsByPath, OutResolvedGraphs, OutDeactivateTags);
             }
         }
 
@@ -2027,20 +2045,29 @@ void FQuestlineGraphCompiler::ResolvePinToTags(
         // Quest or Step: return the tag assigned during Pass 1
         else if (UQuestlineNode_ContentBase* ContentNode = Cast<UQuestlineNode_ContentBase>(Node))
         {
-            // Only resolve forward chain when wired to an Activate input. Prerequisite and Deactivate inputs are compiled
-            // by their own dedicated passes.
-            if (LinkedPin->PinType.PinCategory != TEXT("QuestActivation"))
-                continue;
+        	// Prerequisite inputs have their own compile pass and are never routed here. Activate AND Deactivate
+        	// inputs both are: an outcome pin dropped on a Deactivate pin means "when this resolves, stop that node,"
+        	// which used to fall through this guard and be silently discarded.
+        	const FName DestCat = LinkedPin->PinType.PinCategory;
+        	if (DestCat != TEXT("QuestActivation") && DestCat != TEXT("QuestDeactivate"))
+        		continue;
 
-            const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-            if (!Label.IsEmpty())
-            {
-                const FName TagName = MakeNodeTagName(TagPrefix, Label);
-                if (!TagName.IsNone())
-                {
-                    OutTags.AddUnique(TagName);
-                }
-            }
+        	const FString Label = SanitizeTagSegment(ContentNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+        	if (!Label.IsEmpty())
+        	{
+        		const FName TagName = MakeNodeTagName(TagPrefix, Label);
+        		if (!TagName.IsNone())
+        		{
+        			if (DestCat == TEXT("QuestDeactivate"))
+        			{
+        				if (OutDeactivateTags) OutDeactivateTags->AddUnique(TagName);
+        			}
+        			else
+        			{
+        				OutTags.AddUnique(TagName);
+        			}
+        		}
+        	}
         }
         
         // Utility node: return its GUID-based key so the caller can route into NextNodesOnForward

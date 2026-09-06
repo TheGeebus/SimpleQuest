@@ -80,6 +80,13 @@ expected you to know where the reward had been authored.
   live, so a UI re-queries constantly, and two 50-XP rewards used to be
   indistinguishable from one reward recomputed.
 
+- **A completion can stop another node.** Wire a Step or Quest's outcome pin to
+  another node's Deactivate input, and resolving on that outcome deactivates the
+  target - take the left path, close the right one. It is per-outcome, so each
+  path can close something different, and the Any Outcome pin closes on every
+  completion. The editor has always allowed that wire; the compiler discarded
+  it, so it looked authored and did nothing.
+
 - **Observe Quest Lifecycle exposes Activation Failed and Progress Refused.**
   The observer component has always published both; the Blueprint async node
   omitted them, so the same two refusals were reachable from a component and

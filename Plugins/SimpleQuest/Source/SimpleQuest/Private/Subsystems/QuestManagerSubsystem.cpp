@@ -2343,6 +2343,26 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
         ActivateNodeByTag(DestTagName, EQuestActivationProvenance::ChainCascade, OutcomeTag, SourceTagName);
     };
 
+    // *** DEACTIVATIONS RUN BEFORE ACTIVATIONS. *** An outcome pin wired to a Deactivate input means "when this
+    // resolves, stop that node." Ordered ahead of the chain below so a completion that closes one branch and opens
+    // another leaves the board clear before the new content arrives. SetQuestDeactivated's cascade-visited guard
+    // makes a destination named by both the path and the Any-Outcome route a no-op the second time.
+    auto DeactivateEach = [this](const auto& TagNames)
+    {
+        for (const FName& Tag : TagNames)
+        {
+            const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+            const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+            if (CanonicalTarget.IsValid()) SetQuestDeactivated(CanonicalTarget, EDeactivationSource::Internal);
+        }
+    };
+
+    if (const FQuestNodeTagList* PathDeactivations = Node->GetNextNodesToDeactivateByPath().Find(ResolvedPath))
+    {
+        DeactivateEach(PathDeactivations->NodeTags);
+    }
+    DeactivateEach(Node->GetNextNodesToDeactivateOnAnyOutcome());
+
     // Named-outcome path. PublishGraphResolutions fires unconditionally for the path's ExitedGraphTags - the
     // earlier BC-empty gate was based on the premise that the wrapper's alias-publish would cover the inner
     // asset's identity, but LinkedQuestline wrappers carry no alias to the inner asset identity in the current

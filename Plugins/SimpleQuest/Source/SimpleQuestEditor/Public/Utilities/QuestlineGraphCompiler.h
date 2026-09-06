@@ -120,6 +120,11 @@ protected:
 	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
 	 * @param OutResolvedGraphs				Accumulator for graph resolutions as the walk encounters Outcome nodes. Gathers every declared
 	 *										outcome tag from a graph paired with that asset's root ID tag.
+	 * @param OutDeactivateTags				Accumulates destinations reached on a Deactivate input rather than an Activate one - an outcome
+	 *										pin wired to a Deactivate pin, meaning "when this resolves, stop that node." Kept separate from
+	 *										OutTags because the two compile into different routing sets: NextNodesByPath activates, and
+	 *										NextNodesToDeactivateByPath stops. Null when the caller routes no deactivations, in which case
+	 *										those destinations are skipped exactly as they were before the split existed.
 	 */
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
@@ -129,7 +134,8 @@ protected:
 		TArray<FName>& OutTags,
 		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
 		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
-		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr);
+		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr,
+		TArray<FName>* OutDeactivateTags = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with

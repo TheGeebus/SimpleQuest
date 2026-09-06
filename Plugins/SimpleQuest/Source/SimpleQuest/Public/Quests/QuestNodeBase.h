@@ -111,6 +111,19 @@ struct FQuestPathNodeList
 };
 
 /**
+ * A bare list of node tags. Distinct from FQuestPathNodeList because a deactivation route carries no boundary
+ * completions and no graph-resolution attribution - it is only "stop these."
+ */
+USTRUCT(BlueprintType)
+struct FQuestNodeTagList
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleDefaultsOnly)
+    TArray<FName> NodeTags;
+};
+
+/**
  * Compile-time reachability snapshot per Activate pin on a UQuest container. Populated by
  * FQuestlineGraphCompiler::ComputeContainerReachability via a precise routing walk filtered by structural
  * containment (cf. UQuest::ReachableStepsByActivatePin doc). Read by the path-aware giver gate.
@@ -358,6 +371,18 @@ protected:
     TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
 
     /**
+     * Nodes to DEACTIVATE when this node resolves on a given path - an outcome pin wired to a Deactivate input.
+     * Keyed the same way NextNodesByPath is, so "complete on Left, stop the Right branch" is expressible per outcome
+     * rather than applying to every outcome the node can end on.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TMap<FName, FQuestNodeTagList> NextNodesToDeactivateByPath;
+
+    /** Nodes to deactivate when this node resolves on ANY outcome - the Any Outcome pin wired to a Deactivate input. */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesToDeactivateOnAnyOutcome;
+
+    /**
      * Rewards advertised per completion path, for "do this task, get this reward" UI. Compile-time populated by the
      * reward-manifest pass for any node that completes (Steps and containers); empty for everything else. NAME_None is
      * the any-outcome bucket; other keys match NextNodesByPath. Merge NAME_None with a specific path at the query.
@@ -566,5 +591,6 @@ public:
     FORCEINLINE const FText& GetDescription() const { return Description; }
     FORCEINLINE UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     FORCEINLINE const FOriginatingEventID& GetLastIncomingEventID() const { return LastIncomingEventID; }
-    
+    FORCEINLINE const TMap<FName, FQuestNodeTagList>& GetNextNodesToDeactivateByPath() const { return NextNodesToDeactivateByPath; }
+    FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnAnyOutcome() const { return NextNodesToDeactivateOnAnyOutcome; }
 };

@@ -746,6 +746,21 @@ private:
 	void DeriveContainerLive(FGameplayTag ContainerTag);
 
 	/**
+	 * Recomputes a questline ASSET identity's Live fact (and its Started anchor on the rising edge) from whatever holds
+	 * that asset's content live, the way DeriveContainerLive does for a container node. An asset identity is not a node:
+	 * no ancestor walk reaches it, it carries no alias from the placements that embed it, and the only direct write it
+	 * ever received was at ActivateQuestlineGraph - so an embedded questline's identity used to show Completed without
+	 * ever having shown Started or Live.
+	 *
+	 * Scope is the STANDALONE case only - a graph activated directly, which has no placement to speak for it. An
+	 * embedded questline's identity is written by each placement through AddStateFactAcrossPerspectives instead, so
+	 * its count equals the number of live placements the way its inner Steps' alias counts already do. Deriving that
+	 * case would flatten a count to a presence flag. Multi-Exit graphs are why the standalone case derives rather
+	 * than clearing outright: one Exit resolving does not mean the questline stopped running.
+	 */
+	void DeriveGraphLive(const FGameplayTag& IdentityTag);
+
+	/**
 	 * Walks Step's ancestor wrappers and re-derives each one's Live fact. Covers both the Step's own
 	 * compile-perspective ancestors (AncestorContainerTags) AND foreign-perspective ancestors derived
 	 * from each AssetScopedAliasTag's parent prefix chain. The second walk is required because
@@ -929,6 +944,10 @@ private:
 	 * that led to the Exit. Writes QSS resolution record + Completed fact + publishes FQuestEndedEvent on the
 	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
 	 * questline-level lifecycle event.
+	 *
+	 * Whether the per-run path mirror is written alongside the record comes from the resolved GRAPH's compile-stamped
+	 * replay flag, read inside. It cannot come from the caller: a questline's resolution is published by a utility
+	 * node, and utility instances never receive the per-node bResettableReplay stamp.
 	 */
 	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationParams& CompleterContext);
 	

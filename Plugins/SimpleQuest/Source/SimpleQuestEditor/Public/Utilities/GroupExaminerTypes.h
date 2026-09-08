@@ -23,16 +23,32 @@ struct FGroupExaminerReference
 };
 
 /**
+ * How an endpoint's own GroupTag relates to the tag being examined. Exact means the tags are equal; Hierarchical means
+ * they differ but the bus still delivers between them, because a subscription receives its own channel and every
+ * descendant of it. Both kinds are real connections - the distinction exists so the panel can show which tag an
+ * endpoint actually carries when it is not the one you pinned.
+ */
+enum class EGroupEndpointMatch : uint8
+{
+	Exact,
+	Hierarchical
+};
+
+/**
  * One setter or getter endpoint in the group topology. For activation groups (v1), References is a flat list of sources
  * or destinations from the appropriate directional walker. Prereq extension will layer richer per-condition structure on
- * top — a future FGroupExaminerPrereqEndpoint subclass or parallel type can replace References with a nested condition
+ * top - a future FGroupExaminerPrereqEndpoint subclass or parallel type can replace References with a nested condition
  * representation while keeping the topology shape (Setters + Getters lists) unchanged.
+ *
+ * EndpointTag is the endpoint's own GroupTag, which is not necessarily the topology's GroupTag - see EGroupEndpointMatch.
  */
 struct FGroupExaminerEndpoint
 {
 	TWeakObjectPtr<UEdGraphNode>        Node;
 	TWeakObjectPtr<UQuestlineGraph>     Asset;
 	TArray<FGroupExaminerReference>     References;
+	FGameplayTag                        EndpointTag;
+	EGroupEndpointMatch                 Match = EGroupEndpointMatch::Exact;
 };
 
 /**

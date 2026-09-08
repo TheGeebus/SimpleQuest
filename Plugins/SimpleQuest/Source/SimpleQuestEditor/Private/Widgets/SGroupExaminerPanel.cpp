@@ -31,11 +31,24 @@ namespace
 		{
 			return LOCTEXT("EndpointMissing", "(unresolved endpoint)");
 		}
-		return FText::Format(
+
+		const FText Base = FText::Format(
 			LOCTEXT("EndpointLabelFmt", "{0} in {1} ({2})"),
 			Node->GetNodeTitle(ENodeTitleType::ListView),
 			FText::FromString(Asset->GetName()),
 			FText::AsNumber(Endpoint.References.Num())
+		);
+
+		// An endpoint on the examined tag itself needs no annotation. One that connects through the hierarchy names the tag
+		// it actually carries, so the difference between "this is on your tag" and "this reaches your tag" stays visible.
+		if (Endpoint.Match == EGroupEndpointMatch::Exact || !Endpoint.EndpointTag.IsValid())
+		{
+			return Base;
+		}
+		return FText::Format(
+			LOCTEXT("EndpointHierarchicalFmt", "{0}  \u2022  on {1}"),
+			Base,
+			FQuestTagComposer::FormatTagForDisplay(Endpoint.EndpointTag.GetTagName())
 		);
 	}
 
@@ -63,7 +76,7 @@ namespace
 	
 	/**
 	 * Collects the editor nodes to hover-highlight for a given row. Endpoint and Reference rows highlight their own Node;
-	 * Section rows highlight all endpoint nodes in the section (not their references) — gives the designer an at-a-glance
+	 * Section rows highlight all endpoint nodes in the section (not their references) - gives the designer an at-a-glance
 	 * view of the breadth of the group across the project. Section rows of sections with no endpoints return empty.
 	 */
 	void GatherHoverTargets(const TSharedPtr<FExaminerTreeItem>& Item, TArray<UEdGraphNode*>& OutNodes)
@@ -99,7 +112,7 @@ namespace
 }
 
 // ---------------------------------------------------------------------------
-// SGroupExaminerRow — custom alternating-row widget with per-kind styling
+// SGroupExaminerRow - custom alternating-row widget with per-kind styling
 // ---------------------------------------------------------------------------
 
 void SGroupExaminerRow::Construct(const FArguments& InArgs, const TSharedRef<STableViewBase>& InOwnerTable)
@@ -121,8 +134,8 @@ void SGroupExaminerRow::ConstructChildren(ETableViewMode::Type InOwnerTableMode,
 	}
 
 	/**
-	 * Category family colors. Setter family renders amber/gold (warm — "publish" semantic). Getter family renders sky
-	 * blue (cool — "receive" semantic). Reference rows fall through to default foreground, visually nested under their
+	 * Category family colors. Setter family renders amber/gold (warm - "publish" semantic). Getter family renders sky
+	 * blue (cool - "receive" semantic). Reference rows fall through to default foreground, visually nested under their
 	 * colored endpoint via SExpanderArrow's indent + wire rendering.
 	 */
 	static const FLinearColor SetterColor =  SQ_ED_EXAMINER_GROUP_SETTER;
@@ -188,7 +201,7 @@ void SGroupExaminerRow::OnMouseLeave(const FPointerEvent& MouseEvent)
 	/**
 	 * Clear by re-resolving which editors we set highlights on. Re-enumeration beats state caching because the row's Item
 	 * stays stable during hover, and editor lookup is O(1). Clearing the whole editor's highlight set (rather than only
-	 * our nodes) is intentional — a hover-leave should cleanly reset, and any other simultaneously-active hover will
+	 * our nodes) is intentional - a hover-leave should cleanly reset, and any other simultaneously-active hover will
 	 * re-set its own targets on its next OnMouseEnter.
 	 */
 	TArray<UEdGraphNode*> Targets;
@@ -239,7 +252,7 @@ void SGroupExaminerPanel::Construct(const FArguments& InArgs)
 void SGroupExaminerPanel::PinGroup(FGameplayTag InGroupTag, UEdGraphNode* InPinnedEndpointNode)
 {
 	/**
-	 * Idempotency guard — same tag + same endpoint in means we're already showing the right topology, so skip the rebuild
+	 * Idempotency guard - same tag + same endpoint in means we're already showing the right topology, so skip the rebuild
 	 * flicker. Matters when cross-editor navigation roundtrips back through the same editor, or when the context-menu action
 	 * fires on an already-pinned node.
 	 */
@@ -435,7 +448,7 @@ TSharedRef<SWidget> SGroupExaminerPanel::BuildTreeContent()
 		.OnMouseButtonDoubleClick(this, &SGroupExaminerPanel::OnItemDoubleClicked)
 		.SelectionMode(ESelectionMode::Single);
 
-	// Initial expansion — sections and endpoints expanded by default.
+	// Initial expansion - sections and endpoints expanded by default.
 	for (const FTreeItemPtr& Root : RootItems)
 	{
 		TreeView->SetItemExpansion(Root, true);
@@ -493,7 +506,7 @@ void SGroupExaminerPanel::OnItemDoubleClicked(FTreeItemPtr Item)
 	FSimpleQuestEditorUtilities::NavigateToEdGraphNode(TargetNode);
 
 	/**
-	 * Cross-editor pin continuity — propagate the pinned group to whichever editor now hosts the target. Same-editor
+	 * Cross-editor pin continuity - propagate the pinned group to whichever editor now hosts the target. Same-editor
 	 * navigation roundtrips and PinGroup's idempotency guard no-ops; cross-asset navigation sets up a fresh target panel
 	 * with the same pin so the designer's context carries across asset boundaries.
 	 */
@@ -523,6 +536,6 @@ FText SGroupExaminerPanel::GetHeaderTagText() const
 	{
 		return LOCTEXT("HeaderNoGroup", "Group Examiner");
 	}
-	return FText::Format(LOCTEXT("HeaderGroupFmt", "Group Examiner — {0}"), FQuestTagComposer::FormatTagForDisplay(PinnedGroupTag.GetTagName()));}
+	return FText::Format(LOCTEXT("HeaderGroupFmt", "Group Examiner - {0}"), FQuestTagComposer::FormatTagForDisplay(PinnedGroupTag.GetTagName()));}
 
 #undef LOCTEXT_NAMESPACE

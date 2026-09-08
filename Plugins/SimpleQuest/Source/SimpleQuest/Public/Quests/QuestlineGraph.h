@@ -126,6 +126,18 @@ private:
      */
     UPROPERTY()
     FName CompiledIdentityTag;
+
+    /**
+     * The compile-resolved Resettable Replay for this asset's own root scope - the tri-state above run through the
+     * Inherit chain, which only the compiler can do. Runtime reads this rather than the tri-state, because Inherit is
+     * the common authored value and reading it raw treats nearly every asset as Off.
+     *
+     * Exists because a questline's resolution is published by a UTILITY node (the Exit), and utility instances never
+     * receive the per-node bResettableReplay stamp - so the resolving node cannot answer for the graph.
+     * False on an asset not compiled since this field existed; the next compile fills it in.
+     */
+    UPROPERTY()
+    bool bCompiledResettableReplay = false;
     
     /**
      * Parallel to CompiledQuestTags: each entry pairs a node's ContextualTag with one AssetScopedAliasTag it carries. Empty
@@ -288,6 +300,7 @@ public:
     const FText& GetDescription() const { return Description; }
     UQuestDisplayData* GetDisplayData() const { return DisplayData; }
     EResettableReplay GetResettableReplay() const { return ResettableReplay; }
+    bool IsCompiledResettableReplay() const { return bCompiledResettableReplay; }
     const TMap<FGameplayTag, FQuestRewardSet>& GetQuestlineRewards() const { return QuestlineRewards; }
     
     /** Identity used as both the QuestlineEffectiveID AR tag and this graph's section key in the compiled display ini. */

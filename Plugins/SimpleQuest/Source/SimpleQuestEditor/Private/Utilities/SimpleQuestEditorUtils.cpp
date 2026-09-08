@@ -1360,18 +1360,24 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 
 		for (UEdGraphNode* Node : QuestlineGraph->QuestlineEdGraph->Nodes)
 		{
-			/**
-			 * Setter: backward-walk each LinkedTo of the Activate input. CollectEffectiveSources expects output-side pins
-			 * it can walk through (knots, utility Forward, setter Forward, getter tag dereference). Transitive group-chain
-			 * sources are naturally captured - a getter-dereference chain surfaces the ultimate content-node sources.
-			 */
+			
+			// Setter: backward-walk each LinkedTo of the Activate input. CollectEffectiveSources expects output-side pins
+			// it can walk through (knots, utility Forward, setter Forward, getter tag dereference). Transitive group-chain
+			// sources are naturally captured - a getter-dereference chain surfaces the ultimate content-node sources.
 			if (UQuestlineNode_ActivationGroupEntry* Setter = Cast<UQuestlineNode_ActivationGroupEntry>(Node))
 			{
-				if (Setter->GetGroupTag() != InGroupTag) continue;
+				// A publisher reaches this group if it publishes on the examined tag OR on any descendant of it, because a
+				// subscription receives its own channel plus everything below it. Exact equality here would hide the
+				// hierarchical case entirely - the panel would report "nothing sends to this" for a channel being actively
+				// sent to, and it would do so precisely on the routing behavior that makes group tags worth nesting.
+				const FGameplayTag SetterTag = Setter->GetGroupTag();
+				if (!SetterTag.IsValid() || !SetterTag.MatchesTag(InGroupTag)) continue;
 
 				FGroupExaminerEndpoint Endpoint;
 				Endpoint.Node = Setter;
 				Endpoint.Asset = QuestlineGraph;
+				Endpoint.EndpointTag = SetterTag;
+				Endpoint.Match = (SetterTag == InGroupTag) ? EGroupEndpointMatch::Exact : EGroupEndpointMatch::Hierarchical;
 
 				UEdGraphPin* ActivatePin = Setter->GetPinByRole(EQuestPinRole::ExecIn);
 				if (!ActivatePin)
@@ -1403,17 +1409,21 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 				continue;
 			}
 
-			/**
-			 * Getter: forward-walk from the Forward output. CollectActivationTerminals already iterates LinkedTo internally
-			 * and terminates at content/exit Activate or Deactivate pins, so direct invocation on the Forward pin is correct.
-			 */
+
+			// Getter: forward-walk from the Forward output. CollectActivationTerminals already iterates LinkedTo internally
+			// and terminates at content/exit Activate or Deactivate pins, so direct invocation on the Forward pin is correct.
 			if (UQuestlineNode_ActivationGroupExit* Getter = Cast<UQuestlineNode_ActivationGroupExit>(Node))
 			{
-				if (Getter->GetGroupTag() != InGroupTag) continue;
+				// Mirror of the setter rule, and it runs the other direction: a subscriber hears the examined tag if it
+				// subscribes on that tag OR on any ANCESTOR of it, since a publish travels up to listeners above it.
+				const FGameplayTag GetterTag = Getter->GetGroupTag();
+				if (!GetterTag.IsValid() || !InGroupTag.MatchesTag(GetterTag)) continue;
 
 				FGroupExaminerEndpoint Endpoint;
 				Endpoint.Node = Getter;
 				Endpoint.Asset = QuestlineGraph;
+				Endpoint.EndpointTag = GetterTag;
+				Endpoint.Match = (GetterTag == InGroupTag) ? EGroupEndpointMatch::Exact : EGroupEndpointMatch::Hierarchical;
 
 				UEdGraphPin* ForwardPin = Getter->GetPinByRole(EQuestPinRole::ExecForwardOut);
 				if (!ForwardPin)

@@ -285,6 +285,60 @@ expected you to know where the reward had been authored.
   synchronously, destroying the window the context menu was about to parent
   itself to. Seven pickers were affected.
 
+- **A step inside a nested questline listed none of the triggers watching it.**
+  A node reports the level actors observing it, including the ones that reach it
+  through an outer questline placing its asset. That lookup only considered
+  questlines referencing the node's own asset *directly*, so an asset placed two
+  or more levels down - a chapter linking a routine that links a shared sequence -
+  reported nothing at all, because the tag its actors actually subscribe to
+  belongs to the questline at the top of the chain. The lookup now follows the
+  chain however deep it runs. Givers were affected the same way, as were Quest
+  and Linked Questline nodes.
+
+- **A questline started on its own stayed "running" after it finished.** Starting
+  a questline as a graph - a **Start Questline** node, or the Blueprint call -
+  marks the questline itself Live, and nothing ever cleared it. It completed with
+  both Completed and Live asserted at once, so "is this questline running?" had no
+  correct answer, and it refused to start again. Its Live state is now derived from
+  its own steps the way a container's always has been, so it clears when the last
+  one finishes - and stays set when a questline resolves one ending while other
+  branches are still running.
+
+- **An embedded questline's own identity carried no lifecycle state.** A questline
+  placed inside another one reported `Completed` when it finished but never
+  `Started` or `Live` while it ran, so anything watching the questline by its own
+  name saw a completion for something it never saw begin. A placement now writes
+  its inner questline's state alongside its own, and because facts are counted,
+  the number tells you how many copies are running: one route placed twice reads
+  2 while both are live, 1 when the first finishes, 0 when the last does.
+
+- **A questline's outcome could not be read back by path.** Steps record which
+  path they resolved through; questlines recorded only *that* they finished. The
+  outcome was dropped on the way into the record, and the matching world state
+  fact was neither written nor registered, so a prerequisite could ask a step
+  which way it went but never ask the questline holding it. Both now land, and
+  the compiler registers the fact tags they need - if a questline has been
+  answering that question with silence, recompile it.
+
+- **Start Questline fired once per session.** A questline that had already begun
+  refused a second start, which is what keeps a fresh start from trampling a
+  restored save - but it made no exception for content meant to be replayed. A
+  chapter select, or anything else that reruns a questline containing a **Start
+  Questline** node, silently stopped starting it after the first run. A questline
+  marked **Resettable Replay** now restarts, unless it is currently running.
+
+- **The Group Examiner could not see a hierarchical pair.** An activation group
+  subscribes to its own channel *and* every channel beneath it, so an Exit on
+  `Group.Alpha` hears an Entry publishing on `Group.Alpha.Beta`. The examiner
+  matched on exact tag equality instead, so pinning the parent tag reported zero
+  setters while a sender was live one asset away - the one tool whose job is
+  showing a connection that has no wire, blind to the case that makes nested
+  group tags worth using. Matching now follows delivery: a setter is listed if it
+  publishes on the examined tag or any tag beneath it, a getter if it subscribes
+  on that tag or any tag above it, and an endpoint reached through the hierarchy
+  names the tag it actually carries so it stays distinguishable from one sitting
+  on the tag you pinned.
+
 ### QuickStart
 
 - **The tutorial is eleven chapters and teaches rewards.** A Rewards chapter
@@ -314,9 +368,18 @@ expected you to know where the reward had been authored.
   components already have.
 
 - **The chapters teach, rather than only demonstrate.** Chapters one through
-  seven carry narrative beats for the player and graph comments written for the
+  eight carry narrative beats for the player and graph comments written for the
   author, so a chapter explains the concept it exhibits instead of leaving the
   graph to speak for itself. The remaining chapters are in progress.
+
+- **Chapter 8 teaches linked questlines by placing one twice.** A patrol route is
+  authored once and placed at both ends of the room, dispatched together by a
+  single step so that both run at the same time. Clear one end, walk to the
+  other, and its beacons are still lit and waiting - same route, separate
+  progress, which is the thing a single placement cannot show. The chapter also
+  covers what a placement does to the tags underneath it: the same authored step
+  lands on a different tag in each placement, and the outcomes in the inner graph
+  are the pins you wire from on the outer one.
 
 - **`OBJ_InteractWithTarget` is an annotated reference for writing an
   Objective.** It walks the basic flow - receive a trigger event, notify the

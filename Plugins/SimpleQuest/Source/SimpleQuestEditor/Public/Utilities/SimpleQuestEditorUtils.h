@@ -54,11 +54,11 @@ struct FPrereqExaminerTree;
 /**
  * Output of DiscoverObjectivePaths: a completion path's two orthogonal axes, carried separately.
  *
- * Identity is the ROUTING id — which output branch of the node this is. Always present, always the routing key
+ * Identity is the ROUTING id - which output branch of the node this is. Always present, always the routing key
  * (NextNodesByPath etc.). For a static placement it is the outcome tag's full name; for a dynamic placement it is
  * the authored PathName or an auto-numbered "Dynamic N".
  *
- * Outcome is the OUTCOME — the gameplay result the branch represents — as a real FGameplayTag, valid ONLY when the
+ * Outcome is the OUTCOME - the gameplay result the branch represents - as a real FGameplayTag, valid ONLY when the
  * path is statically named by a registered tag. Invalid for dynamic placements (the runtime outcome isn't known at
  * author time) and for the any-outcome route (there is no outcome). So Outcome.IsValid() answers "is this a
  * registered-tag path" directly.
@@ -92,12 +92,12 @@ public:
 	/**
 	 * Strips the SimpleQuest.Outcome. prefix, preserving any sub-hierarchy the designer authored (so "Combat.Won" and
 	 * "Social.Won" stay distinct). Falls back to GetTagLeafLabel for non-outcome tags. This is the ONE rendering of an
-	 * outcome tag — node pins, the Prereq Examiner, and the mapping panel's qualifier picker all read identically.
+	 * outcome tag - node pins, the Prereq Examiner, and the mapping panel's qualifier picker all read identically.
 	 */
 	static FText GetOutcomeLabel(FName TagName);
 
 	/**
-	 * The output pin CATEGORY an edge verb leaves from — the inverse of the export's category->verb rendering. One
+	 * The output pin CATEGORY an edge verb leaves from - the inverse of the export's category->verb rendering. One
 	 * definition, so the import's pin resolution and the export's wire-binding inversion can never disagree on the mapping.
 	 */
 	static FName PinCategoryForEdgeVerb(const FString& Verb);
@@ -170,7 +170,7 @@ public:
 
 	/**
 	 * Scope flags for CollectStaleQuestTagEntries. Each surface is independently toggled so callers can opt
-	 * into the cost they want — Tier 1's panel sticks with loaded-levels-only for instant designer feedback;
+	 * into the cost they want - Tier 1's panel sticks with loaded-levels-only for instant designer feedback;
 	 * the "Full Project Scan" button + the commandlet enable everything for pre-flight validation.
 	 */
 	struct FStaleTagScanScope
@@ -185,7 +185,7 @@ public:
 		 * classes known to author UQuestComponentBase descendants and skips WP descriptors whose class isn't
 		 * in the set. Filter is fast on large WP levels but misses the rare case where a designer adds a
 		 * quest component to a single placed actor instance (per-instance, not on the BP). Comprehensive
-		 * mode catches that — recommended unless WP scan latency becomes a real problem.
+		 * mode catches that - recommended unless WP scan latency becomes a real problem.
 		 *
 		 * No effect on non-WP unloaded levels (those always do a full PersistentLevel walk) or on Tier 1
 		 * loaded-level scope.
@@ -199,9 +199,9 @@ public:
 	 * Tier 2 entries (BP CDOs, unloaded levels) can be distinguished from Tier 1 loaded-level instances.
 	 *
 	 * Field semantics by Source:
-	 *   LoadedLevelInstance   — Actor + Component live; PackagePath = Actor's level package; FieldLabel + StaleTag as before.
-	 *   ActorBlueprintCDO     — Actor = the BP-generated-class CDO (cast to AActor); Component = CDO's component; PackagePath = BP asset path.
-	 *   UnloadedLevelInstance — Actor + Component point into a transiently-loaded world; PackagePath = umap path.
+	 *   LoadedLevelInstance   - Actor + Component live; PackagePath = Actor's level package; FieldLabel + StaleTag as before.
+	 *   ActorBlueprintCDO     - Actor = the BP-generated-class CDO (cast to AActor); Component = CDO's component; PackagePath = BP asset path.
+	 *   UnloadedLevelInstance - Actor + Component point into a transiently-loaded world; PackagePath = umap path.
 	 *                           Note: weak ptrs may go stale after the scan if the world is GC'd; treat them as
 	 *                           "valid only during this scan, use PackagePath for navigation."
 	 */
@@ -229,7 +229,7 @@ public:
 	};
 
 	/**
-	 * Aggregate return from ValidateProjectPrereqTags. ErrorCount / WarningCount map 1:1 to Diagnostics' severities —
+	 * Aggregate return from ValidateProjectPrereqTags. ErrorCount / WarningCount map 1:1 to Diagnostics' severities -
 	 * callers use them for toast formatting without re-iterating the message list.
 	 */
 	struct FQuestTagValidationResult
@@ -253,7 +253,7 @@ public:
 
 	/**
 	 * Scans the Asset Registry for other questline assets whose CompiledQuestTags list contains an entry that ends with
-	 * this node's relative path (post home-ID prefix strip). Returns the matching runtime tags — i.e., the contextual
+	 * this node's relative path (post home-ID prefix strip). Returns the matching runtime tags - i.e., the contextual
 	 * nested variants of this node's tag under every OUTER asset that LinkedQuestline-references the home, directly or
 	 * through intermediate assets. Empty when the node is used only in its own asset.
 	 */
@@ -261,7 +261,7 @@ public:
 	
 	/**
 	 * Same walk as FindContextualGiversForNode, but resolves QuestTriggerComponent observers per contextual tag instead of
-	 * givers. Surfaces target actors whose StepTagsToTrigger include one of the node's contextual inlined tags — the
+	 * givers. Surfaces target actors whose StepTagsToTrigger include one of the node's contextual inlined tags - the
 	 * equivalent of the standalone FindActorNamesWatchingTag path for the cross-graph case.
 	 */
 	static TArray<FQuestContextualActor> FindContextualObserversForNode(const UQuestlineNode_ContentBase* ContentNode);
@@ -270,7 +270,7 @@ public:
 	 * Walks any UObject's top-level UPROPERTYs and rewrites FGameplayTag or FGameplayTagContainer field values whose
 	 * stored tag name appears as an OldTagName in Renames. Returns the number of individual field swaps performed.
 	 *
-	 * Generic reflection sweep — covers FGameplayTag and FGameplayTagContainer UPROPERTYs on any UObject regardless of
+	 * Generic reflection sweep - covers FGameplayTag and FGameplayTagContainer UPROPERTYs on any UObject regardless of
 	 * class. Used as the shared implementation behind ApplyTagRenamesToLoadedBlueprintCDOs (CDO healing) and
 	 * ApplyTagRenamesToLoadedWorlds (actor + component healing), and available to adopter custom code that needs the
 	 * same generic sweep on bespoke UObjects.
@@ -296,7 +296,7 @@ public:
 	 * something in the CDO are skipped; UE's redirect resolver walks the map transitively at lookup time, so a stale chain like
 	 * A->B already resolves to the eventual canonical without a second A->C entry).
 	 *
-	 * UE's deserialization-time redirect mechanism heals FGameplayTag UPROPERTY fields automatically once a redirect is registered —
+	 * UE's deserialization-time redirect mechanism heals FGameplayTag UPROPERTY fields automatically once a redirect is registered -
 	 * component fields, TMap keys, TArray entries, FGameplayTagContainer contents, FInstancedStruct interiors. The K2-node pin
 	 * DefaultValue case is NOT covered here (pin defaults are stored as strings, not FGameplayTag structs); that gap is handled by
 	 * ApplyTagRenamesToBlueprintGraphs.
@@ -322,12 +322,12 @@ public:
 	
 	/**
 	 * Walks every loaded UBlueprint's generated-class CDO and rewrites any FGameplayTag or FGameplayTagContainer field whose stored
-	 * tag name appears as an OldTagName in Renames. Required because UE's GameplayTagRedirects heals values at deserialization time —
+	 * tag name appears as an OldTagName in Renames. Required because UE's GameplayTagRedirects heals values at deserialization time -
 	 * an already-loaded CDO retains its old value in memory until the class is reloaded. Variables that aren't Instance Editable are
 	 * read directly from the CDO at runtime, so they wouldn't pick up the rename otherwise without an editor restart.
 	 *
 	 * Covers top-level FGameplayTag UPROPERTYs and FGameplayTagContainer UPROPERTYs on the CDO. Does not currently descend into nested
-	 * USTRUCTs, FInstancedStruct interiors, or TMap / TArray element types other than FGameplayTag — those fields heal naturally on
+	 * USTRUCTs, FInstancedStruct interiors, or TMap / TArray element types other than FGameplayTag - those fields heal naturally on
 	 * next BP load via UE's deserialization redirect.
 	 *
 	 * Returns the number of UBlueprint assets modified (and marked dirty).
@@ -337,7 +337,7 @@ public:
 	/**
 	 * Walks every loaded asset (excluding UBlueprint and UWorld, which are handled by sibling helpers) and applies the
 	 * rename map to any matching FGameplayTag / FGameplayTagContainer UPROPERTYs on the asset object itself. Covers
-	 * UDataAsset, UDataTable, and adopter custom asset types — anything loaded in memory that holds tag UPROPERTYs and
+	 * UDataAsset, UDataTable, and adopter custom asset types - anything loaded in memory that holds tag UPROPERTYs and
 	 * isn't already covered by the actor + BP CDO sweeps. Marks each modified asset dirty so Save All persists the
 	 * healed values to disk. Returns the number of assets modified.
 	 */
@@ -352,7 +352,7 @@ public:
 	static FGameplayTag FindCompiledTagForNode(const UQuestlineNode_ContentBase* ContentNode);
 
 	/**
-	 * Compiler-adjacent resolver — returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
+	 * Compiler-adjacent resolver - returns the WorldState fact tag a prereq-expression leaf reading OutputPin would check
 	 * at runtime, plus the source node's compiled runtime tag (OutSourceTag). Mirrors the content-node branches of
 	 * FQuestlineGraphCompiler::CompilePrerequisiteFromOutputPin: AnyOutcomeOut resolves to QuestState.<src>.Completed;
 	 * NamedOutcomeOut resolves to QuestState.<src>.Path.<leaf>. Returns invalid tags for pin roles the examiner treats
@@ -364,21 +364,21 @@ public:
 	/**
 	 * Returns true if the content node's reconstructed tag (from current labels) matches its last compiled tag. False when
 	 * renamed since last compile, never compiled, or the Outer chain is broken. Works for any UQuestlineNode_ContentBase
-	 * descendant — widgets displaying a "Recompile to update tags" warning use this as the source of truth.
+	 * descendant - widgets displaying a "Recompile to update tags" warning use this as the source of truth.
 	 */
 	static bool IsContentNodeTagCurrent(const UQuestlineNode_ContentBase* ContentNode);
 
-	/** Back-compat thin wrapper — prefer IsContentNodeTagCurrent. Same semantics, Step-typed argument. */
+	/** Back-compat thin wrapper - prefer IsContentNodeTagCurrent. Same semantics, Step-typed argument. */
 	static bool IsStepTagCurrent(const UQuestlineNode_Step* StepNode);
 
 	/**
 	 * Syncs a node's pins of a given category to match a desired set of pin names. Pins not in DesiredPinNames are orphaned
 	 * (if wired) or removed (if unwired). Missing names are created. After the add/remove pass, pins of the category are
-	 * reordered in the node's Pins array so their positions match DesiredPinNames order — this means toggle-off-then-on returns
+	 * reordered in the node's Pins array so their positions match DesiredPinNames order - this means toggle-off-then-on returns
 	 * a pin to its original position rather than the bottom of the category. Orphaned pins (present but not in DesiredPinNames)
 	 * are placed after desired pins, preserving their relative order. Calls Modify() and NotifyGraphChanged() internally.
 	 *
-	 * Callers control ordering by the order of DesiredPinNames — sort alphabetically for stable display, leave in index order
+	 * Callers control ordering by the order of DesiredPinNames - sort alphabetically for stable display, leave in index order
 	 * for ordinal-named pins (e.g., "Condition_0", "Condition_1", ...).
 	 */
 	static void SyncPinsByCategory(UEdGraphNode* Node,	EEdGraphPinDirection Direction, FName PinCategory, const TArray<FName>& DesiredPinNames, const TSet<FName>& InsertBeforeCategories = {});
@@ -391,34 +391,39 @@ public:
 	static void SortPinNamesAlphabetical(TArray<FName>& PinNames);
 	
 	/**
-	 * Scans all UQuestlineGraph assets in the project (AR scan + sync load) for ActivationGroup setters and getters whose
-	 * GroupTag matches InGroupTag, and builds a full topology: for each setter, content-node sources feeding its Activate
-	 * input; for each getter, content-node destinations reached by its Forward output. Walkers delegate to the existing
+	 * Scans all UQuestlineGraph assets in the project (AR scan + sync load) for ActivationGroup setters and getters that
+	 * CONNECT to InGroupTag, and builds a full topology: for each setter, content-node sources feeding its Activate input;
+	 * for each getter, content-node destinations reached by its Forward output. Walkers delegate to the existing
 	 * CollectEffectiveSources / CollectActivationTerminals primitives. Intended for authoring-time inspection widgets;
 	 * sync-loading is accepted overhead for on-select invocation.
+	 *
+	 * Matching follows the bus rather than tag equality, because a subscription receives its own channel and every
+	 * descendant of it: a setter qualifies if it publishes on InGroupTag or any DESCENDANT, and a getter qualifies if it
+	 * subscribes on InGroupTag or any ANCESTOR. Each endpoint carries its own EndpointTag and an EGroupEndpointMatch
+	 * saying which case it is, so callers can distinguish "on this tag" from "reaches this tag".
 	 */
 	static void CollectActivationGroupTopology(const FGameplayTag& InGroupTag, FGroupExaminerTopology& OutTopology);
 
 	/**
 	 * Builds a prerequisite expression tree for SPrereqExaminerPanel, dispatched by ContextNode's type. Handles four
 	 * entry points:
-	 *   Content node (Quest / Step / LinkedQuestline / Outcome terminal) — walks the node's Prerequisites input pin.
-	 *   Combinator (AND / OR / NOT) — emits the combinator as the root, walks each condition input.
-	 *   Rule Entry — walks the Entry's Enter input; tree's RuleTag + RuleEntryNode populated for the header.
-	 *   Rule Exit — resolves the Exit's tag to its defining Entry (local graph first, cross-asset AR fallback), walks that
+	 *   Content node (Quest / Step / LinkedQuestline / Outcome terminal) - walks the node's Prerequisites input pin.
+	 *   Combinator (AND / OR / NOT) - emits the combinator as the root, walks each condition input.
+	 *   Rule Entry - walks the Entry's Enter input; tree's RuleTag + RuleEntryNode populated for the header.
+	 *   Rule Exit - resolves the Exit's tag to its defining Entry (local graph first, cross-asset AR fallback), walks that
 	 *     Entry's Enter input; tree's RuleTag + RuleEntryNode populated.
 	 * Knots are traversed transparently. Rule Exit references encountered during the walk emit RuleRef nodes with the
 	 * referenced Entry's Enter expression eagerly attached as children (cycle-guarded against mutually referenced rules).
-	 * Rule Entry Forward pins are inlined directly (direct-eval — no RuleRef boundary). Returns a tree with
+	 * Rule Entry Forward pins are inlined directly (direct-eval - no RuleRef boundary). Returns a tree with
 	 * RootIndex == INDEX_NONE when the context has no wired expression.
 	 */
 	static FPrereqExaminerTree CollectPrereqExpressionTopology(UEdGraphNode* ContextNode);
 
 	/**
 	 * Project-wide prerequisite reference validator. Scans every UQuestlineGraph asset and emits diagnostics for:
-	 *   Error   — prereq leaves whose resolved fact tag isn't in the union of all compiled-tag sets.
-	 *   Error   — Rule Exits whose referenced GroupTag isn't in the compiled-tag universe.
-	 *   Warning — Rule Entries whose GroupTag isn't referenced by any Rule Exit in the project.
+	 *   Error   - prereq leaves whose resolved fact tag isn't in the union of all compiled-tag sets.
+	 *   Error   - Rule Exits whose referenced GroupTag isn't in the compiled-tag universe.
+	 *   Warning - Rule Entries whose GroupTag isn't referenced by any Rule Exit in the project.
 	 * Sync-loads assets (explicit designer action; matches Compile All's cost model). Read-only. Each diagnostic
 	 * carries an FActionToken that navigates to the offending node on click.
 	 */
@@ -427,7 +432,7 @@ public:
 	/**
 	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
 	 * UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
-	 * Loaded-level scope only — Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
+	 * Loaded-level scope only - Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
 

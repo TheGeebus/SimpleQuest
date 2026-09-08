@@ -558,6 +558,23 @@ void UQuestManagerSubsystem::AddStateFactAcrossPerspectives(FGameplayTag InputTa
                 if (AliasFact.IsValid()) WorldState->AddFact(AliasFact);
             }
         }
+
+        // A LinkedQuestline placement also speaks for the ASSET it placed. That identity is not in the node's alias
+        // set - aliases are minted for content INSIDE a linked asset, never for the placement sitting in the outer
+        // graph - so without this an embedded questline's identity receives no lifecycle state at all. Written here
+        // rather than derived so the COUNT stays meaningful: two placements of one route leave the identity at 2,
+        // matching what its inner Steps' aliases already read, and each release decrements it symmetrically.
+        // COMPLETED IS EXCLUDED: PublishGraphResolutions already writes it at the inner identity when the questline's
+        // own Exit resolves, which happens once per placement. Fanning it out here as well double-counts - a route
+        // placed twice read 4 instead of 2. The identity's Completed is a statement about the QUESTLINE resolving and
+        // belongs to the resolution path; the transient leaves below have no other writer at an identity.
+        const bool bLeafOwnedByGraphResolution = (Leaf == EQuestStateLeaf::Completed);
+        if (const FGameplayTag InnerIdentity = Instance->GetLinkedInnerIdentityTag();
+            InnerIdentity.IsValid() && !bLeafOwnedByGraphResolution)
+        {
+            const FGameplayTag IdentityFact = FQuestTagComposer::ResolveStateFactTag(InnerIdentity, Leaf);
+            if (IdentityFact.IsValid()) WorldState->AddFact(IdentityFact);
+        }
     }
 }
 
@@ -580,6 +597,18 @@ void UQuestManagerSubsystem::RemoveStateFactAcrossPerspectives(FGameplayTag Inpu
                 const FGameplayTag AliasFact = FQuestTagComposer::ResolveStateFactTag(AliasTag, Leaf);
                 if (AliasFact.IsValid()) WorldState->RemoveFact(AliasFact);
             }
+        }
+
+        // Symmetric partner to the placement-identity write in AddStateFactAcrossPerspectives. Every add must have
+        // exactly one matching remove or the shared identity's count never returns to zero.
+        // Same exclusion as the add side, so the pairing stays exact. Completed is append-only and never reaches
+        // here in practice, but leaving it out keeps the two helpers symmetric by construction rather than by luck.
+        const bool bLeafOwnedByGraphResolution = (Leaf == EQuestStateLeaf::Completed);
+        if (const FGameplayTag InnerIdentity = Instance->GetLinkedInnerIdentityTag();
+            InnerIdentity.IsValid() && !bLeafOwnedByGraphResolution)
+        {
+            const FGameplayTag IdentityFact = FQuestTagComposer::ResolveStateFactTag(InnerIdentity, Leaf);
+            if (IdentityFact.IsValid()) WorldState->RemoveFact(IdentityFact);
         }
     }
 }
@@ -615,6 +644,15 @@ void UQuestManagerSubsystem::AddPathFactAcrossPerspectives(FGameplayTag InputTag
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
     const FGameplayTag CanonicalFact = FQuestTagComposer::ResolvePathFactTag(CanonicalTag, PathIdentity);
+    if (!CanonicalFact.IsValid())
+    {
+        // Silent failure here cost most of a debugging session: an unregistered path fact composes a valid NAME, gets
+        // an invalid tag back from RequestGameplayTag, and the write vanishes with nothing to read. Say so.
+        UE_LOG(LogSimpleQuestActivation, Warning,
+            TEXT("AddPathFactAcrossPerspectives: '%s' path '%s' composes an UNREGISTERED fact tag - write skipped. "
+                 "Recompile the owning questline so the compiler registers it."),
+            *CanonicalTag.ToString(), *PathIdentity.ToString());
+    }
     if (CanonicalFact.IsValid())
     {
         if (StateSubsystem) StateSubsystem->StampPathFactWriteEventID(CanonicalFact, OriginatingEventID);
@@ -778,10 +816,20 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
     // BEFORE the level reloads - so it reads true whether Start Questline fires at level BeginPlay (before the restore
     // flush) or later from a debug key / interaction (after it). A new game leaves it unset, so the first start proceeds.
     // Net effect: Start Questline is safe to call unconditionally; it starts a questline once and won't fight a load.
-    if (QuestlineTag.IsValid() && FQuestLifecycleQuery::IsStarted(WorldState, QuestlineTag))
+    // THE EXCEPTION IS AN AUTHORED REPLAY. A questline whose own Resettable Replay is On is content meant to run more
+    // than once, so a second start is the point rather than a mistake. Both things this gate protects are still
+    // protected: a questline that is currently Live is never restarted out from under itself, and the pending-restore
+    // check below still owns the save-race case. Without the exception a Start Questline node inside replayable content
+    // fires exactly once per session and then stops, with only this log line to say so.
+    const bool bAlreadyStarted = QuestlineTag.IsValid() && FQuestLifecycleQuery::IsStarted(WorldState, QuestlineTag);
+    const bool bCurrentlyLive  = QuestlineTag.IsValid() && FQuestLifecycleQuery::IsLive(WorldState, QuestlineTag);
+    const bool bAuthoredReplay = Graph->GetResettableReplay() == EResettableReplay::Enabled;
+
+    if (bAlreadyStarted && !(bAuthoredReplay && !bCurrentlyLive))
     {
         UE_LOG(LogSimpleQuestActivation, Log,
-            TEXT("ActivateQuestlineGraph: '%s' already started (running or restored from a save) - skipping fresh activation."),
+            TEXT("ActivateQuestlineGraph: '%s' already started (running or restored from a save) - skipping fresh activation. ")
+            TEXT("Set Resettable Replay to On at the questline level if this graph is meant to run again."),
             *Graph->GetName());
         return;
     }
@@ -812,6 +860,18 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
             TEXT("Skipping to break the loop. Likely a self-referencing Start Questline node or a multi-graph cycle (e.g., A→B→A)."),
             *Graph->GetName());
         return;
+    }
+
+    // Authored replay of a questline that has already run: clear the per-run mirrors on the asset identity before it
+    // runs again so gates wired from it re-gate honestly. Inner nodes need no explicit walk - each resets itself as the
+    // inward cascade reaches it, exactly as ActivateNodeByTag does. The append-only Started and Completed anchors are
+    // never touched; only the clearable projection. ResetQuestRunState no-ops on a Live quest as a second guard.
+    if (bAlreadyStarted && bAuthoredReplay)
+    {
+        ResetQuestRunState(QuestlineTag);
+        UE_LOG(LogSimpleQuestActivation, Verbose,
+            TEXT("[Resettable] ActivateQuestlineGraph: '%s' replaying - cleared run-state mirrors on the asset identity."),
+            *Graph->GetName());
     }
 
     ActivatingGraphPaths.Add(GraphPath);
@@ -3480,6 +3540,52 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     // else: container's Live state already matches what's derived - no action needed.
 }
 
+void UQuestManagerSubsystem::DeriveGraphLive(const FGameplayTag& IdentityTag)
+{
+    if (!WorldState || !IdentityTag.IsValid()) return;
+
+    // Cheap pre-filter only. IsIdentityTag classifies by NAMESPACE, so every tag under "SimpleQuest.Questline."
+    // answers true regardless of depth - a wrapper path like QuickStart.Chapter_9 included.
+    if (!FQuestTagComposer::IsIdentityTag(IdentityTag.GetTagName())) return;
+
+    // *** ONLY THE STANDALONE CASE IS DERIVED. *** An embedded questline's identity is written directly by each
+    // placement through the perspective helpers, which is what keeps its count equal to the number of live
+    // placements; deriving would flatten that to a presence flag. A graph started directly has no placement to speak
+    // for it and took a direct Live write at activation that nothing else can clear, so it needs this. The lookup
+    // failing is also what stops a wrapper path from being answered for - its Live belongs to DeriveContainerLive,
+    // and asserting absence here would clear what that just set.
+    const UQuestlineGraph* Graph = LiveGraphsByIdentity.FindRef(IdentityTag).Get();
+    if (!Graph) return;
+
+    bool bAnyStepLive = false;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Compiled : Graph->GetCompiledNodes())
+    {
+        const UQuestNodeBase* Node = Compiled.Value;
+        if (!Node || !Node->IsStepNode()) continue;
+
+        if (FQuestLifecycleQuery::HasActiveLifecycle(WorldState, ResolveToCanonicalTag(Node->GetContextualTag())))
+        {
+            bAnyStepLive = true;
+            break;
+        }
+    }
+
+    const bool bCurrentlyLive = FQuestLifecycleQuery::IsLive(WorldState, IdentityTag);
+    if (bAnyStepLive && !bCurrentlyLive)
+    {
+        AddStateFactAcrossPerspectives(IdentityTag, EQuestStateLeaf::Live);
+        MarkQuestStarted(IdentityTag);
+        UE_LOG(LogSimpleQuestActivation, Verbose,
+            TEXT("DeriveGraphLive: '%s' → Live (a Step of this asset is active)"), *IdentityTag.ToString());
+    }
+    else if (!bAnyStepLive && bCurrentlyLive)
+    {
+        RemoveStateFactAcrossPerspectives(IdentityTag, EQuestStateLeaf::Live);
+        UE_LOG(LogSimpleQuestActivation, Verbose,
+            TEXT("DeriveGraphLive: '%s' → not Live (no Step of this asset active)"), *IdentityTag.ToString());
+    }
+}
+
 void UQuestManagerSubsystem::DeriveAllAncestorContainersForStep(UQuestStep* Step)
 {
     if (!Step) return;
@@ -3491,7 +3597,26 @@ void UQuestManagerSubsystem::DeriveAllAncestorContainersForStep(UQuestStep* Step
         DeriveContainerLive(AncestorTag);
     }
 
-    // Pass 2: foreign-compile-perspective ancestors derived from each alias's parent prefix chain. Bounded
+    // Pass 2: the owning ASSET identity. Passes 1 and 3 only ever reach container NODES - pass 3 skips asset roots by
+    // design - so a questline started as a graph takes a direct Live write at activation that nothing in this walk can
+    // ever clear, and it stays Live alongside its own Completed forever. The identity is a prefix of the Step's tag and
+    // of each alias; DeriveGraphLive no-ops on any prefix that is not a registered graph, so an asset that only appears
+    // as a LinkedQuestline placement keeps deriving through its container node exactly as before.
+    // Placed ahead of the QuestStateSubsystem guard below because none of this needs the registry.
+    TArray<FGameplayTag> IdentityWalkRoots;
+    IdentityWalkRoots.Add(Step->GetContextualTag());
+    IdentityWalkRoots.Append(Step->GetAssetScopedAliasTags());
+    for (const FGameplayTag& RootTag : IdentityWalkRoots)
+    {
+        FGameplayTag PrefixTag = RootTag.IsValid() ? RootTag.RequestDirectParent() : FGameplayTag();
+        while (PrefixTag.IsValid())
+        {
+            DeriveGraphLive(PrefixTag);
+            PrefixTag = PrefixTag.RequestDirectParent();
+        }
+    }
+
+    // Pass 3: foreign-compile-perspective ancestors derived from each alias's parent prefix chain. Bounded
     // by IsContainerTag so non-wrapper prefixes (asset roots, "SimpleQuest.Questline") are skipped without
     // requiring a runtime check at every prefix level.
     if (!QuestStateSubsystem) return;
@@ -3686,8 +3811,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
     }
 }
 
-void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationParams
-                                                     & CompleterContext)
+void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationParams& CompleterContext)
 {
     if (Resolutions.IsEmpty()) return;
 
@@ -3704,12 +3828,34 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
             *Resolution.OutcomeTag.ToString());
 
         // QSV layer: rich-record registry entry using the Exit's authored OutcomeTag (what the questline
-        // resolves WITH), not any upstream cascading path outcome.
-        StateSubsystem->RecordResolution(Resolution.GraphTag, Resolution.OutcomeTag, NAME_None, ResolutionTime, Source);
+        // resolves WITH), not any upstream cascading path outcome. The outcome doubles as the path identity, the
+        // same way a node's resolving pin name does - passing NAME_None here left every questline-level resolution
+        // unqueryable by path, so HasResolvedAtPath could answer for a Step but never for the questline holding it.
+        const FName GraphPathIdentity = Resolution.OutcomeTag.GetTagName();
+        StateSubsystem->RecordResolution(Resolution.GraphTag, Resolution.OutcomeTag, GraphPathIdentity, ResolutionTime, Source);
 
         // WSV layer: Completed fact write at the asset identity. Asset identities aren't aliased in the
         // current compile model, but AddStateFactAcrossPerspectives handles single-canonical uniformly.
         AddStateFactAcrossPerspectives(Resolution.GraphTag, EQuestStateLeaf::Completed);
+
+        // Per-run resettable mirror, on the same terms SetQuestResolved applies to a node: a resettable-scoped
+        // resolution projects its path to a clearable fact so a replay reset can clear it and anything gated on the
+        // questline's outcome re-gates honestly. Non-resettable scopes keep registry-only behavior. Without this a
+        // questline is the one resolvable thing in the system whose outcome no pin-wired prereq can read.
+        //
+        // Scope comes from the GRAPH's compile-resolved flag, not from the resolving node. A questline's resolution is
+        // published by a utility node (the Exit), and utility instances never receive the per-node bResettableReplay
+        // stamp - asking the node here reads false for every questline in the project. Nor can the graph's authored
+        // tri-state be read directly: Inherit is the common value and resolving it is a compile-time job.
+        const UQuestlineGraph* ResolvedGraph = LiveGraphsByIdentity.FindRef(Resolution.GraphTag).Get();
+        if (ResolvedGraph && ResolvedGraph->IsCompiledResettableReplay())
+        {
+            AddPathFactAcrossPerspectives(Resolution.GraphTag, GraphPathIdentity, CompleterContext.OriginatingEventID);
+        }
+        else if (!ResolvedGraph)
+        {
+            UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("PublishGraphResolutions: '%s' not in LiveGraphsByIdentity - path mirror skipped."), *Resolution.GraphTag.ToString());
+        }
 
         // Bus publish at the questline asset's tag channel so questline-tag subscribers (Hierarchical or
         // ExactMatch) receive a direct questline-level Ended event. Closes the gap that previously forced

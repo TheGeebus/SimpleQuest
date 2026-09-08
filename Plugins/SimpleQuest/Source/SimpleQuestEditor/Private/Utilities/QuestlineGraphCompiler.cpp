@@ -304,6 +304,28 @@ static FText RehomeDisplayText(const FText& Source, UObject* Target)
 }
 
 /**
+ * Registers the per-outcome path facts for a questline ASSET identity (SimpleQuest.State.<AssetSegment>.Path.<Outcome>),
+ * one per outcome the graph's Exit nodes can resolve with. Sibling to the state-leaf expansion WriteCompiledTagsIni
+ * performs on every identity tag: state leaves are outcome-independent so they expand from the identity alone, while
+ * path facts depend on which outcomes exist and have to be emitted here, where the graph is in hand. Without them the
+ * runtime's path-mirror write resolves to an unregistered tag and silently no-ops - invisible at the write site, since
+ * the fact simply never appears.
+ */
+static void RegisterAssetIdentityPathFacts(const UQuestlineGraph* Graph, FName IdentityName, TArray<FName>& OutCompiledTags)
+{
+	if (!Graph || !Graph->QuestlineEdGraph || IdentityName.IsNone()) return;
+
+	for (const FName& OutcomeName : FSimpleQuestEditorUtilities::CollectExitOutcomeTagNames(Graph->QuestlineEdGraph))
+	{
+		const FName PathFact = FQuestTagComposer::MakeNodePathFact(IdentityName, OutcomeName);
+		if (!PathFact.IsNone())
+		{
+			OutCompiledTags.AddUnique(PathFact);
+		}
+	}
+}
+
+/**
  * Checksums the compiled model into LABELED components: the ed-graph, the graph itself, then every compiled node in
  * sorted key order.
  *
@@ -674,15 +696,23 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 	// Add to AllCompiledQuestTags so RegisterCompiledQuestTags expands the asset-identity state-leaf facts
 	// (SimpleQuest.State.<AssetSegment>.{Live, Completed, ...}) at module init - required for the runtime
 	// PublishGraphResolutions WSV write to land at a registered fact tag rather than no-op on an unregistered
-	// one.
+	// one. The per-outcome path facts need the same treatment and cannot be expanded from the identity alone,
+	// because which outcomes exist is a property of this graph's Exits.
 	const FName RootAssetIdentityName = FQuestTagComposer::MakeIdentityTag(TagPrefix, {});
 	AllCompiledQuestTags.Add(RootAssetIdentityName);
+	RegisterAssetIdentityPathFacts(InGraph, RootAssetIdentityName, AllCompiledQuestTags);
 	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(RootAssetIdentityName, false);
 
 	// Stamp it on the asset as well, so consumers read the identity rather than rebuilding it. TagPrefix has already been
 	// through SanitizeQuestlineTagSegment and the empty-ID asset-name fallback - neither of which runtime code can
 	// perform - so a recomposed identity elsewhere can only be right by coincidence.
 	InGraph->CompiledIdentityTag = RootAssetIdentityName;
+
+	// Resolve the root scope's replay setting once and stamp it, so the runtime can read a resolved bool instead of
+	// re-deriving one from the authored tri-state it cannot resolve. The inner compile below takes the same value.
+	const bool RootResettable = ResolveResettable(InGraph->GetResettableReplay(), false);
+	InGraph->bCompiledResettableReplay = RootResettable;
+	
 	CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(RootAssetIdentityName, false);
 
     // Refresh outcome pins on all step nodes so that changes to outcomes on an objective class are reflected without
@@ -702,11 +732,11 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     TArray<FName> EntryTags = CompileGraph(
     	InGraph->QuestlineEdGraph,
     	TagPrefix,
-    	{},
-    	BoundaryCompletionsByPath,
-    	VisitedAssetPaths,
-    	nullptr,
-    	ResolveResettable(InGraph->GetResettableReplay(), false));
+		{},
+		BoundaryCompletionsByPath,
+		VisitedAssetPaths,
+		nullptr,
+		RootResettable);
 	
     InGraph->EntryNodeTags = EntryTags;
     InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
@@ -1147,6 +1177,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
 				const FGameplayTag PreviousAssetIdentity = CurrentAssetIdentityTag;
 				const FName LinkedAssetIdentityName = FQuestTagComposer::MakeIdentityTag(LinkedAssetPrefix, {});
 				AllCompiledQuestTags.AddUnique(LinkedAssetIdentityName);
+				RegisterAssetIdentityPathFacts(LinkedGraph, LinkedAssetIdentityName, AllCompiledQuestTags);
 				CurrentAssetIdentityTag = UGameplayTagsManager::Get().RequestGameplayTag(LinkedAssetIdentityName, false);
 
 				// Bridge the placement to its inner asset identity: the same tag HarvestQuestlineRewards files the inner

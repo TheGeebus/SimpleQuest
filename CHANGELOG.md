@@ -304,6 +304,21 @@ expected you to know where the reward had been authored.
   one finishes - and stays set when a questline resolves one ending while other
   branches are still running.
 
+- **A questline placed inside another announced its ending twice.** Subscribe at a
+  broad tag and you are promised one delivery per thing that happens - that is
+  what makes a HUD possible without naming every quest it might show. A placed
+  questline broke it: its completion went out as two separate publishes, one from
+  the placement and one from the questline asset, and while the bus removes
+  duplicate channels *within* a publish it cannot know that two publishes describe
+  one event. Anything listening broadly saw every chapter finish twice. The two
+  are now channels of a single publish, so the guarantee holds for questlines the
+  way it already held for everything else.
+
+  - **What a questline-tag subscriber receives changed with it.** An embedded
+  questline's ending now arrives with the placement's context rather than a bare
+  identity payload - more information, and the same shape every other
+  multi-perspective event already had.
+
 - **An embedded questline's own identity carried no lifecycle state.** A questline
   placed inside another one reported `Completed` when it finished but never
   `Started` or `Live` while it ran, so anything watching the questline by its own

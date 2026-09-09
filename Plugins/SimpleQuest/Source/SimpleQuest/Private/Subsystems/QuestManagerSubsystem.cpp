@@ -3864,7 +3864,15 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
         // don't have a specific completing node to attribute beyond the asset identity itself; adopters
         // who need per-Step context subscribe to Step-tag FQuestEndedEvent (still published via the
         // PublishQuestEndedEvent path on the completing Step's channel).
-        if (QuestSignalSubsystem)
+        //
+        // *** ONLY FOR A QUESTLINE NOBODY ELSE ANNOUNCES. *** An EMBEDDED questline is announced by its placement,
+        // whose publish now carries the inner identity as one of its channels (FQuestPublish::OnAllNodeTags). Firing
+        // again here made two publishes of one completion, and the bus cannot dedup across publishes - so every
+        // subscriber bound at a broad ancestor received a chapter's completion twice, one delivery per publish.
+        // LiveGraphsByIdentity holds exactly the graphs activated in their own right, which is exactly the set with
+        // no placement to speak for them.
+        const bool bStandaloneQuestline = LiveGraphsByIdentity.Contains(Resolution.GraphTag);
+        if (QuestSignalSubsystem && bStandaloneQuestline)
         {
             FQuestEventPayload Payload;
             Payload.NodeInfo.QuestTag = Resolution.GraphTag;

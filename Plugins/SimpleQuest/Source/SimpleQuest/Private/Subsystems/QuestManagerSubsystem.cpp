@@ -2073,9 +2073,18 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
     // gates wired from it re-gate honestly. The append-only resolution registry and the Completed anchor are NEVER
     // touched; only the clearable projection (ClearFact, count-agnostic). Guards: the activation must proceed (a
     // Block-refused activation doesn't re-run), and the node must not already be Live (a no-op mid-run re-entry must
-    // not wipe in-flight mirrors). Descendants need no explicit walk - the inward activation cascade re-activates
-    // each one, which resets itself here the same way; that also correctly leaves the mirrors of any branch a replay
-    // doesn't re-enter. Mirrors to clear come from the node's own resolution history (the registry knows the paths).
+    // not wipe in-flight mirrors). Mirrors to clear come from the node's own resolution history (the registry knows
+    // the paths).
+    //
+    // *** A CONTAINER'S REPLAY ALSO RESETS ITS DESCENDANTS, EAGERLY. *** This used to be left to the inward cascade,
+    // on the theory that each descendant resets itself as the cascade re-enters it and any branch the replay does not
+    // re-enter keeps its mirror "correctly". That reasoning has a hole: a branch the replay has not re-entered YET is
+    // indistinguishable from one it never will, and its mirror is last run's answer either way. Content activated
+    // out of band - a room manager calling Activate Quest on containers deliberately left unwired from Start - is
+    // never reached by the cascade at all, so a gate across those containers read two of three as already true on
+    // the first beat of the second run and resolved the whole chapter. A per-run mirror surviving into the next run
+    // is stale by definition; clearing it up front is what makes it per-run. ResetQuestRunState still refuses to
+    // touch anything Live, so a descendant that is genuinely mid-flight keeps its state.
     if (Decision != EQuestActivationGuardDecision::RefuseBlocked && Instance->IsResettableReplay() && NodeTag.IsValid() && WorldState)
     {
         const FGameplayTag CompletedFact = FQuestTagComposer::ResolveStateFactTag(NodeTag, EQuestStateLeaf::Completed);
@@ -2089,6 +2098,25 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
                 *NodeTag.ToString(),
                 bWasCompleted,
                 bBypassPrerequisites);
+
+            if (Instance->IsContainerNode())
+            {
+                int32 DescendantsReset = 0;
+                for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Loaded : LoadedNodeInstances)
+                {
+                    const UQuestNodeBase* Descendant = Loaded.Value;
+                    if (!Descendant || !Descendant->IsResettableReplay()) continue;
+
+                    // MatchesTag is "this tag is the argument or a descendant of it"; exclude the container itself.
+                    const FGameplayTag DescendantTag = Descendant->GetContextualTag();
+                    if (!DescendantTag.IsValid() || DescendantTag == NodeTag || !DescendantTag.MatchesTag(NodeTag)) continue;
+
+                    ResetQuestRunState(DescendantTag);
+                    ++DescendantsReset;
+                }
+                UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("[Resettable] '%s' replay reset %d descendant(s) eagerly"),
+                    *NodeTag.ToString(), DescendantsReset);
+            }
         }
     }
 

@@ -304,6 +304,16 @@ expected you to know where the reward had been authored.
   one finishes - and stays set when a questline resolves one ending while other
   branches are still running.
 
+- **Replaying a container left its untouched branches remembering the last run.**
+  A replayable quest clears its per-run record when it starts again, and each
+  thing inside it did the same as the replay reached it - so anything the replay
+  had not reached *yet* still carried the previous run's result. Content that is
+  activated from outside the graph, a room controller starting each scenario in
+  turn, is never reached by the replay at all. A gate across three such scenarios
+  saw two already satisfied on the first beat of the second run and resolved the
+  whole chapter. A container's replay now clears every descendant up front; anything
+  genuinely still running keeps its state.
+
 - **A questline placed inside another announced its ending twice.** Subscribe at a
   broad tag and you are promised one delivery per thing that happens - that is
   what makes a HUD possible without naming every quest it might show. A placed

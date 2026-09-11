@@ -45,7 +45,7 @@ struct SIMPLEQUEST_API FQuestResolutionEntry
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FName PathIdentity = NAME_None;
 
-	/** World time at this specific resolution (GetTimeSeconds on the manager's world). */
+	/** Quest time at this specific resolution - see UQuestStateSubsystem::GetQuestTime. */
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	double ResolutionTime = 0.0;
 

@@ -22,6 +22,14 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 	const FString EffectiveID = GetEffectiveID();
 	Context.AddTag(FAssetRegistryTag(TEXT("QuestlineEffectiveID"), EffectiveID, FAssetRegistryTag::TT_Alphabetical));
 
+	// The identity the compiler stamped - what root-scope resolutions attribute to, and what another asset's
+	// CompiledPlacementIdentities names when it places this one. Absent until the asset has been compiled, so a reader
+	// can tell "never compiled" from "root asset".
+	if (!CompiledIdentityTag.IsNone())
+	{
+		Context.AddTag(FAssetRegistryTag(TEXT("CompiledIdentityTag"), CompiledIdentityTag.ToString(), FAssetRegistryTag::TT_Hidden));
+	}
+
 	// Publish DisplayName so content-browser tooltips and similar surfaces can show it without loading the asset.
 	// Empty when no DisplayName is set - consumers fall back to the asset's short name.
 	Context.AddTag(FAssetRegistryTag(TEXT("DisplayName"), DisplayName.ToString(), FAssetRegistryTag::TT_Alphabetical));
@@ -48,6 +56,23 @@ void UQuestlineGraph::GetAssetRegistryTags(FAssetRegistryTagsContext Context) co
 			PairStrings.Add(FString::Printf(TEXT("%s=%s"), *Pair.ContextualFName.ToString(), *Pair.AliasFName.ToString()));
 		}
 		Context.AddTag(FAssetRegistryTag(TEXT("CompiledNodeAliases"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+	}
+
+	// CompiledPlacementIdentities - pipe-separated "Contextual=Identity" pairs, one per LinkedQuestline placement in this
+	// compile: the wrapper's contextual tag and the inner asset identity it speaks for. The manager preloads these at
+	// startup, with CompiledNodeAliases, so the registry knows every perspective relation before any graph registers.
+	{
+		TArray<FString> PairStrings;
+		for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : CompiledNodes)
+		{
+			const FGameplayTag Identity = Pair.Value ? Pair.Value->GetLinkedInnerIdentityTag() : FGameplayTag();
+			if (!Identity.IsValid()) continue;
+			PairStrings.Add(FString::Printf(TEXT("%s=%s"), *Pair.Key.ToString(), *Identity.GetTagName().ToString()));
+		}
+		if (!PairStrings.IsEmpty())
+		{
+			Context.AddTag(FAssetRegistryTag(TEXT("CompiledPlacementIdentities"), FString::Join(PairStrings, TEXT("|")), FAssetRegistryTag::TT_Hidden));
+		}
 	}
 	
 	// ListenerGroupTags + OutwardSetterGroupTags drive the manager's reachability-walked async-load. Manager builds

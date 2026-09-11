@@ -5,8 +5,10 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
+#include "Quests/Types/QuestPhase.h"
 
 
+class UQuestStateSubsystem;
 class UWorldStateSubsystem;
 
 
@@ -71,5 +73,18 @@ namespace FQuestLifecycleQuery
      * Completed across iterations); the "is this re-resolve allowed?" check belongs at the resolution-request
      * layer, not the activation layer.
      */
-    SIMPLEQUEST_API bool IsTerminal(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
+	SIMPLEQUEST_API bool IsTerminal(const UWorldStateSubsystem* WS, FGameplayTag QuestTag);
+
+	/**
+	 * The single-value read of a node's lifecycle - phase plus coexisting flags - assembled from the WorldState facts and,
+	 * when QSS is supplied, the prerequisite cache (bEnabled) and the resolution registry (LatestOutcome). Precedence is
+	 * documented on EQuestPhase. Null WS or an invalid tag returns NotReached with every flag false; null QSS leaves
+	 * bEnabled false and LatestOutcome empty. Advancement holds are not part of a phase - ask the manager through
+	 * IsQuestAdvancementHeld, which walks ancestors; this reads one tag.
+	 *
+	 * THE ONE PLACE the phase is derived. UQuestStateSubsystem::GetQuestPhase hands it to designers; the catch-up pass
+	 * (FQuestCatchUpFanout::ReconstructTag) replays events from it. A new lifecycle fact lands here once.
+	 */
+	SIMPLEQUEST_API FQuestPhaseSnapshot GetPhase(const UWorldStateSubsystem* WS, const UQuestStateSubsystem* QSS, FGameplayTag QuestTag);
 }
+

@@ -54,3 +54,4 @@ namespace FSignalChannelUtils
         return Best;
     }
 }
+

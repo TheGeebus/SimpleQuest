@@ -35,7 +35,7 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	FGameplayTag IncomingOutcomeTag;
 
-	/** World time at this specific entry (GetTimeSeconds on the manager's world). */
+	/** Quest time at this specific entry - see UQuestStateSubsystem::GetQuestTime. */
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	double EntryTime = 0.0;
 

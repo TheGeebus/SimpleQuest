@@ -25,9 +25,18 @@ struct SIMPLEQUEST_API FQuestRuntimeRecord
 	GENERATED_BODY()
 
 	/**
-	 * World time at which the manager first registered this tag (RegisterQuestlineGraph during graph activation).
-	 * 0.0 if registered before the manager's world had a valid time source. Useful for telemetry / save-time ordering.
+	 * Quest time at which the manager first registered this tag (RegisterQuestlineGraph during graph activation). 0.0 if
+	 * registered before the state subsystem had a world. Useful for telemetry / save-time ordering.
 	 */
 	UPROPERTY(BlueprintReadOnly)
 	double RegisteredTime = 0.0;
+
+	/**
+	 * True when a runtime node instance is registered under this exact spelling - a node's ContextualTag, or a questline's
+	 * identity tag on a standalone start. False for spellings that are only a perspective on some other node: an asset-scoped
+	 * alias, or a record the compiled display index registered ahead of any graph. Catch-up and child enumeration walk NODES,
+	 * so they read this to skip perspective-only keys.
+	 */
+	UPROPERTY(BlueprintReadOnly)
+	bool bHasNodeInstance = false;
 };

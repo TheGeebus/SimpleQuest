@@ -9,6 +9,7 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestPhase.h"
 #include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
@@ -154,6 +155,31 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
+    /**
+     * Where QuestTag is in its lifecycle right now: the phase (Not Reached / Activated / Started / Deactivated / Completed) plus
+     * the flags that coexist with it - Enabled, Blocked, has started, has resolved, latest outcome. The same read the catch-up
+     * pass makes for a late observer, so a status line built from this and one built from events agree. Prefer it to composing
+     * Is Quest Live / Is Quest Completed / Is Quest Pending Giver by hand.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static FQuestPhaseSnapshot GetQuestPhase(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag);
+
+    /**
+     * The known quest tags exactly one level below Parent Tag, one per node, in canonical spelling, sorted lexically: a
+     * container's steps, a questline's top-level nodes, a linked placement's inner content. Registration, not state - a child
+     * that has never been reached is listed all the same; ask Get Quest Phase for its state. Empty for an unknown parent or a leaf.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static TArray<FGameplayTag> GetChildQuestTags(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag ParentTag);
+
+    /**
+     * Seconds of play on the quest clock: continuous across level changes and saved games, zero at a new game, not
+     * advancing while paused. Every timestamp the framework records is in this domain, so "how long ago" is this minus
+     * the stamp - across a save as well as within a session.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static double GetQuestTime(const UObject* WorldContext);
+    
     // -------------------------------------------------------------------------------------------------------------
     // Source registry queries - find "which Giver / Trigger / Observer in the world handles this?" without maintaining a
     // parallel tag → actor registry. Queries alias-walk via the existing QuestStateSubsystem canonical-resolution

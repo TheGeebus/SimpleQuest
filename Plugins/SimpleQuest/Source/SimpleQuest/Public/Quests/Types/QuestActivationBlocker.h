@@ -84,7 +84,7 @@ struct SIMPLEQUEST_API FQuestRefusalEntry
 	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
 	EQuestActivationBlocker Reason = EQuestActivationBlocker::PrereqUnmet;
 
-	/** World time the refusal occurred, in the manager's GetTimeSeconds domain. */
+	/** Quest time the refusal occurred - see UQuestStateSubsystem::GetQuestTime. */
 	UPROPERTY(BlueprintReadOnly, Category = "Quest|Blocker")
 	double RefusalTime = 0.0;
 };

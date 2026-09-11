@@ -121,6 +121,24 @@ int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* World
     return QM ? QM->GetQuestCompletionCount(QuestTag) : 0;
 }
 
+FQuestPhaseSnapshot USimpleQuestBlueprintLibrary::GetQuestPhase(const UObject* WorldContext, FGameplayTag QuestTag)
+{
+    const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+    return QSS ? QSS->GetQuestPhase(QuestTag) : FQuestPhaseSnapshot();
+}
+
+TArray<FGameplayTag> USimpleQuestBlueprintLibrary::GetChildQuestTags(const UObject* WorldContext, FGameplayTag ParentTag)
+{
+    const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+    return QSS ? QSS->GetChildQuestTags(ParentTag) : TArray<FGameplayTag>();
+}
+
+double USimpleQuestBlueprintLibrary::GetQuestTime(const UObject* WorldContext)
+{
+    const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+    return QSS ? QSS->GetQuestTime() : 0.0;
+}
+
 // -------------------------------------------------------------------------
 // Quest actions
 // -------------------------------------------------------------------------

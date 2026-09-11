@@ -14,6 +14,7 @@
 #include "Quests/Types/QuestResolutionRecord.h"
 #include "Quests/Types/QuestRuntimeRecord.h"
 #include "Quests/Types/QuestDisplayDataRecord.h"
+#include "Quests/Types/QuestPhase.h"
 #include "QuestStateSubsystem.generated.h"
 
 struct FSimpleQuestSaveSnapshot;
@@ -44,10 +45,10 @@ DECLARE_MULTICAST_DELEGATE(FOnAnyRegistryChanged);
  *
  * Writes are exclusive to UQuestManagerSubsystem via friend access. External code never mutates this
  * subsystem. The manager pushes:
- *  - Known quest tag registration on graph activation (RegisterQuestTag) — populates the KnownQuests
+ *  - Known quest tag registration on graph activation (RegisterQuestTag) - populates the KnownQuests
  *     map whose keys answer GetQuestTagsUnderPrefix for hierarchical catch-up subscribers.
  *  - Resolution records on quest completion (RecordResolution).
- *  - Entry records on quest start (RecordEntry) — carries Provenance + ActivationParamsSnapshot +
+ *  - Entry records on quest start (RecordEntry) - carries Provenance + ActivationParamsSnapshot +
  *     PathIdentity alongside the existing cascade fields, capturing the merged final params delivered
  *     to the objective so save/load can reconstitute live questline state by-value.
  *  - Prereq status snapshots on giver-branch entry and enablement-watch transitions (UpdateQuestPrereqStatus).
@@ -63,6 +64,21 @@ class SIMPLEQUEST_API UQuestStateSubsystem : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	// ── Quest clock ──────────────────────────────────────────────────────────────────────────────────────
+
+	/**
+	 * Seconds of play: continuous across level changes and saved games, zero at a new game, not advancing while the game
+	 * is paused (it is built on the world's TimeSeconds, which pauses and dilates with the game). Every timestamp the
+	 * framework records - resolutions, entries, refusals, registration, holds - is in this domain, so "how long ago" is
+	 * GetQuestTime() minus the stamp, and a stamp from before a save is comparable with one after. Wall-clock time is
+	 * deliberately not part of this: idling in a menu is not play.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
+	double GetQuestTime() const;
+	
     // ── Past resolution queries ──────────────────────────────────────────────────────────────────────────
 
     /** Returns the full resolution record for a quest, or nullptr if the quest hasn't resolved this session. */
@@ -86,7 +102,7 @@ public:
 	 * Distinct from HasResolvedWith: that one is outcome-keyed (satisfies on any path producing the named
 	 * outcome); this one is path-keyed (satisfies only when the named quest resolved through this specific
 	 * authored path). Drives the runtime evaluation of Leaf_Path prereqs emitted from pin-wired prereq
-	 * authoring — a designer wiring from a specific output pin gets a leaf that only this exact path satisfies.
+	 * authoring - a designer wiring from a specific output pin gets a leaf that only this exact path satisfies.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|State")
 	bool HasResolvedAtPath(FGameplayTag QuestTag, FName PathIdentity) const;
@@ -100,7 +116,7 @@ public:
 
 	/**
 	 * Whether ANY quest has resolved with the specified OutcomeTag (or any descendant via gameplay-tag hierarchy)
-	 * at any point this session. Context-free — no quest-tag scoping. Backs the runtime evaluation of Leaf_Outcome
+	 * at any point this session. Context-free - no quest-tag scoping. Backs the runtime evaluation of Leaf_Outcome
 	 * prereqs emitted from the declarative PrerequisiteOutcome authoring node. Hierarchy walk via FGameplayTag::
 	 * MatchesTag mirrors the bus's hierarchical delivery semantics for outcome-channel publishes: a leaf subscribed
 	 * at SimpleQuest.Outcome.Victory satisfies on both Outcome.Victory and any descendant like Outcome.Victory.Flawless.
@@ -120,7 +136,7 @@ public:
 
 	/**
 	 * Returns this session's refused activation attempts for a quest, oldest first. Empty if it has never been refused.
-	 * Bounded — see FQuestRefusalRecord — so a long session reports the most recent refusals rather than all of them.
+	 * Bounded - see FQuestRefusalRecord - so a long session reports the most recent refusals rather than all of them.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|State")
 	TArray<FQuestRefusalEntry> GetRefusalHistory(FGameplayTag QuestTag) const;
@@ -161,7 +177,7 @@ public:
 	//
 	// KnownQuests is the registry of quest tags the manager has registered this session via RegisterQuestTag
 	// (called from RegisterQuestlineGraph). Keys answer "is this a known quest tag" and "what tags live under
-	// this prefix" — the hierarchical catch-up entry point. Values hold quest-level historical context that
+	// this prefix" - the hierarchical catch-up entry point. Values hold quest-level historical context that
 	// isn't tied to an individual start arrival (per-start detail lives on FQuestEntryArrival).
 
 	/**
@@ -173,11 +189,22 @@ public:
 	 * canonical-tag set suitable for fact lookups (which are keyed by canonical) and instance lookups in
 	 * LoadedNodeInstances. A subscriber binding to an alias-shape prefix (e.g. SimpleQuest.Questline.NewTest
 	 * when NewTest is loaded only as inlined content under another asset's compile) gets the canonical tags
-	 * of the inlined nodes whose alias arrays contain a descendant of Prefix — the bus's hierarchical-walk
+	 * of the inlined nodes whose alias arrays contain a descendant of Prefix - the bus's hierarchical-walk
 	 * semantic, applied to the registered-tag set.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest|State")
 	TArray<FGameplayTag> GetQuestTagsUnderPrefix(FGameplayTag Prefix) const;
+
+	/**
+	 * The known quest tags exactly one level below ParentTag, one per node, in canonical spelling: a container's steps, a
+	 * questline's top-level nodes, a linked placement's inner content. ParentTag may be given in an inner asset's own
+	 * spelling; the children still come back canonical, and a route placed twice lists both placements' children.
+	 * Registration, not state - a child that has never been reached is listed all the same (ask GetQuestPhase). Empty for
+	 * an unknown parent or a leaf. Sorted lexically by full tag: a stable, explicable order, which is all the framework can
+	 * promise until the compiler stamps an authored one.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Quest|State")
+	TArray<FGameplayTag> GetChildQuestTags(FGameplayTag ParentTag) const;
 
 	/**
 	 * True if ContextualTag has been registered with the manager this session via RegisterQuestTag. Distinct from
@@ -239,7 +266,7 @@ public:
 
 	/**
 	 * All known quest tags this session, keyed by quest tag. The map's keys are the canonical answer to
-	 * "what tags has the manager registered" — used by the hierarchical catch-up walk. Values hold per-quest
+	 * "what tags has the manager registered" - used by the hierarchical catch-up walk. Values hold per-quest
 	 * historical context (RegisteredTime; future quest-level fields).
 	 */
 	const TMap<FGameplayTag, FQuestRuntimeRecord>& GetAllKnownQuests() const { return KnownQuests; }
@@ -248,7 +275,7 @@ public:
     const TMap<FGameplayTag, FQuestPrereqStatus>& GetAllCachedPrereqStatus() const { return CachedPrereqStatus; }
 
     /**
-     * Multicast fired after any mutation to the registry maps — RecordResolution, RecordEntry, UpdateQuest-
+     * Multicast fired after any mutation to the registry maps - RecordResolution, RecordEntry, UpdateQuest-
      * PrereqStatus, ClearQuestPrereqStatus. Distinct from the per-quest FQuestResolutionRecordedEvent / FQuest-
      * EntryRecordedEvent publishes used by prereq-leaf subscribers. This is a "registry mutated, refresh if
      * you care about the whole map" signal for inspection surfaces (Quest State Facts Panel, future telemetry
@@ -257,10 +284,19 @@ public:
     FOnAnyRegistryChanged OnAnyRegistryChanged;
 
 
-    // ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
+	// ── Present-tense activation queries ─────────────────────────────────────────────────────────────────
 
-    /**
-     * Returns the current set of activation blockers for ContextualTag — empty array means the quest is currently
+	/**
+	 * Where QuestTag is in its lifecycle right now, as one value plus the flags that coexist with it. See EQuestPhase for
+	 * the precedence and FQuestPhaseSnapshot for the fields. This is the read the catch-up pass replays from, so a status
+	 * line built from it agrees with one built from events. Prefer it to composing IsLive / IsCompleted / IsPendingGiver by
+	 * hand. Unknown tags return NotReached and log a Warning on LogSimpleQuestState, like GetDisplayName.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
+	FQuestPhaseSnapshot GetQuestPhase(FGameplayTag QuestTag) const;
+
+	/**
+	 * Returns the current set of activation blockers for ContextualTag - empty array means the quest is currently
      * startable. State-fact blockers (UnknownQuest, AlreadyLive, Blocked, Deactivated, NotPendingGiver) come
      * first; PrereqUnmet comes last with UnsatisfiedLeafTags populated. Computed from WorldState facts +
      * cached prereq status. Pure read; no manager interaction.
@@ -279,7 +315,7 @@ public:
 
 	/**
 	 * Whether ContextualTag's runtime instance is a UQuest container (wrapper). False for Steps, utility nodes, and
-	 * any tag the manager hasn't registered. Public read surface — used by the blocker query and any consumer
+	 * any tag the manager hasn't registered. Public read surface - used by the blocker query and any consumer
 	 * that needs to know a tag's structural classification.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
@@ -287,13 +323,13 @@ public:
 	
 	/**
 	 * Translates an input tag to the list of canonical ContextualTag(s) it represents. Returns [InputTag] when
-	 * InputTag is a ContextualTag (or unknown — defensive); returns the alias-mapped contextual list when
+	 * InputTag is a ContextualTag (or unknown - defensive); returns the alias-mapped contextual list when
 	 * InputTag is a registered AssetScopedAliasTag. Used by alias-aware predicate / aggregate read APIs and by
 	 * any consumer that needs to enumerate the active placements behind a tag (debug surfaces, designer tools,
 	 * future BP integrations).
 	 *
 	 * Pointer-returning APIs (GetQuestResolution, GetQuestEntry) and "latest" / "single instance" APIs
-	 * (GetLatestResolution, GetLastGiverActor, etc.) intentionally stay direct-only — cross-asset semantics for
+	 * (GetLatestResolution, GetLastGiverActor, etc.) intentionally stay direct-only - cross-asset semantics for
 	 * "the single record" are ambiguous with multiple placements. Callers wanting cross-asset visibility use the
 	 * predicate / aggregate APIs (HasResolvedWith, GetResolutionHistory, etc.).
 	 */
@@ -306,6 +342,14 @@ public:
 	 */
 	TArray<FGameplayTag> GetAssetScopedAliasTagsForCanonical(FGameplayTag ContextualTag) const;
 
+	/**
+	 * The inner asset identity a LinkedQuestline placement speaks for (its LinkedInnerIdentityTag), or an invalid tag when
+	 * ContextualTag is not a placement wrapper. The identity carries the wrapper's mirrored lifecycle facts and is a channel
+	 * of the wrapper's publishes; catch-up reconstruction adds it to the wrapper's channel set so a subscriber bound at the
+	 * asset perspective sees the same delivery it would have seen live.
+	 */
+	FGameplayTag GetPlacementIdentityForCanonical(FGameplayTag ContextualTag) const;
+
 	// ── Source registry queries ──────────────────────────────────────────────────────────────────────────
 	//
 	// Component-driven self-registration of which Trigger / Giver / Observer instances in the world handle a given
@@ -314,7 +358,7 @@ public:
 	//
 	// Registration alias-walks (ResolveCanonicalTags) at write time so a Giver authored under an alias and queried
 	// under canonical (or vice versa) surfaces correctly. Phase 1 returns live entries only (bIsActive=true);
-	// Phase 2 (0.5.0) adds an editor-baked QuestSourcesManifest channel that populates AuthoredActorPath /
+	// Phase 2 adds an editor-baked QuestSourcesManifest channel that populates AuthoredActorPath /
 	// AuthoredLevel / AuthoredTransform for streamed-out content without changing the struct shape.
 
 	/** Returns every currently-registered UQuestTriggerComponent (or subclass) whose StepTagsToTrigger covers QueryTag,
@@ -329,7 +373,7 @@ public:
 
 	/** Returns every currently-registered UQuestObserverComponent (or subclass) whose ObservedTags covers QueryTag,
 	 *  alias-walked. Note: derived components (Trigger, Giver) also register under this role for tags they observe
-	 *  via the implicit-observed bridge — a single Giver component watching its QuestTagsToGive surfaces under both
+	 *  via the implicit-observed bridge - a single Giver component watching its QuestTagsToGive surfaces under both
 	 *  GetActiveGiversForTag (giver role) AND GetActiveObserversForTag (observer role on the same tags). */
 	UFUNCTION(BlueprintCallable, Category = "Quest|Source")
 	TArray<FQuestRoleSourceInfo> GetActiveObserversForTag(FGameplayTag QueryTag) const;
@@ -342,12 +386,12 @@ public:
 
 	// ── Source registry writes (framework infrastructure) ─────────────────────────────────────────────────
 	//
-	// Components call these from BeginPlay (register) and EndPlay (unregister). Not BlueprintCallable —
+	// Components call these from BeginPlay (register) and EndPlay (unregister). Not BlueprintCallable -
 	// designers don't drive the registry directly. Public-but-non-BP to avoid friend declarations across the
 	// component hierarchy; the methods themselves are cheap no-ops when the input is empty or invalid.
 
 	/** Registers Component as a Trigger source for every tag in AuthoredTags + each tag's canonical resolution.
-	 *  Idempotent — repeat calls replace the prior entry for this Component. */
+	 *  Idempotent - repeat calls replace the prior entry for this Component. */
 	void RegisterTriggerSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags);
 
 	/** Registers Component as a Giver source for every tag in AuthoredTags + each tag's canonical resolution. */
@@ -358,7 +402,7 @@ public:
 	
 	/**
 	 * Granular counterpart to UnregisterAllRoleSources: drops Component as a source for a SINGLE tag in the named
-	 * role registry — for components whose watched-tag set changes at runtime. No-op if Component isn't registered
+	 * role registry - for components whose watched-tag set changes at runtime. No-op if Component isn't registered
 	 * for Tag. Pass the same (authored) tag form used at registration.
 	 */
 	void UnregisterTriggerSource(UActorComponent* Component, FGameplayTag Tag);
@@ -367,14 +411,14 @@ public:
 
 	/**
 	 * Removes every per-role entry pointing at Component. Safe no-op when the component never registered. Called
-	 * from component EndPlay — explicit removal keeps the registry compact across repeated activate/end cycles
+	 * from component EndPlay - explicit removal keeps the registry compact across repeated activate/end cycles
 	 * (weak-pointer queries already skip dead entries; this trims them up front).
 	 */
 	void UnregisterAllRoleSources(UActorComponent* Component);
 
 	/**
 	 * Registers Objective under each tag in TagSet (canonical + aliases). The latest registration for any given tag
-	 * wins — a Step re-activating under the same tag replaces the prior entry.
+	 * wins - a Step re-activating under the same tag replaces the prior entry.
 	 */
 	void RegisterActiveObjective(UQuestObjective* Objective, const TArray<FGameplayTag>& TagSet);
 
@@ -384,12 +428,12 @@ public:
 	// ── Display data queries ─────────────────────────────────────────────────────────────────────────────
 
 	/**
-	 * Returns the authored UI display name for a Questline / Quest / Step tag. Returns the authored value as-is —
+	 * Returns the authored UI display name for a Questline / Quest / Step tag. Returns the authored value as-is -
 	 * empty FText when the designer didn't author one. No silent fallback to NodeLabel or to a derived leaf-name
 	 * reformat: empty means the designer chose not to pipeline display content for this tag, distinct from a
 	 * missing-record bug.
 	 *
-	 * Returns empty FText for unknown tags + logs a Warning on LogSimpleQuestState — that's the loud-failure
+	 * Returns empty FText for unknown tags + logs a Warning on LogSimpleQuestState - that's the loud-failure
 	 * path for "tag may be unregistered or compile may have missed it." Empty-authored-content (record exists,
 	 * DisplayName field intentionally blank) is silent.
 	 *
@@ -418,7 +462,7 @@ public:
 	// ── Snapshot ─────────────────────────────────────────────────────────────────────────────────────────
 
 	/**
-	 * Captures the two data layers — WorldState facts + the resolution/entry registries — into a serializable snapshot.
+	 * Captures the two data layers - WorldState facts + the resolution/entry registries - into a serializable snapshot.
 	 * Pure read. Lower-level C++ primitive: the Blueprint entry point is USimpleQuestBlueprintLibrary::CaptureQuestState,
 	 * which pairs this with the active-graph list + deferred-activation set that restore needs. Native callers composing
 	 * their own save flow may still call this directly.
@@ -428,7 +472,7 @@ public:
 	/**
 	 * Restores the two data layers from a snapshot: bulk-sets WorldState, overwrites the registries, rebuilds the
 	 * parallel indices, and fires the registry/fact "refresh" multicasts. Returns false only on an unrecoverable version.
-	 * Restores DATA only — it does not rebuild live objectives or re-arm deferred activations. Lower-level C++ primitive:
+	 * Restores DATA only - it does not rebuild live objectives or re-arm deferred activations. Lower-level C++ primitive:
 	 * the Blueprint entry point is USimpleQuestBlueprintLibrary::ApplyQuestSnapshot, which pairs this with the stash the
 	 * per-graph restore consumes. Native callers composing their own load flow may still call this directly.
 	 */
@@ -453,7 +497,7 @@ private:
 	/**
 	 * Parallel O(1) index for HasResolvedAtPath. Maintained alongside QuestResolutions: every RecordResolution
 	 * call adds the (ContextualTag, PathIdentity) pair to this map. Separate from ResolvedOutcomesByQuest because
-	 * Path and Outcome are independently queryable concerns — a quest with two paths sharing an outcome will
+	 * Path and Outcome are independently queryable concerns - a quest with two paths sharing an outcome will
 	 * appear once in ResolvedOutcomesByQuest (under the shared outcome) but twice in ResolvedPathsByQuest (one
 	 * entry per path). TSet handles deduplication for repeat resolutions through the same path.
 	 */
@@ -461,7 +505,7 @@ private:
 
 	/**
 	 * Flat session-wide set of every outcome tag any quest has resolved with. Maintained alongside the per-quest
-	 * ResolvedOutcomesByQuest map: RecordResolution inserts here too. Backs HasAnyQuestResolvedWith — the
+	 * ResolvedOutcomesByQuest map: RecordResolution inserts here too. Backs HasAnyQuestResolvedWith - the
 	 * context-free outcome query that catch-up logic for Leaf_Outcome prereqs queries on subscribe.
 	 *
 	 * Hierarchy walk happens at query time (HasAnyQuestResolvedWith iterates and calls MatchesTag) rather than
@@ -513,11 +557,12 @@ private:
 	void RecordActivationRefusal(FGameplayTag QuestTag, EQuestActivationBlocker Reason, double RefusalTime);
 
 	/**
-	 * Registers ContextualTag into KnownQuests with a default-constructed FQuestRuntimeRecord stamped with current world time.
-	 * Idempotent — repeat calls on the same tag preserve the earliest RegisteredTime. Called from
-	 * UQuestManagerSubsystem::RegisterQuestlineGraph for every valid resolved tag in the graph's compiled nodes.
+	 * Registers QuestTag into KnownQuests with an FQuestRuntimeRecord stamped with current world time. Idempotent - repeat
+	 * calls preserve the earliest RegisteredTime, and bNodeInstance can only promote a record (a spelling first seen through
+	 * the compiled display preload or an alias becomes a node when its instance registers), never demote one. Pass true from
+	 * the sites that register a node's own ContextualTag or a questline identity; leave it false for aliases and preloads.
 	 */
-	void RegisterQuestTag(FGameplayTag QuestTag);
+	void RegisterQuestTag(FGameplayTag QuestTag, bool bNodeInstance = false);
 	
     /** Resolves the GameInstance's WorldState subsystem for the blocker-fact lookups. */
     UWorldStateSubsystem* ResolveWorldState() const;
@@ -528,7 +573,7 @@ private:
 	/**
 	 * Pushed by the manager during graph activation: marks ContextualTag as a container (UQuest wrapper). Lets the
 	 * blocker query distinguish Step-vs-container semantics for the AlreadyLive blocker without cross-subsystem
-	 * coupling — containers' Live state is derived from inner Step state and shouldn't gate forward activation.
+	 * coupling - containers' Live state is derived from inner Step state and shouldn't gate forward activation.
 	 */
 	void RegisterContainerTag(FGameplayTag QuestTag);
 
@@ -538,12 +583,26 @@ private:
 	 * queries; folding the KnownQuests registration in here enforces the invariant at the API boundary instead of relying
 	 * on every caller to remember the pairing.
 	 *
-	 * Top-level content (where AssetScopedTag == ContextualTag) is a no-op — no aliasing needed; no double-registration of
+	 * Top-level content (where AssetScopedTag == ContextualTag) is a no-op - no aliasing needed; no double-registration of
 	 * the same tag.
 	 *
 	 * Called by the manager during RegisterQuestlineGraph for each AssetScopedAliasTag carried by a registered instance.
 	 */
 	void RegisterAlias(FGameplayTag AssetScopedTag, FGameplayTag ContextualTag);
+
+	/**
+	 * Registers that the placement wrapper at ContextualTag speaks for the inner asset identity InnerIdentityTag. The
+	 * identity is a known key with mirrored facts, but it is a PERSPECTIVE on the wrapper, not a node: hierarchical fan-out
+	 * skips it when its placement is enumerated, and resolves a subscription bound at the identity to its placements.
+	 * Called by the manager from RegisterAllNodePerspectives for every wrapper carrying a LinkedInnerIdentityTag.
+	 */
+	void RegisterPlacementIdentity(FGameplayTag InnerIdentityTag, FGameplayTag ContextualTag);
+
+	/** Placement identity -> the wrapper canonicals that speak for it (two placements of one asset share one identity). */
+	TMap<FGameplayTag, TArray<FGameplayTag>> PlacementsByIdentity;
+
+	/** Reverse of PlacementsByIdentity - wrapper canonical -> its inner asset identity. */
+	TMap<FGameplayTag, FGameplayTag> IdentityByPlacement;
 
 	/**
 	 * Set of compiled QuestTags whose runtime instance is a UQuest container. Populated by the manager during
@@ -559,7 +618,7 @@ private:
 	TMap<FGameplayTag, FQuestRuntimeRecord> KnownQuests;
 
 	/**
-	 * Forward alias index — AssetScopedAliasTag → list of ContextualTags it aliases. Multiple ContextualTags
+	 * Forward alias index - AssetScopedAliasTag → list of ContextualTags it aliases. Multiple ContextualTags
 	 * may share the same alias when a linked asset is placed multiple times across the project (each placement
 	 * gets its own ContextualTag; they share their inner asset's StandaloneTag-shape alias). Read by the alias-
 	 * walk in ResolveCanonicalTags + GetQuestTagsUnderPrefix.
@@ -567,7 +626,7 @@ private:
 	TMap<FGameplayTag, TArray<FGameplayTag>> ContextualTagsByAssetScopedTag;
 
 	/**
-	 * Reverse alias index — ContextualTag → list of AssetScopedAliasTags. Empty for top-level content (no
+	 * Reverse alias index - ContextualTag → list of AssetScopedAliasTags. Empty for top-level content (no
 	 * LinkedQuestline ancestors). Read by RecordResolution / RecordEntry's multi-publish so cross-asset
 	 * subscribers receive the fact-mutation events on their bound alias channels.
 	 */
@@ -578,7 +637,7 @@ private:
 	 * alias index has registered for it. Iteration is silent when no aliases exist (top-level content). Used by
 	 * the multi-write mutators (RecordResolution / RecordEntry / UpdateQuestPrereqStatus / ClearQuestPrereqStatus)
 	 * so registry maps stay symmetric with the WorldState multi-perspective fact-write model and the bus's
-	 * multi-channel publish — query and iteration from any perspective surface the same data without alias-
+	 * multi-channel publish - query and iteration from any perspective surface the same data without alias-
 	 * walking at every read site.
 	 */
 	template<typename TFunc>
@@ -623,7 +682,7 @@ private:
 	void ClearDisplayDataRegistry();
 
 	/**
-	 * Per-role source registries — TMap<TagKey, TArray<TWeakObjectPtr<UActorComponent>>>. Keys cover both authored
+	 * Per-role source registries - TMap<TagKey, TArray<TWeakObjectPtr<UActorComponent>>>. Keys cover both authored
 	 * and canonical forms (registration alias-walks at write time via ResolveCanonicalTags so query-time lookup is
 	 * direct). Weak pointers ensure GC'd actors don't pollute results; explicit cleanup via UnregisterAllRoleSources
 	 * keeps the registry compact across repeated component activate/end cycles.
@@ -633,7 +692,7 @@ private:
 	TMap<FGameplayTag, TArray<TWeakObjectPtr<UActorComponent>>> ObserverSourcesByTag;
 
 	/**
-	 * Live-objective registry — one entry per (canonical or alias) tag pointing at the Step's bound LiveObjective.
+	 * Live-objective registry - one entry per (canonical or alias) tag pointing at the Step's bound LiveObjective.
 	 * Steps self-register from ActivateInternal and unregister from DeactivateInternal / OnObjectiveComplete /
 	 * ResetTransientState.
 	 */
@@ -667,7 +726,7 @@ private:
 	/**
 	 * Builds the full synonym set for QueryTag: the input + every canonical it alias-walks to + every alias each of
 	 * those canonicals fans out to. Catches every perspective form a component / objective could have been registered
-	 * under regardless of register-time alias-index state — components register at BeginPlay but graphs register
+	 * under regardless of register-time alias-index state - components register at BeginPlay but graphs register
 	 * lazily via WarmReachableGraphs, so register-time canonical walks may miss aliases that hadn't been registered yet.
 	 * Order: input first, then canonicals, then aliases. Each entry unique.
 	 */
@@ -685,7 +744,29 @@ private:
 
 	/**
 	 * Rebuilds ResolvedOutcomesByQuest / ResolvedPathsByQuest / ResolvedOutcomes / EnteredOutcomesByQuest from
-	 * the restored histories — mirrors RecordResolution / RecordEntry's per-perspective index maintenance.
+	 * the restored histories - mirrors RecordResolution / RecordEntry's per-perspective index maintenance.
 	 */
 	void RebuildRegistryIndices();
+
+	// ── Quest clock state ────────────────────────────────────────────────────────────────────────────────
+	//
+	// GetQuestTime = AccumulatedPlaySeconds + (current world's TimeSeconds - CurrentWorldBaseSeconds). The base is only
+	// non-zero in the world the clock last rebased in (ClockWorld) - after a snapshot restore, so the restored value
+	// continues from that moment rather than from the world's start. A world the clock has not rebased in reads with base
+	// zero, which is what a fresh world's TimeSeconds started at. The outgoing world's contribution is folded into the
+	// accumulator at its cleanup, so a level change without a save keeps the clock continuous too.
+
+	/** Play seconds accumulated from worlds already cleaned up, plus a restored snapshot's PlayTime. */
+	double AccumulatedPlaySeconds = 0.0;
+
+	/** The world CurrentWorldBaseSeconds applies to; null when the current world reads with base zero. */
+	TWeakObjectPtr<const UWorld> ClockWorld;
+
+	/** The current world's TimeSeconds at the moment the clock last rebased in it (snapshot apply). */
+	double CurrentWorldBaseSeconds = 0.0;
+
+	FDelegateHandle WorldCleanupHandle;
+
+	/** Folds the outgoing world's play seconds into the accumulator when it is this instance's current world. */
+	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
 };

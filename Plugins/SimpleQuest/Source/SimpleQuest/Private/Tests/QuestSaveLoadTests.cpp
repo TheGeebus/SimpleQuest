@@ -34,19 +34,20 @@ namespace
 		Snapshot.Version = FSimpleQuestSaveSnapshot::CurrentVersion;
 		Snapshot.WorldFacts.Add(QuestTag, 3);
 		Snapshot.ActiveGraphs.Add(FSoftObjectPath(TEXT("/Game/Test/QL_Fixture.QL_Fixture")));
+		Snapshot.PlayTime = 4321.09876;   // deliberately NOT exactly representable in float
 
 		FQuestResolutionEntry Resolution;
-		Resolution.OutcomeTag     = OutcomeTag;
-		Resolution.PathIdentity   = TestPathIdentity;
-		Resolution.ResolutionTime = 1234.56789;   // deliberately NOT exactly representable in float
-		Resolution.Source         = EQuestResolutionSource::External;   // non-default, so a dropped enum shows up
+		Resolution.OutcomeTag		= OutcomeTag;
+		Resolution.PathIdentity		= TestPathIdentity;
+		Resolution.ResolutionTime	= 1234.56789;   // deliberately NOT exactly representable in float
+		Resolution.Source			= EQuestResolutionSource::External;   // non-default, so a dropped enum shows up
 		Snapshot.Resolutions.FindOrAdd(QuestTag).History.Add(Resolution);
 
 		FQuestEntryArrival Arrival;
-		Arrival.IncomingOutcomeTag = OutcomeTag;
-		Arrival.EntryTime          = 9876.54321;   // deliberately NOT exactly representable in float
-		Arrival.Provenance         = EQuestActivationProvenance::ChainCascade;
-		Arrival.PathIdentity       = TestPathIdentity;
+		Arrival.IncomingOutcomeTag	= OutcomeTag;
+		Arrival.EntryTime			= 9876.54321;   // deliberately NOT exactly representable in float
+		Arrival.Provenance			= EQuestActivationProvenance::ChainCascade;
+		Arrival.PathIdentity		= TestPathIdentity;
 		Arrival.ActivationParamsSnapshot.Config.NumElementsRequired = 7;   // two structs deep
 		Snapshot.Entries.FindOrAdd(QuestTag).History.Add(Arrival);
 
@@ -92,6 +93,7 @@ bool FSimpleQuestSaveLoad_SnapshotRoundTrip::RunTest(const FString& Parameters)
 	TestEqual(TEXT("version"), Out.Version, FSimpleQuestSaveSnapshot::CurrentVersion);
 	TestEqual(TEXT("world fact value"), Out.WorldFacts.FindRef(QuestTag), 3);
 	TestEqual(TEXT("active graph count"), Out.ActiveGraphs.Num(), 1);
+	TestEqual(TEXT("play time survived"), Out.PlayTime, 4321.09876, 1e-6);
 
 	const FQuestResolutionRecord* Resolution = Out.Resolutions.Find(QuestTag);
 	TestNotNull(TEXT("resolution key survived"), Resolution);
@@ -210,6 +212,10 @@ bool FSimpleQuestSaveLoad_ApplySnapshotRebuildsIndices::RunTest(const FString& P
 	FSimpleQuestSaveSnapshot Snapshot = MakePopulatedSnapshot(QuestTag, OutcomeTag);
 	TestTrue(TEXT("ApplySnapshot accepted a current-version snapshot"), QuestState->ApplySnapshot(Snapshot));
 
+	// No world here, so the clock has nothing to add to the accumulator - the read IS the restored value, which makes this
+	// the one place the apply half of the clock can be checked without a level.
+	TestEqual(TEXT("quest time continues from the snapshot"), QuestState->GetQuestTime(), 4321.09876, 1e-6);
+
 	TestTrue(TEXT("ResolvedOutcomesByQuest rebuilt"), QuestState->HasResolvedWith(QuestTag, OutcomeTag));
 	TestTrue(TEXT("ResolvedPathsByQuest rebuilt"), QuestState->HasResolvedAtPath(QuestTag, TestPathIdentity));
 	TestTrue(TEXT("session-wide ResolvedOutcomes rebuilt"), QuestState->HasAnyQuestResolvedWith(OutcomeTag));
@@ -219,6 +225,7 @@ bool FSimpleQuestSaveLoad_ApplySnapshotRebuildsIndices::RunTest(const FString& P
 	FSimpleQuestSaveSnapshot Empty;
 	Empty.Version = FSimpleQuestSaveSnapshot::CurrentVersion;
 	TestTrue (TEXT("second ApplySnapshot accepted"), QuestState->ApplySnapshot(Empty));
+	TestEqual(TEXT("quest time replaced by the empty snapshot, not accumulated"), QuestState->GetQuestTime(), 0.0, 1e-9);
 	TestFalse(TEXT("outcome index cleared"), QuestState->HasResolvedWith(QuestTag, OutcomeTag));
 	TestFalse(TEXT("path index cleared"), QuestState->HasResolvedAtPath(QuestTag, TestPathIdentity));
 	TestFalse(TEXT("session outcome set cleared"), QuestState->HasAnyQuestResolvedWith(OutcomeTag));

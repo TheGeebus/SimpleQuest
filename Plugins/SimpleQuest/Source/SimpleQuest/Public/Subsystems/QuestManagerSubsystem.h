@@ -362,6 +362,12 @@ protected:
 private:
 	void LoadCompiledDisplayIni() const;
 	
+	/**
+	 * The quest clock, for every timestamp this subsystem records. One accessor so the fourteen stamp sites share a
+	 * domain and cannot drift back to world time. Zero before the state subsystem is resolved.
+	 */
+	double QuestNow() const;
+
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
@@ -845,6 +851,19 @@ private:
 	 * AutoLoadListenerBearingGraphs which sync-loaded every listener-bearing graph at startup.
 	 */
 	void BuildListenerGroupIndex();
+
+	/** Runs the asset-registry-backed startup passes once the registry is ready: the listener index, then the relation preload. */
+	void OnAssetRegistryReady();
+
+	/**
+	 * Registers every alias and placement-identity relation the registry will need BEFORE the graph that owns it registers:
+	 * a late observer that catches up ahead of registration - the restore path does, every time - otherwise sees the
+	 * preloaded spellings as unrelated nodes and reconstructs one node several times. Reads CompiledNodeAliases and
+	 * CompiledPlacementIdentities from UQuestlineGraph asset-registry tags. ROOT ASSETS ONLY - an asset that another asset
+	 * places contributes nothing, because its own compile never runs in that session and its pairs would name spellings
+	 * that are themselves aliases in the compile that does.
+	 */
+	void PreloadCompiledRelations();
 
 	/**
 	 * Walks a just-registered graph's OutwardSetterGroupTags, looks up matching listener-graphs in the global

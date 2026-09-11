@@ -200,11 +200,11 @@ void UQuestManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
     IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
     if (AR.IsLoadingAssets())
     {
-        AR.OnFilesLoaded().AddUObject(this, &UQuestManagerSubsystem::BuildListenerGroupIndex);
+        AR.OnFilesLoaded().AddUObject(this, &UQuestManagerSubsystem::OnAssetRegistryReady);
     }
     else
     {
-        BuildListenerGroupIndex();
+        OnAssetRegistryReady();
     }
 }
 
@@ -485,7 +485,7 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         const FGameplayTag QuestlineTag = Graph->GetIdentityTag();
         if (QuestlineTag.IsValid())
         {
-            StateSubsystem->RegisterQuestTag(QuestlineTag);
+            StateSubsystem->RegisterQuestTag(QuestlineTag, true);
             StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetAuthoredDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
         }
         else
@@ -778,12 +778,21 @@ void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* I
     const FText& InDisplayName = Instance->GetDisplayName();
     const FText& InDescription = Instance->GetDescription();
     UQuestDisplayData* InDisplayData = Instance->GetDisplayData();
-
-    // Canonical: register directly. RegisterAlias would bail on equal tags so we use RegisterQuestTag explicitly.
-    StateSubsystem->RegisterQuestTag(Canonical);
+    
+    // Canonical: register directly as a node instance. RegisterAlias would bail on equal tags so we use RegisterQuestTag
+    // explicitly, and this is the site that promotes a preloaded spelling to a node.
+    StateSubsystem->RegisterQuestTag(Canonical, true);
     if (bIsContainer)
     {
         StateSubsystem->RegisterContainerTag(Canonical);
+    }
+
+    // A LinkedQuestline placement speaks for the asset it placed: its identity gets the wrapper's mirrored facts and rides
+    // the wrapper's publishes as a channel. Tell the registry, so catch-up treats the identity as this wrapper's
+    // perspective rather than as a node of its own.
+    if (const FGameplayTag InnerIdentity = Instance->GetLinkedInnerIdentityTag(); InnerIdentity.IsValid())
+    {
+        StateSubsystem->RegisterPlacementIdentity(InnerIdentity, Canonical);
     }
     StateSubsystem->RegisterDisplayData(Canonical, InDisplayName, InDescription, InDisplayData);
 
@@ -1237,7 +1246,7 @@ void UQuestManagerSubsystem::HandleOnNodeCompleted(UQuestNodeBase* Node, FGamepl
     // PendingActivationContext and into every FireWrapperBoundaryCompletion call.
     FOriginatingEventID OriginatingEventID;
     OriginatingEventID.AuthoredNodeGuid = Node->GetAuthoredNodeGuid();
-    OriginatingEventID.ResolutionTimestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    OriginatingEventID.ResolutionTimestamp = QuestNow();
     UE_LOG(LogSimpleQuestActivation, Verbose,
         TEXT("HandleOnNodeCompleted: '%s' minted cascade event ID - guid=%s ts=%.3f"),
         *Node->GetContextualTag().ToString(),
@@ -1423,7 +1432,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             if (QuestStateSubsystem && Node->GetContextualTag().IsValid())
             {
                 const FQuestObjectiveRuntimeContext& Snapshot = Step->GetReceivedRuntimeContext();
-                const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+                const double Now = QuestNow();
                 QuestStateSubsystem->RecordEntry(
                     Node->GetContextualTag(),
                     Snapshot.IncomingParams.OriginTag,
@@ -1504,7 +1513,7 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // Inner-graph Leaf_Entry prereqs subscribe to that event via FPrereqLeafSubscription and re-evaluate.
             if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
             {
-                const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+                const double Now = QuestNow();
                 QuestStateSubsystem->RecordEntry(
                     QuestNode->GetContextualTag(),
                     CascadeContext.IncomingParams.OriginTag,
@@ -1572,7 +1581,7 @@ void UQuestManagerSubsystem::HandleOnNodeActivationRefused(UQuestNodeBase* Node,
     // this node and stop here", which is the question with no other source.
     if (QuestStateSubsystem && InContextualTag.IsValid())
     {
-        QuestStateSubsystem->RecordActivationRefusal(InContextualTag, EQuestActivationBlocker::PrereqUnmet, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+        QuestStateSubsystem->RecordActivationRefusal(InContextualTag, EQuestActivationBlocker::PrereqUnmet, QuestNow());
     }
 }
 
@@ -1580,14 +1589,14 @@ void UQuestManagerSubsystem::HandleGiveBlockedForRecord(FGameplayTag Channel, co
 {
     if (!QuestStateSubsystem || Event.Blockers.Num() == 0 || !Event.QuestTag.IsValid()) return;
 
-    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, QuestNow());
 }
 
 void UQuestManagerSubsystem::HandleProgressRefusedForRecord(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event)
 {
     if (!QuestStateSubsystem || Event.Blockers.Num() == 0 || !Event.QuestTag.IsValid()) return;
 
-    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+    QuestStateSubsystem->RecordActivationRefusal(Event.QuestTag, Event.Blockers[0].Reason, QuestNow());
 }
 
 void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
@@ -1670,7 +1679,7 @@ FQuestAdvancementHold UQuestManagerSubsystem::HoldQuestAdvancement(FGameplayTag 
     Record.QuestTag          = QuestTag;
     Record.Reason            = Reason;
     Record.bHoldDeactivation = bHoldDeactivation;
-    Record.PlacedAtSeconds   = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    Record.PlacedAtSeconds   = QuestNow();
 
     // Started here and nowhere else; an idle game pays nothing for this net because the timer does not exist until
     // something is actually held.
@@ -1726,11 +1735,7 @@ void UQuestManagerSubsystem::CheckForAbandonedHolds()
         AbandonedHoldTimer.Invalidate();
         return;
     }
-
-    if (const UWorld* World = GetWorld())
-    {
-        WarnOnHoldsOlderThan(World->GetTimeSeconds());
-    }
+    WarnOnHoldsOlderThan(QuestNow());
 }
 
 void UQuestManagerSubsystem::WarnOnHoldsOlderThan(double Now)
@@ -1753,7 +1758,9 @@ void UQuestManagerSubsystem::WarnOnHoldsOlderThan(double Now)
             TEXT("Advancement hold '%s' on '%s' has been active for %.0f seconds and is still holding. Whatever placed it "
                  "has most likely gone away without releasing - the questline will not advance until something does. Holds "
                  "are never released automatically, because that would hide this rather than report it."),
-            *Record.Reason.ToString(), *Record.QuestTag.ToString(), Elapsed);
+            *Record.Reason.ToString(),
+            *Record.QuestTag.ToString(),
+            Elapsed);
     }
 }
 
@@ -1800,7 +1807,8 @@ int32 UQuestManagerSubsystem::ReleaseAllQuestAdvancementHolds()
     for (const FGameplayTag& Tag : HeldTags) RemoveStateFactAcrossPerspectives(Tag, EQuestStateLeaf::Held);
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("ReleaseAllQuestAdvancementHolds: dropped %d hold(s), replaying %d parked activation(s)"),
-        Dropped, ParkedActivations.Num());
+        Dropped,
+        ParkedActivations.Num());
 
     ReplayParkedActivations();
     return Dropped;
@@ -2036,7 +2044,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyLive, Context));
             if (QuestStateSubsystem)
             {
-                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyLive, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyLive, QuestNow());
             }
         }
         return;
@@ -2052,7 +2060,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::AlreadyPendingGiver, Context));
             if (QuestStateSubsystem)
             {
-                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyPendingGiver, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::AlreadyPendingGiver, QuestNow());
             }
         }
         return;
@@ -2137,7 +2145,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Instance, FQuestActivationFailedEvent(NodeTag, NodeTagName, EQuestActivationBlocker::Blocked, Context));
             if (QuestStateSubsystem)
             {
-                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::Blocked, GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0);
+                QuestStateSubsystem->RecordActivationRefusal(NodeTag, EQuestActivationBlocker::Blocked, QuestNow());
             }
         }
         return;
@@ -2318,6 +2326,11 @@ void UQuestManagerSubsystem::LoadCompiledDisplayIni() const
     }
 
     UE_LOG(LogSimpleQuestActivation, Log, TEXT("LoadCompiledDisplayIni: %d record(s), %d DisplayData asset(s) from %s"), Registered, Loaded, *IniPath);
+}
+
+double UQuestManagerSubsystem::QuestNow() const
+{
+    return QuestStateSubsystem ? QuestStateSubsystem->GetQuestTime() : 0.0;
 }
 
 void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag OutcomeTag, FName PathIdentity, const FOriginatingEventID& OriginatingEventID, const FQuestObjectiveActivationParams& InheritedForward)
@@ -3292,6 +3305,83 @@ void UQuestManagerSubsystem::BuildListenerGroupIndex()
         IndexedTagCount);
 }
 
+void UQuestManagerSubsystem::OnAssetRegistryReady()
+{
+    BuildListenerGroupIndex();
+    PreloadCompiledRelations();
+}
+
+void UQuestManagerSubsystem::PreloadCompiledRelations()
+{
+    UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
+    if (!StateSubsystem) return;
+
+    IAssetRegistry& AR = FAssetRegistryModule::GetRegistry();
+    FARFilter Filter;
+    Filter.ClassPaths.Add(UQuestlineGraph::StaticClass()->GetClassPathName());
+    Filter.bRecursiveClasses = true;
+    TArray<FAssetData> Assets;
+    AR.GetAssets(Filter, Assets);
+
+    // Both tags are pipe-separated "Contextual=Other" pairs written by UQuestlineGraph::GetAssetRegistryTags at save. A pair
+    // naming a tag that is no longer registered (an asset compiled against tags since removed) is skipped and counted.
+    int32 Skipped = 0;
+    auto ForEachPair = [&Skipped](const FAssetData& Asset, const TCHAR* TagKey, TFunctionRef<void(FGameplayTag, FGameplayTag)> Op)
+    {
+        FString Value;
+        if (!Asset.GetTagValue(TagKey, Value) || Value.IsEmpty()) return;
+        TArray<FString> Pairs;
+        Value.ParseIntoArray(Pairs, TEXT("|"), true);
+        for (const FString& PairStr : Pairs)
+        {
+            FString Left, Right;
+            if (!PairStr.Split(TEXT("="), &Left, &Right)) { ++Skipped; continue; }
+            const FGameplayTag Contextual = UGameplayTagsManager::Get().RequestGameplayTag(FName(*Left), false);
+            const FGameplayTag Other      = UGameplayTagsManager::Get().RequestGameplayTag(FName(*Right), false);
+            if (!Contextual.IsValid() || !Other.IsValid()) { ++Skipped; continue; }
+            Op(Contextual, Other);
+        }
+    };
+
+    // Pass 1 - every identity some asset places. Those assets' own compiles never run while they are placed, so their pairs
+    // must not contribute: they would name spellings that are aliases in the root compile that does run.
+    TSet<FName> PlacedIdentities;
+    for (const FAssetData& Asset : Assets)
+    {
+        ForEachPair(Asset, TEXT("CompiledPlacementIdentities"), [&PlacedIdentities](FGameplayTag, FGameplayTag Identity)
+        {
+            PlacedIdentities.Add(Identity.GetTagName());
+        });
+    }
+
+    // Pass 2 - relations from root assets only.
+    int32 RootAssets = 0, AliasPairs = 0, IdentityPairs = 0;
+    for (const FAssetData& Asset : Assets)
+    {
+        // An asset with no compiled identity has never been compiled and has nothing to preload; one that some other
+        // asset places is not a root - its own compile never runs while it is placed.
+        FString IdentityString;
+        if (!Asset.GetTagValue(TEXT("CompiledIdentityTag"), IdentityString) || IdentityString.IsEmpty()) continue;
+        if (PlacedIdentities.Contains(FName(*IdentityString))) continue;
+        ++RootAssets;
+
+        ForEachPair(Asset, TEXT("CompiledNodeAliases"), [&](FGameplayTag Contextual, FGameplayTag Alias)
+        {
+            StateSubsystem->RegisterAlias(Alias, Contextual);
+            ++AliasPairs;
+        });
+        ForEachPair(Asset, TEXT("CompiledPlacementIdentities"), [&](FGameplayTag Contextual, FGameplayTag Identity)
+        {
+            StateSubsystem->RegisterPlacementIdentity(Identity, Contextual);
+            ++IdentityPairs;
+        });
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Log,
+        TEXT("PreloadCompiledRelations: %d root asset(s) of %d scanned - %d alias pair(s), %d placement identit(y/ies) registered, %d pair(s) skipped (unregistered tag)"),
+        RootAssets, Assets.Num(), AliasPairs, IdentityPairs, Skipped);
+}
+
 void UQuestManagerSubsystem::WarmReachableGraphs(UQuestlineGraph* Graph)
 {
     if (!Graph) return;
@@ -3435,7 +3525,7 @@ void UQuestManagerSubsystem::TryFireDeferredCompletion(FGameplayTag StepTag)
     // HandleOnNodeCompleted's minting pattern.
     FOriginatingEventID OriginatingEventID;
     OriginatingEventID.AuthoredNodeGuid = Step->GetAuthoredNodeGuid();
-    OriginatingEventID.ResolutionTimestamp = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    OriginatingEventID.ResolutionTimestamp = QuestNow();
 
     ChainToNextNodes(Step, Pending.OutcomeTag, Pending.PathIdentity, OriginatingEventID);
 }
@@ -3727,7 +3817,7 @@ void UQuestManagerSubsystem::SetQuestResolved(FGameplayTag QuestTag, FGameplayTa
     {
         if (UQuestStateSubsystem* Registry = GI->GetSubsystem<UQuestStateSubsystem>())
         {
-            const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+            const double Now = QuestNow();
             Registry->RecordResolution(QuestTag, OutcomeTag, PathIdentity, Now, Source, OriginatingEventID);
         }
     }
@@ -3846,7 +3936,7 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
     UQuestStateSubsystem* StateSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     if (!StateSubsystem) return;
 
-    const double ResolutionTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+    const double ResolutionTime = QuestNow();
     for (const FQuestGraphResolution& Resolution : Resolutions)
     {
         if (!Resolution.GraphTag.IsValid() || !Resolution.OutcomeTag.IsValid()) continue;

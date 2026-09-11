@@ -393,9 +393,9 @@ expected you to know where the reward had been authored.
   components already have.
 
 - **The chapters teach, rather than only demonstrate.** Chapters one through
-  eight carry narrative beats for the player and graph comments written for the
+  ten carry narrative beats for the player and graph comments written for the
   author, so a chapter explains the concept it exhibits instead of leaving the
-  graph to speak for itself. The remaining chapters are in progress.
+  graph to speak for itself. The last chapter is in progress.
 
 - **Chapter 8 teaches linked questlines by placing one twice.** A patrol route is
   authored once and placed at both ends of the room, dispatched together by a
@@ -405,6 +405,25 @@ expected you to know where the reward had been authored.
   covers what a placement does to the tags underneath it: the same authored step
   lands on a different tag in each placement, and the outcomes in the inner graph
   are the pins you wire from on the outer one.
+
+- **Chapter 9 teaches activation groups with a bridge and a way under it.** The
+  long way is four steps up and over. A second questline, started alongside the
+  chapter and knowing nothing about it, has a route underneath - and finishing it
+  publishes on a group tag that an Exit node in the chapter is listening to,
+  which opens the far side of the bridge while the player is still in the
+  tunnel. A new entry point into a graph that has already started, with no wire
+  between the two. The chapter is also where the difference between a group and
+  a prerequisite gets its clearest statement: a gate is polled when the player
+  arrives at it; a group is told the moment the sender fires.
+
+- **Chapter 10 teaches prerequisite rules with the oldest trope there is: turn on
+  the power.** Two quests run side by side, each after a keycard. The terminal
+  that opens the first keycard's door refuses - no power - and the refusal names
+  what is missing. The switch is in the other quest. Throwing it writes one named
+  condition, and everything that needs it reads it by that name: the lights, the
+  locker, and a terminal across the facility, none of which know a switch exists.
+  A condition authored once, true or false everywhere at the same instant - and
+  from the reader's side, indistinguishable from a fact.
 
 - **`OBJ_InteractWithTarget` is an annotated reference for writing an
   Objective.** It walks the basic flow - receive a trigger event, notify the

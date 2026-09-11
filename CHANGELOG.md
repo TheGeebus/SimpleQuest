@@ -197,6 +197,15 @@ expected you to know where the reward had been authored.
   Params. **Core redirects ship with the plugin**, so assets and Blueprints heal
   on load; C++ referring to the old names needs the rename.
 
+- **The example materials and meshes moved up out of the QuickStart folder.**
+  The prototype grid, the button and door materials, the fade material the
+  trigger auras use, and the basic shapes now live under the plugin's own
+  `Content/Materials` and `Content/Meshes` rather than `Content/QuickStart/…`,
+  since nothing about them is specific to the tutorial. References inside the
+  plugin were fixed up on the move; a project that pointed at the old QuickStart
+  paths directly will need to repoint. The fade material also gained an emissive
+  term so auras stay readable in a dark room.
+
 ### Fixes
 
 - **Three ensures no longer fire on editor startup.** The advancement-hold

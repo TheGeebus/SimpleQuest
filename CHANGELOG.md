@@ -93,6 +93,40 @@ expected you to know where the reward had been authored.
   invisible from a node. Anything that can be observed one way can now be
   observed the other.
 
+- **Where a quest is right now is one question.** **Get Quest Phase** returns a
+  single phase - Not Reached, Activated, Started, Deactivated, Completed - plus
+  the facts that coexist with a phase rather than replace it: whether it is
+  enabled, blocked, has ever started, has ever resolved, and its latest outcome.
+  Until now a status line meant composing Is Quest Live, Is Quest Completed and
+  Is Quest Pending Giver by hand with a precedence you invented, and every UI
+  invented a slightly different one. The phase names follow the lifecycle
+  events, and precedence goes by what is current: a repeatable quest running
+  again reads Started, with its earlier completion reported alongside.
+
+  - **Catch-up replays from the same read.** A late observer is caught up by
+  the same derivation, so a status built from this and one built from events
+  cannot disagree.
+
+- **A node's children can be listed.** **Get Child Quest Tags** returns the
+  known quest tags one level below a tag - a container's steps, a questline's
+  top-level nodes, a placed questline's inner content - one per node, in the
+  placement's own spelling, whether or not a child has ever been reached. A
+  journal can show a "never reached" row without splitting tag strings to find
+  it. Given an inner asset's own tag, it lists the children of every placement
+  of that asset. Order is alphabetical for now; an authored order is a separate
+  item.
+
+- **Every recorded timestamp is on a persisted play clock.** **Get Quest Time**
+  is seconds of play: it does not advance while the game is paused, it carries
+  across a level change, and a loaded save continues from where it left off.
+  Resolution, entry and refusal records, registration times and advancement
+  holds all stamp in this domain now, where before they used the world's own
+  clock - which restarts on every level load and every save, so a restored
+  history held two clocks that could not be compared and "how long ago" was
+  unanswerable across a load. Wall-clock time is deliberately not part of it:
+  idling in a menu is not play. Saves from before this restart the clock at
+  zero, which leaves their old stamps as incomparable as they already were.
+
 ### Changed
 
 - **An advertisement never hides a reward for being unavailable.** A modifier
@@ -372,6 +406,34 @@ expected you to know where the reward had been authored.
   on that tag or any tag above it, and an endpoint reached through the hierarchy
   names the tag it actually carries so it stays distinguishable from one sitting
   on the tag you pinned.
+
+- **Catch-up replayed a previous run over the current one.** A late observer is
+  told a quest's state as a short replay of lifecycle events. That replay was
+  built from every fact on the tag, including the append-only ones an earlier
+  run left behind, so a quest offered again at a giver after an earlier run
+  replayed that run's STARTED - reading as live while it was still waiting - and
+  a repeatable quest running again replayed its earlier COMPLETED, reading as
+  finished while it ran. Replay now describes the current run only; the earlier
+  completion is still on the record and on the phase, where a consumer that
+  wants history can ask.
+
+- **A broad observer arriving late reconstructed a placed node more than once.**
+  Live delivery has long been deduplicated - one event, however many channels
+  it answers to - but catch-up enumerated every spelling a node was known by and
+  replayed each: a node inside a placed questline under both its placement tag
+  and its inner asset's spelling, and, once a placement began carrying its inner
+  questline's state, the questline under its own name as well. The visible case
+  was a loaded save with a quest in progress listing it twice in the sidebar.
+  Catch-up now walks nodes, not spellings.
+
+  - **The relations are known before anything starts.** The registry learned
+  which spellings belonged to which nodes only as each questline registered, so
+  a save restored before its questlines came up - which is every restore - and a
+  child listing asked before a questline started both saw spellings as separate
+  nodes. Those relations are now read at startup from the questline assets
+  themselves, and only from root assets: a questline that another one places
+  never runs on its own, so its own compile's view is not the one that applies.
+  **Compile All** once after updating so every asset carries them.
 
 ### QuickStart
 

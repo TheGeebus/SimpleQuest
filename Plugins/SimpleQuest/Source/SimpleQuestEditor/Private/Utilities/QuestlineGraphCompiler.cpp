@@ -1064,6 +1064,7 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
             StepInstance->NumberOfElements = StepNode->NumberOfElements;
             StepInstance->TargetActors.Append(StepNode->TargetActors);
             StepInstance->PrerequisiteGateMode = StepNode->PrerequisiteGateMode;
+        	StepInstance->ConfigAsset = StepNode->ConfigAsset;
             Instance = StepInstance;
         }
 		else if (UQuestlineNode_LinkedQuestline* LinkedNode = Cast<UQuestlineNode_LinkedQuestline>(ContentNode))

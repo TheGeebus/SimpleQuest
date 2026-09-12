@@ -6,6 +6,7 @@
 #include "Quests/Types/QuestStepEnums.h"
 #include "QuestlineNode_Step.generated.h"
 
+class UQuestObjectiveConfig;
 class UQuestObjective;
 
 
@@ -26,6 +27,14 @@ public:
 	/** The objective that defines how this step is completed. Required for compilation. */
 	UPROPERTY(EditAnywhere, Category = "Step")
 	TSoftClassPtr<UQuestObjective> ObjectiveClass;
+
+	/**
+	 * Optional typed configuration for this Step's objective - an instance of a UQuestObjectiveConfig subclass, which the
+	 * objective loads and casts on activation. This is how one objective class serves many Steps that differ only in
+	 * data: the class states the rule, the asset supplies the values. Left empty, the objective sees a null config.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Step")
+	TSoftObjectPtr<UQuestObjectiveConfig> ConfigAsset;
 
 	UPROPERTY(EditAnywhere, Category = "Step")
 	TArray<TSoftObjectPtr<AActor>> TargetActors;

@@ -32,6 +32,7 @@
 #define STEP_CLASS_COLOR		FLinearColor(0.2f, 0.325f, 0.85f)
 #define STEP_ELEMENT_COLOR		FLinearColor(0.25f, 0.8f, 0.20f)
 #define STEP_GIVER_COLOR		FLinearColor(0.75f, 0.4f, 1.f)
+#define STEP_CONFIG_COLOR		FLinearColor(0.35f, 0.8f, 0.8f)
 
 #define LOCTEXT_NAMESPACE "SGraphNode_QuestlineStep"
 
@@ -384,7 +385,10 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 
 	const int32 ElementCount = StepNode->NumberOfElements;
 
-	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0)
+	// GetAssetName reads the path without loading the asset - the name is the summary, the asset stays on disk.
+	const FString ConfigName = StepNode->ConfigAsset.IsNull() ? FString() : StepNode->ConfigAsset.GetAssetName();
+
+	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0 && ConfigName.IsEmpty())
 	{
 		return SNullWidget::NullWidget;
 	}
@@ -460,7 +464,6 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 			];
 	}
-
 	return SummaryBox;
 }
 
@@ -548,6 +551,25 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 				}
 			})
 			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+		]
+
+		// Config asset - the typed data this Step hands its objective. Collapsed when none is set.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]()
+			{
+				if (!StepNode || StepNode->ConfigAsset.IsNull()) return FText::GetEmpty();
+				return FText::Format(LOCTEXT("ConfigAssetLine", "Config Asset: {0}"), FText::FromString(StepNode->ConfigAsset.GetAssetName()));
+			})
+			.Visibility_Lambda([this]()
+			{
+				return (StepNode && !StepNode->ConfigAsset.IsNull()) ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.ColorAndOpacity(FSlateColor(STEP_CONFIG_COLOR))
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 		];
 }

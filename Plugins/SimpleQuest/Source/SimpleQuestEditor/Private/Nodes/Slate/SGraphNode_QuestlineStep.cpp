@@ -388,7 +388,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 	// GetAssetName reads the path without loading the asset - the name is the summary, the asset stays on disk.
 	const FString ConfigName = StepNode->ConfigAsset.IsNull() ? FString() : StepNode->ConfigAsset.GetAssetName();
 
-	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0 && ConfigName.IsEmpty())
+	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0)
 	{
 		return SNullWidget::NullWidget;
 	}

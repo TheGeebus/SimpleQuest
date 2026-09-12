@@ -61,14 +61,15 @@ bool IsQuestInstancedBearing(const FProperty* Prop);
 
 /**
  * One child the instanced walk found. Two shapes, because two things are authored in place: a UObject subobject
- * (a reward) and the contents of an FInstancedStruct (a generic reward's payload). Carried in one descriptor rather
+ * (a reward) and the contents of a struct - an FInstancedStruct's (a generic reward's payload) or a plain struct that
+ * carries instanced children (one outcome's reward set in the questline's map). Carried in one descriptor rather
  * than walked twice, so a consumer cannot learn about one kind and silently ignore the other - which for the planner
  * would read as "the source describes children this owner does not have" and report deletions.
  */
 struct FQuestInstancedChild
 {
 	const UObject* Object = nullptr;             // set when the child is a subobject
-	const UScriptStruct* StructType = nullptr;   // set, with Memory, when the child is an FInstancedStruct's contents
+	const UScriptStruct* StructType = nullptr;   // set, with Memory, when the child is a struct's contents
 	const void* Memory = nullptr;
 
 	bool IsStruct() const { return StructType != nullptr; }
@@ -88,7 +89,8 @@ struct FQuestInstancedChild
  * A key derived two ways is a key that eventually disagrees, and a child addressed by a name nobody else uses is a child
  * that silently disappears.
  * 
- * @param PathPrefix  the property path so far, relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards").
+ * @param PathPrefix  the property path so far, relative to OwnerKey (e.g. "Rewards" for a node's reward array, or
+ *                    "QuestlineRewards[<key>]" for one outcome's reward set - whose own Rewards are then ITS children).
  */
 void ForEachQuestInstancedChild(
 	const FProperty* Prop,

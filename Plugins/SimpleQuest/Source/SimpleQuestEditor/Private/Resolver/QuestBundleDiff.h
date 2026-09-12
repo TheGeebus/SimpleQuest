@@ -22,15 +22,26 @@ class UStruct;
  * into a graph and writing a graph back out into one, instead of two rules free to drift apart.
  * PathPrefix names where this container sits under its owner, empty at the top.
  */
-void DiffQuestContainerAgainstRow(const UStruct* Layout, const void* Container, const FQuestDataRow& Row, const FString& PathPrefix,
-	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
+void DiffQuestContainerAgainstRow(
+	const UStruct* Layout,
+	const void* Container,
+	const FQuestDataRow& Row,
+	const FString& PathPrefix,
+	FQuestNodePlanEntry& Entry,
+	FQuestInPlacePlan& OutPlan,
+	const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 
 /**
  * The UObject case - every caller today, and the one worth keeping legible: a node, the questline itself, an instanced
  * child. Forwards to the general form so no existing call site changes and neither does the rule it runs.
  */
-void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, const FString& PathPrefix, FQuestNodePlanEntry& Entry,
-	FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
+void DiffQuestObjectAgainstRow(
+	const UObject* Object,
+	const FQuestDataRow& Row,
+	const FString& PathPrefix,
+	FQuestNodePlanEntry& Entry,
+	FQuestInPlacePlan& OutPlan,
+	const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 
 /**
  * Compare a container's live instanced children against the rows describing them, recording adds, removes and reorders -
@@ -38,14 +49,29 @@ void DiffQuestObjectAgainstRow(const UObject* Object, const FQuestDataRow& Row, 
  * its owner's are. Same split as DiffQuestContainerAgainstRow above, and for the same reason.
  * Honors the declare-versus-silence contract: a property the bundle says nothing about is skipped entirely, because a
  * source that omits a property is not asserting that it should be emptied.
+ * PathPrefix names where this container sits under the entry's top-level owner, empty at the top: every change a nested
+ * child records is spelled from that owner down ("QuestlineRewards[<key>].Rewards[<guid>].Amount"), which is the spelling
+ * the apply path resolves.
  */
-void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, const FString& OwnerKey, const FQuestDataBundle& Bundle,
-	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
+void DiffQuestInstancedChildren(
+	const UStruct* Layout,
+	const void* Container,
+	const FString& OwnerKey,
+	const FString& PathPrefix,
+	const FQuestDataBundle& Bundle,
+	FQuestNodePlanEntry& Entry,
+	FQuestInPlacePlan& OutPlan,
+	const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 
 /**
  * The UObject case - the planner's two call sites, and the one worth keeping legible. Forwards to the general form so no
  * existing caller changes and neither does the rule it runs.
  */
-void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry,
-	FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
+void DiffQuestInstancedChildren(
+	const UObject* Owner,
+	const FString& OwnerKey,
+	const FQuestDataBundle& Bundle,
+	FQuestNodePlanEntry& Entry,
+	FQuestInPlacePlan& OutPlan,
+	const FQuestAbsentPolicyResolver& Policies = FQuestAbsentPolicyResolver());
 

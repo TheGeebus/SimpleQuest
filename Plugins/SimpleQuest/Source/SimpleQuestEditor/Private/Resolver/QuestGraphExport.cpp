@@ -43,9 +43,12 @@ static FString NodeKeyOf(const UQuestlineNodeBase* Node)
 }
 
 /**
- * Emit child rows + contains edges for every instanced object reachable from Prop on the entity keyed OwnerKey.
- * PathPrefix is the property path so far relative to OwnerKey (e.g. "Rewards" or "QuestlineRewards[<key>].Rewards");
- * it becomes both the contains-edge qualifier and the child row's synthetic key suffix, so edge and key corroborate.
+ * Emit child rows + contains edges for every instanced child reachable from Prop on the entity keyed OwnerKey.
+ * PathPrefix is the property path so far relative to OwnerKey (e.g. "Rewards", or "QuestlineRewards[<key>]" for one
+ * outcome's reward set); it becomes both the contains-edge qualifier and the child row's synthetic key suffix, so edge
+ * and key corroborate. A struct child's own instanced fields are keyed under the struct row - the reward set's rewards
+ * read "<owner>/QuestlineRewards[<key>]/Rewards[<guid>]" - because the row collector descends them with the struct as
+ * their owner, exactly as it does a subobject's.
  */
 static void RecurseInstanced(const FProperty* Prop, const void* ValuePtr, const FString& OwnerKey, const FString& PathPrefix, FQuestDataBundle& Bundle)
 {

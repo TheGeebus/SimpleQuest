@@ -138,23 +138,30 @@ void ForEachQuestInstancedChild(
 	TFunctionRef<void(const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)> Visit,
 	int32 ArrayOrdinal)
 {
-	// An FInstancedStruct's contents: one child, typed by whatever it currently holds. An UNSET one yields nothing, for
-	// the same reason a null object slot does - absence is the honest representation, and emitting a typeless row would
-	// give import nothing to reconstruct from.
+	// A struct reached by this walk is a child in its own right. Two ways in: an FInstancedStruct's contents (a generic
+	// reward's payload, typed by whatever it currently holds - an UNSET one yields nothing, for the same reason a null
+	// object slot does: absence is the honest representation, and a typeless row gives import nothing to reconstruct
+	// from) and a plain struct that carries instanced children (one outcome's reward set, reached as a map value). The
+	// row is what gives the struct's PLAIN fields a home: a reward set's referenced RewardSets sit beside its instanced
+	// Rewards, and a walk that descended only the instanced field left them nowhere - an outcome granting only sets
+	// exported as nothing at all. The struct's instanced fields are the visitor's to descend, with the struct as their
+	// owner, exactly as a subobject's are.
 	if (const FStructProperty* AsStruct = CastField<FStructProperty>(Prop))
 	{
-		if (AsStruct->Struct == FInstancedStruct::StaticStruct())
+		const UScriptStruct* Type = AsStruct->Struct;
+		const void* Memory = ValuePtr;
+		if (Type == FInstancedStruct::StaticStruct())
 		{
 			const FInstancedStruct& Inst = *static_cast<const FInstancedStruct*>(ValuePtr);
-			if (const UScriptStruct* Type = Inst.GetScriptStruct())
-			{
-				FQuestInstancedChild Child;
-				Child.StructType = Type;
-				Child.Memory = Inst.GetMemory();
-				Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Child, ArrayOrdinal);
-			}
-			return;
+			Type = Inst.GetScriptStruct();
+			Memory = Inst.GetMemory();
+			if (!Type) return;
 		}
+		FQuestInstancedChild Child;
+		Child.StructType = Type;
+		Child.Memory = Memory;
+		Visit(FString::Printf(TEXT("%s/%s"), *OwnerKey, *PathPrefix), PathPrefix, Child, ArrayOrdinal);
+		return;
 	}
 
 	// Direct instanced object: one child. A null slot yields nothing — absence is the honest representation.
@@ -214,20 +221,6 @@ void ForEachQuestInstancedChild(
 			                           FString::Printf(TEXT("%s[%s]"), *PathPrefix, *SanitizeChildKeySegment(KeyExport)), Visit);
 		}
 		return;
-	}
-	// Struct: descend its instanced-bearing fields, extending the path with the field name. Non-instanced siblings are
-	// dropped - the only corpus case is a reward set whose sole field IS the instanced array.
-	if (const FStructProperty* Struct = CastField<FStructProperty>(Prop))
-	{
-		for (TFieldIterator<FProperty> It(Struct->Struct); It; ++It)
-		{
-			if (!IsQuestInstancedBearing(*It))
-			{
-				continue;
-			}
-			ForEachQuestInstancedChild(*It, It->ContainerPtrToValuePtr<void>(ValuePtr), OwnerKey,
-			                           FString::Printf(TEXT("%s.%s"), *PathPrefix, *It->GetName()), Visit);
-		}
 	}
 }
 

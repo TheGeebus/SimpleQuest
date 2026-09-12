@@ -258,6 +258,36 @@ expected you to know where the reward had been authored.
   Grant Rewards node instead. Sets are listed above the inline rewards, because
   that is the order they grant in.
 
+- **Questline-level Reward Sets now survive an export.** The export wrote an
+  outcome's inline rewards as rows of their own but had nowhere to put the
+  sets it referenced, so an outcome that granted only sets exported as nothing
+  at all and came back from an import with no rewards - the round-trip check
+  reports it, but only if you ran one. Each outcome's reward set is now a row of
+  its own, carrying its referenced sets, with its inline rewards as child rows
+  beneath it. Exports written before this change still import; their inline
+  questline rewards are read under the older key spelling.
+
+- **A Step's Config Asset could not be set from the graph editor.** The runtime
+  Step, the objective's authored config and the documentation all described
+  the slot, but the Step node never exposed it and the compiler never copied
+  it, so an objective's `Config Asset` was always empty. The node has the field
+  now, filtered to Objective Config assets, and shows the chosen asset on its
+  face.
+
+- **The round-trip check compared nothing under the JSON format.** Its authored
+  comparison only ever read `.tsv` files, so with JSON as the project's format
+  it found no files, said so, and reported a failure that had nothing to do
+  with the questline. It reads whatever format the export wrote, and both
+  `SimpleQuest.RoundTrip` and `SimpleQuest.RoundTripCompare` accept
+  `--format=<name>` the way the export and import commands do.
+
+- **Importing a Generic reward with no payload set warned about a missing
+  row.** An unset payload is exported as no row on purpose, and an export
+  written before payloads became rows of their own carries it as a cell
+  instead; the import treated both as a row that should have been there and
+  warned on every one. The value was never wrong, only the warning. Two tests
+  now hold the import to silence on both shapes.
+
 - **A questline with no Questline ID had no runtime identity of its own.** The
   field is documented as optional, falling back to the asset name - but three
   places rebuilt the questline's identity tag by hand without that fallback,

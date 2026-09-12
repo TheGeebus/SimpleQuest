@@ -13,9 +13,10 @@
 /**
  * Compare a source export folder against the re-export of its reconstructed copy, file by file. Returns the number of
  * mismatches; zero means the authored content round-tripped intact. OriginalID names the questline so the copy's
- * identity suffix can be normalized out before diffing.
+ * identity suffix can be normalized out before diffing. FileExtension selects the provider's files, without the dot -
+ * the folders hold whatever format the export ran with, and this comparator has no other way to know which that was.
  */
-int32 CompareQuestExportFolders(const FString& SrcFolder, const FString& RtFolder, const FString& OriginalID);
+int32 CompareQuestExportFolders(const FString& SrcFolder, const FString& RtFolder, const FString& OriginalID, const FString& FileExtension);
 
 /**
  * Compare two compiled-model dumps, order-preserving. Returns the number of differing lines; zero means both assets

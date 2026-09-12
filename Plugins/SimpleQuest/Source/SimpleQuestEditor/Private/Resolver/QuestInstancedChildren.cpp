@@ -156,42 +156,36 @@ static void GatherIndexedChildKeys(const FQuestDataBundle& Bundle, const FString
 	Out.Sort([](const TPair<int32, FString>& A, const TPair<int32, FString>& B){ return A.Key < B.Key; });
 }
 
-void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+void ReattachQuestInstancedChildren(const UStruct* Layout, void* Container, UObject* Outer, const FString& OwnerKey,
+	const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
 {
-	for (TFieldIterator<FProperty> It(Owner->GetClass()); It; ++It)
+	if (!Layout || !Container || !Outer) return;
+
+	for (TFieldIterator<FProperty> It(Layout); It; ++It)
 	{
 		FProperty* Prop = *It;
 		// Only authored instanced-bearing properties produced child rows on export (same filter shape).
 		if (!Prop->HasAnyPropertyFlags(CPF_Edit) || Prop->HasAnyPropertyFlags(CPF_Transient | CPF_EditConst)) continue;
 
 		const FString PropPrefix = FString::Printf(TEXT("%s/%s"), *OwnerKey, *Prop->GetName());
+		void* ValuePtr = Prop->ContainerPtrToValuePtr<void>(Container);
 
 		// An FInstancedStruct property: one child row, keyed by the property path with no bracket segment.
 		// THE GUARD BELOW IS ABOUT NOISE, NOT CORRECTNESS - BuildChildStruct already leaves the value untouched when no
 		// row exists. What it prevents is a spurious "child row missing" warning on every LEGACY bundle, where the
 		// payload arrived as a StructLiteral cell on this owner's row and the absence of a child row is expected
-		// rather than wrong.
+		// rather than wrong - and on every UNSET payload, which the export writes no row for at all.
 		if (FStructProperty* AsStruct = CastField<FStructProperty>(Prop))
 		{
-			// SABOTAGE
-			if (AsStruct->Struct == FInstancedStruct::StaticStruct())
-			{
-				FInstancedStruct& Live = *AsStruct->ContainerPtrToValuePtr<FInstancedStruct>(Owner);
-				BuildChildStruct(Live, PropPrefix, Bundle, OutConsumed, OutWarnings);
-				continue;
-			}
-			/*
 			if (AsStruct->Struct == FInstancedStruct::StaticStruct())
 			{
 				FString UnusedClass;
 				if (FindQuestChildRow(Bundle, PropPrefix, UnusedClass))
 				{
-					FInstancedStruct& Live = *AsStruct->ContainerPtrToValuePtr<FInstancedStruct>(Owner);
-					BuildChildStruct(Live, PropPrefix, Bundle, OutConsumed, OutWarnings);
+					BuildChildStruct(*static_cast<FInstancedStruct*>(ValuePtr), PropPrefix, Bundle, OutConsumed, OutWarnings);
 				}
 				continue;
 			}
-			*/
 		}
 
 		// Array of instanced objects: rebuild elements in [i] order (children whose key starts with "<owner>/<prop>[").
@@ -203,6 +197,14 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 			TArray<TPair<int32, FString>> Indexed;
 			GatherIndexedChildKeys(Bundle, PropPrefix, Indexed);
 
+			// A corpus written before a reward set had a row of its own keyed the set's rewards straight off the map
+			// segment, with a '.' where the set's own key now ends: "<owner>/QuestlineRewards[<key>].Rewards[i]". Read
+			// that spelling too, so an older export still restores its inline questline rewards.
+			if (Indexed.IsEmpty() && OwnerKey.EndsWith(TEXT("]")))
+			{
+				GatherIndexedChildKeys(Bundle, FString::Printf(TEXT("%s.%s"), *OwnerKey, *Prop->GetName()), Indexed);
+			}
+
 			// SILENCE IS NOT AN ASSERTION OF EMPTINESS. A source that declares no children for this property has said
 			// nothing about it - the same contract a missing scalar cell carries, where RestoreQuestCell's Empty arm leaves the
 			// constructed value alone. Clearing here would make silence destructive: restoring onto an owner that already
@@ -210,22 +212,29 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 			// replaces the contents wholesale, which is the source stating what they are.
 			if (Indexed.IsEmpty()) continue;
 
-			FScriptArrayHelper Helper(Arr, Prop->ContainerPtrToValuePtr<void>(Owner));
+			FScriptArrayHelper Helper(Arr, ValuePtr);
 			Helper.EmptyValues();
 			for (const TPair<int32, FString>& Pair : Indexed)
 			{
 				const int32 NewIdx = Helper.AddValue();
-				if (UObject* Child = BuildChildObject(Owner, Pair.Value, Bundle, OutConsumed, OutWarnings))
+				if (UObject* Child = BuildChildObject(Outer, Pair.Value, Bundle, OutConsumed, OutWarnings))
 					InnerObj->SetObjectPropertyValue(Helper.GetRawPtr(NewIdx), Child);
 			}
 			continue;
 		}
 
-		// Map<key, struct-wrapping-instanced-array>: the QuestlineRewards shape. Rebuild by re-adding each map
-		// entry (key parsed from the child path's map segment) then recursing the struct's inner array.
+		// Map of struct values that carry instanced children: the QuestlineRewards shape. Each entry is a child row of
+		// its own, keyed by the map segment, and its inline rewards are children OF THAT ROW - so rebuild the map by
+		// re-adding every key the rows name, restore the entry's own row onto the value (its referenced RewardSets),
+		// then hand the value to this same walk as the owner of its children. That is the walk a node's Rewards go
+		// through, which is what stops the nested case drifting from the flat one.
 		if (FMapProperty* Map = CastField<FMapProperty>(Prop))
 		{
-			// Child keys look like "<owner>/QuestlineRewards[<mapkey>].Rewards[i]". Group by the <mapkey> segment.
+			FStructProperty* ValStruct = CastField<FStructProperty>(Map->ValueProp);
+			if (!ValStruct) continue;   // the only map shape the export writes - see IsQuestInstancedBearing
+
+			// Child keys look like "<owner>/QuestlineRewards[<mapkey>]" and "<owner>/QuestlineRewards[<mapkey>]/Rewards[i]"
+			// (or, from an older export, "<owner>/QuestlineRewards[<mapkey>].Rewards[i]"). Group by the <mapkey> segment.
 			TSet<FString> MapKeyTokens;
 			const FString MapOpen = PropPrefix + TEXT("[");
 			for (const TPair<FString, FQuestDataTable>& TablePair : Bundle.TablesByType)
@@ -241,47 +250,47 @@ void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, con
 
 			if (MapKeyTokens.IsEmpty()) continue;   // see the array case: an unmentioned property is not an empty one
 
-			FScriptMapHelper Helper(Map, Prop->ContainerPtrToValuePtr<void>(Owner));
+			FScriptMapHelper Helper(Map, ValuePtr);
 			Helper.EmptyValues();
 			for (const FString& KeyTok : MapKeyTokens)
 			{
 				const int32 Pair = Helper.AddDefaultValue_Invalid_NeedsRehash();
 				// Import the map KEY from its exported text (e.g. a FGameplayTag struct literal).
 				Map->KeyProp->ImportText_Direct(*KeyTok, Helper.GetKeyPtr(Pair), nullptr, PPF_None);
-				// Recurse the VALUE struct's instanced array. The value's "owner key" for the recursion is the
-				// full "<owner>/QuestlineRewards[<keytok>]" prefix so its inner Rewards[i] children resolve.
-				const FString ValueOwnerKey = FString::Printf(TEXT("%s[%s]"), *PropPrefix, *KeyTok);
-				// The struct value isn't a UObject, so recurse its FStructProperty fields inline:
-				if (FStructProperty* ValStruct = CastField<FStructProperty>(Map->ValueProp))
+
+				const FString EntryKey = FString::Printf(TEXT("%s[%s]"), *PropPrefix, *KeyTok);
+				void* EntryValue = Helper.GetValuePtr(Pair);
+
+				// The entry's own row. Absent from an older export, which had no row for the entry because the map had
+				// no plain fields worth one - nothing to restore then, and its rewards below still read from the key.
+				FString UnusedClass;
+				if (const FQuestDataRow* EntryRow = FindQuestChildRow(Bundle, EntryKey, UnusedClass))
 				{
-					for (TFieldIterator<FProperty> SIt(ValStruct->Struct); SIt; ++SIt)
+					// The property fixes the value's type, so a row naming another is malformed - refuse it rather than
+					// let whichever columns happen to share a name land.
+					const FString RowStruct = EntryRow->Get(TEXT("struct"));
+					if (RowStruct == ValStruct->Struct->GetName())
 					{
-						if (FArrayProperty* InnerArr = CastField<FArrayProperty>(*SIt))
-						{
-							FObjectProperty* InnerObj = CastField<FObjectProperty>(InnerArr->Inner);
-							if (!InnerObj || !InnerArr->Inner->HasAnyPropertyFlags(CPF_InstancedReference)) continue;
-
-							const FString ArrPrefix = FString::Printf(TEXT("%s.%s"), *ValueOwnerKey, *SIt->GetName());
-							TArray<TPair<int32, FString>> Indexed;
-							GatherIndexedChildKeys(Bundle, ArrPrefix, Indexed);
-
-							if (Indexed.IsEmpty()) continue;   // see the array case
-
-							FScriptArrayHelper AH(InnerArr, SIt->ContainerPtrToValuePtr<void>(Helper.GetValuePtr(Pair)));
-							AH.EmptyValues();
-							for (const TPair<int32, FString>& P : Indexed)
-							{
-								const int32 NewIdx = AH.AddValue();
-								if (UObject* Child = BuildChildObject(Owner, P.Value, Bundle, OutConsumed, OutWarnings))
-									InnerObj->SetObjectPropertyValue(AH.GetRawPtr(NewIdx), Child);
-							}
-						}
+						RestoreQuestRowProperties(ValStruct->Struct, EntryValue, *EntryRow);
+						OutConsumed.Add(EntryKey);
+					}
+					else
+					{
+						OutWarnings.Add(FString::Printf(TEXT("row '%s' names struct '%s' where the property holds '%s' - its cells were not restored"),
+							*EntryKey, *RowStruct, *ValStruct->Struct->GetName()));
 					}
 				}
+				ReattachQuestInstancedChildren(ValStruct->Struct, EntryValue, Outer, EntryKey, Bundle, OutConsumed, OutWarnings);
 			}
 			Helper.Rehash();
 			continue;
 		}
 	}
+}
+
+void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings)
+{
+	if (!Owner) return;
+	ReattachQuestInstancedChildren(Owner->GetClass(), Owner, Owner, OwnerKey, Bundle, OutConsumed, OutWarnings);
 }
 

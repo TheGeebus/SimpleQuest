@@ -70,6 +70,19 @@ namespace FQuestCatchUpFanout
 		}
 		Out.MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(ChannelSet, SubscribedTag);
 
+		// One read of the node's lifecycle, then the events that read supports, in canonical fire order. The phase decides
+		// which RUN is replayed: a node offered again after an earlier run replays ACTIVATED (+ ENABLED), not that run's
+		// STARTED; a repeatable quest running again replays ACTIVATED + STARTED, not its earlier COMPLETED. History stays on
+		// the registry, where a consumer that wants it can ask.
+		// Read BEFORE the payload is built: a subscription at a namespace root fans out to every known node, most of which
+		// the run has never reached, and each of those has nothing to replay - so nothing to rehydrate, and no display
+		// name to look up. The one thing a never-reached node can still carry is a Blocked fact, which replays alone.
+		const FQuestPhaseSnapshot Phase = FQuestLifecycleQuery::GetPhase(WorldState, QuestState, CanonicalTag);
+		if (Phase.Phase == EQuestPhase::NotReached && !Phase.bBlocked)
+		{
+			return Out;
+		}
+
 		// Payload: tag + CatchUp delivery + rich fields rehydrated from the persisted entry snapshot (the same activation
 		// IncomingParams the live publish forwards via AssembleEventContext) and the display registry. CompletionTrigger
 		// stays default - a reconstruction has no live trigger.
@@ -92,12 +105,6 @@ namespace FQuestCatchUpFanout
 				}
 			}
 		}
-
-		// One read of the node's lifecycle, then the events that read supports, in canonical fire order. The phase decides
-		// which RUN is replayed: a node offered again after an earlier run replays ACTIVATED (+ ENABLED), not that run's
-		// STARTED; a repeatable quest running again replays ACTIVATED + STARTED, not its earlier COMPLETED. History stays on
-		// the registry, where a consumer that wants it can ask.
-		const FQuestPhaseSnapshot Phase = FQuestLifecycleQuery::GetPhase(WorldState, QuestState, CanonicalTag);
 
 		if (Phase.Phase == EQuestPhase::Activated && QuestState)
 		{

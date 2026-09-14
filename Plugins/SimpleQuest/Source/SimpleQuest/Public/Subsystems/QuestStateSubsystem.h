@@ -433,9 +433,10 @@ public:
 	 * reformat: empty means the designer chose not to pipeline display content for this tag, distinct from a
 	 * missing-record bug.
 	 *
-	 * Returns empty FText for unknown tags + logs a Warning on LogSimpleQuestState - that's the loud-failure
-	 * path for "tag may be unregistered or compile may have missed it." Empty-authored-content (record exists,
-	 * DisplayName field intentionally blank) is silent.
+	 * Returns empty FText, quietly, for a known tag with no record - the compiler writes a record only for a node
+	 * that carries a display payload, so a node authored without one has no record and that is not a fault. Returns
+	 * empty FText and logs a Warning on LogSimpleQuestState only for a tag the state subsystem does not know at all:
+	 * unregistered, or a compile that never ran. The same rule applies to the description and display-data getters.
 	 *
 	 * An alias-form tag yields the same result as its canonical: the registry stores a parallel record under the
 	 * canonical tag AND every alias key at registration, so a direct lookup on any perspective hits without a
@@ -480,6 +481,13 @@ public:
 
 private:
     friend class UQuestManagerSubsystem;
+
+	/**
+	 * The lookup behind the three display getters, with one rule for a missing record: a KNOWN tag without one is a
+	 * node authored without a display payload, which is ordinary and stays quiet; an UNKNOWN tag is the case worth a
+	 * warning, because it is the one the warning describes. Caller names the getter for the log line.
+	 */
+	const FQuestDisplayDataRecord* FindDisplayRecord(FGameplayTag Tag, const TCHAR* Caller) const;
 
 	UPROPERTY()
 	TMap<FGameplayTag, FQuestResolutionRecord> QuestResolutions;

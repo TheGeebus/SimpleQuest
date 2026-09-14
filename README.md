@@ -98,11 +98,48 @@ To use SimpleQuest as a source dependency in another plugin, add `"SimpleQuest"`
 
 ## Quick Start
 
-### 1. Create a Questline Graph asset
+The fastest way in is to play the tutorial that ships with the plugin, then open the graphs behind the rooms you just walked through. Building your own progression comes after, and goes faster for it.
 
-Right-click in the Content Browser and select **Gameplay > Questline Graph**. This creates a `UQuestlineGraph` asset containing an empty editor graph with only an Entry node. The "Entered" pin will pass an activation signal to any connected nodes when this Questline activates.
+### Play the tutorial
 
-### 2. Author the graph
+The QuickStart is an eleven-chapter level, one concept per room, in the order the vocabulary builds. Each chapter narrates itself on the HUD as it activates, starts and completes, its graph carries comments written for the author, and every room has something in the world - a door, a light, a screen - that visibly reacts to quest state. That last part is the point of playing rather than reading: by the end you have watched every lifecycle event happen before you have to name one.
+
+1. Open the `SimpleQuestDemo` project (or any project with both plugins installed). The map is the editor's startup map: `SimpleQuest Content/QuickStart/QuickStart`.
+2. Press **Play**. Walk to the green button on the pedestal in front of you and press **E** (Interact) to start the questline - the tutorial's own start is a quest event, so the first thing you see react is the HUD.
+3. Follow the sidebar. Move with WASD, interact with E, and read each beat before acting on it; the beats are written to land at the moment the next action is yours.
+4. Press P to open the pause menu. You can save and load your progress between sessions - worth trying mid-chapter, since restored state arrives through the same catch-up path the rest of the framework uses.
+
+| Chapter               | Teaches                                                                 |
+|-----------------------|-------------------------------------------------------------------------|
+| 1 Basic Trigger       | A single step, a single trigger, a single ending                        |
+| 2 Rewards             | Grant Rewards nodes, the experience bar and gold readout                |
+| 3 Basic Giver         | A quest offered by an actor: activated is not started                   |
+| 4 Sequential Steps    | Activation alone does not enforce order - wiring does                   |
+| 5 Named Outcomes      | A fork resolved with `Left` or `Right`, and what routes on each         |
+| 6 Blocking            | The Blocked state, a refused give, and a door that reads it             |
+| 7 Prerequisites       | AND / OR / NOT composition, spawned as three scenarios in one room      |
+| 8 Linked Questlines   | One questline placed twice, with separate progress                      |
+| 9 Activation Groups   | A second questline opening a bridge it knows nothing about              |
+| 10 Prerequisite Rules | A named condition - the power - read by everything that needs it        |
+| 11 Observers          | An archive console that logs what an observer hears, live and caught up |
+
+A red button beside the green Start button unlocks every chapter at once if you want to jump ahead.
+
+### Read the graphs behind it
+
+After a room, open its questline: `SimpleQuest Content/QuickStart/Chapters/<Num_Name>/QL_Ch<Num_Name>`. The comments in each graph say what the room teaches in authoring terms - which node does the work, why it is wired that way, and what the in-world actors that react are subscribed to. `QuickStart/QL_QuickStart` is the master that places all eleven as Linked Questline nodes, which is itself the Chapter 8 lesson at full scale.
+
+Keep a graph open while you play: the graph panel shows per-state colored halos on content nodes as the room progresses, and the Questline Outliner tab on the right lists the structure of whatever is open.
+
+### Building your first progression
+
+The same steps the QuickStart's own chapters were built with.
+
+#### 1. Create a Questline Graph asset
+
+Right-click in the Content Browser and select **SimpleQuest > Questline Graph**. This creates a `UQuestlineGraph` asset containing an empty editor graph with only an Entry node. The "Entered" pin will pass an activation signal to any connected nodes when this Questline activates.
+
+#### 2. Author the graph
 
 Open the asset to launch the graph editor. From Entry, drag off a wire and place a **Step** node. Questlines are composed of ordered Step nodes with inline objective class pickers. Drop the objective type from the Step widget, assign targets and parameters, and wire completion paths to downstream paths.
 
@@ -112,7 +149,11 @@ Completion Path pins (or simply "Path" pins, which are always an output) connect
 
 **Solid wires carry activation. Dashed wires carry prerequisites.**
 
-When a content node receives an activation signal, it checks satisfaction of any attached prerequisite expression. If the prerequisite is satisfied - or if there is no connected prerequisite wire - the node activates. If a connected prerequisite remains unsatisfied, further progress is deferred until that prerequisite is satisfied. A node that has been activated but deferred proceeds automatically when the prerequisite gating it is fulfilled, no additional signalling is needed.
+When a content node receives an activation signal, it first activates any Givers watching that node.  If there are no Givers, it then checks satisfaction of any attached prerequisite expression. If the prerequisite is satisfied - or if there is no connected prerequisite wire - the node Starts, entering the Live state. If a connected prerequisite remains unsatisfied, further progress is deferred until that prerequisite is satisfied. A node that has been activated but deferred proceeds automatically when the prerequisite gating it is fulfilled, no additional signalling is needed.
+
+A Giver will similarly give a quest only if any attached prerequisite condition is satisfied. However, satisfying the prerequisite does not then cause the quest to Start. Instead, it goes into the Enabled state, where the Giver may then successfully give the quest, which Starts it.
+
+Activated, Enabled, and Started are thus distinct lifecycle states. Activated means any activation signal has been received but the node is not yet Started. Enabled means it has a giver who may now Start it. Started means it is now Live and can further progress.
 
 Useful constructs as your graph grows:
 - **Quest** — a node that contains another graph with its own nodes and that has its own independent tag address, which nests in the parent questline - much like animation state machines that can nest within each other. Double-click to open the contained graph. Use the Questline Outliner panel or the breadcrumbs at the top of the graph editor panel to return to the parent level.
@@ -128,21 +169,21 @@ Useful constructs as your graph grows:
 
 The Questline Outliner tab, Group Examiner, and Prereq Expression Examiner panels all provide read-only inspection of the graph's structure, particularly useful as graphs grow beyond a single screen.
 
-### 3. Compile the graph
+#### 3. Compile the graph
 
 Hit the **Compile** button on the graph editor toolbar (or **Compile All** from the editor's main menu). The compiler generates runtime node instances and registers the required Gameplay Tags. Errors and warnings appear in the message log with clickable navigation to the offending node.
 
 Compile also propagates any tag renames from this session. If you renamed a quest node or asset, references in Blueprints, components, data assets, data tables, and custom struct fields update on this compile. Assets that weren't loaded at rename time heal on next load and flag for save. The editor blocks renames that would silently rebind an active subscription to a different node - protection against the quiet "wrong-listener" bug.
 
-### 4. Activate at runtime
+#### 4. Activate at runtime
 
 Call `USimpleQuestBlueprintLibrary::StartQuestline(UQuestlineGraph*)` from any startup hook of your choosing - player pawn `BeginPlay`, GameMode `BeginPlay`, a custom GameInstance subsystem, a dialogue trigger, save-load rehydration, level-streaming callback, etc. One pattern serves static startup, procedural orchestration, and dynamic activation alike.
 
-The plugin's demo content shows the canonical static-startup pattern: `BP_QuestPlayerExample::BeginPlay` calls `Start Questline(QL_Main)`. Drop that BP into your player pawn slot and the demo questline runs end-to-end.
+The QuickStart shows the simplest shape: a pedestal in the first room calls `Start Questline(QL_QuickStart)` when the player interacts with it, so the tutorial's own start is a witnessed quest event rather than something that happened before the player arrived.
 
 If you need custom orchestration logic (analytics, save integration, bespoke activation gating), subclass `UQuestManagerSubsystem` and register your subclass under **Project Settings > Plugins > Simple Quest > QuestManagerClass**. The default native class works without configuration.
 
-### 5. Attach components to actors
+#### 5. Attach components to actors
 
 | Component                 | Attach to                      | Purpose                                                                                           |
 |---------------------------|--------------------------------|---------------------------------------------------------------------------------------------------|
@@ -150,11 +191,11 @@ If you need custom orchestration logic (analytics, save integration, bespoke act
 | `UQuestTriggerComponent`  | Enemy, item, or location Actor | Publishes trigger fires; receives per-fire response, structural-block, and per-lifecycle feedback |
 | `UQuestObserverComponent` | Any Actor                      | Receives lifecycle events for one or more quests                                                  |
 
-### 6. Inspect during PIE
+#### 6. Inspect during PIE
 
 Start Play In Editor. The graph panel shows per-state colored halos on content nodes (active, completed, blocked, etc.). Open the **Window > Developer Tools > Debug > World State Facts** panel for a searchable live view of every asserted fact. Hover any leaf in the Prereq Examiner to see whether it's satisfied, unsatisfied, or in-progress.
 
-### 7. Catch authoring drift
+#### 7. Catch authoring drift
 
 Two surfaces catch broken or stale tag references the compiler can't flag on its own:
 

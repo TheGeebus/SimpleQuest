@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.1] — 2026-09-13 — Conditions, Endings and Eleven Chapters
+## [0.8.1] — 2026-09-13 — Conditions, Endings, and Eleven Chapters
 
 A flurry of changes to several systems and features, all driven by hands-on work
 authoring the eleven chapters of the QuickStart tutorial progression.

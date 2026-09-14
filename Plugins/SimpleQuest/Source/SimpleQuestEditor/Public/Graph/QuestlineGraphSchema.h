@@ -69,8 +69,15 @@ public:
 	 */
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const override;
 
+	/**
+	 * The three ways a wire is broken - one link, every link on a pin, every link on a node - each inside a transaction of
+	 * its own. The base schema opens none, and neither does the graph editor that calls it, so without these an undo has
+	 * nothing to restore; every engine schema does the same in its override. Each also refreshes the panel, which the pin
+	 * break alone does not trigger.
+	 */
 	virtual void BreakSinglePinLink(UEdGraphPin* SourcePin, UEdGraphPin* TargetPin) const override;
 	virtual void BreakPinLinks(UEdGraphPin& TargetPin, bool bSendsNodeNotification) const override;
+	virtual void BreakNodeLinks(UEdGraphNode& TargetNode) const override;
 	
 	// Optional integration point for SimpleQuestEditorEN.
 	static void RegisterENPolicyFactory(TFunction<FConnectionDrawingPolicy*(int32, int32, float, const FSlateRect&, FSlateWindowElementList&, UEdGraph*)> Factory);

@@ -5,25 +5,62 @@
 
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Resolver/QuestDataFormatIO.h"
 #include "Resolver/Verification/QuestVerificationPaths.h"
 #include "SimpleQuestLog.h"
 
 
-/** Load every *.tsv in a folder into a name->content map (content line-split, trailing empties culled). */
-static TMap<FString, TArray<FString>> LoadFolderTsvs(const FString& Folder)
+/**
+ * The JSON provider's counterpart to StripLocNamespaces below. It writes an FText as an object whose "ns" and "key"
+ * members carry the loc identity on lines of their own, so a per-line collapse never sees the identity as one token.
+ * Blank the value of every "ns" line and of the "key" line that directly follows it; a row's own "key" line is never
+ * preceded by an "ns" line, so it is left alone. Same stance as the TSV form: the identity - the package namespace and
+ * the per-string key, both of which legitimately differ between an asset and its round-tripped twin - is erased for the
+ * COMPARISON only. The file on disk keeps it. A no-op on a TSV, which carries no such lines.
+ */
+static void BlankJsonLocIdentity(TArray<FString>& Lines)
+{
+	bool bAfterNamespace = false;
+	for (FString& Line : Lines)
+	{
+		const FString Trimmed = Line.TrimStart();
+		if (Trimmed.StartsWith(TEXT("\"ns\":")))
+		{
+			Line = TEXT("\"ns\": <loc>");
+			bAfterNamespace = true;
+		}
+		else if (bAfterNamespace && Trimmed.StartsWith(TEXT("\"key\":")))
+		{
+			Line = TEXT("\"key\": <loc>");
+			bAfterNamespace = false;
+		}
+		else
+		{
+			bAfterNamespace = false;
+		}
+	}
+}
+
+/**
+ * Load every file of the provider's extension in a folder into a name->lines map, through the same gather the import
+ * uses to find them. The comparator is provider-agnostic by construction: whatever the export wrote, this reads.
+ */
+static TMap<FString, TArray<FString>> LoadFolderFiles(const FString& Folder, const FString& FileExtension)
 {
 	TMap<FString, TArray<FString>> Out;
-	TArray<FString> Files;
-	IFileManager::Get().FindFiles(Files, *(Folder / TEXT("*.tsv")), true, false);
-	for (const FString& F : Files)
+	TMap<FString, FString> Files;
+	FString GatherError;
+	if (!QuestDataFormatIO::ReadFilesFromFolder(Folder, FileExtension, Files, GatherError))
 	{
-		FString Text;
-		if (FFileHelper::LoadFileToString(Text, *(Folder / F)))
-		{
-			TArray<FString> Lines;
-			Text.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
-			Out.Add(F, Lines);
-		}
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[authored] could not read '%s': %s"), *Folder, *GatherError);
+		return Out;
+	}
+	for (const TPair<FString, FString>& File : Files)
+	{
+		TArray<FString> Lines;
+		File.Value.ParseIntoArrayLines(Lines, /*CullEmpty*/ false);
+		BlankJsonLocIdentity(Lines);
+		Out.Add(File.Key, MoveTemp(Lines));
 	}
 	return Out;
 }
@@ -303,20 +340,20 @@ static TArray<FString> DiffNormalized(const TArray<FString>& A, const TArray<FSt
 }
 
 /** Authored folder fixpoint: compare the source export folder against the _RT re-export, file by file, _RT-normalized. */
-int32 CompareQuestExportFolders(const FString& SrcFolder, const FString& RtFolder, const FString& OriginalID)
+int32 CompareQuestExportFolders(const FString& SrcFolder, const FString& RtFolder, const FString& OriginalID, const FString& FileExtension)
 {
-	const TMap<FString, TArray<FString>> Src = LoadFolderTsvs(SrcFolder);
-	// The _RT folder's files carry the _RT stem on questline_graph? No — file stems are type names, not the ID; only
-	// the ID-derived FOLDER name differs. So match files by identical name.
-	const TMap<FString, TArray<FString>> Rt = LoadFolderTsvs(RtFolder);
+	const TMap<FString, TArray<FString>> Src = LoadFolderFiles(SrcFolder, FileExtension);
+	// File names are type stems (or the provider's one bundle file), never the ID; only the ID-derived FOLDER name
+	// differs between the two sides. So match files by identical name.
+	const TMap<FString, TArray<FString>> Rt = LoadFolderFiles(RtFolder, FileExtension);
 
 	// FAIL CLOSED when there is nothing to compare. With both sides empty the loops below run zero times and this
 	// returns a clean 0 — reporting a PASS for a comparison it never made. B2 already refuses a missing dump; C should
 	// refuse an empty pair for the same reason: an oracle that can't tell "identical" from "absent" isn't an oracle.
 	if (Src.IsEmpty() && Rt.IsEmpty())
 	{
-		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[authored] neither folder yielded any .tsv — nothing was compared. src='%s' rt='%s'"),
-			*SrcFolder, *RtFolder);
+		UE_LOG(LogSimpleQuestResolver, Warning, TEXT("[authored] neither folder yielded any .%s — nothing was compared. src='%s' rt='%s'"),
+			*FileExtension, *SrcFolder, *RtFolder);
 		return 1;
 	}
 

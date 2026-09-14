@@ -21,11 +21,20 @@ const FQuestDataRow* FindQuestChildRow(const FQuestDataBundle& Bundle, const FSt
 
 /**
  * The one reattach primitive, used by both the self row (QuestlineRewards) and per-node rows (Rewards).
- * PROPERTY-DRIVEN (D2): walk Owner's instanced-bearing properties, rebuild each child from its child row (matched
- * by key), in array/map order. The child KEY carries the position (Owner already knows the property + container
+ * PROPERTY-DRIVEN (D2): walk the layout's instanced-bearing properties, rebuild each child from its child row (matched
+ * by key), in array/map order. The child KEY carries the position (the layout already knows the property + container
  * type from reflection), so the only parse is extracting the trailing [index] / [mapkey] segment. Records every
  * child key it consumed into OutConsumed so P-final can cross-check against the contains edges (D1's completeness
  * property, kept as a tripwire rather than the reconstruction path).
+ *
+ * The general form walks any reflected container: a UObject's class over itself, or a script struct over its memory -
+ * which is how one outcome's reward set, a struct value inside the questline's map, rebuilds its inline rewards through
+ * the same array walk a node does rather than a copy of it. Outer is the object new subobjects are created under, and
+ * is the owning UObject whichever container is being walked.
  */
+void ReattachQuestInstancedChildren(const UStruct* Layout, void* Container, UObject* Outer, const FString& OwnerKey,
+	const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
+
+/** The UObject case - every caller today. Forwards to the general form with the object as both container and outer. */
 void ReattachQuestInstancedChildren(UObject* Owner, const FString& OwnerKey, const FQuestDataBundle& Bundle, TSet<FString>& OutConsumed, TArray<FString>& OutWarnings);
 

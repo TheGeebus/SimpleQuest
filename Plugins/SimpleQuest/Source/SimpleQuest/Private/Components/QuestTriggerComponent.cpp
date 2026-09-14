@@ -221,6 +221,20 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
         Instigator ? *Instigator->GetName() : TEXT("(none)"),
         Registered.Num(), Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
+    // Two passes, and the split is the point. A fire that completes a live step activates that step's successors
+    // synchronously, inside the publish - and a successor this trigger also watches would then be reached by the
+    // SAME fire, as a step that cannot progress yet, and refused for an action the player took before it existed.
+    // So every watched step's fate is decided first, against the state as it stood when the fire happened, and only
+    // then is anything published. A step that becomes active during the publish waits for the next fire.
+    struct FStepDispatch
+    {
+        TArray<FGameplayTag> Channels;
+        bool bIsLive = false;
+        TArray<FQuestActivationBlocker> StructuralBlockers;
+    };
+    TArray<FStepDispatch> Dispatches;
+    Dispatches.Reserve(Registered.Num());
+
     for (const FGameplayTag& StepTag : Registered)
     {
         // Branch per-step on state. Use the activation-blocker query as the single source of truth: AlreadyLive
@@ -230,10 +244,10 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
         TArray<FQuestActivationBlocker> Blockers;
         if (StateSubsystem) Blockers = StateSubsystem->QueryQuestActivationBlockers(StepTag);
 
-        bool bIsLive = false;
+        FStepDispatch Dispatch;
         for (const FQuestActivationBlocker& Blocker : Blockers)
         {
-            if (Blocker.Reason == EQuestActivationBlocker::AlreadyLive) { bIsLive = true; break; }
+            if (Blocker.Reason == EQuestActivationBlocker::AlreadyLive) { Dispatch.bIsLive = true; break; }
         }
 
         // Resolve watched-tag perspective to canonical + all aliases. The designer's authored StepTagsToTrigger may
@@ -242,39 +256,44 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
         // Trigger Components watching the same step may bind on different perspectives. Multi-publish on the full
         // channel set matches the FQuestPublish::OnAllNodeTags model so any-perspective subscriber receives via the
         // bus's per-subscription dedup.
-        TArray<FGameplayTag> Channels;
         if (StateSubsystem)
         {
             for (const FGameplayTag& Canonical : StateSubsystem->ResolveCanonicalTags(StepTag))
             {
-                Channels.AddUnique(Canonical);
+                Dispatch.Channels.AddUnique(Canonical);
                 for (const FGameplayTag& Alias : StateSubsystem->GetAssetScopedAliasTagsForCanonical(Canonical))
                 {
-                    Channels.AddUnique(Alias);
+                    Dispatch.Channels.AddUnique(Alias);
                 }
             }
         }
-        if (Channels.IsEmpty()) Channels.Add(StepTag);
-
-        if (bIsLive)
-        {
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this, Context.CustomTag));
-            continue;
-        }
+        if (Dispatch.Channels.IsEmpty()) Dispatch.Channels.Add(StepTag);
 
         // Filter to structural blockers - the user-actionable subset. Other reasons (NotPendingGiver, UnknownQuest)
         // mean the step isn't yet activated; trigger fires against those aren't surfaced.
-        TArray<FQuestActivationBlocker> StructuralBlockers = Blockers.FilterByPredicate([](const FQuestActivationBlocker& B)
+        if (!Dispatch.bIsLive)
         {
-            return B.Reason == EQuestActivationBlocker::Blocked || B.Reason == EQuestActivationBlocker::PrereqUnmet;
-        });
+            Dispatch.StructuralBlockers = Blockers.FilterByPredicate([](const FQuestActivationBlocker& B)
+            {
+                return B.Reason == EQuestActivationBlocker::Blocked || B.Reason == EQuestActivationBlocker::PrereqUnmet;
+            });
+        }
+        Dispatches.Add(MoveTemp(Dispatch));
+    }
 
-        if (!StructuralBlockers.IsEmpty())
+    for (FStepDispatch& Dispatch : Dispatches)
+    {
+        if (Dispatch.bIsLive)
+        {
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Dispatch.Channels), FQuestTriggerFiredEvent(TriggeredActor, Instigator, Context.CustomData, this, Context.CustomTag));
+            continue;
+        }
+        if (!Dispatch.StructuralBlockers.IsEmpty())
         {
             // Canonical identity for the event payload - first channel in the set after resolve, matches
             // FQuestPublish::OnAllNodeTags semantics where Event.QuestTag is set to the canonical ContextualTag.
-            const FGameplayTag IdentityTag = Channels[0];
-            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Channels), FQuestProgressRefusedEvent(IdentityTag, StructuralBlockers, EchoContext));
+            const FGameplayTag IdentityTag = Dispatch.Channels[0];
+            SignalSubsystem->PublishMessageOnChannels(MoveTemp(Dispatch.Channels), FQuestProgressRefusedEvent(IdentityTag, Dispatch.StructuralBlockers, EchoContext));
         }
     }
 }

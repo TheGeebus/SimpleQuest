@@ -6,7 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Quests/Types/OriginatingEventID.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestActivationGroupTriggeredEvent.generated.h"
 
 
@@ -30,7 +30,7 @@ struct SIMPLEQUEST_API FQuestActivationGroupTriggeredEvent
 
     FQuestActivationGroupTriggeredEvent() = default;
 
-    FQuestActivationGroupTriggeredEvent(FGameplayTag InGroupTag, const FQuestObjectiveActivationContext& InForwardParams,
+    FQuestActivationGroupTriggeredEvent(FGameplayTag InGroupTag, const FQuestObjectiveActivationParams& InForwardParams,
         FName InSourceTag, const TArray<FGameplayTag>& InOriginChain,
         const FOriginatingEventID& InOriginatingEventID = FOriginatingEventID())
         : GroupTag(InGroupTag), ForwardParams(InForwardParams), SourceTag(InSourceTag), OriginChain(InOriginChain),
@@ -42,7 +42,7 @@ struct SIMPLEQUEST_API FQuestActivationGroupTriggeredEvent
 
     /** Activation params reaching the Setter. Listener stamps these onto each NextNodesOnForward destination's PendingActivationContext. */
     UPROPERTY(BlueprintReadOnly)
-    FQuestObjectiveActivationContext ForwardParams;
+    FQuestObjectiveActivationParams ForwardParams;
 
     /** Compiled ContextualTag of the upstream source whose outcome activated the Setter. Diagnostic / signal-provenance only — not chain-extended. */
     UPROPERTY(BlueprintReadOnly)

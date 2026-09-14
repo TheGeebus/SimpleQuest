@@ -4,7 +4,7 @@
 #pragma once
 
 #include "NativeGameplayTags.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestlineStartRequestEvent.generated.h"
 
 class UQuestlineGraph;
@@ -35,7 +35,7 @@ struct SIMPLEQUEST_API FQuestlineStartRequestEvent
 
 	FQuestlineStartRequestEvent() = default;
 	explicit FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph) : Graph(InGraph) {}
-	FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph, const FQuestObjectiveActivationContext& InParams)
+	FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph, const FQuestObjectiveActivationParams& InParams)
 		: Graph(InGraph), Params(InParams) {}
 	FQuestlineStartRequestEvent(TSoftObjectPtr<UQuestlineGraph> InGraph, bool bInRestoreFromSave)
 		: Graph(InGraph), bRestoreFromSave(bInRestoreFromSave) {}
@@ -45,7 +45,7 @@ struct SIMPLEQUEST_API FQuestlineStartRequestEvent
 
 	/** Optional activation context stamped onto the graph's entry activation. Empty default = no additional context. */
 	UPROPERTY(BlueprintReadWrite)
-	FQuestObjectiveActivationContext Params;
+	FQuestObjectiveActivationParams Params;
 
 	/**
 	 * When true the manager RESTORES the graph from an already-applied save (rebuilds the live objectives the restored

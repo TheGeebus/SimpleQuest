@@ -21,7 +21,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineGraphSchema : public UEdGraphSchema
 public:
 	UQuestlineGraphSchema();
 	
-	/** Called when the graph is first created — populates it with the entry node */
+	/** Called when the graph is first created - populates it with the entry node */
 	virtual void CreateDefaultNodesForGraph(UEdGraph& Graph) const override;
 	
 	static TSharedPtr<FGraphPanelPinConnectionFactory> MakeQuestlineConnectionFactory();
@@ -69,8 +69,15 @@ public:
 	 */
 	virtual const FPinConnectionResponse CanCreateConnection(const UEdGraphPin* A, const UEdGraphPin* B) const override;
 
+	/**
+	 * The three ways a wire is broken - one link, every link on a pin, every link on a node - each inside a transaction of
+	 * its own. The base schema opens none, and neither does the graph editor that calls it, so without these an undo has
+	 * nothing to restore; every engine schema does the same in its override. Each also refreshes the panel, which the pin
+	 * break alone does not trigger.
+	 */
 	virtual void BreakSinglePinLink(UEdGraphPin* SourcePin, UEdGraphPin* TargetPin) const override;
 	virtual void BreakPinLinks(UEdGraphPin& TargetPin, bool bSendsNodeNotification) const override;
+	virtual void BreakNodeLinks(UEdGraphNode& TargetNode) const override;
 	
 	// Optional integration point for SimpleQuestEditorEN.
 	static void RegisterENPolicyFactory(TFunction<FConnectionDrawingPolicy*(int32, int32, float, const FSlateRect&, FSlateWindowElementList&, UEdGraph*)> Factory);
@@ -82,6 +89,21 @@ public:
 	static void SetActiveDragFromPin(UEdGraphPin* Pin);
 	static UEdGraphPin* GetActiveDragFromPin();
 	static void ClearActiveDragFromPin();
+
+	// Node-title cache invalidation. SNodeTitle re-queries GetNodeTitle on its next Tick whenever the schema's
+	// visualization cache ID has moved. UEdGraphSchema no-ops these, so without them a title only ever refreshes
+	// via a full node rebuild - which is what forced NotifyGraphChanged into every inline-edit callback, and what
+	// made those callbacks close an open picker dropdown. Same mechanism UEdGraphSchema_K2 uses for Blueprints.
+	virtual bool IsCacheVisualizationOutOfDate(int32 InVisualizationCacheID) const override;
+	virtual int32 GetCurrentVisualizationCacheID() const override;
+	virtual void ForceVisualizationCacheClear() const override;
+
+private:
+	/**
+	 * Bumped by ForceVisualizationCacheClear; compared against each SNodeTitle's cached ID. Static because the
+	 * accessors are const and the schema is a CDO - matches EdGraphSchema_K2's CurrentCacheRefreshID exactly.
+	 */
+	static int32 CurrentCacheRefreshID;
 
 private:
 	TUniquePtr<FQuestlineGraphTraversalPolicy> TraversalPolicy;

@@ -41,7 +41,7 @@ public:
 	 * Instanced Rewards and dispatches DescribeReward on each, concatenating the results. Pure: no delivery, no event,
 	 * no forward. Backs the advertisement query (UQuestStateSubsystem::GetAdvertisedRewardsForAnyOutcome).
 	 */
-	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer) const;
+	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer, FGameplayTag ResolvingQuestTag) const;
 
 	/**
 	 * Source-agnostic advertised-rewards walk - the shared core of both the live query (manager: nodes from
@@ -55,7 +55,8 @@ public:
 		const TMap<FName, TObjectPtr<UQuestNodeBase>>& NodeMap,
 		FName PathIdentity,
 		AActor* Viewer,
-		bool bIncludeAnyOutcome);
+		bool bIncludeAnyOutcome,
+		FGameplayTag ResolvingQuestTag);
 
 	/**
 	 * Grant a reward set - shared core of node grants (ActivateInternal) and questline-level grants (at resolution).

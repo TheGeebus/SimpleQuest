@@ -4,9 +4,10 @@
 #include "Quests/QuestStep.h"
 
 #include "SimpleQuestLog.h"
+#include "TimerManager.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Objectives/QuestObjective.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveAuthoredConfig.h"
 #include "Subsystems/QuestStateSubsystem.h"
 
@@ -25,14 +26,14 @@ void UQuestStep::Activate(FGameplayTag InContextualTag)
 
 void UQuestStep::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Pack the authored config from this Step's UPROPERTYs and take the caller's input verbatim as the runtime context —
+	// Pack the authored config from this Step's UPROPERTYs and take the caller's input verbatim as the runtime context -
 	// no merge. The objective composes the two however it wants (see UQuestObjective::OnObjectiveActivated), with full
-	// provenance over which values are authored vs caller-supplied. ReceivedActivationContext (the runtime half) is set
+	// provenance over which values are authored vs caller-supplied. ReceivedRuntimeContext (the runtime half) is set
 	// BEFORE Super::ActivateInternal so OnNodeStarted's handler reads a populated snapshot for the registry's start record.
 	const FQuestObjectiveAuthoredConfig Authored = BuildAuthoredConfig();
 	const FQuestObjectiveRuntimeContext Runtime = PendingActivationContext;   // caller input + framework-stamped provenance/outcome
 
-	ReceivedActivationContext = Runtime;
+	ReceivedRuntimeContext = Runtime;
 
 	// Now fire OnNodeStarted (via Super::ActivateInternal). HandleOnNodeStarted runs SetQuestLive, publishes
 	// FQuestStartedEvent, and captures the Step-side entry record using the snapshot above. AssembleEventContext reads
@@ -59,6 +60,11 @@ void UQuestStep::InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& A
 	UClass* ObjClass = QuestObjective.LoadSynchronous();
 	if (!ObjClass) return;
 
+	// A prior objective can still be here: a completion releases at the end of its frame, and a chain that loops back
+	// to this Step lands inside that frame. Release it properly rather than overwriting the pointer and leaving it
+	// holding our bindings with nothing left to release it.
+	ReleaseLiveObjective();
+
 	LiveObjective = NewObject<UQuestObjective>(this, ObjClass);
 
 	LiveObjective->OnQuestObjectiveComplete.AddDynamic(this, &UQuestStep::OnObjectiveComplete);
@@ -84,40 +90,40 @@ void UQuestStep::InstantiateLiveObjective(const FQuestObjectiveAuthoredConfig& A
 	LiveObjective->DispatchOnObjectiveActivated(Authored, Runtime, InContextualTag);
 }
 
-void UQuestStep::RestoreObjective(const FQuestObjectiveActivationContext& IncomingContext, FGameplayTag InContextualTag)
+void UQuestStep::RestoreObjective(const FQuestObjectiveActivationParams& IncomingParams, FGameplayTag InContextualTag)
 {
 	// Rebuild the runtime context from the saved snapshot: the caller's incoming half, plus a Restored provenance stamp
 	// so the objective can suppress first-activation side effects. The authored half re-derives from this Step.
 	FQuestObjectiveRuntimeContext Runtime;
-	Runtime.IncomingContext = IncomingContext;
+	Runtime.IncomingParams = IncomingParams;
 	Runtime.Provenance = EQuestActivationProvenance::Restored;
 
 	// Mirror onto the Step so post-restore reads (completion chaining, AssembleEventContext) see the context a live
-	// activation would have left behind. No Super::ActivateInternal here — SetQuestLive / lifecycle events / the entry
+	// activation would have left behind. No Super::ActivateInternal here - SetQuestLive / lifecycle events / the entry
 	// record all fired at the original start and were restored in bulk; re-firing them would double-count.
-	ReceivedActivationContext = Runtime;
+	ReceivedRuntimeContext = Runtime;
 
 	InstantiateLiveObjective(BuildAuthoredConfig(), Runtime, InContextualTag);
 }
 
 void UQuestStep::DeactivateInternal(FGameplayTag InContextualTag)
 {
-	if (LiveObjective)
+	// *** ONLY THE INTERRUPTION PATH RELEASES HERE. *** A completed objective was already dispatched and unregistered
+	// at completion and is already queued for release at the end of that frame. Deactivation can arrive inside the
+	// same frame - a completion whose cascade tears this step down - and releasing here would undo the very boundary
+	// that makes post-completion work legal. Re-firing the hook would also tell a subclass it was Interrupted
+	// immediately after telling it it Completed.
+	if (LiveObjective && !LiveObjective->HasCompleted())
 	{
-		// Symmetric to OnObjectiveActivated: fire the deactivation hook BEFORE delegate cleanup and null-out
-		// so subclass overrides (universal-adapter pattern: subscribed to game-system events in OnObjective-
-		// Activated) can still inspect targets / objective state and explicitly unsubscribe.
+		// Symmetric to OnObjectiveActivated: fire the deactivation hook BEFORE the unbind so subclass overrides
+		// (universal-adapter pattern: subscribed to game-system events in OnObjectiveActivated) can still inspect
+		// targets / objective state and explicitly unsubscribe.
 		LiveObjective->DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason::Interrupted);
 		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
-		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
-		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
-		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
-		LiveObjective = nullptr;
+		ReleaseLiveObjective();
 	}
-	ReceivedActivationContext = FQuestObjectiveRuntimeContext{};
-	CompletionForwardParams = FQuestObjectiveActivationContext{};
+	ReceivedRuntimeContext = FQuestObjectiveRuntimeContext{};
+	CompletionForwardParams = FQuestObjectiveActivationParams{};
 	Super::DeactivateInternal(InContextualTag);
 }
 
@@ -125,14 +131,14 @@ void UQuestStep::ResetTransientState()
 {
 	Super::ResetTransientState();
 	
-	// LiveObjective was a weak tie to the prior PIE's world — don't touch it (GC cleaned up the UObject), just
+	// LiveObjective was a weak tie to the prior PIE's world - don't touch it (GC cleaned up the UObject), just
 	// drop the reference. CompletionContext + params are pure value types; reset to empty. QSS unregister:
-	// ActiveObjectivesByTag uses TWeakObjectPtr — stale entries become invalid on dereference and queries skip them.
+	// ActiveObjectivesByTag uses TWeakObjectPtr - stale entries become invalid on dereference and queries skip them.
 	// Explicit cleanup belongs in the manager's PIE-reset path if/when needed.
 	LiveObjective = nullptr;
 	CompletionContext = FQuestObjectiveTriggerContext{};
-	ReceivedActivationContext = FQuestObjectiveRuntimeContext{};
-	CompletionForwardParams = FQuestObjectiveActivationContext{};
+	ReceivedRuntimeContext = FQuestObjectiveRuntimeContext{};
+	CompletionForwardParams = FQuestObjectiveActivationParams{};
 }
 
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity)
@@ -142,17 +148,20 @@ void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity
 		// Fire the deactivation hook FIRST, before TakeCompletionContext / TakeForwardActivationParams move
 		// data out of the objective, so the subclass override can read CompletionContext / ForwardActivation-
 		// Params if it needs them. The objective is still live (we're inside its OnQuestObjectiveComplete
-		// broadcast); ConditionalBeginDestroy hasn't fired yet.
+		// broadcast).
 		LiveObjective->DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason::Completed);
 		UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
 		CompletionContext = LiveObjective->TakeCompletionContext();
 		CompletionForwardParams = LiveObjective->TakeForwardActivationParams();
-		LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
-		LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
-		LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
-		LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
-		LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
-		LiveObjective = nullptr;
+
+		// *** BINDINGS STAY UP FOR THE REST OF THIS FRAME. *** We are inside the objective's own completion
+		// broadcast and the Blueprint chain that called Complete is still running - unbinding here would silently
+		// orphan whatever it does next (a PublishTriggerSatisfied, a cleanup publish). So the Step keeps listening
+		// and schedules the release for the end of the frame instead: post-completion work is a supported pattern
+		// with a definite end, rather than an objective that lives on until the step happens to be deactivated -
+		// which, for a step that simply completes, never happens. A second completion cannot slip through; the
+		// objective refuses it at the source.
+		ScheduleCompletedObjectiveRelease();
 	}
 	OnNodeCompleted.ExecuteIfBound(this, OutcomeTag, PathIdentity);
 }
@@ -175,6 +184,55 @@ void UQuestStep::OnObjectiveTriggerDeactivation(FGameplayTag OutcomeTag, FQuestO
 void UQuestStep::OnObjectiveTriggerSatisfied(FQuestObjectiveTriggerContext Context)
 {
 	OnNodeTriggerSatisfied.ExecuteIfBound(this, Context);
+}
+
+void UQuestStep::ReleaseLiveObjective()
+{
+	if (!LiveObjective) return;
+
+	LiveObjective->OnQuestObjectiveComplete.RemoveDynamic(this, &UQuestStep::OnObjectiveComplete);
+	LiveObjective->OnQuestObjectiveProgress.RemoveDynamic(this, &UQuestStep::OnObjectiveProgress);
+	LiveObjective->OnQuestObjectiveRefused.RemoveDynamic(this, &UQuestStep::OnObjectiveRefused);
+	LiveObjective->OnQuestObjectiveTriggerDeactivation.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerDeactivation);
+	LiveObjective->OnQuestObjectiveTriggerSatisfied.RemoveDynamic(this, &UQuestStep::OnObjectiveTriggerSatisfied);
+	LiveObjective->MarkReleased();
+
+	UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("UQuestStep::ReleaseLiveObjective : '%s' released '%s'"),
+		*GetContextualTag().ToString(), *LiveObjective->GetName());
+
+	LiveObjective = nullptr;
+}
+
+void UQuestStep::ScheduleCompletedObjectiveRelease()
+{
+	if (!LiveObjective) return;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		// Nothing to schedule against, and no frame for post-completion work to run in either. Release now.
+		ReleaseLiveObjective();
+		return;
+	}
+
+	// End of the completing frame, not the moment of completion: the Blueprint chain that called Complete is still
+	// running, and so is the manager's entire resolution cascade. The world's timer manager ticks after every actor
+	// tick group, so a completion raised from gameplay releases late in that SAME frame; one raised after that point
+	// (a tickable object, a latent resume) releases on the next. Both land after the synchronous chain, which is the
+	// guarantee. The timer is world-owned, so PIE teardown drops it for free; a paused game defers to the unpause.
+	TWeakObjectPtr<UQuestStep> WeakStep(this);
+	TWeakObjectPtr<UQuestObjective> WeakObjective(LiveObjective);
+	World->GetTimerManager().SetTimerForNextTick([WeakStep, WeakObjective]()
+	{
+		UQuestStep* Step = WeakStep.Get();
+
+		// Release ONLY the objective that completed. A re-activation inside the same frame installs a replacement,
+		// and releasing that one would unbind a step that has only just started.
+		if (Step && WeakObjective.IsValid() && Step->LiveObjective == WeakObjective.Get())
+		{
+			Step->ReleaseLiveObjective();
+		}
+	});
 }
 
 void UQuestStep::UnregisterObjectiveFromQuestStateSubsystem(UQuestObjective* Objective, const UWorld* World)

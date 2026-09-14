@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Quests/QuestNodeBase.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "StartQuestlineNode.generated.h"
 
 class UQuestlineGraph;
@@ -33,7 +33,7 @@ protected:
 	 * Empty default merges cleanly with the entry Step's authored defaults.
 	 */
 	UPROPERTY()
-	FQuestObjectiveActivationContext Params;
+	FQuestObjectiveActivationParams Params;
 
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 };

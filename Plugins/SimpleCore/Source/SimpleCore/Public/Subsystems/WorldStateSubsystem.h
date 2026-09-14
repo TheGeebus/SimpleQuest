@@ -6,6 +6,7 @@
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Events/SignalEventBase.h"
 #include "WorldStateSubsystem.generated.h"
 
 UENUM(BlueprintType)
@@ -20,7 +21,7 @@ enum class EFactBroadcastMode : uint8
 };
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FWorldStateFactAddedEvent
+struct SIMPLECORE_API FWorldStateFactAddedEvent : public FSignalEventBase
 {
     GENERATED_BODY()
 
@@ -35,7 +36,7 @@ struct SIMPLECORE_API FWorldStateFactAddedEvent
 };
 
 USTRUCT(BlueprintType)
-struct SIMPLECORE_API FWorldStateFactRemovedEvent
+struct SIMPLECORE_API FWorldStateFactRemovedEvent : public FSignalEventBase
 {
     GENERATED_BODY()
 

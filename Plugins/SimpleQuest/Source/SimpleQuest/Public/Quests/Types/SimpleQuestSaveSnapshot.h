@@ -19,7 +19,7 @@
  * or not the flag is present, so it cannot be used to keep something out of a save.
  *
  * Layers captured: WorldState facts (the primary state store) and the QSS resolution + entry history registries,
- * including each entry's ActivationContextSnapshot. The parallel lookup indices (ResolvedOutcomesByQuest, etc.)
+ * including each entry's ActivationParamsSnapshot. The parallel lookup indices (ResolvedOutcomesByQuest, etc.)
  * are NOT stored - they rebuild from the histories on apply.
  */
 USTRUCT(BlueprintType)
@@ -32,6 +32,15 @@ struct SIMPLEQUEST_API FSimpleQuestSaveSnapshot
 
 	UPROPERTY(SaveGame)
 	int32 Version = CurrentVersion;
+
+	/**
+	 * Seconds of play at capture, on the quest clock (UQuestStateSubsystem::GetQuestTime): continuous across level changes
+	 * and saved games, pauses excluded. Apply continues the clock from this value. Additive with a zero default, so a
+	 * snapshot from before the clock existed restarts it at zero - its recorded timestamps were world-relative and are
+	 * no more comparable than they already were.
+	 */
+	UPROPERTY(SaveGame)
+	double PlayTime = 0.0;
 
 	/** Layer 1 - UWorldStateSubsystem fact map (running facts, completion, blocked, prereq satisfaction, …). */
 	UPROPERTY(SaveGame)

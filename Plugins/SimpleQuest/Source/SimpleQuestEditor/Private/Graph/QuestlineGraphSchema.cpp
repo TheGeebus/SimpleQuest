@@ -1124,6 +1124,9 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 
 void UQuestlineGraphSchema::BreakSinglePinLink(UEdGraphPin* SourcePin, UEdGraphPin* TargetPin) const
 {
+	// The transaction is what makes the break undoable: the pins Modify() their owning nodes inside the base call, and
+	// with nothing open that records nowhere. Opened here, as every engine schema does, because the callers do not.
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "GraphEd_BreakSinglePinLink", "Break Pin Link"));
 	Super::BreakSinglePinLink(SourcePin, TargetPin);
 	if (SourcePin)
 	{
@@ -1136,8 +1139,21 @@ void UQuestlineGraphSchema::BreakSinglePinLink(UEdGraphPin* SourcePin, UEdGraphP
 
 void UQuestlineGraphSchema::BreakPinLinks(UEdGraphPin& TargetPin, bool bSendsNodeNotification) const
 {
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "GraphEd_BreakPinLinks", "Break Pin Links"));
 	Super::BreakPinLinks(TargetPin, bSendsNodeNotification);
 	if (UEdGraph* Graph = TargetPin.GetOwningNode() ? TargetPin.GetOwningNode()->GetGraph() : nullptr)
+	{
+		Graph->NotifyGraphChanged();
+	}
+}
+
+void UQuestlineGraphSchema::BreakNodeLinks(UEdGraphNode& TargetNode) const
+{
+	// One transaction around the whole node: the base walks the pins through BreakPinLinks above, whose own transactions
+	// nest inside this one, so a "Break Node Links" undoes as one step rather than one per pin.
+	const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "GraphEd_BreakNodeLinks", "Break Node Links"));
+	Super::BreakNodeLinks(TargetNode);
+	if (UEdGraph* Graph = TargetNode.GetGraph())
 	{
 		Graph->NotifyGraphChanged();
 	}
@@ -1603,6 +1619,23 @@ void UQuestlineGraphSchema::ClearActiveDragFromPin()
 {
 	GActiveDragFromNode = nullptr;
 	GActiveDragFromPinName = NAME_None;
+}
+
+int32 UQuestlineGraphSchema::CurrentCacheRefreshID = 0;
+
+bool UQuestlineGraphSchema::IsCacheVisualizationOutOfDate(int32 InVisualizationCacheID) const
+{
+	return CurrentCacheRefreshID != InVisualizationCacheID;
+}
+
+int32 UQuestlineGraphSchema::GetCurrentVisualizationCacheID() const
+{
+	return CurrentCacheRefreshID;
+}
+
+void UQuestlineGraphSchema::ForceVisualizationCacheClear() const
+{
+	++CurrentCacheRefreshID;
 }
 
 FConnectionDrawingPolicy* UQuestlineGraphSchema::CreateConnectionDrawingPolicy(int32 InBackLayerID, int32 InFrontLayerID,

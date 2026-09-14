@@ -5,6 +5,592 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.1] — 2026-09-13 — Conditions, Endings, and Eleven Chapters
+
+A flurry of changes to several systems and features, all driven by hands-on work
+authoring the eleven chapters of the QuickStart tutorial progression.
+
+An Objective's life got a defined ending. Work placed after a completion is now
+a supported pattern with a boundary rather than something that silently reached
+nobody, a Step resolves once per activation and says so if you ask twice, and a
+questline's Deactivated wire finally does what it says instead of compiling into
+an activation route. The structs that describe an activation also got named for
+what they are.
+
+Rewards learned to say no, and advertisements learned to say why. A reward can
+now fire on a first completion only, pay across a range of runs, require
+something to be true, or scale by a number you author - none of which needed a
+new reward class. An advertisement no longer hides what it cannot grant: every
+reward comes back, and an unavailable one carries the reason, so a journal can
+show "50 XP - already collected" rather than showing nothing at all. And asking
+what a quest pays became one question, where six answered it in pieces and each
+expected you to know where the reward had been authored.
+
+Asking where a quest stands is one question too. Get Quest Phase answers from
+the same derivation catch-up replays from, so a Blueprint asking directly and an
+observer arriving late can no longer disagree; a node's children can be listed;
+and every timestamp the framework records is on a play clock that survives level
+changes and saved games. Underneath, the relations between a placed questline's
+spellings are known before anything starts, which closed the last of the
+late-observer duplicates.
+
+And the QuickStart is finished. Eleven chapters, each carrying narrative beats
+for the player and comments for the author, with a Rewards chapter second and
+the last four built in this release: linked questlines placed twice, activation
+groups under a bridge, prerequisite rules and a power switch, and Observers -
+where an archive console shows the player what every tell in the previous ten
+had been hearing all along. Building them found a fair share of the fixes
+below; the written on-ramp starts from here.
+
+### Added
+
+- **A reward can pay once and never again.** Attach **Grant Once** to a reward
+  and it fires on a first completion only. Replaying the content - a chapter
+  select, a Resettable Replay step, a second run through a questline - no longer
+  pays it again. It counts the quest's own resolution history rather than
+  recording anything of its own, so there is no second bookkeeping to drift out
+  of step with the first, and it works on any reward regardless of what it
+  grants.
+
+  - **Its advertisement says so rather than vanishing.** A collected reward
+  still comes back from an advertisement query, marked "Already collected" -
+  see the blocker change below.
+
+- **A reward can pay on some runs and not others.** **Require Completion
+  Count** takes a first and last completion, so a reward can start paying on the
+  third run, stop after the fifth, or cover any range between. Grant Once is
+  this with both bounds at one, and stays its own class because that case wants
+  no configuration and reads instantly in the picker.
+
+- **A reward can require something to be true.** **Require Fact** drops a grant
+  unless a world state fact holds - guild membership, a difficulty flag, a story
+  beat reached. The condition is written in the same fact vocabulary
+  prerequisites already use, so gating a *reward* asks nothing new of anyone who
+  has gated a *step*. Facts are counted rather than boolean, so **Minimum Count**
+  asks "at least this many" and the default of 1 is the plain has-it-or-not case;
+  **Require Absent** inverts the test.
+
+  - **It describes the present, and for gating on quest progress you want
+  Require Completion Count instead.** A fact gate reports whether the condition
+  holds right now, which is exactly right for a fact a completion does not
+  touch. It cannot predict what a completion will do to an arbitrary world fact,
+  so gating on a fact that completions themselves advance describes a state one
+  completion behind. Doing that warns and names the modifier to use.
+
+- **A reward can be scaled by a number you choose.** **Scale Amount** multiplies
+  by an authored constant - a double-XP event, a harder difficulty paying more,
+  one placement of a shared questline worth less than another. Its companion
+  Scale By Recipient reads its factor off the recipient through an interface;
+  there was no way to simply say ×1.5 until now.
+
+- **An advertised reward can be traced back to what pays it.** Previews carry
+  **Source Tag** - the completion they were resolved from - so a list drawn from
+  both a graph's reward nodes and a questline's own rewards can still be told
+  apart.
+
+- **An advertised reward and the payout that arrives can be matched up.** Both
+  now carry **Reward Guid**, identifying which reward produced them. A journal
+  that showed "50 XP" can flash the line that just paid out instead of guessing
+  from a type and a number two different rewards could both produce. It also
+  gives a preview a stable identity it never had: advertised values are computed
+  live, so a UI re-queries constantly, and two 50-XP rewards used to be
+  indistinguishable from one reward recomputed.
+
+- **A completion can stop another node.** Wire a Step or Quest's outcome pin to
+  another node's Deactivate input, and resolving on that outcome deactivates the
+  target - take the left path, close the right one. It is per-outcome, so each
+  path can close something different, and the Any Outcome pin closes on every
+  completion. The editor has always allowed that wire; the compiler discarded
+  it, so it looked authored and did nothing.
+
+- **Observe Quest Lifecycle exposes Activation Failed and Progress Refused.**
+  The observer component has always published both; the Blueprint async node
+  omitted them, so the same two refusals were reachable from a component and
+  invisible from a node. Anything that can be observed one way can now be
+  observed the other.
+
+- **Where a quest is right now is one question.** **Get Quest Phase** returns a
+  single phase - Not Reached, Activated, Started, Deactivated, Completed - plus
+  the facts that coexist with a phase rather than replace it: whether it is
+  enabled, blocked, has ever started, has ever resolved, and its latest outcome.
+  Until now a status line meant composing Is Quest Live, Is Quest Completed and
+  Is Quest Pending Giver by hand with a precedence you invented, and every UI
+  invented a slightly different one. The phase names follow the lifecycle
+  events, and precedence goes by what is current: a repeatable quest running
+  again reads Started, with its earlier completion reported alongside.
+
+  - **Catch-up replays from the same read.** A late observer is caught up by
+  the same derivation, so a status built from this and one built from events
+  cannot disagree.
+
+- **A node's children can be listed.** **Get Child Quest Tags** returns the
+  known quest tags one level below a tag - a container's steps, a questline's
+  top-level nodes, a placed questline's inner content - one per node, in the
+  placement's own spelling, whether or not a child has ever been reached. A
+  journal can show a "never reached" row without splitting tag strings to find
+  it. Given an inner asset's own tag, it lists the children of every placement
+  of that asset. Order is alphabetical for now; an authored order is a separate
+  item.
+
+- **Every recorded timestamp is on a persisted play clock.** **Get Quest Time**
+  is seconds of play: it does not advance while the game is paused, it carries
+  across a level change, and a loaded save continues from where it left off.
+  Resolution, entry and refusal records, registration times and advancement
+  holds all stamp in this domain now, where before they used the world's own
+  clock - which restarts on every level load and every save, so a restored
+  history held two clocks that could not be compared and "how long ago" was
+  unanswerable across a load. Wall-clock time is deliberately not part of it:
+  idling in a menu is not play. Saves from before this restart the clock at
+  zero, which leaves their old stamps as incomparable as they already were.
+
+### Changed
+
+- **An advertisement never hides a reward for being unavailable.** A modifier
+  that would drop the grant used to remove the reward from "do this, get this"
+  entirely, so a player saw nothing and had no way to know the reward existed.
+  Every possible reward now comes back, and an unavailable one carries
+  **Blockers** saying why - "Already collected", "Requires Guild membership",
+  "Available on run 3". Whether to grey it, filter it out or render the reason
+  is a presentation decision, and it belongs to your UI rather than to us.
+
+  - Each blocker carries a **tag** under `SimpleQuest.RewardBlocker` alongside
+  its text, so a UI branches on the kind for an icon or a color instead of
+  parsing prose. Write a modifier of your own and it adds its own tags there.
+  More than one modifier can block the same reward, so it is a list.
+
+  - **This also removed a class of bug rather than just a limitation.** Deciding
+  *whether* to show a reward meant answering "would this be granted if the
+  completion happened now" - a prediction, and modifiers were getting it wrong
+  by one completion in both directions. Describing what currently blocks a
+  reward needs no prediction at all.
+
+- **A reward modifier's preview hook changed shape twice over.** `ModifyPreview`
+  now takes an activation context instead of a bare actor - the same shape
+  `ModifyGrant` receives, so whatever a modifier can branch on while granting it
+  can branch on while advertising - and it returns nothing, marking the preview
+  through `AddBlocker` rather than reporting a hide-or-show verdict.
+  `ModifyGrant` still returns a verdict, because a grant is a decision and an
+  advertisement is a description. **This is a breaking change if you subclassed
+  a modifier**; the viewer is on the context as `Instigator`, and anywhere the
+  old body returned `false` now adds a blocker.
+
+- **Asking what something pays is one question now.** `Get Advertised Rewards`
+  takes any tag - a step, a container, a linked placement, or a questline - and
+  returns everything that completion pays, keyed by outcome. Rewards used to
+  live in two channels a caller had to choose between: those wired into a graph,
+  and a questline's own completion rewards. Choosing wrongly returned an empty
+  result rather than an error, and choosing rightly required knowing whether a
+  tag named a node or an asset. That distinction is an authoring detail and it
+  is no longer yours to track.
+
+  - **Any Outcome is a key of its own** in the returned map, rather than being
+  folded into each named outcome. Completing with a given outcome pays that
+  outcome's list *plus* the Any Outcome list, which is exactly how delivery
+  grants them - so unioning those two is a real total, while summing the whole
+  map is a number nobody receives.
+
+  - **Four functions are deprecated and removed in 0.9**:
+  `Get Advertised Rewards For Any Outcome`, `Get All Advertised Rewards By
+  Outcome`, `Get Questline Rewards`, and `Get Questline Rewards From Asset`.
+  Each names its replacement when you compile against it. All four still work
+  until then.
+
+- **`Get Advertised Rewards From Asset` returns a map instead of an array**, the
+  same outcome-keyed shape the live query returns, and it reads both channels.
+  **This breaks Blueprints calling it** - deliberately, on a pin type mismatch,
+  so the change is impossible to miss rather than quietly handing back a
+  different shape.
+
+- **`Get Advertised Rewards For Outcome` sees both channels.** Its name and
+  signature are unchanged, but it now folds in questline-level rewards the same
+  way the whole-map query does. Asking one outcome what it pays previously
+  answered from graph-wired rewards alone.
+
+- **The reference modifiers live one per file** under `Rewards/Modifiers/`,
+  matching how the rewards themselves are organized. Update the include path if
+  you referenced `Rewards/QuestRewardModifier.h` directly.
+
+- **Work placed after a Complete Objective node now runs, and has a defined
+  end.** Completing used to tear the Objective down on the spot, so a trailing
+  `Publish Trigger Satisfied` or cleanup publish reached nobody - no error, no
+  warning, just nothing. The Objective now stays live for the remainder of the
+  completing frame and its Step releases it at the end of that frame. Anything
+  arriving later warns and names the entry point rather than failing silently.
+
+  - **A Step resolves once per activation.** A second `Complete Objective With
+  Outcome` on the same activation is refused and logged; the first outcome
+  sticks. Put mutually exclusive completions on separate branches.
+
+  - **Completing with `Any Outcome` is refused.** It describes a pin that fires
+  regardless of outcome, not an outcome a Step can end on - completing with it
+  resolved the Step on a path nothing could match, so downstream prerequisites
+  and outcome filters never fired while the routing still looked correct.
+
+  - **Ordering after a completion is yours.** Publishing trigger-satisfied after
+  completing means a watching Trigger hears Deactivated before Satisfied. That
+  is visible and accountable-for, so it is allowed rather than forbidden.
+
+- **Three framework-stamped fields are no longer writable from Blueprint.**
+  `OriginatingEventID`, `Provenance` and `IncomingOutcomeTag` were documented as
+  framework-owned but exposed as Make-node inputs and details-panel fields.
+  `OriginatingEventID` in particular feeds the wrapper-boundary deduplication
+  gate, where a hand-authored duplicate would silently suppress a legitimate
+  completion. All three stay readable on Break nodes and in the details panel.
+  `OriginTag` and `OriginChain` remain writable - both have real caller-side
+  entry points.
+
+- **`FQuestObjectiveActivationContext` is now `FQuestObjectiveActivationParams`,
+  and `FQuestObjectiveRuntimeContext::IncomingContext` is `IncomingParams`.**
+  The type is an argument list handed forward to the next activation, not a
+  description of circumstances like the Trigger and Runtime contexts - and it
+  nested inside one under a Context-shaped name. Every call site already said
+  Params. **Core redirects ship with the plugin**, so assets and Blueprints heal
+  on load; C++ referring to the old names needs the rename.
+
+- **The example materials and meshes moved up out of the QuickStart folder.**
+  The prototype grid, the button and door materials, the fade material the
+  trigger auras use, and the basic shapes now live under the plugin's own
+  `Content/Materials` and `Content/Meshes` rather than `Content/QuickStart/…`,
+  since nothing about them is specific to the tutorial. References inside the
+  plugin were fixed up on the move; a project that pointed at the old QuickStart
+  paths directly will need to repoint. The fade material also gained an emissive
+  term so auras stay readable in a dark room.
+
+### Fixes
+
+- **Three ensures no longer fire on editor startup.** The advancement-hold
+  tests declared their fixture tags natively from the editor module, and a
+  native gameplay tag has to be declared from a runtime module - client and
+  server tag tables must match, and an editor-only module ships to neither. Each
+  ensure paid for a stack walk and a crash-report submission, so this was costing
+  roughly nine seconds of every editor start. The tests moved to the runtime
+  module, where the tags are legal in a development build and compile away
+  entirely in a shipping one, so nothing new reaches your tag table.
+
+- **Questline-level rewards can reference Reward Sets.** An outcome's rewards
+  could always be a mix of inline rewards and shared sets, and the compiler has
+  always flattened both - but the questline's Rewards panel only ever showed the
+  inline half, so a set was unreachable there unless you routed it through a
+  Grant Rewards node instead. Sets are listed above the inline rewards, because
+  that is the order they grant in.
+
+- **Questline-level Reward Sets now survive an export.** The export wrote an
+  outcome's inline rewards as rows of their own but had nowhere to put the
+  sets it referenced, so an outcome that granted only sets exported as nothing
+  at all and came back from an import with no rewards - the round-trip check
+  reports it, but only if you ran one. Each outcome's reward set is now a row of
+  its own, carrying its referenced sets, with its inline rewards as child rows
+  beneath it. Exports written before this change still import; their inline
+  questline rewards are read under the older key spelling.
+
+- **A Step's Config Asset could not be set from the graph editor.** The runtime
+  Step, the objective's authored config and the documentation all described
+  the slot, but the Step node never exposed it and the compiler never copied
+  it, so an objective's `Config Asset` was always empty. The node has the field
+  now, filtered to Objective Config assets, and names the chosen asset when
+  expanded.
+
+- **The round-trip check compared nothing under the JSON format.** Its authored
+  comparison only ever read `.tsv` files, so with JSON as the project's format
+  it found no files, said so, and reported a failure that had nothing to do
+  with the questline. It reads whatever format the export wrote, and both
+  `SimpleQuest.RoundTrip` and `SimpleQuest.RoundTripCompare` accept
+  `--format=<name>` the way the export and import commands do.
+
+- **Breaking a wire in a questline graph is undoable.** It never was: the
+  engine's base schema opens no transaction around a break and neither does the
+  graph editor that calls it - every engine schema opens its own in the override,
+  and ours did not. Single links, a pin's links and a node's links each undo as
+  one step now.
+
+- **A trigger no longer refuses a step it has only just activated.** A trigger
+  watching several steps evaluated them one at a time as it fired, so when
+  completing a live step activated the next one in the same instant, the fire
+  reached that successor too and was refused for an action the player took
+  before the step existed - a spurious PROGRESS REFUSED, or a wrong-outcome
+  refusal, on every advance. Every watched step's fate is decided against the
+  state at the moment of the fire, and only then is anything published.
+
+- **Nodes with no authored display name no longer warn on every catch-up.** A
+  broad subscription catches up on every known node at startup, and the display
+  lookup for each was made before the framework had checked whether the node had
+  anything to replay; a node authored without a display payload - which has no
+  record by design - then logged "unregistered, or the compile missed it," once
+  per node per subscriber. The phase is read first now, a never-reached node is
+  skipped before any lookup, and a known tag with no record is quiet. The
+  warning is reserved for a tag the framework does not know at all, which is
+  the case it was written for.
+
+- **Importing a Generic reward with no payload set warned about a missing
+  row.** An unset payload is exported as no row on purpose, and an export
+  written before payloads became rows of their own carries it as a cell
+  instead; the import treated both as a row that should have been there and
+  warned on every one. The value was never wrong, only the warning. Two tests
+  now hold the import to silence on both shapes.
+
+- **A questline with no Questline ID had no runtime identity of its own.** The
+  field is documented as optional, falling back to the asset name - but three
+  places rebuilt the questline's identity tag by hand without that fallback,
+  composing a tag that did not exist. Such a questline wrote no `Live` or
+  `Started` fact under its own tag, published no asset-level Activated event,
+  and answered its display name with nothing, so anything bound to the questline
+  itself rather than to a node inside it heard and saw nothing. The guard that
+  stops `Start Questline` re-running over restored progress reads the same tag
+  and fails open, though steps refuse re-entry independently, so completed
+  progress was not lost.
+
+  - **The compiler stamps that identity now**, and every consumer reads it
+  rather than rebuilding it. Turning an ID into a tag segment involves
+  sanitizing that exists only in the editor, so runtime code could never have
+  reproduced the composition correctly - it had to be recorded at compile time
+  rather than recomputed at every call site.
+
+- **A reward wired to both an outcome pin and Any Outcome paid twice.** Both
+  routes fire on a completion, and each activated whatever it reached without
+  checking whether the other already had. One arrival per destination per
+  completion now.
+
+- **Advertised rewards came back empty for a node that plainly had them.**
+  Rewards on the Any Outcome pin were merged into named outcomes and never
+  reported on their own, so a node whose only rewards were any-outcome answered
+  with nothing at all.
+
+- **Asking for Any Outcome rewards by name returned them twice**, once from the
+  outcome you asked for and again from the flag that includes them.
+
+- **Compiling refuses a node that reaches one questline end node from both a
+  named outcome pin and Any Outcome.** Any Outcome already fires on every
+  completion, so the pair overlaps and the questline would resolve twice for a
+  single completion - paying its rewards twice and recording two resolutions,
+  which makes grant-once rewards and anything counting completions read wrong.
+  The graph editor has always refused to draw this; the compiler refuses it now
+  as well, because an imported bundle is not drawn.
+
+- **Step nodes say "Triggers"** where they said "Targets", matching what the
+  component has been called since the trigger and observer split.
+
+- **A questline's Deactivated wire had no effect.** Wiring the Start node's
+  Deactivated pin to a Step's Deactivate input compiled into an *entry* route
+  instead of a deactivation route, so deactivating the questline left everything
+  inside it running. The wire read as broken rather than absent - anyone who
+  authored one got silence. It works now for all three boundary kinds: inline
+  Quest containers, Linked Questline placements, and a graph's own Start node.
+  The cascade travels transitively, including through an already-completed
+  linked questline into the chapter beyond it.
+
+- **Deactivation fired once per enclosing container instead of once.** A Step's
+  deactivation reached the manager's handler through its own subscription and
+  again through every ancestor container's, because the subscription accepted
+  descendant channels. Each extra delivery re-ran the *Step's* work, so a
+  Deactivated-to-Activate wire activated its target once per nesting level -
+  publishing a spurious activation-refused event each time.
+
+- **Cancelling an observer mid-catch-up did not stop it.** `Observe Quest
+  Lifecycle` replays existing state when it starts; calling `Cancel` from a
+  handler on one of those pins unsubscribed the node but the replay kept firing
+  the remaining pins. Worst on a subscription bound to a parent tag, where the
+  replay covers every descendant. The observer component had the same shape with
+  `Remove Observed Tag`.
+
+- **Right-clicking a tag in an inline picker crashed the editor.** Opening the
+  tag picker on a graph node and right-clicking an entry brought down the
+  session ("Window Creation Failed"). The selection rebuilt the node's widgets
+  synchronously, destroying the window the context menu was about to parent
+  itself to. Seven pickers were affected.
+
+- **A step inside a nested questline listed none of the triggers watching it.**
+  A node reports the level actors observing it, including the ones that reach it
+  through an outer questline placing its asset. That lookup only considered
+  questlines referencing the node's own asset *directly*, so an asset placed two
+  or more levels down - a chapter linking a routine that links a shared sequence -
+  reported nothing at all, because the tag its actors actually subscribe to
+  belongs to the questline at the top of the chain. The lookup now follows the
+  chain however deep it runs. Givers were affected the same way, as were Quest
+  and Linked Questline nodes.
+
+- **A questline started on its own stayed "running" after it finished.** Starting
+  a questline as a graph - a **Start Questline** node, or the Blueprint call -
+  marks the questline itself Live, and nothing ever cleared it. It completed with
+  both Completed and Live asserted at once, so "is this questline running?" had no
+  correct answer, and it refused to start again. Its Live state is now derived from
+  its own steps the way a container's always has been, so it clears when the last
+  one finishes - and stays set when a questline resolves one ending while other
+  branches are still running.
+
+- **Replaying a container left its untouched branches remembering the last run.**
+  A replayable quest clears its per-run record when it starts again, and each
+  thing inside it did the same as the replay reached it - so anything the replay
+  had not reached *yet* still carried the previous run's result. Content that is
+  activated from outside the graph, a room controller starting each scenario in
+  turn, is never reached by the replay at all. A gate across three such scenarios
+  saw two already satisfied on the first beat of the second run and resolved the
+  whole chapter. A container's replay now clears every descendant up front; anything
+  genuinely still running keeps its state.
+
+- **A questline placed inside another announced its ending twice.** Subscribe at a
+  broad tag and you are promised one delivery per thing that happens - that is
+  what makes a HUD possible without naming every quest it might show. A placed
+  questline broke it: its completion went out as two separate publishes, one from
+  the placement and one from the questline asset, and while the bus removes
+  duplicate channels *within* a publish it cannot know that two publishes describe
+  one event. Anything listening broadly saw every chapter finish twice. The two
+  are now channels of a single publish, so the guarantee holds for questlines the
+  way it already held for everything else.
+
+  - **What a questline-tag subscriber receives changed with it.** An embedded
+  questline's ending now arrives with the placement's context rather than a bare
+  identity payload - more information, and the same shape every other
+  multi-perspective event already had.
+
+- **An embedded questline's own identity carried no lifecycle state.** A questline
+  placed inside another one reported `Completed` when it finished but never
+  `Started` or `Live` while it ran, so anything watching the questline by its own
+  name saw a completion for something it never saw begin. A placement now writes
+  its inner questline's state alongside its own, and because facts are counted,
+  the number tells you how many copies are running: one route placed twice reads
+  2 while both are live, 1 when the first finishes, 0 when the last does.
+
+- **A questline's outcome could not be read back by path.** Steps record which
+  path they resolved through; questlines recorded only *that* they finished. The
+  outcome was dropped on the way into the record, and the matching world state
+  fact was neither written nor registered, so a prerequisite could ask a step
+  which way it went but never ask the questline holding it. Both now land, and
+  the compiler registers the fact tags they need - if a questline has been
+  answering that question with silence, recompile it.
+
+- **Start Questline fired once per session.** A questline that had already begun
+  refused a second start, which is what keeps a fresh start from trampling a
+  restored save - but it made no exception for content meant to be replayed. A
+  chapter select, or anything else that reruns a questline containing a **Start
+  Questline** node, silently stopped starting it after the first run. A questline
+  marked **Resettable Replay** now restarts, unless it is currently running.
+
+- **The Group Examiner could not see a hierarchical pair.** An activation group
+  subscribes to its own channel *and* every channel beneath it, so an Exit on
+  `Group.Alpha` hears an Entry publishing on `Group.Alpha.Beta`. The examiner
+  matched on exact tag equality instead, so pinning the parent tag reported zero
+  setters while a sender was live one asset away - the one tool whose job is
+  showing a connection that has no wire, blind to the case that makes nested
+  group tags worth using. Matching now follows delivery: a setter is listed if it
+  publishes on the examined tag or any tag beneath it, a getter if it subscribes
+  on that tag or any tag above it, and an endpoint reached through the hierarchy
+  names the tag it actually carries so it stays distinguishable from one sitting
+  on the tag you pinned.
+
+- **Catch-up replayed a previous run over the current one.** A late observer is
+  told a quest's state as a short replay of lifecycle events. That replay was
+  built from every fact on the tag, including the append-only ones an earlier
+  run left behind, so a quest offered again at a giver after an earlier run
+  replayed that run's STARTED - reading as live while it was still waiting - and
+  a repeatable quest running again replayed its earlier COMPLETED, reading as
+  finished while it ran. Replay now describes the current run only; the earlier
+  completion is still on the record and on the phase, where a consumer that
+  wants history can ask.
+
+- **A broad observer arriving late reconstructed a placed node more than once.**
+  Live delivery has long been deduplicated - one event, however many channels
+  it answers to - but catch-up enumerated every spelling a node was known by and
+  replayed each: a node inside a placed questline under both its placement tag
+  and its inner asset's spelling, and, once a placement began carrying its inner
+  questline's state, the questline under its own name as well. The visible case
+  was a loaded save with a quest in progress listing it twice in the sidebar.
+  Catch-up now walks nodes, not spellings.
+
+  - **The relations are known before anything starts.** The registry learned
+  which spellings belonged to which nodes only as each questline registered, so
+  a save restored before its questlines came up - which is every restore - and a
+  child listing asked before a questline started both saw spellings as separate
+  nodes. Those relations are now read at startup from the questline assets
+  themselves, and only from root assets: a questline that another one places
+  never runs on its own, so its own compile's view is not the one that applies.
+  **Compile All** once after updating so every asset carries them.
+
+### QuickStart
+
+- **The tutorial is eleven chapters and teaches rewards.** A Rewards chapter
+  sits second, right after the first trigger, and the chapters that followed it
+  shift down one. Chapter 1 is back to a single trigger and a single ending -
+  it had accumulated activation groups, a second exit and two reward types from
+  being used as a test bed, which is a poor first thing to read.
+
+- **There is an experience bar and a gold readout.** Gold pays on every chapter
+  completion and varies; experience pays once per chapter, so finishing all
+  eleven fills the bar exactly and the level-up is the total crossing its
+  threshold rather than a reward of its own. Grant Once is what makes that safe -
+  replaying a chapter cannot grind the bar.
+
+- **Saving and loading moved onto a Game Instance subsystem.** The sample used
+  to route it through a custom Game Instance that reached into the character to
+  read and write its fields. Anything with state to persist now implements a
+  small interface and registers itself; the subsystem drives the flow and never
+  learns what a pawn is. It is worth a read if you are wiring your own save,
+  because it also shows where the quest snapshot has to sit relative to opening
+  the level - the snapshot is applied *before* the level opens, so the world
+  reconstructs itself on the reload.
+
+  - A target registering while a restore is staged is handed its data on the
+  spot, so a character calls in from BeginPlay without knowing whether it
+  spawned into a fresh game or a restored one - the same catch-up behavior quest
+  components already have.
+
+- **The chapters teach, rather than only demonstrate.** All eleven carry
+  narrative beats for the player and graph comments written for the author, so
+  a chapter explains the concept it exhibits instead of leaving the graph to
+  speak for itself.
+
+- **Chapter 8 teaches linked questlines by placing one twice.** A patrol route is
+  authored once and placed at both ends of the room, dispatched together by a
+  single step so that both run at the same time. Clear one end, walk to the
+  other, and its beacons are still lit and waiting - same route, separate
+  progress, which is the thing a single placement cannot show. The chapter also
+  covers what a placement does to the tags underneath it: the same authored step
+  lands on a different tag in each placement, and the outcomes in the inner graph
+  are the pins you wire from on the outer one.
+
+- **Chapter 9 teaches activation groups with a bridge and a way under it.** The
+  long way is four steps up and over. A second questline, started alongside the
+  chapter and knowing nothing about it, has a route underneath - and finishing it
+  publishes on a group tag that an Exit node in the chapter is listening to,
+  which opens the far side of the bridge while the player is still in the
+  tunnel. A new entry point into a graph that has already started, with no wire
+  between the two. The chapter is also where the difference between a group and
+  a prerequisite gets its clearest statement: a gate is polled when the player
+  arrives at it; a group is told the moment the sender fires.
+
+- **Chapter 10 teaches prerequisite rules with the oldest trope there is: turn on
+  the power.** Two quests run side by side, each after a keycard. The terminal
+  that opens the first keycard's door refuses - no power - and the refusal names
+  what is missing. The switch is in the other quest. Throwing it writes one named
+  condition, and everything that needs it reads it by that name: the lights, the
+  locker, and a terminal across the facility, none of which know a switch exists.
+  A condition authored once, true or false everywhere at the same instant - and
+  from the reader's side, indistinguishable from a fact.
+
+- **Chapter 11 teaches observers with a screen that shows what one hears.** An
+  archive console in the last room carries a Quest Observer Component and a log
+  of every event it receives: the event on the left, the node on the right, a
+  time on every row it witnessed. A dial locks the screen onto any chapter, and
+  locking onto one that finished an hour ago fills the page at once with rows
+  marked *catch-up* - the framework hands a late subscriber the current state,
+  not a replay of the past. The room then runs the vocabulary in order: an
+  archivist who refuses a request until a barrier is cleared, so the screen
+  shows ACTIVATED, then GIVE BLOCKED in amber, then GIVE ENABLED, then STARTED;
+  and a return to the chapter's own page at the end, where the amber rows are
+  gone - transient events leave no state behind, so there is nothing to catch
+  up. Every node's current state is bright and what it moved past is grey,
+  which is the phase query drawn as a log. It is also the reveal: the door
+  panel, the sconce, the buttons and the sidebar were observers all along.
+
+- **`OBJ_InteractWithTarget` is an annotated reference for writing an
+  Objective.** It walks the basic flow - receive a trigger event, notify the
+  trigger it was counted, complete on an outcome - and carries the surrounding
+  surface an author needs but would otherwise have to find: the events that
+  refuse or report progress, what the Authored Config and Runtime Context each
+  carry, and how to declare an outcome dynamically at runtime. The unwired nodes
+  are deliberate; they are the palette, kept beside the flow that uses them.
+
+---
+
 ## [0.8.0] — 2026-08-27 — Composition and Control
 
 Three things that were out of reach before: pausing quest advancement while

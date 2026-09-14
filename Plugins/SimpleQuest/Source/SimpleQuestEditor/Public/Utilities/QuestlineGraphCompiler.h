@@ -7,8 +7,7 @@
 #include "Logging/TokenizedMessage.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 
-class UQuestRewardBase;
-class URewardSetDataAsset;
+
 enum class EResettableReplay : uint8;
 
 struct FQuestGraphResolution;
@@ -20,6 +19,8 @@ class UQuestlineGraph;
 class UQuestlineNode_ContentBase;
 class UQuestlineNode_UtilityBase;
 class UQuestNodeBase;
+class UQuestRewardBase;
+class URewardSetDataAsset;
 class UQuest;
 class UEdGraphPin;
 class FQuestlineGraphTraversalPolicy;
@@ -50,7 +51,8 @@ public:
 	 * shared, and a name colliding with an inline reward's is a hard crash whenever their classes differ.
 	 * ContextLabel names the owner in a diagnostic; DiagnosticNode is optional and makes the log entry clickable.
 	 */
-	void FlattenRewardSets(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+	void FlattenRewardSets(
+		const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
 		UObject* Outer,
 		const FString& NamePrefix,
 		const FString& ContextLabel,
@@ -118,6 +120,11 @@ protected:
 	 * @param OutVisitedExitsByPath			Outcome deduplication detection stack.
 	 * @param OutResolvedGraphs				Accumulator for graph resolutions as the walk encounters Outcome nodes. Gathers every declared
 	 *										outcome tag from a graph paired with that asset's root ID tag.
+	 * @param OutDeactivateTags				Accumulates destinations reached on a Deactivate input rather than an Activate one - an outcome
+	 *										pin wired to a Deactivate pin, meaning "when this resolves, stop that node." Kept separate from
+	 *										OutTags because the two compile into different routing sets: NextNodesByPath activates, and
+	 *										NextNodesToDeactivateByPath stops. Null when the caller routes no deactivations, in which case
+	 *										those destinations are skipped exactly as they were before the split existed.
 	 */
 	virtual void ResolvePinToTags(
 		UEdGraphPin* FromPin,
@@ -127,7 +134,8 @@ protected:
 		TArray<FName>& OutTags,
 		TArray<FQuestBoundaryCompletion>& OutBoundaryCompletions,
 		TMap<FName, TArray<TWeakObjectPtr<const UEdGraphNode>>>* OutVisitedExitsByPath = nullptr,
-		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr);
+		TArray<FQuestGraphResolution>* OutResolvedGraphs = nullptr,
+		TArray<FName>* OutDeactivateTags = nullptr);
 	
 	/**
 	 * Sanitizes a designer-entered node label into a valid Gameplay Tag segment. Replaces spaces and invalid characters with
@@ -161,13 +169,14 @@ private:
 	 * should be granted twice, while a set reachable from itself never terminates. A visited set would conflate the
 	 * two and silently drop the second legitimate inclusion.
 	 */
-	void FlattenRewardSetsInternal(const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
-	                               UObject* Outer,
-	                               const FString& NamePrefix,
-	                               const FString& ContextLabel,
-	                               const UEdGraphNode* DiagnosticNode,
-	                               TArray<const URewardSetDataAsset*>& OnPath,
-	                               TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
+	void FlattenRewardSetsInternal(
+		const TArray<TSoftObjectPtr<URewardSetDataAsset>>& Sets,
+		UObject* Outer,
+		const FString& NamePrefix,
+		const FString& ContextLabel,
+		const UEdGraphNode* DiagnosticNode,
+		TArray<const URewardSetDataAsset*>& OnPath,
+		TArray<TObjectPtr<UQuestRewardBase>>& Out, const UObject* DiagnosticAsset = nullptr);
 
 	/**
 	 * Step / inner-container compiled tag → its IMMEDIATE containing UQuest's compiled tag. Populated during
@@ -218,6 +227,17 @@ private:
 	 * next content node (whose rewards belong to it). Steps AND containers advertise.
 	 */
 	static void BuildRewardManifest(UQuestlineGraph* InGraph);
+
+	/**
+	 * Refuses a node that reaches the same questline end node from BOTH a named outcome pin and its Any Outcome pin.
+	 * Any Outcome fires on every completion, so the pair overlaps and the questline resolves TWICE for one completion.
+	 *
+	 * The graph schema already refuses to DRAW this, but the schema is editor-only and the resolver's apply path links
+	 * pins raw (QuestInPlaceApply's AddedEdges loop calls MakeLinkTo without consulting CanCreateConnection), so an
+	 * imported bundle can author what the editor forbids. Compiled data is what the runtime consumes, which makes this
+	 * the one checkpoint every authoring route has to pass.
+	 */
+	void RefuseOverlappingExitAttribution(UQuestlineGraph* InGraph);
 
 	/**
 	 * Parallel-path warning data structures. Populated during the compile pass, analyzed at the end of Compile(). All keyed
@@ -331,6 +351,18 @@ private:
 	void ResolveDeactivatedPinToTags(
 		UEdGraphPin* FromPin,
 		const FString& TagPrefix,
+		TArray<FString>& VisitedAssetPaths,
+		TArray<FName>& OutActivateTags,
+		TArray<FName>& OutDeactivateTags);
+
+	/**
+	 * Resolves an inner graph's Entry-node Deactivated pin into the two routing sets a boundary instance carries.
+	 * Shared by the inline-Quest and LinkedQuestline paths - both wrap an inner graph whose Entry node describes what
+	 * happens when that boundary deactivates.
+	 */
+	void MergeEntryDeactivatedRouting(
+		const UEdGraph* InnerGraph,
+		const FString& InnerPrefix,
 		TArray<FString>& VisitedAssetPaths,
 		TArray<FName>& OutActivateTags,
 		TArray<FName>& OutDeactivateTags);

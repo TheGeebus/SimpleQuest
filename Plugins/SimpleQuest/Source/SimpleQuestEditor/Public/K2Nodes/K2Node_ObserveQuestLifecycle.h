@@ -10,10 +10,10 @@
 /**
  * Dedicated K2 node for the UQuestLifecycleObserver async action. Inherits all pin generation + expansion +
  * latent-node visual framing from UK2Node_AsyncAction. Two responsibilities on top of the base:
- *   1. Swap the title-bar icon for the Questline icon — same visual signifier UK2Node_CompleteObjectiveWithOutcome
- *      uses — so every SimpleQuest K2 node reads as part of the same system at a glance.
+ *   1. Swap the title-bar icon for the Questline icon - same visual signifier UK2Node_CompleteObjectiveWithOutcome
+ *      uses - so every SimpleQuest K2 node reads as part of the same system at a glance.
  *   2. Per-instance pin exposure: designers toggle individual lifecycle event pins on/off via the Details panel.
- *      The corresponding event's subscription is gated on the proxy side by an exposure bitmask — unexposed
+ *      The corresponding event's subscription is gated on the proxy side by an exposure bitmask - unexposed
  *      events incur zero subscription cost.
  */
 UCLASS()
@@ -38,13 +38,21 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Give Blocked"))
 	bool bExposeOnGiveBlocked = false;
 
-	/** The subscribed quest entered the Live state — its objectives are bound. */
+	/** An activation attempt against this quest was refused. Carries the blocker Reason and the attempted tag name. */
+	UPROPERTY(EditAnywhere, Category = "Pins|Offer Phase", meta = (DisplayName = "On Activation Failed"))
+	bool bExposeOnActivationFailed = false;
+
+	/** The subscribed quest entered the Live state - its objectives are bound. */
 	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Started"))
 	bool bExposeOnStarted = true;
 
 	/** Objective progress tick during the Live phase. Context.CompletionContext carries CurrentCount / RequiredCount. */
 	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Progress"))
 	bool bExposeOnProgress = false;
+
+	/** A trigger fired at a Live quest whose gate isn't open. Run-phase partner to On Give Blocked; shares Blockers. */
+	UPROPERTY(EditAnywhere, Category = "Pins|Run Phase", meta = (DisplayName = "On Progress Refused"))
+	bool bExposeOnProgressRefused = false;
 
 	/** The subscribed quest resolved with an outcome. */
 	UPROPERTY(EditAnywhere, Category = "Pins|End Phase", meta = (DisplayName = "On Completed"))
@@ -59,7 +67,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Pins|End Phase", meta = (DisplayName = "On Blocked"))
 	bool bExposeOnBlocked = false;
 
-	/** Symmetric partner to On Blocked — Blocked-state fact transitioned present → absent. */
+	/** Symmetric partner to On Blocked - Blocked-state fact transitioned present → absent. */
 	UPROPERTY(EditAnywhere, Category = "Pins|End Phase", meta = (DisplayName = "On Unblocked"))
 	bool bExposeOnUnblocked = false;
 	

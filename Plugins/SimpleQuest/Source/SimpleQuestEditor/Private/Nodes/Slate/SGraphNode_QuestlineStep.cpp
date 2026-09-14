@@ -32,6 +32,7 @@
 #define STEP_CLASS_COLOR		FLinearColor(0.2f, 0.325f, 0.85f)
 #define STEP_ELEMENT_COLOR		FLinearColor(0.25f, 0.8f, 0.20f)
 #define STEP_GIVER_COLOR		FLinearColor(0.75f, 0.4f, 1.f)
+#define STEP_CONFIG_COLOR		FLinearColor(0.35f, 0.8f, 0.8f)
 
 #define LOCTEXT_NAMESPACE "SGraphNode_QuestlineStep"
 
@@ -59,7 +60,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 		}
 		else
 		{
-			// Query using the old compiled tag — still valid in the dictionary and still referenced by actors until next compile propagates renames
+			// Query using the old compiled tag - still valid in the dictionary and still referenced by actors until next compile propagates renames
 			const FGameplayTag CompiledTag = FSimpleQuestEditorUtilities::FindCompiledTagForNode(StepNode);
 			if (CompiledTag.IsValid())
 			{
@@ -217,7 +218,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			CreateNodeContentArea()
 		]
 		
-		// Stale tag warning bar (visible after rename, before recompile) — shared helper, flag on the node.
+		// Stale tag warning bar (visible after rename, before recompile) - shared helper, flag on the node.
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.Padding(FMargin(4.f, 2.f, 4.f, 0.f))
@@ -284,7 +285,7 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 			+ SVerticalBox::Slot()
 			.AutoHeight()
 			[
-				// Red border wrapper — draws a tinted body brush behind the node. When ObjectiveClass is null, the outer
+				// Red border wrapper - draws a tinted body brush behind the node. When ObjectiveClass is null, the outer
 				// brush is bright red, creating a visible outline through the 2px padding gap. When set, the outer brush matches
 				// the body color and the border is invisible.
 				SNew(SOverlay)
@@ -378,11 +379,14 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 	int32 ClassCount = 0;
 	for (const TSoftClassPtr<AActor>& SoftClass : StepNode->TargetClasses)
 	{
-		// IsNull checks the path without loading — count authored entries, ignore the ones designer cleared
+		// IsNull checks the path without loading - count authored entries, ignore the ones designer cleared
 		if (!SoftClass.IsNull()) ClassCount++;
 	}
 
 	const int32 ElementCount = StepNode->NumberOfElements;
+
+	// GetAssetName reads the path without loading the asset - the name is the summary, the asset stays on disk.
+	const FString ConfigName = StepNode->ConfigAsset.IsNull() ? FString() : StepNode->ConfigAsset.GetAssetName();
 
 	if (ActorCount == 0 && GiverCount == 0 && ClassCount == 0 && ElementCount <= 0)
 	{
@@ -427,7 +431,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 			.AutoWidth()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("Targets: %d"), ActorCount)))
+				.Text(FText::FromString(FString::Printf(TEXT("Triggers: %d"), ActorCount)))
 				.ColorAndOpacity(FSlateColor(STEP_ACTOR_COLOR))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 			];
@@ -460,7 +464,6 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateTargetSummaryWidget()
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 			];
 	}
-
 	return SummaryBox;
 }
 
@@ -477,7 +480,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		{
 			if (!SoftClass.IsNull())
 			{
-				// GetAssetName returns the short class name without loading the class asset — ideal for node-header display
+				// GetAssetName returns the short class name without loading the class asset - ideal for node-header display
 				FString Name = SoftClass.GetAssetName();
 				Name.RemoveFromEnd(TEXT("_C"));
 				ClassNames.Add(Name);
@@ -508,7 +511,7 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 		.Padding(0.f, 2.f)
 		[
 			FQuestNodeSlateHelpers::BuildLabeledExpandableList(
-				LOCTEXT("TargetActorsLabel", "Targets"),
+				LOCTEXT("TargetActorsLabel", "Triggers"),
 				ActorNames,
 				STEP_ACTOR_COLOR,
 				[this]() { return StepNode && StepNode->bTargetActorsExpanded; },
@@ -548,6 +551,25 @@ TSharedRef<SWidget> SGraphNode_QuestlineStep::CreateExpandedContentWidget()
 				}
 			})
 			.ColorAndOpacity(FSlateColor(STEP_INFO_TEXT_COLOR))
+			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+		]
+
+		// Config asset - the typed data this Step hands its objective. Collapsed when none is set.
+		+ SVerticalBox::Slot()
+		.AutoHeight()
+		.Padding(FMargin(14.f, 2.f, 0.f, 2.f))
+		[
+			SNew(STextBlock)
+			.Text_Lambda([this]()
+			{
+				if (!StepNode || StepNode->ConfigAsset.IsNull()) return FText::GetEmpty();
+				return FText::Format(LOCTEXT("ConfigAssetLine", "Config Asset: {0}"), FText::FromString(StepNode->ConfigAsset.GetAssetName()));
+			})
+			.Visibility_Lambda([this]()
+			{
+				return (StepNode && !StepNode->ConfigAsset.IsNull()) ? EVisibility::Visible : EVisibility::Collapsed;
+			})
+			.ColorAndOpacity(FSlateColor(STEP_CONFIG_COLOR))
 			.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 		];
 }
@@ -657,19 +679,26 @@ void SGraphNode_QuestlineStep::OnObjectiveClassChanged(const UClass* NewClass)
 {
 	if (!StepNode) return;
 
-	const FScopedTransaction Transaction(LOCTEXT("ChangeObjective", "Change Objective Class"));
-	StepNode->Modify();
-	StepNode->ObjectiveClass = const_cast<UClass*>(NewClass);
+	TWeakObjectPtr<UQuestlineNode_Step> WeakStep = StepNode;
+	TWeakObjectPtr<const UClass> WeakClass = NewClass;
 
-	// Outcome pins may change — refresh them
-	StepNode->RefreshOutcomePins();
+	FQuestNodeSlateHelpers::CommitNodeEditDeferred(StepNode,
+		LOCTEXT("ChangeObjective", "Change Objective Class"),
+		[WeakStep, WeakClass]()
+		{
+			UQuestlineNode_Step* Step = WeakStep.Get();
+			if (!Step) return;
 
-	// Always notify even if pins didn't change — our visual state did
-	// (red border, target summary, details panel sync)
-	if (UEdGraph* Graph = StepNode->GetGraph())
-	{
-		Graph->NotifyGraphChanged();
-	}
+			Step->ObjectiveClass = const_cast<UClass*>(WeakClass.Get());
+			Step->RefreshOutcomePins();
+
+			// Structural, same as LinkedQuestline: outcome pins may have changed, and the node's visual state
+			// (red border, target summary, details sync) depends on the rebuild.
+			if (UEdGraph* Graph = Step->GetGraph())
+			{
+				Graph->NotifyGraphChanged();
+			}
+		});
 }
 
 void SGraphNode_QuestlineStep::OnUseSelectedObjectiveClass()
@@ -709,7 +738,7 @@ void SGraphNode_QuestlineStep::OnBrowseToObjectiveClass()
 {
 	if (!StepNode || StepNode->ObjectiveClass.IsNull() || !GEditor) return;
 
-	// LoadSynchronous on the soft ref — the designer just asked to browse to the asset, so loading now is expected.
+	// LoadSynchronous on the soft ref - the designer just asked to browse to the asset, so loading now is expected.
 	UClass* Loaded = StepNode->ObjectiveClass.LoadSynchronous();
 	if (!Loaded) return;
 

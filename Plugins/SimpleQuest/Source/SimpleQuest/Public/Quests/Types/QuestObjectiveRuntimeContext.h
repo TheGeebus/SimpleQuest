@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestObjectiveActivationContext.h"
+#include "QuestObjectiveActivationParams.h"
 #include "QuestActivationProvenance.h"
 #include "QuestObjectiveRuntimeContext.generated.h"
 
@@ -16,15 +16,15 @@ struct SIMPLEQUEST_API FQuestObjectiveRuntimeContext
 {
 	GENERATED_BODY()
 
-	/** The caller's raw activation input, verbatim — Instigator, CustomData, lineage, target sets, authored overrides. */
+	/** The caller's raw activation input, verbatim - Instigator, CustomData, lineage, target sets, authored overrides. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
-	FQuestObjectiveActivationContext IncomingContext;
+	FQuestObjectiveActivationParams IncomingParams;
 
-	/** How this activation was initiated. Framework-stamped. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+	/** How this activation was initiated. Framework-stamped - read it, never set it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame)
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
-	/** The outcome route that drove this activation, if any. Framework-stamped. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+	/** The outcome route that drove this activation, if any. Framework-stamped - read it, never set it. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame)
 	FGameplayTag IncomingOutcomeTag;
 };

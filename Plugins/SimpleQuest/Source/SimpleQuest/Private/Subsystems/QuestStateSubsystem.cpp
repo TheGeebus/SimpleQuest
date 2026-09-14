@@ -65,6 +65,48 @@ namespace
 	}
 }
 
+void UQuestStateSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+	WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddUObject(this, &UQuestStateSubsystem::HandleWorldCleanup);
+}
+
+void UQuestStateSubsystem::Deinitialize()
+{
+	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+	WorldCleanupHandle.Reset();
+	Super::Deinitialize();
+}
+
+double UQuestStateSubsystem::GetQuestTime() const
+{
+	const UWorld* World = GetWorld();
+	if (!World) return AccumulatedPlaySeconds;
+
+	// A world the clock has not rebased in started its TimeSeconds at zero, so its base is zero; the previous world's
+	// contribution was folded at that world's cleanup.
+	const double Base = (World == ClockWorld.Get()) ? CurrentWorldBaseSeconds : 0.0;
+	return AccumulatedPlaySeconds + (World->GetTimeSeconds() - Base);
+}
+
+void UQuestStateSubsystem::HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)
+{
+	// Only this instance's current world contributes; other game instances' worlds (a second PIE client) and editor
+	// worlds pass through here too.
+	if (!World || World != GetWorld()) return;
+
+	const double Base = (World == ClockWorld.Get()) ? CurrentWorldBaseSeconds : 0.0;
+	const double Folded = World->GetTimeSeconds() - Base;
+	AccumulatedPlaySeconds += Folded;
+	ClockWorld = nullptr;
+	CurrentWorldBaseSeconds = 0.0;
+
+	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::HandleWorldCleanup : folded %.2fs of play from '%s' (quest time now %.2fs)"),
+		Folded,
+		*World->GetName(),
+		AccumulatedPlaySeconds);
+}
+
 const FQuestResolutionRecord* UQuestStateSubsystem::GetQuestResolution(FGameplayTag QuestTag) const
 {
 	return QuestResolutions.Find(QuestTag);
@@ -159,7 +201,8 @@ void UQuestStateSubsystem::RecordActivationRefusal(FGameplayTag QuestTag, EQuest
 	});
 
 	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::RecordActivationRefusal : '%s' reason=%d at t=%.2fs"),
-		*QuestTag.ToString(), (int32)Reason, RefusalTime);
+		*QuestTag.ToString(),
+		(int32)Reason, RefusalTime);
 	OnAnyRegistryChanged.Broadcast();
 }
 
@@ -244,6 +287,19 @@ FQuestEntryArrival UQuestStateSubsystem::GetLatestEntry(FGameplayTag QuestTag) c
 		}
 	}
 	return FQuestEntryArrival();
+}
+
+FQuestPhaseSnapshot UQuestStateSubsystem::GetQuestPhase(FGameplayTag QuestTag) const
+{
+	if (!IsKnownQuestTag(QuestTag))
+	{
+		// Loud on purpose, like GetDisplayName: an unknown tag is a typo or an unregistered asset, and NotReached would
+		// otherwise pass for a true answer. A known tag with no facts yet returns NotReached silently.
+		UE_LOG(LogSimpleQuestState, Warning, TEXT("UQuestStateSubsystem::GetQuestPhase : '%s' is not a known quest tag - returning NotReached"),
+			*QuestTag.ToString());
+		return FQuestPhaseSnapshot();
+	}
+	return FQuestLifecycleQuery::GetPhase(ResolveWorldState(), this, QuestTag);
 }
 
 TArray<FQuestActivationBlocker> UQuestStateSubsystem::QueryQuestActivationBlockers(FGameplayTag QuestTag) const
@@ -427,7 +483,7 @@ void UQuestStateSubsystem::RecordEntry(
 	FGameplayTag IncomingOutcomeTag,
 	double EntryTime,
 	EQuestActivationProvenance Provenance,
-	const FQuestObjectiveActivationContext& ActivationParamsSnapshot,
+	const FQuestObjectiveActivationParams& ActivationParamsSnapshot,
 	FName PathIdentity,
 	const FOriginatingEventID& OriginatingEventID)
 {
@@ -442,7 +498,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.IncomingOutcomeTag = IncomingOutcomeTag;
 		Entry.EntryTime = EntryTime;
 		Entry.Provenance = Provenance;
-		Entry.ActivationContextSnapshot = ActivationParamsSnapshot;
+		Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
 		Entry.InstigatorRef = ActivationParamsSnapshot.Instigator.Get();   // save-stable soft form of the live giver/instigator
 		Entry.PathIdentity = PathIdentity;
 
@@ -496,10 +552,19 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 	{
 		// MatchesTag returns true when the iterated key is Prefix or a descendant of Prefix - the live signal
 		// bus's hierarchical-walk semantic, applied to the registered-tag set rather than the publish stream.
-		if (Pair.Key.MatchesTag(Prefix))
-		{
-			Out.AddUnique(Pair.Key);
-		}
+		if (!Pair.Key.MatchesTag(Prefix)) continue;
+
+		// One entry per NODE. An alias key is another spelling of a canonical that the loop below resolves for us; listing it
+		// here as well hands a broad subscriber two reconstructions of one node - the catch-up twin of a double publish. A key
+		// that is an alias AND a node in its own right (an asset both placed and started standalone) keeps its place through
+		// bHasNodeInstance.
+		// Same rule for a placement's inner asset identity: it carries the wrapper's mirrored facts, but it is the wrapper
+		// seen from the asset's side, not a second node. The loop below resolves it to the wrapper(s) it speaks for. An
+		// identity that is ALSO a standalone run of the same asset keeps its place through bHasNodeInstance.
+		const bool bIsPerspectiveKey = ContextualTagsByAssetScopedTag.Contains(Pair.Key) || PlacementsByIdentity.Contains(Pair.Key);
+		if (bIsPerspectiveKey && !Pair.Value.bHasNodeInstance) continue;
+
+		Out.AddUnique(Pair.Key);
 	}
 
 	// AssetScopedAliasTags - the inner-asset perspective. Cross-asset subscribers binding to an alias-shape
@@ -519,6 +584,51 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetQuestTagsUnderPrefix(FGameplayTag 
 		}
 	}
 
+	// Placement identities - a subscription bound at an inner asset's own tag reaches the wrapper(s) placing that asset,
+	// exactly as the live publish reaches it through the identity channel.
+	for (const TPair<FGameplayTag, TArray<FGameplayTag>>& Pair : PlacementsByIdentity)
+	{
+		if (Pair.Key.MatchesTag(Prefix))
+		{
+			for (const FGameplayTag& Wrapper : Pair.Value)
+			{
+				Out.AddUnique(Wrapper);
+			}
+		}
+	}
+
+	return Out;
+}
+
+TArray<FGameplayTag> UQuestStateSubsystem::GetChildQuestTags(FGameplayTag ParentTag) const
+{
+	TArray<FGameplayTag> Out;
+	if (!ParentTag.IsValid()) return Out;
+
+	for (const FGameplayTag& Canonical : GetQuestTagsUnderPrefix(ParentTag))
+	{
+		if (Canonical == ParentTag) continue;
+
+		// A direct child sits exactly one level below the parent. Test the canonical spelling first, then each alias
+		// perspective, so a parent given in the inner asset's own spelling finds the placements' children too.
+		bool bDirectChild = (Canonical.RequestDirectParent() == ParentTag);
+		if (!bDirectChild)
+		{
+			for (const FGameplayTag& Alias : GetAssetScopedAliasTagsForCanonical(Canonical))
+			{
+				if (Alias.RequestDirectParent() == ParentTag) { bDirectChild = true; break; }
+			}
+		}
+		if (bDirectChild) Out.AddUnique(Canonical);
+	}
+
+	// Lexical order by full tag: stable and explicable, which is all the framework can promise until the compiler stamps an
+	// authored order. Consumers that need play order or graph order should not read one into this.
+	Out.Sort([](const FGameplayTag& A, const FGameplayTag& B) { return A.ToString() < B.ToString(); });
+
+	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::GetChildQuestTags : '%s' -> %d direct child(ren)"),
+		*ParentTag.ToString(),
+		Out.Num());
 	return Out;
 }
 
@@ -564,16 +674,16 @@ EQuestActivationProvenance UQuestStateSubsystem::GetLastActivationProvenance(FGa
 	return EQuestActivationProvenance::Unknown;
 }
 
-FQuestObjectiveActivationContext UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
+FQuestObjectiveActivationParams UQuestStateSubsystem::GetLastActivationParamsSnapshot(FGameplayTag QuestTag) const
 {
 	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())
 		{
-			return Latest->ActivationContextSnapshot;
+			return Latest->ActivationParamsSnapshot;
 		}
 	}
-	return FQuestObjectiveActivationContext();
+	return FQuestObjectiveActivationParams();
 }
 
 FName UQuestStateSubsystem::GetLastPathIdentity(FGameplayTag QuestTag) const
@@ -588,28 +698,31 @@ FName UQuestStateSubsystem::GetLastPathIdentity(FGameplayTag QuestTag) const
 	return NAME_None;
 }
 
-void UQuestStateSubsystem::RegisterQuestTag(FGameplayTag QuestTag)
+void UQuestStateSubsystem::RegisterQuestTag(FGameplayTag QuestTag, bool bNodeInstance)
 {
 	if (!QuestTag.IsValid()) return;
 
-	// Idempotent on repeat calls. The inline-collision dedup case in RegisterQuestlineGraph (where a standalone
-	// copy of an inlined graph would otherwise overwrite the parent-bound instance) skips re-registration via
-	// LoadedNodeInstances.Contains, but defensive idempotency here keeps the registry correct if any future
-	// caller pushes the same tag twice. Earliest RegisteredTime wins.
-	if (KnownQuests.Contains(QuestTag)) return;
-
-	FQuestRuntimeRecord& Record = KnownQuests.Add(QuestTag);
-	if (const UGameInstance* GI = GetGameInstance())
+	// Idempotent on repeat calls: earliest RegisteredTime wins, and a later call can only PROMOTE the record to a node
+	// instance, never demote it. Promotion is the normal path for a canonical - the compiled display preload registers every
+	// spelling ahead of any graph, so the record already exists by the time the node itself registers.
+	const bool bIsNew = !KnownQuests.Contains(QuestTag);
+	FQuestRuntimeRecord& Record = KnownQuests.FindOrAdd(QuestTag);
+	if (bIsNew)
 	{
-		if (const UWorld* World = GI->GetWorld())
-		{
-			Record.RegisteredTime = World->GetTimeSeconds();
-		}
+		Record.RegisteredTime = GetQuestTime();
 	}
+	const bool bPromoted = bNodeInstance && !Record.bHasNodeInstance;
+	Record.bHasNodeInstance |= bNodeInstance;
+
+	if (!bIsNew && !bPromoted) return;   // nothing changed - keeps the registry-changed multicast honest
 
 	UE_LOG(LogSimpleQuestState, Verbose,
-		TEXT("UQuestStateSubsystem::RegisterQuestTag : '%s' registered (KnownQuests count=%d, RegisteredTime=%.2fs)"),
-		*QuestTag.ToString(), KnownQuests.Num(), Record.RegisteredTime);
+		TEXT("UQuestStateSubsystem::RegisterQuestTag : '%s' %s (node instance=%d, KnownQuests count=%d, RegisteredTime=%.2fs)"),
+		*QuestTag.ToString(),
+		bIsNew ? TEXT("registered") : TEXT("promoted"),
+		Record.bHasNodeInstance ? 1 : 0,
+		KnownQuests.Num(),
+		Record.RegisteredTime);
 
 	OnAnyRegistryChanged.Broadcast();
 }
@@ -734,43 +847,65 @@ TArray<FGameplayTag> UQuestStateSubsystem::GetAssetScopedAliasTagsForCanonical(F
 	return {};
 }
 
-FText UQuestStateSubsystem::GetDisplayName(FGameplayTag Tag) const
+FGameplayTag UQuestStateSubsystem::GetPlacementIdentityForCanonical(FGameplayTag ContextualTag) const
 {
-	if (!Tag.IsValid()) return FText::GetEmpty();
-	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
-	{
-		return Record->DisplayName;
-	}
-	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayName : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning empty."),
-		*Tag.ToString());
-	return FText::GetEmpty();
+	const FGameplayTag* Found = IdentityByPlacement.Find(ContextualTag);
+	return Found ? *Found : FGameplayTag();
 }
 
-FText UQuestStateSubsystem::GetDisplayDescription(FGameplayTag Tag) const
+void UQuestStateSubsystem::RegisterPlacementIdentity(FGameplayTag InnerIdentityTag, FGameplayTag ContextualTag)
 {
-	if (!Tag.IsValid()) return FText::GetEmpty();
-	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
-	{
-		return Record->Description;
-	}
-	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayDescription : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning empty."),
-		*Tag.ToString());
-	return FText::GetEmpty();
+	if (!InnerIdentityTag.IsValid() || !ContextualTag.IsValid() || InnerIdentityTag == ContextualTag) return;
+
+	PlacementsByIdentity.FindOrAdd(InnerIdentityTag).AddUnique(ContextualTag);
+	IdentityByPlacement.Add(ContextualTag, InnerIdentityTag);
+
+	UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::RegisterPlacementIdentity : '%s' spoken for by '%s' (%d placement(s))"),
+		*InnerIdentityTag.ToString(),
+		*ContextualTag.ToString(),
+		PlacementsByIdentity[InnerIdentityTag].Num());
 }
 
-UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
+const FQuestDisplayDataRecord* UQuestStateSubsystem::FindDisplayRecord(FGameplayTag Tag, const TCHAR* Caller) const
 {
 	if (!Tag.IsValid()) return nullptr;
 	if (const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag))
 	{
-		return Record->DisplayData;
+		return Record;
 	}
-	UE_LOG(LogSimpleQuestState, Warning,
-		TEXT("UQuestStateSubsystem::GetDisplayData : no display-data record for tag '%s' - tag may be unregistered or compile may have missed it. Returning null."),
-		*Tag.ToString());
+
+	if (IsKnownQuestTag(Tag))
+	{
+		// A node the compiler knows but wrote no record for: authored without a display payload. Not a fault, and at
+		// Warning it drowns the log on every root-level catch-up, which asks about every node there is.
+		UE_LOG(LogSimpleQuestState, Verbose, TEXT("UQuestStateSubsystem::%s : '%s' carries no display payload. Returning empty."),
+			Caller, *Tag.ToString());
+	}
+	else
+	{
+		UE_LOG(LogSimpleQuestState, Warning,
+			TEXT("UQuestStateSubsystem::%s : '%s' is not a known quest tag - unregistered, or the compile never ran. Returning empty."),
+			Caller, *Tag.ToString());
+	}
 	return nullptr;
+}
+
+FText UQuestStateSubsystem::GetDisplayName(FGameplayTag Tag) const
+{
+	const FQuestDisplayDataRecord* Record = FindDisplayRecord(Tag, TEXT("GetDisplayName"));
+	return Record ? Record->DisplayName : FText::GetEmpty();
+}
+
+FText UQuestStateSubsystem::GetDisplayDescription(FGameplayTag Tag) const
+{
+	const FQuestDisplayDataRecord* Record = FindDisplayRecord(Tag, TEXT("GetDisplayDescription"));
+	return Record ? Record->Description : FText::GetEmpty();
+}
+
+UQuestDisplayData* UQuestStateSubsystem::GetDisplayData(FGameplayTag Tag) const
+{
+	const FQuestDisplayDataRecord* Record = FindDisplayRecord(Tag, TEXT("GetDisplayData"));
+	return Record ? Record->DisplayData : nullptr;
 }
 
 FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
@@ -786,11 +921,12 @@ FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
 		}
 	}
 	Snapshot.Resolutions = QuestResolutions;
-	// Entries carry FQuestEntryArrival::ActivationContextSnapshot, which IS SaveGame-flagged and persists across the
+	// Entries carry FQuestEntryArrival::ActivationParamsSnapshot, which IS SaveGame-flagged and persists across the
 	// disk round-trip (only its Instigator weak-ptr is un-flagged; actor attribution rides InstigatorRef instead). The
-	// restore path relies on this - RestoreQuestlineGraph re-derives an objective's IncomingContext from the persisted
+	// restore path relies on this - RestoreQuestlineGraph re-derives an objective's IncomingParams from the persisted
 	// snapshot - so do not un-flag it or stop capturing it here.
 	Snapshot.Entries = QuestEntries;
+	Snapshot.PlayTime = GetQuestTime();
 	return Snapshot;
 }
 
@@ -800,7 +936,8 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 	{
 		// Session A is single-version; future versions migrate here. Best-effort restore for now.
 		UE_LOG(LogSimpleQuestState, Warning, TEXT("ApplySnapshot: snapshot version %d != current %d - restoring best-effort"),
-			Snapshot.Version, FSimpleQuestSaveSnapshot::CurrentVersion);
+			Snapshot.Version,
+			FSimpleQuestSaveSnapshot::CurrentVersion);
 	}
 
 	if (UGameInstance* GI = GetGameInstance())
@@ -815,9 +952,25 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 	QuestEntries = Snapshot.Entries;
 	RebuildRegistryIndices();
 
+	// Continue the clock from the saved value: from here on, the current world's TimeSeconds counts on top of it.
+	AccumulatedPlaySeconds = Snapshot.PlayTime;
+	if (const UWorld* World = GetWorld())
+	{
+		ClockWorld = World;
+		CurrentWorldBaseSeconds = World->GetTimeSeconds();
+	}
+	else
+	{
+		ClockWorld = nullptr;
+		CurrentWorldBaseSeconds = 0.0;
+	}
+
 	OnAnyRegistryChanged.Broadcast();           // the "registry mutated, refresh" signal
-	UE_LOG(LogSimpleQuestState, Log, TEXT("ApplySnapshot: restored %d fact(s), %d resolution key(s), %d entry key(s)"),
-		Snapshot.WorldFacts.Num(), Snapshot.Resolutions.Num(), Snapshot.Entries.Num());
+	UE_LOG(LogSimpleQuestState, Log, TEXT("ApplySnapshot: restored %d fact(s), %d resolution key(s), %d entry key(s); quest time continues from %.2fs"),
+		Snapshot.WorldFacts.Num(),
+		Snapshot.Resolutions.Num(),
+		Snapshot.Entries.Num(),
+		Snapshot.PlayTime);
 	return true;
 }
 
@@ -880,7 +1033,7 @@ void UQuestStateSubsystem::ClearDisplayDataRegistry()
 	DisplayDataByTag.Empty();
 }
 
-// ── Source registry — query ────────────────────────────────────────────────────────────────────────────────
+// ── Source registry - query ────────────────────────────────────────────────────────────────────────────────
 
 TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::GetActiveTriggersForTag(FGameplayTag QueryTag) const
 {
@@ -909,7 +1062,7 @@ UQuestObjective* UQuestStateSubsystem::GetActiveObjectiveForTag(FGameplayTag Que
 	return nullptr;
 }
 
-// ── Source registry — write ────────────────────────────────────────────────────────────────────────────────
+// ── Source registry - write ────────────────────────────────────────────────────────────────────────────────
 
 void UQuestStateSubsystem::RegisterTriggerSource(UActorComponent* Component, const FGameplayTagContainer& AuthoredTags)
 {
@@ -979,7 +1132,7 @@ void UQuestStateSubsystem::UnregisterActiveObjective(UQuestObjective* Objective)
 	}
 }
 
-// ── Source registry — shared helpers ──────────────────────────────────────────────────────────────────────
+// ── Source registry - shared helpers ──────────────────────────────────────────────────────────────────────
 
 TArray<FQuestRoleSourceInfo> UQuestStateSubsystem::QueryRoleSources(
 	FGameplayTag QueryTag,

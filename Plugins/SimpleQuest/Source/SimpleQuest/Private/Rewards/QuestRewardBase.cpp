@@ -4,7 +4,7 @@
 #include "Rewards/QuestRewardBase.h"
 
 #include "SimpleQuestLog.h"
-#include "Rewards/QuestRewardModifier.h"
+#include "Rewards/Modifiers/QuestRewardModifier.h"
 #include "UObject/ObjectSaveContext.h"
 
 void UQuestRewardBase::DispatchTryGrantReward(const FQuestRewardActivationContext& Incoming)
@@ -24,26 +24,40 @@ TArray<FQuestRewardPreview> UQuestRewardBase::DescribeReward_Implementation(AAct
 	return {};						// pure adapter - nothing to advertise; concrete rewards override this
 }
 
-TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer) const
+TArray<FQuestRewardPreview> UQuestRewardBase::DispatchDescribeReward(AActor* Viewer, FGameplayTag ResolvingQuestTag) const
 {
 	TArray<FQuestRewardPreview> Previews = DescribeReward(Viewer);		// routes to BP overrides
+
+	// BUILT ONCE, HERE, rather than inside a modifier that happens to need it. Nothing has activated, so Provenance stays
+	// Unknown and no outcome routed here - but the Viewer IS the actor this reward is about, and the resolving quest is the
+	// same one the grant path names. Synthesizing it at the top is what lets a modifier answer both paths from one shape:
+	// when this was a bare Viewer, a modifier could branch on the quest while granting and was blind to it while
+	// advertising, which is how a reward ends up promising something the grant will refuse.
+	FQuestRewardActivationContext AsIfActivating;
+	AsIfActivating.Instigator        = Viewer;
+	AsIfActivating.ResolvingQuestTag = ResolvingQuestTag;
 
 	// *** MODIFIERS RUN HERE, not at the call sites. *** Three places ask a reward what it advertises - the reward
 	// node, the manager's questline-level query, and the Blueprint library - and a pass added to each is a pass one of
 	// them eventually forgets, leaving that surface promising a number nobody will receive. The grant path is the
 	// asymmetric one on purpose: it lives in the node because lineage and publishing have to interleave with it.
-	// Backwards so a hidden preview can be removed without disturbing the indices still to come.
-	for (int32 Index = Previews.Num() - 1; Index >= 0; --Index)
+	// NOTHING IS REMOVED HERE. A modifier that would drop the grant marks the preview with a blocker instead, so every
+	// advertised reward survives to be rendered and the UI decides whether an unavailable one is greyed, filtered or
+	// explained. That is why this walks forward now - there are no indices to protect from removal.
+	for (FQuestRewardPreview& Preview : Previews)
 	{
-		if (!ApplyModifiersToPreview(Previews[Index], Viewer))
-		{
-			Previews.RemoveAt(Index);
-		}
+		ApplyModifiersToPreview(Preview, AsIfActivating);
+
+		// Stamped AFTER the modifiers, mirroring the grant path's rule that provenance is written last and a modifier
+		// cannot corrupt it.
+		Preview.SourceTag  = ResolvingQuestTag;
+		Preview.RewardGuid = RewardGuid;
 	}
 	return Previews;
 }
 
-bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, AActor* Viewer) const
+void UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview,
+                                               const FQuestRewardActivationContext& AsIfActivating) const
 {
 	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
 	{
@@ -61,14 +75,8 @@ bool UQuestRewardBase::ApplyModifiersToPreview(FQuestRewardPreview& Preview, AAc
 			continue;
 		}
 
-		if (!Modifier->DispatchModifyPreview(Preview, Viewer))
-		{
-			UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("%s on %s hid the preview."),
-				*Modifier->GetClass()->GetName(), *GetClass()->GetName());
-			return false;
-		}
+		Modifier->DispatchModifyPreview(Preview, AsIfActivating);
 	}
-	return true;
 }
 
 void UQuestRewardBase::PostLoad()
@@ -124,7 +132,7 @@ void UQuestRewardBase::DeliverReward(FGameplayTag InRewardType, const FInstanced
 bool UQuestRewardBase::ApplyModifiers(FQuestRewardContext& Grant, const FQuestRewardActivationContext& Incoming) const
 {
 	for (const TObjectPtr<UQuestRewardModifier>& Modifier : Modifiers)
-	{
+	{ 
 		if (!Modifier) continue;
 
 		// THE GATE IS HERE, ONCE, rather than inside each modifier: a modifier that silently did nothing to a payload

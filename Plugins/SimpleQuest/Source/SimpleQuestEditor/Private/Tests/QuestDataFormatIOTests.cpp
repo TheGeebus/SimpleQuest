@@ -184,8 +184,7 @@ bool FQuestFormatIO_PublicExportMatchesFolderExport::RunTest(const FString& Para
  * Safe to run against shipped content BECAUSE it refuses - nothing is created, so there is nothing to clean up. If this
  * test ever starts leaving an asset behind, that is itself the failure.
  */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestImport_CreateRefusesExistingAsset,
-	"SimpleQuest.Resolver.CreateRefusesExistingAsset", FormatIOTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestImport_CreateRefusesExistingAsset, "SimpleQuest.Resolver.CreateRefusesExistingAsset", FormatIOTestFlags)
 bool FQuestImport_CreateRefusesExistingAsset::RunTest(const FString& Parameters)
 {
 	// Aimed at shipped content that is known to exist on disk. If QuickStart is ever renamed this test fails loudly
@@ -240,8 +239,7 @@ bool FQuestImport_CreateRefusesExistingAsset::RunTest(const FString& Parameters)
  * IS the migration. This test is what keeps that true - the two behaviors it depends on live in different files and
  * neither one's author would see this consequence.
  */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_LegacyStructLiteralStillImports,
-	"SimpleQuest.Resolver.LegacyStructLiteralStillImports", FormatIOTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_LegacyStructLiteralStillImports, "SimpleQuest.Resolver.LegacyStructLiteralStillImports", FormatIOTestFlags)
 bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Parameters)
 {
 	const FStructProperty* PayloadProp =
@@ -316,6 +314,64 @@ bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Para
 		}
 	}
 
+	// The value alone proves too little here. The guard the reattach walk runs for an FInstancedStruct decides what the
+	// import SAYS, not what it restores: with it gone the payload above still comes through intact, and every legacy
+	// payload draws a "child row missing" warning for a row the old form never had. A value-only assertion cannot see
+	// that, so the walk's silence is asserted as its own outcome.
+	if (!TestTrue(TEXT("no warning for the child row the old form never had"), Warnings.IsEmpty()))
+	{
+		AddInfo(FString::Join(Warnings, TEXT("\n")));
+	}
+
+	return true;
+}
+
+/**
+ * An UNSET payload exports as no row at all - absence is the honest representation - so the import has to read that
+ * absence as silence rather than as a missing row. This is the shape every current export produces for a Generic reward
+ * whose payload was never set, which makes it the more common of the two silent cases, and the one the legacy test
+ * above does not reach: there the cell exists and only the row is absent; here neither does.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_UnsetPayloadImportsSilently, "SimpleQuest.Resolver.UnsetPayloadImportsSilently", FormatIOTestFlags)
+bool FQuestFormatIO_UnsetPayloadImportsSilently::RunTest(const FString& Parameters)
+{
+	const FStructProperty* PayloadProp =
+		CastField<FStructProperty>(UGenericReward::StaticClass()->FindPropertyByName(FName(TEXT("Payload"))));
+	if (!TestNotNull(TEXT("UGenericReward has a Payload property"), PayloadProp))
+	{
+		return false;
+	}
+
+	// The reward's own row with no Payload cell and no Payload child row - exactly what the export writes for an unset one.
+	const FString RewardKey = TEXT("node_a/Rewards[0]");
+	FQuestDataBundle Bundle;
+	{
+		FQuestDataTable& Table = Bundle.TablesByType.Add(TEXT("generic_reward"));
+		Table.Columns = { TEXT("class"), TEXT("RewardType") };
+
+		FQuestDataRow Row;
+		Row.Key = RewardKey;
+		FQuestDataValue ClassCell;
+		ClassCell.Kind = EQuestDataValueKind::String;
+		ClassCell.StringForm = TEXT("GenericReward");
+		Row.Cells.Add(TEXT("class"), ClassCell);
+		Table.Rows.Add(MoveTemp(Row));
+	}
+
+	UGenericReward* Target = NewObject<UGenericReward>(GetTransientPackage());
+	const FInstancedStruct& TargetPayload = *PayloadProp->ContainerPtrToValuePtr<FInstancedStruct>(Target);
+
+	TSet<FString> Consumed;
+	TArray<FString> Warnings;
+	RestoreQuestRowProperties(Target, Bundle.TablesByType[TEXT("generic_reward")].Rows[0]);
+	ReattachQuestInstancedChildren(Target, RewardKey, Bundle, Consumed, Warnings);
+
+	TestFalse(TEXT("an unset payload stays unset"), TargetPayload.IsValid());
+	TestTrue(TEXT("nothing was consumed - there was no row to consume"), Consumed.IsEmpty());
+	if (!TestTrue(TEXT("silence about the payload draws no warning"), Warnings.IsEmpty()))
+	{
+		AddInfo(FString::Join(Warnings, TEXT("\n")));
+	}
 	return true;
 }
 
@@ -326,8 +382,7 @@ bool FQuestFormatIO_LegacyStructLiteralStillImports::RunTest(const FString& Para
  * A UGenericReward is used as the OWNER rather than a node, because it is one - its Payload is a direct
  * FInstancedStruct property, so the walk, the diff and the apply all run their real paths with no graph fixture.
  */
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_StructChildPlansAndApplies,
-	"SimpleQuest.Resolver.StructChildPlansAndApplies", FormatIOTestFlags)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestFormatIO_StructChildPlansAndApplies,	"SimpleQuest.Resolver.StructChildPlansAndApplies", FormatIOTestFlags)
 bool FQuestFormatIO_StructChildPlansAndApplies::RunTest(const FString& Parameters)
 {
 	const FStructProperty* PayloadProp =

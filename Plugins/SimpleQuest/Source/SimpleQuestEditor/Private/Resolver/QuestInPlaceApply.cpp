@@ -47,17 +47,21 @@ static void CollectApplyTargets(UObject* Owner, const UStruct* Layout, void* Con
 		if (!IsQuestInstancedBearing(Prop)) continue;
 
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Container), OwnerKey, Prop->GetName(),
-		[&OutByPath, Owner](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
+		[&OutByPath, &PathPrefix, Owner](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
 		{
+			// A nested child's path reads from the top-level owner down - the parent's path, then this child's under
+			// it - which is the spelling the planner records and this map is looked up by.
+			const FString FullPath = PathPrefix.IsEmpty() ? Path : PathPrefix + TEXT(".") + Path;
+
 			// A struct child's OWNER stays the object we are already inside - it is the thing undo and notification
 			// have to reach. Only the layout and the memory descend.
 			if (Child.IsStruct())
 			{
-				CollectApplyTargets(Owner, Child.StructType, const_cast<void*>(Child.Memory), ChildKey, Path, OutByPath);
+				CollectApplyTargets(Owner, Child.StructType, const_cast<void*>(Child.Memory), ChildKey, FullPath, OutByPath);
 				return;
 			}
 			UObject* ChildObject = const_cast<UObject*>(Child.Object);
-			CollectApplyTargets(ChildObject, ChildObject->GetClass(), ChildObject, ChildKey, Path, OutByPath);
+			CollectApplyTargets(ChildObject, ChildObject->GetClass(), ChildObject, ChildKey, FullPath, OutByPath);
 		});
 	}
 }

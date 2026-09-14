@@ -67,7 +67,8 @@ struct SIMPLEQUEST_API FQuestContextBase
 	 * at the originating Step's resolution; threaded through ChainToNextNodes onto every downstream context.
 	 * Read by FireWrapperBoundaryCompletion's event-keyed deduplication gate. Default-constructed (invalid) for
 	 * contexts that don't originate from a Step resolution (top-level entries, direct external API requests).
+	 * Framework-stamped - read it, never set it. 
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame)
 	FOriginatingEventID OriginatingEventID;
 };

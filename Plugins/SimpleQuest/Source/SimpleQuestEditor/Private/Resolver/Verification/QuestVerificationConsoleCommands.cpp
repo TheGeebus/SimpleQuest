@@ -9,14 +9,16 @@
 #include "ISimpleQuestEditorModule.h"
 #include "ObjectTools.h"
 #include "Engine/Engine.h"
+#include "Graph/QuestGraphArrange.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
 #include "Quests/QuestlineGraph.h"
+#include "Resolver/ISimpleQuestDataFormat.h"
+#include "Resolver/QuestMappingSource.h"
 #include "Resolver/Verification/QuestCompiledModelDump.h"
 #include "Resolver/Verification/QuestRoundTripOracle.h"
 #include "Resolver/Verification/QuestVerificationPaths.h"
 #include "SimpleQuestLog.h"
-#include "Graph/QuestGraphArrange.h"
 #include "UObject/UObjectGlobals.h"
 #include "Utilities/QuestlineGraphCompiler.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -65,14 +67,19 @@ namespace
 		const FString DestPackagePath = Args[1];
 
 		// Forward an optional "--format=<name>" to the export/import sub-commands so the whole round-trip uses the chosen
-		// provider (default TSV). Without this the harness would silently run TSV even when --format=json was requested.
-		// DumpCompiled needs no format (it reads the compiled asset, not a file). NOTE: Args[0]/[1] are positional; a
-		// --format arg would be Args[2], so it doesn't disturb the positional reads above.
+		// provider (else the project default). Without this the harness would silently run the default even when a format
+		// was requested. DumpCompiled needs no format (it reads the compiled asset, not a file). NOTE: Args[0]/[1] are
+		// positional; a --format arg would be Args[2], so it doesn't disturb the positional reads above.
 		FString FormatArg;
 		for (const FString& Arg : Args)
 		{
 			if (Arg.StartsWith(TEXT("--format="))) { FormatArg = FString(TEXT(" ")) + Arg; break; }
 		}
+		// The authored comparator reads whatever files the provider wrote, so resolve the provider the same way the
+		// sub-commands will - one resolution, and all three agree on the format.
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("RoundTrip"));
+		if (!Format) return;
+		const FString FileExtension = Format->FileExtension();
 
 		UQuestlineGraph* Src = LoadObject<UQuestlineGraph>(nullptr, *AssetPath);
 		if (!Src) { UE_LOG(LogSimpleQuestResolver, Error, TEXT("RoundTrip: couldn't load '%s'."), *AssetPath); return; }
@@ -189,7 +196,7 @@ namespace
 		}
 
 		// 4. Compare, normalized.
-		const int32 AuthoredMiss = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID);
+		const int32 AuthoredMiss = CompareQuestExportFolders(SrcFolder, RtFolder, OriginalID, FileExtension);
 		const int32 CompiledMiss = CompareQuestCompiledDumps(SrcDump, RtDump, OriginalID);
 
 		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTrip '%s': authored %s (%d), compiled %s (%d) ===="),
@@ -203,20 +210,24 @@ namespace
 	// (ExportQuestline + DumpCompiled on it), leave the src-side artifacts pristine from the last full RoundTrip, then
 	// call this to confirm the REAL comparators (not a re-implementation) go red on the injected break. Because a full
 	// RoundTrip re-imports and self-heals, corruption can only be observed through this no-regen compare path.
-	// Args: <OriginalID> — the sanitized questline ID whose <ID>/<ID>_RT folders + <ID>_compiled_dump.tsv /
-	// <ID>_RT_compiled_dump.tsv dumps live under Saved/QuestExport (i.e. the same stems a prior RoundTrip wrote).
+	// Args: <OriginalID> [--format=<name>] — the sanitized questline ID whose <ID>/<ID>_RT folders + <ID>_compiled_dump.tsv /
+	// <ID>_RT_compiled_dump.tsv dumps live under Saved/QuestExport (i.e. the same stems a prior RoundTrip wrote). The
+	// format names which files the folders hold, resolved exactly as RoundTrip resolved it when it wrote them.
 	void RoundTripCompareCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)
 		{
-			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RoundTripCompare: usage 'SimpleQuest.RoundTripCompare <OriginalID>' "
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RoundTripCompare: usage 'SimpleQuest.RoundTripCompare <OriginalID> [--format=<name>]' "
 				"(compares the on-disk <ID> vs <ID>_RT artifacts a prior RoundTrip left; no re-export/import)."));
 			return;
 		}
 		const FString OriginalID = Args[0];
 		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
 
-		const int32 AuthoredMiss = CompareQuestExportFolders(QuestExport_FolderForKey(OriginalID), QuestExport_FolderForKey(RtID), OriginalID);
+		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("RoundTripCompare"));
+		if (!Format) return;
+
+		const int32 AuthoredMiss = CompareQuestExportFolders(QuestExport_FolderForKey(OriginalID), QuestExport_FolderForKey(RtID), OriginalID, Format->FileExtension());
 		const int32 CompiledMiss = CompareQuestCompiledDumps(QuestCompiledDumpPathFor(OriginalID), QuestCompiledDumpPathFor(RtID), OriginalID);
 		UE_LOG(LogSimpleQuestResolver, Log, TEXT("==== RoundTripCompare '%s': authored %s (%d), compiled %s (%d) ===="),
 			*OriginalID,
@@ -283,14 +294,14 @@ static FAutoConsoleCommand GRoundTripCmd(
 	TEXT("SimpleQuest.RoundTrip"),
 	TEXT("Full round-trip check on a questline — export, import (_RT), dump both, then report two diffs: AUTHORED "
 		"(the export folders) and COMPILED (the compiled-model dumps), each _RT-normalized. A questline that survives "
-		"the cycle intact reports 0 for both. Args: <QuestlineAssetPath> <DestPackagePath>."),
+		"the cycle intact reports 0 for both. Args: <QuestlineAssetPath> <DestPackagePath> [--format=<name>]."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RoundTripCmd));
 
 static FAutoConsoleCommand GRoundTripCompareCmd(
 	TEXT("SimpleQuest.RoundTripCompare"),
 	TEXT("Smoke-test seam: run both comparators against the <ID> vs <ID>_RT artifacts a prior RoundTrip left on disk, "
 		"WITHOUT re-export/import. Corrupt the _RT asset, re-run ExportQuestline+DumpCompiled on it, then this — the "
-		"real comparators should go red on the injected break. Args: <OriginalID>."),
+		"real comparators should go red on the injected break. Args: <OriginalID> [--format=<name>]."),
 	FConsoleCommandWithArgsDelegate::CreateStatic(&RoundTripCompareCmd));
 
 static FAutoConsoleCommand GLogGraphRanksCmd(

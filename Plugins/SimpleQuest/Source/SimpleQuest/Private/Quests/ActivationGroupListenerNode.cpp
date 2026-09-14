@@ -52,9 +52,9 @@ void UActivationGroupListenerNode::OnGroupSignalReceived(FGameplayTag Channel, c
 	// ForwardParams assignment already carries both fields; the explicit re-stamps mirror the documented
 	// ForwardParams-vs-event-field duplication pattern (event field takes precedence). SourceTag from the
 	// event is informational only.
-	PendingActivationContext.IncomingContext = Event.ForwardParams;
-	PendingActivationContext.IncomingContext.OriginChain = Event.OriginChain;
-	PendingActivationContext.IncomingContext.OriginatingEventID = Event.OriginatingEventID;
+	PendingActivationContext.IncomingParams = Event.ForwardParams;
+	PendingActivationContext.IncomingParams.OriginChain = Event.OriginChain;
+	PendingActivationContext.IncomingParams.OriginatingEventID = Event.OriginatingEventID;
 
 	UE_LOG(LogSimpleQuestActivation, Verbose,
 		TEXT("ActivationGroupListener '%s' received signal — source='%s' chain-depth=%d eventGuid=%s"),

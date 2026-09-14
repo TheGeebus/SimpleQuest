@@ -12,7 +12,7 @@ class UQuestObjectiveConfig;
 /**
  * The objective-config shape: target classes, target actors, required element count, and a typed ConfigAsset blank
  * slate. Used two ways — packed from the destination Step's UPROPERTYs as the authored config handed to the objective,
- * and carried on FQuestObjectiveActivationContext::Config when a runtime caller (giver, forward params, external BP)
+ * and carried on FQuestObjectiveActivationParams::Config when a runtime caller (giver, forward params, external BP)
  * contributes one. The objective composes the Step's authored config with the caller's (see OnObjectiveActivated).
  */
 USTRUCT(BlueprintType)

@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "Nodes/Utility/QuestlineNode_UtilityBase.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestlineNode_StartQuestline.generated.h"
 
 class UQuestlineGraph;
@@ -38,5 +38,5 @@ public:
 	 * the entry Step's authored config during activation.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Start Questline")
-	FQuestObjectiveActivationContext Params;
+	FQuestObjectiveActivationParams Params;
 };

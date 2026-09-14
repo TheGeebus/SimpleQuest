@@ -8,12 +8,12 @@
 #include "Subsystems/SignalSubsystem.h"
 #include "SimpleQuestLog.h"
 
-TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer) const
+TArray<FQuestRewardPreview> UQuestRewardNode::DescribeRewards(AActor* Viewer, FGameplayTag ResolvingQuestTag) const
 {
 	TArray<FQuestRewardPreview> Previews;
 	for (const TObjectPtr<UQuestRewardBase>& Reward : Rewards)
 	{
-		if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer));
+		if (Reward) Previews.Append(Reward->DispatchDescribeReward(Viewer, ResolvingQuestTag));
 	}
 	return Previews;
 }
@@ -23,7 +23,7 @@ TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
 	const TMap<FName, TObjectPtr<UQuestNodeBase>>& NodeMap,
 	FName PathIdentity,
 	AActor* Viewer,
-	bool bIncludeAnyOutcome)
+	bool bIncludeAnyOutcome, FGameplayTag ResolvingQuestTag)
 {
 	// The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
 	// that sits in both buckets (a reward on Any Outcome AND the named path).
@@ -45,7 +45,7 @@ TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
 	{
 		if (const UQuestRewardNode* RewardNode = Cast<UQuestRewardNode>(NodeMap.FindRef(Key)))
 		{
-			Previews.Append(RewardNode->DescribeRewards(Viewer));
+			Previews.Append(RewardNode->DescribeRewards(Viewer, ResolvingQuestTag));
 		}
 	}
 	return Previews;
@@ -55,7 +55,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 {
 	if (!Signals)
 	{
-		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("GrantRewardSet: no SignalSubsystem — %d reward(s) not published."), Rewards.Num());
+		UE_LOG(LogSimpleQuestActivation, Warning, TEXT("GrantRewardSet: no SignalSubsystem - %d reward(s) not published."), Rewards.Num());
 		return;
 	}
 
@@ -74,7 +74,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 			if (!Grant.RewardType.IsValid())
 			{
 				UE_LOG(LogSimpleQuestActivation, Warning,
-					TEXT("GrantRewardSet: a reward or one of its modifiers produced a grant with no RewardType — dropped (nothing to route on)."));
+					TEXT("GrantRewardSet: a reward or one of its modifiers produced a grant with no RewardType - dropped (nothing to route on)."));
 				continue;
 			}
 
@@ -82,6 +82,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 			Grant.OriginTag          = Incoming.OriginTag;
 			Grant.OriginChain        = Incoming.OriginChain;
 			Grant.OriginatingEventID = Incoming.OriginatingEventID;
+			Grant.RewardGuid         = Reward->RewardGuid;   // pairs with the advertisement's stamp; see FQuestRewardContext
 			if (!Grant.Recipient.IsValid()) Grant.Recipient = Incoming.Instigator;
 
 			UE_LOG(LogSimpleQuestActivation, Log, TEXT("GrantRewardSet: granting '%s' (recipient: %s)"),
@@ -95,9 +96,12 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 void UQuestRewardNode::ActivateInternal(FGameplayTag InContextualTag)
 {
 	FQuestRewardActivationContext Incoming;
-	static_cast<FQuestContextBase&>(Incoming) = PendingActivationContext.IncomingContext;
+	static_cast<FQuestContextBase&>(Incoming) = PendingActivationContext.IncomingParams;
 	Incoming.Provenance                       = PendingActivationContext.Provenance;
 	Incoming.IncomingOutcomeTag               = PendingActivationContext.IncomingOutcomeTag;
+	// A reward node is tagless, so the nearest thing carrying a resolution history is whatever cascaded into it - which is
+	// what OriginTag already holds. Reached from something that records no resolution, the count stays zero and nothing gates.
+	Incoming.ResolvingQuestTag                = Incoming.OriginTag;
 
 	UGameInstance* GI = CachedGameInstance.Get();
 	USignalSubsystem* Signals = GI ? GI->GetSubsystem<USignalSubsystem>() : nullptr;

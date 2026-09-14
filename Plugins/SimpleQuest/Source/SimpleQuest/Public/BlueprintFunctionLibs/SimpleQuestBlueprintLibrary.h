@@ -8,7 +8,8 @@
 #include "Events/QuestEventBase.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Quests/Types/QuestEventPayload.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
+#include "Quests/Types/QuestPhase.h"
 #include "Quests/Types/QuestRewardPreview.h"
 #include "Quests/Types/QuestRoleSourceInfo.h"
 #include "Quests/Types/SimpleQuestSaveSnapshot.h"
@@ -57,10 +58,14 @@ public:
      *   - On Enabled - quest became accept-ready (Activated AND prereqs satisfy).
      *   - On Disabled - accept-ready quest became no-longer-ready (NOT-prereq edge cases; rare).
      *   - On Give Blocked - a give attempt was refused. Blockers carries the structured reasons.
+     *   - On Activation Failed - an activation attempt was refused. Reason says why; Attempted Tag Name is
+     *     populated even when Quest Tag is empty, which is the stale-tag Unknown Quest case.
      *
      *  Run phase:
      *   - On Started - quest entered Live state; objectives are bound and ticking.
-     *   - On Progress - objective progress tick (transient, no catch-up).
+     *   - On Progress - objective progress tick.
+     *   - On Progress Refused - a trigger fired at a Live quest whose gate isn't open. Run-phase partner to
+     *     On Give Blocked, and it shares the same Blockers pin.
      *
      *  End phase:
      *   - On Completed - quest resolved with an outcome. Outcome Tag tells you which (Victory / Defeat / etc.).
@@ -74,8 +79,12 @@ public:
      * output gives the canonical event identity (where the event originated); Matched Channel output gives
      * the address relative to what you subscribed to.
      *
-     * Catch-up: if the quest already reached one of these states before you subscribed, the matching pin
-     * fires immediately on bind. Late binders aren't left waiting on events that already happened.
+     * Catch-up: if the quest already reached one of these STATES before you subscribed, the matching pin fires
+     * immediately on bind, so late binders aren't left waiting on something that already happened. This covers
+     * On Activated, On Enabled, On Started, On Completed, On Deactivated and On Blocked - the events backed by
+     * a state fact that can be read back. The rest are transient: On Disabled, On Give Blocked, On Activation
+     * Failed, On Progress, On Progress Refused, and On Unblocked describe a moment rather than a state, so there
+     * is nothing to replay and they only ever fire live.
      *
      * Context output carries the full event payload - Triggered Actor, Instigator, Node Info, Custom Data -
      * so you don't need a separate lookup for who triggered the event or what payload came with it.
@@ -89,8 +98,8 @@ public:
             DisplayName = "Observe Quest Lifecycle"))
     static UQuestLifecycleObserver* ObserveQuestLifecycle(
         UObject* WorldContextObject,
-        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 255,
+        UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,        
+        UPARAM(meta = (Bitmask, BitmaskEnum = "/Script/SimpleQuest.EQuestEventTypes")) int32 ExposedEvents = 0,
         ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
@@ -146,6 +155,31 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
+    /**
+     * Where QuestTag is in its lifecycle right now: the phase (Not Reached / Activated / Started / Deactivated / Completed) plus
+     * the flags that coexist with it - Enabled, Blocked, has started, has resolved, latest outcome. The same read the catch-up
+     * pass makes for a late observer, so a status line built from this and one built from events agree. Prefer it to composing
+     * Is Quest Live / Is Quest Completed / Is Quest Pending Giver by hand.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static FQuestPhaseSnapshot GetQuestPhase(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag);
+
+    /**
+     * The known quest tags exactly one level below Parent Tag, one per node, in canonical spelling, sorted lexically: a
+     * container's steps, a questline's top-level nodes, a linked placement's inner content. Registration, not state - a child
+     * that has never been reached is listed all the same; ask Get Quest Phase for its state. Empty for an unknown parent or a leaf.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static TArray<FGameplayTag> GetChildQuestTags(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag ParentTag);
+
+    /**
+     * Seconds of play on the quest clock: continuous across level changes and saved games, zero at a new game, not
+     * advancing while paused. Every timestamp the framework records is in this domain, so "how long ago" is this minus
+     * the stamp - across a save as well as within a session.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
+    static double GetQuestTime(const UObject* WorldContext);
+    
     // -------------------------------------------------------------------------------------------------------------
     // Source registry queries - find "which Giver / Trigger / Observer in the world handles this?" without maintaining a
     // parallel tag → actor registry. Queries alias-walk via the existing QuestStateSubsystem canonical-resolution
@@ -180,21 +214,20 @@ public:
      * @param ContentTag          the Step or container whose advertised rewards you want
      * @param Viewer              viewing actor for computing live values
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
+        DeprecationMessage = "Use Get Advertised Rewards and read the SimpleQuest.Outcome.AnyOutcome key. Removed in 0.9."))
     static TArray<FQuestRewardPreview> GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
 
     /**
-     * Cold advertised-rewards query - reads a questline ASSET's compiled reward manifest directly, with no running game
-     * / no live instance. For catalog UI (quest-giver hub, bounty board) that shows "what does this quest pay" BEFORE
-     * it's activated. Mirrors GetAdvertisedRewardsForAnyOutcome but sources nodes from the asset's CompiledNodes instead of the live
-     * manager. Viewer-dependent rewards (scaled) compute off the compiled template; a cold catalog may pass null Viewer.
+     * Cold twin of GetAdvertisedRewards - everything a tag pays, both channels, read off a questline ASSET with no
+     * running game. For catalog UI (quest-giver hub, bounty board) showing what a quest pays before it is accepted.
+     * Viewer-dependent rewards compute off the compiled template; a cold catalog may pass null.
      *
-     * @param Questline    the compiled questline asset to inspect
-     * @param ContentTag   the Step or container whose advertised rewards you want (must be a compiled tag in this asset)
-     * @param Viewer       optional viewing actor for live-computed previews (null = context-free)
+     * *** RETURN TYPE CHANGED IN 0.8.1 *** from a flat array to the same outcome-keyed map the live query returns.
+     * Blueprints calling the old form fail on a pin type mismatch rather than quietly receiving a different shape.
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
-    static TArray<FQuestRewardPreview> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag ContentTag, AActor* Viewer);
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag Tag, AActor* Viewer);
 
     /**
      * Cold query for a questline's QUESTLINE-LEVEL rewards - what completing the whole questline pays, per outcome, read
@@ -205,7 +238,8 @@ public:
      *
      * @return outcome tag -> the previews that outcome pays. Empty map for a questline with no questline-level rewards.
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (DeprecatedFunction,
+        DeprecationMessage = "Use Get Advertised Rewards From Asset - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
 
     /**
@@ -213,8 +247,24 @@ public:
      * will pay. HUD/journal companion to the cold GetQuestlineRewardsFromAsset. Returns empty if the questline isn't
      * currently loaded (use the cold asset query for pre-activation catalogs).
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
+        DeprecationMessage = "Use Get Advertised Rewards - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
+
+    /**
+     * Everything a tag pays on completion, keyed by outcome - rewards wired into the graph AND the questline's own
+     * completion rewards, in one answer. Pass a Step, a container, a linked placement, or a questline identity; the
+     * framework resolves which channels apply.
+     *
+     * SimpleQuest.Outcome.AnyOutcome is a key in its own right, NOT duplicated into the named outcomes: completing with
+     * outcome X pays X's list PLUS the Any-Outcome list, which is exactly how delivery grants them. Summing one
+     * outcome's list with the Any-Outcome list is the total for that completion; summing the whole map is not a total
+     * anyone receives.
+     *
+     * Each preview carries SourceTag, so a merged list can still be traced back to what pays it.
+     */
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag Tag, AActor* Viewer);
     
     /**
      * The rewards a completing node advertises for a specific outcome - the rewards on that outcome's path, plus (unless
@@ -234,7 +284,8 @@ public:
      * Failure: Y". Each outcome's list includes the any-outcome rewards (they fire regardless). Static outcomes only;
      * dynamic paths aren't represented (they have no author-time outcome tag).
      */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
+    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
+        DeprecationMessage = "Use Get Advertised Rewards - same map, and it also folds in questline-level rewards. Removed in 0.9."))
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
     
     // -------------------------------------------------------------------------------------------------------------
@@ -255,7 +306,7 @@ public:
     //
     // Each action accepts an optional payload - Context (FQuestEventPayload) for lifecycle-control ops carries
     // attribution data (Instigator / CustomData / OriginTag / OriginChain) that the manager threads through into
-    // the resulting lifecycle event's Payload field; Params (FQuestObjectiveActivationContext) for activation-side
+    // the resulting lifecycle event's Payload field; Params (FQuestObjectiveActivationParams) for activation-side
     // ops carries Authored override + Dynamic context stamped onto the destination Step's activation. BP pins are
     // optional via AutoCreateRefTerm; callers that don't supply one publish with an empty payload.
     // -------------------------------------------------------------------------------------------------------------
@@ -268,12 +319,12 @@ public:
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void GiveQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void ActivateQuest(const UObject* WorldContext,
         UPARAM(meta = (Categories = "SimpleQuest.Questline")) FGameplayTag QuestTag,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext(),
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams(),
         bool bBypassPrerequisites = false);
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Payload"))
@@ -300,7 +351,7 @@ public:
 
     UFUNCTION(BlueprintCallable, Category = "SimpleQuest|Actions", meta = (WorldContext = "WorldContext", AutoCreateRefTerm = "Params"))
     static void StartQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph,
-        const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+        const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
     
     /**
      * Restore a questline from a loaded save. Call AFTER Apply Snapshot (on the Quest State subsystem) has restored the

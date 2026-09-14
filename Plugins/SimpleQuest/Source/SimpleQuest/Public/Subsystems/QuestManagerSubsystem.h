@@ -11,7 +11,7 @@
 #include "Quests/QuestlineGraph.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/OriginatingEventID.h"
-#include "Quests/Types/QuestObjectiveActivationContext.h"
+#include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
 #include "Quests/Types/QuestObjectiveRuntimeContext.h"
 #include "Quests/Types/QuestResolutionRecord.h"
@@ -139,7 +139,7 @@ protected:
 	virtual void RegisterQuestlineGraph(UQuestlineGraph* Graph);
 	
 	/** Registers all compiled node instances from the graph into LoadedNodeInstances and activates its entry nodes. */
-	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationContext& Params = FQuestObjectiveActivationContext());
+	virtual void ActivateQuestlineGraph(UQuestlineGraph* Graph, const FQuestObjectiveActivationParams& Params = FQuestObjectiveActivationParams());
 
 	/**
 	 * Load-time counterpart to ActivateQuestlineGraph. Registers the graph's compiled instances, then - instead of
@@ -167,7 +167,7 @@ protected:
 
 	/**
 	 * Looks up the instance for NodeTagName in LoadedNodeInstances and activates it. Stamps Provenance onto the
-	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedActivationContext;
+	 * destination's PendingActivationContext so it rides through ActivateInternal's merge into ReceivedRuntimeContext;
 	 * HandleOnNodeStarted then captures it on the FQuestEntryArrival snapshot the state subsystem persists, giving
 	 * catch-up subscribers and save/load reconstitution access to "how was this activation initiated?"
 	 *
@@ -198,7 +198,7 @@ protected:
 	 *
 	 * @see UQuestStateSubsystem::RecordEntry
 	 * @see UQuestManagerSubsystem::HandleOnNodeStarted
-	 * @see FQuestObjectiveActivationContext::Provenance
+	 * @see FQuestObjectiveRuntimeContext::Provenance
 	 */
 	virtual void ActivateNodeByTag(
 		FName NodeTagName,
@@ -264,7 +264,7 @@ protected:
 		FGameplayTag OutcomeTag,
 		FName PathIdentity,
 		const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(),
-		const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+		const FQuestObjectiveActivationParams& InheritedForward = FQuestObjectiveActivationParams());
 
 	/**
 	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
@@ -281,6 +281,29 @@ protected:
 	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
 	 */
 	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
+	
+	/**
+	 * Everything a tag pays on completion, keyed by the outcome that pays it - rewards wired into the graph AND the
+	 * questline's own completion rewards, merged into one answer. Backs the Blueprint library's Get Advertised Rewards.
+	 *
+	 * TAKES WHATEVER TAG THE CALLER HAS: a Step, a container, a linked placement, or a questline identity. The node
+	 * channel comes from that tag's own reachability manifest; the questline channel is delegated to
+	 * ResolveQuestlineRewards, which resolves a placement's CONTEXTUAL tag to its inner asset IDENTITY through
+	 * LinkedInnerIdentityTag. Choosing between those channels used to be the CALLER's job, and required knowing
+	 * node-versus-asset and contextual-versus-identity in order to ask a single question.
+	 *
+	 * *** SimpleQuest.Outcome.AnyOutcome IS A KEY IN ITS OWN RIGHT, NOT FOLDED INTO THE NAMED OUTCOMES. *** Completing
+	 * with outcome X pays X's list PLUS the Any-Outcome list, which is exactly how delivery grants them -
+	 * PublishGraphResolutions looks the two up separately and grants both. So the union of one outcome with
+	 * Any-Outcome is a real total, while the sum of the whole map is a number no completion ever pays.
+	 *
+	 * Every preview carries SourceTag (which completion it was resolved from) and RewardGuid (which reward produced
+	 * it), so a merged list stays traceable and a UI that re-queries keeps its identities across refreshes.
+	 *
+	 * PURE: computes previews for the Viewer, grants nothing, publishes nothing. An outcome with no rewards has no key
+	 * rather than an empty list; a tag with no loaded node yields an empty map, and the Verbose log says which.
+	 */
+	TMap<FGameplayTag, FQuestRewardPreviewList> ResolveAllRewards(FGameplayTag Tag, AActor* Viewer) const;
 
 	/**
 	 * Whole-node advertised rewards, grouped by outcome - every static-outcome path of a completing node and what each
@@ -339,6 +362,12 @@ protected:
 private:
 	void LoadCompiledDisplayIni() const;
 	
+	/**
+	 * The quest clock, for every timestamp this subsystem records. One accessor so the fourteen stamp sites share a
+	 * domain and cannot drift back to world time. Zero before the state subsystem is resolved.
+	 */
+	double QuestNow() const;
+
 	void CheckQuestObjectives(FGameplayTag Channel, const FInstancedStruct& RawEvent);
 
 	/** Returns and clears the stashed active-graph list. RestoreQuestGraphs drives per-graph restore from it. */
@@ -536,7 +565,7 @@ private:
 	 */
 	void RegisterAllNodePerspectives(const UQuestNodeBase* Instance) const;
 
-	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationContext& CompleterContext = FQuestObjectiveActivationContext()) const;
+	void PublishQuestEndedEvent(const UQuestNodeBase* Node, FGameplayTag OutcomeTag, EQuestResolutionSource Source, const FQuestEventPayload& ExternalContext = FQuestEventPayload(), const FQuestObjectiveActivationParams& CompleterContext = FQuestObjectiveActivationParams()) const;
 
 	UPROPERTY()
 	TObjectPtr<USignalSubsystem> QuestSignalSubsystem;
@@ -723,6 +752,21 @@ private:
 	void DeriveContainerLive(FGameplayTag ContainerTag);
 
 	/**
+	 * Recomputes a questline ASSET identity's Live fact (and its Started anchor on the rising edge) from whatever holds
+	 * that asset's content live, the way DeriveContainerLive does for a container node. An asset identity is not a node:
+	 * no ancestor walk reaches it, it carries no alias from the placements that embed it, and the only direct write it
+	 * ever received was at ActivateQuestlineGraph - so an embedded questline's identity used to show Completed without
+	 * ever having shown Started or Live.
+	 *
+	 * Scope is the STANDALONE case only - a graph activated directly, which has no placement to speak for it. An
+	 * embedded questline's identity is written by each placement through AddStateFactAcrossPerspectives instead, so
+	 * its count equals the number of live placements the way its inner Steps' alias counts already do. Deriving that
+	 * case would flatten a count to a presence flag. Multi-Exit graphs are why the standalone case derives rather
+	 * than clearing outright: one Exit resolving does not mean the questline stopped running.
+	 */
+	void DeriveGraphLive(const FGameplayTag& IdentityTag);
+
+	/**
 	 * Walks Step's ancestor wrappers and re-derives each one's Live fact. Covers both the Step's own
 	 * compile-perspective ancestors (AncestorContainerTags) AND foreign-perspective ancestors derived
 	 * from each AssetScopedAliasTag's parent prefix chain. The second walk is required because
@@ -807,6 +851,19 @@ private:
 	 * AutoLoadListenerBearingGraphs which sync-loaded every listener-bearing graph at startup.
 	 */
 	void BuildListenerGroupIndex();
+
+	/** Runs the asset-registry-backed startup passes once the registry is ready: the listener index, then the relation preload. */
+	void OnAssetRegistryReady();
+
+	/**
+	 * Registers every alias and placement-identity relation the registry will need BEFORE the graph that owns it registers:
+	 * a late observer that catches up ahead of registration - the restore path does, every time - otherwise sees the
+	 * preloaded spellings as unrelated nodes and reconstructs one node several times. Reads CompiledNodeAliases and
+	 * CompiledPlacementIdentities from UQuestlineGraph asset-registry tags. ROOT ASSETS ONLY - an asset that another asset
+	 * places contributes nothing, because its own compile never runs in that session and its pairs would name spellings
+	 * that are themselves aliases in the compile that does.
+	 */
+	void PreloadCompiledRelations();
 
 	/**
 	 * Walks a just-registered graph's OutwardSetterGroupTags, looks up matching listener-graphs in the global
@@ -898,7 +955,7 @@ private:
 	 * OriginatingEventID is inherited from the cascade and threaded through the recursive
 	 * ChainToNextNodes call.
 	 */
-	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationContext& InheritedForward = FQuestObjectiveActivationContext());
+	void FireWrapperBoundaryCompletion(const FQuestBoundaryCompletion& BC, const FOriginatingEventID& OriginatingEventID = FOriginatingEventID(), const FQuestObjectiveActivationParams& InheritedForward = FQuestObjectiveActivationParams());
 
 	/**
 	 * Per-questline-asset resolution registry write + bus publish. Each FQuestGraphResolution entry carries the
@@ -906,8 +963,12 @@ private:
 	 * that led to the Exit. Writes QSS resolution record + Completed fact + publishes FQuestEndedEvent on the
 	 * questline asset's tag channel so questline-tag subscribers (Hierarchical or ExactMatch) receive a direct
 	 * questline-level lifecycle event.
+	 *
+	 * Whether the per-run path mirror is written alongside the record comes from the resolved GRAPH's compile-stamped
+	 * replay flag, read inside. It cannot come from the caller: a questline's resolution is published by a utility
+	 * node, and utility instances never receive the per-node bResettableReplay stamp.
 	 */
-	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationContext& CompleterContext);
+	void PublishGraphResolutions(const TArray<FQuestGraphResolution>& Resolutions, EQuestResolutionSource Source, const FQuestObjectiveActivationParams& CompleterContext);
 	
 	void RegisterEnablementWatch(FGameplayTag QuestTag, FName NodeTagName, const FPrerequisiteExpression& Expr, bool bInitialSatisfied);
 	void OnEnablementLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);

@@ -246,7 +246,7 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
             // Wire up listeners, subscribe to signals, store local tracking state, spawn UI, etc.
             // Authored: design-time config from the Step's UPROPERTYs (target classes/actors, element count,
             //           config asset). Owned by the Step, not the caller.
-            // Runtime:  caller's IncomingContext (instigator, custom data, lineage, target overrides) plus
+            // Runtime:  caller's IncomingParams (instigator, custom data, lineage, target overrides) plus
             //           Provenance and IncomingOutcomeTag stamped by the framework.
             // The framework does NOT merge these - compose what you need, with full provenance over which
             // values are authored vs caller-supplied.
@@ -281,7 +281,13 @@ Three protected `BlueprintNativeEvent` methods drive the Objective lifecycle. Ov
         }
     };
 ```
-`UGoToQuestObjective` and `UInteractAllTargetsObjective` in `Objectives/Examples/` are working references for this pattern.
+`UGoToQuestObjective`, `UInteractAllTargetsObjective` and `UKillClassQuestObjective` in `Objectives/Examples/` are working references for this pattern.
+
+**A Step resolves once per activation, and work placed after the completion still runs.** Calling `CompleteObjectiveWithOutcome` a second time on the same activation is refused and logged - the first outcome sticks. But the nodes after a Complete Objective node are not dead ends: the Objective stays live for the rest of that frame, so a trailing `PublishTriggerSatisfied`, a cleanup publish, or any other work reaches its listeners normally. The owning Step releases the Objective at the end of the completing frame.
+
+Ordering is yours to author. Publishing trigger-satisfied *after* completing means a watching Trigger hears Deactivated before Satisfied, because the deactivation publish rides the completion. That is visible and accountable-for, so the framework allows the arrangement rather than forbidding it.
+
+Anything reaching the Objective after that release warns rather than failing silently. Objectives are asset-owned and have no world of their own, so `Delay` and the timer nodes are unavailable inside one - the only way to act on a later frame is a delegate bound to something world-owned. If such a callback publishes after the release, you get a warning naming the entry point instead of a call that quietly reaches nobody.
 
 ### Completion Path discovery
 
@@ -406,13 +412,13 @@ Formats are a registered seam, not a fixed list. Implement `ISimpleQuestDataForm
 ```c++
     class FMyFormat : public ISimpleQuestDataFormat
     {
-        virtual bool ReadBundle(const FString& SrcFolder, FQuestDataBundle& OutBundle) override;
-        virtual bool WriteBundle(const FQuestDataBundle& Bundle, const FString& DestFolder) override;
+        virtual bool ReadBundle(const TMap<FString, FString>& Files, FQuestDataBundle& OutBundle) override;
+        virtual bool WriteBundle(const FQuestDataBundle& Bundle, TMap<FString, FString>& OutFiles) override;
         virtual FString FormatName() const override { return TEXT("MyFormat"); }
     };
 ```
 
-Both directions are optional - a read-only provider implements `ReadBundle` and leaves `WriteBundle` alone, and the base reports the unsupported direction honestly rather than failing obscurely. A provider owns parsing, framing, and escaping, and needs to know nothing about quests; structural validity is checked downstream.
+A format serializes text; it does not touch disk. Both maps are keyed by bare file name, the folder half is handled for you, and files are gathered by `FileExtension()`, which defaults to the lowercased format name. Both directions are optional - a read-only provider implements `ReadBundle` and leaves `WriteBundle` alone, and the base reports the unsupported direction honestly rather than failing obscurely. A provider owns parsing, framing, and escaping, and needs to know nothing about quests; structural validity is checked downstream. Import/export symmetry is the provider's own contract, and `SimpleQuest.RoundTrip` below is how to test it.
 
 #### *"Do I use a Mapping asset or a format provider?"*
 
@@ -429,8 +435,9 @@ The pipeline is complete and exercised end to end, driven by console commands - 
 | `SimpleQuest.ImportQuestline <folder> --in-place=<asset>`       | Plan against an existing asset; add `--apply` to perform it |
 | `SimpleQuest.ImportQuestline <destpackage> --datatable=<asset>` | Use an in-engine DataTable as the source                    |
 | `SimpleQuest.EnumerateSourceColumns <folder>`                   | List the columns a source exposes                           |
+| `SimpleQuest.RoundTrip <asset> <destpackage>`                   | Export, import, re-export and diff - proves a format's symmetry |
 
-Add `--format=<name>` to select a registered format and `--mapping=<asset>` to apply a mapping. Everything above is also reachable from the editor: Export and Import on the questline graph editor toolbar, and a dockable **Source Data** panel showing the same plan the console prints - hover a row to highlight the node it describes, double-click to navigate to it.
+Add `--format=<name>` to select a registered format - otherwise the project's **Default Import Format** applies (Project Settings > Plugins > SimpleQuest; TSV out of the box) - and `--mapping=<asset>` to apply a mapping. Everything above is also reachable from the editor: Export and Import on the questline graph editor toolbar, and a dockable **Source Data** panel showing the same plan the console prints - hover a row to highlight the node it describes, double-click to navigate to it.
 
 ### Gating it in CI
 

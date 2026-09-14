@@ -12,13 +12,13 @@
 /**
  * Blueprint node that completes the owning UQuestObjective with an outcome tag and an optional structural path
  * identity. All instances are automatically discovered and reflected as exec output pins on the corresponding Step
- * node in the questline graph editor — no manual sync between outcome / path declarations and completion call sites.
+ * node in the questline graph editor - no manual sync between outcome / path declarations and completion call sites.
  *
  * Two authoring modes:
- *   Static  — leave PathName empty. Set the OutcomeTag via the pin's tag picker (filtered to SimpleQuest.Outcome).
+ *   Static  - leave PathName empty. Set the OutcomeTag via the pin's tag picker (filtered to SimpleQuest.Outcome).
  *             PathIdentity auto-derives from OutcomeTag.GetTagName(); the Step's exec pin shows the outcome leaf as
  *             its label. This is the common case and matches the pre-Bundle-Y authoring shape.
- *   Dynamic — set PathName to a short authored identity (e.g., "DynamicVictory"). Wire a runtime FGameplayTag into
+ *   Dynamic - set PathName to a short authored identity (e.g., "DynamicVictory"). Wire a runtime FGameplayTag into
  *             the OutcomeTag pin to override the static value at completion time. The Step's exec pin uses PathName
  *             as its identity, so routing is stable regardless of what runtime tag flows through.
  *
@@ -48,7 +48,7 @@ public:
 	 * Used by ExpandNode (passes to CompleteObjectiveWithOutcome's PathIdentity arg), GetNodeTitle (drives
 	 * the on-node title), and DiscoverObjectivePaths (Step pin generation). Single source of truth.
 	 *
-	 * OutOutcome is the OUTCOME — the gameplay result the branch represents — as a pointer to an FGameplayTag, valid ONLY
+	 * OutOutcome is the OUTCOME - the gameplay result the branch represents - as a pointer to an FGameplayTag, valid ONLY
 	 * when the path is statically named by a registered tag. Invalid for dynamic placements (the runtime outcome isn't
 	 * known at author time).
 	 */
@@ -66,7 +66,7 @@ public:
 	 */
 	void EnsureDynamicIndexAllocated();
 
-	// — UEdGraphNode —
+	// - UEdGraphNode -
 	virtual void AllocateDefaultPins() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual FText GetTooltipText() const override;
@@ -78,7 +78,7 @@ public:
 	virtual TSharedPtr<SGraphNode> CreateVisualWidget() override;
 	virtual FSlateIcon GetIconAndTint(FLinearColor& OutColor) const override;
 
-	// — UK2Node —
+	// - UK2Node -
 	virtual void ExpandNode(FKismetCompilerContext& CompilerContext, UEdGraph* SourceGraph) override;
 	virtual void GetMenuActions(FBlueprintActionDatabaseRegistrar& ActionRegistrar) const override;
 	virtual FText GetMenuCategory() const override;
@@ -109,7 +109,7 @@ private:
 	/**
 	 * Stable disambiguator for dynamic-without-PathName placements. INDEX_NONE = unallocated. Once assigned
 	 * (via EnsureDynamicIndexAllocated), persists across the node's lifetime so the resolved path identity
-	 * stays stable. ResolvePathIdentity formats this as "Dynamic <N+1>" — DynamicIndex 0 → "Dynamic 1",
+	 * stays stable. ResolvePathIdentity formats this as "Dynamic <N+1>" - DynamicIndex 0 → "Dynamic 1",
 	 * DynamicIndex 1 → "Dynamic 2", etc. Uniform numbering (no off-by-one for singletons) keeps the
 	 * numbering legible regardless of how many sibling placements exist.
 	 */

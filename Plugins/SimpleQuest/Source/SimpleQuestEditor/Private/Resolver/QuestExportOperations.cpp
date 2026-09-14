@@ -145,7 +145,8 @@ bool QuestExport_BuildBundle(const FQuestExportRequest& Request, FQuestDataBundl
 	const TUniquePtr<FQuestlineGraphTraversalPolicy> Policy = MakeUnique<FQuestlineGraphTraversalPolicy>();
 
 	// Questline-self row: the asset's own authored fields (QuestlineID / DisplayName / Description / DisplayData /
-	// ResettableReplay as columns; QuestlineRewards explodes through the instanced recursion into reward child rows).
+	// ResettableReplay as columns; QuestlineRewards explodes through the instanced recursion into one reward-set row per
+	// outcome, each carrying its referenced sets, with its inline rewards as child rows under it).
 	// Keyed by the SANITIZED EffectiveID - the same segment form compiled tags use, so the export key aligns with
 	// tag identity and stays interchange-safe (no spaces/punctuation in keys or folder names).
 	const FString SelfKey = QuestExport_KeyFor(*Graph);	

@@ -21,7 +21,7 @@ void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
     // Stash the cascade's event ID so subclasses (UPrereqGateNode) can read it during ActivateInternal for
     // per-event-ID dedup. PendingActivationContext was populated by the manager before Activate runs.
-    LastIncomingEventID = PendingActivationContext.IncomingContext.OriginatingEventID;
+    LastIncomingEventID = PendingActivationContext.IncomingParams.OriginatingEventID;
     
     // Prerequisite bypass - a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
     // Consume the one-shot flag and, crucially, cancel any deferral this instance is still holding from an earlier

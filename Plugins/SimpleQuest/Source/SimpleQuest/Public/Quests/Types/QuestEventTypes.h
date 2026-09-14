@@ -11,13 +11,13 @@
 class AActor;
 
 /**
- * Quest lifecycle event-type enums — two shapes for two roles.
+ * Quest lifecycle event-type enums - two shapes for two roles.
  *
  * EQuestEventTypes (bitmask, uint16): multi-select EXPOSURE configuration. "Which
  * events do I want to subscribe to?" Used on the ObserveQuestLifecycle K2 node's
  * per-flag Details-panel checkboxes, on FObservedQuestEventSettings's per-event
- * bools, and on the proxy's ExposedEventsMask int32. The 10 flags (bits 0-9)
- * require uint16 storage, which precludes BlueprintType — adopters needing a
+ * bools, and on the proxy's ExposedEventsMask int32. The 12 flags (bits 0-11)
+ * require uint16 storage, which precludes BlueprintType - adopters needing a
  * BP-typed event identifier reach for the companion enum below.
  *
  * EQuestLifecycleEventType (single-value, uint8): single-value ARRIVAL identification.
@@ -26,7 +26,7 @@ class AActor;
  * one-for-one (minus the bitmask semantics).
  *
  * The two are intentionally kept distinct rather than collapsed because their
- * shapes serve incompatible roles — bitmask wide enough for 10 flags vs single-
+ * shapes serve incompatible roles - bitmask wide enough for 10 flags vs single-
  * value narrow enough for BP-typed reflection. ToEventTypeMask below bridges them
  * for adopter C++ that needs to test arrival identity against exposure config.
  */
@@ -50,8 +50,13 @@ enum class EQuestEventTypes : uint16
     Deactivated     = 1 << 7,
     Blocked         = 1 << 8,
     Unblocked       = 1 << 9,
+    // Refusal flags are appended rather than filed beside the phase they belong to. EQuestLifecycleEventType below
+    // mirrors this order and is a BlueprintType uint8 used as a struct field and BP Switch operand in adopter
+    // graphs, so inserting mid-enum would renumber values already authored against. Order here follows that.
     ProgressRefused = 1 << 10,
+    ActivationFailed = 1 << 11,
 };
+
 ENUM_CLASS_FLAGS(EQuestEventTypes);
 
 /**
@@ -78,6 +83,7 @@ enum class EQuestLifecycleEventType : uint8
     Blocked,
     Unblocked,
     ProgressRefused,
+    ActivationFailed,
 };
 
 /** Convert a single-value lifecycle identifier to its bitmask equivalent. */
@@ -85,18 +91,19 @@ FORCEINLINE EQuestEventTypes ToEventTypeMask(EQuestLifecycleEventType Single)
 {
     switch (Single)
     {
-        case EQuestLifecycleEventType::Activated:       return EQuestEventTypes::Activated;
-        case EQuestLifecycleEventType::Enabled:         return EQuestEventTypes::Enabled;
-        case EQuestLifecycleEventType::Disabled:        return EQuestEventTypes::Disabled;
-        case EQuestLifecycleEventType::GiveBlocked:     return EQuestEventTypes::GiveBlocked;
-        case EQuestLifecycleEventType::Started:         return EQuestEventTypes::Started;
-        case EQuestLifecycleEventType::Progress:        return EQuestEventTypes::Progress;
-        case EQuestLifecycleEventType::Completed:       return EQuestEventTypes::Completed;
-        case EQuestLifecycleEventType::Deactivated:     return EQuestEventTypes::Deactivated;
-        case EQuestLifecycleEventType::Blocked:         return EQuestEventTypes::Blocked;
-        case EQuestLifecycleEventType::Unblocked:       return EQuestEventTypes::Unblocked;
-        case EQuestLifecycleEventType::ProgressRefused: return EQuestEventTypes::ProgressRefused;
-        default:                                        return EQuestEventTypes::None;
+        case EQuestLifecycleEventType::Activated:        return EQuestEventTypes::Activated;
+        case EQuestLifecycleEventType::Enabled:          return EQuestEventTypes::Enabled;
+        case EQuestLifecycleEventType::Disabled:         return EQuestEventTypes::Disabled;
+        case EQuestLifecycleEventType::GiveBlocked:      return EQuestEventTypes::GiveBlocked;
+        case EQuestLifecycleEventType::Started:          return EQuestEventTypes::Started;
+        case EQuestLifecycleEventType::Progress:         return EQuestEventTypes::Progress;
+        case EQuestLifecycleEventType::Completed:        return EQuestEventTypes::Completed;
+        case EQuestLifecycleEventType::Deactivated:      return EQuestEventTypes::Deactivated;
+        case EQuestLifecycleEventType::Blocked:          return EQuestEventTypes::Blocked;
+        case EQuestLifecycleEventType::Unblocked:        return EQuestEventTypes::Unblocked;
+        case EQuestLifecycleEventType::ProgressRefused:  return EQuestEventTypes::ProgressRefused;
+        case EQuestLifecycleEventType::ActivationFailed: return EQuestEventTypes::ActivationFailed;
+        default:                                         return EQuestEventTypes::None;
     }
 }
 
@@ -111,7 +118,7 @@ FORCEINLINE EQuestEventTypes ToEventTypeMask(EQuestLifecycleEventType Single)
  *   - GiverActor: populated on Started for giver-gated quests; nullptr otherwise
  *
  * Consumers needing richer event-specific payloads (Progress amounts, Block reasons, GiveBlocked blocker
- * arrays, etc.) bind the corresponding narrow delegate instead — those payloads stay on the per-type
+ * arrays, etc.) bind the corresponding narrow delegate instead - those payloads stay on the per-type
  * delegates rather than bloating the catch-all into a union.
  */
 USTRUCT(BlueprintType)
@@ -123,16 +130,16 @@ struct FQuestLifecycleEventReport
     UPROPERTY(BlueprintReadOnly)
     FGameplayTag QuestTag;
 
-    /** Delivery metadata — the channel from the publishing set most specific to this observer's bound tag. */
+    /** Delivery metadata - the channel from the publishing set most specific to this observer's bound tag. */
     UPROPERTY(BlueprintReadOnly)
     FGameplayTag MatchedChannel;
 
-    /** Which lifecycle event arrived. Never None at dispatch — None is reserved for configuration sentinels. */
+    /** Which lifecycle event arrived. Never None at dispatch - None is reserved for configuration sentinels. */
     UPROPERTY(BlueprintReadOnly)
     EQuestLifecycleEventType EventType = EQuestLifecycleEventType::None;
 
     /**
-     * Per-event payload — NodeInfo, CompletionTrigger, plus inherited FQuestContextBase fields (Instigator,
+     * Per-event payload - NodeInfo, CompletionTrigger, plus inherited FQuestContextBase fields (Instigator,
      * CustomData, OriginTag, OriginChain). Common across all lifecycle events; carries the same data the
      * narrow delegates' Payload parameter does. On catch-up the payload is rehydrated from the persisted
      * entry snapshot, so the rich context (instigator, CustomData, origin lineage) rides along just as it

@@ -156,10 +156,13 @@ static bool BundleDeclaresChildrenUnder(const FQuestDataBundle& Bundle, const FS
 	return false;
 }
 
-void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, const FString& OwnerKey, const FQuestDataBundle& Bundle,
-	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
+void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, const FString& OwnerKey, const FString& PathPrefix,
+	const FQuestDataBundle& Bundle, FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	if (!Layout || !Container) return;
+
+	// A nested child's path reads from the entry's top-level owner down: the parent's path, then the child's under it.
+	auto PathUnderOwner = [&PathPrefix](const FString& Path) { return PathPrefix.IsEmpty() ? Path : PathPrefix + TEXT(".") + Path; };
 
 	for (TFieldIterator<FProperty> It(Layout); It; ++It)
 	{
@@ -175,25 +178,27 @@ void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, co
 		ForEachQuestInstancedChild(Prop, Prop->ContainerPtrToValuePtr<void>(Container), OwnerKey, Prop->GetName(),
 		[&](const FString& ChildKey, const FString& Path, const FQuestInstancedChild& Child, int32 ArrayOrdinal)
 		{
-            LiveKeys.Add(ChildKey);
+			LiveKeys.Add(ChildKey);
+			const FString FullPath = PathUnderOwner(Path);
 			FString ChildClass;
-            const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
-            if (!ChildRow)
-            {
-                // The source DOES describe this property's contents, and this child is not among them.
-                FQuestPropertyChange Change;
-                Change.Property     = Path;
-                Change.CurrentText  = Child.TypeName();
-                Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
-                Change.IncomingText = TEXT("<removed>");
-                Entry.Changes.Add(MoveTemp(Change));
-                return;
-            }
+			const FQuestDataRow* ChildRow = FindQuestChildRow(Bundle, ChildKey, ChildClass);
+			if (!ChildRow)
+			{
+				// The source DOES describe this property's contents, and this child is not among them.
+				FQuestPropertyChange Change;
+				Change.Property     = FullPath;
+				Change.CurrentText  = Child.TypeName();
+				Change.Kind         = EQuestPropertyChangeKind::ChildRemoved;
+				Change.IncomingText = TEXT("<removed>");
+				Entry.Changes.Add(MoveTemp(Change));
+				return;
+			}
 			// One call for both shapes: the row comparison was already written against a layout and a container rather
 			// than against a UObject, so a struct child needs no special case here - only its own layout and memory.
-			DiffQuestContainerAgainstRow(Child.Layout(), Child.IsStruct() ? Child.Memory : static_cast<const void*>(Child.Object), *ChildRow, Path, Entry, OutPlan, Policies);
-			DiffQuestInstancedChildren(Child.Layout(), Child.IsStruct() ? Child.Memory : static_cast<const void*>(Child.Object), ChildKey, Bundle, Entry, OutPlan, Policies);			// a child can itself nest
-       });
+			const void* ChildContainer = Child.IsStruct() ? Child.Memory : static_cast<const void*>(Child.Object);
+			DiffQuestContainerAgainstRow(Child.Layout(), ChildContainer, *ChildRow, FullPath, Entry, OutPlan, Policies);
+			DiffQuestInstancedChildren(Child.Layout(), ChildContainer, ChildKey, FullPath, Bundle, Entry, OutPlan, Policies);   // a child can itself nest
+		});
 
 		// Rows under this property with no live counterpart are additions.
 		const FString Indexed = PropPrefix + TEXT("[");
@@ -206,11 +211,13 @@ void DiffQuestInstancedChildren(const UStruct* Layout, const void* Container, co
 				// DIRECT children only - a grandchild's key carries a further '/' segment, and belongs to its own owner.
 				if (Row.Key.RightChop(OwnerKey.Len() + 1).Contains(TEXT("/"))) continue;
 
+				// A subobject row names its type in "class", a struct row in "struct" - show whichever the row carries.
+				const FString ClassCell = Row.Get(TEXT("class"));
 				FQuestPropertyChange Change;
-				Change.Property     = Row.Key.RightChop(OwnerKey.Len() + 1);
+				Change.Property     = PathUnderOwner(Row.Key.RightChop(OwnerKey.Len() + 1));
 				Change.Kind         = EQuestPropertyChangeKind::ChildAdded;
 				Change.CurrentText  = TEXT("<absent>");
-				Change.IncomingText = Row.Get(TEXT("class"));
+				Change.IncomingText = ClassCell.IsEmpty() ? Row.Get(TEXT("struct")) : ClassCell;
 				Entry.Changes.Add(MoveTemp(Change));
 			}
 		}
@@ -221,6 +228,6 @@ void DiffQuestInstancedChildren(const UObject* Owner, const FString& OwnerKey, c
 	FQuestNodePlanEntry& Entry, FQuestInPlacePlan& OutPlan, const FQuestAbsentPolicyResolver& Policies)
 {
 	if (!Owner) return;
-	DiffQuestInstancedChildren(Owner->GetClass(), Owner, OwnerKey, Bundle, Entry, OutPlan, Policies);
+	DiffQuestInstancedChildren(Owner->GetClass(), Owner, OwnerKey, FString(), Bundle, Entry, OutPlan, Policies);
 }
 

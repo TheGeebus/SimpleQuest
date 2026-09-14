@@ -271,8 +271,8 @@ expected you to know where the reward had been authored.
   Step, the objective's authored config and the documentation all described
   the slot, but the Step node never exposed it and the compiler never copied
   it, so an objective's `Config Asset` was always empty. The node has the field
-  now, filtered to Objective Config assets, and shows the chosen asset on its
-  face.
+  now, filtered to Objective Config assets, and names the chosen asset when
+  expanded.
 
 - **The round-trip check compared nothing under the JSON format.** Its authored
   comparison only ever read `.tsv` files, so with JSON as the project's format
@@ -280,6 +280,30 @@ expected you to know where the reward had been authored.
   with the questline. It reads whatever format the export wrote, and both
   `SimpleQuest.RoundTrip` and `SimpleQuest.RoundTripCompare` accept
   `--format=<name>` the way the export and import commands do.
+
+- **Breaking a wire in a questline graph is undoable.** It never was: the
+  engine's base schema opens no transaction around a break and neither does the
+  graph editor that calls it - every engine schema opens its own in the override,
+  and ours did not. Single links, a pin's links and a node's links each undo as
+  one step now.
+
+- **A trigger no longer refuses a step it has only just activated.** A trigger
+  watching several steps evaluated them one at a time as it fired, so when
+  completing a live step activated the next one in the same instant, the fire
+  reached that successor too and was refused for an action the player took
+  before the step existed - a spurious PROGRESS REFUSED, or a wrong-outcome
+  refusal, on every advance. Every watched step's fate is decided against the
+  state at the moment of the fire, and only then is anything published.
+
+- **Nodes with no authored display name no longer warn on every catch-up.** A
+  broad subscription catches up on every known node at startup, and the display
+  lookup for each was made before the framework had checked whether the node had
+  anything to replay; a node authored without a display payload - which has no
+  record by design - then logged "unregistered, or the compile missed it," once
+  per node per subscriber. The phase is read first now, a never-reached node is
+  skipped before any lookup, and a known tag with no record is quiet. The
+  warning is reserved for a tag the framework does not know at all, which is
+  the case it was written for.
 
 - **Importing a Generic reward with no payload set warned about a missing
   row.** An unset payload is exported as no row on purpose, and an export
@@ -493,10 +517,10 @@ expected you to know where the reward had been authored.
   spawned into a fresh game or a restored one - the same catch-up behavior quest
   components already have.
 
-- **The chapters teach, rather than only demonstrate.** Chapters one through
-  ten carry narrative beats for the player and graph comments written for the
-  author, so a chapter explains the concept it exhibits instead of leaving the
-  graph to speak for itself. The last chapter is in progress.
+- **The chapters teach, rather than only demonstrate.** All eleven carry
+  narrative beats for the player and graph comments written for the author, so
+  a chapter explains the concept it exhibits instead of leaving the graph to
+  speak for itself.
 
 - **Chapter 8 teaches linked questlines by placing one twice.** A patrol route is
   authored once and placed at both ends of the room, dispatched together by a
@@ -525,6 +549,21 @@ expected you to know where the reward had been authored.
   locker, and a terminal across the facility, none of which know a switch exists.
   A condition authored once, true or false everywhere at the same instant - and
   from the reader's side, indistinguishable from a fact.
+
+- **Chapter 11 teaches observers with a screen that shows what one hears.** An
+  archive console in the last room carries a Quest Observer Component and a log
+  of every event it receives: the event on the left, the node on the right, a
+  time on every row it witnessed. A dial locks the screen onto any chapter, and
+  locking onto one that finished an hour ago fills the page at once with rows
+  marked *catch-up* - the framework hands a late subscriber the current state,
+  not a replay of the past. The room then runs the vocabulary in order: an
+  archivist who refuses a request until a barrier is cleared, so the screen
+  shows ACTIVATED, then GIVE BLOCKED in amber, then GIVE ENABLED, then STARTED;
+  and a return to the chapter's own page at the end, where the amber rows are
+  gone - transient events leave no state behind, so there is nothing to catch
+  up. Every node's current state is bright and what it moved past is grey,
+  which is the phase query drawn as a log. It is also the reveal: the door
+  panel, the sconce, the buttons and the sidebar were observers all along.
 
 - **`OBJ_InteractWithTarget` is an annotated reference for writing an
   Objective.** It walks the basic flow - receive a trigger event, notify the

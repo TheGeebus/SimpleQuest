@@ -5,10 +5,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.8.1] — Unreleased — Conditions and Endings
+## [0.8.1] — 2026-09-13 — Conditions, Endings and Eleven Chapters
 
-> **Unreleased.** The last tagged version is 0.8.0, and both `.uplugin` files
-> still read `0.8.0`. Everything below ships when this is tagged.
+A flurry of changes to several systems and features, all driven by hands-on work
+authoring the eleven chapters of the QuickStart tutorial progression.
 
 An Objective's life got a defined ending. Work placed after a completion is now
 a supported pattern with a boundary rather than something that silently reached
@@ -25,6 +25,22 @@ reward comes back, and an unavailable one carries the reason, so a journal can
 show "50 XP - already collected" rather than showing nothing at all. And asking
 what a quest pays became one question, where six answered it in pieces and each
 expected you to know where the reward had been authored.
+
+Asking where a quest stands is one question too. Get Quest Phase answers from
+the same derivation catch-up replays from, so a Blueprint asking directly and an
+observer arriving late can no longer disagree; a node's children can be listed;
+and every timestamp the framework records is on a play clock that survives level
+changes and saved games. Underneath, the relations between a placed questline's
+spellings are known before anything starts, which closed the last of the
+late-observer duplicates.
+
+And the QuickStart is finished. Eleven chapters, each carrying narrative beats
+for the player and comments for the author, with a Rewards chapter second and
+the last four built in this release: linked questlines placed twice, activation
+groups under a bridge, prerequisite rules and a power switch, and Observers -
+where an archive console shows the player what every tell in the previous ten
+had been hearing all along. Building them found a fair share of the fixes
+below; the written on-ramp starts from here.
 
 ### Added
 

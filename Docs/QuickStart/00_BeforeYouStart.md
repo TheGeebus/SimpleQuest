@@ -8,7 +8,7 @@ Open `SimpleQuestDemo` (or any project with both plugins installed). The QuickSt
 
 Everything the tutorial uses lives inside the SimpleQuest plugin's content folder, and the Content Browser hides plugin content by default. Click the **Settings** gear at the top right of the Content Browser and turn on **Show Plugin Content**. A `SimpleQuest Content` folder appears at the top level; `QuickStart` is inside it, and the chapters are under `QuickStart/Chapters`, one folder per room.
 
-<!-- shot 0.1: Content Browser with Show Plugin Content on, SimpleQuest Content/QuickStart/Chapters expanded -->
+<img width="1200" alt="Click the Settings gear icon and enable Plugin Content to find the chapter Questline Graphs" src="https://github.com/user-attachments/assets/5d20e1fa-e8e5-4783-8ebd-c430475118a6" />
 
 ## Controls
 
@@ -29,7 +29,7 @@ Three things on screen matter:
 - **The beats** are the lines of text that print as things happen. Each one is written to land at the moment the next action is yours, and each names the lifecycle event that just fired, in capitals: ACTIVATED, STARTED, COMPLETED, and so on. Those capitalized words are the vocabulary the whole tutorial is building; the companion uses them the same way.
 - **Experience and gold** read out at the bottom of the screen. Completing a room the first time grants experience points. Every completion grants gold.
 
-<!-- shot 0.2: the HUD during Chapter 1 - sidebar entry, a beat on screen -->
+<img width="1200" alt="A view of the Quest Sidebar on the left with its narrative beats along with the experience bar and gold readouts at the bottom and bottom right" src="https://github.com/user-attachments/assets/68475cbc-a001-42b8-9df0-aa76c4fab8ca" />
 
 ## The two buttons at the start
 
@@ -41,7 +41,7 @@ The first room has a pedestal with a **green Start button** and a **red Unlock b
 
 Every room has its own start button. It reads *Locked - finish earlier chapters* until you either reach that room in order or press Unlock. Once enabled, pressing it re-activates that chapter, which is how you replay one - Chapter 5 asks you to, to see its other path.
 
-<!-- shot 0.3: the start pedestal - green Start, red Unlock -->
+<img width="1200" alt="The green 'Start Tutorial' and red 'Unlock All Chapters' buttons" src="https://github.com/user-attachments/assets/a78ecf40-9241-4767-8025-1fb5254efc15" />
 
 ## Reading a room
 
@@ -68,7 +68,7 @@ The graph editor is a live instrument during Play In Editor, and most of what th
 - **Prerequisite Examiner.** Right-click a node and choose *Examine Prerequisite Expression*. The panel lays out the node's whole expression with each condition tinted by whether it is satisfied - the place to look when a node is waiting and you want to know on what (Chapters 4 and 7).
 - **Group Examiner.** Right-click an Activation Group node and choose *Examine Group Connections* to see the pairings that have no wire (Chapter 9).
 
-<!-- shot 0.4: a chapter graph open during PIE with halos visible, Outliner tab showing -->
+<img width="1200" alt="A questline side-by-side with a PIE session - debug halos show the live state of nodes" src="https://github.com/user-attachments/assets/c47711f1-6c53-4b42-99ea-383d8bc75086" />
 
 ## Saving and loading
 

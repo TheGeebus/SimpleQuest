@@ -38,7 +38,7 @@ See [CHANGELOG.md](CHANGELOG.md) for version history.
 - **Progression data as text** — export a questline to flat, diffable tables, edit them wherever your team already works, and re-import onto the existing asset. A read-only plan states every property it would change before anything is written, and refuses structural rewrites rather than half-applying them. A Mapping asset teaches the importer to read your studio's own file shape, so nobody reformats a spreadsheet to suit the plugin, and file formats are a registered seam you can add to.
 - **Save/load** — full progression state packs into a single serializable snapshot you embed in whatever save game your project already uses. Plain value copy, safe to hand off to an async save. Restored actors see events flagged as catch-up so they can jump straight to settled state rather than replaying transitions.
 - **Late-registration catch-up** — components that register after an event has fired receive the recorded state immediately on bind. Streaming levels, dynamically spawned actors, late-joining players, and save-game restoration all work without special-casing.
-- **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A searchable World State Facts panel lists every asserted fact. No log-diving to understand runtime state.
+- **Live PIE inspection** — colored halos on graph nodes show which lifecycle state each is in. The Prereq Examiner tints individual conditions by satisfaction. A dockable Facts Panel hosts a searchable World State view of every asserted fact and a Quest State view of every resolution, entry, and pending prerequisite. No log-diving to understand runtime state.
 - **Authoring diagnostics** — the Prereq Tag Validator runs a project-wide scan for broken cross-graph references. The Stale Quest Tags panel covers loaded levels, Actor Blueprint defaults, and unloaded levels (including World Partition), with per-row navigation, atomic multi-select clear, and a headless commandlet variant for CI gating.
 - **Two-plugin architecture** — SimpleQuest is built on **SimpleCore**, a standalone coordination layer (a hierarchical tag-routed event bus and a persistent fact store) that any UE plugin or system can consume independently.
 
@@ -56,7 +56,7 @@ Foundational coordination layer. Runtime and editor modules.
 
 - **`USignalSubsystem`** — gameplay-tag-routed event bus. Publishers send events on a tag, and the bus delivers them to subscribers bound on that tag or any ancestor tag in the hierarchy. Each callback receives the original published tag, so a subscriber on a parent tag knows which descendant fired. When the same logical event publishes under multiple tags simultaneously (a common case with linked questlines, where one node carries both its standalone tag and inlining-context aliases), the bus collapses delivery so each subscriber gets exactly one callback, not one per matching tag. Compared to Unreal's built-in `GameplayMessageRouter`: both handle hierarchical tag-keyed routing, and `USignalSubsystem` adds multi-branch publish with cross-branch deduplication for the case where a single logical event carries multiple tags simultaneously.
 - **`UWorldStateSubsystem`** — queryable, gameplay-tag-keyed fact store with integer reference counts. Add a fact, query whether it's present, remove it. Transition events fire when a fact appears (count goes 0→1) or disappears (1→0), so subscribers can react to state changes without polling. Components that register late read current truth directly - safe for streaming, dynamic spawn, join-in-progress, and save game restoration.
-- **`SimpleCoreEditor`** — editor module. Provides the World State Facts inspector panel and PIE debug channel. Usable without SimpleQuest.
+- **`SimpleCoreEditor`** — editor module. Provides the Facts Panel - a dockable host for fact-registry views, shipping with the World State view - and the PIE debug channel. Other plugins register their own views into the same panel; SimpleQuest adds Quest State. Usable without SimpleQuest.
 
 ### SimpleQuest
 
@@ -164,7 +164,7 @@ Useful constructs as your graph grows:
 - **Prereq Gate** — gate an activation cascade on a prerequisite expression as a standalone, graph-visible primitive. Handles "satisfy these conditions in any order, then proceed" without wiring a phantom downstream quest just to borrow its prereq gating.
 - **Add / Remove / Clear Facts** — write World State facts directly from the questline graph, so a graph both reacts to and produces the shared tag-keyed state any other system (or another questline) can gate on.
 - **Activation Group Entry / Exit** — many-to-many node activation topology without per-wire bookkeeping.
-- **LinkedQuestline** — reference another questline asset inline; the compiler expands it with full outcome pin synchronization.
+- **LinkedQuestline** — reference another questline asset inline; the compiler expands it, and the node's Completion Path pins stay synchronized with the linked graph's Outcome nodes.
 - **Grant Rewards** — drop onto any completion path (after a step, on a specific outcome, or on Any Outcome) to grant one or more rewards when the flow reaches it; its output continues the flow. Configure each reward inline, or author your own reward type. A questline can also carry its own completion rewards in its details panel, keyed by outcome, which fire whenever it completes - standalone or embedded in another questline.
 
 The Questline Outliner tab, Group Examiner, and Prereq Expression Examiner panels all provide read-only inspection of the graph's structure, particularly useful as graphs grow beyond a single screen.
@@ -193,7 +193,7 @@ If you need custom orchestration logic (analytics, save integration, bespoke act
 
 #### 6. Inspect during PIE
 
-Start Play In Editor. The graph panel shows per-state colored halos on content nodes (active, completed, blocked, etc.). Open the **Window > Developer Tools > Debug > World State Facts** panel for a searchable live view of every asserted fact. Hover any leaf in the Prereq Examiner to see whether it's satisfied, unsatisfied, or in-progress.
+Start Play In Editor. The graph panel shows per-state colored halos on content nodes (active, completed, blocked, etc.). Open **Window > Developer Tools > Debug > Facts Panel** and pick a view: **World State** is a searchable live list of every asserted fact, including the per-node lifecycle facts the framework writes; **Quest State** holds the detail a fact can't - each resolution with its outcome, time, and source; each entry with where it came from; and the prerequisite status of anything waiting on a giver. Every menu invocation opens a fresh panel, so the two views can sit side by side. Hover any leaf in the Prereq Examiner to see whether it's satisfied, unsatisfied, or in-progress.
 
 #### 7. Catch authoring drift
 

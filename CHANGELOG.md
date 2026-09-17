@@ -5,6 +5,76 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+The first pages of the written on-ramp, a crash found by doing what an author
+will do - saving while playing - and a routing rule that now says one thing for
+both role components.
+
+### Changed
+
+- **The Trigger component routes its subscriptions exactly.** Its own five
+  subscriptions, the observer bridge for `Step Tags to Trigger`, and tags added
+  at runtime all use exact routing, matching the Giver. Nothing changes for a
+  Step tag - Steps have no descendant tags, so hierarchical and exact delivered
+  identically - and authoring the asset-form spelling of a placed Step still
+  works, because a Step's publishes carry each of its addresses as a channel of
+  its own. What it rules out is a container tag in the list fanning every inner
+  Step's events onto the trigger's delegates while the trigger can never fire
+  one, a container being never Live. The activation guard's warning now says
+  what it checks.
+
+### Fixes
+
+- **Recompiling a questline during a play session could crash the next
+  questline-level reward grant.** Compiling a registered graph moves the previous
+  compile's node instances and questline rewards out of the asset, and the
+  running manager kept the nodes alive but held the rewards by bare pointer, so
+  the next garbage collection freed them and the next chapter to complete
+  granted from freed memory. The manager now owns a reference to the rewards it
+  grants from, exactly as it does for nodes: a running session keeps the compile
+  it started with, and the new one takes effect the next time you play. The
+  compiler says so when a graph is compiled while a session is running, since
+  from the viewport nothing changes and that reads as a failed compile rather
+  than a deferred one.
+
+### QuickStart
+
+- **Chapter 11's steps are named for the lesson, not the lock-in.** The step
+  that sends you back to Chapter 11 is *Catch-up Events* and the one held by the
+  archivist is *Watch Givers and Triggers*, so the sidebar reads as a table of
+  contents for the room. The beat that sends you to Chapter 5 now says what a
+  lock-in does underneath: the screen drops the channel it was on, subscribes
+  to the new one, and receives what already fired there as catch-up.
+
+### Documentation
+
+- **The QuickStart companion has begun.** `Docs/QuickStart/` opens with an
+  index, *Before You Start* - controls, the HUD, what the green and red buttons
+  publish, the three layers every room is built from, and the live instruments
+  to keep open while you play - and *Chapter 1 - Basic Trigger*, written from
+  the source: what happened in the room, what is in the graph, which tags were
+  minted and which events fired in which order, and the gotchas the room's
+  design steers you around. Every chapter page ends with what it added to the
+  picture of the Step node and its Objective, which is the one thing the eleven
+  rooms are meant to leave you with. Screenshots follow; the pages read without
+  them.
+
+- **The README's Quick Start plays before it builds.** It sends a newcomer to
+  the tutorial first, then to the graphs behind the rooms, and only then to
+  building a first progression - with a table of what each of the eleven
+  chapters teaches.
+
+- **The Facts Panel is named for what it is.** Three places in the README
+  described a "World State Facts" panel. The panel is *Facts Panel*, under
+  Developer Tools > Debug, and it hosts two selectable views: *World State*,
+  every asserted fact, and *Quest State*, the resolutions, entries, and
+  prerequisite status behind them. The README now also says which plugin
+  provides which: SimpleCore ships the panel and the World State view, and
+  SimpleQuest registers Quest State into it.
+
+---
+
 ## [0.8.1] — 2026-09-13 — Conditions, Endings, and Eleven Chapters
 
 A flurry of changes to several systems and features, all driven by hands-on work

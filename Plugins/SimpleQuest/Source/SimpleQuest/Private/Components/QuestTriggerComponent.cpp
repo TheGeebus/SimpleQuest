@@ -50,11 +50,11 @@ void UQuestTriggerComponent::SubscribeTriggerStep(FGameplayTag StepTag)
     // Trigger-side subscriptions, captured into the shared per-tag handle map so RemoveTagsFromTrigger (via the base
     // UnregisterSingleObservedTag) unsubscribes them selectively. Same five subs the bulk path used.
     TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(StepTag);
-    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated));
-    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse));
-    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked));
-    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated));
-    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated, FSignalRoutingDefaults::ExactOnly));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse, FSignalRoutingDefaults::ExactOnly));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerBlocked, FSignalRoutingDefaults::ExactOnly));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerDeactivatedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerDeactivated, FSignalRoutingDefaults::ExactOnly));
+    Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerSatisfiedEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerSatisfied, FSignalRoutingDefaults::ExactOnly));
 
     if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
     {
@@ -87,12 +87,15 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
 {
     if (!SignalSubsystem) return;
     
-    // Guard: ensure the channel matches some entry in StepTagsToTrigger, including ancestor-matching semantics.
+    // Guard: the delivering channel must be one of the authored Step tags. HasTag accepts an entry or one of its ancestors,
+    // never a descendant, which is consistent with the exact routing on the subscriptions above.
     if (!StepTagsToTrigger.HasTag(Channel))
     {
         UE_LOG(LogSimpleQuestSubscription, Warning,
-            TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' - channel tag does not match any watched tag (including hierarchical descendants). Check StepTagsToTrigger configuration."),
-            *Channel.ToString(), *GetOwner()->GetActorNameOrLabel());
+            TEXT("UQuestTriggerComponent::OnTriggerActivated : '%s' on '%s' - channel tag is not one of the "
+                 "watched Step tags. Check StepTagsToTrigger."),
+            *Channel.ToString(),
+            *GetOwner()->GetActorNameOrLabel());
         return;
     }
 
@@ -185,9 +188,11 @@ TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags(
     Implicit.Reserve(Implicit.Num() + StepTagsToTrigger.Num());
     for (const FGameplayTag& Tag : StepTagsToTrigger)
     {
-        // Trigger keeps default routing for now - Step tags subscribed hierarchically preserve current
-        // behavior. Audit (TODO §4.38) classifies whether Trigger should narrow to ExactMatch in a future pass.
-        Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::HierarchicalSubscribe});
+        // Exact routing, matching the Giver's bridge: a Trigger addresses exactly the Step tags it is authored with. Step
+        // tags have no descendants, so nothing changes for a correctly authored component. What it rules out is a container
+        // tag fanning every inner Step's events onto these delegates while the Trigger can never fire one (a container is
+        // never Live). Alias-form authoring still works - a Step's publishes carry each of its addresses as its own channel.
+        Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::ExactOnly});
     }
     return Implicit;
 }
@@ -219,7 +224,8 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
     UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("UQuestTriggerComponent::SendTriggerEvent : '%s' fired by '%s' against %d watched step(s); CustomData %s"),
         TriggeredActor ? *TriggeredActor->GetName() : TEXT("(none)"),
         Instigator ? *Instigator->GetName() : TEXT("(none)"),
-        Registered.Num(), Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
+        Registered.Num(),
+        Context.CustomData.IsValid() ? TEXT("populated") : TEXT("empty"));
 
     // Two passes, and the split is the point. A fire that completes a live step activates that step's successors
     // synchronously, inside the publish - and a successor this trigger also watches would then be reached by the
@@ -308,7 +314,7 @@ void UQuestTriggerComponent::AddTagsToTrigger(const FGameplayTagContainer& Tags)
         if (bRegistered)
         {
             // Base observer side, with the same effective settings GetImplicitlyObservedTags produces for a fresh
-            // trigger tag (default + Progress/Blocked/Unblocked + the forced Started/GiveBlocked pair, hierarchical).
+            // trigger tag (default + Progress/Blocked/Unblocked + the forced Started/GiveBlocked pair, exact).
             // Mirrors the bridge overlay in RegisterQuestObserver - keep in sync if that overlay changes.
             FObservedQuestEventSettings Settings;
             Settings.bObserveProgress = true;
@@ -316,7 +322,7 @@ void UQuestTriggerComponent::AddTagsToTrigger(const FGameplayTagContainer& Tags)
             Settings.bObserveUnblocked = true;
             Settings.bObserveStarted = true;
             Settings.bObserveGiveBlocked = true;
-            Settings.Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
+            Settings.Routing = FSignalRoutingDefaults::ExactOnly;
             RegisterSingleObservedTag(Tag, Settings);
 
             SubscribeTriggerStep(Tag);

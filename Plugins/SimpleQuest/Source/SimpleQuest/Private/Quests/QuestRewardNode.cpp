@@ -61,7 +61,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 
 	for (UQuestRewardBase* Reward : Rewards)
 	{
-		if (!Reward) continue;
+		if (!IsValid(Reward)) continue;
 
 		Reward->DispatchTryGrantReward(Incoming);
 		for (FQuestRewardContext& Grant : Reward->TakePendingGrants())

@@ -533,6 +533,15 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
     NumWarnings = 0;
     RootGraph = InGraph;
 
+	// A running play session keeps the compile it started with - the manager holds the previous instances and rewards, and
+	// only the next session sees this one. Say so, because from the viewport nothing changed and that reads as a failed
+	// compile rather than a deferred one.
+	if (GEditor && GEditor->IsPlaySessionInProgress())
+	{
+		AddWarning(FString::Printf(TEXT("'%s' was compiled during a play session. The running session keeps the previous compile; "
+			"this one takes effect the next time you play."), *InGraph->GetName()));
+	}
+
 	// Derive the effective questline ID; designer override takes priority, asset name is the fallback
 	const FString TagPrefix = SanitizeTagSegment(InGraph->QuestlineID.IsEmpty() ? InGraph->GetName() : InGraph->QuestlineID);
 

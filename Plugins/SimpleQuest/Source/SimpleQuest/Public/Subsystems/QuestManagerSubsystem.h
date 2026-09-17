@@ -467,7 +467,14 @@ private:
 	 * Delivery (PublishGraphResolutions) and the reward queries read this by a resolution's GraphTag, so an embedded
 	 * questline's rewards resolve without its source asset - which is never loaded at runtime. Populated in
 	 * RegisterQuestlineGraph alongside LiveGraphsByIdentity.
+	 *
+	 * A UPROPERTY for the same reason LoadedNodeInstances is one: these are the objects the manager grants from, so it
+	 * must own a reference to them. Recompiling a registered graph while a play session is running moves the previous
+	 * compile's rewards into the transient package and drops them from the asset. The node instances survive that because
+	 * this subsystem references them; the rewards have to survive the same way, or the next questline completion grants
+	 * from freed memory.
 	 */
+	UPROPERTY()
 	TMap<FName, FQuestCompiledQuestlineRewards> LiveQuestlineRewardsByIdentity;
 
 	/**

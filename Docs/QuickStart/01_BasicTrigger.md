@@ -58,23 +58,38 @@ Four comment boxes sit beside the nodes. Read them in the graph; in short:
 - *Trigger Component* - watches a Step, receives an activation when the Step goes Live, can fire while it is Live, and hears when it ends. Fires carry a payload your game defines; the Objective decides what the payload means.
 - *Outcome node* - ends the graph with a named result, and becomes a pin on any node that places this questline inside another.
 
-Things worth clicking:
+### Things worth clicking:
 
-- **Expand the Step.** The arrow at the bottom of the node opens a detail view listing the actors watching it. The beacon is there, marked *(via QuickStart)* - it watches this Step through the tutorial's master questline rather than through this asset directly. That distinction is the subject of *Under the hood*. 
 <br>
   <img width="490" height="324" alt="The Step expanded: the beacon listed (via QuickStart)" src="https://github.com/user-attachments/assets/44cd76c5-12e6-4a65-b2f5-f18d55697211" />
-- **Select the Step.** In the Details panel: *Node Label* (the identity the tag is built from); *Display Name*, *Description*, and *Display Data* (UI text - separate from identity, empty by default); the *Objective Class*; an optional *Config Asset*; *Target Actors* and *Target Classes*; *Number of Elements*; and the *Prerequisite Gate Mode* (Chapter 4). This Step has no display data of its own; the beats you read belong to the chapter. The properties on the Step node will be discussed throughout the other chapters.
+<br>
+
+- **Expand the Step.** The arrow at the bottom of the node opens a detail view listing the actors watching it. The beacon is there, marked *(via QuickStart)* - it watches this Step through the tutorial's master questline rather than through this asset directly. That distinction is the subject of *Under the hood*.
+
 <br>
   <img width="548" height="562" alt="Details panel with the Step selected" src="https://github.com/user-attachments/assets/23a7d053-15ad-4bc0-a730-c4eb205153a3" />
-- **Click empty canvas.** The Details panel switches to the questline's own settings - the same thing the *Graph Defaults* button on the toolbar shows. Here the *Display Name* is "Chapter 1 — Quests and Triggers", the *Display Data* is `DA_Ch1Main_BasicTrigger`, and *Questline Rewards* holds the reward set that pays at the end of every chapter (Chapter 2 explains it).
+<br>
+
+- **Select the Step.** In the Details panel: *Node Label* (the identity the tag is built from); *Display Name*, *Description*, and *Display Data* (UI text - separate from identity, empty by default); the *Objective Class*; an optional *Config Asset*; *Target Actors* and *Target Classes*; *Number of Elements*; and the *Prerequisite Gate Mode* (Chapter 4). This Step has no display data of its own; the beats you read belong to the chapter. The properties on the Step node will be discussed throughout the other chapters.
+
 <br>
   <img width="547" height="375" alt="Graph Defaults including Display Name, Display Data, and Questline Rewards" src="https://github.com/user-attachments/assets/f713d2da-f6e3-4f88-aaf4-cabc283241f7" />
-- **Open `DA_Ch1Main_BasicTrigger`** in the chapter's `DisplayData` folder. It is a Quest Lifecycle Display Data asset: one text array per lifecycle event. *Activated Beats* and *Completed Beats Default* are filled; the others are empty. That is the entire source of what the HUD printed.
+<br>
+
+- **Click empty canvas.** The Details panel switches to the questline's own settings - the same thing the *Graph Defaults* button on the toolbar shows. Here the *Display Name* is "Chapter 1 — Quests and Triggers", the *Display Data* is `DA_Ch1Main_BasicTrigger`, and *Questline Rewards* holds the reward set that pays at the end of every chapter (Chapter 2 explains it).
+
 <br>
   <img width="1200" alt="	DA_Ch1Main_BasicTrigger: display data, Activated Beats and Completed Beats Default" src="https://github.com/user-attachments/assets/10b0d279-cd06-4d3d-a465-dc57b0e5ee73" />
-- **Open `QL_QuickStart`** and find the Chapter 1 node. It is a Linked Questline node, and it has a *Reached* Completion Path pin. That pin *is* this graph's Outcome node, seen from outside.
+<br>
+
+- **Open `DA_Ch1Main_BasicTrigger`** in the chapter's `DisplayData` folder. It is a Quest Lifecycle Display Data asset: one text array per lifecycle event. *Activated Beats* and *Completed Beats Default* are filled; the others are empty. That is the entire source of what the HUD printed.
+
 <br>
   <img width="1200" alt="QL_QuickStart on the Chapter 1 node: its Reached pin, the prerequisite wire leaving Any Outcome" src="https://github.com/user-attachments/assets/d67ab8e8-254d-4bae-b347-adff075e19d5" />
+<br>
+
+- **Open `QL_QuickStart`** and find the Chapter 1 node. It is a Linked Questline node, and it has a *Reached* Completion Path pin. That pin *is* this graph's Outcome node, seen from outside.
+
 
 ## Under the hood
 
@@ -111,8 +126,7 @@ Pressing the green button calls `Start Questline` on `QL_QuickStart`. The master
 5. The Step creates an instance of `OBJ_InteractWithTarget` and activates it. The Objective is now listening for trigger fires on the Step's tag.
 6. The beacon's Trigger Component hears STARTED on the tag it watches and fires its own *On Quest Trigger Activated* event. The actor lights its aura.
 
-<img width="1200" alt="Where the Facts Panel lives: Window > Developer Tools > Debug > Facts Panel" src="https://github.com/user-attachments/assets/529690f4-bf70-46d7-b479-028ffcd14c7b" />
-<br>
+<img width="1200" alt="Where the Facts Panel lives: Window → Developer Tools → Debug → Facts Panel" src="https://github.com/user-attachments/assets/529690f4-bf70-46d7-b479-028ffcd14c7b" />
 <img width="1200" alt="World State view, filter empty, right after walking in with several tags visible" src="https://github.com/user-attachments/assets/c268a0b1-ef3b-4f77-b593-fc372b68d2da" />
 
 ### The fire
@@ -160,16 +174,18 @@ None of the actors held a reference to the graph, or to each other.
 Publisher and subscriber meet at a tag and nowhere else. That is what the Objective's comment means by the game's vocabulary coming in and the graph's vocabulary going out - the Trigger's payload is yours, the outcome is the graph's, and the Objective is where one becomes the other.
 
 **PIE Debug Halo - Live state:**
+
 <img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
 
 **PIE Debug Halo - Completed state:**
+
 <img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
 
 ## Gotchas
 
 **The tag comes from the Node Label, not the Display Name.** *Node Label* is identity. *Display Name* is UI text and nothing else. Display Name is empty by default and is never substituted from the label - a HUD that asks for a display name gets nothing back until you author one. Rename a node's label and the node shows a *Recompile to update tags* marker until you compile. On compile, the rename propagates to every loaded actor, Blueprint default, and data asset that referenced the old tag, and assets that weren't loaded heal on their next load.
 
-- Though it is intended to be a flexible approach that provides a place to author display data for each Step, it's not mandatory to source your display data through this system. Your HUD controller or any other manager actor can instead subscribe to quest events and use data from the payload to assemble text to show or drive additional queries through any external system as needed. 
+- Though it is intended to be a flexible approach that provides a place to author display data for each Step, it's not mandatory to source your display data through this system. Your HUD controller or any other manager actor can instead subscribe to quest events and use data from the payload to assemble text to show or drive additional queries through any external system as needed.
 
 **Compile before you wire an actor.** A Trigger Component's tag picker lists registered tags, and a Step's tag does not exist until its graph has been compiled. Add nodes, compile, then place actors. When a chapter of yours does nothing in play, the first check is whether the tag the component holds is the tag the graph currently compiles to.
 

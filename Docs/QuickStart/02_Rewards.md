@@ -106,7 +106,7 @@ Three comment boxes sit in the graph. In short:
   <img width="1200" alt="BP_QuestPlayerExample's Quest Reward Recipient Component: Reacts To Reward Types listing Experience and Currency.Gold" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />~~~~
 <br>
 
-- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to the handler - Apply Reward, which reads the reward tag and calls *Add Experience Points* and/or *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
+- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists only `SimpleQuest.Reward` with routing mode set to `Descendants`. This ensures that all child reward tags of `SimpleQuest.Reward` broadcast to this component, which includes both `SimpleQuest.Reward.Currency.Gold` and `SimpleQuest.Reward.Experience` - the two tags that the Grant Reward nodes in this project actually use. The character's *On Reward Granted* event is bound in the event graph to the handler - *Apply Reward*, which reads the reward tag and calls *Add Experience Points* and/or *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
 
 ---
 

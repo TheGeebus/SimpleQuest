@@ -67,7 +67,7 @@ Play the room first. Then open its graph: `SimpleQuest Content/QuickStart/Chapte
 
 The graph editor is a live instrument during Play In Editor, and most of what the companion points at is easier to see this way than to read about.
 
-- **Halos.** With a questline graph open during PIE, content nodes draw a colored halo for the lifecycle state they are in - waiting on a giver, Live, Completed, or Deactivated. The colors are yours to set in **Editor Preferences > Plugins > Simple Quest Visuals**, alongside the wire and pin colors.
+- **Halos.** With a questline graph open during PIE, content nodes draw a colored halo for the lifecycle state they are in - waiting on a giver, Live, Completed, or Deactivated.
 - **Questline Outliner.** A tab in the graph editor listing the structure of whatever is open. Double-click an entry to jump to it. It is the fastest way around a graph with nested Quests or linked questlines.
 - **Breadcrumbs.** The bar across the top of the graph panel. Clicking a graph's name goes to that graph; clicking the arrow before it goes to the node that hosts it.
 - **Facts Panel.** `Window > Developer Tools > Debug > Facts Panel`. One panel with a view selector at the top, and two views to pick from:
@@ -97,4 +97,4 @@ Press **P** at any point for the pause menu. Saving mid-chapter and loading it b
 
 ---
 
-Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md).
+Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md)

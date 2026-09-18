@@ -36,7 +36,7 @@ In order:
 
 4. The door ahead opens. It is Chapter 2's door, and it opened because Chapter 2 just activated - more on that under *Completion* below.
 
-The in-world tell is the beacon: it glows only while its Step is Live, and when it fires it hears back from the Objective - a satisfaction signal that changes its aura, and a per-fire response that plays the sound cue. That, and the HUD, are how this room shows you the lifecycle. Neither the beacon nor the HUD knows about the graph. Both are reacting to events published on a tag.
+The in-world tell is the beacon: it glows only while its Step is Live, and when it fires it hears back from the Objective - a satisfaction signal, which is what changes its aura and plays the sound cue, and a per-fire response, which the beacon only acts on when the answer is a refusal. That, and the HUD, are how this room shows you the lifecycle. Neither the beacon nor the HUD knows about the graph. Both are reacting to events published on a tag.
 
 <img width="1200" alt="The room on entry: beacon lit, the ACTIVATED beat" src="https://github.com/user-attachments/assets/699ab65f-b12a-4b5b-9649-d16820dd1cec" />
 <img width="1200" alt="After the overlap: satisfied beacon, the COMPLETED beat, Chapter 2's door opening" src="https://github.com/user-attachments/assets/e0c61636-1e36-423f-b450-d47732d2e13d" />
@@ -147,17 +147,17 @@ Walking into the beacon calls `Send Trigger Event` on its Trigger Component. The
 
 Here the Step is Live, so the fire lands on the Objective's *Try Complete Objective*. `OBJ_InteractWithTarget` does two things with it:
 
-1. *Publish Trigger Satisfied* - a signal back to the one Trigger Component whose fire this was, saying the fire counted. The beacon's *On Quest Trigger Satisfied* event runs and it changes its aura.
+1. *Publish Trigger Satisfied* - a signal back to the one Trigger Component whose fire this was, saying the fire counted. The beacon's *On Quest Trigger Satisfied* event runs: it plays the success sound cue, changes its aura, and makes itself inactive.
 2. *Complete Objective With Outcome* with `SimpleQuest.Outcome.Reached`. (The Objective's default arm calls its parent class, which completes on *Reached*; a tickbox on the Blueprint switches it to *Solved*. The tutorial ships with the default.)
 
-Every fire also gets a **response** from the Objective - *Progress*, *Completed*, or *Refused* - delivered to the Trigger Component that fired, on its *On Quest Trigger Responded* event. Here the response is *Completed*, and it rides the completion below. The beacon's sound cue plays from that response. Satisfied and Responded are the two signals in this chapter that travel back toward the actor that caused them; everything else flows outward.
+Every fire also gets a **response** from the Objective - *Progress*, *Completed*, or *Refused* - delivered to the Trigger Component that fired, on its *On Quest Trigger Responded* event. Here the response is *Completed*, and it rides the completion below. The example beacon does nothing with a *Completed* response - Satisfied already told it everything it needed - and reacts only to *Refused*, with the same denied sound and blocked color it gives a PROGRESS REFUSED (Chapter 4). Satisfied and Responded are the two signals in this chapter that travel back toward the actor that caused them; everything else flows outward.
 
 ### Completion
 
 Completing the Objective resolves the Step:
 
 1. The `.Live` fact is removed and a `.Completed` fact is added. `.Started` stays. It is the append-only record that the Step has run at least once, held at a count of 1 however many times the Step runs - where `.Completed` counts: resolve the Step a second time and it reads 2. That is the World State side. The resolution itself - outcome `Reached`, the time, and what caused it - is recorded in the Quest State Subsystem, where `Is Quest Resolved With` and the catch-up path read it later. The Facts Panel's Quest State view is the window onto that record, and this completion is one row on its *Resolutions* tab.
-2. **COMPLETED** publishes on the Step's tag, carrying the outcome. Alongside it, the beacon's Trigger Component receives the *Completed* response to its fire (the sound cue) and the trigger-side wrap for the Step: it disarms its own subscriptions, and the actor's *On Quest Trigger Deactivated* event runs with reason *Completed*.
+2. **COMPLETED** publishes on the Step's tag, carrying the outcome. Alongside it, the beacon's Trigger Component receives the *Completed* response to its fire and the trigger-side wrap for the Step: it disarms its own subscriptions, and the actor's *On Quest Trigger Deactivated* event runs with reason *Completed*.
 3. The Step's *Reached* path fires, and so does *Any Outcome* - the white pin fires on every completion, the yellow pins are exclusive. Only *Reached* is wired, so activation runs into the Outcome node.
 4. The Outcome node resolves the questline with `Reached`. **COMPLETED** publishes on `SimpleQuest.Questline.QuickStart.Chapter_1`, the questline-level rewards are granted, and the HUD prints the Completed beat.
 5. Back in the master graph, the Chapter 1 node's *Reached* pin fires, and so does its *Any Outcome* pin - and *Any Outcome* is the one wired to the prerequisite holding Chapter 2 back. The master gates on the chapter having ended, not on how it ended. Chapter 2 - activated at the start and deferred since - proceeds, and **ACTIVATED** publishes on `SimpleQuest.Questline.QuickStart.Chapter_2`.
@@ -236,4 +236,4 @@ Then run it once more. The room's start button re-activates the chapter now that
 
 ---
 
-Previous: [Before You Start](00_BeforeYouStart.md) | Next: [Chapter 2 - Rewards](02_Rewards.md).
+Previous: [Before You Start](00_BeforeYouStart.md) | Next: [Chapter 2 - Rewards](02_Rewards.md)

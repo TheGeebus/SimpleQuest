@@ -79,7 +79,7 @@ Four comment boxes sit beside the nodes. Read them in the graph; in short:
 - **Click empty canvas.** The Details panel switches to the questline's own settings - the same thing the *Graph Defaults* button on the toolbar shows. Here the *Display Name* is "Chapter 1 — Quests and Triggers", the *Display Data* is `DA_Ch1Main_BasicTrigger`, and *Questline Rewards* holds the reward set that pays at the end of every chapter (Chapter 2 explains it).
 
 <br>
-  <img width="1200" alt="	DA_Ch1Main_BasicTrigger: display data, Activated Beats and Completed Beats Default" src="https://github.com/user-attachments/assets/10b0d279-cd06-4d3d-a465-dc57b0e5ee73" />
+  <img width="1200" alt="DA_Ch1Main_BasicTrigger: display data, Activated Beats and Completed Beats Default" src="https://github.com/user-attachments/assets/10b0d279-cd06-4d3d-a465-dc57b0e5ee73" />
 <br>
 
 - **Open `DA_Ch1Main_BasicTrigger`** in the chapter's `DisplayData` folder. It is a Quest Lifecycle Display Data asset: one text array per lifecycle event. *Activated Beats* and *Completed Beats Default* are filled; the others are empty. That is the entire source of what the HUD printed.
@@ -178,11 +178,11 @@ Publisher and subscriber meet at a tag and nowhere else. That is what the Object
 
 **PIE Debug Halo - Live state:**
 
-<img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
+<img width="668" height="401" alt="A yellow PIE debug halo showing the Live state" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
 
 **PIE Debug Halo - Completed state:**
 
-<img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
+<img width="668" height="401" alt="A green PIE debug halo showing the Completed state" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
 
 ## Gotchas
 

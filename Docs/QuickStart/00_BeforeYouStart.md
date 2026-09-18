@@ -30,7 +30,7 @@ The glowing beacons and the quest givers do not need a key. Both fire on overlap
 Three things on screen matter:
 
 - **The sidebar** lists the questlines and steps currently in play and ticks them off as they complete.
-- **The beats** are the lines of text that print as things happen. Each one is written to land at the moment the next action is yours, and each names the lifecycle event that just fired, in capitals: ACTIVATED, STARTED, COMPLETED, and so on. Those capitalized words are the vocabulary the whole tutorial is building; the companion uses them the same way.
+- **The beats** are the lines of text that print as things happen. Each one is written to land at the moment the next action is yours, and each names the lifecycle event that just fired, in capitals: ACTIVATED, STARTED, COMPLETED, and so on. Those capitalized words are the vocabulary the whole tutorial is building; the walkthrough uses them the same way.
 - **Experience and gold** read out at the bottom of the screen. Completing a room the first time grants experience points. Every completion grants gold.
 
 <img width="1200" alt="A view of the Quest Sidebar on the left with its narrative beats along with the experience bar and gold readouts at the bottom and bottom right" src="https://github.com/user-attachments/assets/68475cbc-a001-42b8-9df0-aa76c4fab8ca" />
@@ -53,7 +53,7 @@ Every room has its own start button. It reads *Locked - finish earlier chapters*
 
 ## Reading a room
 
-Every chapter is built on three layers, and the companion refers to all three:
+Every chapter is built on three layers, and the walkthrough refers to all three:
 
 1. **Beats** - the HUD text. Player language. Fires at the moment the thing happens. Authored on a Display Data asset in the chapter's `DisplayData` folder.
 2. **Graph comments** - the comment boxes inside the chapter's questline graph. Author language. Sit beside the nodes they describe and say why the graph is shaped the way it is.
@@ -65,7 +65,7 @@ Play the room first. Then open its graph: `SimpleQuest Content/QuickStart/Chapte
 
 ## Keeping a graph open while you play
 
-The graph editor is a live instrument during Play In Editor, and most of what the companion points at is easier to see this way than to read about.
+The graph editor is a live instrument during Play In Editor, and most of what the walkthrough points at is easier to see this way than to read about.
 
 - **Halos.** With a questline graph open during PIE, content nodes draw a colored halo for the lifecycle state they are in - waiting on a giver, Live, Completed, or Deactivated.
 - **Questline Outliner.** A tab in the graph editor listing the structure of whatever is open. Double-click an entry to jump to it. It is the fastest way around a graph with nested Quests or linked questlines.
@@ -93,7 +93,7 @@ Press **P** at any point for the pause menu. Saving mid-chapter and loading it b
 - **EVENTS** are written in capitals, the way the beats print them. **States** are capitalized words: Live, Completed, Blocked.
 - Tags are in code font: `SimpleQuest.Questline.QuickStart.Chapter_1`.
 - Asset names are in code font too: `QL_Ch1_BasicTrigger`, `DA_Ch1Main_BasicTrigger`.
-- A **beat** is a line the HUD printed. A **comment** is a comment box in a graph. When the companion quotes either, it is quoting the asset as shipped.
+- A **beat** is a line the HUD printed. A **comment** is a comment box in a graph. When this walkthrough quotes either, it is quoting the asset as shipped.
 
 ---
 

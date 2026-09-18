@@ -49,7 +49,7 @@ both role components.
 
 ### Documentation
 
-- **The QuickStart companion has begun.** `Docs/QuickStart/` opens with an
+- **The QuickStart walkthrough has begun.** `Docs/QuickStart/` opens with an
   index, *Before You Start* - controls, the HUD, what the green and red buttons
   publish, the three layers every room is built from, and the live instruments
   to keep open while you play - and *Chapter 1 - Basic Trigger*, written from

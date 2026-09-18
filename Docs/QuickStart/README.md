@@ -1,6 +1,6 @@
 # The QuickStart, Chapter by Chapter
 
-A companion to the eleven-room tutorial that ships with SimpleQuest. The rooms teach by playing: each one narrates itself on the HUD, carries author-facing comments in its graph, and has something in the world that visibly reacts to quest state. This companion is the third pass over the same rooms - the one that goes underneath. For each chapter it says what you saw, what is in the graph behind it, how the framework actually did it, and what tends to go wrong when you build the same thing yourself.
+A walkthrough of the eleven-room tutorial that ships with SimpleQuest. The rooms teach by playing: each one narrates itself on the HUD, carries author-facing comments in its graph, and has something in the world that visibly reacts to quest state. This walkthrough is the third pass over the same rooms - the one that goes underneath. For each chapter it says what you saw, what is in the graph behind it, how the framework actually did it, and what tends to go wrong when you build the same thing yourself.
 
 It assumes you have played the room before you read its chapter. If you haven't, start with [Before you start](00_BeforeYouStart.md) - it covers the controls, the HUD, the two buttons at the start, and how to keep a graph open while you play.
 

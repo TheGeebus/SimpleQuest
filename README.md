@@ -131,6 +131,10 @@ After a room, open its questline: `SimpleQuest Content/QuickStart/Chapters/<Num_
 
 Keep a graph open while you play: the graph panel shows per-state colored halos on content nodes as the room progresses, and the Questline Outliner tab on the right lists the structure of whatever is open.
 
+### Read what happened underneath
+
+The written companion, [The QuickStart, Chapter by Chapter](Docs/QuickStart/README.md), is the third pass over the same rooms: one page per chapter on what you saw, what is in the graph, which tags were minted and which events fired in which order, where the state lives, and the mistakes each room's design steers you around. It opens with [Before You Start](Docs/QuickStart/00_BeforeYouStart.md) - the controls, the HUD, and the Facts Panel and PIE halos you can watch while you play - and every chapter adds a piece of one picture, the Step node and its Objective, which a closing page assembles. It is being written in chapter order; the index shows which pages are up.
+
 ### Building your first progression
 
 The same steps the QuickStart's own chapters were built with.

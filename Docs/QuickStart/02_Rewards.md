@@ -75,6 +75,7 @@ Three comment boxes sit in the graph. In short:
 
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/33604db3-9422-40af-92b9-a60e7193fac2" />
 <br>
+
 - **Select the Grant Rewards node on the *Reached* branch.** In the Details panel, *Rewards* is an array of configured reward objects - here one Currency reward, `SimpleQuest.Reward.Currency.Gold`, amount 40 - and each reward has its own *Modifiers* array: one Scale Amount, multiplier 2. That is how 40 became 80 in the readout. *Reward Sets* is empty on this node.
 
 <br>
@@ -86,6 +87,7 @@ Three comment boxes sit in the graph. In short:
 <br>
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/1b3d8f5c-a5c6-4df3-8241-1efa8c9f56d0" />
 <br>
+
 - **Select the node on the *Solved* branch.** Five thousand gold, no modifiers. An amount chosen to be impossible to miss, for the day you make it fire (see *Try it*).
 
 <br>

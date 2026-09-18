@@ -20,7 +20,7 @@ In order:
 
    > Touch the Trigger to get some more gold. A Grant Rewards node sits on this step's completion path.
 
-<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/07fb8500-3fbb-4a3e-bf1a-0577fb78fc39" />
+<img width="1200" alt="The room on entry: both beats on screen (the chapter's and Simple Grant's), the first beacon lit, the readout at its starting values" src="https://github.com/user-attachments/assets/07fb8500-3fbb-4a3e-bf1a-0577fb78fc39" />
 
 2. Touch the first beacon. The gold readout at the bottom of the screen goes up by 20, and the Step's completed beat prints:
 
@@ -34,7 +34,7 @@ In order:
    >
    > This step grants Experience Points via the 'Any Outcome' path, and it uses the 'Grant Once' modifier to ensure that only happens the first time. Any subsequent replay won't grant more experience, but it will still grant gold.
 
-<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/ce51bc14-9c1a-4bad-b5ed-7d3a4664e9d8" />
+<img width="1200" alt="After the first beacon: the REWARD GRANTED beat, gold up by 20, the second beacon lit" src="https://github.com/user-attachments/assets/ce51bc14-9c1a-4bad-b5ed-7d3a4664e9d8" />
 
 3. Touch the second beacon. Gold goes up again, the experience bar moves, and two completed beats land - the Step's, then the chapter's:
 
@@ -46,7 +46,7 @@ In order:
    >
    > Head back through the door to continue.
 
-<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/54152288-3d69-458b-b7b8-3d2145cd2670" />
+<img width="1200" alt="After the second beacon: both completed beats, the experience bar moved, the gold total" src="https://github.com/user-attachments/assets/54152288-3d69-458b-b7b8-3d2145cd2670" />
 
 The in-world tell is the readout itself: the numbers at the bottom of the screen are not the framework's. They belong to the player character, which received each grant as an event and decided what to do with it. The framework never learned what gold is.
 
@@ -61,9 +61,9 @@ Open `SimpleQuest Content/QuickStart/Chapters/02_Rewards/QL_Ch2_Rewards`. Two St
 - *Solved* → **[Grant: 5,000 gold]** - a dead end, and unused by default
 - *Any Outcome* → **[Grant: 500 XP, Grant Once]** → **Outcome (Reached)**
 
-Both Steps host `OBJ_InteractWithTarget`, the same Objective as Chapter 1, so each completes on *Reached* when a beacon is touched. Read the three branches against that: the *Reached* branch pays, the *Any Outcome* branch pays and carries the flow to the Outcome node, and the *Solved* branch does nothing at all - not because it is broken, but because nothing in this room ever completes on *Solved* (see the "Try It" section). Chapter 5 is where a Step ends more than one way, but this shows rewards waiting on mutually exclusive paths.
+Both Steps host `OBJ_InteractWithTarget`, the same Objective as Chapter 1, so each completes on *Reached* when a beacon is touched. Read the three branches against that: the *Reached* branch pays, the *Any Outcome* branch pays and carries the flow to the Outcome node, and the *Solved* branch does nothing at all - not because it is broken, but because nothing in this room ever completes on *Solved* (see the "Try it" section). Chapter 5 is where a Step ends more than one way, but this shows rewards waiting on mutually exclusive paths.
 
-<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/f3c89d6e-da0d-4f45-be84-a9c417de2834" />
+<img width="1200" alt="QL_Ch2_Rewards, the whole graph: two Steps, four Grant Rewards nodes, the three branches off Reward Trigger readable" src="https://github.com/user-attachments/assets/f3c89d6e-da0d-4f45-be84-a9c417de2834" />
 
 Three comment boxes sit in the graph. In short:
 
@@ -73,40 +73,40 @@ Three comment boxes sit in the graph. In short:
 
 ### Things worth clicking:
 
-  <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/33604db3-9422-40af-92b9-a60e7193fac2" />
+  <img width="1200" alt="The Reached-branch Grant Rewards node selected: Details showing Rewards [Currency: Gold, 40] and its Modifiers [Scale Amount, 2.0]" src="https://github.com/user-attachments/assets/33604db3-9422-40af-92b9-a60e7193fac2" />
 <br>
 
 - **Select the Grant Rewards node on the *Reached* branch.** In the Details panel, *Rewards* is an array of configured reward objects - here one Currency reward, `SimpleQuest.Reward.Currency.Gold`, amount 40 - and each reward has its own *Modifiers* array: one Scale Amount, multiplier 2. That is how 40 became 80 in the readout. *Reward Sets* is empty on this node.
 
 <br>
-  <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/7d91038d-fb3a-4159-9201-02d8ddf77452" />
+  <img width="1200" alt="The Any Outcome node selected: Rewards [XP, 500] with Modifiers [Grant Once]" src="https://github.com/user-attachments/assets/7d91038d-fb3a-4159-9201-02d8ddf77452" />
 <br>
 
 - **Select the node on the *Any Outcome* branch.** One XP reward, 500, carrying a Grant Once modifier. This node is also the one that continues to the Outcome node, which is why the chapter can end no matter which path the Step took.
 
 <br>
-  <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/1b3d8f5c-a5c6-4df3-8241-1efa8c9f56d0" />
+  <img width="1200" alt="The Solved-branch node: Currency Gold 5,000, no modifiers" src="https://github.com/user-attachments/assets/1b3d8f5c-a5c6-4df3-8241-1efa8c9f56d0" />
 <br>
 
 - **Select the node on the *Solved* branch.** Five thousand gold, no modifiers. An amount chosen to be impossible to miss, for the day you make it fire (see *Try it*).
 
 <br>
-  <img width="456" height="417" alt="Image" src="https://github.com/user-attachments/assets/80944ce3-8963-45fe-9002-ef98b705eb9f" />
+  <img width="456" height="417" alt="Graph Defaults: Questline Rewards with an Any Outcome entry whose Reward Sets lists QR_QuickStartRewardSet" src="https://github.com/user-attachments/assets/80944ce3-8963-45fe-9002-ef98b705eb9f" />
 <br>
 
 - **Click empty canvas.** Under *Questline Rewards*, one entry keyed *Any Outcome*, and instead of inline rewards it references a set: `QR_QuickStartRewardSet`. Every chapter's questline carries this same entry. It is the payout the chapter beat calls "rewards of its own."
 
 <br>
-  <img width="572" height="560" alt="Image" src="https://github.com/user-attachments/assets/de5e9ef4-f382-4d0b-a64a-f329a288895a" />
+  <img width="572" height="560" alt="QR_QuickStartRewardSet open: two rewards, XP with Grant Once and Gold with Scale By Recipient" src="https://github.com/user-attachments/assets/de5e9ef4-f382-4d0b-a64a-f329a288895a" />
 <br>
 
 - **Open `QR_QuickStartRewardSet`** in the `QuickStart` folder. A Reward Set is a data asset holding rewards, and optionally other sets, authored once and referenced from anywhere. This one holds two: an XP reward with Grant Once - experience pays once per chapter, so finishing all eleven fills the bar exactly - and a Gold reward with Scale By Recipient, which asks the recipient what to multiply by.
 
 <br>
-  <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />
+  <img width="1200" alt="BP_QuestPlayerExample's Quest Reward Recipient Component: Reacts To Reward Types listing Experience and Currency.Gold" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />
 <br>
 
-- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to two functions, *Add Experience Points* and *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
+- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to the handler - Apply Rewards, which reads the reward tag and calls *Add Experience Points* and/or *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
 
 ---
 
@@ -160,7 +160,7 @@ On the second beacon, four grants fire in a fixed order:
 
 Each grant reaches the player's Reward Recipient Component as an event, and the HUD reads the totals the player keeps. Open the Output Log filtered to `LogSimpleQuestActivation` and the sequence prints one line per grant: `GrantRewardSet: granting 'SimpleQuest.Reward.Currency.Gold' (recipient: targeted)`, then the component announcing it received it.
 
-<img width="861" height="431" alt="Image" src="https://github.com/user-attachments/assets/9b491f77-6ca7-4bd5-8f47-c3fa874e2d07" />
+<img width="861" height="431" alt="The Output Log filtered to LogSimpleQuestActivation across the second beacon: the four grants in order, each followed by the recipient's line" src="https://github.com/user-attachments/assets/9b491f77-6ca7-4bd5-8f47-c3fa874e2d07" />
 
 Above: On Reward Granted - the single surface through which Rewards are granted. See `SimpleQuest Content/ExampleBlueprints/Actors/BP_QuestPlayerExample` to view the `Apply Reward` event handler, which is an example of how to increment attributes that in turn notify the HUD that they were changed.
 
@@ -210,11 +210,11 @@ Open `OBJ_InteractWithTarget` in `SimpleQuest Content/ExampleBlueprints/Objectiv
 
 **Find and Untick the Branch in `OBJ_InteractWithTarget`:**
 
-<img width="340" height="370" alt="Image" src="https://github.com/user-attachments/assets/b7d5c1f4-ff36-470e-b344-5b9f3ce1676c" />
+<img width="340" height="370" alt="Flip this tickbox on OBJ_InteractWithTarget to fire the Solved Completion Path which grants 5000 gold" src="https://github.com/user-attachments/assets/b7d5c1f4-ff36-470e-b344-5b9f3ce1676c" />
 
 **The Next Completion Grants 5000 Gold:**
 
-<img width="407" height="238" alt="Image" src="https://github.com/user-attachments/assets/843beda5-ac9a-41ff-9ab0-6491e9e545f8" />
+<img width="407" height="238" alt="After the tickbox flip: the gold readout jumping by 5,000 on the second beacon" src="https://github.com/user-attachments/assets/843beda5-ac9a-41ff-9ab0-6491e9e545f8" />
 
 ### Change the amount granted without touching the Objective:
 

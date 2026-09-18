@@ -103,10 +103,10 @@ Three comment boxes sit in the graph. In short:
 - **Open `QR_QuickStartRewardSet`** in the `QuickStart` folder. A Reward Set is a data asset holding rewards, and optionally other sets, authored once and referenced from anywhere. This one holds two: an XP reward with Grant Once - experience pays once per chapter, so finishing all eleven fills the bar exactly - and a Gold reward with Scale By Recipient, which asks the recipient what to multiply by.
 
 <br>
-  <img width="1200" alt="BP_QuestPlayerExample's Quest Reward Recipient Component: Reacts To Reward Types listing Experience and Currency.Gold" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />
+  <img width="1200" alt="BP_QuestPlayerExample's Quest Reward Recipient Component: Reacts To Reward Types listing Experience and Currency.Gold" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />~~~~
 <br>
 
-- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to the handler - Apply Rewards, which reads the reward tag and calls *Add Experience Points* and/or *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
+- **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to the handler - Apply Reward, which reads the reward tag and calls *Add Experience Points* and/or *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
 
 ---
 

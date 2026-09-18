@@ -208,17 +208,17 @@ This is the room to change things in. Two experiments, both reversible.
 
 Open `OBJ_InteractWithTarget` in `SimpleQuest Content/ExampleBlueprints/Objectives`, find the tickbox the Chapter 1 comment described, and flip it so the Objective completes on *Solved*. Compile and save the Blueprint; no questline needs recompiling, because the Objective is a class the Step instantiates at play time. Press Play, press the red Unlock button, and start Chapter 2 from its own button. The first beacon still pays 20 gold - *Simple Grant*'s node is on *Any Outcome*, so it fires on *Solved* too. The second beacon pays 5,000, the 80 never appears, the XP still pays if it hasn't already, and the chapter still ends, because the Outcome node is on the one branch that fires no matter what. Everything the graph was designed to survive, it survives. Then flip the tickbox back: every other chapter wires *Reached*, and they will not end until you do.
 
-**Find and Untick the Branch in `OBJ_InteractWithTarget`:**
+**Find and untick the branch in `OBJ_InteractWithTarget`:**
 
 <img width="340" height="370" alt="Flip this tickbox on OBJ_InteractWithTarget to fire the Solved Completion Path which grants 5000 gold" src="https://github.com/user-attachments/assets/b7d5c1f4-ff36-470e-b344-5b9f3ce1676c" />
 
-**The Next Completion Grants 5000 Gold:**
+**The next Completion grants 5000 gold:**
 
 <img width="407" height="238" alt="After the tickbox flip: the gold readout jumping by 5,000 on the second beacon" src="https://github.com/user-attachments/assets/843beda5-ac9a-41ff-9ab0-6491e9e545f8" />
 
 ### Change the amount granted without touching the Objective:
 
-In `QL_Ch2_Rewards`, select the *Reached* node, add a Clamp Amount modifier to its Gold reward with *Max Amount* set to 30, and *Compile All*. The second beacon pays 30 instead of 80: 40 scaled to 80, then clamped. Now move the Clamp above the Scale Amount in the Modifiers array and *Compile All* again: 60, because 40 clamped is still 40, and then it doubles. Same two modifiers, different answers, and the array order is the only thing that changed. Remove the Clamp when you are done.
+In `QL_Ch2_Rewards`, select the *Reached* node, add a Clamp Amount modifier to its Gold reward with *Max Amount* set to 30, and *Compile All*. The second beacon pays 30 instead of 80: 40 scaled to 80, then clamped. Now move the Clamp above the Scale Amount in the Modifiers array and *Compile All* again: 60, because 40 clamps down to 30, and then it doubles. Same two modifiers, different answers, and the array order is the only thing that changed. Remove the Clamp when you are done.
 
 ---
 

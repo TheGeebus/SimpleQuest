@@ -74,26 +74,35 @@ Three comment boxes sit in the graph. In short:
 ### Things worth clicking:
 
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/33604db3-9422-40af-92b9-a60e7193fac2" />
-
+<br>
 - **Select the Grant Rewards node on the *Reached* branch.** In the Details panel, *Rewards* is an array of configured reward objects - here one Currency reward, `SimpleQuest.Reward.Currency.Gold`, amount 40 - and each reward has its own *Modifiers* array: one Scale Amount, multiplier 2. That is how 40 became 80 in the readout. *Reward Sets* is empty on this node.
 
+<br>
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/7d91038d-fb3a-4159-9201-02d8ddf77452" />
+<br>
 
 - **Select the node on the *Any Outcome* branch.** One XP reward, 500, carrying a Grant Once modifier. This node is also the one that continues to the Outcome node, which is why the chapter can end no matter which path the Step took.
 
+<br>
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/1b3d8f5c-a5c6-4df3-8241-1efa8c9f56d0" />
-
+<br>
 - **Select the node on the *Solved* branch.** Five thousand gold, no modifiers. An amount chosen to be impossible to miss, for the day you make it fire (see *Try it*).
 
+<br>
   <img width="456" height="417" alt="Image" src="https://github.com/user-attachments/assets/80944ce3-8963-45fe-9002-ef98b705eb9f" />
+<br>
 
 - **Click empty canvas.** Under *Questline Rewards*, one entry keyed *Any Outcome*, and instead of inline rewards it references a set: `QR_QuickStartRewardSet`. Every chapter's questline carries this same entry. It is the payout the chapter beat calls "rewards of its own."
 
+<br>
   <img width="572" height="560" alt="Image" src="https://github.com/user-attachments/assets/de5e9ef4-f382-4d0b-a64a-f329a288895a" />
+<br>
 
 - **Open `QR_QuickStartRewardSet`** in the `QuickStart` folder. A Reward Set is a data asset holding rewards, and optionally other sets, authored once and referenced from anywhere. This one holds two: an XP reward with Grant Once - experience pays once per chapter, so finishing all eleven fills the bar exactly - and a Gold reward with Scale By Recipient, which asks the recipient what to multiply by.
 
+<br>
   <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/e8aa41a2-f934-400c-9558-df8a20a69568" />
+<br>
 
 - **Open `BP_QuestPlayerExample`** in `SimpleQuest Content/ExampleBlueprints/Actors` and select its Quest Reward Recipient Component. *Reacts To Reward Types* lists `SimpleQuest.Reward.Experience` and `SimpleQuest.Reward.Currency.Gold`. Its *On Reward Granted* event is bound in the event graph to two functions, *Add Experience Points* and *Add Gold*, which update the totals the HUD reads. This is the whole receiving end.
 

@@ -4,7 +4,7 @@
 
 Chapters 1 and 2 had Steps that were running the moment the graph reached them. This room puts an actor between those two moments. Two Steps, both on the Objective from Chapter 1, and two quest givers in the room: a Step the graph has reached is *offerable*, and only a giver handing it over makes it *run*. The first Step is watched by both givers, and either can start it. The second is offered by one of those same givers, a second time. Nothing on either Step node says any of this.
 
-**By the end of this chapter you can name:** a Quest Giver Component, the Pending Giver state, the ENABLED event and the order ACTIVATED, ENABLED, STARTED, and where the decision that a Step has a giver actually lives.
+**By the end of this chapter you can name:** a Quest Giver Component, the Pending Giver state, the ENABLED event, the order ACTIVATED → ENABLED → STARTED, and where the decision that a Step has a giver actually lives.
 
 ---
 
@@ -34,7 +34,7 @@ In order:
 
 <img width="1200" alt="After walking into a giver: the STARTED beat on the HUD, both cubes blue, the first beacon lit" src="https://github.com/user-attachments/assets/5a5cb8e1-13d6-4c5f-a9f1-d014d6d973a2" />
 
-3. Touch the beacon. The Step completes - its beat is one line - and the second Step activates on the same touch. One cube turns yellow again, and it is always the same one, whichever of the two you used a moment ago: it offered the first Step too, whether or not you took it from there.
+3. Touch the beacon. The Step completes - its beat is one line - and the second Step activates on the same touch. One cube turns yellow again. It offered the first Step too, whether or not you took it from there.
 
    > COMPLETED. The Trigger advanced the objective, and the step resolved.
 
@@ -76,7 +76,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/03_BasicGiver/QL_Ch3_BasicGiver`. 
 
 - Both Steps host `OBJ_InteractWithTarget`, so both complete on *Reached* when a beacon is touched.
 - Both continue from their white *Any Outcome* pin rather than from *Reached* - Chapter 2's lesson applied: the room ends however the Objective ends.
-- Nothing on either node says "giver." What marks them is the summary line on the node face - *Givers: 2 · Triggers: 1* on Either Giver, *Givers: 1 · Triggers: 2* on Reuse Giver. That line is the editor reading the level, not a property of the Step.
+- No property on either node says "giver." What marks them is the summary line on the node face - *Givers: 2 · Triggers: 1* on Either Giver, *Givers: 1 · Triggers: 2* on Reuse Giver. That line is the editor reading the level, not a property of the Step.
 
 <img width="1200" alt="QL_Ch3_BasicGiver: the whole graph, both comment boxes, and the Givers and Triggers counts on the two Step nodes" src="https://github.com/user-attachments/assets/0b86f744-b75b-4a8b-bb9e-ee49ec01091e" />
 

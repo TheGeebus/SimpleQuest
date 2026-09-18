@@ -36,8 +36,8 @@ In order:
 
 The in-world tell is the beacon: it glows only while its Step is Live, and when it fires it hears back from the Objective - a satisfaction signal that changes its aura, and a per-fire response that plays the sound cue. That, and the HUD, are how this room shows you the lifecycle. Neither the beacon nor the HUD knows about the graph. Both are reacting to events published on a tag.
 
-<!-- shot 1.1: the room on entry - beacon lit, the ACTIVATED beat on the HUD -->
-<!-- shot 1.2: after the overlap - aura changed, the COMPLETED beat, Chapter 2's door opening ahead -->
+<img width="1200" alt="The room on entry: beacon lit, the ACTIVATED beat" src="https://github.com/user-attachments/assets/699ab65f-b12a-4b5b-9649-d16820dd1cec" />
+<img width="1200" alt="After the overlap: satisfied beacon, the COMPLETED beat, Chapter 2's door opening" src="https://github.com/user-attachments/assets/e0c61636-1e36-423f-b450-d47732d2e13d" />
 
 ## In the graph
 
@@ -49,7 +49,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/01_BasicTrigger/QL_Ch1_BasicTrigge
 - **Basic Trigger** is a Step. The dropdown on its face names the Objective class, `OBJ_InteractWithTarget`. It has three yellow Completion Path pins - *Reached*, *Solved*, *Procedural* - one for each outcome the Objective declares, and a white *Any Outcome* pin beneath them. Only *Reached* is wired.
 - **Outcome** carries the tag `SimpleQuest.Outcome.Reached`. When activation reaches it, the questline resolves with that outcome.
 
-<!-- shot 1.3: the whole graph, comment boxes readable -->
+<img width="1200" alt="QL_Ch1_BasicTrigger: the whole graph and all comments" src="https://github.com/user-attachments/assets/1d5392de-7094-4f62-b35e-aea33b6af238" />
 
 Four comment boxes sit beside the nodes. Read them in the graph; in short:
 
@@ -60,17 +60,21 @@ Four comment boxes sit beside the nodes. Read them in the graph; in short:
 
 Things worth clicking:
 
-- **Expand the Step.** The arrow at the bottom of the node opens a detail view listing the actors watching it. The beacon is there, marked *(via QuickStart)* - it watches this Step through the tutorial's master questline rather than through this asset directly. That distinction is the subject of *Under the hood*.
+- **Expand the Step.** The arrow at the bottom of the node opens a detail view listing the actors watching it. The beacon is there, marked *(via QuickStart)* - it watches this Step through the tutorial's master questline rather than through this asset directly. That distinction is the subject of *Under the hood*. 
+<br>
+  <img width="490" height="324" alt="The Step expanded: the beacon listed (via QuickStart)" src="https://github.com/user-attachments/assets/44cd76c5-12e6-4a65-b2f5-f18d55697211" />
 - **Select the Step.** In the Details panel: *Node Label* (the identity the tag is built from); *Display Name*, *Description*, and *Display Data* (UI text - separate from identity, empty by default); the *Objective Class*; an optional *Config Asset*; *Target Actors* and *Target Classes*; *Number of Elements*; and the *Prerequisite Gate Mode* (Chapter 4). This Step has no display data of its own; the beats you read belong to the chapter. The properties on the Step node will be discussed throughout the other chapters.
+<br>
+  <img width="548" height="562" alt="Details panel with the Step selected" src="https://github.com/user-attachments/assets/23a7d053-15ad-4bc0-a730-c4eb205153a3" />
 - **Click empty canvas.** The Details panel switches to the questline's own settings - the same thing the *Graph Defaults* button on the toolbar shows. Here the *Display Name* is "Chapter 1 — Quests and Triggers", the *Display Data* is `DA_Ch1Main_BasicTrigger`, and *Questline Rewards* holds the reward set that pays at the end of every chapter (Chapter 2 explains it).
+<br>
+  <img width="547" height="375" alt="Graph Defaults including Display Name, Display Data, and Questline Rewards" src="https://github.com/user-attachments/assets/f713d2da-f6e3-4f88-aaf4-cabc283241f7" />
 - **Open `DA_Ch1Main_BasicTrigger`** in the chapter's `DisplayData` folder. It is a Quest Lifecycle Display Data asset: one text array per lifecycle event. *Activated Beats* and *Completed Beats Default* are filled; the others are empty. That is the entire source of what the HUD printed.
+<br>
+  <img width="1200" alt="	DA_Ch1Main_BasicTrigger: display data, Activated Beats and Completed Beats Default" src="https://github.com/user-attachments/assets/10b0d279-cd06-4d3d-a465-dc57b0e5ee73" />
 - **Open `QL_QuickStart`** and find the Chapter 1 node. It is a Linked Questline node, and it has a *Reached* Completion Path pin. That pin *is* this graph's Outcome node, seen from outside.
-
-<!-- shot 1.4: the Step expanded, the beacon listed "(via QuickStart)" -->
-<!-- shot 1.5: Details panel with the Step selected -->
-<!-- shot 1.6: Graph Defaults - Display Name, Display Data, Questline Rewards -->
-<!-- shot 1.7: DA_Ch1Main_BasicTrigger open - Activated Beats and Completed Beats Default -->
-<!-- shot 1.8: QL_QuickStart zoomed on the Chapter 1 node and its Reached pin -->
+<br>
+  <img width="1200" alt="QL_QuickStart on the Chapter 1 node: its Reached pin, the prerequisite wire leaving Any Outcome" src="https://github.com/user-attachments/assets/d67ab8e8-254d-4bae-b347-adff075e19d5" />
 
 ## Under the hood
 
@@ -94,7 +98,7 @@ Now the part the *(via QuickStart)* marker was pointing at. Chapter 1 is not pla
 
 The beacon's Quest Trigger Component watches the placed form. The same Step therefore has two addresses - the one in its own asset and the one in each graph that places it - and Chapter 8 is about what you can do with that. For now: this room's actors are wired to the placement.
 
-<!-- shot 1.9: the beacon selected in the level - its Quest Trigger Component with Step Tags to Trigger -->
+<img width="1200" alt="The beacon's Quest Trigger Component: Step Tags to Trigger" src="https://github.com/user-attachments/assets/08ff21e9-64d4-4ea2-af84-b845c592e7cb" />
 
 ### Activation
 
@@ -106,6 +110,10 @@ Pressing the green button calls `Start Questline` on `QL_QuickStart`. The master
 4. World State facts are written for both nodes: `SimpleQuest.State.QuickStart.Chapter_1.Basic_Trigger.Live` and `...Started` for the Step, and `SimpleQuest.State.QuickStart.Chapter_1.Live` and `...Started` for the chapter, which as a container takes its Live from the Steps inside it. Open the Facts Panel's World State view and all four are there - twice. Each also appears under the asset's own address, `SimpleQuest.State.QL_Ch1_BasicTrigger.Basic_Trigger.…` and `SimpleQuest.State.QL_Ch1_BasicTrigger.…`, because the framework writes every state fact at both of a node's addresses. Anything reading either address sees the same truth. Chapter 8 shows why you would choose the standalone address over a contextualized placement's address.
 5. The Step creates an instance of `OBJ_InteractWithTarget` and activates it. The Objective is now listening for trigger fires on the Step's tag.
 6. The beacon's Trigger Component hears STARTED on the tag it watches and fires its own *On Quest Trigger Activated* event. The actor lights its aura.
+
+<img width="1200" alt="Where the Facts Panel lives: Window > Developer Tools > Debug > Facts Panel" src="https://github.com/user-attachments/assets/529690f4-bf70-46d7-b479-028ffcd14c7b" />
+<br>
+<img width="1200" alt="World State view, filter empty, right after walking in with several tags visible" src="https://github.com/user-attachments/assets/c268a0b1-ef3b-4f77-b593-fc372b68d2da" />
 
 ### The fire
 
@@ -130,10 +138,16 @@ Completing the Objective resolves the Step:
 2. **COMPLETED** publishes on the Step's tag, carrying the outcome. Alongside it, the beacon's Trigger Component receives the *Completed* response to its fire (the sound cue) and the trigger-side wrap for the Step: it disarms its own subscriptions, and the actor's *On Quest Trigger Deactivated* event runs with reason *Completed*.
 3. The Step's *Reached* path fires, and so does *Any Outcome* - the white pin fires on every completion, the yellow pins are exclusive. Only *Reached* is wired, so activation runs into the Outcome node.
 4. The Outcome node resolves the questline with `Reached`. **COMPLETED** publishes on `SimpleQuest.Questline.QuickStart.Chapter_1`, the questline-level rewards are granted, and the HUD prints the Completed beat.
-5. Back in the master graph, the Chapter 1 node's *Reached* pin fires. It is wired to the prerequisite holding Chapter 2 back, so Chapter 2 - activated at the start and deferred since - proceeds, and **ACTIVATED** publishes on `SimpleQuest.Questline.QuickStart.Chapter_2`.
+5. Back in the master graph, the Chapter 1 node's *Reached* pin fires, and so does its *Any Outcome* pin - and *Any Outcome* is the one wired to the prerequisite holding Chapter 2 back. The master gates on the chapter having ended, not on how it ended. Chapter 2 - activated at the start and deferred since - proceeds, and **ACTIVATED** publishes on `SimpleQuest.Questline.QuickStart.Chapter_2`.
 6. The door ahead opens. It belongs to Chapter 2, not Chapter 1: its observer watches Chapter 2's tag and opens on that ACTIVATED. Completing Chapter 1 opened it only because completion cascaded into Chapter 2's activation. Play in unlocked mode, where the chain is cut, and finishing this room leaves the door shut until you press Chapter 2's own start button - which activates Chapter 2, which opens the door.
 
 Two stores were written in step 1, and they have different owners. World State is shared: SimpleQuest publishes its lifecycle facts into it, and your own systems can publish and read theirs alongside - the green button that started the tutorial wrote a fact there before any quest existed. The Quest State record is the framework's alone. You read it; the quest manager writes it.
+
+The World State view on completion:
+<img width="1200" alt="World State view after completion: .Completed is present, .Live is gone, .Started is still there" src="https://github.com/user-attachments/assets/dd74a6b8-e420-4049-8289-e7671c78a558" />
+
+The Quest State view on completion:
+<img width="1200" alt="Quest State view, Resolutions tab: both Reached rows" src="https://github.com/user-attachments/assets/831907d3-d5f3-4016-8d34-13d2fabe2e56" />
 
 ### Who was listening
 
@@ -145,8 +159,11 @@ None of the actors held a reference to the graph, or to each other.
 
 Publisher and subscriber meet at a tag and nowhere else. That is what the Objective's comment means by the game's vocabulary coming in and the graph's vocabulary going out - the Trigger's payload is yours, the outcome is the graph's, and the Objective is where one becomes the other.
 
-<!-- shot 1.10: Facts Panel, World State view, during PIE, filter empty - Live and Started, then Completed; and after the replay, Completed at 2 -->
-<!-- shot 1.11: the graph open during PIE - Basic Trigger with its Live halo, then its Completed halo -->
+**PIE Debug Halo - Live state:**
+<img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
+
+**PIE Debug Halo - Completed state:**
+<img width="668" height="401" alt="Image" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
 
 ## Gotchas
 
@@ -184,5 +201,7 @@ Still to come: a Step offered by a giver (Chapter 3), the Prerequisites pin and 
 Nothing here needs changing. Play the room again with `QL_Ch1_BasicTrigger` open beside the viewport and the Facts Panel's World State view open with its filter empty - the list is short this early: the fact the green button wrote, the master questline's own state, and Chapter 1's facts under both spellings. Watch the halo on Basic Trigger and the `.Live` facts appear together when you walk in, and the halo turn to Completed and the facts become `.Completed` when you touch the beacon. Filter to `Basic_Trigger` to follow just the Step. Then switch the panel to Quest State: the Resolutions tab has a row for the Step and a row for the chapter, both `Reached`. That is the whole lifecycle, and it is the same one every later chapter runs.
 
 Then run it once more. The room's start button re-activates the chapter now that you have reached it. Touch the beacon again and read the Count column: `.Completed` is at 2, `.Started` still at 1, and the Resolutions tab has a second row. Gold pays again and experience does not - the Grant Once modifier Chapter 2 explains counts the same resolutions this column does.
+
+<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/012bd8d2-2461-49ff-815c-de20944e20f6" />
 
 Previous: [Before You Start](00_BeforeYouStart.md) | Next: Chapter 2 - Rewards.

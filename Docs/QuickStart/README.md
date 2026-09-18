@@ -24,20 +24,21 @@ Some chapters add a **Try it** - a change you can make to the room's graph that 
 
 Act I is authoring one questline. Act II is what happens when one graph is not enough.
 
-|             | Chapter                               | Teaches                                                                                                                  |
-|-------------|---------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| **Act I**   | [1 Basic Trigger](01_BasicTrigger.md) | A single step, a single trigger, a single ending                                                                         |
-|             | 2 Rewards                             | Grant Rewards nodes, the experience bar and gold readout                                                                 |
-|             | 3 Basic Giver                         | A quest offered by an actor: activated is not started                                                                    |
-|             | 4 Sequential Steps                    | Activation alone does not enforce order - wiring does                                                                    |
-|             | 5 Named Outcomes                      | A fork resolved with `Left` or `Right`, and what routes on each                                                          |
-|             | 6 Blocking                            | The Blocked state, a refused give, and a door that reads it                                                              |
-|             | 7 Prerequisites                       | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |
-| **Act II**  | 8 Linked Questlines                   | One questline placed twice, with separate progress                                                                       |
-|             | 9 Activation Groups                   | A second questline opening a bridge it knows nothing about                                                               |
-|             | 10 Prerequisite Rules                 | A named condition - the power - read by everything that needs it                                                         |
-|             | 11 Observers                          | An archive console that logs what an observer hears, live and caught up                                                  |
-| **Closing** | The Step node, assembled              | Every Step property and Objective override in one place, with the chapter that taught it - and what the rooms don't show |
+|              | Chapter                                          | Teaches                                                                                                                  |
+|--------------|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| **Prologue** | [Intro - Before You Start](00_BeforeYouStart.md) | Basic controls, HUD layout, how to start the tutorial and follow along in a graph                                        |
+| **Act I**    | [1 Basic Trigger](01_BasicTrigger.md)            | A single step, a single trigger, a single ending                                                                         |
+|              | 2 Rewards                                        | Grant Rewards nodes, the experience bar and gold readout                                                                 |
+|              | 3 Basic Giver                                    | A quest offered by an actor: activated is not started                                                                    |
+|              | 4 Sequential Steps                               | Activation alone does not enforce order - wiring does                                                                    |
+|              | 5 Named Outcomes                                 | A fork resolved with `Left` or `Right`, and what routes on each                                                          |
+|              | 6 Blocking                                       | The Blocked state, a refused give, and a door that reads it                                                              |
+|              | 7 Prerequisites                                  | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |
+| **Act II**   | 8 Linked Questlines                              | One questline placed twice, with separate progress                                                                       |
+|              | 9 Activation Groups                              | A second questline opening a bridge it knows nothing about                                                               |
+|              | 10 Prerequisite Rules                            | A named condition - the power - read by everything that needs it                                                         |
+|              | 11 Observers                                     | An archive console that logs what an observer hears, live and caught up                                                  |
+| **Closing**  | The Step node, assembled                         | Every Step property and Objective override in one place, with the chapter that taught it - and what the rooms don't show |
 
 Chapters without a link are not written yet.
 

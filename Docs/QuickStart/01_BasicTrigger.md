@@ -126,7 +126,10 @@ Pressing the green button calls `Start Questline` on `QL_QuickStart`. The master
 5. The Step creates an instance of `OBJ_InteractWithTarget` and activates it. The Objective is now listening for trigger fires on the Step's tag.
 6. The beacon's Trigger Component hears STARTED on the tag it watches and fires its own *On Quest Trigger Activated* event. The actor lights its aura.
 
+**Where to find the Facts Panel:**
 <img width="1200" alt="Where the Facts Panel lives: Window → Developer Tools → Debug → Facts Panel" src="https://github.com/user-attachments/assets/529690f4-bf70-46d7-b479-028ffcd14c7b" />
+
+**The World State view on activation:**
 <img width="1200" alt="World State view, filter empty, right after walking in with several tags visible" src="https://github.com/user-attachments/assets/c268a0b1-ef3b-4f77-b593-fc372b68d2da" />
 
 ### The fire
@@ -157,10 +160,10 @@ Completing the Objective resolves the Step:
 
 Two stores were written in step 1, and they have different owners. World State is shared: SimpleQuest publishes its lifecycle facts into it, and your own systems can publish and read theirs alongside - the green button that started the tutorial wrote a fact there before any quest existed. The Quest State record is the framework's alone. You read it; the quest manager writes it.
 
-The World State view on completion:
+**The World State view on completion:**
 <img width="1200" alt="World State view after completion: .Completed is present, .Live is gone, .Started is still there" src="https://github.com/user-attachments/assets/dd74a6b8-e420-4049-8289-e7671c78a558" />
 
-The Quest State view on completion:
+**The Quest State view on completion:**
 <img width="1200" alt="Quest State view, Resolutions tab: both Reached rows" src="https://github.com/user-attachments/assets/831907d3-d5f3-4016-8d34-13d2fabe2e56" />
 
 ### Who was listening

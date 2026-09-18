@@ -6,6 +6,8 @@ The first room is the framework in miniature. A questline holds one Step. The St
 
 **By the end of this chapter you can name:** Questline, Step, Objective, Trigger, and Outcome; the ACTIVATED and COMPLETED events; and the tag that connects a node in a graph to an actor in a level.
 
+---
+
 ## In the room
 
 In order:
@@ -38,6 +40,8 @@ The in-world tell is the beacon: it glows only while its Step is Live, and when 
 
 <img width="1200" alt="The room on entry: beacon lit, the ACTIVATED beat" src="https://github.com/user-attachments/assets/699ab65f-b12a-4b5b-9649-d16820dd1cec" />
 <img width="1200" alt="After the overlap: satisfied beacon, the COMPLETED beat, Chapter 2's door opening" src="https://github.com/user-attachments/assets/e0c61636-1e36-423f-b450-d47732d2e13d" />
+
+---
 
 ## In the graph
 
@@ -90,6 +94,7 @@ Four comment boxes sit beside the nodes. Read them in the graph; in short:
 
 - **Open `QL_QuickStart`** and find the Chapter 1 node. It is a Linked Questline node, and it has a *Reached* Completion Path pin. That pin *is* this graph's Outcome node, seen from outside.
 
+---
 
 ## Under the hood
 
@@ -184,6 +189,8 @@ Publisher and subscriber meet at a tag and nowhere else. That is what the Object
 
 <img width="668" height="401" alt="A green PIE debug halo showing the Completed state" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
 
+---
+
 ## Gotchas
 
 **The tag comes from the Node Label, not the Display Name.** *Node Label* is identity. *Display Name* is UI text and nothing else. Display Name is empty by default and is never substituted from the label - a HUD that asks for a display name gets nothing back until you author one. Rename a node's label and the node shows a *Recompile to update tags* marker until you compile. On compile, the rename propagates to every loaded actor, Blueprint default, and data asset that referenced the old tag, and assets that weren't loaded heal on their next load.
@@ -204,6 +211,8 @@ Publisher and subscriber meet at a tag and nowhere else. That is what the Object
 
 **The example Objective is shared.** `OBJ_InteractWithTarget` is the Objective on most of the tutorial's Steps. Flipping its tickbox to complete on *Solved* changes every chapter that uses it, not just this one - and Chapter 1's graph only wires *Reached*, so the questline would never end. If you flip the tickbox to see this in action, be sure to flip it back to enable progress again.
 
+---
+
 ## The Step so far
 
 What this chapter added to your picture of the Step node and its Objective:
@@ -215,6 +224,8 @@ What this chapter added to your picture of the Step node and its Objective:
 
 Still to come: a Step offered by a giver (Chapter 3), the Prerequisites pin and the gate mode (Chapter 4), an Objective you write yourself (Chapter 5), the Deactivate pins (Chapter 7), and the Config Asset (Chapter 11).
 
+---
+
 ## Try it
 
 Nothing here needs changing. Play the room again with `QL_Ch1_BasicTrigger` open beside the viewport and the Facts Panel's World State view open with its filter empty - the list is short this early: the fact the green button wrote, the master questline's own state, and Chapter 1's facts under both spellings. Watch the halo on Basic Trigger and the `.Live` facts appear together when you walk in, and the halo turn to Completed and the facts become `.Completed` when you touch the beacon. Filter to `Basic_Trigger` to follow just the Step. Then switch the panel to Quest State: the Resolutions tab has a row for the Step and a row for the chapter, both `Reached`. That is the whole lifecycle, and it is the same one every later chapter runs.
@@ -223,4 +234,6 @@ Then run it once more. The room's start button re-activates the chapter now that
 
 <img width="1200" alt="Image" src="https://github.com/user-attachments/assets/012bd8d2-2461-49ff-815c-de20944e20f6" />
 
-Previous: [Before You Start](00_BeforeYouStart.md) | Next: Chapter 2 - Rewards.
+---
+
+Previous: [Before You Start](00_BeforeYouStart.md) | Next: [Chapter 2 - Rewards](02_Rewards.md).

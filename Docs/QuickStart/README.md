@@ -28,7 +28,7 @@ Act I is authoring one questline. Act II is what happens when one graph is not e
 |--------------|--------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | **Prologue** | [Intro - Before You Start](00_BeforeYouStart.md) | Basic controls, HUD layout, how to start the tutorial and follow along in a graph                                        |
 | **Act I**    | [1 Basic Trigger](01_BasicTrigger.md)            | A single step, a single trigger, a single ending                                                                         |
-|              | 2 Rewards                                        | Grant Rewards nodes, the experience bar and gold readout                                                                 |
+|              | [2 Rewards](02_Rewards.md)                       | Grant Rewards nodes, the experience bar and gold readout                                                                 |
 |              | 3 Basic Giver                                    | A quest offered by an actor: activated is not started                                                                    |
 |              | 4 Sequential Steps                               | Activation alone does not enforce order - wiring does                                                                    |
 |              | 5 Named Outcomes                                 | A fork resolved with `Left` or `Right`, and what routes on each                                                          |

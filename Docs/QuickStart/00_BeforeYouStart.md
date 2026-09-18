@@ -10,6 +10,8 @@ Everything the tutorial uses lives inside the SimpleQuest plugin's content folde
 
 <img width="1200" alt="Click the Settings gear icon and enable Plugin Content to find the chapter Questline Graphs" src="https://github.com/user-attachments/assets/5d20e1fa-e8e5-4783-8ebd-c430475118a6" />
 
+---
+
 ## Controls
 
 | Input                   | Does                                                          |
@@ -21,6 +23,8 @@ Everything the tutorial uses lives inside the SimpleQuest plugin's content folde
 
 The glowing beacons and the quest givers do not need a key. Both fire on overlap - walk into a beacon to trigger it, walk into a giver to accept what it is offering. The buttons are the things you press E on.
 
+---
+
 ## The HUD
 
 Three things on screen matter:
@@ -30,6 +34,8 @@ Three things on screen matter:
 - **Experience and gold** read out at the bottom of the screen. Completing a room the first time grants experience points. Every completion grants gold.
 
 <img width="1200" alt="A view of the Quest Sidebar on the left with its narrative beats along with the experience bar and gold readouts at the bottom and bottom right" src="https://github.com/user-attachments/assets/68475cbc-a001-42b8-9df0-aa76c4fab8ca" />
+
+---
 
 ## The two buttons at the start
 
@@ -43,6 +49,8 @@ Every room has its own start button. It reads *Locked - finish earlier chapters*
 
 <img width="1200" alt="The green 'Start Tutorial' and red 'Unlock All Chapters' buttons" src="https://github.com/user-attachments/assets/a78ecf40-9241-4767-8025-1fb5254efc15" />
 
+---
+
 ## Reading a room
 
 Every chapter is built on three layers, and the companion refers to all three:
@@ -52,6 +60,8 @@ Every chapter is built on three layers, and the companion refers to all three:
 3. **The in-world tell** - a door that opens, a light that comes on, a screen that logs - something in the room that visibly changes with quest state, so the concept is a physical consequence and not only text.
 
 Play the room first. Then open its graph: `SimpleQuest Content/QuickStart/Chapters/<Num_Name>/QL_Ch<Num_Name>`. Read the comments. Then come back here for the part underneath.
+
+---
 
 ## Keeping a graph open while you play
 
@@ -70,9 +80,13 @@ The graph editor is a live instrument during Play In Editor, and most of what th
 
 <img width="1200" alt="A questline side-by-side with a PIE session - debug halos show the live state of nodes" src="https://github.com/user-attachments/assets/c47711f1-6c53-4b42-99ea-383d8bc75086" />
 
+---
+
 ## Saving and loading
 
 Press **P** at any point for the pause menu. Saving mid-chapter and loading it back is worth doing once early: restored state arrives through the same catch-up path the framework uses for anything that registers late - a streamed-in actor, a spawned NPC - and every event a restored observer receives is marked as catch-up rather than live. Chapter 11 puts that distinction on a screen.
+
+---
 
 ## Conventions in the documentation
 
@@ -80,5 +94,7 @@ Press **P** at any point for the pause menu. Saving mid-chapter and loading it b
 - Tags are in code font: `SimpleQuest.Questline.QuickStart.Chapter_1`.
 - Asset names are in code font too: `QL_Ch1_BasicTrigger`, `DA_Ch1Main_BasicTrigger`.
 - A **beat** is a line the HUD printed. A **comment** is a comment box in a graph. When the companion quotes either, it is quoting the asset as shipped.
+
+---
 
 Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md).

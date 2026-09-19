@@ -1,6 +1,10 @@
-﻿#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "ToolMenu.h"
 #include "GraphEditorActions.h"
+#include "SimpleQuestLog.h"
 
 void UQuestlineNode_PrerequisiteAnd::AllocateDefaultPins()
 {
@@ -8,7 +12,33 @@ void UQuestlineNode_PrerequisiteAnd::AllocateDefaultPins()
     {
         CreatePin(EGPD_Input, TEXT("QuestPrerequisite"), *FString::Printf(TEXT("Condition_%d"), i));
     }
-    CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("Out"));
+    CreatePin(EGPD_Output, TEXT("QuestPrerequisite"), TEXT("PrereqOut"));
+}
+
+void UQuestlineNode_PrerequisiteAnd::PostLoad()
+{
+    Super::PostLoad();
+
+    // AND was the one combinator whose output pin was named "Out"; OR and NOT say "PrereqOut", and the role table only
+    // knew the latter, so a forward walk through an AND found no output to follow. Rename in place - LinkedTo survives a
+    // PinName change - so every saved graph converges on one spelling.
+    int32 RenamedCount = 0;
+    for (UEdGraphPin* Pin : Pins)
+    {
+        if (Pin && Pin->Direction == EGPD_Output
+            && Pin->PinType.PinCategory == TEXT("QuestPrerequisite")
+            && Pin->PinName == TEXT("Out"))
+        {
+            Pin->PinName = TEXT("PrereqOut");
+            ++RenamedCount;
+        }
+    }
+    if (RenamedCount > 0)
+    {
+        UE_LOG(LogSimpleQuest, Log,
+            TEXT("UQuestlineNode_PrerequisiteAnd::PostLoad: '%s' - %d 'Out' output pin(s) renamed to 'PrereqOut'."),
+            *GetName(), RenamedCount);
+    }
 }
 
 FText UQuestlineNode_PrerequisiteAnd::GetNodeTitle(ENodeTitleType::Type TitleType) const

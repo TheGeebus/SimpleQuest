@@ -13,6 +13,7 @@ class SIMPLEQUESTEDITOR_API UQuestlineNode_PrerequisiteAnd : public UQuestlineNo
 	GENERATED_BODY()
 public:
 	virtual void AllocateDefaultPins() override;
+	virtual void PostLoad() override;
 	virtual FText GetNodeTitle(ENodeTitleType::Type TitleType) const override;
 	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 

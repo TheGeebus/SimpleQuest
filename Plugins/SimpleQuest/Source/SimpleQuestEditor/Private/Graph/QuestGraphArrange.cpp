@@ -31,8 +31,7 @@ namespace
 	 * THROUGH one is an edge between the nodes at its ends - ranking a knot as a node would scatter a self-loop arch
 	 * across columns and tear it apart.
 	 */
-	void CollectCollapsedTargets(const UEdGraphPin* FromPin, TSet<const UEdGraphNode*>& VisitedKnots,
-								 TArray<UEdGraphPin*>& OutDestPins)
+	void CollectCollapsedTargets(const UEdGraphPin* FromPin, TSet<const UEdGraphNode*>& VisitedKnots, TArray<UEdGraphPin*>& OutDestPins)
 	{
 		if (!FromPin) { return; }
 
@@ -62,10 +61,10 @@ namespace
 	/** Does an edge landing on this pin PROGRESS the graph - should it push the receiving node rightward? */
 	bool IsRankingDestination(const UEdGraphPin* Pin)
 	{
-		// DIRECTION + CATEGORY, deliberately not GetPinRole. Two pins in this codebase fall through the role map to
-		// None - Exit's input is named "Outcome" rather than "Activate", and PrerequisiteAnd's output is named "Out" -
-		// so a role-based test drops every wire into an Exit and ranks a fully connected terminal at 0. Category is
-		// also the more durable test: a node type added later with a differently-named pin still classifies correctly.
+		// DIRECTION + CATEGORY, deliberately not GetPinRole. Exit's input is named "Outcome" rather than "Activate" and
+		// falls through the role map to None, so a role-based test drops every wire into an Exit and ranks a fully
+		// connected terminal at 0. Category is also the more durable test: a node type added later with a
+		// differently-named pin still classifies correctly.
 		if (!Pin || Pin->Direction != EGPD_Input) { return false; }
 		const FName Cat = Pin->PinType.PinCategory;
 		return Cat == TEXT("QuestActivation") || Cat == TEXT("QuestPrerequisite");

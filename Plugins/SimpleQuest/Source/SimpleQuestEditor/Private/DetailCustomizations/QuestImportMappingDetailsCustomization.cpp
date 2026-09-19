@@ -98,7 +98,7 @@ TArray<FString> FQuestImportMappingDetailsCustomization::SampleDiscriminatorValu
 TArray<FString> FQuestImportMappingDetailsCustomization::SampleQualifierOptions() const
 {
 	// The structural flow pins every graph has, plus the combinator outputs a feeds-prereq wire can leave from.
-	TArray<FString> Out = { TEXT("Any Outcome"), TEXT("Entered"), TEXT("Deactivated"), TEXT("Out"), TEXT("PrereqOut") };
+	TArray<FString> Out = { TEXT("Any Outcome"), TEXT("Entered"), TEXT("Deactivated"), TEXT("PrereqOut") };
 
 	const UQuestImportMapping* M = Mapping.Get();
 	if (!M || SampleFolder.IsEmpty()) return Out;

@@ -30,7 +30,7 @@ Act I is authoring one questline. Act II is what happens when one graph is not e
 | **Act I**    | [1 Basic Trigger](01_BasicTrigger.md)            | A single step, a single trigger, a single ending                                                                         |
 |              | [2 Rewards](02_Rewards.md)                       | Grant Rewards nodes, the experience bar and gold readout                                                                 |
 |              | [3 Basic Giver](03_BasicGiver.md)                | A quest offered by an actor: activated is not started                                                                    |
-|              | 4 Sequential Steps                               | Activation alone does not enforce order - wiring does                                                                    |
+|              | [4 Sequential Steps](04_SequentialSteps.md)      | Activation alone does not enforce order - wiring does                                                                    |
 |              | 5 Named Outcomes                                 | A fork resolved with `Left` or `Right`, and what routes on each                                                          |
 |              | 6 Blocking                                       | The Blocked state, a refused give, and a door that reads it                                                              |
 |              | 7 Prerequisites                                  | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |

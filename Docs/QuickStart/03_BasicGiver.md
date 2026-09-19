@@ -241,4 +241,4 @@ Select `BP_QuestGiverActor2` and `BP_QuestGiverActor4` in the World Outliner and
 
 ---
 
-Previous: [Chapter 2 - Rewards](02_Rewards.md) | Next: Chapter 4 - Sequential Steps
+Previous: [Chapter 2 - Rewards](02_Rewards.md) | Next: [Chapter 4 - Sequential Steps](04_SequentialSteps.md)

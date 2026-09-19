@@ -141,9 +141,9 @@ Pressing the green button calls `Start Questline` on `QL_QuickStart`. The master
 
 Walking into the beacon calls `Send Trigger Event` on its Trigger Component. The component checks the state of every Step it watches before publishing anything:
 
-- If the Step is Live, the fire is published to the Objective.
-- If the Step is activated but cannot progress - Blocked, or waiting on a prerequisite - the component publishes **PROGRESS REFUSED** instead, with the reason (Chapters 4 and 6).
-- If the Step is not activated at all, the fire is dropped silently. A trigger against a Step the runtime hasn't reached is not the trigger's concern.
+- If the Step is Live and free to progress, the fire reaches the Objective.
+- If the Step is running but gated - Blocked, or holding an unmet prerequisite - the fire never reaches the Objective. It comes back as **PROGRESS REFUSED**, with the reason (Chapters 4 and 6).
+- If the Step has not started, the fire is dropped silently. A trigger against a Step the runtime hasn't reached is not the trigger's concern.
 
 Here the Step is Live, so the fire lands on the Objective's *Try Complete Objective*. `OBJ_InteractWithTarget` does two things with it:
 

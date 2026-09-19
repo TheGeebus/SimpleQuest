@@ -316,7 +316,6 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
     const FLinearColor HighlightColor = SQ_ED_HOVER_HIGHLIGHT;
     // Twice the selected-shadow inflation so the hover halo reads louder than a plain selection.
     const FVector2f ShadowInflate = UE::Slate::CastToVector2f(GetDefault<UGraphEditorSettings>()->GetShadowDeltaSize()) * 2.f;
-    const int32 HighlightLayer = ChildLayer + 1;
 
     // Graph-space viewport rect — derived from the panel's view offset, size, and zoom. Used to cull halos for nodes
     // that are currently off-screen in graph coordinates, independent of their (possibly stale) paint-space geometry.
@@ -330,6 +329,104 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
         ViewOffset.X + PanelLocalSize.X / Zoom,
         ViewOffset.Y + PanelLocalSize.Y / Zoom);
 
+    // One brush for every band. The hover, the lifecycle halo, and the gating ring are the same glow at different
+    // inflations, which is what lets them read as concentric rings of one system rather than three decorations.
+    static const ISlateStyle* SimpleQuestStyle = FSlateStyleRegistry::FindSlateStyle("SimpleQuestStyle");
+    const FSlateBrush* HaloBrush = SimpleQuestStyle
+        ? SimpleQuestStyle->GetBrush("SimpleQuest.Graph.Node.HoverHalo")
+        : FAppStyle::GetBrush("Graph.Node.ShadowSelected");  // fallback if style missing
+
+    // ---- PIE debug overlay pass ------------------------------------------------------------------------------------
+    // Runs only when PIE is active and the channel has resolved subsystems. Paints a state-colored halo per content
+    // node at S and a gating ring outside it at 1.6S. Drawn BEFORE the hover pass so the hover can size itself to sit
+    // outside whatever bands a node ends up wearing.
+    FQuestPIEDebugChannel* DebugChannel = FSimpleQuestEditor::GetPIEDebugChannel();
+    const bool bDebugActive = DebugChannel && DebugChannel->IsActive();
+
+    int32 TopLayer = ChildLayer;
+    if (bDebugActive)
+    {
+        const int32 DebugOverlayLayer = ChildLayer + 1;
+
+        for (UEdGraphNode* Node : Panel->GetGraphObj()->Nodes)
+        {
+            if (!Node) continue;
+
+            const EQuestNodeDebugState State = DebugChannel->QueryNodeState(Node);
+            const TArray<FQuestActivationBlocker> Gating = DebugChannel->QueryNodeGating(Node);
+            if (State == EQuestNodeDebugState::Unknown && Gating.Num() == 0) continue;
+
+            TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
+            if (!NodeWidget.IsValid()) continue;
+
+            const FVector2D NodeGraphPos(Node->NodePosX, Node->NodePosY);
+            const FVector2D NodeGraphSize = NodeWidget->GetDesiredSize();
+            const FSlateRect NodeGraphRect(NodeGraphPos.X, NodeGraphPos.Y, NodeGraphPos.X + NodeGraphSize.X, NodeGraphPos.Y + NodeGraphSize.Y);
+            if (!FSlateRect::DoRectanglesIntersect(NodeGraphRect, ViewGraphRect)) continue;
+
+            const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
+            if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
+
+            // A refusal is the ABSENCE of a state change, so it pulses the lifecycle halo - the layer that should have
+            // advanced and didn't. On a node holding no state at all, the halo appears in the pulse color and fades to
+            // nothing, which is what the attempted transition did.
+            const float RefusalAlpha = DebugChannel->GetRefusalPulseAlpha(Node);
+            const bool bHasState = State != EQuestNodeDebugState::Unknown;
+            if (bHasState || RefusalAlpha > 0.f)
+            {
+                FLinearColor HaloColor = bHasState ? PIEOverlay_Style::ColorForState(State) : PIEOverlay_Style::RefusalPulse;
+                if (bHasState && RefusalAlpha > 0.f) HaloColor = FMath::Lerp(HaloColor, PIEOverlay_Style::RefusalPulse, RefusalAlpha);
+                if (!bHasState) HaloColor.A = RefusalAlpha;
+
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    DebugOverlayLayer,
+                    NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
+                    HaloBrush,
+                    ESlateDrawEffect::None,
+                    HaloColor
+                );
+            }
+
+            // Gating reads as a ring outside the lifecycle halo rather than replacing its color, because the two are
+            // independent: a node can be live and gated at once, and collapsing them hides whichever loses.
+            if (Gating.Num() > 0)
+            {
+                const bool bBlocked = Gating.ContainsByPredicate([](const FQuestActivationBlocker& B)
+                    { return B.Reason == EQuestActivationBlocker::Blocked; });
+                FSlateDrawElement::MakeBox(
+                    OutDrawElements,
+                    DebugOverlayLayer - 1,
+                    NodeGeom.ToInflatedPaintGeometry(ShadowInflate * 1.6f),
+                    HaloBrush,
+                    ESlateDrawEffect::None,
+                    bBlocked ? PIEOverlay_Style::GateBlocked : PIEOverlay_Style::GatePrereq
+                );
+            }
+        }
+        TopLayer = DebugOverlayLayer;
+
+        // ---- "DEBUG (PIE)" badge in the panel's top-left corner -------------------------------------------------------
+        const FSlateFontInfo BadgeFont = FCoreStyle::GetDefaultFontStyle("Bold", 10);
+        const FVector2D BadgePos(12.f, 8.f);
+        FSlateDrawElement::MakeText(
+            OutDrawElements,
+            DebugOverlayLayer + 1,
+            AllottedGeometry.ToOffsetPaintGeometry(BadgePos),
+            FString(TEXT("DEBUG (PIE)")),
+            BadgeFont,
+            ESlateDrawEffect::None,
+            PIEOverlay_Style::DebugBadge
+        );
+        TopLayer = DebugOverlayLayer + 1;
+    }
+
+    // ---- Hover highlight, drawn last and outermost ----------------------------------------------------------------
+    // The hover band sits OUTSIDE whatever debug bands this node is wearing: the lifecycle halo (or its refusal pulse)
+    // at S, the gating ring at 1.6S. Same brush and same node as those, so sharing a band would mean the two colors
+    // fighting through the glow; stepping out by the ring's own 0.6S keeps the bands evenly spaced. Outside PIE the
+    // node wears nothing and the band hugs it as before. Topmost layer, so any soft-edge overlap resolves to hover.
+    const int32 HoverLayer = TopLayer + 1;
     for (const TWeakObjectPtr<UEdGraphNode>& WeakNode : HoverHighlightedNodes)
     {
         UEdGraphNode* Node = WeakNode.Get();
@@ -355,109 +452,25 @@ int32 SQuestlineGraphPanel::OnPaint(const FPaintArgs& Args, const FGeometry& All
         const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
         if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
 
-        static const ISlateStyle* SimpleQuestStyle = FSlateStyleRegistry::FindSlateStyle("SimpleQuestStyle");
-        const FSlateBrush* HoverHaloBrush = SimpleQuestStyle
-            ? SimpleQuestStyle->GetBrush("SimpleQuest.Graph.Node.HoverHalo")
-            : FAppStyle::GetBrush("Graph.Node.ShadowSelected");  // fallback if style missing
+        float BandScale = 1.f;
+        if (bDebugActive)
+        {
+            const bool bInnerBand = DebugChannel->QueryNodeState(Node) != EQuestNodeDebugState::Unknown
+                                 || DebugChannel->GetRefusalPulseAlpha(Node) > 0.f;
+            const bool bRing = DebugChannel->QueryNodeGating(Node).Num() > 0;
+            BandScale = bRing ? 2.2f : (bInnerBand ? 1.6f : 1.f);
+        }
 
         FSlateDrawElement::MakeBox(
             OutDrawElements,
-            HighlightLayer,
-            NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
-            HoverHaloBrush,
+            HoverLayer,
+            NodeGeom.ToInflatedPaintGeometry(ShadowInflate * BandScale),
+            HaloBrush,
             ESlateDrawEffect::None,
             HighlightColor
         );
     }
-
-    // ---- PIE debug overlay pass ------------------------------------------------------------------------------------
-    // Runs only when PIE is active and the channel has resolved subsystems. Iterates the same viewport-culled node set
-    // as the hover halo above and paints a state-colored border halo per content node. Layered above the hover halo so
-    // a hovered node that's also in a state shows both (hover reads as saturation; state reads as the color).
-    int32 TopLayer = HighlightLayer;
-    if (FQuestPIEDebugChannel* DebugChannel = FSimpleQuestEditor::GetPIEDebugChannel())
-    {
-        if (DebugChannel->IsActive())
-        {
-            const int32 DebugOverlayLayer = HighlightLayer + 1;
-            static const ISlateStyle* SimpleQuestStyle = FSlateStyleRegistry::FindSlateStyle("SimpleQuestStyle");
-            const FSlateBrush* DebugBrush = SimpleQuestStyle
-                ? SimpleQuestStyle->GetBrush("SimpleQuest.Graph.Node.HoverHalo")
-                : FAppStyle::GetBrush("Graph.Node.ShadowSelected");
-
-            for (UEdGraphNode* Node : Panel->GetGraphObj()->Nodes)
-            {
-                if (!Node) continue;
-
-                const EQuestNodeDebugState State = DebugChannel->QueryNodeState(Node);
-                const TArray<FQuestActivationBlocker> Gating = DebugChannel->QueryNodeGating(Node);
-                if (State == EQuestNodeDebugState::Unknown && Gating.Num() == 0) continue;
-
-                TSharedPtr<SGraphNode> NodeWidget = Panel->GetNodeWidgetFromGuid(Node->NodeGuid);
-                if (!NodeWidget.IsValid()) continue;
-
-                const FVector2D NodeGraphPos(Node->NodePosX, Node->NodePosY);
-                const FVector2D NodeGraphSize = NodeWidget->GetDesiredSize();
-                const FSlateRect NodeGraphRect(NodeGraphPos.X, NodeGraphPos.Y, NodeGraphPos.X + NodeGraphSize.X, NodeGraphPos.Y + NodeGraphSize.Y);
-                if (!FSlateRect::DoRectanglesIntersect(NodeGraphRect, ViewGraphRect)) continue;
-
-                const FGeometry& NodeGeom = NodeWidget->GetPaintSpaceGeometry();
-                if (NodeGeom.GetLocalSize().IsNearlyZero()) continue;
-
-                // A refusal is the ABSENCE of a state change, so it pulses the lifecycle halo - the layer that should have
-                // advanced and didn't. On a node holding no state at all, the halo appears in the pulse color and fades to
-                // nothing, which is what the attempted transition did.
-                const float RefusalAlpha = DebugChannel->GetRefusalPulseAlpha(Node);
-                const bool bHasState = State != EQuestNodeDebugState::Unknown;
-                if (bHasState || RefusalAlpha > 0.f)
-                {
-                    FLinearColor HaloColor = bHasState ? PIEOverlay_Style::ColorForState(State) : PIEOverlay_Style::RefusalPulse;
-                    if (bHasState && RefusalAlpha > 0.f) HaloColor = FMath::Lerp(HaloColor, PIEOverlay_Style::RefusalPulse, RefusalAlpha);
-                    if (!bHasState) HaloColor.A = RefusalAlpha;
-
-                    FSlateDrawElement::MakeBox(
-                        OutDrawElements,
-                        DebugOverlayLayer,
-                        NodeGeom.ToInflatedPaintGeometry(ShadowInflate),
-                        DebugBrush,
-                        ESlateDrawEffect::None,
-                        HaloColor
-                    );
-                }
-
-                // Gating reads as a ring outside the lifecycle halo rather than replacing its color, because the two are
-                // independent: a node can be live and gated at once, and collapsing them hides whichever loses.
-                if (Gating.Num() > 0)
-                {
-                    const bool bBlocked = Gating.ContainsByPredicate([](const FQuestActivationBlocker& B)
-                        { return B.Reason == EQuestActivationBlocker::Blocked; });
-                    FSlateDrawElement::MakeBox(
-                        OutDrawElements,
-                        DebugOverlayLayer - 1,
-                        NodeGeom.ToInflatedPaintGeometry(ShadowInflate * 1.6f),
-                        DebugBrush,
-                        ESlateDrawEffect::None,
-                        bBlocked ? PIEOverlay_Style::GateBlocked : PIEOverlay_Style::GatePrereq
-                    );
-                }
-            }
-            TopLayer = DebugOverlayLayer;
-
-            // ---- "DEBUG (PIE)" badge in the panel's top-left corner ---------------------------------------------------
-            const FSlateFontInfo BadgeFont = FCoreStyle::GetDefaultFontStyle("Bold", 10);
-            const FVector2D BadgePos(12.f, 8.f);
-            FSlateDrawElement::MakeText(
-                OutDrawElements,
-                DebugOverlayLayer + 1,
-                AllottedGeometry.ToOffsetPaintGeometry(BadgePos),
-                FString(TEXT("DEBUG (PIE)")),
-                BadgeFont,
-                ESlateDrawEffect::None,
-                PIEOverlay_Style::DebugBadge
-            );
-            TopLayer = DebugOverlayLayer + 1;
-        }
-    }
+    TopLayer = HoverLayer;
 
     return TopLayer;
 }

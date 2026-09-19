@@ -710,6 +710,16 @@ void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputT
     }
 }
 
+const UQuestNodeBase* UQuestManagerSubsystem::FindNodeInstanceByAuthoredGuid(const FGuid& AuthoredNodeGuid) const
+{
+    if (!AuthoredNodeGuid.IsValid()) return nullptr;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        if (Pair.Value && Pair.Value->GetAuthoredNodeGuid() == AuthoredNodeGuid) return Pair.Value;
+    }
+    return nullptr;
+}
+
 void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
 {
     if (!QuestTag.IsValid() || !WorldState)

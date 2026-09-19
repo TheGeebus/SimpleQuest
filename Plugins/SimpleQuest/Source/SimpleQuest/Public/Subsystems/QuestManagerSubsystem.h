@@ -356,6 +356,15 @@ protected:
 	 */
 	virtual const UQuestNodeBase* FindNodeInstance(FGameplayTag Tag) const { return LoadedNodeInstances.FindRef(Tag.GetTagName()); }
 
+	/**
+	 * The live node instance whose authored guid is AuthoredNodeGuid, or null. For nodes with no tag to be registered
+	 * under - utility nodes such as a Prerequisite Gate, which carry a prerequisite expression but no lifecycle - the guid
+	 * is the only handle. An authored node placed in several compile contexts registers one instance per placement, all
+	 * sharing the guid; this returns the first found. A linear scan, sized for editor tooling. Same replacement-contract
+	 * note as FindNodeInstance.
+	 */
+	virtual const UQuestNodeBase* FindNodeInstanceByAuthoredGuid(const FGuid& AuthoredNodeGuid) const;
+
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
 

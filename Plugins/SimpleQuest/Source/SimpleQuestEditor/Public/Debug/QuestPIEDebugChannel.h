@@ -12,6 +12,7 @@
 #include "Quests/Types/PrerequisiteExpression.h"
 
 
+struct FPrereqExaminerTree;
 struct FQuestActivationBlocker;
 class UQuestlineNode_ContentBase;
 class UEdGraphNode;
@@ -76,7 +77,8 @@ public:
 	 * Resolves the node's compiled FGameplayTag, looks up its WorldState state facts, and returns the highest-priority
 	 * state leaf currently set. Returns EQuestNodeDebugState::Unknown when not in PIE, when the node type doesn't participate
 	 * in runtime state (combinators, utility nodes, portal nodes), when no compiled tag resolves, or when no state facts
-	 * are present for the node.
+	 * are present for the node. Prerequisite-typed nodes have no lifecycle; the overlay reads them through EvaluateExaminerNode
+	 * instead.
 	 */
 	EQuestNodeDebugState QueryNodeState(const UEdGraphNode* EditorNode) const;
 
@@ -120,10 +122,33 @@ public:
 	 * which completion path on that node it requires. Pass bAnyOutcome for the Any Outcome sentinel, which the compiler
 	 * expands into one leaf per path - satisfied when any of them is.
 	 *
+	 * An unsatisfied leaf is refined by the source node's own lifecycle so the panel can show WHY it is unsatisfied:
+	 * InProgress while the source is Live or waiting on a giver (undecided), Unsatisfied once the source carries any
+	 * other state fact (it ran and did not produce this path), NotStarted while it carries none. On a replay the source
+	 * keeps its Started / Completed anchors from the previous run, so a re-gated leaf reads Unsatisfied rather than
+	 * NotStarted until the source goes Live again.
+	 *
 	 * SourceTag may be in the opened asset's own namespace while the running instance is a placement under a parent's, so
 	 * it is matched through the runtime alias index rather than by equality.
 	 */
 	EPrereqDebugState QueryLeafStateForSource(const UEdGraphNode* OwnerNode, FGameplayTag SourceTag, FName PathIdentity, bool bAnyOutcome) const;
+
+	/**
+	 * Live state of a prerequisite leaf that reads a tag directly rather than a content node - a Fact Tag node or a
+	 * context-free Outcome node. Satisfied when the owner's compiled expression reports that tag held; Unsatisfied
+	 * otherwise; Unknown when the owner has no leaf for it. OwnerNode is the node whose compiled expression contains the
+	 * leaf - see FPrereqExaminerTree::EvaluationNode.
+	 */
+	EPrereqDebugState QueryLeafStateForFact(const UEdGraphNode* OwnerNode, FGameplayTag LeafTag) const;
+
+	/**
+	 * Live state of one node of an examiner tree: a leaf resolved against the tree's EvaluationNode, or a combinator
+	 * folded from its children - AND true when every child holds, OR when any does, NOT the inverse, a rule reference
+	 * whatever its inlined expression is. Combinators collapse to Satisfied / Unsatisfied; a child that cannot be
+	 * evaluated (Unknown) makes the combinator Unknown, because a partial answer painted as a whole one would lie.
+	 * Shared by the Prerequisite Examiner's boxes and the graph overlay's halos so the two never disagree.
+	 */
+	EPrereqDebugState EvaluateExaminerNode(const FPrereqExaminerTree& Tree, int32 NodeIndex) const;
 
 	/**
 	 * Convenience raw-fact lookup - returns true if the PIE world's WorldState has the given fact asserted. False otherwise

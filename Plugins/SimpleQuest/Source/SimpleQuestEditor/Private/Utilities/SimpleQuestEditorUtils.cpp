@@ -27,9 +27,13 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Exit.h"
+#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
@@ -1599,6 +1603,36 @@ namespace PrereqExaminer_Internal
             return Index;
         }
 
+    	// Getter-shaped leaves read a fact or the resolution registry directly and have no source content node, so
+        // the channel correlates them by the tag alone. They must be recognized ahead of the content-node branch below,
+        // which would otherwise file them under their pin name ("Exit") with no tag for the channel to find.
+        if (const UQuestlineNode_PrerequisiteFactTag* FactNode = Cast<UQuestlineNode_PrerequisiteFactTag>(OwningNode))
+        {
+            FPrereqExaminerNode Leaf;
+            Leaf.Type = EPrereqExaminerNodeType::Leaf;
+            Leaf.SourceNode = OwningNode;
+            Leaf.LeafTag = FactNode->GetGroupTag();
+            Leaf.LeafSourceLabel = OwningNode->GetNodeTitle(ENodeTitleType::ListView);
+            Leaf.LeafPathHeader = NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerFactHeader", "Fact: ");
+            Leaf.LeafPathLabel = Leaf.LeafTag.IsValid() ? FText::FromName(Leaf.LeafTag.GetTagName())
+                                                        : NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNoTag", "(no tag set)");
+            Leaf.DisplayLabel = FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerFactLabel", "Fact: {0}"), Leaf.LeafPathLabel);
+            return Tree.Nodes.Add(Leaf);
+        }
+        if (const UQuestlineNode_PrerequisiteOutcome* OutcomeNode = Cast<UQuestlineNode_PrerequisiteOutcome>(OwningNode))
+        {
+            FPrereqExaminerNode Leaf;
+            Leaf.Type = EPrereqExaminerNodeType::Leaf;
+            Leaf.SourceNode = OwningNode;
+            Leaf.LeafTag = OutcomeNode->GetGroupTag();
+            Leaf.LeafSourceLabel = OwningNode->GetNodeTitle(ENodeTitleType::ListView);
+            FString Remainder = Leaf.LeafTag.IsValid() ? Leaf.LeafTag.ToString() : TEXT("(no tag set)");
+            FQuestTagComposer::TryStripOutcomePrefix(Remainder);
+            Leaf.LeafPathLabel = FText::FromString(Remainder);
+            Leaf.DisplayLabel = FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOutcomeLabel", "Outcome: {0}"), Leaf.LeafPathLabel);
+            return Tree.Nodes.Add(Leaf);
+        }
+
     	// Everything else (content nodes, Start terminal, etc.) compiles to a Leaf under the compiler's semantics.
     	FPrereqExaminerNode Leaf;
     	Leaf.Type = EPrereqExaminerNodeType::Leaf;
@@ -1645,6 +1679,61 @@ namespace PrereqExaminer_Internal
 
     	return Tree.Nodes.Add(Leaf);
     }
+
+	/**
+     * The node whose compiled expression contains the expression under `Node`: the content node or Prerequisite Gate the
+     * prerequisite wire eventually feeds, found by walking forward through knots, combinators, and - for a rule - from
+     * the Rule Entry to its Exits in the same graph. Null when nothing in this graph consumes it. Visited guards the
+     * walk against a wiring cycle.
+     */
+    UEdGraphNode* FindPrereqConsumer(UEdGraphNode* Node, TSet<const UEdGraphNode*>& Visited)
+    {
+        if (!Node || Visited.Contains(Node)) return nullptr;
+        Visited.Add(Node);
+
+        TArray<UEdGraphPin*> Outputs;
+        if (const UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+        {
+            if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output)) Outputs.Add(KnotOut);
+        }
+        else if (const UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+        {
+            // A rule is consumed through its Exits. Only this graph's are reachable from here; a rule consumed
+            // elsewhere evaluates when that consumer is pinned instead.
+            if (UEdGraph* Graph = Node->GetGraph())
+            {
+                for (UEdGraphNode* Candidate : Graph->Nodes)
+                {
+                    const UQuestlineNode_PrerequisiteRuleExit* Exit = Cast<UQuestlineNode_PrerequisiteRuleExit>(Candidate);
+                    if (!Exit || Exit->GetGroupTag() != Entry->GetGroupTag()) continue;
+                    if (UEdGraphNode* Consumer = FindPrereqConsumer(Candidate, Visited)) return Consumer;
+                }
+            }
+            return nullptr;
+        }
+        else if (const UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(Node))
+        {
+            Base->GetPinsByRole(EQuestPinRole::PrereqOut, Outputs);
+        }
+
+        for (UEdGraphPin* Out : Outputs)
+        {
+            if (!Out) continue;
+            for (UEdGraphPin* Linked : Out->LinkedTo)
+            {
+                UEdGraphNode* Downstream = Linked ? Linked->GetOwningNode() : nullptr;
+                if (!Downstream) continue;
+
+                const bool bPassThrough = Cast<UQuestlineNode_Knot>(Downstream)
+                    || Cast<UQuestlineNode_PrerequisiteBase>(Downstream)
+                    || Cast<UQuestlineNode_PrerequisiteRuleEntry>(Downstream);
+                if (!bPassThrough) return Downstream;   // a content node or a utility node with a Prerequisites pin
+
+                if (UEdGraphNode* Consumer = FindPrereqConsumer(Downstream, Visited)) return Consumer;
+            }
+        }
+        return nullptr;
+    }
 }
 
 FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology(UEdGraphNode* ContextNode)
@@ -1669,6 +1758,8 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
 		{
 			Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
 		}
+		TSet<const UEdGraphNode*> Visited;
+		Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
 		return Tree;
 	}
 
@@ -1686,6 +1777,8 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
                     Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
             }
         }
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
 
@@ -1694,24 +1787,43 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::And,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerAnd", "AND"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
     if (Cast<UQuestlineNode_PrerequisiteOr>(ContextNode))
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Or,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOr", "OR"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
     if (Cast<UQuestlineNode_PrerequisiteNot>(ContextNode))
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Not,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNot", "NOT"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
+	
+	// A Fact Tag or Outcome node as the context IS the expression: emit it as the root leaf by walking from its own
+	// output, exactly as a consumer's walk would, and evaluate it against the consumer it feeds.
+	if (Cast<UQuestlineNode_PrerequisiteFactTag>(ContextNode) || Cast<UQuestlineNode_PrerequisiteOutcome>(ContextNode))
+	{
+		if (UEdGraphPin* OutPin = Cast<UQuestlineNodeBase>(ContextNode)->GetPinByRole(EQuestPinRole::PrereqOut))
+		{
+			Tree.RootIndex = WalkFromOutputPin(OutPin, Tree, RuleEntriesVisited);
+		}
+		{ TSet<const UEdGraphNode*> Visited; Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited); }
+		return Tree;
+	}
 
-    // Content node context: walk the Prerequisites input.
+	// Content node or Prerequisite Gate context: walk the Prerequisites input. This node owns the compiled expression.
 	if (UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(ContextNode))
 	{
+		Tree.EvaluationNode = ContextNode;
 		if (UEdGraphPin* PrereqPin = Base->GetPinByRole(EQuestPinRole::PrereqIn))
 		{
 			if (PrereqPin->LinkedTo.Num() > 0) Tree.RootIndex = WalkFromOutputPin(PrereqPin->LinkedTo[0], Tree, RuleEntriesVisited);

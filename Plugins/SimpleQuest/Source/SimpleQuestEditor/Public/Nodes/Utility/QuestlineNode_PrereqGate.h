@@ -40,4 +40,8 @@ public:
 
 	/** Node-level tooltip describing the gate's per-activation semantics at a glance. */
 	virtual FText GetTooltipText() const override;
+
+	/** Offers Examine Prerequisite Expression, as content nodes and combinators do - the gate has an expression to examine. */
+	virtual void GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const override;
 };
+

@@ -54,6 +54,12 @@ struct FPrereqExaminerNode
      * leaf's two-row display.
      */
     UPROPERTY() FText LeafPathLabel;
+
+    /**
+     * Leaf-only: the row-2 header. Empty means the default "Outcome: " - right for every leaf sourced from a content
+     * node's pins. A Fact Tag leaf reads a fact, not an outcome, and sets this to "Fact: ".
+     */
+    UPROPERTY() FText LeafPathHeader;
     
     /**
      * WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
@@ -119,7 +125,16 @@ struct FPrereqExaminerTree
     /** Populated when ContextNode is a Prerequisite Rule Entry or Exit; invalid tag + null node otherwise. */
     UPROPERTY() FGameplayTag RuleTag;
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> RuleEntryNode;
-
+    
+    /**
+     * The node whose COMPILED expression the debug channel evaluates the leaves against. For a content node or a
+     * Prerequisite Gate it is the context itself. For a pinned combinator or rule it is the first consumer found by
+     * walking the prerequisite wire forward - the expression only exists at runtime where something consumes it. Null
+     * when nothing does (a dangling expression, or a rule consumed only in another asset): the tree still renders, with
+     * no PIE tint.
+     */
+    UPROPERTY() TWeakObjectPtr<UEdGraphNode> EvaluationNode;
+    
     UPROPERTY() TArray<FPrereqExaminerNode> Nodes;
 
     /** Index into Nodes of the top-level expression node, or INDEX_NONE when the context has no wired expression. */

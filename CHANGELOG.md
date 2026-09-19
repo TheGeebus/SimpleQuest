@@ -7,11 +7,53 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-The first pages of the written on-ramp, a crash found by doing what an author
-will do - saving while playing - and a routing rule that now says one thing for
-both role components.
+The first four chapters of the written on-ramp; the Prerequisite Examiner made
+truthful - every state it advertised is now produced, and every node it can pin
+evaluates; a crash found by doing what an author will do - saving while playing;
+and a routing rule that now says one thing for both role components.
+
+### Added
+
+- **Prerequisite Gate nodes can be examined.** Right-click a gate and choose
+  *Examine Prerequisite Expression*, as on a content node. A gate compiles to a
+  utility instance with no tag of its own, so the manager gained a lookup by
+  authored node guid - `FindNodeInstanceByAuthoredGuid`, virtual and under the
+  same replacement-contract note as `FindNodeInstance` - and the PIE debug
+  channel falls back to it for tagless nodes. A gate whose expression is unmet
+  now also wears the overlay's gating ring, through the same lookup.
 
 ### Changed
+
+- **The Prerequisite Examiner shows five states per condition, and everything
+  it can pin evaluates.** A condition on a source node reads grey before the
+  source has activated, amber while it is Live or waiting on a giver, green once
+  the fact it checks is present, and rust when the source ended without
+  producing it. The panel's tints always listed the first two; nothing produced
+  them, so every unmet condition read rust from the moment the room opened.
+  Pinning an AND, OR, or NOT, a Prerequisite Rule's Entry or Exit, or a Fact
+  Tag or Outcome node showed blank boxes, because none of those has a runtime
+  instance to evaluate against. The examiner now finds the content node or gate
+  the pinned expression feeds and evaluates as that, folds a combinator to
+  Satisfied or Unsatisfied from its inputs, and correlates Fact and Outcome
+  leaves by their tag under a *Fact:* row header. One nuance on replay: the
+  Started and Completed anchors persist, so a re-gated condition reads rust,
+  not grey, until its source goes Live again.
+
+- **The AND node's output pin is *PrereqOut*, the name OR and NOT already
+  use.** It was *Out*, which the editor's pin-role table did not recognize, so
+  any walk out of an AND - the examiner's, for one - stopped there. Saved graphs
+  migrate on load, one log line per AND node, and the tutorial graphs that carry
+  one are re-saved. The Data Resolver writes the combinator edge as
+  `feeds-prereq(PrereqOut)` and still imports `feeds-prereq(Out)` from an older
+  export, so existing DataTables round-trip unchanged; the mapping picker no
+  longer offers *Out*.
+
+- **The graph's hover highlight sits outside the PIE halos.** It was drawn at
+  the lifecycle halo's own size one layer beneath it, so a hovered node with
+  state showed the two colors blended through the glow. The hover band now
+  steps out to the next ring - outside the lifecycle halo when one is drawn,
+  outside the gating ring when that is - and draws on top of both, so the
+  three read as evenly spaced concentric rings.
 
 - **The Trigger component routes its subscriptions exactly.** Its own five
   subscriptions, the observer bridge for `Step Tags to Trigger`, and tags added
@@ -49,16 +91,17 @@ both role components.
 
 ### Documentation
 
-- **The QuickStart walkthrough has begun.** `Docs/QuickStart/` opens with an
-  index, *Before You Start* - controls, the HUD, what the green and red buttons
-  publish, the three layers every room is built from, and the live instruments
-  to keep open while you play - and *Chapter 1 - Basic Trigger*, written from
-  the source: what happened in the room, what is in the graph, which tags were
-  minted and which events fired in which order, and the gotchas the room's
-  design steers you around. Every chapter page ends with what it added to the
-  picture of the Step node and its Objective, which is the one thing the eleven
-  rooms are meant to leave you with. Screenshots follow; the pages read without
-  them.
+- **The QuickStart walkthrough is four chapters in.** `Docs/QuickStart/` holds
+  an index, *Before You Start* - controls, the HUD, what the green and red
+  buttons publish, the three layers every room is built from, and the live
+  instruments to keep open while you play - and Chapters 1 through 4: Basic
+  Trigger, Rewards, Basic Giver, and Sequential Steps, each written from the
+  source and illustrated: what happened in the room, what is in the graph,
+  which facts and events landed in which order, the gotchas the room's design
+  steers you around, experiments to try, and what the chapter added to the
+  picture of the Step node and its Objective - the one thing the eleven rooms
+  are meant to leave you with. The root README's Quick Start points at it.
+  Chapters 5 through 11 follow one at a time.
 
 - **The README's Quick Start plays before it builds.** It sends a newcomer to
   the tutorial first, then to the graphs behind the rooms, and only then to
@@ -72,6 +115,10 @@ both role components.
   prerequisite status behind them. The README now also says which plugin
   provides which: SimpleCore ships the panel and the World State view, and
   SimpleQuest registers Quest State into it.
+
+- **The Grant Once modifier's header says what it does.** It described hiding
+  a collected reward's advertisement; since 0.8.1 the preview comes back
+  marked *Already collected* and the UI decides how to show it.
 
 ---
 

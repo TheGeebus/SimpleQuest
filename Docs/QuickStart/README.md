@@ -4,7 +4,13 @@ A walkthrough of the eleven-room tutorial that ships with SimpleQuest. The rooms
 
 It assumes you have played the room before you read its chapter. If you haven't, start with [Before you start](00_BeforeYouStart.md) - it covers the controls, the HUD, the two buttons at the start, and how to keep a graph open while you play.
 
-If you take one thing away from the eleven rooms, it should be a confident grip on the **Step node and its Objective** - what each property on the Step does, and what an Objective decides. Every chapter adds a piece of that picture, no chapter tries to give you all of it, and the closing page assembles the whole thing in one place.
+As you work through the walkthrough, pay particular attention to three concepts:
+
+- **Objectives** describe what the player needs to accomplish.
+- **Steps** organize objectives into a progression.
+- **Prerequisites** describe the conditions under which progression becomes available.
+
+These three ideas form the foundation of how the framework expresses progression. The walkthrough introduces them gradually, so don't worry about understanding every capability immediately. In particular, watch how prerequisites allow progression to express relationships between things without necessarily forcing those things into a strict sequence.
 
 ## How each chapter is laid out
 
@@ -33,7 +39,7 @@ Act I is authoring one questline. Act II is what happens when one graph is not e
 |              | [4 Sequential Steps](04_SequentialSteps.md)      | Activation alone does not enforce order - wiring does                                                                    |
 |              | [5 Named Outcomes](05_NamedOutcomes.md)          | A fork resolved with `Left` or `Right`, and what routes on each                                                          |
 |              | [6 Blocking](06_Blocking.md)                     | The Blocked state, a refused give, and a door that reads it                                                              |
-|              | 7 Prerequisites                                  | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |
+|              | [7 Prerequisites](07_Prerequisites.md)           | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |
 | **Act II**   | 8 Linked Questlines                              | One questline placed twice, with separate progress                                                                       |
 |              | 9 Activation Groups                              | A second questline opening a bridge it knows nothing about                                                               |
 |              | 10 Prerequisite Rules                            | A named condition - the power - read by everything that needs it                                                         |

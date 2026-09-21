@@ -277,4 +277,4 @@ Open `BP_BlockToggleButton`, find *Set Quest Blocked* in *Handle Button Press*, 
 
 ---
 
-Previous: [Chapter 5 - Named Outcomes](05_NamedOutcomes.md) | Next: Chapter 7 - Prerequisites
+Previous: [Chapter 5 - Named Outcomes](05_NamedOutcomes.md) | Next: [Chapter 7 - Prerequisites](07_Prerequisites.md)

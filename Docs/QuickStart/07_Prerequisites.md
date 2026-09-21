@@ -2,31 +2,6 @@
 
 *A game system can run the room without owning the quest.*
 
-<!-- SHOT LIST (page order; each number matches a slot comment below - replace the slot with the <img> line and delete the comment)
-  7.1  The room on entry: the chapter's beat on the HUD; the three operator buttons; the four empty beacon positions.
-  7.2  After pressing AND: the AND scenario's beat on the HUD; four beacons spawned and lit, labeled Step 1, Step 2, Step 3, and Goal.
-  7.3  Touching Goal before the inputs: the beacon in its blocked color, no beat.
-  7.4  After the three inputs and the Goal: the AND scenario's completed beat; the beacons gone.
-  7.5  OR, after one input: the Goal open, the other two inputs still lit.
-  7.6  NOT, after touching Step 3 - Locks Goal: the Goal refusing.
-  7.7  After the NOT scenario solves: the chapter's completed beat; Chapter 8's door opening.
-  7.8  BP_PrereqSpawnManager selected in the level: its four arrow components, nothing else placed for the chapter but the buttons and the doors.
-  7.9  DO_Not open: the scenario's Quest tag, the three inputs with their labels and Step tags, and the goal.
-  7.10 QL_Ch7_Prerequisites, the outer graph: Start disconnected; the three Quest nodes; their Solved pins into the AND combinator, its output into the Prerequisite Gate's Prerequisites pin; their Any Outcome wires into the gate's Enter; Forward into the Outcome node.
-  7.11 Inside the AND scenario (double-click the AND node): Start's Entered into four Steps; the orange chain from Start's Deactivated down through the Steps; the three Any Outcome wires into the AND; the AND into AndGoal's Prerequisites; AndGoal into the Outcome node (Solved).
-  7.12 Inside the NOT scenario: NotInput3's Any Outcome into the NOT, the NOT and the other two inputs into the AND, the AND into NotGoal.
-  7.13 The breadcrumb bar above the graph with the AND scenario open, and the Questline Outliner beside it.
-  7.14 QL_QuickStart: the two Fact Tag nodes, TutorialStarted and ChaptersUnlocked.
-  7.14.1 The wire from the ChaptersUnlocked Fact Tag through the NOT, joined by Chapter 6's Any Outcome in the AND, into the Chapter 7 node's Prerequisites pin.
-  7.15 The outer graph during PIE after the AND scenario: the AND node Completed, OR and NOT unlit, the gate with its gating ring.
-  7.16 Examine Prerequisite Expression on the gate during PIE after AND: three boxes, AND green, OR and NOT grey.
-  7.17 Inside a running scenario during PIE: the goal Step with the Live halo and the gating ring, the inputs' halos.
-  7.18 World State view filtered to Chapter_7.AND after the scenario: .Path.Solved on the AND container beside .Completed, and the four Steps' facts.
-  7.19 Quest State view, Entries tab after a scenario: the scenario's row with Provenance ExternalAPI, and the four Step rows with ChainCascade and no source.
-  7.20 Try it: the OR scenario with OrInput1's Any Outcome wired into the Deactivate inputs of OrInput2 and OrInput3; in play, the two beacons dark after Step 1.
-  7.21 Try it: World State after switching scenarios with the AND chain cut: AndInput Steps still Live.
--->
-
 Act I ends here, with the graph letting go of the level. Every room so far placed its quest actors and let the questline drive them. This one places none: a Blueprint the framework has never heard of runs the room from three data assets, deciding which scenario exists, spawning its beacons, naming them, tearing them down - while the framework keeps every decision about progress. The room's manager can start a scenario and end one. It spawns actors appropriate for each, driven by data assets that configure their Trigger components.
 
 The mechanism underneath this chapter is the largest of the tutorial: three scenarios, each a Quest node holding a graph of its own, each with a goal Step gated by a combinator - AND, OR, NOT - over three Steps beside it, and a Prerequisite Gate in the outer graph that ends the chapter when all three are solved. The nested graphs and the orange Deactivate wires Chapter 4 left for later are here too.

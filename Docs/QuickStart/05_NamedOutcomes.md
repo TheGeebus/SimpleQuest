@@ -84,7 +84,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/05_NamedOutcomes/QL_Ch5_NamedOutco
 ### Things worth clicking:
 
 <br>
-  <img width="1198" height="751" alt="The Fork selected: the Details panel with Objective Class OBJ_LeftOrRight, Display Name Branching Paths, and Display Data DA_Ch5_Fork; the node's two yellow pins and its Triggers: 2 line" src="https://github.com/user-attachments/assets/3f2d2042-8834-4f07-aff0-46f62035f9f6" />
+  <img width="1198" alt="The Fork selected: the Details panel with Objective Class OBJ_LeftOrRight, Display Name Branching Paths, and Display Data DA_Ch5_Fork; the node's two yellow pins and its Triggers: 2 line" src="https://github.com/user-attachments/assets/3f2d2042-8834-4f07-aff0-46f62035f9f6" />
 <br>
 
 - **Select The Fork.** *Objective Class* reads `OBJ_LeftOrRight`, *Display Name* is *Branching Paths*, and *Display Data* is `DA_Ch5_Fork`. Nothing else on the node is set. The two pins are the whole difference from Chapter 1's Step, and they were not typed in anywhere on this panel. The summary line on the node face reads *Triggers: 2* - Chapter 3's shape, two actors on one Step - and the expander names both beacons.
@@ -106,7 +106,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/05_NamedOutcomes/QL_Ch5_NamedOutco
 - **Select the left fork beacon in the level** - `BP_QuestTriggerActor4` in the World Outliner. Its Trigger Component lists `...Chapter_5.The_Fork` under *Step Tags to Trigger*, and the actor's own *Owned Outcome Tag* is `MyGameTags.Fork.LeftPath`. `BP_QuestTriggerActor5` is the same actor class with the same Step tag and `MyGameTags.Fork.RightPath`. That one variable is the beacon's whole opinion about the matter, and despite its name it is not an outcome tag - the name is the example actor's, and what it holds is a tag your game owns.
 
 <br>
-  <img width="898" height="839" alt="DA_Ch5_Fork: Completed Beats By Outcome with its Left and Right entries, Completed Beats Default empty, Activated Beats with its one line" src="https://github.com/user-attachments/assets/853f9ae3-c766-4557-83d5-e6add85a27b4" />
+  <img width="898" alt="DA_Ch5_Fork: Completed Beats By Outcome with its Left and Right entries, Completed Beats Default empty, Activated Beats with its one line" src="https://github.com/user-attachments/assets/853f9ae3-c766-4557-83d5-e6add85a27b4" />
 <br>
 
 - **Open `DA_Ch5_Fork`.** *Activated Beats* has the one line from the room. *Completed Beats Default* is empty. *Completed Beats By Outcome* is a map with two entries, keyed `SimpleQuest.Outcome.Left` and `SimpleQuest.Outcome.Right`, each holding the line you read after choosing. `DA_Ch5_Left`, `DA_Ch5_Right`, and `DA_Ch5_Converge` fill only *Activated Beats*: this chapter's Steps narrate on ACTIVATED where Chapter 4's did on STARTED, and for a Step with no giver those are the same instant.
@@ -250,7 +250,7 @@ Open `OBJ_LeftOrRight`, drop a *Complete Objective With Outcome* node anywhere i
 
 **The Fork with a third pin:**
 
-<img width="953" height="482" alt="The Fork after the compile, with a third yellow pin, Solved, wired to nothing" src="https://github.com/user-attachments/assets/8b705eb6-a4a6-4b0e-82d7-7edf33438a37" />
+<img width="953" alt="The Fork after the compile, with a third yellow pin, Solved, wired to nothing" src="https://github.com/user-attachments/assets/8b705eb6-a4a6-4b0e-82d7-7edf33438a37" />
 
 ---
 

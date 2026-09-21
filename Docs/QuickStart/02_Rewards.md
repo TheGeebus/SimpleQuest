@@ -91,13 +91,13 @@ Three comment boxes sit in the graph. In short:
 - **Select the node on the *Solved* branch.** Five thousand gold, no modifiers. An amount chosen to be impossible to miss, for the day you make it fire (see *Try it*).
 
 <br>
-  <img width="456" height="417" alt="Graph Defaults: Questline Rewards with an Any Outcome entry whose Reward Sets lists QR_QuickStartRewardSet" src="https://github.com/user-attachments/assets/80944ce3-8963-45fe-9002-ef98b705eb9f" />
+  <img width="456" alt="Graph Defaults: Questline Rewards with an Any Outcome entry whose Reward Sets lists QR_QuickStartRewardSet" src="https://github.com/user-attachments/assets/80944ce3-8963-45fe-9002-ef98b705eb9f" />
 <br>
 
 - **Click empty canvas.** Under *Questline Rewards*, one entry keyed *Any Outcome*, and instead of inline rewards it references a set: `QR_QuickStartRewardSet`. Every chapter's questline carries this same entry. It is the payout the chapter beat calls "rewards of its own."
 
 <br>
-  <img width="572" height="560" alt="QR_QuickStartRewardSet open: two rewards, XP with Grant Once and Gold with Scale By Recipient" src="https://github.com/user-attachments/assets/de5e9ef4-f382-4d0b-a64a-f329a288895a" />
+  <img width="572" alt="QR_QuickStartRewardSet open: two rewards, XP with Grant Once and Gold with Scale By Recipient" src="https://github.com/user-attachments/assets/de5e9ef4-f382-4d0b-a64a-f329a288895a" />
 <br>
 
 - **Open `QR_QuickStartRewardSet`** in the `QuickStart` folder. A Reward Set is a data asset holding rewards, and optionally other sets, authored once and referenced from anywhere. This one holds two: an XP reward with Grant Once - experience pays once per chapter, so finishing all eleven fills the bar exactly - and a Gold reward with Scale By Recipient, which asks the recipient what to multiply by.
@@ -160,7 +160,7 @@ On the second beacon, four grants fire in a fixed order:
 
 Each grant reaches the player's Reward Recipient Component as an event, and the HUD reads the totals the player keeps. Open the Output Log filtered to `LogSimpleQuestActivation` and the sequence prints one line per grant: `GrantRewardSet: granting 'SimpleQuest.Reward.Currency.Gold' (recipient: targeted)`, then the component announcing it received it.
 
-<img width="861" height="431" alt="The Output Log filtered to LogSimpleQuestActivation across the second beacon: the four grants in order, each followed by the recipient's line" src="https://github.com/user-attachments/assets/9b491f77-6ca7-4bd5-8f47-c3fa874e2d07" />
+<img width="861" alt="The Output Log filtered to LogSimpleQuestActivation across the second beacon: the four grants in order, each followed by the recipient's line" src="https://github.com/user-attachments/assets/9b491f77-6ca7-4bd5-8f47-c3fa874e2d07" />
 
 Above: On Reward Granted - the single surface through which Rewards are granted. See `SimpleQuest Content/ExampleBlueprints/Actors/BP_QuestPlayerExample` to view the `Apply Reward` event handler, which is an example of how to increment attributes that in turn notify the HUD that they were changed.
 
@@ -210,11 +210,11 @@ Open `OBJ_InteractWithTarget` in `SimpleQuest Content/ExampleBlueprints/Objectiv
 
 **Find and untick the branch in `OBJ_InteractWithTarget`:**
 
-<img width="340" height="370" alt="Flip this tickbox on OBJ_InteractWithTarget to fire the Solved Completion Path which grants 5000 gold" src="https://github.com/user-attachments/assets/b7d5c1f4-ff36-470e-b344-5b9f3ce1676c" />
+<img width="340" alt="Flip this tickbox on OBJ_InteractWithTarget to fire the Solved Completion Path which grants 5000 gold" src="https://github.com/user-attachments/assets/b7d5c1f4-ff36-470e-b344-5b9f3ce1676c" />
 
 **The next Completion grants 5000 gold:**
 
-<img width="407" height="238" alt="After the tickbox flip: the gold readout jumping by 5,000 on the second beacon" src="https://github.com/user-attachments/assets/843beda5-ac9a-41ff-9ab0-6491e9e545f8" />
+<img width="407" alt="After the tickbox flip: the gold readout jumping by 5,000 on the second beacon" src="https://github.com/user-attachments/assets/843beda5-ac9a-41ff-9ab0-6491e9e545f8" />
 
 ### Change the amount granted without touching the Objective:
 

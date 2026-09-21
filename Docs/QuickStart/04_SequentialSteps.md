@@ -85,19 +85,19 @@ Open `SimpleQuest Content/QuickStart/Chapters/04_SequentialSteps/QL_Ch4_Sequenti
 ### Things worth clicking:
 
 <br>
-  <img width="1017" height="553" alt="Third selected: the Details panel with Prerequisite Gate Mode on Gate Progression" src="https://github.com/user-attachments/assets/0d14a007-0753-4d3a-8d8d-a5d7e54d55da" />
+  <img width="1017" alt="Third selected: the Details panel with Prerequisite Gate Mode on Gate Progression" src="https://github.com/user-attachments/assets/0d14a007-0753-4d3a-8d8d-a5d7e54d55da" />
 <br>
 
 - **Select Third.** In the Details panel, *Prerequisite Gate Mode* reads *Gate Progression*, and it is what it reads on every Step in the tutorial - the other setting is described in the comment and explained below, and the *Try it* switches to it.
 
 <br>
-  <img width="1019" height="555" alt="Second selected: Resettable Replay set to Enabled" src="https://github.com/user-attachments/assets/2858655f-3131-4e7d-be5f-2529385c31fa" />
+  <img width="1019" alt="Second selected: Resettable Replay set to Enabled" src="https://github.com/user-attachments/assets/2858655f-3131-4e7d-be5f-2529385c31fa" />
 <br>
 
 - **Select Second.** *Resettable Replay* is set to *Enabled* rather than *Inherit*. Second is the node whose completion the dashed wire reads, and being resettable is what makes that reading per-run, so the gate closes again when the room is replayed. The master graph also declares itself resettable, and every child may choose to simply inherit its parent's setting. This override is not generally needed unless the parent and child must differ. 
 
 <br>
-  <img width="921" height="723" alt="DA_Ch4_Third: Started Beats, Progress Refused Beats, and Completed Beats Default filled" src="https://github.com/user-attachments/assets/52c750fe-ac72-496a-8a21-b94d5f222bb2" />
+  <img width="921" alt="DA_Ch4_Third: Started Beats, Progress Refused Beats, and Completed Beats Default filled" src="https://github.com/user-attachments/assets/52c750fe-ac72-496a-8a21-b94d5f222bb2" />
 <br>
 
 - **Open `DA_Ch4_Third`.** Three arrays: *Started Beats*, *Completed Beats Default*, and one new one, *Progress Refused Beats* - the line that printed when the beacon refused you. `DA_Ch4_First` and `DA_Ch4_Second` fill only Started and Completed, and none of the three fills *Activated Beats* - for a Step with no giver, ACTIVATED and STARTED land in the same instant, and one line is enough.

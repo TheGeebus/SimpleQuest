@@ -137,13 +137,13 @@ Open `SimpleQuest Content/QuickStart/Chapters/06_Blocking/QL_Ch6_Blocking`. One 
 ### Things worth clicking:
 
 <br>
-  <img width="1104" height="240" alt="Set Blocked selected: the Details panel with Target Quest Tags naming the Step and Also Deactivate Targets unticked" src="https://github.com/user-attachments/assets/be18cf2d-feff-4d6e-a639-db2190917349" />
+  <img width="1104" alt="Set Blocked selected: the Details panel with Target Quest Tags naming the Step and Also Deactivate Targets unticked" src="https://github.com/user-attachments/assets/be18cf2d-feff-4d6e-a639-db2190917349" />
 <br>
 
 - **Select Set Blocked.** The Details panel has two things: *Target Quest Tags*, a tag list with the Step's address in it, and *Also Deactivate Targets*, unticked. That is the whole node. It does not know whether its target exists yet, is waiting on a giver, or is running - it writes a fact against a tag, and at this point in the graph the Step has not activated.
 
 <br>
-  <img width="836" height="929" alt="DA_Ch6_BlockingTargetStep: Activated, Give Blocked, Started, Progress Refused, Completed Beats Default, Blocked, and Unblocked Beats all filled" src="https://github.com/user-attachments/assets/97249e9f-426f-4854-b19d-85664e07e333" />
+  <img width="836" alt="DA_Ch6_BlockingTargetStep: Activated, Give Blocked, Started, Progress Refused, Completed Beats Default, Blocked, and Unblocked Beats all filled" src="https://github.com/user-attachments/assets/97249e9f-426f-4854-b19d-85664e07e333" />
 <br>
 
 - **Open `DA_Ch6_BlockingTargetStep`.** Seven arrays filled - *Activated*, *Give Blocked*, *Started*, *Progress Refused*, *Completed Default*, *Blocked*, *Unblocked* - the fullest display data in the tutorial. Every line you read in the room is one of them, and the three new ones are the three events this chapter adds. `DA_Ch6Main_Blocking` fills only *Activated Beats* and *Completed Beats Default*.

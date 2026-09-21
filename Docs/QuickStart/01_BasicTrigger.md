@@ -65,19 +65,19 @@ Four comment boxes sit beside the nodes. Read them in the graph; in short:
 ### Things worth clicking:
 
 <br>
-  <img width="490" height="324" alt="The Step expanded: the beacon listed (via QuickStart)" src="https://github.com/user-attachments/assets/44cd76c5-12e6-4a65-b2f5-f18d55697211" />
+  <img width="490" alt="The Step expanded: the beacon listed (via QuickStart)" src="https://github.com/user-attachments/assets/44cd76c5-12e6-4a65-b2f5-f18d55697211" />
 <br>
 
 - **Expand the Step.** The arrow at the bottom of the node opens a detail view listing the actors watching it. The beacon is there, marked *(via QuickStart)* - it watches this Step through the tutorial's master questline rather than through this asset directly. That distinction is the subject of *Under the hood*.
 
 <br>
-  <img width="548" height="562" alt="Details panel with the Step selected" src="https://github.com/user-attachments/assets/23a7d053-15ad-4bc0-a730-c4eb205153a3" />
+  <img width="548" alt="Details panel with the Step selected" src="https://github.com/user-attachments/assets/23a7d053-15ad-4bc0-a730-c4eb205153a3" />
 <br>
 
 - **Select the Step.** In the Details panel: *Node Label* (the identity the tag is built from); *Display Name*, *Description*, and *Display Data* (UI text - separate from identity, empty by default); the *Objective Class*; an optional *Config Asset*; *Target Actors* and *Target Classes*; *Number of Elements*; and the *Prerequisite Gate Mode* (Chapter 4). This Step has no display data of its own; the beats you read belong to the chapter. The properties on the Step node will be discussed throughout the other chapters.
 
 <br>
-  <img width="547" height="375" alt="Graph Defaults including Display Name, Display Data, and Questline Rewards" src="https://github.com/user-attachments/assets/f713d2da-f6e3-4f88-aaf4-cabc283241f7" />
+  <img width="547" alt="Graph Defaults including Display Name, Display Data, and Questline Rewards" src="https://github.com/user-attachments/assets/f713d2da-f6e3-4f88-aaf4-cabc283241f7" />
 <br>
 
 - **Click empty canvas.** The Details panel switches to the questline's own settings - the same thing the *Graph Defaults* button on the toolbar shows. Here the *Display Name* is "Chapter 1 — Quests and Triggers", the *Display Data* is `DA_Ch1Main_BasicTrigger`, and *Questline Rewards* holds the reward set that pays at the end of every chapter (Chapter 2 explains it).
@@ -183,11 +183,11 @@ Publisher and subscriber meet at a tag and nowhere else. That is what the Object
 
 **PIE Debug Halo - Live state:**
 
-<img width="668" height="401" alt="A yellow PIE debug halo showing the Live state" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
+<img width="668" alt="A yellow PIE debug halo showing the Live state" src="https://github.com/user-attachments/assets/38ae7ccb-68fe-4184-b079-c391940c34a2" />
 
 **PIE Debug Halo - Completed state:**
 
-<img width="668" height="401" alt="A green PIE debug halo showing the Completed state" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
+<img width="668" alt="A green PIE debug halo showing the Completed state" src="https://github.com/user-attachments/assets/ad13b347-562f-405b-927a-69d190824b7a" />
 
 ---
 

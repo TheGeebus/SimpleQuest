@@ -88,13 +88,13 @@ Two comment boxes sit in the graph. In short:
 ### Things worth clicking:
 
 <br>
-  <img width="358" height="357" alt="Either Giver expanded: two givers and one trigger listed, each marked (via QuickStart)" src="https://github.com/user-attachments/assets/1c512a59-9de0-4e80-81e7-5ce8ed6d5452" />
+  <img width="358" alt="Either Giver expanded: two givers and one trigger listed, each marked (via QuickStart)" src="https://github.com/user-attachments/assets/1c512a59-9de0-4e80-81e7-5ce8ed6d5452" />
 <br>
 
 - **Expand Either Giver.** Two givers - `BP_QuestGiverActor2` and `BP_QuestGiverActor4` - and one trigger, `BP_QuestTriggerActor6`, all marked *(via QuickStart)*.
 
 <br>
-  <img width="370" height="361" alt="Reuse Giver expanded: one giver and two triggers listed" src="https://github.com/user-attachments/assets/681978f5-a698-4d99-a687-f63f3d24fd58" />
+  <img width="370" alt="Reuse Giver expanded: one giver and two triggers listed" src="https://github.com/user-attachments/assets/681978f5-a698-4d99-a687-f63f3d24fd58" />
 <br>
 
 - **Expand Reuse Giver.** One giver, `BP_QuestGiverActor2` again, and two triggers: `BP_QuestTriggerActor6` again, and `BP_QuestTriggerActor16`. The reuse is symmetrical - one actor offers both Steps, and one actor can fire both.
@@ -114,7 +114,7 @@ Two comment boxes sit in the graph. In short:
 - **Open `BP_QuestGiverActor`** in `SimpleQuest Content/ExampleBlueprints/Actors`. Five events do the whole job. *Begin Play* creates the aura material. *On Give Availability Changed* recolors the cube and switches its collision on or off from what the component reports. *On Component Begin Overlap* calls *Give Quest* for every tag in the component's activated set. *On Quest Started* plays the accept sound, `QuestAccepted`. *On Quest Give Blocked* turns the cube red and plays the refusal, `QuestStartFail`. Blue, yellow, red: nothing to offer, offering, refused. The beacon has its own pair - `QuestStepSuccess` when the Objective marks it satisfied, `QuestStepDenied` when a fire is refused - so the tutorial's four sounds tell you which actor answered, and how, without looking.
 
 <br>
-  <img width="745" height="788" alt="DA_Ch3_StepA: Activated Beats, an empty Enabled Beats, Started Beats, and Completed Beats Default" src="https://github.com/user-attachments/assets/487c4c61-2f0b-426b-abbe-9e4524c932e3" />
+  <img width="745" alt="DA_Ch3_StepA: Activated Beats, an empty Enabled Beats, Started Beats, and Completed Beats Default" src="https://github.com/user-attachments/assets/487c4c61-2f0b-426b-abbe-9e4524c932e3" />
 <br>
 
 - **Open `DA_Ch3_StepA`.** Three arrays are filled this time - *Activated Beats*, *Started Beats*, and *Completed Beats Default*. The *Enabled Beats* array between the first two is empty, and ENABLED did fire for this Step. An event with no line authored prints nothing.
@@ -146,7 +146,7 @@ The graph shows the state with its own halo color - cyan, where Live is yellow -
 
 **The Pending Giver halo:**
 
-<img width="400" height="361" alt="The cyan Pending Giver halo on Either Giver during PIE" src="https://github.com/user-attachments/assets/f8b3be63-d490-4dcb-952c-e804c5ed5fc4" />
+<img width="400" alt="The cyan Pending Giver halo on Either Giver during PIE" src="https://github.com/user-attachments/assets/f8b3be63-d490-4dcb-952c-e804c5ed5fc4" />
 
 **The Quest State view, Prereq Status tab:**
 

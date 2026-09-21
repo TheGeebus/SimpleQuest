@@ -91,7 +91,7 @@ namespace FQuestCatchUpFanout
 		if (QuestState)
 		{
 			Out.Payload.NodeInfo.DisplayName = QuestState->GetDisplayName(CanonicalTag);
-			Out.Payload.Instigator = QuestState->GetLastGiverActor(CanonicalTag);
+			Out.Payload.Instigator = QuestState->GetLastInstigatorActor(CanonicalTag);
 			if (const FQuestEntryRecord* EntryRec = QuestState->GetQuestEntry(CanonicalTag))
 			{
 				if (const FQuestEntryArrival* Latest = EntryRec->GetLatest())
@@ -121,7 +121,10 @@ namespace FQuestCatchUpFanout
 		{
 			FReconstructedEvent Ev;
 			Ev.EventType = EQuestLifecycleEventType::Started;
+			// Giver-only: null for a cascaded or externally started quest, exactly as the live STARTED's GiverActor is.
 			Ev.RecoveredGiver = QuestState ? QuestState->GetLastGiverActor(CanonicalTag) : nullptr;
+			UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("FQuestCatchUpFanout: STARTED for '%s' reconstructed with giver=%s"),
+				*CanonicalTag.ToString(), Ev.RecoveredGiver ? *Ev.RecoveredGiver->GetName() : TEXT("none"));
 			Out.Events.Add(Ev);
 		};
 

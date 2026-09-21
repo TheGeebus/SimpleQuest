@@ -52,12 +52,12 @@ struct FQuestStateEntryRow
     EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
 
     /**
-     * Display string for the giver actor (resolved from FQuestEntryArrival::InstigatorRef).
-     * Captured as a string at refresh time — InstigatorRef is a soft reference that resolves lazily and the actor may
-     * be unloaded, and we only need the name for display. Empty when the start had no giver (cascade / external /
-     * initial-entry).
+     * Display string for the actor credited with the start (resolved from FQuestEntryArrival::InstigatorRef): the giver for
+     * a GiverGate row, the completer of the source for a ChainCascade row. Captured as a string at refresh time -
+     * InstigatorRef is a soft reference that resolves lazily and the actor may be unloaded, and we only need the name for
+     * display. Empty when the start credited nobody (initial entry, an external activation with no instigator).
      */
-    FString GiverActorName;
+    FString InstigatorName;
 
     /** Per-source routing identity from FQuestEntryArrival::PathIdentity. NAME_None for non-cascade starts. */
     FName PathIdentity = NAME_None;

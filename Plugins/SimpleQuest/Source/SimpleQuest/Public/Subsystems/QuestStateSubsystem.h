@@ -222,12 +222,23 @@ public:
 	const FQuestRuntimeRecord* GetQuestRuntimeRecord(FGameplayTag QuestTag) const;
 
 	/**
-	 * The actor that initiated the most-recent start of this quest (UQuestStep::ReceivedRuntimeContext.Instigator
-	 * captured at start time, preserved past the live step's deactivation). Null for non-Step starts (containers
-	 * have no objective; no params snapshot) and for starts where no Instigator was supplied.
+	 * The giver actor that started this quest most recently, or null when the most recent start was not a give. A
+	 * cascade, an external activation, and an initial entry all credit an instigator (the player whose fire completed
+	 * the source, for a cascade) but none of them has a giver, and this returns null for them - matching the live
+	 * FQuestStartedEvent, whose GiverActor is set only on the give path. For the credited actor of any start, see
+	 * GetLastInstigatorActor.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
 	AActor* GetLastGiverActor(FGameplayTag QuestTag) const;
+
+	/**
+	 * The actor credited with the most-recent start of this quest, whatever its provenance: the giver for a give, the
+	 * completer of the source for a cascade (UQuestStep::ReceivedRuntimeContext.Instigator captured at start time and
+	 * preserved past the live step's deactivation). Null for non-Step starts (containers have no objective; no params
+	 * snapshot) and for starts where no Instigator was supplied.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
+	AActor* GetLastInstigatorActor(FGameplayTag QuestTag) const;
 
 	/**
 	 * Provenance of the most-recent start of this quest. EQuestActivationProvenance::Unknown if the quest hasn't started

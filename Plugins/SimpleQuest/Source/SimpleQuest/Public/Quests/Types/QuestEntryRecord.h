@@ -53,10 +53,12 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	FQuestObjectiveActivationParams ActivationParamsSnapshot;
 
 	/**
-	 * Save-stable attribution: the actor credited with this start, as a soft reference. Captured at RecordEntry from the
-	 * snapshot's live (weak) Instigator and resolved lazily on read, so it survives a save/load where the actor streams in
-	 * after the snapshot is applied. GetLastGiverActor reads this. Unset when the start had no instigator. A runtime-spawned
-	 * instigator with no stable path resolves in-session but not across a save — that's UE's actor model, not a quest caveat.
+	 * Save-stable attribution: the actor credited with this start, as a soft reference - the giver for a give, the completer
+	 * of the source for a cascade. Captured at RecordEntry from the snapshot's live (weak) Instigator and resolved lazily on
+	 * read, so it survives a save/load where the actor streams in after the snapshot is applied. GetLastInstigatorActor reads
+	 * this for any start; GetLastGiverActor reads it only when Provenance is GiverGate. Unset when the start had no
+	 * instigator. A runtime-spawned instigator with no stable path resolves in-session but not across a save - that's UE's
+	 * actor model, not a quest caveat.
 	 */
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	TSoftObjectPtr<AActor> InstigatorRef;

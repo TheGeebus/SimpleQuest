@@ -41,7 +41,7 @@ namespace QuestStateView_Entries_ColumnIDs
     const FName Outcome    = TEXT("Outcome");
     const FName Time       = TEXT("Time");
     const FName Provenance = TEXT("Provenance");
-    const FName Giver      = TEXT("Giver");
+    const FName Instigator = TEXT("Instigator");
     const FName Path       = TEXT("Path");
 }
 
@@ -269,15 +269,15 @@ public:
                         .Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
                 ]);
         }
-        if (ColumnName == QuestStateView_Entries_ColumnIDs::Giver)
+        if (ColumnName == QuestStateView_Entries_ColumnIDs::Instigator)
         {
             return WithStripe(SNew(SBox).Padding(FMargin(6.f, 2.f))
                 [
                     SNew(STextBlock)
-                        .Text(Item->GiverActorName.IsEmpty() ? FText::FromString(TEXT("(none)")) : FText::FromString(Item->GiverActorName))
-                        .ColorAndOpacity(Item->GiverActorName.IsEmpty() ? FSlateColor(QuestStateView_Style::SubduedText) : FSlateColor::UseForeground())
+                        .Text(Item->InstigatorName.IsEmpty() ? FText::FromString(TEXT("(none)")) : FText::FromString(Item->InstigatorName))
+                        .ColorAndOpacity(Item->InstigatorName.IsEmpty() ? FSlateColor(QuestStateView_Style::SubduedText) : FSlateColor::UseForeground())
                         .HighlightText(HighlightText)
-                        .Font(FCoreStyle::GetDefaultFontStyle(Item->GiverActorName.IsEmpty() ? "Italic" : "Regular", 9))
+                        .Font(FCoreStyle::GetDefaultFontStyle(Item->InstigatorName.IsEmpty() ? "Italic" : "Regular", 9))
                 ]);
         }
         if (ColumnName == QuestStateView_Entries_ColumnIDs::Path)
@@ -468,9 +468,9 @@ void SQuestStateView::Construct(const FArguments& InArgs)
             .DefaultLabel(LOCTEXT("EntriesProvenance", "Provenance")).FillWidth(0.08f)
             .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Provenance); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
-        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Giver)
-            .DefaultLabel(LOCTEXT("EntriesGiver", "Giver")).FillWidth(0.12f)
-            .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Giver); })
+        + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Instigator)
+            .DefaultLabel(LOCTEXT("EntriesInstigator", "Instigator")).FillWidth(0.12f)
+            .SortMode_Lambda([this]() { return GetEntriesSortMode(QuestStateView_Entries_ColumnIDs::Instigator); })
             .OnSort(this, &SQuestStateView::HandleEntriesColumnSort)
         + SHeaderRow::Column(QuestStateView_Entries_ColumnIDs::Path).FillWidth(0.2f)
             .DefaultLabel(LOCTEXT("EntriesPath", "Path"))
@@ -838,15 +838,15 @@ bool SQuestStateView::RefreshEntriesFromChannel()
             Row->Provenance         = Entry.Provenance;
             Row->PathIdentity       = Entry.PathIdentity;
 
-            // Resolve the giver actor name at refresh time. Using GetName() rather than NameOrLabel because the
-            // snapshot may outlive the actor, and the underlying TObjectPtr<AActor> in the snapshot may be a
-            // dangling pointer to a destroyed actor — IsValid() guards. Designers see "(none)" rendered with the
-            // subdued color when no giver was attributed to the start.
-			if (const AActor* Giver = Entry.InstigatorRef.Get())
-			{
-                if (IsValid(Giver))
+            // Resolve the credited actor's name at refresh time - the giver for a give, the completer of the source for a
+            // cascade. GetName() rather than NameOrLabel because the snapshot may outlive the actor, and the underlying
+            // pointer may be a dangling pointer to a destroyed actor - IsValid() guards. Designers see "(none)" rendered
+            // with the subdued color when the start credited nobody.
+            if (const AActor* Instigator = Entry.InstigatorRef.Get())
+            {
+                if (IsValid(Instigator))
                 {
-                    Row->GiverActorName = Giver->GetName();
+                    Row->InstigatorName = Instigator->GetName();
                 }
             }
 
@@ -991,13 +991,13 @@ void SQuestStateView::SortEntries()
                         : static_cast<uint8>(A->Provenance) > static_cast<uint8>(B->Provenance);
         });
     }
-    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Giver)
+    else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Instigator)
     {
         AllEntries.Sort([bAsc](const TSharedPtr<FQuestStateEntryRow>& A, const TSharedPtr<FQuestStateEntryRow>& B)
         {
             if (!A.IsValid() || !B.IsValid()) return false;
-            return bAsc ? A->GiverActorName.Compare(B->GiverActorName) < 0
-                        : A->GiverActorName.Compare(B->GiverActorName) > 0;
+            return bAsc ? A->InstigatorName.Compare(B->InstigatorName) < 0
+                        : A->InstigatorName.Compare(B->InstigatorName) > 0;
         });
     }
     else if (EntriesSortColumn == QuestStateView_Entries_ColumnIDs::Path)
@@ -1099,12 +1099,12 @@ void SQuestStateView::ApplyEntriesFilter()
             && Row->IncomingOutcomeTag.GetTagName().ToString().Contains(FilterText);
         const bool bProvenanceMatches = Row->Provenance != EQuestActivationProvenance::Unknown
             && QuestStateView_Style::FormatProvenance(Row->Provenance).ToString().Contains(FilterText);
-        const bool bGiverMatches      = !Row->GiverActorName.IsEmpty()
-            && Row->GiverActorName.Contains(FilterText);
+        const bool bInstigatorMatches      = !Row->InstigatorName.IsEmpty()
+            && Row->InstigatorName.Contains(FilterText);
         const bool bPathMatches       = !Row->PathIdentity.IsNone()
             && Row->PathIdentity.ToString().Contains(FilterText);
 
-        if (bDestMatches || bSourceMatches || bOutcomeMatches || bProvenanceMatches || bGiverMatches || bPathMatches)
+        if (bDestMatches || bSourceMatches || bOutcomeMatches || bProvenanceMatches || bInstigatorMatches || bPathMatches)
         {
             Entries.Add(Row);
         }
@@ -1123,8 +1123,7 @@ void SQuestStateView::ApplyPrereqsFilter()
     {
         if (!Row.IsValid()) continue;
         const FString TypeLabel = (Row->bIsAlways ? LOCTEXT("TypeAlways", "Always") : LOCTEXT("TypeCustom", "Custom")).ToString();
-        if (Row->QuestTag.GetTagName().ToString().Contains(FilterText) ||
-            TypeLabel.Contains(FilterText))
+        if (Row->QuestTag.GetTagName().ToString().Contains(FilterText) || TypeLabel.Contains(FilterText))
         {
             Prereqs.Add(Row);
         }
@@ -1236,7 +1235,7 @@ void SQuestStateView::CopySelectedRowsAsTSV()
     case EQuestStateViewTab::Entries:
         if (EntriesList.IsValid())
         {
-            Lines.Add(TEXT("Destination\tSource\tOutcome\tProvenance\tGiver\tPath\tTime"));
+            Lines.Add(TEXT("Destination\tSource\tOutcome\tProvenance\tInstigator\tPath\tTime"));
             for (const TSharedPtr<FQuestStateEntryRow>& Row : Entries)
             {
                 if (!Row.IsValid() || !EntriesList->IsItemSelected(Row)) continue;
@@ -1245,7 +1244,7 @@ void SQuestStateView::CopySelectedRowsAsTSV()
                     Row->SourceQuestTag.IsValid() ? *Row->SourceQuestTag.GetTagName().ToString() : TEXT("(none)"),
                     Row->IncomingOutcomeTag.IsValid() ? *Row->IncomingOutcomeTag.GetTagName().ToString() : TEXT("(none)"),
                     *QuestStateView_Style::FormatProvenance(Row->Provenance).ToString(),
-                    Row->GiverActorName.IsEmpty() ? TEXT("(none)") : *Row->GiverActorName,
+                    Row->InstigatorName.IsEmpty() ? TEXT("(none)") : *Row->InstigatorName,
                     Row->PathIdentity.IsNone() ? TEXT("(none)") : *Row->PathIdentity.ToString(),                    
                     Row->EntryTime));
             }

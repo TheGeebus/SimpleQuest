@@ -68,6 +68,17 @@ and a routing rule that now says one thing for both role components.
 
 ### Fixes
 
+- **A caught-up STARTED no longer names the player as the giver of a cascaded
+  Step.** The entry record credits one actor per start - the giver for a give,
+  and by design the completer of the source for a cascade, so rewards and the
+  next Objective can see who did it - and `Get Last Giver Actor` returned that
+  actor for every start. A subscriber catching up on a cascaded Step therefore
+  received a STARTED with a giver the live event never carried, and the Facts
+  Panel's Entries tab listed the player under *Giver*. The accessor now answers
+  only for a give, `Get Last Instigator Actor` is the generic read, catch-up
+  uses each where the live path does, and the Entries column is named for what
+  it shows: *Instigator*, read beside *Provenance*.
+
 - **Recompiling a questline during a play session could crash the next
   questline-level reward grant.** Compiling a registered graph moves the previous
   compile's node instances and questline rewards out of the asset, and the

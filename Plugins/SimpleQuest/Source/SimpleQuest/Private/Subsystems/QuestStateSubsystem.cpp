@@ -652,6 +652,26 @@ const FQuestRuntimeRecord* UQuestStateSubsystem::GetQuestRuntimeRecord(FGameplay
 
 AActor* UQuestStateSubsystem::GetLastGiverActor(FGameplayTag QuestTag) const
 {
+	// Only a give has a giver. The record credits an instigator for every start - the completer of the source for a
+	// cascade - and reporting that actor as the giver put the player in the Entries tab's giver column and, worse, in the
+	// GiverActor of a caught-up STARTED that the live STARTED never carried.
+	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
+	{
+		if (const FQuestEntryArrival* Latest = Record->GetLatest())
+		{
+			if (Latest->Provenance == EQuestActivationProvenance::GiverGate)
+			{
+				return Latest->InstigatorRef.Get();
+			}
+			UE_LOG(LogSimpleQuestState, VeryVerbose, TEXT("GetLastGiverActor: '%s' - last start was %s, not a give; no giver"),
+				*QuestTag.ToString(), *UEnum::GetValueAsString(Latest->Provenance));
+		}
+	}
+	return nullptr;
+}
+
+AActor* UQuestStateSubsystem::GetLastInstigatorActor(FGameplayTag QuestTag) const
+{
 	if (const FQuestEntryRecord* Record = QuestEntries.Find(QuestTag))
 	{
 		if (const FQuestEntryArrival* Latest = Record->GetLatest())

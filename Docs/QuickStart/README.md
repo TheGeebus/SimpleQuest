@@ -32,7 +32,7 @@ Act I is authoring one questline. Act II is what happens when one graph is not e
 |              | [3 Basic Giver](03_BasicGiver.md)                | A quest offered by an actor: activated is not started                                                                    |
 |              | [4 Sequential Steps](04_SequentialSteps.md)      | Activation alone does not enforce order - wiring does                                                                    |
 |              | [5 Named Outcomes](05_NamedOutcomes.md)          | A fork resolved with `Left` or `Right`, and what routes on each                                                          |
-|              | 6 Blocking                                       | The Blocked state, a refused give, and a door that reads it                                                              |
+|              | [6 Blocking](06_Blocking.md)                     | The Blocked state, a refused give, and a door that reads it                                                              |
 |              | 7 Prerequisites                                  | AND / OR / NOT composition, spawned as three scenarios in one room                                                       |
 | **Act II**   | 8 Linked Questlines                              | One questline placed twice, with separate progress                                                                       |
 |              | 9 Activation Groups                              | A second questline opening a bridge it knows nothing about                                                               |

@@ -254,4 +254,4 @@ Open `OBJ_LeftOrRight`, drop a *Complete Objective With Outcome* node anywhere i
 
 ---
 
-Previous: [Chapter 4 - Sequential Steps](04_SequentialSteps.md) | Next: Chapter 6 - Blocking
+Previous: [Chapter 4 - Sequential Steps](04_SequentialSteps.md) | Next: [Chapter 6 - Blocking](06_Blocking.md)

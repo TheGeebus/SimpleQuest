@@ -122,8 +122,6 @@ void SGraphNode_PrerequisiteCombinator::UpdateGraphNode()
             ];
     }
 
-    this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
     TSharedRef<SVerticalBox> InnerVerticalBox =
         SNew(SVerticalBox)
         + SVerticalBox::Slot()

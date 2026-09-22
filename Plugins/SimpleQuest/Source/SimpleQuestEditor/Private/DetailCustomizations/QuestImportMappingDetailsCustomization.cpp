@@ -13,7 +13,7 @@
 #include "Misc/TransactionObjectEvent.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
-#include "SSearchableComboBox.h"
+#include "Widgets/Input/SSearchableComboBox.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"

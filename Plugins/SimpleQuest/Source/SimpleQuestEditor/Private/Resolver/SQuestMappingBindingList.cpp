@@ -8,7 +8,7 @@
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "SSearchableComboBox.h"
+#include "Widgets/Input/SSearchableComboBox.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBox.h"

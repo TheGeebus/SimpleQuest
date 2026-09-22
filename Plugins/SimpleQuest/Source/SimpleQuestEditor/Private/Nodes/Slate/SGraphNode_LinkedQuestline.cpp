@@ -156,8 +156,6 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
 
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
 	TSharedPtr<SVerticalBox> InnerVerticalBox = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		.Padding(Settings->GetNonPinNodeBodyPadding())

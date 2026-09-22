@@ -73,8 +73,8 @@ public:
 			{
 				const FVector2f A = FMath::CubicInterp(Start, P0Tangent, End, P1Tangent, (float)(i-1)/N);
 				const FVector2f B = FMath::CubicInterp(Start, P0Tangent, End, P1Tangent, (float)i/N);
-				const FVector2f Closest = FMath::ClosestPointOnSegment2D(LocalMousePosition, A, B);
-				const float DistSq = (LocalMousePosition - Closest).SizeSquared();
+				const FVector2f Closest = FMath::ClosestPointOnSegment2D(AbsoluteMousePosition, A, B);
+				const float DistSq = (AbsoluteMousePosition - Closest).SizeSquared();
 				if (DistSq < BestDistSq) { BestDistSq = DistSq; BestPoint = Closest; }
 			}
 			if (BestDistSq < ToleranceSq && BestDistSq < SplineOverlapResult.GetDistanceSquared())
@@ -157,8 +157,8 @@ public:
 
 		for (int32 i = 1; i < CurvePoints.Num(); ++i)
 		{
-			const FVector2f Closest = FMath::ClosestPointOnSegment2D(LocalMousePosition, CurvePoints[i - 1], CurvePoints[i]);
-			const float DistSq = (LocalMousePosition - Closest).SizeSquared();
+			const FVector2f Closest = FMath::ClosestPointOnSegment2D(AbsoluteMousePosition, CurvePoints[i - 1], CurvePoints[i]);
+			const float DistSq = (AbsoluteMousePosition - Closest).SizeSquared();
 			if (DistSq < BestDistSq)
 			{
 				BestDistSq = DistSq;

@@ -1,6 +1,14 @@
 # Before You Start
 
-What you need open, what the controls are, and how to read the rooms. Ten minutes, once.
+The three central ideas to focus on, what you need open, what the controls are, and how to read the rooms.
+
+As you work through the walkthrough, pay particular attention to three central ideas:
+
+- **Objectives** describe what the player needs to accomplish.
+- **Steps** place objectives in a progression.
+- **Prerequisites** describe the conditions under which progression becomes available.
+
+These three central ideas form the foundation of how the framework expresses progression. The walkthrough introduces them gradually, so don't worry about understanding every capability immediately. In particular, watch how prerequisites allow progression to express relationships between things without necessarily forcing those things into a strict sequence.
 
 ## Open the project
 
@@ -74,7 +82,7 @@ The graph editor is a live instrument during Play In Editor, and most of what th
   - **World State** - every fact currently asserted, searchable, live. The framework writes each node's lifecycle here as facts (`.Live`, `.Started`, `.Completed`, `.Blocked`), so this view answers whether something holds right now: is this Step Live, has this chapter completed. A fact is a count, not a flag - the Count column says how many times it has been asserted, and it holds until the count reaches zero. Most lifecycle facts sit at 1; `.Completed` counts every time a node resolves, which Chapter 1 puts on screen. The store itself is shared, not SimpleQuest's. Anything in your game can add, remove, and read facts here through the SimpleCore Blueprint Library - the tutorial's own start and unlock buttons do - so an inventory, a weather system, or a faction ledger can keep its state in the same place without touching the quest system, and a quest can gate on it (Chapters 7 and 10).
   - **Quest State** - the detail a yes-or-no fact can't hold. *Resolutions*: one row per completion, with the outcome, the time, and the source. *Entries*: how each node was reached - from which node, on which outcome. *Prereq Status*: what each giver-held node is waiting on. This record is the framework's own: you read it, here or through the Quest State Subsystem's query functions, and only the quest manager writes it. It is not built for anything else to share.
 
-  Each menu invocation opens a fresh panel, so you can dock one of each side by side.
+  Each menu invocation opens a fresh panel, so you can dock one or more of each side by side.
 - **Prerequisite Examiner.** Right-click a node and choose *Examine Prerequisite Expression*. The panel lays out the node's whole expression with each condition tinted by whether it is satisfied - the place to look when a node is waiting and you want to know on what (Chapters 4 and 7).
 - **Group Examiner.** Right-click an Activation Group node and choose *Examine Group Connections* to see the pairings that have no wire (Chapter 9).
 

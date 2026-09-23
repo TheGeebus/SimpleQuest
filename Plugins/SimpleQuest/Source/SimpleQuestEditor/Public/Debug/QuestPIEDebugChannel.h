@@ -19,6 +19,7 @@ class UEdGraphNode;
 class UWorldStateSubsystem;
 class UQuestManagerSubsystem;
 class UQuestStateSubsystem;
+class UQuestlineGraph;
 
 
 /**
@@ -72,6 +73,25 @@ public:
 
 	/** True when PIE is running AND the PIE world's subsystems were successfully resolved. */
 	bool IsActive() const;
+
+	/**
+	 * Which running placement of OpenedAsset the overlay reports for, or an invalid tag for every placement at once - the
+	 * default, and the only possible answer for an asset placed once.
+	 *
+	 * An asset placed more than once has one authored node per Step and several running instances of it, and every fact is
+	 * written at every perspective, so a Step's own asset-level address belongs to all of them. Left unset, the overlay reads
+	 * that shared address and reports the placements merged: a node is Live when any placement of it is, which is the right
+	 * answer to "is this route running anywhere" and the wrong one to "how far along is the west patrol". Set a context and
+	 * every query narrows to the instance sitting under it. Selections are session-scoped and cleared when PIE ends.
+	 */
+	void SetDebugContextForAsset(const UQuestlineGraph* OpenedAsset, FGameplayTag PlacementTag);
+	FGameplayTag GetDebugContextForAsset(const UQuestlineGraph* OpenedAsset) const;
+
+	/**
+	 * The running placements of OpenedAsset, for a picker to offer. Empty when PIE is inactive, when the asset has not been
+	 * compiled since it grew an identity tag, or when nothing places it.
+	 */
+	TArray<FGameplayTag> GetPlacementsForAsset(const UQuestlineGraph* OpenedAsset) const;
 
 	/**
 	 * Resolves the node's compiled FGameplayTag, looks up its WorldState state facts, and returns the highest-priority
@@ -204,6 +224,16 @@ private:
 	/** Walks editor node → containing UQuestlineGraph → CompiledNodes lookup by QuestGuid. Returns invalid tag if not resolvable. */
 	FGameplayTag ResolveRuntimeTag(const UEdGraphNode* EditorNode) const;
 
+	/** The asset that owns EditorNode's graph, or null. Shared by the compiled-tag resolution and the debug-context lookups. */
+	static const UQuestlineGraph* FindOwningAsset(const UEdGraphNode* EditorNode);
+
+	/**
+	 * The one tag among Candidates that sits under the debug context selected for EditorNode's asset, or an invalid tag when
+	 * no context is selected, when the node has no owning asset, or when nothing matches. Callers keep their merged behavior
+	 * on an invalid return, so an unselected context and a stale one read the same.
+	 */
+	FGameplayTag NarrowToDebugContext(const UEdGraphNode* EditorNode, const TArray<FGameplayTag>& Candidates) const;
+
 	/** Pushes a new in-flight session snapshot, applies the FIFO memory cap, fires OnSessionHistoryChanged. */
 	void BeginNewSession();
 
@@ -218,6 +248,9 @@ private:
 
 	/** Memory cap - maximum sessions retained in SessionHistory. Older entries are FIFO-evicted on push. */
 	static constexpr int32 MaxStoredSessions = 50;
+
+	/** Per-asset debug context - see SetDebugContextForAsset. Weak keys; entries for unloaded assets are ignored and swept on PIE end. */
+	TMap<TWeakObjectPtr<const UQuestlineGraph>, FGameplayTag> DebugContextByAsset;
 
 	TWeakObjectPtr<UWorldStateSubsystem> CachedWorldState;
 

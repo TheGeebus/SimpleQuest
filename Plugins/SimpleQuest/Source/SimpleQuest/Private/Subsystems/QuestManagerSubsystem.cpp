@@ -720,6 +720,29 @@ const UQuestNodeBase* UQuestManagerSubsystem::FindNodeInstanceByAuthoredGuid(con
     return nullptr;
 }
 
+TArray<FGameplayTag> UQuestManagerSubsystem::FindPlacementsOfAsset(FGameplayTag AssetIdentityTag) const
+{
+    TArray<FGameplayTag> Placements;
+    if (!AssetIdentityTag.IsValid()) return Placements;
+
+    // The registry is keyed per perspective, so one instance is visited once per tag it answers to - dedup on the contextual
+    // tag, which is the one name a placement has regardless of how many spellings reach it.
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        const UQuestNodeBase* Instance = Pair.Value;
+        if (!Instance || Instance->GetLinkedInnerIdentityTag() != AssetIdentityTag) continue;
+
+        const FGameplayTag ContextualTag = Instance->GetContextualTag();
+        if (ContextualTag.IsValid()) Placements.AddUnique(ContextualTag);
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("FindPlacementsOfAsset: '%s' - %d placement(s) registered"),
+        *AssetIdentityTag.ToString(),
+        Placements.Num());
+
+    return Placements;
+}
+
 void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
 {
     if (!QuestTag.IsValid() || !WorldState)

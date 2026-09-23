@@ -112,6 +112,11 @@ void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
 	CachedQuestState.Reset();
+
+	// Placements exist only while the game runs, so a selection cannot outlive the session that produced it. Clearing here
+	// also means the next session starts on the merged default rather than on a tag that named a different run's instance.
+	DebugContextByAsset.Reset();
+
 	bIsActive = false;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE ended"));
 	OnDebugActiveChanged.Broadcast();
@@ -436,6 +441,72 @@ EPrereqDebugState FQuestPIEDebugChannel::EvaluateExaminerNode(const FPrereqExami
 	}
 }
 
+const UQuestlineGraph* FQuestPIEDebugChannel::FindOwningAsset(const UEdGraphNode* EditorNode)
+{
+	if (!EditorNode) return nullptr;
+
+	UObject* Outer = EditorNode->GetGraph() ? EditorNode->GetGraph()->GetOuter() : nullptr;
+	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
+	return Cast<UQuestlineGraph>(Outer);
+}
+
+FGameplayTag FQuestPIEDebugChannel::NarrowToDebugContext(const UEdGraphNode* EditorNode, const TArray<FGameplayTag>& Candidates) const
+{
+	const UQuestlineGraph* OwningAsset = FindOwningAsset(EditorNode);
+	if (!OwningAsset) return FGameplayTag();
+
+	const FGameplayTag* Context = DebugContextByAsset.Find(OwningAsset);
+	if (!Context || !Context->IsValid()) return FGameplayTag();
+
+	// MatchesTag is "this tag is the argument or a descendant of it", so one comparison covers a placement at any depth: a
+	// route placed in a chapter that is itself placed in the master reads the same as a placement sitting at the top.
+	for (const FGameplayTag& Candidate : Candidates)
+	{
+		if (Candidate.MatchesTag(*Context)) return Candidate;
+	}
+	return FGameplayTag();
+}
+
+void FQuestPIEDebugChannel::SetDebugContextForAsset(const UQuestlineGraph* OpenedAsset, FGameplayTag PlacementTag)
+{
+	if (!OpenedAsset) return;
+
+	if (PlacementTag.IsValid())
+	{
+		DebugContextByAsset.Add(OpenedAsset, PlacementTag);
+	}
+	else
+	{
+		DebugContextByAsset.Remove(OpenedAsset);
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel : debug context for '%s' is now %s"),
+		*OpenedAsset->GetName(),
+		PlacementTag.IsValid() ? *PlacementTag.ToString() : TEXT("all placements"));
+
+	OnDebugActiveChanged.Broadcast();
+}
+
+FGameplayTag FQuestPIEDebugChannel::GetDebugContextForAsset(const UQuestlineGraph* OpenedAsset) const
+{
+	if (!OpenedAsset) return FGameplayTag();
+	const FGameplayTag* Context = DebugContextByAsset.Find(OpenedAsset);
+	return Context ? *Context : FGameplayTag();
+}
+
+TArray<FGameplayTag> FQuestPIEDebugChannel::GetPlacementsForAsset(const UQuestlineGraph* OpenedAsset) const
+{
+	if (!IsActive() || !OpenedAsset || OpenedAsset->GetCompiledIdentityTag().IsNone()) return {};
+
+	const UQuestManagerSubsystem* Manager = CachedQuestManager.Get();
+	if (!Manager) return {};
+
+	const FGameplayTag AssetIdentity = FGameplayTag::RequestGameplayTag(OpenedAsset->GetCompiledIdentityTag(), false);
+	if (!AssetIdentity.IsValid()) return {};
+
+	return Manager->FindPlacementsOfAsset(AssetIdentity);
+}
+
 FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* EditorNode) const
 {
 	if (!EditorNode) return FGameplayTag();
@@ -444,9 +515,7 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 	if (!ContentNode) return FGameplayTag();
 
 	// Resolve own-asset compile tag via Outer walk + CompiledNodes lookup (same as before).
-	UObject* Outer = EditorNode->GetGraph() ? EditorNode->GetGraph()->GetOuter() : nullptr;
-	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
-	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	const UQuestlineGraph* QuestlineAsset = FindOwningAsset(EditorNode);
 	if (!QuestlineAsset) return FGameplayTag();
 
 	FGameplayTag OwnAssetTag;
@@ -459,15 +528,26 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 		}
 	}
 
+	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
+	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
+	if (!WorldState || !StateSubsystem || !OwnAssetTag.IsValid()) return OwnAssetTag;
+
+	// A placement selected in the toolbar names one instance, and it wins outright. Without this the branch below returns the
+	// asset's own tag whenever that tag carries state - which it always does for a placed asset, because facts are written at
+	// every perspective - and an asset placed twice reads as its placements merged.
+	if (const FGameplayTag InContext = NarrowToDebugContext(EditorNode, StateSubsystem->ResolveCanonicalTags(OwnAssetTag));
+		InContext.IsValid())
+	{
+		return InContext;
+	}
+
 	// Contextual resolution: if PIE is running and own-asset tag has no live state, the asset may be opened
 	// while a parent LinkedQuestline placement is the actively running instance. Consult the state subsystem's
 	// runtime alias index (ResolveCanonicalTags) instead of the editor-utility's asset-registry walk - the
 	// runtime index reflects post-game-start registrations (including listener auto-load), whereas the asset-
 	// registry walk only sees compile-time data and can disagree with what the manager has actually registered.
 	// Closes the "halo doesn't update post-listener" symptom.
-	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
-	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
-	if (WorldState && StateSubsystem && OwnAssetTag.IsValid() && !HasAnyStateFact(OwnAssetTag, WorldState))
+	if (!HasAnyStateFact(OwnAssetTag, WorldState))
 	{
 		for (const FGameplayTag& CanonicalTag : StateSubsystem->ResolveCanonicalTags(OwnAssetTag))
 		{

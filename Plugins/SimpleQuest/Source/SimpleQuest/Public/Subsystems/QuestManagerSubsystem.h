@@ -365,6 +365,17 @@ protected:
 	 */
 	virtual const UQuestNodeBase* FindNodeInstanceByAuthoredGuid(const FGuid& AuthoredNodeGuid) const;
 
+	/**
+	 * The contextual tags of every registered placement of a linked questline asset - the running copies of AssetIdentityTag.
+	 * Empty when nothing places it, which includes an asset running standalone under its own identity.
+	 *
+	 * A placement carries the identity of the asset it placed; content inside a linked asset carries asset-scoped aliases
+	 * instead, so this matches the wrappers only. Editor tooling asks it to answer "which of these am I looking at": an asset
+	 * placed more than once has one authored node per Step and several running instances of it. A linear scan, sized for
+	 * editor tooling. Same replacement-contract note as FindNodeInstance.
+	 */
+	virtual TArray<FGameplayTag> FindPlacementsOfAsset(FGameplayTag AssetIdentityTag) const;
+
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
 

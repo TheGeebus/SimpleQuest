@@ -273,6 +273,7 @@ public:
     const TArray<FName>& GetEntryNodeTags() const { return EntryNodeTags; }
     const TMap<FName, TObjectPtr<UQuestNodeBase>>& GetCompiledNodes() const { return CompiledNodes; }
     const TArray<FName>& GetCompiledQuestTags() const { return CompiledQuestTags; }
+    const FName& GetCompiledIdentityTag() const { return CompiledIdentityTag; }
     const TArray<FQuestCompiledNodeAlias>& GetCompiledNodeAliases() const { return CompiledNodeAliases; }
     const FString& GetQuestlineID() const { return QuestlineID; }
     const TArray<FGameplayTag>& GetOutwardSetterGroupTags() const { return OutwardSetterGroupTags; }

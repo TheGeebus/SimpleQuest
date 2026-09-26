@@ -100,8 +100,6 @@ void SGraphNode_Exit::UpdateGraphNode()
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
 
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
 	TSharedPtr<SVerticalBox> InnerVerticalBox = SNew(SVerticalBox)
 		// Title
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)

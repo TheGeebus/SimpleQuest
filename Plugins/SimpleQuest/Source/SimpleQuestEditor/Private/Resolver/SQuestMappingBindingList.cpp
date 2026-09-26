@@ -3,17 +3,23 @@
 
 #include "Resolver/SQuestMappingBindingList.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/EngineVersionComparison.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "SSearchableComboBox.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/AppStyle.h"
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "SSearchableComboBox.h"
+#else
+#include "Widgets/Input/SSearchableComboBox.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "SQuestMappingBindingList"
 

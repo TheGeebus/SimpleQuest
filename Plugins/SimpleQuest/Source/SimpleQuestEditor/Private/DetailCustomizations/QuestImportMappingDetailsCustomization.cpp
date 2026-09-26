@@ -10,10 +10,10 @@
 #include "IDesktopPlatform.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/TransactionObjectEvent.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
-#include "SSearchableComboBox.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
@@ -25,6 +25,11 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "SSearchableComboBox.h"
+#else
+#include "Widgets/Input/SSearchableComboBox.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "QuestImportMappingDetails"
 

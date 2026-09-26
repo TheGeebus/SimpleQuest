@@ -126,8 +126,6 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
 
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
 	TSharedPtr<SVerticalBox> InnerVerticalBox = SNew(SVerticalBox)
 
 		// Title

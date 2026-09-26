@@ -52,6 +52,7 @@ public:
 
 	virtual void DrawConnection(int32 LayerId, const FVector2f& Start, const FVector2f& End, const FConnectionParams& Params) override
 	{		
+		const FVector2f MousePos = this->HoverMousePosition();   // one spelling for both hover passes below; see the mixin
 		const FVector2f SplineTangent = ComputeSplineTangent(Start, End);
 		const FVector2f P0Tangent = Params.StartTangent.IsNearlyZero() 
 			? ((Params.StartDirection == EGPD_Output) ? SplineTangent : -SplineTangent)
@@ -73,8 +74,8 @@ public:
 			{
 				const FVector2f A = FMath::CubicInterp(Start, P0Tangent, End, P1Tangent, (float)(i-1)/N);
 				const FVector2f B = FMath::CubicInterp(Start, P0Tangent, End, P1Tangent, (float)i/N);
-				const FVector2f Closest = FMath::ClosestPointOnSegment2D(LocalMousePosition, A, B);
-				const float DistSq = (LocalMousePosition - Closest).SizeSquared();
+				const FVector2f Closest = FMath::ClosestPointOnSegment2D(MousePos, A, B);
+				const float DistSq = (MousePos - Closest).SizeSquared();
 				if (DistSq < BestDistSq) { BestDistSq = DistSq; BestPoint = Closest; }
 			}
 			if (BestDistSq < ToleranceSq && BestDistSq < SplineOverlapResult.GetDistanceSquared())
@@ -157,8 +158,8 @@ public:
 
 		for (int32 i = 1; i < CurvePoints.Num(); ++i)
 		{
-			const FVector2f Closest = FMath::ClosestPointOnSegment2D(LocalMousePosition, CurvePoints[i - 1], CurvePoints[i]);
-			const float DistSq = (LocalMousePosition - Closest).SizeSquared();
+			const FVector2f Closest = FMath::ClosestPointOnSegment2D(MousePos, CurvePoints[i - 1], CurvePoints[i]);
+			const float DistSq = (MousePos - Closest).SizeSquared();
 			if (DistSq < BestDistSq)
 			{
 				BestDistSq = DistSq;

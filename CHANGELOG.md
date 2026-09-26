@@ -7,12 +7,28 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-The first four chapters of the written on-ramp; the Prerequisite Examiner made
-truthful - every state it advertised is now produced, and every node it can pin
-evaluates; a crash found by doing what an author will do - saving while playing;
-and a routing rule that now says one thing for both role components.
+Act I of the written on-ramp - seven chapters on the pieces of one progression;
+compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
+the four deprecations and one load failure that verifying it turned up; the
+Prerequisite Examiner made truthful - every state it advertised is now produced,
+and every node it can pin evaluates; a crash found by doing what an author will
+do - saving assets while playing; and a routing rule that now says one thing for both
+role components.
 
 ### Added
+
+- **The graph's debug overlay can report one placement at a time.** A questline
+  placed in several graphs - or twice in one - runs as several instances at
+  once, and every lifecycle fact is written at every one of a node's addresses,
+  so the address a Step has inside its own asset belongs to all of its
+  instances. Opening that asset during play therefore showed them merged: a
+  node read Live when any instance of it was. The graph editor's toolbar now
+  ends with a placement picker, in the spot and the shape Blueprints use for
+  their debug object: it lists the placements running right now, and choosing
+  one narrows the halos, the gating rings, the refusal pulses, and the
+  Prerequisite Examiner's tints to that instance. It reads *All placements*
+  until you choose - the merged view, and the only thing a singly-placed asset
+  can mean - and it resets when play ends.
 
 - **Prerequisite Gate nodes can be examined.** Right-click a gate and choose
   *Examine Prerequisite Expression*, as on a content node. A gate compiles to a
@@ -68,6 +84,52 @@ and a routing rule that now says one thing for both role components.
 
 ### Fixes
 
+- **SimpleQuest no longer fails to load when Electronic Nodes is installed but
+  not enabled.** The optional Electronic Nodes integration decided whether to
+  build itself by looking for EN on disk, and then for an explicit
+  `"Enabled": false` in the project file. A project with EN installed - for some
+  other project, at some other time - but never enabled in this one matched
+  neither test, so the integration was compiled and linked against a plugin that
+  was never loaded, and the editor then refused *all* of SimpleQuest with an
+  error naming a module you had never heard of. The build now asks Unreal
+  whether EN will actually be enabled for what it is building, so a project that
+  says nothing about EN simply gets no integration and loads normally. Unreal
+  5.7 and later only - earlier engines never built the integration at all.
+
+- **SimpleQuest builds without deprecation warnings on Unreal 5.8.** Four of the
+  engine APIs it used were deprecated there: the searchable combo box header
+  moved from ToolWidgets to Slate, the connection drawing policy's mouse
+  position was renamed, a graph node attribute the engine no longer reads was
+  retired, and the gameplay tag manager's last-chance registration hook was
+  replaced. Each now resolves to the right spelling for the engine compiling it,
+  so 5.6 and 5.7 are untouched and 5.8 is clean. This had been a hard build
+  failure for any project compiling with warnings as errors.
+  - Thanks to **Buckley603**, who reported three of the four.
+
+- **`SimpleQuest.RoundTrip` returns a verdict again.** The command proved its
+  artifacts belonged to the run in progress by comparing their timestamps
+  against the moment it started - but Unreal reports a file's timestamp to the
+  nearest whole second, while the clock it was compared against carries
+  milliseconds. Any round trip that finished inside one second therefore read
+  its own fresh output as older than itself and aborted with no verdict, which
+  small questlines on fast machines did every time. The check no longer consults
+  a clock at all: the export reports back through the same channel the editor
+  panels listen to, so a step that runs and *refuses* is now named, along with
+  the reason it gave, instead of being reported as a stale folder.
+  - Thanks to **Buckley603**, who reported it with two reproductions and the
+    likeliest wrong explanations already ruled out.
+
+- **A JSON export no longer reports a questline as changed because of its
+  reroute nodes.** The writer recorded how many reroute nodes the export had
+  collapsed - a note about the export, not about the questline - and the
+  round-trip check, which compares the exported files, saw that note differ on
+  every run, because a reimported copy has no reroute nodes left to collapse.
+  Any questline containing one reported a mismatch that was not there. The count
+  is no longer written into the file; it is still reported in the export's
+  summary line, which is where it was always meant to live. Files written by an
+  earlier version still load, and the TSV writer never recorded it, so the two
+  formats now describe an export the same way.
+
 - **A caught-up STARTED no longer names the player as the giver of a cascaded
   Step.** The entry record credits one actor per start - the giver for a give,
   and by design the completer of the source for a cascade, so rewards and the
@@ -93,6 +155,11 @@ and a routing rule that now says one thing for both role components.
 
 ### QuickStart
 
+- **The quest sidebar stops at the bottom of the screen.** Its size box had a
+  width but no height limit, so a long enough list ran off the edge. It now caps
+  its height and lets the scroll box inside it do the rest, while still sitting
+  short when only a step or two is live.
+
 - **Chapter 11's steps are named for the lesson, not the lock-in.** The step
   that sends you back to Chapter 11 is *Catch-up Events* and the one held by the
   archivist is *Watch Givers and Triggers*, so the sidebar reads as a table of
@@ -102,17 +169,20 @@ and a routing rule that now says one thing for both role components.
 
 ### Documentation
 
-- **The QuickStart walkthrough is four chapters in.** `Docs/QuickStart/` holds
-  an index, *Before You Start* - controls, the HUD, what the green and red
-  buttons publish, the three layers every room is built from, and the live
-  instruments to keep open while you play - and Chapters 1 through 4: Basic
-  Trigger, Rewards, Basic Giver, and Sequential Steps, each written from the
-  source and illustrated: what happened in the room, what is in the graph,
+- **The QuickStart walkthrough is through Act I.** `Docs/QuickStart/` holds an
+  index, *Before You Start* - the three central ideas the rooms teach together,
+  controls, the HUD, what the green and red buttons publish, the three layers
+  every room is built from, and the live instruments to keep open while you
+  play - and Chapters 1 through 7: Basic Trigger, Rewards, Basic Giver,
+  Sequential Steps, Named Outcomes, Blocking, and Prerequisites. Those seven are
+  the pieces of one progression, and they close on a room where a data-driven
+  game system runs the scenarios without owning the quest. Each is written from
+  the source and illustrated: what happened in the room, what is in the graph,
   which facts and events landed in which order, the gotchas the room's design
   steers you around, experiments to try, and what the chapter added to the
   picture of the Step node and its Objective - the one thing the eleven rooms
   are meant to leave you with. The root README's Quick Start points at it.
-  Chapters 5 through 11 follow one at a time.
+  Chapters 8 through 11 follow one at a time.
 
 - **The README's Quick Start plays before it builds.** It sends a newcomer to
   the tutorial first, then to the graphs behind the rooms, and only then to

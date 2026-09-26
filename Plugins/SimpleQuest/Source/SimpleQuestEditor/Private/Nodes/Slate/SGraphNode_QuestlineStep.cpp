@@ -178,8 +178,6 @@ void SGraphNode_QuestlineStep::UpdateGraphNode()
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
 
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
 	TSharedPtr<SVerticalBox> InnerVerticalBox;
 	InnerVerticalBox = SNew(SVerticalBox)
 

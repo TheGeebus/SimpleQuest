@@ -5,6 +5,7 @@
 
 #include "BlueprintConnectionDrawingPolicy.h"
 #include "Graph/QuestlineGraphSchema.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -14,11 +15,24 @@ class TQuestlineDrawingPolicyMixin : public TBase
 public:
 	using TBase::TBase;
 
-	// Shared helper — called by both drawing policies to avoid duplicating color/flag logic
+	// The mouse position the wire-hover tests measure against. 5.8 renamed this member, and the engine is explicit that
+	// the name was the only thing wrong with it: "Use AbsoluteMousePosition instead, no other change of code needed."
+	// The old spelling is the only one that exists on 5.6 and 5.7 and it deprecates on 5.8, so both drawing policies ask
+	// here rather than each picking a spelling, and a future hover test inherits the answer.
+	FVector2f HoverMousePosition() const
+	{
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+		return this->LocalMousePosition;
+#else
+		return this->AbsoluteMousePosition;
+#endif
+	}
+
+	// Shared helper - called by both drawing policies to avoid duplicating color/flag logic
 	static void ApplyQuestlineWireParams(UEdGraphPin* OutputPin, UEdGraphPin* InputPin, FConnectionParams& Params)
 	{
 		// Stale-pin check: mirrors Blueprint behavior (direct endpoints only, no knot tracing).
-		// Sets color but does NOT return — prerequisite dashing logic still runs below.
+		// Sets color but does NOT return - prerequisite dashing logic still runs below.
 		if ((OutputPin && OutputPin->bOrphanedPin) || (InputPin && InputPin->bOrphanedPin))
 		{
 			Params.WireColor = SQ_ED_WIRE_STALE;
@@ -58,7 +72,7 @@ public:
 	{
 		TBase::DetermineWiringStyle(OutputPin, InputPin, Params);
 
-		// Default directions — may be overridden below for reversed knots
+		// Default directions - may be overridden below for reversed knots
 		Params.StartDirection = EGPD_Output;
 		Params.EndDirection = EGPD_Input;
 		Params.WireThickness = this->Settings->DefaultDataWireThickness;
@@ -117,7 +131,7 @@ public:
 			const UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output);
 			if (!KnotOut || KnotOut->LinkedTo.IsEmpty())
 			{
-				return false; // unconnected downstream — no confirmed prereq path, draw solid
+				return false; // unconnected downstream - no confirmed prereq path, draw solid
 			}
 			for (const UEdGraphPin* Linked : KnotOut->LinkedTo)
 			{

@@ -267,8 +267,13 @@ bool FJsonQuestDataFormat::WriteBundle(const FQuestDataBundle& Bundle, TMap<FStr
 	}
 	Root->SetArrayField(TEXT("edges"), EdgesJson);
 
-	Root->SetNumberField(TEXT("knotsCollapsed"), Bundle.KnotsCollapsed);
-
+	// knotsCollapsed is NOT written. It describes the export RUN, not the questline - the bundle header calls it a
+	// produce-time provenance stat "for its summary log", and the summary log is where it goes. Writing it into the
+	// payload made it content, and content is what the round-trip oracle diffs: a source with knots reports N, the
+	// reimported copy has no knots left to collapse and reports 0, and every knotted questline failed forever. The TSV
+	// provider never wrote it, so the two providers disagreed about what an export file holds. The reader below still
+	// accepts it, so a file written by an older version still loads.
+	
 	FString Out;
 	const TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer =
 		TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&Out);

@@ -232,7 +232,7 @@ Nothing here needs changing. Play the room again with `QL_Ch1_BasicTrigger` open
 
 Then run it once more. The room's start button re-activates the chapter now that you have reached it. Touch the beacon again and read the Count column: `.Completed` is at 2, `.Started` still at 1, and the Resolutions tab has a second row. Gold pays again and experience does not - the Grant Once modifier Chapter 2 explains counts the same resolutions this column does.
 
-<img width="1200" alt="Image" src="https://github.com/user-attachments/assets/012bd8d2-2461-49ff-815c-de20944e20f6" />
+<img width="1200" alt="After a second run of Chapter 1: the World State view's Count column with .Completed at 2 and .Started still at 1" src="https://github.com/user-attachments/assets/012bd8d2-2461-49ff-815c-de20944e20f6" />
 
 ---
 

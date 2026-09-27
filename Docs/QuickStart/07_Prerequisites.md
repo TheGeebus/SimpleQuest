@@ -100,7 +100,7 @@ That is the whole integration. The manager is one possible shape of it - a demo'
 
 **One scenario, as data:**
 
-<img width="665" height="934" alt="DO_Not open: the scenario's Quest tag, the three inputs with their labels and Step tags, and the goal" src="https://github.com/user-attachments/assets/b5f5c4f5-ddb0-4eef-9476-d4ce51a21a99" />
+<img width="665" alt="DO_Not open: the scenario's Quest tag, the three inputs with their labels and Step tags, and the goal" src="https://github.com/user-attachments/assets/b5f5c4f5-ddb0-4eef-9476-d4ce51a21a99" />
 
 ---
 
@@ -158,7 +158,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 <br>
 
 <br>
-  <img width="820" height="366" alt="The wire from the ChaptersUnlocked Fact Tag node through the NOT, joined by Chapter 6's Any Outcome in the AND, into the Chapter 7 node's Prerequisites pin" src="https://github.com/user-attachments/assets/81da3241-c6ca-4f9c-8aff-9c6e2b8c79be" />
+  <img width="820" alt="The wire from the ChaptersUnlocked Fact Tag node through the NOT, joined by Chapter 6's Any Outcome in the AND, into the Chapter 7 node's Prerequisites pin" src="https://github.com/user-attachments/assets/81da3241-c6ca-4f9c-8aff-9c6e2b8c79be" />
 <br>
 
 - **Click up to `QL_QuickStart` and find the Chapter 7 node.** Its *Prerequisites* pin is fed by an AND with two inputs: Chapter 6's *Any Outcome*, and a NOT wrapping a **Fact Tag node** that names `SimpleQuest.Fact.QuickStart.ChaptersUnlocked` - the fact the red pedestal button publishes. Every chapter from 2 on is gated the same way, from the same NOT. You have been playing under an AND / NOT expression since Chapter 1, and this is the first page that shows it: *the previous chapter ended, and the chapters were not unlocked*.
@@ -242,7 +242,7 @@ The outer graph during play: the three Quest nodes wear halos as their Steps run
 
 **The gate examined after the AND scenario:**
 
-<img width="921" height="307" alt="The Prerequisite Examiner on the gate after the AND scenario: three boxes, Outcome Solved, AND green and OR and NOT grey" src="https://github.com/user-attachments/assets/3bfa7520-38e7-4233-ac69-ff2e08dc186c" />
+<img width="921" alt="The Prerequisite Examiner on the gate after the AND scenario: three boxes, Outcome Solved, AND green and OR and NOT grey" src="https://github.com/user-attachments/assets/3bfa7520-38e7-4233-ac69-ff2e08dc186c" />
 
 **Inside a running scenario:**
 
@@ -314,4 +314,4 @@ In the AND scenario's graph, disconnect the orange wire from Start's *Deactivate
 
 ---
 
-Previous: [Chapter 6 - Blocking](06_Blocking.md) | Next: Chapter 8 - Linked Questlines
+Previous: [Chapter 6 - Blocking](06_Blocking.md) | Next: [Chapter 8 - Linked Questlines](08_LinkedQuestlines.md)

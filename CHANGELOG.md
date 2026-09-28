@@ -38,6 +38,18 @@ role components.
   channel falls back to it for tagless nodes. A gate whose expression is unmet
   now also wears the overlay's gating ring, through the same lookup.
 
+- **An Activation Group can close a route as well as open one.** A group's
+  *Exit* node fires when anything publishes the group's tag, and its output
+  could already start whatever it was wired to. Wired instead to a node's
+  *Deactivate* input it did nothing at all, and said nothing about it: the
+  connection was accepted, the compile was silent, and the wire simply never
+  arrived. An Exit now tears down as well as starts, so one published tag can
+  close the long way around and open the shortcut in the same moment - which
+  is what a group is for. When an Exit does both, the teardown runs first and
+  the activation second, so the route being opened is the one you end up on;
+  the other order lets a deactivation cascade reach what was just started and
+  undo it.
+
 ### Changed
 
 - **The Prerequisite Examiner shows five states per condition, and everything
@@ -83,6 +95,17 @@ role components.
   what it checks.
 
 ### Fixes
+
+- **The Quest State panel's *Entries* tab reports every start, not only wired
+  ones.** A Quest or a placed questline records how it was entered - from which
+  node, on which outcome, credited to which actor. That record was only written
+  when an outcome-carrying wire started it, so the three other ways a container
+  starts wrote nothing at all: a chapter opened by a prerequisite gate, a Quest
+  started by a game system calling *Activate Quest*, and a questline launched by
+  a *Start Questline* node were absent from the tab entirely, with no row to say
+  they had ever begun. All four now record, and the *Provenance* column is what
+  tells them apart - *ChainCascade*, *ExternalAPI*, *GiverGate*, or
+  *InitialEntry*.
 
 - **SimpleQuest no longer fails to load when Electronic Nodes is installed but
   not enabled.** The optional Electronic Nodes integration decided whether to

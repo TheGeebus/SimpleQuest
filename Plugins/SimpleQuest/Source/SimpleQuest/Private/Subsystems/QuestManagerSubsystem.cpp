@@ -1544,7 +1544,16 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
             // FQuestEntryRecord and broadcasts FQuestEntryRecordedEvent on the destination's tag channel.
             // Inner-graph Leaf_Entry prereqs subscribe to that event via FPrereqLeafSubscription and re-evaluate.
-            if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
+            //
+            // NOT gated on the incoming outcome. A container is started in four ways and only one of them carries
+            // one: a wired cascade brings an outcome, while a prerequisite gate satisfying, an external Activate
+            // call, and a Start Questline node all arrive with none. Gating the record on the outcome recorded the
+            // first and silently dropped the other three - so a gated chapter, an API-started Quest, and an
+            // independently started questline left no trace of having been entered at all, and the Entries tab
+            // could not answer the one question it exists to answer. Provenance already distinguishes the four
+            // (ActivateNodeByTag stamps it before queueing this context), so the record is the honest place to
+            // tell them apart. Outcome-specific ROUTING below stays gated - an absent outcome routes nothing.
+            if (QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
             {
                 const double Now = QuestNow();
                 QuestStateSubsystem->RecordEntry(
@@ -1637,11 +1646,12 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     if (!Node) return;
 
     UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("HandleOnNodeForwardActivated: '%s' - %d boundary completion(s), %d resolved graph(s), %d next node(s)"),
+        TEXT("HandleOnNodeForwardActivated: '%s' - %d boundary completion(s), %d resolved graph(s), %d next node(s), %d to deactivate"),
         *Node->GetContextualTag().ToString(),
         Node->GetBoundaryCompletionsOnForward().Num(),
         Node->GetResolvedGraphsOnForward().Num(),
-        Node->GetNextNodesOnForward().Num());
+        Node->GetNextNodesOnForward().Num(),
+        Node->GetNextNodesToDeactivateOnForward().Num());
     
     // The utility node's PendingActivationContext was populated by the upstream activation (cascade stamp, or
     // signal-driven self-stamp on UActivationGroupListenerNode). Its OriginatingEventID identifies the gameplay
@@ -1679,6 +1689,30 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // upstream stamp) propagates through the forward chain. Mirrors ChainToNextNodes::StampAndActivate. Identity
     // for utility nodes that don't carry payload (SetBlocked / ClearBlocked) - those fields stay zero-init either
     // way so the stamp is a harmless overwrite. OriginatingEventID rides through this wholesale copy.
+
+    // Forward-path teardown, and it runs BEFORE the activation loop below on purpose. A utility that closes one
+    // route and opens another - the Activation Group Exit case - means the opening to be the end state, and a
+    // deactivation cascade (NextNodesToDeactivateOnDeactivation on each target) can reach nodes the activation
+    // loop is about to start. Tearing down first and starting second leaves what the author drew; the other order
+    // can silently undo the activation and leave the graph with nothing live.
+    // Mirrors CascadeDeactivation's DeactivateEach: each compile-time FName is in the source node's compile
+    // perspective, so it resolves to canonical before SetQuestDeactivated, whose visited guard breaks cycles.
+    for (const FName& Tag : Node->GetNextNodesToDeactivateOnForward())
+    {
+        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+        if (!CanonicalTarget.IsValid())
+        {
+            UE_LOG(LogSimpleQuestActivation, Warning,
+                TEXT("HandleOnNodeForwardActivated: '%s' - forward deactivation target '%s' resolved to no canonical tag; skipped"),
+                *Node->GetContextualTag().ToString(), *Tag.ToString());
+            continue;
+        }
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleOnNodeForwardActivated: '%s' deactivating '%s'"),
+            *Node->GetContextualTag().ToString(), *CanonicalTarget.ToString());
+        SetQuestDeactivated(CanonicalTarget, EDeactivationSource::Internal);
+    }
+
     for (const FName& Tag : Node->GetNextNodesOnForward())
     {
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(Tag))

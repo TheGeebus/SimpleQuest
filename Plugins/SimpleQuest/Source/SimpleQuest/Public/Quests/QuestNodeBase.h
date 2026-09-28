@@ -416,6 +416,15 @@ protected:
     /** Nodes to activate as a pass-through (utility node chaining; no lifecycle writes). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnForward;
+
+    /**
+     * Nodes to DEACTIVATE as a pass-through (utility forward output wired to a Deactivate input) - the forward
+     * path's mirror of NextNodesToDeactivateOnDeactivation. An Activation Group Exit, a reward node, or any other
+     * utility can close a route as well as open one. Kept as its own list because the two do opposite things to a
+     * destination and one list cannot say which the author drew.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesToDeactivateOnForward;
     
     /**
      * Boundary completions to fire when this utility node's forward output crosses one or more wrapper Exits.
@@ -575,6 +584,7 @@ public:
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
+    FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnForward() const { return NextNodesToDeactivateOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsResettableReplay() const { return bResettableReplay; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }

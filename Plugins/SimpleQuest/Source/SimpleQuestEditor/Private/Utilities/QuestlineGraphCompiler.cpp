@@ -927,6 +927,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 		if (!Inst) continue;
 
 		Inst->NextNodesOnForward.Empty();
+		Inst->NextNodesToDeactivateOnForward.Empty();
 		Inst->BoundaryCompletionsOnForward.Empty();
 		Inst->ResolvedGraphsOnForward.Empty();
 
@@ -937,11 +938,18 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
 			// completion (SetQuestResolved + FQuestEndedEvent) before the chain fans out. Without this, a utility
 			// node placed before a wrapper Exit silently drops the wrapper's completion: host stays Live forever,
 			// Path facts never emit, downstream Path-prereqs never satisfy.
+			//
+			// ForwardDeactivateTags is the destination split ResolvePinToTags already performs and this call site
+			// used to throw away by passing no array: a wire from a forward output into a Deactivate input was
+			// classified, found no home, and was dropped, so an Activation Group Exit wired to close a route did
+			// nothing at all and said nothing about it. Collected here, it becomes NextNodesToDeactivateOnForward.
 			TArray<FName> ForwardTags;
+			TArray<FName> ForwardDeactivateTags;
 			TArray<FQuestBoundaryCompletion> ForwardBoundaries;
 			TArray<FQuestGraphResolution> ForwardResolutions;
-			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ForwardTags, ForwardBoundaries, nullptr, &ForwardResolutions);
+			ResolvePinToTags(ForwardPin, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths, ForwardTags, ForwardBoundaries, nullptr, &ForwardResolutions, &ForwardDeactivateTags);
 			for (const FName& Tag : ForwardTags) Inst->NextNodesOnForward.Add(Tag);
+			for (const FName& Tag : ForwardDeactivateTags) Inst->NextNodesToDeactivateOnForward.Add(Tag);
 			for (const FQuestBoundaryCompletion& BC : ForwardBoundaries) Inst->BoundaryCompletionsOnForward.AddUnique(BC);
 			for (const FQuestGraphResolution& Res : ForwardResolutions) Inst->ResolvedGraphsOnForward.AddUnique(Res);
 		}
@@ -1825,11 +1833,11 @@ TArray<FName> FQuestlineGraphCompiler::ResolveEntryTags(
 		    if (Pin->bOrphanedPin) continue;
 			if (Pin->PinType.PinCategory == TEXT("QuestOutcome")) continue;
 
-			// Deactivated is a routing SOURCE, not an entry route. ResolvePinToTags is destination-agnostic - it
-			// collects destination tags without consulting which input pin the wire landed on - so letting this pin
-			// through would compile "deactivate X when this boundary ends" into "activate X on entry."
-			// MergeEntryDeactivatedRouting handles it, splitting destinations the way a content node's own
-			// Deactivated pin is split.
+			// Deactivated is a routing SOURCE, not an entry route: it means "when this boundary ends," and every
+			// destination hanging off it - activate or deactivate alike - belongs to that event rather than to entry.
+			// Letting the pin through here would compile "X when this boundary ends" into "X on entry," whichever
+			// kind of destination it is. MergeEntryDeactivatedRouting handles it, splitting destinations the way a
+			// content node's own Deactivated pin is split.
 			if (Pin->PinType.PinCategory == TEXT("QuestDeactivated")) continue;
 			
 		    TArray<FName> PinDests;

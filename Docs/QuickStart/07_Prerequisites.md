@@ -254,7 +254,7 @@ The outer graph during play: the three Quest nodes wear halos as their Steps run
 
 **The framework's record of who started it:**
 
-<img width="1200" alt="Quest State view, Entries tab: the scenario's row with Provenance ExternalAPI, and the four Step rows with ChainCascade and no source" src="https://github.com/user-attachments/assets/429aaf9d-4bc4-4214-9cac-749c0bcb14fb" />
+<img width="1200" alt="Quest State view, Entries tab: the scenario's row with Provenance ExternalAPI, and the four Step rows with ChainCascade sourced from the scenario" src="https://github.com/user-attachments/assets/429aaf9d-4bc4-4214-9cac-749c0bcb14fb" />
 
 ---
 

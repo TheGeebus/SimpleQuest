@@ -31,6 +31,12 @@ void SGraphNode_QuestlineQuest::Construct(const FArguments& InArgs, UQuestlineNo
 	UpdateGraphNode();
 }
 
+void SGraphNode_QuestlineQuest::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
+{
+	FQuestNodeSlateHelpers::AnchorDeactivationPinToBottom(PinToAdd, LeftNodeBox, RightNodeBox);
+	SGraphNode::AddPin(PinToAdd);
+}
+
 void SGraphNode_QuestlineQuest::UpdateGraphNode()
 {
 	// Refresh watching-givers cache + stale-tag flag. Empty giver list collapses the display via BuildLabeledExpandableList.

@@ -18,6 +18,7 @@ public:
 
 	// SGraphNode overrides
 	virtual void UpdateGraphNode() override;
+	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
 
 private:
 	// Body content builders

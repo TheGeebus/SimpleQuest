@@ -44,6 +44,12 @@ void SGraphNode_QuestlineStep::Construct(const FArguments& InArgs, UQuestlineNod
 	UpdateGraphNode();
 }
 
+void SGraphNode_QuestlineStep::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
+{
+	FQuestNodeSlateHelpers::AnchorDeactivationPinToBottom(PinToAdd, LeftNodeBox, RightNodeBox);
+	SGraphNode::AddPin(PinToAdd);
+}
+
 void SGraphNode_QuestlineStep::UpdateGraphNode()
 {
 	WatchingGiverNames.Reset();

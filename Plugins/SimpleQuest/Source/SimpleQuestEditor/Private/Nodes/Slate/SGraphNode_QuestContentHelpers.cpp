@@ -4,6 +4,8 @@
 #include "Nodes/Slate/SGraphNode_QuestContentHelpers.h"
 
 #include "SGraphNode.h"
+#include "SGraphPin.h"
+#include "EdGraph/EdGraphPin.h"
 #include "Styling/AppStyle.h"
 #include "Styling/CoreStyle.h"
 #include "Widgets/Images/SImage.h"
@@ -178,6 +180,31 @@ namespace FQuestNodeSlateHelpers
 					Schema->ForceVisualizationCacheClear();
 				}
 			}));
+	}
+	
+	void AnchorDeactivationPinToBottom(const TSharedRef<SGraphPin>& PinToAdd, const TSharedPtr<SVerticalBox>& LeftBox, const TSharedPtr<SVerticalBox>& RightBox)
+	{
+		const UEdGraphPin* PinObj = PinToAdd->GetPinObj();
+		if (!PinObj) return;
+
+		const FName Category = PinObj->PinType.PinCategory;
+		const bool bIsDeactivateIn   = (Category == TEXT("QuestDeactivate"));
+		const bool bIsDeactivatedOut = (Category == TEXT("QuestDeactivated"));
+		if (!bIsDeactivateIn && !bIsDeactivatedOut) return;
+
+		// The input pin lives in the left column and the output pin in the right, the same split SGraphNode::AddPin
+		// makes by pin direction - classifying by category here keeps the two in step without asking the pin twice.
+		const TSharedPtr<SVerticalBox> Column = bIsDeactivateIn ? LeftBox : RightBox;
+		if (!Column.IsValid()) return;
+
+		// One filler slot, immediately before the pin the caller is about to add. FillHeight claims whatever the
+		// column was allocated beyond the height its own pins need - which is precisely the difference between the
+		// two columns - so the taller column contributes nothing and the shorter one closes the gap.
+		Column->AddSlot()
+			.FillHeight(1.f)
+			[
+				SNullWidget::NullWidget
+			];
 	}
 }
 

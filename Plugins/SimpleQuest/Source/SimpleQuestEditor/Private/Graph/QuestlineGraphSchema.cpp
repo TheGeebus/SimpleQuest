@@ -255,14 +255,17 @@ void UQuestlineGraphSchema::OnPinConnectionDoubleCicked(UEdGraphPin* PinA, UEdGr
 	UEdGraphPin* KnotOut = KnotNode->FindPin(TEXT("KnotOut"));
 	if (!KnotIn || !KnotOut) return;
 
-	// Inherit the wire type so the knot locks to the correct signal colour
-	KnotIn->PinType = OutputPin->PinType;
-	KnotOut->PinType = OutputPin->PinType;
-
 	// Re-route: break existing link, wire through knot
 	OutputPin->BreakLinkTo(InputPin);
 	OutputPin->MakeLinkTo(KnotIn);
 	KnotOut->MakeLinkTo(InputPin);
+
+	// Type the knot from the WIRE it was dropped into, not from that wire's source pin. A wire ending at a
+	// Prerequisites pin draws as a prerequisite for its whole length even when it starts at an outcome, so
+	// inheriting OutputPin's category put an activation-colored dot on a prerequisite wire. This runs AFTER the
+	// links exist because the test reads them, and it defers to the knot's own sync rather than restating the
+	// rule - the duplicate is what let this path disagree with the one the wire uses.
+	KnotNode->NodeConnectionListChanged();
 
 	Graph->NotifyGraphChanged();
 
@@ -497,40 +500,20 @@ FPinConnectionResponse UQuestlineGraphSchema::ValidatePrerequisiteConnection(con
 				"An upstream source of this wire already deactivates this node — a signal cannot be both a prerequisite and a deactivation trigger"));
 		}
 
-		// Sibling dedupe: if this is a prereq-combinator input (AND/OR/NOT) or a prereq group setter condition input,
-		// reject if any sibling input on the same node already carries this outcome (direct, via utility, or via group chain).
-		const bool bIsCombinator   = Cast<const UQuestlineNode_PrerequisiteBase>(InputNode) != nullptr;
-		const bool bIsGroupSetter  = Cast<const UQuestlineNode_PrerequisiteRuleEntry>(InputNode) != nullptr;
-		if (bIsCombinator || bIsGroupSetter)
+		// Sibling dedupe: reject if any sibling condition input on this node already carries this outcome, directly or
+		// through a utility or group chain. Shared with CheckDownstreamParallelPaths so a wire arriving at this node
+		// through a reroute gets the same answer as one arriving straight - two copies of this sweep is how a knot
+		// came to be a way around the rule.
 		{
 			TSet<const UEdGraphPin*> IncomingSources;
 			{
 				TSet<const UEdGraphNode*> Visited;
 				TraversalPolicy->CollectEffectiveSources(OutputPin, IncomingSources, Visited);
 			}
-			if (IncomingSources.Num() > 0)
+			if (const FPinConnectionResponse R = CheckCombinatorSiblingDuplicate(IncomingSources, InputPin);
+				R.Response == CONNECT_RESPONSE_DISALLOW)
 			{
-				for (const UEdGraphPin* SiblingPin : InputNode->Pins)
-				{
-					if (SiblingPin == InputPin) continue;
-					if (SiblingPin->Direction != EGPD_Input) continue;
-					if (SiblingPin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
-					for (const UEdGraphPin* Existing : SiblingPin->LinkedTo)
-					{
-						TSet<const UEdGraphPin*> SiblingSources;
-						TSet<const UEdGraphNode*> Visited;
-						TraversalPolicy->CollectEffectiveSources(Existing, SiblingSources, Visited);
-
-						const UEdGraphPin* CollisionA = nullptr;
-						const UEdGraphPin* CollisionB = nullptr;
-						if (SignalSetsCollide(IncomingSources, SiblingSources, CollisionA, CollisionB))
-						{
-							return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
-								NSLOCTEXT("SimpleQuestEditor", "PrereqSiblingDuplicateSource",
-								"That outcome already feeds another condition input on this node (direct, via a utility node, or via a group)."));
-						}
-					}
-				}
+				return R;
 			}
 		}
 		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
@@ -755,6 +738,32 @@ bool UQuestlineGraphSchema::KnotLeadsToPrereq(const UQuestlineNode_Knot* StartKn
 	return false;
 }
 
+bool UQuestlineGraphSchema::LeadsOnlyToPrereqInputs(const UEdGraphPin* InputPin, TSet<const UEdGraphNode*>& Visited)
+{
+	if (!InputPin) return false;
+	const UEdGraphNode* Node = InputPin->GetOwningNode();
+	if (Visited.Contains(Node)) return true; // cycle guard
+
+	if (InputPin->PinType.PinCategory == TEXT("QuestPrerequisite"))
+		return true;
+
+	if (const UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+	{
+		Visited.Add(Node);
+		const UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output);
+		if (!KnotOut || KnotOut->LinkedTo.IsEmpty())
+		{
+			return false; // unconnected downstream - no confirmed prereq path, draw solid
+		}
+		for (const UEdGraphPin* Linked : KnotOut->LinkedTo)
+		{
+			if (!LeadsOnlyToPrereqInputs(Linked, Visited)) return false;
+		}
+		return true;
+	}
+	return false; // any other non-prereq input terminal
+}
+
 FPinConnectionResponse UQuestlineGraphSchema::CheckDuplicateSources(const UEdGraphPin* OutputPin, const UEdGraphPin* InputPin, bool bOutputIsKnot) const
 {
 	// Collect the effective source outcome pins of the proposed wire.
@@ -856,6 +865,49 @@ FPinConnectionResponse UQuestlineGraphSchema::CheckGroupSetterForwardReach(const
     return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 }
 
+FPinConnectionResponse UQuestlineGraphSchema::CheckCombinatorSiblingDuplicate(const TSet<const UEdGraphPin*>& IncomingSources, const UEdGraphPin* TerminalPin) const
+{
+	if (!TerminalPin || IncomingSources.Num() == 0)
+	{
+		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+	}
+
+	// Only AND/OR/NOT and a prereq rule's Entry gather several conditions on one node, so only they can be fed the
+	// same outcome twice without a single pin seeing both wires.
+	const UEdGraphNode* TerminalNode = TerminalPin->GetOwningNode();
+	const bool bIsCombinator  = Cast<const UQuestlineNode_PrerequisiteBase>(TerminalNode) != nullptr;
+	const bool bIsGroupSetter = Cast<const UQuestlineNode_PrerequisiteRuleEntry>(TerminalNode) != nullptr;
+	if (!bIsCombinator && !bIsGroupSetter)
+	{
+		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+	}
+
+	for (const UEdGraphPin* SiblingPin : TerminalNode->Pins)
+	{
+		if (SiblingPin == TerminalPin) continue;
+		if (SiblingPin->Direction != EGPD_Input) continue;
+		if (SiblingPin->PinType.PinCategory != TEXT("QuestPrerequisite")) continue;
+
+		for (const UEdGraphPin* Existing : SiblingPin->LinkedTo)
+		{
+			TSet<const UEdGraphPin*> SiblingSources;
+			TSet<const UEdGraphNode*> Visited;
+			TraversalPolicy->CollectEffectiveSources(Existing, SiblingSources, Visited);
+
+			const UEdGraphPin* CollisionA = nullptr;
+			const UEdGraphPin* CollisionB = nullptr;
+			if (SignalSetsCollide(IncomingSources, SiblingSources, CollisionA, CollisionB))
+			{
+				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
+					NSLOCTEXT("SimpleQuestEditor", "PrereqSiblingDuplicateSource",
+					"That outcome already feeds another condition input on this node (direct, via a utility node, or via a group)."));
+			}
+		}
+	}
+
+	return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
+}
+
 FPinConnectionResponse UQuestlineGraphSchema::CheckDownstreamParallelPaths(const UEdGraphPin* OutputPin, const UEdGraphPin* KnotInputPin) const
 {
 	// Walk backward from the proposed upstream wire to collect effective source pins.
@@ -894,6 +946,15 @@ FPinConnectionResponse UQuestlineGraphSchema::CheckDownstreamParallelPaths(const
 				return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW,
 					NSLOCTEXT("SimpleQuestEditor", "DuplicatePathViaReroute", "This would create a parallel path to a destination node via another connection."));
 			}
+		}
+
+		// The loop above only compares wires feeding THE SAME pin, which is why a reroute could smuggle an outcome
+		// onto a second condition input of a combinator that already had it: two different pins, no collision found.
+		// The direct path has always swept siblings; this is that sweep reaching the indirect path too.
+		if (const FPinConnectionResponse R = CheckCombinatorSiblingDuplicate(IncomingSources, Terminal);
+			R.Response == CONNECT_RESPONSE_DISALLOW)
+		{
+			return R;
 		}
 	}
 
@@ -977,6 +1038,23 @@ const FPinConnectionResponse UQuestlineGraphSchema::CanCreateConnection(const UE
 			return FPinConnectionResponse(CONNECT_RESPONSE_DISALLOW, NSLOCTEXT("SimpleQuestEditor", "PrereqKnotCircular",
 				"This would create a circular prerequisite expression through a reroute node."));
 		}
+
+		// Sibling dedupe, which this branch used to skip entirely by returning MAKE. Same-pin duplicates cannot reach
+		// here - a prereq input holding a wire was already rejected above - so the only way to feed one outcome into a
+		// combinator twice is through two DIFFERENT condition pins, and arriving at the second one through a reroute
+		// was how that got past. Dragging off the combinator to make the knot hit Case 2 below and was refused; dragging
+		// off the source pin instead landed here and was not. Same question either way now.
+		TSet<const UEdGraphPin*> KnotSources;
+		{
+	    	TSet<const UEdGraphNode*> Visited;
+	    	TraversalPolicy->CollectEffectiveSources(OutputPin, KnotSources, Visited);
+		}
+		if (const FPinConnectionResponse R = CheckCombinatorSiblingDuplicate(KnotSources, InputPin);
+			R.Response == CONNECT_RESPONSE_DISALLOW)
+		{
+			return R;
+		}
+
 		return FPinConnectionResponse(CONNECT_RESPONSE_MAKE, FText::GetEmpty());
 	}
 

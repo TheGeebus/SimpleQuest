@@ -17,6 +17,20 @@ role components.
 
 ### Added
 
+- **A questline can now be closed from a graph, not only opened.** *Start
+  Questline* has always had no counterpart: a questline could be launched as a
+  unit and then had to be taken apart a Step at a time, or blocked, which is a
+  different thing - blocking is a gate that stays shut, and a finished questline
+  is simply finished. The new **Deactivate Quest** node, under *Flow Control*,
+  names one or more quests and tears them down without blocking anything, so
+  they can be started again immediately. It accepts a Step, a container, or a
+  whole questline's tag. Given a questline, the teardown runs through that
+  questline's own *Entry* node and its *Deactivated* output, so the graph being
+  closed is the one that decides what closing it means - and because a
+  questline's running state is derived from its Steps rather than stored
+  separately, it leaves the HUD and every query consistent without any
+  bookkeeping of your own.
+
 - **The graph's debug overlay can report one placement at a time.** A questline
   placed in several graphs - or twice in one - runs as several instances at
   once, and every lifecycle fact is written at every one of a node's addresses,
@@ -95,6 +109,19 @@ role components.
   what it checks.
 
 ### Fixes
+
+- **A questline that is started, stopped, and started again reports its end
+  every time.** Starting a questline wrote its running state without clearing
+  the stopped state left behind by an earlier teardown, so on the second run it
+  carried both at once. The next teardown recognized that pair as inconsistent,
+  cleared the state correctly, and skipped re-announcing the end - on the
+  reasoning that listeners had already been told, which was true of the previous
+  run rather than the current one. Anything that listens for the announcement
+  instead of polling the state, the quest sidebar among them, never heard that
+  the questline had ended, so it kept showing it after the first run. Individual
+  quest nodes already cleared the stale state when they re-activated; questlines
+  now do the same. Reachable from any questline launched by *Start Questline*
+  and then deactivated, which the new *Deactivate Quest* node makes easy to do.
 
 - **The Quest State panel's *Entries* tab reports every start, not only wired
   ones.** A Quest or a placed questline records how it was entered - from which

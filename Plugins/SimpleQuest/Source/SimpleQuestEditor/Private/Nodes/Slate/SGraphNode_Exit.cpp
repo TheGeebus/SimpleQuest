@@ -106,14 +106,16 @@ void SGraphNode_Exit::UpdateGraphNode()
 		.Padding(EditorSettings->GetNonPinNodeBodyPadding())
 		[ DefaultTitleAreaWidget ]
 
+		// Pin content area (single Outcome input pin). Sits directly under the title so this node's heading
+		// lines up with every other non-content node's when they are wired together - the wire pins the two
+		// pin rows to the same height, so anything above a pin row pushes that node's heading out of line.
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill)
+		[ CreatePinContentArea() ]
+
 		// Outcome tag picker: filtered to SimpleQuest.Outcome namespace. HAlign_Left so the slot
 		// shrinks to the picker's content width instead of stretching to fill the node body horizontally.
-		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(FMargin(10.f, 4.f, 10.f, 4.f))
-		[ CreateTagPickerWidget() ]
-
-		// Pin content area (single Outcome input pin)
-		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).Padding(0.f, 0.f, 0.f, 2.f)
-		[ CreatePinContentArea() ];
+		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Left).Padding(FMargin(10.f, 4.f, 10.f, 8.f))
+		[ CreateTagPickerWidget() ];
 
 	InnerVerticalBox->AddSlot().AutoHeight().Padding(EditorSettings->GetNonPinNodeBodyPadding())
 		[ ErrorReporting->AsWidget() ];

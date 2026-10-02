@@ -138,25 +138,25 @@ void SGraphNode_GroupNode::UpdateGraphNode()
 			DefaultTitleAreaWidget
 		];
 
-	// Tag picker — separate row for setters only; getters embed it inline with output pin
-	if (bIsSetter)
-	{
-		InnerVerticalBox->AddSlot()
-			.AutoHeight()
-			.HAlign(HAlign_Left)
-			.Padding(FMargin(10.f, 4.f, 10.f, 1.f))
-			[
-				CreateTagPickerWidget()
-			];
-	}
-
-	// Pin content area — 2px bottom padding for input column breathing room
+	// Pin content area, directly under the title so this node's heading lines up with every other non-content
+	// node's when they are wired together - a wire pins two pin rows to the same height, so anything above a pin
+	// row pushes that node's heading out of line. No padding of its own; the picker below supplies the gap.
 	InnerVerticalBox->AddSlot()
 		.AutoHeight()
 		.HAlign(HAlign_Fill)
-		.Padding(0.f, 0.f, 0.f, 4.f)
 		[
 			CreatePinContentArea()
+		];
+
+	// Tag picker - its own row on both halves of the pair. A getter has no input pin to sit beneath, but the rule
+	// is about where the picker goes, not about how many pins a node happens to have: an Entry and an Exit are two
+	// halves of one mechanism and should not read as two kinds of node.
+	InnerVerticalBox->AddSlot()
+		.AutoHeight()
+		.HAlign(HAlign_Left)
+		.Padding(FMargin(10.f, 4.f, 10.f, 8.f))
+		[
+			CreateTagPickerWidget()
 		];
 
 	// Enabled state widget
@@ -250,7 +250,7 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 {
 	TSharedRef<SOverlay> PinOverlay = SNew(SOverlay);
 
-	// Left (input) pin column — centered vertically
+	// Left (input) pin column - centered vertically
 	PinOverlay->AddSlot()
 		.HAlign(HAlign_Left)
 		.VAlign(VAlign_Center)
@@ -276,9 +276,11 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 				]
 			];
 	}
-	else if (bIsSetter)
+	else
 	{
-		// Single-input setter (activation setter): output pin only, centered.
+		// Single-input setter and getter alike: output pin only, right-aligned. The getter used to embed its tag
+		// picker here on the pin row, which is what made it render narrower than its own Entry - the picker was
+		// competing with the pin for one row's width instead of getting a row of its own.
 		PinOverlay->AddSlot()
 			.HAlign(HAlign_Right)
 			.VAlign(VAlign_Center)
@@ -286,34 +288,13 @@ TSharedRef<SWidget> SGraphNode_GroupNode::CreatePinContentArea()
 				SAssignNew(RightNodeBox, SVerticalBox)
 			];
 	}
-	else
-	{
-		// Getter: tag picker inline with output pin on same row for flat layout.
-		PinOverlay->AddSlot()
-			.VAlign(VAlign_Center)
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.HAlign(HAlign_Left)
-				.Padding(14.f, 0.f, 4.f, 0.f)
-				[
-					CreateTagPickerWidget()
-				]
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.f)
-				.VAlign(VAlign_Center)
-				.HAlign(HAlign_Right)
-				[
-					SAssignNew(RightNodeBox, SVerticalBox)
-				]
-			];
-	}
 
-	// Minimum height so straddling works even with a single input pin
+	// Minimum height ONLY for the two-cell straddle, which needs room to split an output pin into the top half
+	// and an add-pin button into the bottom. A plain pin row sizes to its pins, and forcing a floor on it leaves
+	// a void under the title now that the picker sits below the pins rather than above them.
+	const bool bNeedsStraddleHeight = SetterNode && SetterNode->CanAddInputPin();
 	return SNew(SBox)
-		.MinDesiredHeight(48.f)
+		.MinDesiredHeight(bNeedsStraddleHeight ? 48.f : 0.f)
 		[
 			PinOverlay
 		];

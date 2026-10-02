@@ -29,6 +29,7 @@
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "Nodes/Utility/QuestlineNode_DeactivateQuest.h"
 #include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "Nodes/Utility/QuestlineNode_AddFact.h"
 #include "Nodes/Utility/QuestlineNode_ClearFact.h"
@@ -45,6 +46,7 @@
 #include "Quests/QuestPrereqRuleNode.h"
 #include "Quests/SetBlockedNode.h"
 #include "Quests/ClearBlockedNode.h"
+#include "Quests/DeactivateQuestNode.h"
 #include "Quests/StartQuestlineNode.h"
 #include "Quests/PrereqGateNode.h"
 #include "Quests/ActivationGroupListenerNode.h"
@@ -1469,6 +1471,13 @@ void FQuestlineGraphCompiler::CompileUtilityNodes(
     		UClearBlockedNode* Inst = NewObject<UClearBlockedNode>(RootGraph);
     		Inst->TargetQuestTags = ClearBlockNode->TargetQuestTags;
     		Inst->AuthoredNodeGuid = ClearBlockNode->QuestGuid;
+    		Instance = Inst;
+    	}
+    	else if (UQuestlineNode_DeactivateQuest* DeactivateNode = Cast<UQuestlineNode_DeactivateQuest>(UtilEdNode))
+    	{
+    		UDeactivateQuestNode* Inst = NewObject<UDeactivateQuestNode>(RootGraph);
+    		Inst->TargetQuestTags = DeactivateNode->TargetQuestTags;
+    		Inst->AuthoredNodeGuid = DeactivateNode->QuestGuid;
     		Instance = Inst;
     	}
         else if (UQuestlineNode_StartQuestline* StartNode = Cast<UQuestlineNode_StartQuestline>(UtilEdNode))

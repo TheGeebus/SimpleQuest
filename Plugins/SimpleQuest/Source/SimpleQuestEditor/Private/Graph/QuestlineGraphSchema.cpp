@@ -13,25 +13,27 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleEntry.h"
 #include "Nodes/Groups/QuestlineNode_PrerequisiteRuleExit.h"
 #include "Nodes/Groups/QuestlineNode_PortalEntryBase.h"
 #include "Nodes/Utility/QuestlineNode_ClearBlocked.h"
+#include "Nodes/Utility/QuestlineNode_AddFact.h"
+#include "Nodes/Utility/QuestlineNode_ClearFact.h"
+#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
+#include "Nodes/Utility/QuestlineNode_Reward.h"
 #include "Nodes/Utility/QuestlineNode_SetBlocked.h"
 #include "Nodes/Utility/QuestlineNode_StartQuestline.h"
+#include "Nodes/Utility/QuestlineNode_DeactivateQuest.h"
 #include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 #include "ConnectionDrawingPolicy.h"
 #include "EdGraphUtilities.h"
 #include "ScopedTransaction.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
-#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
-#include "Nodes/Utility/QuestlineNode_AddFact.h"
-#include "Nodes/Utility/QuestlineNode_ClearFact.h"
-#include "Nodes/Utility/QuestlineNode_RemoveFact.h"
-#include "Nodes/Utility/QuestlineNode_Reward.h"
+
 #include "Types/QuestPinRole.h"
 
 
@@ -1395,6 +1397,16 @@ void UQuestlineGraphSchema::GetGraphContextActions(FGraphContextMenuBuilder& Con
 			NSLOCTEXT("SimpleQuestEditor", "AddClearBlockedTooltip", "Remove the blocked state from one or more quests"),
 			0));
 		Action->NodeTemplate = NewObject<UQuestlineNode_ClearBlocked>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
+		ContextMenuBuilder.AddAction(Action);
+	}
+	// Deactivate
+	{
+		TSharedPtr<FEdGraphSchemaAction_NewNode> Action(new FEdGraphSchemaAction_NewNode(
+			NSLOCTEXT("SimpleQuestEditor", "FlowControlCategory", "Flow Control"),
+			NSLOCTEXT("SimpleQuestEditor", "AddDeactivateQuest", "Deactivate Quest"),
+			NSLOCTEXT("SimpleQuestEditor", "AddDeactivateQuestTooltip", "Tear down one or more quests, or a whole questline, without blocking them"),
+			0));
+		Action->NodeTemplate = NewObject<UQuestlineNode_DeactivateQuest>(const_cast<UEdGraph*>(ContextMenuBuilder.CurrentGraph));
 		ContextMenuBuilder.AddAction(Action);
 	}
 	// Start Questline

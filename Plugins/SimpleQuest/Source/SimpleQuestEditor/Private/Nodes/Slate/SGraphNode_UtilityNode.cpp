@@ -143,10 +143,7 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 		[
 			DefaultTitleAreaWidget
 		]
-
-
-
-		// Pin content area — 2px bottom padding for input column breathing room
+		
 		+ SVerticalBox::Slot()
 		.AutoHeight()
 		.HAlign(HAlign_Fill)
@@ -154,7 +151,7 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 			CreatePinContentArea()
 		]
 
-		// Authoring row — varies by utility node type:
+		// Authoring row - varies by utility node type:
 		//   - Asset picker for StartQuestline (selects the questline graph asset to activate).
 		//   - Tag picker for SetBlocked / ClearBlocked (selects the target quest tags).
 		//   - None for PrereqGate (authoring lives in the wired Prerequisites input pin; no UPROPERTY to surface here).
@@ -167,7 +164,7 @@ void SGraphNode_UtilityNode::UpdateGraphNode()
 				: (UsesGraphAssetPicker() ? CreateGraphAssetPickerWidget() : CreateTagPickerWidget())
 		]
 
-		// Optional toggles row — currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
+		// Optional toggles row - currently only SetBlocked surfaces a toggle here ("Also Deactivate Targets").
 		// CreateAlsoDeactivateToggleWidget returns SNullWidget for any other utility node type, so the slot
 		// collapses to zero size in those cases (padding lives inside the wrapper widget).
 		+ SVerticalBox::Slot()
@@ -362,9 +359,9 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateRewardSummaryWidget()
 	UQuestlineNode_Reward* RewardNode = Cast<UQuestlineNode_Reward>(UtilityNode);
 	if (!RewardNode) return SNullWidget::NullWidget;
 
-	// Each entry's class display name — the same label the details-panel class picker shows ("XP Reward",
+	// Each entry's class display name - the same label the details-panel class picker shows ("XP Reward",
 	// "Loot Table Reward", a BP subclass by its asset name). A null entry (class not yet chosen) reads as "(empty)"
-	// so a half-filled array still counts honestly. No config surfaced — just what's placed.
+	// so a half-filled array still counts honestly. No config surfaced - just what's placed.
 	TArray<FString> RewardClassNames;
 	RewardClassNames.Reserve(RewardNode->Rewards.Num());
 	for (const TObjectPtr<UQuestRewardBase>& Reward : RewardNode->Rewards)
@@ -417,7 +414,7 @@ TSharedRef<SWidget> SGraphNode_UtilityNode::CreateAlsoDeactivateToggleWidget()
 				.OnCheckStateChanged(this, &SGraphNode_UtilityNode::OnAlsoDeactivateChanged)
 				.ToolTipText(LOCTEXT("AlsoDeactivateTooltip",
 					"When checked, also issues a deactivation request for each target quest in addition to setting the "
-					"Blocked re-entry gate. By default, blocking only sets the gate — any in-flight lifecycle on the targets "
+					"Blocked re-entry gate. By default, blocking only sets the gate - any in-flight lifecycle on the targets "
 					"continues to its current resolution."))
 			]
 			+ SHorizontalBox::Slot().Padding(4.f, 0.f, 0.f, 0.f).FillWidth(1.f).HAlign(HAlign_Left).VAlign(VAlign_Center)

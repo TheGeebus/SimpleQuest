@@ -945,6 +945,18 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
                 QuestlineTag,
                 FQuestStartedEvent(QuestlineTag, Payload, nullptr));
 
+            // Clear a stale Deactivated before writing Live, mirroring what ActivateNodeByTag does for nodes: a
+            // questline that was torn down and is being started again is re-entering, not resuming. Without this the
+            // identity carries Live AND Deactivated at once, and the NEXT teardown takes SetQuestDeactivated's
+            // inconsistent-state branch - which clears the facts but skips the FQuestDeactivatedEvent re-publish on
+            // the grounds that subscribers already saw the transition. They saw the PREVIOUS run's. Anything driven
+            // by the event rather than by polling the fact (the quest sidebar, for one) then never hears that the
+            // questline ended, so its row survives every run after the first.
+            if (WorldState)
+            {
+                RemoveStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Deactivated);
+            }
+
             // Asset-level Live fact write - symmetric with PublishGraphResolutions's Completed fact write at
             // resolution. Persists past the transient publishes above so late subscribers reconstruct
             // Activated + Started via UQuestLifecycleObserver's catch-up. Uses AddStateFactAcrossPerspectives

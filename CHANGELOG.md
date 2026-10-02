@@ -66,6 +66,24 @@ role components.
 
 ### Changed
 
+- **Deactivation pins sit across from each other, so a teardown chain draws
+  straight.** A node's *Deactivate* input and its *Deactivated* output are now
+  anchored to the bottom of the node rather than following the activation pins
+  down the left and right edges. Wire one node's *Deactivated* into the next
+  node's *Deactivate* and the orange wire runs level instead of sloping, which
+  is what lets a chain of them read as one run of plumbing rather than a tangle
+  crossing the activation wires above it.
+
+- **Reroute nodes take the color of the wire they are sitting on.** A reroute
+  dropped onto a prerequisite wire stayed the color of the pin it came from, so
+  a condition could change color halfway along its length. Two things were
+  wrong: reroutes were only picking up a color when a connection was made in
+  certain ways and not when it was drawn by hand, and the color was being read
+  from where the wire *starts* rather than where it *ends* - which is what
+  decides a wire's appearance, since an outcome plugged into a *Prerequisites*
+  pin is a condition for its whole length. Reroutes now re-read their color
+  whenever anything on either side of them changes.
+
 - **The Prerequisite Examiner shows five states per condition, and everything
   it can pin evaluates.** A condition on a source node reads grey before the
   source has activated, amber while it is Live or waiting on a giver, green once
@@ -109,6 +127,15 @@ role components.
   what it checks.
 
 ### Fixes
+
+- **A reroute node can no longer sneak a second wire from one outcome into the
+  same condition.** An outcome may feed a combinator once; a second wire from
+  the same outcome would make the condition depend on one thing twice. Dragging
+  from the combinator to create the reroute was refused correctly, but dragging
+  from the outcome pin first and then connecting that reroute to a second
+  condition input was allowed - the check that catches it was running on one of
+  those two routes and not the other. The rule now lives in one place and every
+  route asks it, including the one through reroutes.
 
 - **A questline that is started, stopped, and started again reports its end
   every time.** Starting a questline wrote its running state without clearing
@@ -219,20 +246,22 @@ role components.
 
 ### Documentation
 
-- **The QuickStart walkthrough is through Act I.** `Docs/QuickStart/` holds an
-  index, *Before You Start* - the three central ideas the rooms teach together,
-  controls, the HUD, what the green and red buttons publish, the three layers
-  every room is built from, and the live instruments to keep open while you
-  play - and Chapters 1 through 7: Basic Trigger, Rewards, Basic Giver,
-  Sequential Steps, Named Outcomes, Blocking, and Prerequisites. Those seven are
-  the pieces of one progression, and they close on a room where a data-driven
-  game system runs the scenarios without owning the quest. Each is written from
+- **The QuickStart walkthrough is through Act I and into Act II.**
+  `Docs/QuickStart/` holds an index, *Before You Start* - the three central
+  ideas the rooms teach together, controls, the HUD, what the green and red
+  buttons publish, the three layers every room is built from, and the live
+  instruments to keep open while you play - and Chapters 1 through 8: Basic
+  Trigger, Rewards, Basic Giver, Sequential Steps, Named Outcomes, Blocking,
+  Prerequisites, and Linked Questlines. The first seven are the pieces of one
+  progression, and they close on a room where a data-driven game system runs the
+  scenarios without owning the quest; the eighth opens Act II by running one
+  authored questline twice at once, with separate progress. Each is written from
   the source and illustrated: what happened in the room, what is in the graph,
   which facts and events landed in which order, the gotchas the room's design
   steers you around, experiments to try, and what the chapter added to the
   picture of the Step node and its Objective - the one thing the eleven rooms
   are meant to leave you with. The root README's Quick Start points at it.
-  Chapters 8 through 11 follow one at a time.
+  Chapters 9 through 11 follow one at a time.
 
 - **The README's Quick Start plays before it builds.** It sends a newcomer to
   the tutorial first, then to the graphs behind the rooms, and only then to

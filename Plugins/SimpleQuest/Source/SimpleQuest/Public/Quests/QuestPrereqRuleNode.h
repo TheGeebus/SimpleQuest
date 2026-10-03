@@ -8,6 +8,7 @@
 #include "QuestPrereqRuleNode.generated.h"
 
 struct FWorldStateFactAddedEvent;
+struct FWorldStateFactRemovedEvent;
 struct FQuestResolutionRecordedEvent;
 struct FQuestEntryRecordedEvent;
 
@@ -47,6 +48,7 @@ private:
 	TMap<FGameplayTag, FPrereqLeafSubscription::FPrereqLeafHandles> SubscriptionHandles;
 
 	void OnLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event);
+	void OnLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event);
 	void OnLeafResolutionRecorded(FGameplayTag Channel, const FQuestResolutionRecordedEvent& Event);
 	void OnLeafEntryRecorded(FGameplayTag Channel, const FQuestEntryRecordedEvent& Event);
 	void TryPublishRule();

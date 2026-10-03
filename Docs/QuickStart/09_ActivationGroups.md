@@ -32,7 +32,7 @@ In order:
 
    Look at the sidebar. There are **two questlines** on it - *Chapter 9 - Activation Groups* and *A Hidden Passage* - and only one of them is a chapter.
 
-<img width="1200" alt="The room on entry: the chapter's two beats and the Hidden Passage's beat, the bridge ahead" src="https://github.com/user-attachments/assets/b63fa22c-21f2-4090-b197-def6af6cbc3e" />
+<img width="1200" alt="The room on entry: the chapter's two beats and the Hidden Passage's beat, the bridge ahead" src="https://github.com/user-attachments/assets/672b1b27-ad6f-42b0-bc60-c4723c0cfafc" />
 
 <img width="668" alt="The sidebar with both running: Chapter 9 and A Hidden Passage as two separate questlines" src="https://github.com/user-attachments/assets/7bf4e32c-f341-4085-b6c5-6fec731da5fd" />
 

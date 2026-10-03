@@ -253,21 +253,29 @@ A group is transparent to everything the framework tracks about a cascade. The s
 
 So Bridge 4, activated across an asset boundary by a questline it has never heard of, arrives with provenance intact. On the *Entries* tab it is an ordinary cascade arrival, and anything downstream that cares about instigators or event identity behaves exactly as it would have if a wire had done it. **The portal is a shortcut through the graph, not a break in the record.**
 
+**Where Bridge 4's activation came from:**
+
+<img width="1200" alt="Quest State view, Entries tab for Bridge_4: where the activation came from" src="https://github.com/user-attachments/assets/86b7ddf1-4f32-4a8e-a120-de6aa19811a0" />
+
 ### What is watching
 
 The group signal itself leaves nothing to look at. There is no fact to filter for, no row in the Resolutions tab, no count that goes up. The instruments here are different from the previous chapters':
 
 - **The Group Examiner** is the authoring-time instrument. It answers "where does this group come from, anywhere in the project" by scanning the assets rather than the running game, so it works with PIE stopped. Setters and Getters counted separately is what makes a two-listener topology legible at all.
+
+<br>
+  <img width="727" alt="Hovering the closing Exit's output pin: the tooltip about any matching Entry, from this graph or any other" src="https://github.com/user-attachments/assets/87025037-fa49-4e95-843c-06336ab4518d" />
+<br>
+
 - **The pin tooltip** on either Exit's output states the contract in one line: it fires when any Entry with a matching group tag publishes, from this graph or any other. Note that it says nothing about opening or closing - it cannot, because that depends on where you wire it.
+
+<br>
+  <img width="1200" alt="World State filtered to Chapter_9 after the underpass: Bridge_1 Started and Deactivated, Bridge_4 Started and Live, no rows for Bridge_2 or Bridge_3" src="https://github.com/user-attachments/assets/47682577-3dec-4ada-b058-15520e43e056" />
+<br>
+
 - **World State** shows the *consequence* rather than the signal, and the clearest part of it is what is missing. Take the underpass and filter to `Chapter_9`: Bridge 1 reads `Started` and `Deactivated`, Bridge 4 reads `Started` and `Live` - and **Bridge 2 and Bridge 3 have no rows at all**. The teardown passed straight through them, because a Step that was never activated has no lifecycle to interrupt and writes nothing on the way past. Six facts for a room with four Steps in it: the ones that ran, and nothing for the ones that did not.
 - **The sidebar is the instrument for the ending.** It is the only place the questline teardown is visible without opening a panel, which is why the chapter spends a beat on it: two rows at the start, one at the end, and nothing in between announced the change.
 - **Verbose logging** on `LogSimpleQuestActivation` is the closest thing to watching the signal itself. The Entry logs its publish with the chain depth and event ID; each Exit logs its receipt with the same. The deactivation side logs louder - the forward teardown logs each target at Log level, and the pass-through logs at Verbose with the reason, so a chain of three reads as three lines and tells you which ones had anything to tear down.
-
-<img width="727" alt="Hovering the closing Exit's output pin: the tooltip about any matching Entry, from this graph or any other" src="https://github.com/user-attachments/assets/87025037-fa49-4e95-843c-06336ab4518d" />
-
-<img width="1200" alt="World State filtered to Chapter_9 after the underpass: Bridge_1 Started and Deactivated, Bridge_4 Started and Live, no rows for Bridge_2 or Bridge_3" src="https://github.com/user-attachments/assets/47682577-3dec-4ada-b058-15520e43e056" />
-
-<img width="1200" alt="Quest State view, Entries tab for Bridge_4: where the activation came from" src="https://github.com/user-attachments/assets/86b7ddf1-4f32-4a8e-a120-de6aa19811a0" />
 
 ---
 

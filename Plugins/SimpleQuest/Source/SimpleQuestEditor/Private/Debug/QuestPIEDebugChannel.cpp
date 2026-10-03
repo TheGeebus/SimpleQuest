@@ -392,7 +392,8 @@ EPrereqDebugState FQuestPIEDebugChannel::EvaluateExaminerNode(const FPrereqExami
 		// node or gate, otherwise the consumer the builder found downstream of a combinator or rule. Content-sourced
 		// leaves correlate on source node plus completion path, because Any Outcome expands to one compiled leaf per
 		// path and the channel ORs them; fact and outcome leaves have no source and correlate on the tag they read.
-		const UEdGraphNode* Owner = Tree.EvaluationNode.Get();
+		// A node drilled in from a RuleRef names its own owner; everything else evaluates against the pinned context.
+		const UEdGraphNode* Owner = Node.EvaluationOwner.IsValid() ? Node.EvaluationOwner.Get() : Tree.EvaluationNode.Get();
 		if (Node.LeafSourceTag.IsValid())
 		{
 			return QueryLeafStateForSource(Owner, Node.LeafSourceTag, Node.LeafPathIdentity, Node.bLeafIsAnyOutcome);
@@ -433,6 +434,15 @@ EPrereqDebugState FQuestPIEDebugChannel::EvaluateExaminerNode(const FPrereqExami
 	}
 	case EPrereqExaminerNodeType::RuleRef:
 	{
+		// The rule's own fact, not a fold of the expression beneath it. What gates the consumer is the PUBLISHED TAG:
+		// the runtime node writes it while its expression holds and retracts it when that stops. Reading the fact is
+		// therefore the authoritative answer, and it stays right in the one case a fold would get wrong - a rule whose
+		// graph is not running publishes nothing even when its expression would evaluate true. The children below
+		// still evaluate on their own terms, so that disagreement is visible rather than hidden.
+		if (Node.LeafTag.IsValid())
+		{
+			return HasFact(Node.LeafTag) ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+		}
 		if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
 		return EvaluateExaminerNode(Tree, Node.ChildIndices[0]);
 	}

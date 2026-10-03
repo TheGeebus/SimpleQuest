@@ -13,9 +13,14 @@
 
 void UQuestPrereqRuleNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — utility nodes do not publish FQuestStartedEvent. Rule monitors do their work
+	// Intentionally skips Super - utility nodes do not publish FQuestStartedEvent. Rule monitors do their work
 	// via OnRegisteredWithManager (instance-lifetime subscription); this override exists only to suppress the
 	// base class's OnNodeStarted dispatch in case any path ever calls Activate on a Rule monitor.
+}
+
+FQuestPrereqStatus UQuestPrereqRuleNode::GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const
+{
+	return Expression.EvaluateWithLeafStatus(WorldState, QuestState);
 }
 
 void UQuestPrereqRuleNode::OnRegisteredWithManager()

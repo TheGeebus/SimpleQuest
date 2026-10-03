@@ -77,18 +77,20 @@ struct FPrereqExaminerNode
      * Leaf-only; invalid on other node types.
      */
     UPROPERTY() FGameplayTag LeafSourceTag;
-
-    /**
-     * Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
-     * can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
-     * Leaf-only; invalid on other node types.
-     */
     
     /**
      * Leaf-only: the completion path this leaf requires on its source node, taken from the wired output pin's name — the
      * same FName the compiler keys path leaves by. NAME_None when the leaf is the Any Outcome sentinel.
      */
     UPROPERTY() FName LeafPathIdentity;
+
+    /**
+     * The node whose COMPILED expression holds this one, when that is not the tree's EvaluationNode. Set only on
+     * nodes drilled in from a RuleRef: a rule's expression is compiled onto the rule's own runtime instance, not onto
+     * the node the panel is pinned to, so evaluating those leaves against the pinned node finds nothing and renders
+     * them untinted. Empty means "use FPrereqExaminerTree::EvaluationNode", which is every other node.
+     */
+    UPROPERTY() TWeakObjectPtr<UEdGraphNode> EvaluationOwner;
 
     /**
      * Leaf-only: true when the leaf reads the Any Outcome pin. The compiler expands that into one path leaf per completion

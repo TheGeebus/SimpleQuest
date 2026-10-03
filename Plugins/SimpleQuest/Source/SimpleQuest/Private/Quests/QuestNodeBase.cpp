@@ -260,6 +260,11 @@ void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
         *ContextualTag.ToString());
 }
 
+FQuestPrereqStatus UQuestNodeBase::GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const
+{
+    return PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestState);
+}
+
 const TArray<FName>* UQuestNodeBase::GetNextNodesForPath(FName PathIdentity) const
 {
     const FQuestPathNodeList* List = NextNodesByPath.Find(PathIdentity);

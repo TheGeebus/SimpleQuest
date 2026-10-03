@@ -1461,19 +1461,40 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 
 namespace PrereqExaminer_Internal
 {
-    /** Finds the Prerequisite Rule Entry in Graph whose GroupTag matches RuleTag, or nullptr. */
-    UQuestlineNode_PrerequisiteRuleEntry* FindRuleEntryInGraph(const UEdGraph* Graph, const FGameplayTag& RuleTag)
-    {
-        if (!Graph || !RuleTag.IsValid()) return nullptr;
-        for (UEdGraphNode* Node : Graph->Nodes)
-        {
-            if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
-            {
-                if (Entry->GroupTag == RuleTag) return Entry;
-            }
-        }
-        return nullptr;
-    }
+	/**
+	 * Finds the Prerequisite Rule Entry whose GroupTag matches RuleTag, searching Graph and the inner graph of every
+	 * Quest container within it, or nullptr.
+	 *
+	 * The descent is the point rather than a nicety: a rule's whole purpose is to be written in one place and read in
+	 * another, and a Quest container is one of the boundaries it is meant to cross. Searching only the flat node list
+	 * meant a rule written inside one container and read inside a sibling resolved to nothing, and the Examiner
+	 * reported "(rule has no Enter expression wired)" on a rule that was wired perfectly well.
+	 */
+	UQuestlineNode_PrerequisiteRuleEntry* FindRuleEntryInGraph(const UEdGraph* Graph, const FGameplayTag& RuleTag)
+	{
+		if (!Graph || !RuleTag.IsValid()) return nullptr;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+			{
+				if (Entry->GroupTag == RuleTag) return Entry;
+			}
+		}
+
+		// Containers second, so a match in the graph the caller handed us still wins - keeps the common case cheap and
+		// makes the result independent of container ordering.
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				if (UQuestlineNode_PrerequisiteRuleEntry* Found = FindRuleEntryInGraph(QuestNode->GetInnerGraph(), RuleTag))
+				{
+					return Found;
+				}
+			}
+		}
+		return nullptr;
+	}
 
     /**
      * Project-wide lookup for the Rule Entry defining a given tag. Local graph first (common case); AR scan + sync-load
@@ -1484,7 +1505,18 @@ namespace PrereqExaminer_Internal
     {
         if (!RuleTag.IsValid()) return nullptr;
 
-        if (UQuestlineNode_PrerequisiteRuleEntry* Local = FindRuleEntryInGraph(LocalGraph, RuleTag)) return Local;
+		// Local graph first, then the whole asset the caller's graph belongs to. A rule read inside one Quest container
+		// is commonly written inside a sibling, which is neither the local graph nor another asset - without the second
+		// search that case fell through to the registry scan, or missed entirely when the Entry sat in a container.
+		if (UQuestlineNode_PrerequisiteRuleEntry* Local = FindRuleEntryInGraph(LocalGraph, RuleTag)) return Local;
+
+		if (const UQuestlineGraph* OwningAsset = LocalGraph ? LocalGraph->GetTypedOuter<UQuestlineGraph>() : nullptr)
+		{
+			if (UQuestlineNode_PrerequisiteRuleEntry* InAsset = FindRuleEntryInGraph(OwningAsset->QuestlineEdGraph, RuleTag))
+			{
+				return InAsset;
+			}
+		}
 
         const FAssetRegistryModule& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
         TArray<FAssetData> Assets;
@@ -1587,19 +1619,31 @@ namespace PrereqExaminer_Internal
 
             const int32 Index = Tree.Nodes.Add(Ref);
 
-            // Cycle-guarded eager drill-down into the rule's Enter expression.
-            if (DefiningEntry && !RuleEntriesVisited.Contains(DefiningEntry))
-            {
-                RuleEntriesVisited.Add(DefiningEntry);
-                if (UEdGraphPin* EnterPin = DefiningEntry->GetPinByRole(EQuestPinRole::PrereqIn))
-                {
-                    if (EnterPin->LinkedTo.Num() > 0)
-                    {
-                        const int32 ChildIdx = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
-                        if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
-                    }
-                }
-            }
+        	// Cycle-guarded eager drill-down into the rule's Enter expression.
+        	if (DefiningEntry && !RuleEntriesVisited.Contains(DefiningEntry))
+        	{
+        		RuleEntriesVisited.Add(DefiningEntry);
+        		if (UEdGraphPin* EnterPin = DefiningEntry->GetPinByRole(EQuestPinRole::PrereqIn))
+        		{
+        			if (EnterPin->LinkedTo.Num() > 0)
+        			{
+        				// Everything this sub-walk appends belongs to the RULE's compiled expression, so it has to be
+        				// evaluated against the rule's instance rather than against the pinned node. Stamp the range
+        				// the walk added, skipping anything already stamped - a nested rule's own drill ran first and
+        				// its nodes belong to the deeper entry, not this one.
+        				const int32 FirstAdded = Tree.Nodes.Num();
+        				const int32 ChildIdx = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+        				for (int32 i = FirstAdded; i < Tree.Nodes.Num(); ++i)
+        				{
+        					if (!Tree.Nodes[i].EvaluationOwner.IsValid())
+        					{
+        						Tree.Nodes[i].EvaluationOwner = DefiningEntry;
+        					}
+        				}
+        				if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
+        			}
+        		}
+        	}
             return Index;
         }
 

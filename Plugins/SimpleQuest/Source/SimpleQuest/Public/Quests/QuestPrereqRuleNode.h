@@ -21,6 +21,14 @@ class SIMPLEQUEST_API UQuestPrereqRuleNode : public UQuestNodeBase
 public:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 
+	/**
+	 * A rule's expression lives in its own Expression field, not in the base's PrerequisiteExpression - a rule is not
+	 * gated BY a condition, it IS one, and nothing ever gates its activation. The base accessor would therefore report
+	 * bIsAlways over an empty leaf array, which reads as "no condition" to every inspection surface and leaves the
+	 * Prerequisite Examiner unable to tint the expression it just drew. Answer from the field the node actually uses.
+	 */
+	virtual FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const override;
+
 protected:
 	virtual void OnRegisteredWithManager() override;
 	virtual void ResetTransientState() override;

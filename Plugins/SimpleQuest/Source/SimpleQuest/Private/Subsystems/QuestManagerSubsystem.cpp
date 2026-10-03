@@ -289,6 +289,8 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     {
         FQuestActivationBlocker Blocker;
         Blocker.Reason = EQuestActivationBlocker::Blocked;
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("CheckQuestObjectives: '%s' refused a trigger - the step is Blocked. ClearBlocked lets it advance."),
+            *Step->GetContextualTag().ToString());
         FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
         return;
     }
@@ -322,6 +324,15 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
                 if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
             }
 
+            if (UE_LOG_ACTIVE(LogSimpleQuestActivation, Verbose))
+            {
+                const FString Unsatisfied = Blocker.UnsatisfiedLeafTags.IsEmpty()
+                    ? FString(TEXT("none - every leaf reads satisfied, so this is a hold rather than a missing condition"))
+                    : FString::JoinBy(Blocker.UnsatisfiedLeafTags, TEXT(", "), [](const FGameplayTag& Tag) { return Tag.ToString(); });
+                UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("CheckQuestObjectives: '%s' refused a trigger - prerequisite gate %s. Unsatisfied leaves: [%s]"),
+                    *Step->GetContextualTag().ToString(),
+                    GateState == EPrereqTriState::Indeterminate ? TEXT("is held for advancement") : TEXT("is unmet"), *Unsatisfied);
+            }
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
             return;
         }

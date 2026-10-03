@@ -556,10 +556,7 @@ public:
      * Reports what the EXPRESSION says, deliberately ignoring bBypassPrerequisitesOnce: a one-shot activation bypass does not
      * make an unsatisfied prerequisite satisfied, and a surface that showed otherwise would hide the thing being inspected.
      */
-    FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const
-    {
-        return PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, StateSubsystem);
-    }
+    virtual FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const;
     
     const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
 

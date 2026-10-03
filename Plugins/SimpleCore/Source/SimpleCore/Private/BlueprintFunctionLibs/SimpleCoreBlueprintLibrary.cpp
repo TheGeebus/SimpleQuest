@@ -94,6 +94,30 @@ int32 USimpleCoreBlueprintLibrary::GetFactValue(UObject* WorldContextObject, FGa
     return 0;
 }
 
+void USimpleCoreBlueprintLibrary::SubscribeToFactAdded(UObject* WorldContextObject, FGameplayTag Channel,
+    const FOnSignalReceived& OnFactAdded, ESignalRoutingMode Routing)
+{
+    UWorldStateSubsystem* WorldState = GetWorldStateSubsystem(WorldContextObject);
+    USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject);
+    if (!WorldState || !Signals || !Channel.IsValid() || !OnFactAdded.IsBound()) return;
+
+    // Reuse the store's enumeration rather than re-deriving it here: that is where the snapshot lives (a handler may
+    // add or remove facts while consuming this, and iterating the fact map across that is undefined) and where the
+    // sort lives (TMap order is unstable, so an unsorted replay would vary run to run).
+    TArray<FGameplayTag> AlreadyTrue;
+    WorldState->GetFactsMatching(Channel, Routing, AlreadyTrue);
+
+    // Catch-up before wiring, matching the C++ path exactly. Each delivery passes the specific fact's tag as the
+    // matched channel, so a graph bound at a parent tag reads the same pin value it would on a live hit.
+    for (const FGameplayTag& FactTag : AlreadyTrue)
+    {
+        OnFactAdded.ExecuteIfBound(FactTag,
+            FInstancedStruct::Make<FWorldStateFactAddedEvent>(FWorldStateFactAddedEvent(FactTag, /*bCatchUp*/ true)));
+    }
+
+    Signals->SubscribeMessageOfType(Channel, FWorldStateFactAddedEvent::StaticStruct(), OnFactAdded, Routing);
+}
+
 // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
 
 FGameplayTag USimpleCoreBlueprintLibrary::GetDirectParentTag(FGameplayTag Tag)

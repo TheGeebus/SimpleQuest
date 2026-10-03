@@ -38,7 +38,7 @@ public:
     /**
      * Publish an event payload on a single tag channel. The bus walks Channel's hierarchy and delivers to
      * subscribers at the channel itself or any ancestor. Payload is any USTRUCT, packed into an
-     * FInstancedStruct — no base class required.
+     * FInstancedStruct - no base class required.
      *
      * Channels route; payloads identify. Subscribers branch on the payload's identity field for "what event
      * is this"; the bus's subscriber callback receives the channel separately for "how was this delivered to
@@ -54,7 +54,7 @@ public:
      * callback's first arg set to the channel from the publish set most specific to that subscriber's bound
      * tag (longest descendant where the bound tag is a prefix; tie-break by input array order).
      *
-     * Use when a logical event answers to multiple addresses — for example, a node in a LinkedQuestline graph
+     * Use when a logical event answers to multiple addresses - for example, a node in a LinkedQuestline graph
      * that has both its standalone tag and its inlining-context tag and broadcasts on both. The payload is
      * delivered identically across every subscriber; only delivery metadata (the matched channel) varies per
      * subscription.
@@ -71,15 +71,15 @@ public:
     /**
      * Subscribe to messages published on Channel. Default Routing receives events on Channel or any of its
      * descendant tags (the bus's hierarchical-delivery default). Pass ExactOnly (no flags) to receive only
-     * direct publishes on this exact Channel — useful when ancestor-walk delivery would be noise (e.g., a
+     * direct publishes on this exact Channel - useful when ancestor-walk delivery would be noise (e.g., a
      * receptionist watching Quest X that doesn't care about Quest X's inner-Step publishes).
      *
-     * The bound handler receives the original published tag plus the payload as an FInstancedStruct — use
+     * The bound handler receives the original published tag plus the payload as an FInstancedStruct - use
      * UE's "Get FInstancedStruct Value" or typed-extraction nodes inside the handler to read the concrete
      * payload type.
      *
      * Listener identity comes from the bound delegate's UObject (typically the calling Blueprint actor or
-     * component). For cleanup, call UnsubscribeListener(self) from your EndPlay or BeginDestroy — it clears
+     * component). For cleanup, call UnsubscribeListener(self) from your EndPlay or BeginDestroy - it clears
      * every subscription this listener owns across all channels in one call. Per-handle tracking is unnecessary
      * for the typical BP use case.
      */
@@ -92,12 +92,12 @@ public:
         ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     /**
-     * Typed-filter variant of SubscribeMessage. Same delivery shape — handler receives the matched channel
-     * plus the payload as an FInstancedStruct — but only events whose payload is PayloadType (or a USTRUCT
+     * Typed-filter variant of SubscribeMessage. Same delivery shape - handler receives the matched channel
+     * plus the payload as an FInstancedStruct - but only events whose payload is PayloadType (or a USTRUCT
      * derived from it) actually fire the handler. Removes the per-handler "is this the event I care about?"
      * branch adopters otherwise need with the untyped subscribe.
      *
-     * The Payload Type picker is filtered to FSignalEventBase descendants — the SimpleCore-wide marker
+     * The Payload Type picker is filtered to FSignalEventBase descendants - the SimpleCore-wide marker
      * base for events flowing through the signal bus. SimpleQuest's FQuestEventBase and its lifecycle
      * subclasses (FQuestStartedEvent, FQuestEndedEvent, FQuestResolutionRecordedEvent, …) all qualify,
      * as does any adopter-authored event struct that derives from FSignalEventBase. Listener identity,
@@ -115,7 +115,7 @@ public:
 
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /
-     * components with many subscriptions across many channels — call from EndPlay or BeginDestroy. Compares raw UObject
+     * components with many subscriptions across many channels - call from EndPlay or BeginDestroy. Compares raw UObject
      * pointers, so subclasses and unrelated objects are not affected. No-op if Listener is null. Most adopter usage
      * passes self as Listener.
      */
@@ -129,9 +129,9 @@ public:
     /**
      * Increments the fact's assertion count for Tag. Publishes FWorldStateFactAddedEvent on the 0→1
      * transition by default. Use BroadcastMode to opt into different semantics:
-     *   BoundaryOnly (default) — fire only on 0→1 transitions.
-     *   Always — fire on every call regardless of count.
-     *   Suppress — never fire, even at the boundary.
+     *   BoundaryOnly (default) - fire only on 0→1 transitions.
+     *   Always - fire on every call regardless of count.
+     *   Suppress - never fire, even at the boundary.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
@@ -170,12 +170,40 @@ public:
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
     static int32 GetFactValue(UObject* WorldContextObject, FGameplayTag Tag);
 
+    /**
+     * Subscribe to a fact becoming true - and be told immediately about the facts that are true already.
+     *
+     * An ordinary subscription only ever hears what happens next, so an actor that spawns into a world where the power
+     * is already on hears nothing and has to go and ask. This asks on its behalf: every matching fact that is already
+     * true fires your event first, then the live subscription is wired, both inside this call so nothing can arrive
+     * twice in between.
+     *
+     * A replayed delivery carries bCatchUp = true on the payload. Read it as "this is already true", not "this just
+     * happened" - skip one-shots like a sound or a popup on those, and run state-setting logic either way. The
+     * MatchedChannel pin is the specific fact's tag, so a graph bound to a parent tag reads the same value it would on
+     * a live hit.
+     *
+     * *** REMOVAL IS NOT REPLAYED. *** A removal that already happened is a moment that has passed, and delivering it
+     * late would claim something just happened when it did not. If "this was true once" matters, record that as its
+     * own fact and subscribe to it here.
+     *
+     * Clean up with Unsubscribe Listener, same as any other subscription.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject",
+            AutoCreateRefTerm = "OnFactAdded", DisplayName = "Subscribe To Fact Added"))
+    static void SubscribeToFactAdded(
+        UObject* WorldContextObject,
+        FGameplayTag Channel,
+        const FOnSignalReceived& OnFactAdded,
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
+
     // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────
 
     /**
      * Returns the direct parent of the given gameplay tag (e.g., "X.Y.Z" → "X.Y"). Returns an invalid
      * (empty) tag if the input has no parent (root-level tag) or is itself invalid. Wraps the C++-only
-     * FGameplayTag::RequestDirectParent() so BP code can walk tag hierarchies — used by patterns like
+     * FGameplayTag::RequestDirectParent() so BP code can walk tag hierarchies - used by patterns like
      * sidebar parent-resolution walks where each step of the walk checks the next-up ancestor.
      */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleCore|Tags")
@@ -184,7 +212,7 @@ public:
 private:
     /**
      * Resolves the SignalSubsystem from a WorldContext via World → GameInstance → Subsystem. Returns null
-     * on any resolution failure (callers no-op silently — same pattern as USimpleQuestBlueprintLibrary).
+     * on any resolution failure (callers no-op silently - same pattern as USimpleQuestBlueprintLibrary).
      */
     static USignalSubsystem* GetSignalSubsystem(const UObject* WorldContextObject);
 

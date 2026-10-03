@@ -34,7 +34,7 @@ Act I is authoring one questline. Act II is what happens when one graph is not e
 |              | [7 Prerequisites](07_Prerequisites.md)           | AND / OR / NOT composition, spawned as three scenarios in one room                                                                            |
 | **Act II**   | [8 Linked Questlines](08_LinkedQuestlines.md)    | One questline placed twice, with separate progress                                                                                            |
 |              | [9 Activation Groups](09_ActivationGroups.md)    | A second questline opening a bridge it knows nothing about                                                                                    |
-|              | 10 Prerequisite Rules                            | A named condition - the power - read by everything that needs it                                                                              |
+|              | [10 Prerequisite Rules](10_PrerequisiteRules.md) | A named condition - the power - read by everything that needs it                                                                              |
 |              | 11 Observers                                     | An archive console that logs what an observer hears, live and caught up                                                                       |
 | **Closing**  | The Step node, assembled                         | Every Step property and Objective override in one place, with the chapter that taught it - and what the rooms don't show                      |
 

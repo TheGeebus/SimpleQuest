@@ -363,4 +363,4 @@ Delete the wire and *Compile All*.
 
 ---
 
-Previous: [Chapter 8 - Linked Questlines](08_LinkedQuestlines.md) | Next: Chapter 10 - Prerequisite Rules
+Previous: [Chapter 8 - Linked Questlines](08_LinkedQuestlines.md) | Next: [Chapter 10 - Prerequisite Rules](10_PrerequisiteRules.md)

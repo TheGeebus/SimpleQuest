@@ -29,12 +29,26 @@ namespace FQuestCatchUpFanout
 		// iteration order (non-deterministic relative to the cascade); subscribers binding via Hierarchical
 		// routing expect the asset/parent-tag event to land before descendants - which the live cascade does
 		// naturally because PublishMessage on the questline tag completes its synchronous dispatch before
-		// ActivateQuestlineGraph iterates entry tags and triggers content-node publishes. Sort by tag-string
-		// length ascending so the subscribed tag (shortest under itself) lands first, then descendants in
-		// depth order.
+		// ActivateQuestlineGraph iterates entry tags and triggers content-node publishes.
+		//
+		// PARENT-FIRST IS STRUCTURAL, NOT COSMETIC. The QuickStart sidebar builds its hierarchy from arrival
+		// order - FindParentEntry walks up the tag for an existing entry, and a node whose parent has not been
+		// delivered yet is attached at top level with depth 0 and never re-parented. Deliver a child first and
+		// the restored sidebar is shaped differently from the one the player was just looking at.
+		//
+		// Plain lexical order on the tag name gives that for free: an ancestor's tag is a strict PREFIX of its
+		// descendants', and a prefix always sorts before the longer string. It is also a TOTAL order, which the
+		// previous sort was not - that compared string LENGTH, so equal-length siblings (Power_Switch and
+		// Blue_Keycard, say) compared equivalent and fell back to the unstable introsort over hash-ordered
+		// input, coming out in a different order between runs. Across unrelated branches it ordered by name
+		// length, which means nothing at all.
+		//
+		// What this does NOT give is the order the designer laid the graph out in - siblings come back
+		// alphabetically. That is Authored Order's job; this makes the result REPRODUCIBLE so that work has a
+		// stable baseline to be asserted against.
 		CatchUpTags.Sort([](const FGameplayTag& A, const FGameplayTag& B)
 		{
-			return A.ToString().Len() < B.ToString().Len();
+			return A.GetTagName().LexicalLess(B.GetTagName());
 		});
 
 		UE_LOG(LogSimpleQuestSubscription, Verbose,

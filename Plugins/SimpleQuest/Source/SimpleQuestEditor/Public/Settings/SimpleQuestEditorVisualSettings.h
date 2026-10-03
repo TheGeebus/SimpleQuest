@@ -49,10 +49,10 @@ public:
 	// ----- Nodes -----
 
 	UPROPERTY(Config, EditAnywhere, Category="Nodes")
-	FLinearColor EntryNodeColor = FLinearColor(0.7f, 0.15f, 0.1f);
+	FLinearColor EntryNodeColor = FLinearColor(0.700000f, 0.058333f, 0.000000f);
 
 	UPROPERTY(Config, EditAnywhere, Category="Nodes")
-	FLinearColor ExitNodeActiveColor = FLinearColor(0.900000f, 0.249375f, 0.000000f);
+	FLinearColor ExitNodeActiveColor = FLinearColor(1.000000f, 0.656599f, 0.000000f);
 
 	UPROPERTY(Config, EditAnywhere, Category="Nodes")
 	FLinearColor ExitNodeInactiveColor = FLinearColor(0.6f, 0.6f, 0.6f);
@@ -73,10 +73,7 @@ public:
 	FLinearColor PrerequisiteGroupNodeColor = FLinearColor(0.65f, 0.05f, 0.65f);
 
 	UPROPERTY(Config, EditAnywhere, Category="Nodes")
-	FLinearColor GraphOutcomeNodeColor = FLinearColor(0.3f, 0.7f, 0.1f);
-
-	UPROPERTY(Config, EditAnywhere, Category="Nodes")
-	FLinearColor UtilityNodeColor = FLinearColor(0.800000f, 0.302498f, 0.005179f);
+	FLinearColor UtilityNodeColor = FLinearColor(0.588542f, 0.129960f, 0.000000f);
 
 	// ----- Debug Highlights -----
 

@@ -27,7 +27,6 @@
 #define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestEditorVisualSettings>()->ActivateGroupNodeColor)
 #define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteGroupNodeColor)
 #define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestEditorVisualSettings>()->UtilityNodeColor)
-#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestEditorVisualSettings>()->GraphOutcomeNodeColor)
 
 // ---- Group Examiner ----
 #define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupSetterColor)

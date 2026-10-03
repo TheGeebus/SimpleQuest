@@ -128,11 +128,20 @@ namespace
         return Out;
     }
 
-    void WriteSectionsToDisk(const FString& IniPath, const TMap<FString, TArray<FString>>& Sections)
+	void WriteSectionsToDisk(const FString& IniPath, const TMap<FString, TArray<FString>>& Sections)
     {
-        const FString Dir = FPaths::GetPath(IniPath);
-        if (!IFileManager::Get().DirectoryExists(*Dir)) IFileManager::Get().MakeDirectory(*Dir, true);
-        FFileHelper::SaveStringToFile(SerializeDisplaySections(Sections), *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    	const FString Dir = FPaths::GetPath(IniPath);
+    	if (!IFileManager::Get().DirectoryExists(*Dir)) IFileManager::Get().MakeDirectory(*Dir, true);
+
+    	// Same unchanged-content guard as WriteCompiledTagsIni: a rewrite with identical bytes still moves the
+    	// timestamp, and that alone is enough to make the file look modified in source control.
+    	const FString NewContent = SerializeDisplaySections(Sections);
+    	FString ExistingContent;
+    	if (FFileHelper::LoadFileToString(ExistingContent, *IniPath) && ExistingContent.Equals(NewContent, ESearchCase::CaseSensitive))
+    	{
+    		return;
+    	}
+    	FFileHelper::SaveStringToFile(NewContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
     }
 }
 
@@ -1256,14 +1265,25 @@ void FSimpleQuestEditor::WriteCompiledTagsIni() const
         IFileManager::Get().MakeDirectory(*IniDir, true);
     }
 
+	// Skip the write when nothing changed. This file is regenerated at startup and on every compile, and rewriting
+	// identical bytes still bumps the timestamp - which is enough for source control to report it as modified until
+	// something does a full content comparison. Writing only on a real change keeps a clean tree clean.
+	FString ExistingContent;
+	if (FFileHelper::LoadFileToString(ExistingContent, *IniPath) && ExistingContent.Equals(IniContent, ESearchCase::CaseSensitive))
+	{
+		UE_LOG(LogSimpleQuestCompiler, Verbose,
+			TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - %d tag(s) unchanged; leaving the file alone: %s"), AllTags.Num(), *IniPath);
+		return;
+	}
+
 	if (FFileHelper::SaveStringToFile(IniContent, *IniPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
-    {
-        UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
-    }
-    else
-    {
-        UE_LOG(LogSimpleQuestCompiler, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - write FAILED for: %s"), *IniPath);
-    }
+	{
+		UE_LOG(LogSimpleQuestCompiler, Display, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - wrote %d tag(s) to: %s"), AllTags.Num(), *IniPath);
+	}
+	else
+	{
+		UE_LOG(LogSimpleQuestCompiler, Error, TEXT("FSimpleQuestEditor::WriteCompiledTagsIni - write FAILED for: %s"), *IniPath);
+	}
 }
 
 

@@ -2,34 +2,6 @@
 
 *A condition with a name, written in one room and read in another.*
 
-<!-- SHOT LIST (page order; each number matches a slot comment below - replace the slot with the <img> line and delete the comment)
-  10.1  The room on entry: the chapter's two beats on the HUD, the facility ahead, the Security Wing straight on.
-  10.2  Through the window: the Red Keycard visible and unreachable, the Security Wing door shut.
-  10.3  The terminal touched BEFORE the power: the NO POWER refusal beat on the HUD and the denied cue. The beacon stays lit - it was never disarmed.
-  10.4  The Supply Room: its beat on the HUD, the power switch, the locker shut.
-  10.5  The moment the switch is thrown: the Power Switch completed beat, the lights up, the locker open.
-  10.6  The terminal after the power: it accepts, and its completed beat names the condition.
-  10.7  Both keycards taken and the chapter's completed beat.
-  10.8  QL_Ch10_PrerequisiteRules, the outer graph: Start into both Quest nodes, their Any Outcome into the Prerequisite Gate, the gate's Forward into the Outcome node; all five comment boxes readable.
-  10.9  Inside the Supply Room: Supply Entry into Power Switch and Blue Keycard, and the Prerequisite Rule: Entry with the dashed wire from Power Switch into its condition pin. NOTE which pin that wire leaves - the gate upstairs uses Any Outcome and the rule's compiled shape matches it, so it is probably Any Outcome here too. Confirm and tell me.
-  10.10 Inside the Security Wing: Security Entry into Terminal into Red Keycard, and the Prerequisite Rule: Exit with its dashed wire into Terminal's Prerequisites pin.
-  10.11 The Rule Entry selected: Group Tag SimpleQuest.PrereqRule.PowerOn.
-  10.12 The Rule Exit selected: the SAME Group Tag. Pairs with 10.11 - frame them alike, the way Chapter 9's two Exits were framed.
-  10.13 Terminal selected: Prerequisite Gate Mode on Gate Progression.
-  10.14 The Prerequisite Gate in the outer graph examined: an AND over two boxes, each reading Source <quest>, Outcome ANY OUTCOME.
-  10.15 The Questline Outliner with Chapter 10 expanded: both Quests and the three Steps under each.
-  10.16 World State filtered to PrereqRule BEFORE the switch: no rows at all. The tag does not exist yet.
-  10.17 World State filtered to PrereqRule AFTER the switch: SimpleQuest.PrereqRule.PowerOn, Count 1. Pairs with 10.16.
-  10.18 The Prerequisite Examiner pinned t   o Terminal before the power: the PowerOn leaf red.
-  10.19 The same Examiner after the power: the leaf green. Pairs with 10.18 - same panel, one condition flipped.
-  10.20 The graph during PIE before the power: Terminal with its Live halo AND the purple gating ring, the Rule Exit beside it.
-  10.21 The Output Log on a refused touch with `Log LogSimpleQuestActivation Verbose` set: the CheckQuestObjectives line naming Terminal, the gate as unmet, and `[SimpleQuest.PrereqRule.PowerOn]` as the unsatisfied leaf.
-  10.22 Try it: a second Rule Exit on PowerOn added to another chapter's graph, gating something there.
-  10.23 Try it: the debug key wired in BP_QuestPlayerExample - Debug Key 1 Pressed into a Remove Fact node with Tag SimpleQuest.PrereqRule.PowerOn.
-  10.24 Try it: the Prereq Examiner on Terminal after the key - the rule's header red over its condition still green, which is the signature of a rule fact removed by hand.
-  10.25 Try it: after loading a save taken past the switch - the Examiner green again, with nothing touched.
--->
-
 Chapter 9 crossed an asset boundary with an activation. Chapter 10 crosses a *container* boundary with a condition - and the two chapters together say the thing neither says alone: every boundary in this framework is crossed the same way, by name.
 
 A **Prerequisite Rule** is a condition that has been given a tag. One quest writes it. Another quest reads it. Neither knows the other exists, and nothing is wired between them.
@@ -202,12 +174,12 @@ This is worth sitting with, because it changes what a prerequisite *is*. A prere
 
 Both cross a boundary by name. They are not interchangeable, and the comment box draws the line exactly:
 
-| | **Activation Group** (Chapter 9) | **Prerequisite Rule** (Chapter 10) |
-|---|---|---|
-| What crosses | an activation - a thing happening | a condition - a thing being true |
-| Effect on the far side | **starts** the node it reaches | **gates** a node that still has to be reached |
-| Lifetime | transient; a listener not present misses it | a fact; anything can read it at any later moment |
-| Reversible | no - an activation has happened | yes - the fact is retracted when the expression fails |
+|                        | **Activation Group** (Chapter 9)            | **Prerequisite Rule** (Chapter 10)                    |
+|------------------------|---------------------------------------------|-------------------------------------------------------|
+| What crosses           | an activation - a thing happening           | a condition - a thing being true                      |
+| Effect on the far side | **starts** the node it reaches              | **gates** a node that still has to be reached         |
+| Lifetime               | transient; a listener not present misses it | a fact; anything can read it at any later moment      |
+| Reversible             | no - an activation has happened             | yes - the fact is retracted when the expression fails |
 
 Put a group where this chapter puts a rule and the terminal would activate the moment the switch was thrown, whether or not the player had ever found the Security Wing. The rule leaves the quest's own structure in charge of *reaching* Terminal and adds a second condition on top.
 
@@ -219,23 +191,34 @@ That is a deliberate piece of design worth copying: the player is not told "noth
 
 ### What is watching
 
-- **World State**, filtered to `PrereqRule`, is the clearest instrument in the chapter: **no rows at all before the switch, and one row after.** The tag does not exist until the rule publishes it. Take the two shots from the same filter and the pair is the whole mechanism.
+<br>
+  <img width="1200" alt="World State filtered to PrereqRule before the switch: no rows at all" src="https://github.com/user-attachments/assets/14bfe693-9b36-40f2-837e-c66cef40ed70" />
+<br>
+  <img width="1200" alt="World State filtered to PrereqRule after the switch: PowerOn, Count 1" src="https://github.com/user-attachments/assets/8428a6ea-752d-4946-827b-fe5533dc52a8" />
+<br>
+
+- **World State**, filtered to `PrereqRule`, is the clearest instrument in the chapter: **no rows at all before the switch, and one row after.** The tag does not exist until the rule publishes it. These two shots show the same filter before and after the power switch. This is the whole mechanism underneath a Prerequisite Rule.
+
+<br>
+  <img width="414" alt="The Prerequisite Examiner pinned to Terminal before the power: the PowerOn leaf red" src="https://github.com/user-attachments/assets/662fa627-0997-419c-bdf8-73d692848d22" />
+<br>
+  <img width="414" alt="The same Examiner after the power: the leaf green" src="https://github.com/user-attachments/assets/a5c9816b-25a5-43bc-867f-61a9c2929eed" />
+<br>
+
 - **The Prerequisite Examiner** pinned to Terminal shows the PowerOn leaf red before the switch and green after - one condition flipping, with nothing else in the panel changing.
+
+<br>
+  <img width="1200" alt="The graph during PIE before the power: Terminal with its Live halo and the purple gating ring" src="https://github.com/user-attachments/assets/0131c8ab-2238-489e-9ae1-76982bb25f37" />
+<br>
+
 - **The graph overlay** before the power shows Terminal wearing its Live halo *and* the purple gating ring at once, which is the visual statement of Gate Progression: running, and refusing.
 - **The rule itself does log**, once you ask for it. Run `Log LogSimpleQuestActivation Verbose` in the console, then throw the switch: `QuestPrereqRule 'SimpleQuest.PrereqRule.PowerOn' published (expression satisfied)`. Should the expression ever go false again you get the matching `retracted (expression no longer satisfied)`. Both lines fire on the **transition** only - a rule that is already published stays quiet, which is why the log is a record of the two moments that matter rather than a running commentary.
+
+<br>
+  <img width="1099" alt="The Output Log on a refused touch at Verbose: the refusal line naming Terminal and the unsatisfied PowerOn leaf" src="https://github.com/user-attachments/assets/06b5dfcc-17fb-485f-8a2f-256a7760b71c" />
+<br>
+
 - **The refused touch logs too, and names what is missing.** With that same category on, walk into Terminal before the power: `CheckQuestObjectives: '...Security_Wing.Terminal' refused a trigger - prerequisite gate is unmet. Unsatisfied leaves: [SimpleQuest.PrereqRule.PowerOn]`. That is the whole room in one line - which Step refused, why, and the exact tag that would unblock it. The same refusal also rides out as an event carrying those leaf tags, which is what lets the HUD beat name the condition instead of just saying no; an **Observer Component** with *Observe Progress Refused* ticked receives it.
-
-<img width="1200" alt="World State filtered to PrereqRule before the switch: no rows at all" src="https://github.com/user-attachments/assets/14bfe693-9b36-40f2-837e-c66cef40ed70" />
-
-<img width="1200" alt="World State filtered to PrereqRule after the switch: PowerOn, Count 1" src="https://github.com/user-attachments/assets/8428a6ea-752d-4946-827b-fe5533dc52a8" />
-
-<img width="414" alt="The Prerequisite Examiner pinned to Terminal before the power: the PowerOn leaf red" src="https://github.com/user-attachments/assets/662fa627-0997-419c-bdf8-73d692848d22" />
-
-<img width="414" alt="The same Examiner after the power: the leaf green" src="https://github.com/user-attachments/assets/a5c9816b-25a5-43bc-867f-61a9c2929eed" />
-
-<img width="1200" alt="The graph during PIE before the power: Terminal with its Live halo and the purple gating ring" src="https://github.com/user-attachments/assets/0131c8ab-2238-489e-9ae1-76982bb25f37" />
-
-<img width="1099" alt="The Output Log on a refused touch at Verbose: the refusal line naming Terminal and the unsatisfied PowerOn leaf" src="https://github.com/user-attachments/assets/06b5dfcc-17fb-485f-8a2f-256a7760b71c" />
 
 ---
 

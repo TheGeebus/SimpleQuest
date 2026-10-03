@@ -125,7 +125,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/06_Blocking/QL_Ch6_Blocking`. One 
 - The Outcome node's tag is `SimpleQuest.Outcome.Victory`, not *Reached*. A chapter ends on whatever outcome its Outcome node names - *Victory* ships with the plugin's tags - and Chapter 7's prerequisite is wired from the Chapter 6 node's *Any Outcome*, so the name is the author's to choose.
 - Clear Blocked lists the same tag under *Tags to Clear:* and nothing runs into its *Enter*. The room clears the block from the level instead.
 
-<img width="1200" alt="QL_Ch6_Blocking: the whole graph, Start into Set Blocked, its Forward into BlockTargetStep, Any Outcome into the Outcome node, the unwired Clear Blocked below, and the comment boxes" src="https://github.com/user-attachments/assets/7df37091-99a3-4545-87d5-cc4c213f0b94" />
+<img width="1200" alt="QL_Ch6_Blocking: the whole graph, Start into Set Blocked, its Forward into BlockTargetStep, Any Outcome into the Outcome node, the unwired Clear Blocked below, and the comment boxes" src="https://github.com/user-attachments/assets/1115100f-a607-45c7-bea8-c8444fa8ab59" />
 
 **Four comment boxes. In short:**
 
@@ -265,7 +265,7 @@ In `QL_Ch6_Blocking`, disconnect the wire from Start into Set Blocked's *Enter*,
 
 **The graph with the block bypassed:**
 
-<img width="1200" alt="QL_Ch6_Blocking with Start wired straight into BlockTargetStep's Activate, Set Blocked bypassed" src="https://github.com/user-attachments/assets/5ade6497-1eba-43dc-beca-4c6ca0609691" />
+<img width="1200" alt="QL_Ch6_Blocking with Start wired straight into BlockTargetStep's Activate, Set Blocked bypassed" src="https://github.com/user-attachments/assets/3de348c3-568a-43ef-8374-53026c7c35e0" />
 
 ### Block and deactivate:
 

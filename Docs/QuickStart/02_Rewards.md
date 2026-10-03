@@ -63,7 +63,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/02_Rewards/QL_Ch2_Rewards`. Two St
 
 Both Steps host `OBJ_InteractWithTarget`, the same Objective as Chapter 1, so each completes on *Reached* when a beacon is touched. Read the three branches against that: the *Reached* branch pays, the *Any Outcome* branch pays and carries the flow to the Outcome node, and the *Solved* branch does nothing at all - not because it is broken, but because nothing in this room ever completes on *Solved* (see the "Try it" section). Chapter 5 is where a Step ends more than one way, but this shows rewards waiting on mutually exclusive paths.
 
-<img width="1200" alt="QL_Ch2_Rewards, the whole graph: two Steps, four Grant Rewards nodes, the three branches off Reward Trigger readable" src="https://github.com/user-attachments/assets/f3c89d6e-da0d-4f45-be84-a9c417de2834" />
+<img width="1200" alt="QL_Ch2_Rewards, the whole graph: two Steps, four Grant Rewards nodes, the three branches off Reward Trigger readable" src="https://github.com/user-attachments/assets/0c0d1e44-c2d8-4d6e-b483-32894a08186b" />
 
 Three comment boxes sit in the graph. In short:
 
@@ -73,19 +73,19 @@ Three comment boxes sit in the graph. In short:
 
 ### Things worth clicking:
 
-  <img width="1200" alt="The Reached-branch Grant Rewards node selected: Details showing Rewards [Currency: Gold, 40] and its Modifiers [Scale Amount, 2.0]" src="https://github.com/user-attachments/assets/33604db3-9422-40af-92b9-a60e7193fac2" />
+  <img width="1200" alt="The Reached-branch Grant Rewards node selected: Details showing Rewards [Currency: Gold, 40] and its Modifiers [Scale Amount, 2.0]" src="https://github.com/user-attachments/assets/0a2d1394-9344-44b0-816f-8c1100a87004" />
 <br>
 
 - **Select the Grant Rewards node on the *Reached* branch.** In the Details panel, *Rewards* is an array of configured reward objects - here one Currency reward, `SimpleQuest.Reward.Currency.Gold`, amount 40 - and each reward has its own *Modifiers* array: one Scale Amount, multiplier 2. That is how 40 became 80 in the readout. *Reward Sets* is empty on this node.
 
 <br>
-  <img width="1200" alt="The Any Outcome node selected: Rewards [XP, 500] with Modifiers [Grant Once]" src="https://github.com/user-attachments/assets/7d91038d-fb3a-4159-9201-02d8ddf77452" />
+  <img width="1200" alt="The Any Outcome node selected: Rewards [XP, 500] with Modifiers [Grant Once]" src="https://github.com/user-attachments/assets/f3781a8b-5f26-45a8-8087-5cf64ef3df87" />
 <br>
 
 - **Select the node on the *Any Outcome* branch.** One XP reward, 500, carrying a Grant Once modifier. This node is also the one that continues to the Outcome node, which is why the chapter can end no matter which path the Step took.
 
 <br>
-  <img width="1200" alt="The Solved-branch node: Currency Gold 5,000, no modifiers" src="https://github.com/user-attachments/assets/1b3d8f5c-a5c6-4df3-8241-1efa8c9f56d0" />
+  <img width="1200" alt="The Solved-branch node: Currency Gold 5,000, no modifiers" src="https://github.com/user-attachments/assets/5b6965b0-9e3c-4f85-b33a-8270a69f1384" />
 <br>
 
 - **Select the node on the *Solved* branch.** Five thousand gold, no modifiers. An amount chosen to be impossible to miss, for the day you make it fire (see *Try it*).

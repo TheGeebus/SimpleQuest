@@ -75,7 +75,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/04_SequentialSteps/QL_Ch4_Sequenti
 - Second's *Any Outcome* also has a wire out, and it is dashed. It runs into the *Prerequisites* input on Third - the pin under *Activate* that Chapters 1 through 3 never used. A dashed wire carries no activation - it adds a condition.
 - Third continues from *Any Outcome* into the Outcome node. Second continues nowhere: its completion is consumed entirely by the condition it feeds.
 
-<img width="1200" alt="QL_Ch4_SequentialSteps: the whole graph with both comment boxes, First's two solid wires, the dashed wire from Second's Any Outcome into Third's Prerequisites pin" src="https://github.com/user-attachments/assets/185bad47-f82e-4ed9-a516-e25978134028" />
+<img width="1200" alt="QL_Ch4_SequentialSteps: the whole graph with both comment boxes, First's two solid wires, the dashed wire from Second's Any Outcome into Third's Prerequisites pin" src="https://github.com/user-attachments/assets/62b5b653-b89f-4515-96a1-2ec902fdf386" />
 
 **Two comment boxes. In short:**
 

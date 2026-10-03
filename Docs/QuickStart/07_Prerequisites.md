@@ -115,7 +115,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 - The **Prerequisite Gate** is a utility node with three pins: *Enter*, *Forward*, and *Prerequisites*. It holds a wire, not a node: activation arriving at *Enter* is forwarded only when the expression holds, and deferred until it does. Here the expression is *AND(AND Solved, OR Solved, NOT Solved)*, so the chapter ends when the last scenario does.
 - The Outcome node names *Solved*. Chapter 8's prerequisite is wired from this chapter's *Any Outcome*, as every chapter's is.
 
-<img width="1200" alt="QL_Ch7_Prerequisites, the outer graph: Start disconnected, the three Quest nodes, their Solved pins into the AND combinator and its output into the Prerequisite Gate's Prerequisites pin, their Any Outcome wires into the gate's Enter, and Forward into the Outcome node" src="https://github.com/user-attachments/assets/82750221-b887-4d91-936d-ba1dff83abd9" />
+<img width="1200" alt="QL_Ch7_Prerequisites, the outer graph: Start disconnected, the three Quest nodes, their Solved pins into the AND combinator and its output into the Prerequisite Gate's Prerequisites pin, their Any Outcome wires into the gate's Enter, and Forward into the Outcome node" src="https://github.com/user-attachments/assets/6304fd38-7dfc-4bb2-96fc-809303e973c6" />
 
 **Inside a scenario.** Double-click the AND node. Its graph is the room you just played:
 
@@ -127,11 +127,11 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 
 **Inside the AND scenario:**
 
-<img width="1200" alt="Inside the AND scenario: Start's Entered into the four Steps, the orange chain from Start's Deactivated down through them, the three Any Outcome wires into the AND, the AND into AndGoal's Prerequisites, and AndGoal into the Outcome node" src="https://github.com/user-attachments/assets/4ad5dbf0-2a60-47a2-a057-f5c35b092c42" />
+<img width="1200" alt="Inside the AND scenario: Start's Entered into the four Steps, the orange chain from Start's Deactivated down through them, the three Any Outcome wires into the AND, the AND into AndGoal's Prerequisites, and AndGoal into the Outcome node" src="https://github.com/user-attachments/assets/309373e7-967e-4471-82f6-123472b58b65" />
 
 **Inside the NOT scenario:**
 
-<img width="1200" alt="Inside the NOT scenario: NotInput3's Any Outcome into the NOT, the NOT and the other two inputs into the AND, and the AND into NotGoal's Prerequisites" src="https://github.com/user-attachments/assets/3712bea1-f398-433d-93f7-e3af7c9a7da6" />
+<img width="1200" alt="Inside the NOT scenario: NotInput3's Any Outcome into the NOT, the NOT and the other two inputs into the AND, and the AND into NotGoal's Prerequisites" src="https://github.com/user-attachments/assets/8bf6147a-7a22-4b33-9d5d-a16107fa9f07" />
 
 **The comment boxes. In short:**
 
@@ -141,7 +141,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 - *Over the AND combinator* - a combinator takes any number of prerequisite inputs and produces one result, and its output is itself a prerequisite, so one can feed another. The result goes to a content node's *Prerequisites* pin or to a gate.
 - *Over the Step, outer graph* - the two Prerequisite Gate Modes, as Chapter 4 explained them.
 - *Inside each scenario, "Navigating Between Quest Graphs"* - the breadcrumbs above the graph: click a name to open that graph, click the arrow before a name to jump to the node that hosts it; or double-click an entry in the Questline Outliner.
-- *Inside the AND scenario, over the orange wires* - Start's *Deactivated* fires when the Quest is deactivated, and each wire into a Step's *Deactivate* takes that Step down with it. Deactivating a Quest does not automatically stop what is inside it: without these wires the Quest goes inactive while its Steps keep listening. Activation and deactivation wires may both connect to either kind of input, so a completion can deactivate something and a deactivation can activate something.
+- *Inside the AND scenario, over the orange wires* - Start's *Deactivated* fires when the parent AND Quest node is deactivated, and each wire into a Step's *Deactivate* takes that Step down with it. Deactivating a Quest does not automatically stop what is inside it: without these wires the Quest goes inactive while its Steps keep listening. Activation and deactivation wires may both connect to either kind of input, so a completion can deactivate something and a deactivation can activate something.
 - *Inside the OR scenario* - OR opens on the first satisfied input; the others stay live and still respond. If a scenario should shut the others down the moment one path is taken, that is a deactivation wire, not a prerequisite.
 - *Inside the NOT scenario* - NOT wraps a single input and inverts it. Its result feeds an AND alongside two plain inputs, so the goal opens when the first two are solved and the third is not.
 

@@ -73,7 +73,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/05_NamedOutcomes/QL_Ch5_NamedOutco
 - Two wires run into Convergence's *Activate*. An activation input takes as many wires as you like - each is one more way to start the node - where the *Prerequisites* pin (Chapter 4) takes exactly one.
 - No dashed wires. Nothing in this room is gated; the order is entirely activation.
 
-<img width="1200" alt="QL_Ch5_NamedOutcomes: the whole graph with its three comment boxes, the Fork's Left and Right pins wired to Left and Right, both Reached pins into Convergence's Activate, Convergence's Any Outcome into the Outcome node" src="https://github.com/user-attachments/assets/a775c6cf-0d86-4e7d-99c2-894755601138" />
+<img width="1200" alt="QL_Ch5_NamedOutcomes: the whole graph with its three comment boxes, the Fork's Left and Right pins wired to Left and Right, both Reached pins into Convergence's Activate, Convergence's Any Outcome into the Outcome node" src="https://github.com/user-attachments/assets/3f158078-e207-449f-a876-ecae37eddaeb" />
 
 **Three comment boxes. In short:**
 

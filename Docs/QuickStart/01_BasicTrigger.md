@@ -22,6 +22,8 @@ In order:
    >
    > ACTIVATED is always the first event in a quest's lifecycle.
 
+<img width="1200" alt="The room on entry: beacon lit, the ACTIVATED beat" src="https://github.com/user-attachments/assets/699ab65f-b12a-4b5b-9649-d16820dd1cec" />
+
 2. A beacon is glowing. It is a `BP_QuestTriggerActor` - a cube with a Quest Trigger Component on it - and its aura is lit because the Step it watches is Live.
 
 3. Walk into it. The beacon fires on overlap; it plays a sound cue and its aura changes color, the sidebar entry ticks, and the second beat prints:
@@ -36,10 +38,9 @@ In order:
 
 4. The door ahead opens. It is Chapter 2's door, and it opened because Chapter 2 just activated - more on that under *Completion* below.
 
-The in-world tell is the beacon: it glows only while its Step is Live, and when it fires it hears back from the Objective - a satisfaction signal, which is what changes its aura and plays the sound cue, and a per-fire response, which the beacon only acts on when the answer is a refusal. That, and the HUD, are how this room shows you the lifecycle. Neither the beacon nor the HUD knows about the graph. Both are reacting to events published on a tag.
-
-<img width="1200" alt="The room on entry: beacon lit, the ACTIVATED beat" src="https://github.com/user-attachments/assets/699ab65f-b12a-4b5b-9649-d16820dd1cec" />
 <img width="1200" alt="After the overlap: satisfied beacon, the COMPLETED beat, Chapter 2's door opening" src="https://github.com/user-attachments/assets/e0c61636-1e36-423f-b450-d47732d2e13d" />
+
+The in-world tell is the beacon: it glows only while its Step is Live, and when it fires it hears back from the Objective - a satisfaction signal, which is what changes its aura and plays the sound cue, and a per-fire response, which the beacon only acts on when the answer is a refusal. That, and the HUD, are how this room shows you the lifecycle. Neither the beacon nor the HUD knows about the graph. Both are reacting to events published on a tag.
 
 ---
 
@@ -53,7 +54,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/01_BasicTrigger/QL_Ch1_BasicTrigge
 - **Basic Trigger** is a Step. The dropdown on its face names the Objective class, `OBJ_InteractWithTarget`. It has three yellow Completion Path pins - *Reached*, *Solved*, *Procedural* - one for each outcome the Objective declares, and a white *Any Outcome* pin beneath them. Only *Reached* is wired.
 - **Outcome** carries the tag `SimpleQuest.Outcome.Reached`. When activation reaches it, the questline resolves with that outcome.
 
-<img width="1200" alt="QL_Ch1_BasicTrigger: the whole graph and all comments" src="https://github.com/user-attachments/assets/1d5392de-7094-4f62-b35e-aea33b6af238" />
+<img width="1200" alt="QL_Ch1_BasicTrigger: the whole graph and all comments" src="https://github.com/user-attachments/assets/88b1ede3-6a81-4334-9f75-8b9e2f35189c" />
 
 Four comment boxes sit beside the nodes. Read them in the graph; in short:
 

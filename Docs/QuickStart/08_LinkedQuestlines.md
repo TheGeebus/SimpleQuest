@@ -78,7 +78,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/08_LinkedQuestlines/QL_Ch8_LinkedQ
 - Their output pins come from the linked asset. `QL_PatrolRoute` resolves *Solved*, so every placement of it shows a *Solved* pin, plus *Any Outcome*. Add an Outcome node to the route and a pin appears on both placements; remove one and both lose it, along with whatever was wired to it.
 - The ending goes through a gate for a reason the comment box states plainly: each placement publishes its own *Solved*, so wiring either one straight to the Outcome node would let the first patrol home end the chapter for both. The AND joins them, and the gate holds the activation until both have solved.
 
-<img width="1200" alt="QL_Ch8_LinkedQuestlines, the whole graph: Start into Start the Patrol, its Any Outcome into both Linked Questline nodes, each node's Solved into the AND, the AND into the gate's Prerequisites, and Forward into the Outcome node" src="https://github.com/user-attachments/assets/a7281bec-5a6b-4e40-94ab-46db49d18832" />
+<img width="1200" alt="QL_Ch8_LinkedQuestlines, the whole graph: Start into Start the Patrol, its Any Outcome into both Linked Questline nodes, each node's Solved into the AND, the AND into the gate's Prerequisites, and Forward into the Outcome node" src="https://github.com/user-attachments/assets/548c9843-86cc-47c1-bc43-bf085dd6c301" />
 
 **Now open `QL_PatrolRoute`** - or double-click either placement, which opens the same asset. Two Steps:
 
@@ -86,7 +86,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/08_LinkedQuestlines/QL_Ch8_LinkedQ
 
 That is the entire route. It is an ordinary questline asset: it compiles on its own, it can be started on its own tag, and it contains no reference to Chapter 8, to West, or to East. The placements point at it; it does not point back.
 
-<img width="1200" alt="QL_PatrolRoute, the whole graph: Start into Waypoint 1 into Waypoint 2 into the Outcome node tagged Solved" src="https://github.com/user-attachments/assets/d375c8e1-58cc-4565-b467-a6293ae221ef" />
+<img width="1200" alt="QL_PatrolRoute, the whole graph: Start into Waypoint 1 into Waypoint 2 into the Outcome node tagged Solved" src="https://github.com/user-attachments/assets/1f0fff81-4834-4f39-8542-a17fd7a8bef1" />
 
 **The comment boxes. In short:**
 
@@ -194,15 +194,15 @@ The *Entries* tab shows both placements starting from the same source, `Start_th
 
 **The route asset with the picker on its default, one waypoint into the west patrol - both waypoints Live at once:**
 
-<img width="1200" alt="QL_PatrolRoute with the picker on All placements, after the first west beacon only: both waypoints wearing Live halos at once" src="https://github.com/user-attachments/assets/f0c847c4-b704-4926-bb96-2ec199bb008d" />
+<img width="1200" alt="QL_PatrolRoute with the picker on All placements, after the first west beacon only: both waypoints wearing Live halos at once" src="https://github.com/user-attachments/assets/147ddc7d-cbf2-4614-9f97-52bd58c87791" />
 
 **The same graph, the same moment, West Patrol picked:**
 
-<img width="1200" alt="The same graph with West Patrol picked: Waypoint 1 Completed, Waypoint 2 Live" src="https://github.com/user-attachments/assets/7dc0321d-3b9a-4c04-8082-5cea0b719c8d" />
+<img width="1200" alt="The same graph with West Patrol picked: Waypoint 1 Completed, Waypoint 2 Live" src="https://github.com/user-attachments/assets/fd18ccf0-0d67-4d6c-9f42-77c53924f0e2" />
 
 **The same graph, the same moment, East Patrol picked - the only thing that moved is the dropdown:**
 
-<img width="1200" alt="The same graph with East Patrol picked: Waypoint 1 Live, Waypoint 2 dark" src="https://github.com/user-attachments/assets/7f2ca4bc-4f8a-4458-9353-e52827efda29" />
+<img width="1200" alt="The same graph with East Patrol picked: Waypoint 1 Live, Waypoint 2 dark" src="https://github.com/user-attachments/assets/140961a6-9ce6-4301-99ea-a24d70ba4d13" />
 
 **Both instances of one authored Step:** - note that both the West and East Patrols have their own states - the West Patrol records a completion on Waypoint 1 and the East Patrol does not. The QL_PatrolRoute questline also recorded two independent STARTED events: one for each placement.
 

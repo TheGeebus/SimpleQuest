@@ -78,7 +78,7 @@ Open `SimpleQuest Content/QuickStart/Chapters/03_BasicGiver/QL_Ch3_BasicGiver`. 
 - Both continue from their white *Any Outcome* pin rather than from *Reached* - Chapter 2's lesson applied: the room ends however the Objective ends.
 - No property on either node says "giver." What marks them is the summary line on the node face - *Givers: 2 · Triggers: 1* on Either Giver, *Givers: 1 · Triggers: 2* on Reuse Giver. That line is the editor reading the level, not a property of the Step.
 
-<img width="1200" alt="QL_Ch3_BasicGiver: the whole graph, both comment boxes, and the Givers and Triggers counts on the two Step nodes" src="https://github.com/user-attachments/assets/0b86f744-b75b-4a8b-bb9e-ee49ec01091e" />
+<img width="1200" alt="QL_Ch3_BasicGiver: the whole graph, both comment boxes, and the Givers and Triggers counts on the two Step nodes" src="https://github.com/user-attachments/assets/500db63e-a1ae-4d99-8c2f-dbddc23c55fc" />
 
 Two comment boxes sit in the graph. In short:
 

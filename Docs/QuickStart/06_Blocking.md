@@ -2,27 +2,6 @@
 
 *Blocked is a switch, not a condition. Flip it from anywhere, and the giver and the trigger both refuse.*
 
-<!-- SHOT LIST (page order; each number matches a slot comment below - replace the slot with the <img> line and delete the comment)
-  6.1  The room on entry: the chapter's beat and the Step's ACTIVATED beat on the HUD; the giver cube yellow; the green button reading "Press E to Unblock this Quest", the red one "Locked - Quest is already Blocked"; the door shut.
-  6.2  After walking into the giver: the cube red, the GIVE BLOCKED beat.
-  6.3  After the green button: the UNBLOCKED beat; the green button now "Locked - Quest is already Unblocked", the red one "Press E to Block this Quest".
-  6.4  After accepting: the STARTED beat; the cube blue.
-  6.5  After the red button: the BLOCKED beat; the door open.
-  6.6  Touching the beacon while blocked: the PROGRESS REFUSED beat; the beacon in its blocked color.
-  6.7  After the second green button: the UNBLOCKED beat printing a second time, the same line as the first.
-  6.8  After the beacon: the Step's completed beat and the chapter's; Chapter 7's door opening.
-  6.9  QL_Ch6_Blocking, the whole graph: Start into Set Blocked, Forward into BlockTargetStep, Any Outcome into the Outcome node; the unwired Clear Blocked below; the comment boxes readable.
-  6.10 Set Blocked selected: Details with Target Quest Tags naming the Step and Also Deactivate Targets unticked; the node face's "Tags to Block:" row.
-  6.11 DA_Ch6_BlockingTargetStep open: all seven filled arrays visible.
-  6.12 BP_BlockToggleButton2 (the red one) selected in the level: Block Mode = Block, Target Tag = the Step.
-  6.13 BP_DoorPanel15 selected: Open Door Tag = SimpleQuest.Fact.QuickStart.Blocking.DoorOpen.
-  6.14 The graph during PIE after the refused give: the Step with the Pending Giver halo, the red gating ring, and the refusal pulse.
-  6.15 World State view filtered to Chapter_6.BlockTargetStep on entry: .Blocked beside .PendingGiver.
-  6.16 The Output Log filtered to LogSimpleQuestActivation: the HandleBlockRequest line (source=Internal) from the graph, the refused-give Warning with its "Blocked" bullet, and the HandleClearBlockRequest line (source=External) from the button.
-  6.17 Try it: the graph with Start wired straight into BlockTargetStep, Set Blocked bypassed.
-  6.18 Try it: after the red button with Also Deactivate ticked: the beacon dark; World State showing .Deactivated on the Step.
--->
-
 Chapter 4's refusal came from a condition the graph could evaluate. This one comes from a switch. One Step, one giver, one beacon, three buttons, and a door: the graph blocks the Step before it is even offered, a green button clears the block, the giver hands the quest over, the red button blocks it again - and opens the door to the beacon, which refuses you until the other green button clears it once more. Nothing about the Step changes between a refusal and an acceptance except one fact, and every actor in the room reads that fact.
 
 **By the end of this chapter you can name:** the Blocked state and its fact, the Set Blocked and Clear Blocked nodes and the Blueprint calls behind them, GIVE BLOCKED, PROGRESS REFUSED with the reason *Blocked*, the one blocker vocabulary every refusal speaks, and why blocking is not deactivating.

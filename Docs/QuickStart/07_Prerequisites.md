@@ -127,11 +127,11 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 
 **Inside the AND scenario:**
 
-<img width="1200" alt="Inside the AND scenario: Start's Entered into the four Steps, the orange chain from Start's Deactivated down through them, the three Any Outcome wires into the AND, the AND into AndGoal's Prerequisites, and AndGoal into the Outcome node" src="https://github.com/user-attachments/assets/309373e7-967e-4471-82f6-123472b58b65" />
+<img width="1200" alt="Inside the AND scenario: Start's Entered into the four Steps, the orange chain from Start's Deactivated down through them, the three Any Outcome wires into the AND, the AND into AndGoal's Prerequisites, and AndGoal into the Outcome node" src="https://github.com/user-attachments/assets/d59e15cb-daf7-414c-a685-5699951b0d3a" />
 
 **Inside the NOT scenario:**
 
-<img width="1200" alt="Inside the NOT scenario: NotInput3's Any Outcome into the NOT, the NOT and the other two inputs into the AND, and the AND into NotGoal's Prerequisites" src="https://github.com/user-attachments/assets/8bf6147a-7a22-4b33-9d5d-a16107fa9f07" />
+<img width="1200" alt="Inside the NOT scenario: NotInput3's Any Outcome into the NOT, the NOT and the other two inputs into the AND, and the AND into NotGoal's Prerequisites" src="https://github.com/user-attachments/assets/00c84e3d-0c03-45e7-a5c9-d28fc07d8cbb" />
 
 **The comment boxes. In short:**
 
@@ -148,10 +148,10 @@ Open `SimpleQuest Content/QuickStart/Chapters/07_Prerequisites/QL_Ch7_Prerequisi
 ### Things worth clicking:
 
 <br>
-  <img width="1200" alt="The breadcrumb bar above the graph with the AND scenario open, and the Questline Outliner beside it" src="https://github.com/user-attachments/assets/d511d576-c6b8-444f-9756-cf1acdb583a0" />
+  <img width="1200" alt="The breadcrumb bar with the AND scenario open, reading QL_Ch7_Prerequisites then AND - the trail inside one asset, with the back and forward arrows at its left - and the Questline Outliner beside it" src="https://github.com/user-attachments/assets/067470bd-f834-4f89-ba6d-e6a05618e130" />
 <br>
 
-- **Open the Questline Outliner** and use it. With the AND scenario open, the breadcrumb bar above the graph reads the path down to it - the master, the chapter asset, the AND node - with an arrow before each name: click a name to open that graph, click the arrow before it to select the node that hosts it. The Outliner lists every graph and node in the tree; double-click to jump. The tutorial's graphs are three deep, and yours may be deeper.
+- **Open the Questline Outliner** and use it. With the AND scenario open, the breadcrumb bar above the graph reads `QL_Ch7_Prerequisites > AND` - the asset you opened, then the container you are inside - with an arrow before each name: click a name to open that graph, click the arrow before it to select the node that hosts it. **The trail is the path within the open asset**, so the master questline never appears in it however you got here: Chapter 7 is a placement in `QL_QuickStart`, a separate asset with an editor window of its own. The **back arrow** at the left of the bar is the control that crosses - it walks your history inside this asset, and when that runs out it hands you back to the editor you came from. The Outliner lists every graph and node in the tree; double-click to jump.
 
 <br>
   <img width="1200" alt="QL_QuickStart: the two Fact Tag nodes, TutorialStarted and ChaptersUnlocked, with their comment boxes" src="https://github.com/user-attachments/assets/23bd9b12-57cf-47d1-84c3-8d7273e9d34c" />

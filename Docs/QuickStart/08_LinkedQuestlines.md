@@ -271,4 +271,4 @@ In `QL_PatrolRoute`, drag in a Linked Questline node and set its *Linked Graph* 
 
 ---
 
-Previous: [Chapter 7 - Prerequisites](07_Prerequisites.md) | Next: Chapter 9 - Activation Groups
+Previous: [Chapter 7 - Prerequisites](07_Prerequisites.md) | Next: [Chapter 9 - Activation Groups](09_ActivationGroups.md)

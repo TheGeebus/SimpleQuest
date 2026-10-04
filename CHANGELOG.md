@@ -12,8 +12,10 @@ compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
 the four deprecations and one load failure that verifying it turned up; the
 Prerequisite Examiner made truthful - every state it advertised is now produced,
 and every node it can pin evaluates; a crash found by doing what an author will
-do - saving assets while playing; and a routing rule that now says one thing for both
-role components.
+do - saving assets while playing; a routing rule that now says one thing for both
+role components; one order for every list of quest content, so a reload shows
+what the player was just looking at; and a fact subscription that can be told
+what is already true instead of having to go and ask.
 
 ### Added
 
@@ -63,6 +65,35 @@ role components.
   the activation second, so the route being opened is the one you end up on;
   the other order lets a deactivation cascade reach what was just started and
   undo it.
+
+- **Content nodes carry an *Order Bias*, for the cases where the graph's own
+  layout reads wrong.** Quest content is listed in authored order everywhere now
+  (see *Changed*), and that order is read from the graph: top to bottom for
+  parallel branches, left to right for flow, which is how these graphs are
+  already arranged. Order Bias is the override for where that is not the intent.
+  It is a signed whole number defaulting to 0 - higher sorts earlier, negative
+  sorts after everything unset - so eleven chapters with nothing authored still
+  come out 1 to 11, and the property is reached only where the arrangement is
+  wrong. It is a nudge off a computed default, not a position: nothing in it
+  suggests that 7 means seventh.
+
+- **A fact subscription can be told what is already true.** `Subscribe To Fact
+  Added`, on the SimpleCore Blueprint library and as a C++ method on the world
+  state subsystem, wires the ordinary subscription *and* delivers every matching
+  fact that is already asserted - so a component spawning into a world where the
+  power is already on hears about it instead of having to go and ask. Both halves
+  happen inside the one call, so no publish can land between them and be seen
+  twice. A replay reaches only the subscriber that just arrived; nothing is
+  published and nobody else on the channel sees anything. The event carries a
+  `Catch Up` flag that reads as *this is already true* rather than *this just
+  happened*, which is the distinction a handler that plays a sound or a flourish
+  needs and one that sets state can ignore.
+
+  Removal is deliberately not replayed. A fact being absent is the condition of
+  nearly every tag that exists, and a removal that already happened is a moment
+  that has passed - delivering it late would assert that something just happened
+  when it did not. If *it was true once* matters to you, record that as its own
+  fact.
 
 ### Changed
 
@@ -125,6 +156,31 @@ role components.
   Step's events onto the trigger's delegates while the trigger can never fire
   one, a container being never Live. The activation guard's warning now says
   what it checks.
+
+- **Quest content is listed in one order, everywhere, and a reload reproduces
+  what the player saw.** Each surface that shows content in a list used to
+  invent its own order, and they disagreed - so the same chapter could appear in
+  one order during play and another after loading a save. There is now a single
+  rule behind the cascade, catch-up replay, the outliner, and the sidebar.
+  Content inside a graph is ordered by its place in the authored progression:
+  the compiler walks the graph from its entry points, so a node is always listed
+  before anything it activates, and siblings follow the graph's layout unless an
+  *Order Bias* says otherwise. Questlines started on their own are a different
+  question - nothing in either asset refers to the other, so there is no authored
+  order to read - and those are listed by when they actually started, which is
+  also exactly the order they appeared in during play.
+
+  Two consequences worth knowing. A parent is always listed before its children,
+  which is what lets a list widget nest by arrival without sorting anything
+  itself. And because the authored order is settled when the graph compiles,
+  **questlines authored before this release need recompiling to pick it up** -
+  *Compile ▸ All* in any questline's toolbar does the project in one pass.
+  Nothing about the graph changed, so nothing prompts you.
+
+- **Node title colors ship with the palette the QuickStart graphs use.** The
+  entry, active-exit, and utility node defaults are the tuned values rather than
+  the originals, so a fresh project matches the screenshots in the walkthrough
+  without touching the visual settings. The unused graph-outcome color is gone.
 
 ### Fixes
 
@@ -229,6 +285,52 @@ role components.
   compiler says so when a graph is compiled while a session is running, since
   from the viewport nothing changes and that reads as a failed compile rather
   than a deferred one.
+
+- **Same-tick siblings arrive in authored order rather than the order the wires
+  were drawn.** Two Steps activated by one completion published in the order
+  their wires happened to be connected, so a list that appends rows as events
+  land could show Step Three above Step Two. The compiler now puts every routing
+  list into authored order once, after wiring, which makes arrival order correct
+  for anything that consumes it - without that consumer knowing this exists.
+
+- **Catch-up no longer replays content in a different order from the live run.**
+  The replay fan-out sorted by the length of the tag string, so siblings came
+  back in name-length order: Chapter 5 replayed *Left* before *The Fork*. It
+  follows the one ordering rule now, parent before child by construction.
+
+- **A questline started on its own is recorded as having been entered.** The
+  entry registry is written per quest node, and a questline's own tag is not a
+  node - so starting one wrote its running state and its started marker but no
+  entry row, and *when was this questline entered* had no answer at all. Two
+  things were wrong as a result: a prerequisite rule with a *Leaf (Entry)*
+  condition on a questline tag could never satisfy, and separately-started
+  questlines had no recorded start time to be listed by, so they came back from a
+  save in alphabetical order. Both come from the same missing row, and both are
+  fixed by writing it.
+
+- **A prerequisite rule whose condition is a fact now retracts when that fact
+  goes away.** Rules woke on a fact being added and not on one being removed, so
+  a rule was effectively a one-way claim: once published it stayed published
+  even after the thing it asserted stopped being true, and a *NOT* of a fact
+  never re-published once the fact arrived. A rule is a standing claim about the
+  present, so a leaf going away has to re-open the question exactly as one
+  arriving does. Path, resolution, and entry conditions are append-only and have
+  no removal to hear, so they behave as before.
+
+- **The Prerequisite Examiner finds a rule written in a sibling container.** A
+  rule read inside one Quest container is commonly written inside another, which
+  is neither the graph the examiner was handed nor a different asset - so that
+  case fell through to a registry scan, or missed entirely when the container's
+  *Entry* sat inside a container of its own. The search now covers the local
+  graph first and then the whole asset it belongs to, so a match in the graph
+  you opened still wins and the result does not depend on the order containers
+  happen to be visited.
+
+- **Compiling no longer touches the generated ini files when nothing changed.**
+  The compiled tag and display files are regenerated at editor startup and on
+  every compile, and rewriting identical bytes still moves the timestamp - which
+  is all source control needs to report them as modified. They are written only
+  on a real change now, so a clean tree stays clean.
 
 ### QuickStart
 

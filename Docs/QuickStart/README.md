@@ -2,7 +2,7 @@
 
 A walkthrough of the eleven-room tutorial that ships with SimpleQuest. The rooms teach by playing: each one narrates itself on the HUD, carries author-facing comments in its graph, and has something in the world that visibly reacts to quest state. This walkthrough is the third pass over the same rooms - the one that goes underneath. For each chapter it says what you saw, what is in the graph behind it, how the framework actually did it, and what tends to go wrong when you build the same thing yourself.
 
-The walkthrough assumes you have played the room before you read its chapter. Begin with [Before you start](00_BeforeYouStart.md) - it covers the three central ideas the rooms teach together, the controls, the HUD, the two buttons at the start, and how to keep a graph open while you play.
+The walkthrough assumes you have played the room before you read its chapter. It's recommended that you play through all eleven rooms in sequence first. Just play the QuickStart level, press the green button, and follow the onscreen prompts. Once you've finished, proceed with the guided walkthrough at [Before you start](00_BeforeYouStart.md) - it covers the three central ideas the rooms teach together, the controls, the HUD, the two buttons at the start, and how to keep a graph open while you play.
 
 ## How each chapter is laid out
 

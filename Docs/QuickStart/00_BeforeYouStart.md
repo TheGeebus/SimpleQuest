@@ -10,6 +10,8 @@ As you work through the walkthrough, pay particular attention to three central i
 
 These three central ideas form the foundation of how the framework expresses progression. The walkthrough introduces them gradually, so don't worry about understanding every capability immediately. In particular, watch how prerequisites allow progression to express relationships between things without necessarily forcing those things into a strict sequence.
 
+It is recommended you play through all eleven rooms in the tutorial progression first. Then return here and play through them again, using this walkthrough to understand the assembly of each progression you already experienced.
+
 ## Open the project
 
 Open `SimpleQuestDemo` (or any project with both plugins installed). The QuickStart map is the editor's startup map, so it is already loaded when the editor comes up; if you have navigated away, it is at `SimpleQuest Content/QuickStart/QuickStart`.
@@ -105,5 +107,7 @@ Press **P** at any point for the pause menu. Saving mid-chapter and loading it b
 - A **beat** is a line the HUD printed. A **comment** is a comment box in a graph. When this walkthrough quotes either, it is quoting the asset as shipped.
 
 ---
+
+**NOTE:** If you have not yet played all eleven rooms straight through, do that first - the walkthrough is written for someone who has seen each room work.
 
 Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md)

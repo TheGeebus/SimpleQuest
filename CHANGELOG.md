@@ -365,6 +365,12 @@ what is already true instead of having to go and ask.
   are meant to leave you with. The root README's Quick Start points at it.
   Chapters 9 through 11 follow one at a time.
 
+- **The walkthrough says to play the whole tutorial before reading any of it.**
+  It already assumed you had played a room before reading its chapter; the index
+  and *Before You Start* now ask for all eleven in sequence first, following the
+  onscreen prompts, and frame the walkthrough as a second pass over rooms you
+  have already seen work.
+
 - **The README's Quick Start plays before it builds.** It sends a newcomer to
   the tutorial first, then to the graphs behind the rooms, and only then to
   building a first progression - with a table of what each of the eleven

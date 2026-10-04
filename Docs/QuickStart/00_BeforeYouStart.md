@@ -110,4 +110,4 @@ Press **P** at any point for the pause menu. Saving mid-chapter and loading it b
 
 **NOTE:** If you have not yet played all eleven rooms straight through, do that first - the walkthrough is written for someone who has seen each room work.
 
-Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md)
+Previous: [The QuickStart, Chapter by Chapter](README.md) | Next: [Chapter 1 - Basic Trigger](01_BasicTrigger.md)

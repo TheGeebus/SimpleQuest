@@ -24,6 +24,7 @@
 #include "Quests/QuestRewardNode.h"
 #include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
+#include "Utilities/QuestOrdering.h"
 
 
 // -------------------------------------------------------------------------
@@ -113,6 +114,28 @@ bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldConte
     const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
     const UQuestStateSubsystem* StateSubsystem = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     return StateSubsystem && StateSubsystem->HasResolvedWith(QuestTag, OutcomeTag);
+}
+
+bool USimpleQuestBlueprintLibrary::QuestSortsBefore(const UObject* WorldContext, const FGameplayTag A, const FGameplayTag B)
+{
+    return FQuestOrdering::Less(A, B, GetQuestStateSubsystem(WorldContext));
+}
+
+int32 USimpleQuestBlueprintLibrary::FindSortedInsertIndex(const UObject* WorldContext,
+    const TArray<FGameplayTag>& OrderedTags, const FGameplayTag NewTag)
+{
+    const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+
+    // Linear rather than binary: these lists are a sidebar's worth of rows, and a linear scan cannot go subtly wrong
+    // if the caller hands over a list that is not quite sorted - it just puts the row somewhere reasonable.
+    for (int32 Index = 0; Index < OrderedTags.Num(); ++Index)
+    {
+        if (FQuestOrdering::Less(NewTag, OrderedTags[Index], QSS))
+        {
+            return Index;
+        }
+    }
+    return OrderedTags.Num();
 }
 
 int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)

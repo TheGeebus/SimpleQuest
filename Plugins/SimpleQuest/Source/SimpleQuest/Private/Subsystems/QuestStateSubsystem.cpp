@@ -489,6 +489,11 @@ void UQuestStateSubsystem::RecordEntry(
 {
 	if (!QuestTag.IsValid()) return;
 
+	// One number for the whole start, taken before the fan-out below. The perspectives are the same arrival filed under
+	// several spellings, so giving them separate sequences would set a tag's canonical and alias forms sorting against
+	// each other - and the comparator may be handed either.
+	const int32 Sequence = NextEntrySequence++;
+
 	// Multi-perspective registry write - see RecordResolution for the symmetry rationale.
 	ForEachPerspective(QuestTag, [&](FGameplayTag Perspective)
 	{
@@ -497,6 +502,7 @@ void UQuestStateSubsystem::RecordEntry(
 		Entry.SourceQuestTag = SourceQuestTag;
 		Entry.IncomingOutcomeTag = IncomingOutcomeTag;
 		Entry.EntryTime = EntryTime;
+		Entry.EntrySequence = Sequence;
 		Entry.Provenance = Provenance;
 		Entry.ActivationParamsSnapshot = ActivationParamsSnapshot;
 		Entry.InstigatorRef = ActivationParamsSnapshot.Instigator.Get();   // save-stable soft form of the live giver/instigator
@@ -510,8 +516,11 @@ void UQuestStateSubsystem::RecordEntry(
 
 	const AActor* GiverActor = ActivationParamsSnapshot.Instigator.Get();
 	UE_LOG(LogSimpleQuestState, Log,
-		TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.2fs)"),
-		*QuestTag.ToString(),
+	// t is printed to microseconds rather than hundredths because EntryTime is an ORDERING KEY, not just a
+	// readout: two entries in the same tick carry the bitwise-identical GetQuestTime stamp, and at two decimals
+	// that is indistinguishable from two entries a few milliseconds apart. The question "did these tie" is one
+	// the ordering work has to answer, and it cannot be answered at the old precision.
+	TEXT("QuestEntries: appended '%s' source='%s' outcome='%s' provenance=%s giver='%s' path='%s' targetActors=%d targetClasses=%d numRequired=%d (entry #%d at t=%.6fs seq=%d)"),		*QuestTag.ToString(),
 		*SourceQuestTag.ToString(),
 		*IncomingOutcomeTag.ToString(),
 		*UEnum::GetValueAsString(Provenance),
@@ -521,7 +530,8 @@ void UQuestStateSubsystem::RecordEntry(
 		ActivationParamsSnapshot.Config.TargetClasses.Num(),
 		ActivationParamsSnapshot.Config.NumElementsRequired,
 		QuestEntries.FindOrAdd(QuestTag).History.Num(),
-		EntryTime);
+		EntryTime,
+		Sequence);
 
 	// Broadcast on the destination quest's tag channel + each AssetScopedAliasTag + the incoming outcome tag.
 	// PrereqLeafSubscription consumers routed by Leaf_Entry listen here and trigger expression re-evaluation;
@@ -947,6 +957,7 @@ FSimpleQuestSaveSnapshot UQuestStateSubsystem::CaptureSnapshot() const
 	// snapshot - so do not un-flag it or stop capturing it here.
 	Snapshot.Entries = QuestEntries;
 	Snapshot.PlayTime = GetQuestTime();
+	Snapshot.NextEntrySequence = NextEntrySequence;
 	return Snapshot;
 }
 
@@ -974,6 +985,9 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 
 	// Continue the clock from the saved value: from here on, the current world's TimeSeconds counts on top of it.
 	AccumulatedPlaySeconds = Snapshot.PlayTime;
+	// Clamped rather than trusted, because 0 is what a snapshot from before the counter existed carries and 0 is not a
+	// sequence. Such a save's entries have none either, so there is nothing for a fresh count to collide with.
+	NextEntrySequence = FMath::Max(Snapshot.NextEntrySequence, 1);
 	if (const UWorld* World = GetWorld())
 	{
 		ClockWorld = World;
@@ -1038,6 +1052,39 @@ void UQuestStateSubsystem::RegisterDisplayData(FGameplayTag Tag, const FText& In
 	Record.DisplayName = InDisplayName;
 	Record.Description = InDescription;
 	Record.DisplayData = InDisplayData;
+}
+
+void UQuestStateSubsystem::RegisterOrderingKeys(FGameplayTag Tag, int32 InOrderBias, int32 InAuthoredPosition,
+	int32 InAuthoredSubtreeEnd)
+{
+	if (!Tag.IsValid())
+	{
+		return;
+	}
+	FQuestDisplayDataRecord& Record = DisplayDataByTag.FindOrAdd(Tag);
+	Record.OrderBias = InOrderBias;
+	Record.AuthoredPosition = InAuthoredPosition;
+	Record.AuthoredSubtreeEnd = InAuthoredSubtreeEnd;
+}
+
+int32 UQuestStateSubsystem::GetAuthoredPosition(FGameplayTag Tag) const
+{
+	const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag);
+	return Record ? Record->AuthoredPosition : INDEX_NONE;
+}
+
+int32 UQuestStateSubsystem::GetAuthoredSubtreeEnd(FGameplayTag Tag) const
+{
+	const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag);
+	return Record ? Record->AuthoredSubtreeEnd : INDEX_NONE;
+}
+
+int32 UQuestStateSubsystem::GetOrderBias(FGameplayTag Tag) const
+{
+	// Deliberately not FindDisplayRecord: that logs a Warning for an unknown tag, and ordering asks about tags that
+	// were never nodes as a matter of course. 0 is the neutral answer, so an unknown tag and an unbiased one agree.
+	const FQuestDisplayDataRecord* Record = DisplayDataByTag.Find(Tag);
+	return Record ? Record->OrderBias : 0;
 }
 
 void UQuestStateSubsystem::UnregisterDisplayDataForTags(const TArray<FGameplayTag>& Tags)

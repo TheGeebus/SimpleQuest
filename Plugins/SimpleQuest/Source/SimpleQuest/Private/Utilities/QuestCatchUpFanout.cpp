@@ -6,6 +6,7 @@
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestOrdering.h"
 #include "Utilities/SignalChannelUtils.h"
 
 
@@ -25,31 +26,16 @@ namespace FQuestCatchUpFanout
 
 		TArray<FGameplayTag> CatchUpTags = StateSubsystem->GetQuestTagsUnderPrefix(SubscribedTag);
 
-		// Mirror the live cascade's parent-first delivery order. GetQuestTagsUnderPrefix returns tags in TMap
-		// iteration order (non-deterministic relative to the cascade); subscribers binding via Hierarchical
-		// routing expect the asset/parent-tag event to land before descendants - which the live cascade does
-		// naturally because PublishMessage on the questline tag completes its synchronous dispatch before
-		// ActivateQuestlineGraph iterates entry tags and triggers content-node publishes.
+		// GetQuestTagsUnderPrefix returns tags in TMap iteration order, which is not an order at all. Replay has to
+		// impose one, and it has to be the SAME one every other surface uses - a restore that lists content
+		// differently from the live run reads as a bug whatever the list is.
 		//
-		// PARENT-FIRST IS STRUCTURAL, NOT COSMETIC. The QuickStart sidebar builds its hierarchy from arrival
-		// order - FindParentEntry walks up the tag for an existing entry, and a node whose parent has not been
-		// delivered yet is attached at top level with depth 0 and never re-parented. Deliver a child first and
-		// the restored sidebar is shaped differently from the one the player was just looking at.
-		//
-		// Plain lexical order on the tag name gives that for free: an ancestor's tag is a strict PREFIX of its
-		// descendants', and a prefix always sorts before the longer string. It is also a TOTAL order, which the
-		// previous sort was not - that compared string LENGTH, so equal-length siblings (Power_Switch and
-		// Blue_Keycard, say) compared equivalent and fell back to the unstable introsort over hash-ordered
-		// input, coming out in a different order between runs. Across unrelated branches it ordered by name
-		// length, which means nothing at all.
-		//
-		// What this does NOT give is the order the designer laid the graph out in - siblings come back
-		// alphabetically. That is Authored Order's job; this makes the result REPRODUCIBLE so that work has a
-		// stable baseline to be asserted against.
-		CatchUpTags.Sort([](const FGameplayTag& A, const FGameplayTag& B)
-		{
-			return A.GetTagName().LexicalLess(B.GetTagName());
-		});
+		// PARENT-FIRST IS STRUCTURAL HERE, NOT COSMETIC. The QuickStart sidebar builds its hierarchy from arrival
+		// order: FindParentEntry walks up the tag looking for an existing entry, and a node whose parent has not
+		// been delivered yet is attached at top level with depth 0 and never re-parented. Deliver a child first and
+		// the restored sidebar is shaped differently from the one the player was just looking at. FQuestOrdering
+		// guarantees ancestors first as its first rule, so that holds by construction rather than by luck.
+		FQuestOrdering::SortTags(CatchUpTags, StateSubsystem);
 
 		UE_LOG(LogSimpleQuestSubscription, Verbose,
 			TEXT("FQuestCatchUpFanout::EnumerateTagsForCatchUp : '%s' Descendants routing - fanned out to %d known quest tag(s), sorted parent-first"),

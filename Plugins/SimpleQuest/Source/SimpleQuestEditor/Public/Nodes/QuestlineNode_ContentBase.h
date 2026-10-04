@@ -40,7 +40,7 @@ public:
 	 * corresponding runtime UQuestNodeBase at compile time; runtime queries read it via
 	 * UQuestStateSubsystem::GetDisplayName.
 	 *
-	 * Empty by default. Empty means "don't pipeline anything into the display" — designers who don't want this
+	 * Empty by default. Empty means "don't pipeline anything into the display" - designers who don't want this
 	 * node's tag to surface in UI leave it blank. The editor-visible NodeLabel is NOT substituted; it stays an
 	 * organizational identity (graph editor, outliner, compile logs) separate from UI text.
 	 */
@@ -64,7 +64,7 @@ public:
 	TObjectPtr<UQuestDisplayData> DisplayData;
 	
 	/**
-	 * Returns true if ProposedLabel is available for this node — i.e., no other content node on the same direct graph
+	 * Returns true if ProposedLabel is available for this node - i.e., no other content node on the same direct graph
 	 * currently displays it as a live label AND no other content node on the same graph still holds it as its last-
 	 * compiled identity. The second check is what blocks the in-batch collision case: a designer renames Node 1 from
 	 * X to Y, then before recompiling tries to rename Node 2 to X. Live state says X is free (Node 1 displays Y now),
@@ -87,8 +87,23 @@ public:
 	EResettableReplay ResettableReplay = EResettableReplay::Inherit;
 
 	/**
+	 * Nudges this node earlier or later among its SIBLINGS - the nodes it sits beside at the same level. Leave it at
+	 * 0 and siblings fall into natural order by name, which already gets the common cases right (Chapter_2 before
+	 * Chapter_10, because the comparison reads the numbers as numbers).
+	 *
+	 * HIGHER SORTS EARLIER. 0 is the neutral default, so a positive bias lifts this node above every unbiased
+	 * sibling and a negative one drops it below them. It is a nudge, not a position: a bias of 7 does not mean
+	 * "seventh", it means "ahead of anything with a lower bias".
+	 *
+	 * Only siblings compare. Two nodes in different branches are ordered by whichever ancestors diverge, so biasing
+	 * a node never reorders anything outside its own level.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Quest", meta = (DisplayName = "Order Bias"))
+	int32 OrderBias = 0;
+
+	/**
 	 * Persistent expanded/collapsed state for the "Givers" list shown by content-node Slate widgets. Lifted to
-	 * the base so every content-node widget that surfaces givers shares one storage location — avoids duplicating
+	 * the base so every content-node widget that surfaces givers shares one storage location - avoids duplicating
 	 * the flag on every subclass that ends up with a giver affordance.
 	 */
 	UPROPERTY(Transient)
@@ -115,13 +130,13 @@ protected:
 	 * PostPasteNode (user Ctrl-D / copy-paste via SGraphEditor's ExportText/ImportText round-trip).
 	 *
 	 * Strips any trailing "_N" counter on the current label to get a root name, then sweeps from counter+1
-	 * upward — so "GetBook_1" re-duplicated becomes "GetBook_2", not "GetBook_1_1". Fresh placements where
+	 * upward - so "GetBook_1" re-duplicated becomes "GetBook_2", not "GetBook_1_1". Fresh placements where
 	 * NodeLabel is empty fall back to GetDefaultNodeBaseName().
 	 */
 	void EnsureUniqueLabel();
 	
 	/**
-	 * Override to insert custom output pins between Prerequisites and Any Outcome. Do NOT override AllocateDefaultPins — the
+	 * Override to insert custom output pins between Prerequisites and Any Outcome. Do NOT override AllocateDefaultPins - the
 	 * base class controls pin ordering to guarantee Deactivate always appears at the bottom.
 	 */
 	virtual void AllocateOutcomePins() {}

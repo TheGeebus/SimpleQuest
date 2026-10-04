@@ -152,6 +152,32 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag);
 
+    // -------------------------------------------------------------------------------------------------------------
+    // Ordering - one answer to "which of these comes first", shared by every surface that shows quest content.
+    // -------------------------------------------------------------------------------------------------------------
+
+    /**
+     * True when A should be shown before B. The same rule every other surface uses: an ancestor precedes its
+     * descendants; otherwise the two ancestors where the tags diverge decide, by Order Bias first, then by where the
+     * graph puts them, then by name read with numbers as numbers so Chapter_10 follows Chapter_9.
+     *
+     * Use this to keep a list SORTED rather than in arrival order. A display that appends as events land is showing
+     * the order the player happened to reach things, which is not the order the content was authored in - and the
+     * two visibly disagree after a save is reloaded, because a restore delivers everything at once.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Ordering", meta = (WorldContext = "WorldContext", DisplayName = "Sorts Before"))
+    static bool QuestSortsBefore(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag A, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag B);
+
+    /**
+     * Where NewTag belongs in a list that is already in this order - 0 for the front, OrderedTags.Num() for the end.
+     * Hand it the tags of the rows you already have, top to bottom, and insert the new row at the index it returns.
+     *
+     * Exists so a display does not have to write the comparison loop in Blueprint. It assumes OrderedTags is already
+     * sorted; feed it an unsorted list and the result is meaningless rather than wrong-but-close.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Ordering", meta = (WorldContext = "WorldContext", DisplayName = "Find Sorted Insert Index"))
+    static int32 FindSortedInsertIndex(const UObject* WorldContext, const TArray<FGameplayTag>& OrderedTags, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag NewTag);
+    
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 

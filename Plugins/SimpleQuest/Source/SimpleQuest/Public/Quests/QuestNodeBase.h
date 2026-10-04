@@ -368,7 +368,7 @@ protected:
     TMap<FName, FQuestPathNodeList> NextNodesByPath;
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
+    TArray<FName> NextNodesOnAnyOutcome;   // always-fire targets, in authored order
 
     /**
      * Nodes to DEACTIVATE when this node resolves on a given path - an outcome pin wired to a Deactivate input.
@@ -577,7 +577,7 @@ public:
     FORCEINLINE bool IsLinkedQuestlinePlacement() const { return bIsLinkedQuestlinePlacement; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE const TArray<FGameplayTag>& GetAssetScopedAliasTags() const { return AssetScopedAliasTags; }
-    FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
+    FORCEINLINE const TArray<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }

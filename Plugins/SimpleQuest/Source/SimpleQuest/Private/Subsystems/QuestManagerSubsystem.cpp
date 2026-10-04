@@ -498,6 +498,10 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         {
             StateSubsystem->RegisterQuestTag(QuestlineTag, true);
             StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetAuthoredDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
+            // No ordering keys: a questline started on its own is nobody's node, so it has no place in anybody's
+            // authored walk, and it carries no bias either - two assets that never refer to each other have no
+            // authored relationship to express. Roots order by when they started, which FQuestOrdering reads from the
+            // entry registry. The unregistered-tag answers (bias 0, position INDEX_NONE) are already correct here.
         }
         else
         {
@@ -839,6 +843,9 @@ void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* I
         StateSubsystem->RegisterPlacementIdentity(InnerIdentity, Canonical);
     }
     StateSubsystem->RegisterDisplayData(Canonical, InDisplayName, InDescription, InDisplayData);
+    // Every perspective of a node carries the same bias - a node is one thing however it is spelled, and the
+    // comparator may be handed any spelling.
+    StateSubsystem->RegisterOrderingKeys(Canonical, Instance->NodeInfo.OrderBias, Instance->NodeInfo.AuthoredPosition, Instance->NodeInfo.AuthoredSubtreeEnd);
 
     // Aliases: register each as a perspective of Canonical. RegisterAlias folds in RegisterQuestTag internally.
     for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
@@ -850,6 +857,7 @@ void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* I
             StateSubsystem->RegisterContainerTag(AliasTag);
         }
         StateSubsystem->RegisterDisplayData(AliasTag, InDisplayName, InDescription, InDisplayData);
+        StateSubsystem->RegisterOrderingKeys(AliasTag, Instance->NodeInfo.OrderBias, Instance->NodeInfo.AuthoredPosition, Instance->NodeInfo.AuthoredSubtreeEnd);
     }
 }
 
@@ -975,6 +983,39 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
             // effectively a single-tag write.
             AddStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Live);
             MarkQuestStarted(QuestlineTag);
+
+            // Asset-level ENTRY record - the registry twin of the Started anchor written just above. A questline
+            // started on its own is entered exactly as a node is, at a time and by somebody, and until this existed
+            // the registry had no row for it: every other RecordEntry call site passes a NODE's contextual tag, so
+            // "when was this questline entered" had no answer and a Leaf_Entry prereq on a questline tag could never
+            // satisfy.
+            //
+            // *** THIS IS WHAT ORDERS SEPARATELY-STARTED QUESTLINES. *** FQuestOrdering reads its keys where two tags
+            // DIVERGE, and for content in two different assets that point is the two asset identity tags - so an
+            // identity with no row has no arrival to compare and falls through to its own name. QL_Shortcut sorted
+            // above QuickStart.Chapter_9 on the 'L' in "QL_", whatever order the player actually saw.
+            //
+            // Recorded BEFORE the entry-tag loop below, so a questline's own arrival precedes its content's - which is
+            // the causal truth and keeps the sequence monotonic down the hierarchy. A restore does not reach here
+            // (PendingRestoreGraphs skips this whole function and the snapshot carries the rows), so there is no
+            // double-record and the restored arrival is the original one.
+            //
+            // SourceQuestTag carries the launching node when a Start Questline node did it, and is invalid for an
+            // external start - the same distinction it draws for nodes. ExternalAPI rather than InitialEntry or
+            // ChainCascade: no entry tag fired and no outcome routed here. From the target graph's perspective the
+            // start came from outside it, whichever side of the API boundary the caller sat on.
+            if (QuestStateSubsystem)
+            {
+                QuestStateSubsystem->RecordEntry(
+                    QuestlineTag,
+                    Params.OriginTag,
+                    FGameplayTag(),
+                    QuestNow(),
+                    EQuestActivationProvenance::ExternalAPI,
+                    Params,
+                    NAME_None,
+                    Params.OriginatingEventID);
+            }
         }
         else
         {

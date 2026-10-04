@@ -62,6 +62,7 @@
 #include "Toolkit/QuestlineGraphEditor.h"
 #include "Types/QuestPinRole.h"
 #include "Utilities/QuestlineGraphTraversalPolicy.h"
+#include "Utilities/QuestOrdering.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -749,8 +750,14 @@ bool FQuestlineGraphCompiler::Compile(UQuestlineGraph* InGraph)
 		nullptr,
 		RootResettable);
 	
-    InGraph->EntryNodeTags = EntryTags;
-    InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
+	InGraph->EntryNodeTags = EntryTags;
+
+	// Both of these read the WHOLE compiled set, so they belong here rather than inside CompileGraph - that recurses
+	// once per linked asset, and running them there walked an ever-growing accumulation on every pass.
+	AssignAuthoredPositions();
+	SortRoutingByAuthoredOrder();
+
+	InGraph->CompiledNodes = MoveTemp(AllCompiledNodes);
     InGraph->CompiledEditorNodes = MoveTemp(AllCompiledEditorNodes);
     InGraph->CompiledQuestTags = MoveTemp(AllCompiledQuestTags);
 	
@@ -911,7 +918,7 @@ TArray<FName> FQuestlineGraphCompiler::CompileGraph(
     }
 
     // ---- Pass 2: output pin wiring ----
-    CompileOutputWiring(ContentNodes, NodeInstanceMap, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths);
+	CompileOutputWiring(ContentNodes, NodeInstanceMap, TagPrefix, BoundaryCompletionsByPath, VisitedAssetPaths);
 
 	// ---- Collect activation group metadata for parallel-path analysis ----
 	CollectActivationGroupMetadata(Graph, TagPrefix);
@@ -1228,7 +1235,10 @@ void FQuestlineGraphCompiler::CompileNodeRegistration(
     	Instance->AuthoredNodeGuid = ContentNode->QuestGuid;
     	Instance->NodeInfo.DisplayName = RehomeDisplayText(ContentNode->NodeLabel, Instance);
     	Instance->bResettableReplay = bNodeResettable;
-
+    	// Copied straight through, with no inherit walk - unlike resettability, a bias is meaningful only against the
+    	// siblings it sits with, so there is nothing for an ancestor to contribute.
+    	Instance->NodeInfo.OrderBias = ContentNode->OrderBias;
+    	
     	// For LinkedQuestline nodes, fall back per-field to the inner asset's class defaults when the
     	// outer node leaves the corresponding field empty/null. Outer overrides where authored, inner
     	// fills the gap. Designers can rely on inner being the project-wide default for the questline
@@ -1746,7 +1756,7 @@ void FQuestlineGraphCompiler::CompileOutputWiring(
         	{
         		for (const FName& Tag : ResolvedTags)
         		{
-        			Instance->NextNodesOnAnyOutcome.Add(Tag);
+        			Instance->NextNodesOnAnyOutcome.AddUnique(Tag);
         		}
         		// Same pattern for the Any-Outcome path's boundary completions array on the instance.
         		for (const FQuestBoundaryCompletion& BC : ResolvedBoundaryCompletions)
@@ -3014,6 +3024,189 @@ void FQuestlineGraphCompiler::CollectActivationGroupMetadata(UEdGraph* Graph, co
 	}
 }
 
+bool FQuestlineGraphCompiler::AuthoredOrderLess(const FName A, const FName B) const
+{
+	auto KeysOf = [this](const FName Tag)
+	{
+		FQuestOrdering::FAuthoredSiblingKeys Keys;
+		if (const TObjectPtr<UQuestNodeBase>* Node = AllCompiledNodes.Find(Tag); Node && *Node)
+		{
+			Keys.OrderBias = (*Node)->NodeInfo.OrderBias;
+		}
+		// A node with no editor twin - a synthesized utility - keeps the MAX_int32 defaults and lands at the end of
+		// its group. There is nowhere on the canvas it can be said to be.
+		if (const UEdGraphNode* Editor = AllCompiledEditorNodes.FindRef(Tag))
+		{
+			Keys.LayoutY = Editor->NodePosY;
+			Keys.LayoutX = Editor->NodePosX;
+		}
+		return Keys;
+	};
+
+	return FQuestOrdering::AuthoredSiblingLess(KeysOf(A), KeysOf(B), A, B);
+}
+
+void FQuestlineGraphCompiler::AssignAuthoredPositions()
+{
+	// Order Bias first, then layout, then name - see AuthoredOrderLess. *** THIS IS WHERE BIAS IS APPLIED, ONCE. ***
+	// Because the walk visits in this order, the position it stamps below already encodes the designer's bias, and the
+	// runtime comparison can read one integer instead of reasoning about bias and precedence separately.
+	auto AuthoredLess = [this](const FName& A, const FName& B) { return AuthoredOrderLess(A, B); };
+
+	// Every way one node leads to another by ACTIVATING it. Outcome routes and the any-outcome route are the obvious
+	// ones; the two that are easy to miss are a utility node's Forward (how Start Questline, group entries and the
+	// fact nodes pass activation along) and a CONTAINER'S ENTRY LIST - a Step inside a Quest is reached through its
+	// container, never through a sibling's outcome, so leaving that out made every inner Step look like an entry
+	// point of its own.
+	//
+	// Deactivation routes are deliberately absent. They tear content down rather than lay it out, and a node
+	// reachable only that way has no place in the authored progression - it falls to the layout-order sweep.
+	auto SuccessorsOf = [](const UQuestNodeBase* Node, TArray<FName>& Out)
+	{
+		Out.Reset();
+		for (const FName& Tag : Node->NextNodesOnAnyOutcome)
+		{
+			Out.AddUnique(Tag);
+		}
+		for (const FName& Tag : Node->NextNodesOnForward)
+		{
+			Out.AddUnique(Tag);
+		}
+		for (const TPair<FName, FQuestPathNodeList>& Path : Node->NextNodesByPath)
+		{
+			for (const FName& Tag : Path.Value.NodeTags)
+			{
+				Out.AddUnique(Tag);
+			}
+		}
+		if (const UQuest* Container = Cast<const UQuest>(Node))
+		{
+			for (const FName& Tag : Container->EntryStepTags)
+			{
+				Out.AddUnique(Tag);
+			}
+			for (const TPair<FName, FQuestEntryRouteList>& Route : Container->EntryStepTagsByPath)
+			{
+				for (const FQuestEntryDestination& Dest : Route.Value.Destinations)
+				{
+					Out.AddUnique(Dest.DestTag);
+				}
+			}
+		}
+	};
+
+	// Anything another node points at is not a starting point. What is left is the graph's real entries PLUS content
+	// nobody wires to - spawned scenarios, activation-group targets, anything started out of band. Both deserve a
+	// position, and walking from both is how they get one without a special case.
+	TSet<FName> HasIncoming;
+	TArray<FName> Scratch;
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : AllCompiledNodes)
+	{
+		if (!Pair.Value) continue;
+		SuccessorsOf(Pair.Value, Scratch);
+		for (const FName& Tag : Scratch)
+		{
+			HasIncoming.Add(Tag);
+		}
+	}
+
+	TArray<FName> Roots;
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : AllCompiledNodes)
+	{
+		if (Pair.Value && !HasIncoming.Contains(Pair.Key))
+		{
+			Roots.Add(Pair.Key);
+		}
+	}
+	Roots.Sort(AuthoredLess);
+
+	for (const FName& Root : Roots)
+	{
+		UE_LOG(LogSimpleQuestCompiler, VeryVerbose, TEXT("AssignAuthoredPositions: root '%s'"), *Root.ToString());
+	}
+
+	int32 NextPosition = 0;
+	TSet<FName> Visited;
+
+	TFunction<void(const FName&)> Visit = [&](const FName& TagName)
+	{
+		// Also the cycle guard: a loop-back wire revisits a node that already has its position, and the first visit
+		// is the authored one - that is where the designer put it in the flow.
+		if (Visited.Contains(TagName)) return;
+		Visited.Add(TagName);
+
+		UQuestNodeBase* Node = AllCompiledNodes.FindRef(TagName);
+		if (!Node) return;
+		Node->NodeInfo.AuthoredPosition = NextPosition++;
+
+		TArray<FName> Next;
+		SuccessorsOf(Node, Next);
+		Next.Sort(AuthoredLess);
+		for (const FName& Child : Next)
+		{
+			Visit(Child);
+		}
+
+		// Close the range once everything downstream has been numbered. Whatever this node leads to now sits between
+		// its position and this value, which is how a later comparison can tell "I activate you" from "we are peers".
+		Node->NodeInfo.AuthoredSubtreeEnd = NextPosition - 1;
+	};
+
+	for (const FName& Root : Roots)
+	{
+		Visit(Root);
+	}
+
+	// A cycle with no way in leaves its members unreached by the walk above. Sweep them in layout order so every node
+	// carries a real position and nothing is left at the default, which would silently read as "first".
+	TArray<FName> Unreached;
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : AllCompiledNodes)
+	{
+		if (Pair.Value && !Visited.Contains(Pair.Key))
+		{
+			Unreached.Add(Pair.Key);
+		}
+	}
+	Unreached.Sort(AuthoredLess);
+	for (const FName& Tag : Unreached)
+	{
+		Visit(Tag);
+	}
+
+	UE_LOG(LogSimpleQuestCompiler, Verbose, TEXT("AssignAuthoredPositions: %d node(s) positioned from %d root(s)"),
+		NextPosition, Roots.Num());
+}
+
+void FQuestlineGraphCompiler::SortRoutingByAuthoredOrder()
+{
+	// The SAME key the position walk used, so a routing list and the positions can never disagree about sibling order.
+	// This used to call the runtime comparator, which meant the compile-time order depended on rules the runtime was
+	// meanwhile deriving from the numbers this pass helps produce - circular, and the source of an ordering that
+	// contradicted itself. A tag belonging to another asset is not in this compile's maps and reports the neutral
+	// defaults, which is the honest result: this compile has no business claiming to know a foreign asset's authoring.
+	auto SortNames = [this](TArray<FName>& Names)
+	{
+		if (Names.Num() < 2) return;
+		Names.Sort([this](const FName& A, const FName& B) { return AuthoredOrderLess(A, B); });
+	};
+
+	for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : AllCompiledNodes)
+	{
+		UQuestNodeBase* Node = Pair.Value;
+		if (!Node) continue;
+
+		SortNames(Node->NextNodesOnAnyOutcome);
+		for (TPair<FName, FQuestPathNodeList>& PathPair : Node->NextNodesByPath)
+		{
+			SortNames(PathPair.Value.NodeTags);
+		}
+		if (UQuest* Container = Cast<UQuest>(Node))
+		{
+			SortNames(Container->EntryStepTags);
+		}
+	}
+}
+
 bool FQuestlineGraphCompiler::ResolveResettable(EResettableReplay Flag, bool bIncoming)
 {
 	return Flag == EResettableReplay::Enabled ? true : (Flag == EResettableReplay::Disabled ? false : bIncoming);
@@ -3291,7 +3484,7 @@ void FQuestlineGraphCompiler::BuildRewardManifest(UQuestlineGraph* InGraph)
 		};
 
 		// Any-outcome bucket (NAME_None).
-		if (TArray<FName> AnyRewards = WalkRewards(Node->GetNextNodesOnAnyOutcome().Array()); AnyRewards.Num() > 0)
+		if (TArray<FName> AnyRewards = WalkRewards(Node->GetNextNodesOnAnyOutcome()); AnyRewards.Num() > 0)
 		{
 			Node->ReachableRewardsByPath.Add(NAME_None, { LabelForPath(NAME_None), MoveTemp(AnyRewards) });
 		}

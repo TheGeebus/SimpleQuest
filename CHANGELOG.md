@@ -97,6 +97,19 @@ what is already true instead of having to go and ask.
 
 ### Changed
 
+- **A Trigger's watched Steps are no longer observed for broadcast.** A Quest
+  Trigger has always put the Steps it can fire onto its own Observer delegates,
+  so binding *On Quest Started* reported them without listing them anywhere.
+  That was a convenience with a sharp edge: the component's *Observed Tags* no
+  longer described what the component reported, and one component serving as
+  both a trigger and a display would show its own buttons in its own log - on
+  whatever the display happened to be showing, since the watched Steps outlive
+  any change to *Observed Tags*. *Step Tags To Trigger* now arms the trigger and
+  nothing else, and *Observed Tags* means exactly what the details panel shows.
+  To follow a watched Step on the Observer delegates, add it to *Observed Tags*
+  as well - one line, and visible. **Nothing about firing changed**, and a Quest
+  Giver still reports the quests it gives without listing them.
+
 - **Deactivation pins sit across from each other, so a teardown chain draws
   straight.** A node's *Deactivate* input and its *Deactivated* output are now
   anchored to the bottom of the node rather than following the activation pins
@@ -183,6 +196,33 @@ what is already true instead of having to go and ask.
   without touching the visual settings. The unused graph-outcome color is gone.
 
 ### Fixes
+
+- **A component subscribed to overlapping tags at two different moments
+  received every shared event twice.** A component takes its authored
+  subscriptions when it registers, and can take more later through *Add
+  Observed Tag*. Where the two sets overlapped, the same handler was treated as
+  two different ones, so the protection against repeat delivery never
+  recognized it. Anything bound to that component ran twice per event - a log
+  gained a second row, a counter counted double, a flourish played over itself.
+  Components with a role of their own were the most exposed, since a Giver or a
+  Trigger that also observes its own questline brings subscriptions alongside
+  the authored ones. Repeat delivery is now collapsed on both delivery paths,
+  including the single-channel one that most events take and that had no such
+  protection at all.
+
+- **The Stale Quest Tags tool missed stale entries on a Trigger or a Giver.**
+  The tool walks every component on an actor and reports any tag that no longer
+  exists, but it stopped at the first kind of component it recognized - and
+  because a Quest Giver is also a Quest Trigger, which is also a Quest
+  Observer, only one of each component's tag fields was ever reached. A Giver
+  carries four authored tag fields and exactly one of them got checked. So a
+  Trigger or a Giver holding a stale entry in *Observed Tags* or *Watched Step
+  Tags* reported clean, and the components carrying the most tags were the
+  least examined. Every authored tag field on every component is now checked,
+  so a single component can report several entries, each named by the field it
+  came from - expect the panel to find things it used to walk past. It also
+  labeled a Trigger's step tags *Step Tags To Watch*, which is no longer that
+  field's name; it now reads *Step Tags To Trigger*.
 
 - **A reroute node can no longer sneak a second wire from one outcome into the
   same condition.** An outcome may feed a combinator once; a second wire from

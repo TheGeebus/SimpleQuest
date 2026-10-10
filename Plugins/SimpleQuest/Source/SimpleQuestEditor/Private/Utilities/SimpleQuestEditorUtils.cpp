@@ -2164,9 +2164,13 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 namespace
 {
 	/**
-	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Observer),
-	 * emits one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are stamped on
-	 * every entry; Component pointer is the specific component carrying the stale tag.
+	 * Pure component-list stale-tag scan. Iterates Components and reports EVERY authored tag field a component
+	 * carries, emitting one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are
+	 * stamped on every entry; Component pointer is the specific component carrying the stale tag.
+	 *
+	 * The three checks are INDEPENDENT, not a dispatch. A Giver is also a Trigger and an Observer, so it carries
+	 * four authored tag fields and every one of them needs scanning - an else-chain reports only the first and
+	 * leaves a stale ObservedTags entry on a Trigger or a Giver invisible.
 	 *
 	 * Used by both the AActor-based scanner (Tier 1 / loaded-level path, where components come from
 	 * Actor->GetComponents) AND the BP-CDO scanner (Tier 2, where components come from the CDO's native
@@ -2203,12 +2207,12 @@ namespace
 				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive())
 					EmitIfStale(Giver, TEXT("QuestTagsToGive"), Tag);
 			}
-			else if (UQuestTriggerComponent* Target = Cast<UQuestTriggerComponent>(Comp))
+			if (UQuestTriggerComponent* Trigger = Cast<UQuestTriggerComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Target->GetStepTagsToTrigger())
-					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
+				for (const FGameplayTag& Tag : Trigger->GetStepTagsToTrigger())
+					EmitIfStale(Trigger, TEXT("StepTagsToTrigger"), Tag);
 			}
-			else if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
+			if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
 			{
 				for (const FGameplayTag& Tag : Observer->GetWatchedStepTags())
 					EmitIfStale(Observer, TEXT("WatchedStepTags"), Tag);

@@ -42,12 +42,21 @@ void USimpleCoreBlueprintLibrary::SubscribeMessageOfType(UObject* WorldContextOb
     }
 }
 
-void USimpleCoreBlueprintLibrary::UnsubscribeListener(UObject* WorldContextObject, UObject* Listener)
+void USimpleCoreBlueprintLibrary::UnsubscribeListener(UObject* Listener)
 {
-    if (USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject))
+    if (USignalSubsystem* Signals = GetSignalSubsystem(Listener))
     {
         Signals->UnsubscribeListener(Listener);
     }
+}
+
+int32 USimpleCoreBlueprintLibrary::UnsubscribeFromChannel(FGameplayTag Channel, UObject* Listener)
+{
+    if (USignalSubsystem* Signals = GetSignalSubsystem(Listener))
+    {
+        return Signals->UnsubscribeFromChannel(Channel, Listener);
+    }
+    return 0;
 }
 
 // ── World State ────────────────────────────────────────────────────────────────────────────────────
@@ -94,8 +103,7 @@ int32 USimpleCoreBlueprintLibrary::GetFactValue(UObject* WorldContextObject, FGa
     return 0;
 }
 
-void USimpleCoreBlueprintLibrary::SubscribeToFactAdded(UObject* WorldContextObject, FGameplayTag Channel,
-    const FOnSignalReceived& OnFactAdded, ESignalRoutingMode Routing)
+void USimpleCoreBlueprintLibrary::SubscribeToFactAdded(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnFactAdded, ESignalRoutingMode Routing)
 {
     UWorldStateSubsystem* WorldState = GetWorldStateSubsystem(WorldContextObject);
     USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject);
@@ -112,10 +120,19 @@ void USimpleCoreBlueprintLibrary::SubscribeToFactAdded(UObject* WorldContextObje
     for (const FGameplayTag& FactTag : AlreadyTrue)
     {
         OnFactAdded.ExecuteIfBound(FactTag,
-            FInstancedStruct::Make<FWorldStateFactAddedEvent>(FWorldStateFactAddedEvent(FactTag, /*bCatchUp*/ true)));
+            FInstancedStruct::Make<FWorldStateFactAddedEvent>(FWorldStateFactAddedEvent(FactTag, true)));
     }
 
     Signals->SubscribeMessageOfType(Channel, FWorldStateFactAddedEvent::StaticStruct(), OnFactAdded, Routing);
+}
+
+void USimpleCoreBlueprintLibrary::SubscribeToFactRemoved(UObject* WorldContextObject, FGameplayTag Channel, const FOnSignalReceived& OnFactRemoved, ESignalRoutingMode Routing)
+{
+    USignalSubsystem* Signals = GetSignalSubsystem(WorldContextObject);
+    if (!Signals || !Channel.IsValid() || !OnFactRemoved.IsBound()) return;
+
+    // No store lookup here, unlike the Added path: with nothing to replay there is no snapshot to take.
+    Signals->SubscribeMessageOfType(Channel, FWorldStateFactRemovedEvent::StaticStruct(), OnFactRemoved, Routing);
 }
 
 // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────

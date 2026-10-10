@@ -164,6 +164,21 @@ public:
      * state-before-broadcast subscribers depend on continues to hold for surviving subscribers.
      */
     void UnsubscribeListener(UObject* Listener);
+    
+    /**
+     * Remove this listener's subscriptions on ONE channel, leaving everything it hears elsewhere intact. The middle
+     * ground between UnsubscribeMessage, which needs the handle from a specific Subscribe* call, and
+     * UnsubscribeListener, which drops every channel the object is on.
+     *
+     * *** IT DROPS EVERY BINDING THE LISTENER HAS ON THAT CHANNEL, not one of them. *** An object with two handlers
+     * bound to the same channel loses both, because the channel is the unit this one works in - that is what a caller
+     * asking to stop hearing a channel means. Reach for UnsubscribeMessage when one specific binding is the subject.
+     *
+     * Returns how many subscriptions were removed, so a caller can tell "nothing was listening" from "something was,
+     * and now is not". Preserves subscriber insertion order among survivors, same as UnsubscribeListener, so the
+     * broadcast-ordering contract that state-before-broadcast subscribers depend on keeps holding.
+     */
+    int32 UnsubscribeFromChannel(FGameplayTag Channel, UObject* Listener);
 
     /**
      * Identity for "this object, called through this function" - the deduplication key for a publish. See

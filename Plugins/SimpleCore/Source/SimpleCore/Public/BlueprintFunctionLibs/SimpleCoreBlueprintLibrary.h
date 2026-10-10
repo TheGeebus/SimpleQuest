@@ -116,12 +116,28 @@ public:
     /**
      * Remove every signal-bus subscription whose listener is the given object. Single-call cleanup for actors /
      * components with many subscriptions across many channels - call from EndPlay or BeginDestroy. Compares raw UObject
-     * pointers, so subclasses and unrelated objects are not affected. No-op if Listener is null. Most adopter usage
-     * passes self as Listener.
+     * pointers, so subclasses and unrelated objects are not affected. Defaults to self; wire the pin only to unsubscribe
+     * some other object.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
-        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject"))
-    static void UnsubscribeListener(UObject* WorldContextObject, UObject* Listener);
+        meta = (DefaultToSelf = "Listener"))
+    static void UnsubscribeListener(UObject* Listener);
+    
+    /**
+     * Stop this listener hearing ONE channel, leaving its other subscriptions alone. Blueprint has no per-binding
+     * handle to unsubscribe with - and should not want one, since a lost handle leaks a subscription silently - so a
+     * channel is the finest unit available here, and the one a graph thinks in anyway.
+     *
+     * It drops EVERY event this listener has bound to the channel. A graph with two events on the same channel loses
+     * both, which is what stopping a channel means. Returns how many were removed, so you can tell "nothing was
+     * listening" from "something was".
+     *
+     * Listener doubles as the world context and defaults to self, so the common case needs no pin wired at all -
+     * wire it only to unsubscribe some other object.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|Signals",
+        meta = (DefaultToSelf = "Listener", DisplayName = "Unsubscribe From Channel"))
+    static int32 UnsubscribeFromChannel(FGameplayTag Channel, UObject* Listener);
     
 
     // ── World State ────────────────────────────────────────────────────────────────────────────────
@@ -183,11 +199,9 @@ public:
      * MatchedChannel pin is the specific fact's tag, so a graph bound to a parent tag reads the same value it would on
      * a live hit.
      *
-     * *** REMOVAL IS NOT REPLAYED. *** A removal that already happened is a moment that has passed, and delivering it
-     * late would claim something just happened when it did not. If "this was true once" matters, record that as its
-     * own fact and subscribe to it here.
+     * Removals are not replayed. See Subscribe To Fact Removed, which is where that rule and its reasoning live.
      *
-     * Clean up with Unsubscribe Listener, same as any other subscription.
+     * Clean up with Unsubscribe From Channel for this one fact, or Unsubscribe Listener for everything at teardown.
      */
     UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
         meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject",
@@ -196,6 +210,28 @@ public:
         UObject* WorldContextObject,
         FGameplayTag Channel,
         const FOnSignalReceived& OnFactAdded,
+        ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
+    
+    /**
+     * Subscribe to a fact becoming false. The counterpart to Subscribe To Fact Added, and simpler: facts already
+     * removed are not replayed, and that is deliberate rather than missing.
+     *
+     * A fact store answers one question - is this true NOW. Nearly every tag that could exist is absent, so
+     * "already removed" is not a state you can be caught up on; it is the default. And a removal that already
+     * happened is a moment that has passed, so delivering it late would claim something just happened when it did not.
+     *
+     * If "this was true once" is what your graph needs, that is a different question and it needs its own fact.
+     * Write one when the thing happens and subscribe to that with Subscribe To Fact Added, which does replay.
+     *
+     * Clean up with Unsubscribe From Channel for this one fact, or Unsubscribe Listener for everything at teardown.
+     */
+    UFUNCTION(BlueprintCallable, Category = "SimpleCore|World State",
+        meta = (WorldContext = "WorldContextObject", HidePin = "WorldContextObject", DefaultToSelf = "WorldContextObject",
+            AutoCreateRefTerm = "OnFactRemoved", DisplayName = "Subscribe To Fact Removed"))
+    static void SubscribeToFactRemoved(
+        UObject* WorldContextObject,
+        FGameplayTag Channel,
+        const FOnSignalReceived& OnFactRemoved,
         ESignalRoutingMode Routing = ESignalRoutingMode::Descendants);
 
     // ── Gameplay Tags ──────────────────────────────────────────────────────────────────────────────

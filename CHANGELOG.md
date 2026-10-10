@@ -95,6 +95,25 @@ what is already true instead of having to go and ask.
   when it did not. If *it was true once* matters to you, record that as its own
   fact.
 
+- **And a fact becoming false can be subscribed to as well.** *Subscribe To Fact
+  Removed* is the counterpart, on the same Blueprint library and as a C++ method,
+  and it is the simpler of the two: nothing is replayed, for the reason just
+  above. It adds no behavior the signal bus did not already have - what it adds
+  is an answer. The missing node read as *removal is not observable* and sent
+  people hunting in the bus for something that was there all along.
+
+- **A Blueprint can now stop listening to one channel without dropping
+  everything else.** Cleanup had two settings and no middle: *Unsubscribe
+  Listener*, which drops every subscription an object holds on every channel, or
+  nothing at all, since the per-subscription form needs a handle no graph can
+  hold. A widget watching two unrelated channels had to give up both to stop
+  hearing one. The new **Unsubscribe From Channel** node names a channel and
+  clears that object's bindings on it, leaving everything else intact. It drops
+  *every* event the object has bound to that channel, which is what stopping a
+  channel means, and it returns how many it removed - the difference between
+  *nothing was listening* and *something was, and now is not*. Worth knowing: a
+  silent zero is exactly how a leaked subscription hides.
+
 ### Changed
 
 - **A Trigger's watched Steps are no longer observed for broadcast.** A Quest
@@ -194,6 +213,16 @@ what is already true instead of having to go and ask.
   entry, active-exit, and utility node defaults are the tuned values rather than
   the originals, so a fresh project matches the screenshots in the walkthrough
   without touching the visual settings. The unused graph-outcome color is gone.
+
+- **Unsubscribe Listener's pin says what it is.** The node's one input was
+  labeled *World Context Object* while what it actually took was the object to
+  unsubscribe - it had always used that pin for both jobs, so the behavior was
+  right and only the label was wrong. The pin is now *Listener* and defaults to
+  *self*, so the ordinary case needs nothing wired at all; wire it only to
+  unsubscribe some other object. **A graph that wired the old pin needs
+  reconnecting** - the value it was passing is the value the new pin wants, so
+  the fix is the same wire into the renamed pin, or no wire at all when the
+  target is the graph's own actor.
 
 ### Fixes
 

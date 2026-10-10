@@ -198,6 +198,32 @@ void USignalSubsystem::UnsubscribeListener(UObject* Listener)
     }
 }
 
+int32 USignalSubsystem::UnsubscribeFromChannel(const FGameplayTag Channel, UObject* Listener)
+{
+    if (!Listener || !Channel.IsValid() || bIsShuttingDown) return 0;
+
+    TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(Channel);
+    if (!Records) return 0;
+
+    // RemoveAll rather than IndexOfByPredicate's first match: one object may hold several bindings on a channel, and
+    // the channel is the unit here. Survivors keep their relative order, which is the broadcast-ordering contract.
+    const int32 RemovedCount = Records->RemoveAll([Listener](const FSignalSubscriberRecord& R) { return R.Listener.Get() == Listener; });
+
+    if (Records->IsEmpty())
+    {
+        ChannelSubscribers.Remove(Channel);  // invalidates Records - nothing reads it past here
+    }
+
+    if (RemovedCount > 0)
+    {
+        UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::UnsubscribeFromChannel: channel='%s' listener='%s' removed=%d"),
+            *Channel.ToString(),
+            *Listener->GetName(),
+            RemovedCount);
+    }
+    return RemovedCount;
+}
+
 void USignalSubsystem::PublishMessageOnChannelsRaw(TArray<FGameplayTag> Channels, const FInstancedStruct& Payload, bool bAllChannels)
 {
     if (bIsShuttingDown) return;

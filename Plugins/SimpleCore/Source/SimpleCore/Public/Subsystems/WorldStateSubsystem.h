@@ -140,12 +140,7 @@ public:
      * channel sees anything. The callback's channel argument is the specific fact's tag, exactly as it would be on a
      * live delivery to a subscriber bound further up the hierarchy.
      *
-     * *** REMOVAL IS NOT REPLAYED, and that is deliberate rather than an omission. *** A fact being absent is the
-     * state of nearly every tag that exists, and a removal that already happened is a moment that has passed -
-     * delivering it late would assert something just happened when it did not. If "this was true once" matters to
-     * you, record that as its own fact: SimpleQuest's append-only Started anchor is that pattern, and its Held leaf
-     * is the deliberate counter-example, drained before every save because persisting a pause would restore a game
-     * that looks stuck.
+     * Removals are not replayed. See SubscribeToFactRemoved, which is where that rule and its reasoning live.
      *
      * Public C++ surface only - BP code reaches this via USimpleCoreBlueprintLibrary::SubscribeToFactAdded.
      */
@@ -154,6 +149,30 @@ public:
         FGameplayTag Channel, 
         ListenerType* Listener, 
         void(ListenerType::* Function)(FGameplayTag, const FWorldStateFactAddedEvent&), 
+        ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
+    
+    /**
+     * Subscribe to a fact becoming false. The counterpart to SubscribeToFactAdded, and deliberately the simpler of
+     * the pair: there is no catch-up, because there is nothing coherent to replay.
+     *
+     * A fact store answers one question - is this true NOW. Absence is the condition of nearly every tag that could
+     * exist, so "already removed" is not a state a subscriber can be caught up on; it is the default. And a removal
+     * that has already happened is a moment that has passed, so delivering it late would assert that something just
+     * happened when it did not.
+     *
+     * If "this was true once" is what you need, that is a different question and it needs its own fact: write one
+     * when the thing happens and subscribe to THAT with SubscribeToFactAdded, which does replay. SimpleQuest's
+     * append-only Started anchor is that pattern - and its Held leaf is the deliberate counter-example, drained
+     * before every save, because persisting a pause would restore a game that looks stuck. Decide which one a fact
+     * of yours is: a record of something that happened, or a description of how things are right now.
+     *
+     * Public C++ surface only - BP code reaches this via USimpleCoreBlueprintLibrary::SubscribeToFactRemoved.
+     */
+    template<typename ListenerType>
+    FDelegateHandle SubscribeToFactRemoved(
+        FGameplayTag Channel,
+        ListenerType* Listener,
+        void(ListenerType::* Function)(FGameplayTag, const FWorldStateFactRemovedEvent&),
         ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe);
 
     /**
@@ -208,5 +227,20 @@ FDelegateHandle UWorldStateSubsystem::SubscribeToFactAdded(
     }
 
     return Signals->SubscribeMessage<FWorldStateFactAddedEvent>(Channel, Listener, Function, Routing);
+}
+
+template<typename ListenerType>
+FDelegateHandle UWorldStateSubsystem::SubscribeToFactRemoved(
+    const FGameplayTag Channel,
+    ListenerType* Listener,
+    void(ListenerType::* Function)(FGameplayTag, const FWorldStateFactRemovedEvent&),
+    const ESignalRoutingMode Routing)
+{
+    USignalSubsystem* Signals = GetGameInstance() ? GetGameInstance()->GetSubsystem<USignalSubsystem>() : nullptr;
+    if (!Signals || !Listener || !Channel.IsValid() || !Function) return FDelegateHandle();
+
+    // With no replay this is a plain subscribe, and it exists anyway: without it, anyone who found the Added
+    // variant first would read the gap as "removal is not observable" and go looking in the bus instead.
+    return Signals->SubscribeMessage<FWorldStateFactRemovedEvent>(Channel, Listener, Function, Routing);
 }
 

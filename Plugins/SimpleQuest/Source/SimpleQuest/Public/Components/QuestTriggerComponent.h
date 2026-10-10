@@ -37,7 +37,7 @@ public:
 	/**
 	 * Fires when an objective produces a per-fire response to one of this trigger's SendTriggerEvent fires. Resolution
 	 * discriminates Progress / Completed / Refused. Subscriber-side filter on Event.TriggerContext.TriggeredActor ==
-	 * GetOwner() is applied internally before broadcast — adopters bound to this delegate only receive responses for
+	 * GetOwner() is applied internally before broadcast - adopters bound to this delegate only receive responses for
 	 * their own trigger's fires.
 	 */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerResponded, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerResponseEvent, Event);
@@ -47,16 +47,16 @@ public:
 	/**
 	 * Fires when SendTriggerEvent reached a watched step that's been activated (PendingGiver-or-similar) but cannot
 	 * currently progress because of structural blockers (Blocked fact set, or unmet prereqs). Mirrors the Giver's
-	 * OnQuestGiveBlocked shape — same FQuestActivationBlocker[] payload. Own-fire filter applied internally.
+	 * OnQuestGiveBlocked shape - same FQuestActivationBlocker[] payload. Own-fire filter applied internally.
 	 */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerBlocked, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestProgressRefusedEvent, Event);
 	UPROPERTY(BlueprintAssignable, BlueprintCallable, Category = "Delegates")
 	FOnQuestTriggerBlocked OnQuestTriggerBlocked;
 
 	/**
-	 * Fires when the trigger-side of a watched step's lifecycle wraps — Completed / Interrupted (manager-published
+	 * Fires when the trigger-side of a watched step's lifecycle wraps - Completed / Interrupted (manager-published
 	 * alongside FQuestEndedEvent / FQuestDeactivatedEvent) or Manual (from inside an objective via
-	 * PublishTriggerDeactivation). Per-lifecycle signal — fires once per step end. No own-fire filter; all trigger
+	 * PublishTriggerDeactivation). Per-lifecycle signal - fires once per step end. No own-fire filter; all trigger
 	 * actors watching the step are relevant audiences for lifecycle wrap.
 	 */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnQuestTriggerDeactivated, FGameplayTag, QuestTag, FGameplayTag, MatchedChannel, FQuestTriggerDeactivatedEvent, Event);
@@ -74,11 +74,11 @@ public:
 
 	/**
 	 * Publish a trigger event on every watched step channel. The structural facts of any trigger fire are
-	 * "what was triggered" (TriggeredActor — typically this component's owning actor; component fills this
-	 * in if the caller left it null) and "what initiated the trigger" (Instigator — the killer, interactor,
+	 * "what was triggered" (TriggeredActor - typically this component's owning actor; component fills this
+	 * in if the caller left it null) and "what initiated the trigger" (Instigator - the killer, interactor,
 	 * or whatever external causer fired the trigger; equal to TriggeredActor for self-fired triggers).
-	 * CustomData on the context carries game-specific payload. All other variants — kill / interact / any
-	 * domain-specific firing — collapse into this one signal; the semantic differentiation lives in the
+	 * CustomData on the context carries game-specific payload. All other variants - kill / interact / any
+	 * domain-specific firing - collapse into this one signal; the semantic differentiation lives in the
 	 * Instigator role and any CustomData the designer adds.
 	 *
 	 * BP pin is optional via AutoCreateRefTerm; callers can omit Context to publish with TriggeredActor =
@@ -95,7 +95,7 @@ public:
 	void AddTagsToTrigger(const FGameplayTagContainer& Tags);
 
 	/**
-	 * Runtime: stop watching step tags — unsubscribes the trigger + observer subscriptions and drops the trigger
+	 * Runtime: stop watching step tags - unsubscribes the trigger + observer subscriptions and drops the trigger
 	 * source-registry entries. No-op for tags not currently watched.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Quest")
@@ -126,7 +126,7 @@ protected:
 
 	/**
 	 * Step-deactivation handler. Routes to OnTriggerStepEnded for shared cleanup. Subscribed alongside
-	 * the completion handler because targets disable on either kind of end — completion AND mid-flight
+	 * the completion handler because targets disable on either kind of end - completion AND mid-flight
 	 * interruption both indicate "this step is no longer active and this target shouldn't respond." */
 	virtual void OnTriggerStepDeactivated(FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	
@@ -143,7 +143,7 @@ protected:
 	virtual void HandleQuestTriggerBlocked(FGameplayTag Channel, const FQuestProgressRefusedEvent& Event);
 
 	/**
-	 * Receives the trigger-side wrap signal — Completed / Interrupted / Manual. No own-fire filter; all watching
+	 * Receives the trigger-side wrap signal - Completed / Interrupted / Manual. No own-fire filter; all watching
 	 * components on the channel are relevant.
 	 */
 	virtual void HandleQuestTriggerDeactivated(FGameplayTag Channel, const FQuestTriggerDeactivatedEvent& Event);
@@ -155,22 +155,17 @@ protected:
 	virtual void HandleQuestTriggerSatisfied(FGameplayTag Channel, const FQuestTriggerSatisfiedEvent& Event);
 	
 	/**
-	 * Step tags this target listens to. Mirrors the giver pattern — configure in the component rather than using actor references.
+	 * Step tags this target listens to. Mirrors the giver pattern - configure in the component rather than using actor references.
 	 * The subsystem publishes step events on the step tag; any target configured with that tag activates.
+	 *
+	 * These tags arm the trigger; they are not observed for broadcast. The inherited Observer delegates report exactly what
+	 * ObservedTags lists, so a display bound to OnAnyQuestEvent never receives an event nobody asked for. To follow a watched
+	 * step's lifecycle on those delegates, add it to ObservedTags as well.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "SimpleQuest.Questline"))
 	FGameplayTagContainer StepTagsToTrigger;
 
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
-
-	/**
-	 * Bridges StepTagsToTrigger onto the inherited Observer broadcast surface — adopters binding the
-	 * inherited Observer delegates (OnQuestStarted, OnQuestProgress, OnQuestCompleted, etc.) receive
-	 * fires for the Trigger's managed step tags without authoring a parallel ObservedTags entry.
-	 * Chains via Super so a derived class that also bridges its own container (Giver's QuestTagsToGive)
-	 * sees both contributions in EffectiveObserved at register time.
-	 */
-	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
 
 	/**
 	 * Shared cleanup body for both completion and deactivation routes. Unsubscribes the step end handles and
@@ -180,7 +175,7 @@ protected:
 	void OnTriggerStepEnded(FGameplayTag Channel);
 
 private:	
-	/** Per-step activation tracking — preserves the routing guarantee when multiple watched steps are active simultaneously */
+	/** Per-step activation tracking - preserves the routing guarantee when multiple watched steps are active simultaneously */
 	TMap<FGameplayTag, FDelegateHandle> ActiveStepEndHandles;
 	
 	/**
@@ -197,13 +192,13 @@ private:
 
 public:	
 	/**
-	 * Raw authored StepTagsToTrigger. May contain stale tags — feed into tag-library calls via GetRegisteredStepTagsToTrigger()
+	 * Raw authored StepTagsToTrigger. May contain stale tags - feed into tag-library calls via GetRegisteredStepTagsToTrigger()
 	 * instead to avoid UE's stale-tag ensure.
 	 */
 	const FGameplayTagContainer& GetStepTagsToTrigger() const { return StepTagsToTrigger; }
 
 	/**
-	 * Registration-filtered view of StepTagsToTrigger — safe to pass into FGameplayTagContainer::Filter / HasAny /
+	 * Registration-filtered view of StepTagsToTrigger - safe to pass into FGameplayTagContainer::Filter / HasAny /
 	 * MatchesAny. Stale entries are dropped with a Warning log; authored container is unchanged.
 	 */
 	UFUNCTION(BlueprintCallable)

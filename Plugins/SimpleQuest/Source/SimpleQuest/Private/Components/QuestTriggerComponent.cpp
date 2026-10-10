@@ -1,4 +1,4 @@
-// Copyright (c) 2026 Greg Bussell
+﻿// Copyright (c) 2026 Greg Bussell
 // SPDX-License-Identifier: MIT
 
 #include "Components/QuestTriggerComponent.h"
@@ -102,7 +102,7 @@ void UQuestTriggerComponent::OnTriggerActivated(FGameplayTag Channel, const FQue
     // Track active subscription by the canonical ContextualTag from Event.Context - invariant across multi-publish
     // channels (Channel varies by which publish chain the bus dispatched through; Context.NodeInfo.QuestTag is the
     // Step's canonical identity, set by AssembleEventContext to ContextualTag). This serves two ends:
-    //   (1) Dedup when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step -
+    //   (1) Dedupe when StepTagsToTrigger contains both ContextualTag and alias forms for the same logical Step -
     //       multi-publish would otherwise hit both subscriptions and double-activate.
     //   (2) Route trigger publishes (SendTriggerEvent) on ContextualTag, which is what the manager's per-step
     //       FQuestTriggerFiredEvent subscription is bound to - closing the cross-asset trigger flow that
@@ -182,21 +182,6 @@ int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemov
     return Count;
 }
 
-TArray<FQuestObservedTagSpec> UQuestTriggerComponent::GetImplicitlyObservedTags() const
-{
-    TArray<FQuestObservedTagSpec> Implicit = Super::GetImplicitlyObservedTags();
-    Implicit.Reserve(Implicit.Num() + StepTagsToTrigger.Num());
-    for (const FGameplayTag& Tag : StepTagsToTrigger)
-    {
-        // Exact routing, matching the Giver's bridge: a Trigger addresses exactly the Step tags it is authored with. Step
-        // tags have no descendants, so nothing changes for a correctly authored component. What it rules out is a container
-        // tag fanning every inner Step's events onto these delegates while the Trigger can never fire one (a container is
-        // never Live). Alias-form authoring still works - a Step's publishes carry each of its addresses as its own channel.
-        Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::ExactOnly});
-    }
-    return Implicit;
-}
-
 void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContext& Context)
 {
     if (!SignalSubsystem) return;
@@ -261,7 +246,7 @@ void UQuestTriggerComponent::SendTriggerEvent(const FQuestObjectiveTriggerContex
         // manager's FQuestTriggerFiredEvent subscription installs on canonical (Node->GetContextualTag()), and other
         // Trigger Components watching the same step may bind on different perspectives. Multi-publish on the full
         // channel set matches the FQuestPublish::OnAllNodeTags model so any-perspective subscriber receives via the
-        // bus's per-subscription dedup.
+        // bus's per-subscription dedupe.
         if (StateSubsystem)
         {
             for (const FGameplayTag& Canonical : StateSubsystem->ResolveCanonicalTags(StepTag))
@@ -313,18 +298,9 @@ void UQuestTriggerComponent::AddTagsToTrigger(const FGameplayTagContainer& Tags)
 
         if (bRegistered)
         {
-            // Base observer side, with the same effective settings GetImplicitlyObservedTags produces for a fresh
-            // trigger tag (default + Progress/Blocked/Unblocked + the forced Started/GiveBlocked pair, exact).
-            // Mirrors the bridge overlay in RegisterQuestObserver - keep in sync if that overlay changes.
-            FObservedQuestEventSettings Settings;
-            Settings.bObserveProgress = true;
-            Settings.bObserveBlocked = true;
-            Settings.bObserveUnblocked = true;
-            Settings.bObserveStarted = true;
-            Settings.bObserveGiveBlocked = true;
-            Settings.Routing = FSignalRoutingDefaults::ExactOnly;
-            RegisterSingleObservedTag(Tag, Settings);
-
+            // Trigger side only. A watched step is not an observed tag, so arming one at runtime leaves the Observer
+            // delegates reporting exactly what ObservedTags lists. SubscribeTriggerStep registers this component as a
+            // trigger source for the step, which is the claim that is actually true of it.
             SubscribeTriggerStep(Tag);
             TriggerCatchUpForStep(Tag);
         }

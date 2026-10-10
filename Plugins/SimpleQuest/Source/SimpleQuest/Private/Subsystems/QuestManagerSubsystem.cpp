@@ -740,7 +740,7 @@ TArray<FGameplayTag> UQuestManagerSubsystem::FindPlacementsOfAsset(FGameplayTag 
     TArray<FGameplayTag> Placements;
     if (!AssetIdentityTag.IsValid()) return Placements;
 
-    // The registry is keyed per perspective, so one instance is visited once per tag it answers to - dedup on the contextual
+    // The registry is keyed per perspective, so one instance is visited once per tag it answers to - dedupe on the contextual
     // tag, which is the one name a placement has regardless of how many spellings reach it.
     for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
     {
@@ -802,7 +802,7 @@ void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBas
         {
             UE_LOG(LogSimpleQuestActivation, Warning,
                 TEXT("RegisterLoadedNodeInstance: key '%s' already maps to a different Instance ('%s' vs incoming '%s') - ")
-                TEXT("alias keys must be unique per Instance for dedup-by-pointer to work correctly. Preserving existing mapping."),
+                TEXT("alias keys must be unique per Instance for dedupe-by-pointer to work correctly. Preserving existing mapping."),
                 *Key.ToString(),
                 ExistingPtr->Get() ? *ExistingPtr->Get()->GetName() : TEXT("<null>"),
                 *Instance->GetName());
@@ -2290,7 +2290,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         //
         // State writes and watch registrations route the cascade's NodeTag through ResolveToCanonicalTag so every
         // call below targets the canonical ContextualTag the state subsystem's queries alias-walk to. Under
-        // AuthoredGuid-dedup the cascade's NodeTag may be an alias-key form; writing under that form leaves the
+        // AuthoredGuid-dedupe the cascade's NodeTag may be an alias-key form; writing under that form leaves the
         // canonical fact missing and QueryQuestActivationBlockers returns NotPendingGiver despite the gate having
         // fired. Matches the canonical-resolution pattern used by the request-side BP handlers (HandleResolveRequest,
         // HandleNodeDeactivationRequest, etc.) and the Node->GetContextualTag() convention used by SetQuestLive /
@@ -2550,7 +2550,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // the Any-Outcome route appears in both lists below, and each loop activates unconditionally - so a Grant Rewards
     // node wired to an outcome pin AND to Any Outcome was reached twice and paid twice. Wiring two routes into one node
     // asks for one arrival, not two. Scoped to this call, so a later completion activates the same destination again as
-    // normal - this dedups a single cascade, not the node's lifetime.
+    // normal - this dedupes a single cascade, not the node's lifetime.
     TSet<FName> ActivatedThisCompletion;
 
     auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node, &OriginatingEventID, &ActivatedThisCompletion](const FName& DestTagName)
@@ -3238,7 +3238,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
     // Multi-channel publish - mirrors HandleBlockRequest's OnAllTagsForRequest path so subscribers on any
     // perspective of this Step (ContextualTag or any AssetScopedAliasTag) receive one callback via the
-    // bus's per-subscriber dedup. Without this, an observer subscribed via one perspective misses unblock
+    // bus's per-subscriber dedupe. Without this, an observer subscribed via one perspective misses unblock
     // events published on a sibling perspective's canonical.
     FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
 
@@ -3745,7 +3745,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     // on the first active inner Step.
     //
     // InnerStepTags reflect the WRAPPER's compile perspective, which may differ from the canonical perspective
-    // post-AuthoredGuid dedup (the wrapper unique to one asset references inlined Steps whose canonicals were
+    // post-AuthoredGuid dedupe (the wrapper unique to one asset references inlined Steps whose canonicals were
     // registered first by another asset). HasActiveLifecycle is a direct WorldState->HasFact probe with no alias
     // walk, so without canonicalizing the query tag, an outer-asset wrapper sees its inner Steps as inactive
     // even when the canonical Live fact is set. ResolveToCanonicalTag resolves each entry to the perspective
@@ -4007,7 +4007,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
 
     if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
     {
-        // Event-keyed dedup gate: a single gameplay event (Step resolution → cascade → wrapper completion)
+        // Event-keyed dedupe gate: a single gameplay event (Step resolution → cascade → wrapper completion)
         // can reach the same wrapper through multiple paths under multi-tag fanout - e.g., both this
         // context's Listener and another context's Listener forwarding their BoundaryCompletions to this
         // wrapper after their respective Setters publish on the shared GroupTag channel. Without this gate,
@@ -4016,7 +4016,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
         // skipped; loops that re-resolve at a later moment (different timestamp) or multi-resolution within
         // a single Live phase from a different originating Step (different authored GUID) produce distinct
         // event IDs and proceed normally. Invalid event IDs (default-constructed - non-cascade origin like
-        // direct external API resolution) skip the dedup logic entirely so non-cascade paths aren't filtered.
+        // direct external API resolution) skip the dedupe logic entirely so non-cascade paths aren't filtered.
         if (UQuest* WrapperContainer = Cast<UQuest>(WrapperNode); WrapperContainer && OriginatingEventID.IsValid())
         {
             if (WrapperContainer->ResolvedByEvents.Contains(OriginatingEventID))
@@ -4116,7 +4116,7 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
         //
         // *** ONLY FOR A QUESTLINE NOBODY ELSE ANNOUNCES. *** An EMBEDDED questline is announced by its placement,
         // whose publish now carries the inner identity as one of its channels (FQuestPublish::OnAllNodeTags). Firing
-        // again here made two publishes of one completion, and the bus cannot dedup across publishes - so every
+        // again here made two publishes of one completion, and the bus cannot dedupe across publishes - so every
         // subscriber bound at a broad ancestor received a chapter's completion twice, one delivery per publish.
         // LiveGraphsByIdentity holds exactly the graphs activated in their own right, which is exactly the set with
         // no placement to speak for them.

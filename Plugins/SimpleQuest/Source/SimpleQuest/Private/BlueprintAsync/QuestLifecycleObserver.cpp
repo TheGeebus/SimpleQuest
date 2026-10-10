@@ -186,7 +186,7 @@ void UQuestLifecycleObserver::HandleGiveBlocked(FGameplayTag Channel, const FQue
 void UQuestLifecycleObserver::HandleActivationFailed(FGameplayTag Channel, const FQuestActivationFailedEvent& Event)
 {
     if (bCancelled) return;
-    // No TagsWithLive*Seen entry: refusals are transient and have no catch-up to dedup against.
+    // No TagsWithLive*Seen entry: refusals are transient and have no catch-up to dedupe against.
     if (OnActivationFailed.IsBound())
     {
         OnActivationFailed.Broadcast(Event.GetQuestTag(), Channel, Event.AttemptedTagName, Event.Reason, Event.Payload);
@@ -295,7 +295,7 @@ void UQuestLifecycleObserver::RunCatchUp(USignalSubsystem* Signals, UWorldStateS
 
         const FQuestCatchUpFanout::FTagReconstruction R = FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, StateSubsystem);
 
-        // Emission + gating stay here: the exposure mask + the per-tag TagsWith*Seen live-dedup (which the component
+        // Emission + gating stay here: the exposure mask + the per-tag TagsWith*Seen live-dedupe (which the component
         // deliberately lacks) are this node's own. Event eligibility + rehydrated payload are shared via ReconstructTag.
         for (const FQuestCatchUpFanout::FReconstructedEvent& Event : R.Events)
         {

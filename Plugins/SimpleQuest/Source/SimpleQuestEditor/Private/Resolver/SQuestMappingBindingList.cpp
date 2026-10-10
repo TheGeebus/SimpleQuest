@@ -537,7 +537,7 @@ void SQuestMappingBindingList::RefreshRows()
 	if (Mapping)
 	{
 		// Anchor rows = the UNION of authored properties across every mapped node class (bind once, applies where it fits).
-		// Dedup by name; a property on multiple classes is one row. Carry a type-label hint from the first class that has it.
+		// Dedupe by name; a property on multiple classes is one row. Carry a type-label hint from the first class that has it.
 		TMap<FName, FString> PropToType;
 		for (const FQuestDiscriminatorClass& Entry : Mapping->DiscriminatorClasses)
 		{

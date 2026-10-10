@@ -49,7 +49,7 @@ struct SIMPLEQUEST_API FOriginatingEventID
 
     /**
      * True when both fields are populated. False for default-constructed instances (e.g., direct external
-     * resolution that doesn't run through a cascade - wrapper gate skips dedup logic in that case).
+     * resolution that doesn't run through a cascade - wrapper gate skips dedupe logic in that case).
      */
     bool IsValid() const { return AuthoredNodeGuid.IsValid(); }
 };

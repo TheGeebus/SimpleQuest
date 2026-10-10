@@ -95,7 +95,7 @@ public:
 	 * PostPasteNode (via the overrides above), regenerated on Ctrl-D / paste so every placement carries a unique
 	 * GUID. Promoted from UQuestlineNode_ContentBase to UQuestlineNodeBase so that all editor node types (content,
 	 * utility, portal) share the same stable identity surface — required by F.3's cascade event ID, which keys
-	 * wrapper completion dedup against the originating node's GUID. Never hand-edited.
+	 * wrapper completion dedupe against the originating node's GUID. Never hand-edited.
 	 */
 	UPROPERTY(VisibleAnywhere, Category = "Quest")
 	FGuid QuestGuid;

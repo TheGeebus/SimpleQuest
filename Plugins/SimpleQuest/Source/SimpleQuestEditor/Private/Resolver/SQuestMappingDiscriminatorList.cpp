@@ -484,7 +484,7 @@ void SQuestMappingDiscriminatorList::RefreshRows()
 
 		// Union rows: the sample's distinct values (first-seen order, marked in-sample) then any STORED key the sample lacks
 		// (marked stale). A stored value present in the sample is one row (in-sample wins). This is what makes the recipe
-		// outlive any single sample - a partial sample never silently drops a stored mapping. Dedup by NORMALIZED form so a
+		// outlive any single sample - a partial sample never silently drops a stored mapping. Dedupe by NORMALIZED form so a
 		// stored "Objective" and a sample "objective" collapse to one row (the guard treats them as the same value).
 		const TArray<FString> SampleValues = Config.DistinctValueProvider();
 		TSet<FString> AddedNorm;

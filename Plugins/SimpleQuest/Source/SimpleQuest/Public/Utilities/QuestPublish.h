@@ -58,7 +58,7 @@ namespace FQuestPublish
         // aliases are minted for content INSIDE a linked asset, never for the placement sitting in the outer graph -
         // so a questline-tag subscriber used to be served by a SECOND, independent publish elsewhere.
         //
-        // *** TWO PUBLISHES OF ONE LOGICAL EVENT DEFEAT THE DEDUP THIS HELPER'S CONTRACT RESTS ON. *** The bus
+        // *** TWO PUBLISHES OF ONE LOGICAL EVENT DEFEAT THE DEDUPE THIS HELPER'S CONTRACT RESTS ON. *** The bus
         // deduplicates channels within a publish, not across publishes, so a subscriber bound at a broad ancestor
         // fired once per publish - twice for one completion. Carried here as a channel it is one publish again, and
         // the guarantee in the block comment above ("fire exactly once per logical publish") holds for questlines

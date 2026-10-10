@@ -568,7 +568,7 @@ private:
 	/**
 	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds
 	 * one entry per placement - a node's ContextualTag resolves to exactly one runtime instance (strict 1:1).
-	 * Centralizing the Add keeps that invariant in one place; lookup and dedup-by-pointer sites rely on it.
+	 * Centralizing the Add keeps that invariant in one place; lookup and dedupe-by-pointer sites rely on it.
 	 *
 	 * Behavior:
 	 *   - Key unmapped: stores Instance under Key.

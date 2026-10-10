@@ -50,7 +50,7 @@ public:
 
     /**
      * Publish an event on multiple tag channels treating the call as one logical event instance. Subscribers
-     * reached via any channel in the set fire exactly once (default dedup-on, by FDelegateHandle), with the
+     * reached via any channel in the set fire exactly once (default dedupe-on, by FDelegateHandle), with the
      * callback's first arg set to the channel from the publish set most specific to that subscriber's bound
      * tag (longest descendant where the bound tag is a prefix; tie-break by input array order).
      *
@@ -59,7 +59,7 @@ public:
      * delivered identically across every subscriber; only delivery metadata (the matched channel) varies per
      * subscription.
      *
-     * bAllChannels=true opts out of dedup: the bus fires once per channel as a naive sibling-publish would.
+     * bAllChannels=true opts out of dedupe: the bus fires once per channel as a naive sibling-publish would.
      * Use for debug auditing, observability surfaces, or genuinely-distinct-scope publishes where every
      * channel must reach its own subscribers.
      */

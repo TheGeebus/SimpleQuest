@@ -714,7 +714,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		SectionContent = FileContents.Mid(AfterHeader, SectionEnd - AfterHeader);
 	}
 
-	// Parse existing redirect lines into a map for dedup + cycle detection. Non-redirect lines (comments, blank
+	// Parse existing redirect lines into a map for dedupe + cycle detection. Non-redirect lines (comments, blank
 	// lines, other keys in the section) are ignored here and preserved verbatim by the rebuild loop below.
 	TMap<FName, FName> ExistingRedirects;
 	if (!SectionContent.IsEmpty())

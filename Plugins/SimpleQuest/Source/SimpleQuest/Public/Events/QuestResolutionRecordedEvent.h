@@ -43,7 +43,7 @@ struct FQuestResolutionRecordedEvent : public FQuestEventBase
 	
 	/**
 	 * Full constructor including the originating cascade's event ID. Cascade-driven RecordResolution call sites
-	 * should prefer this form so downstream subscribers (notably the Prereq Gate's per-event-ID dedup) see the
+	 * should prefer this form so downstream subscribers (notably the Prereq Gate's per-event-ID dedupe) see the
 	 * same OriginatingEventID across both the prereq-subscription wake-up path and the cascade-arrival path.
 	 */
 	FQuestResolutionRecordedEvent(const FGameplayTag InQuestTag, const FGameplayTag InOutcomeTag,

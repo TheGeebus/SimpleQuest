@@ -54,7 +54,7 @@ namespace
 		
 		// Cross-cutting channels - for resolution / entry events these include the outcome tag (and incoming
 		// outcome tag, respectively) so subscribers can bind by outcome semantically without filtering payloads
-		// on a quest-tag-keyed subscription. Bus dedup-on-by-default collapses delivery to one callback per
+		// on a quest-tag-keyed subscription. Bus dedupe-on-by-default collapses delivery to one callback per
 		// subscriber when they bind on multiple matched channels.
 		for (const FGameplayTag& Extra : AdditionalChannels)
 		{

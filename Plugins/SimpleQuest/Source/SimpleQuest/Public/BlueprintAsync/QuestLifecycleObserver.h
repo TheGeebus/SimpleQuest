@@ -261,7 +261,7 @@ private:
      * Catch-up skips any phase that already fired live for a given tag during the one-tick deferral window.
      *
      * Per-tag tracking matters under hierarchical / parent-prefix subscriptions: catch-up fans out across every
-     * known descendant via FQuestCatchUpFanout::EnumerateTagsForCatchUp. Without per-tag dedup, a single
+     * known descendant via FQuestCatchUpFanout::EnumerateTagsForCatchUp. Without per-tag dedupe, a single
      * descendant firing live during the deferral window would suppress catch-up for every other descendant in
      * the fan-out - under-firing the historical recovery the §1.1 fix exists to deliver.
      *

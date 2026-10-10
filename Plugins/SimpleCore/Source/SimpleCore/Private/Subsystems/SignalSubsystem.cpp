@@ -23,6 +23,16 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
     FGameplayTag CurrentTag = Channel;
     int32 LevelsFired = 0;
 
+    // (listener, handler) keys already delivered on this publish. VisitedTags stops us revisiting a TAG; this stops us
+    // calling one SUBSCRIBER twice, which is a different thing: a component watching a questline with Descendants and
+    // a Step inside it is matched at two levels of this one walk.
+    //
+    // Inline and only touched above the first level. A duplicate needs a subscriber matched at two different levels, so
+    // nothing is recorded while the walk is still on the published channel - the common publish does no extra work.
+    // Linear scan over a handful of keys beats a TSet's hashing at these counts.
+    TArray<uint64, TInlineAllocator<8>> DeliveredKeys;
+    bool bAboveExactChannel = false;
+
     while (CurrentTag.IsValid())
     {
         if (VisitedTags.Contains(CurrentTag)) break;
@@ -31,7 +41,7 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
         if (TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(CurrentTag))
         {
             // Subscribers always receive events on their exact channel. Past the exact channel (walking up the
-            // ancestor chain), only subscribers who opted into Descendants want delivery — from their perspective,
+            // ancestor chain), only subscribers who opted into Descendants want delivery - from their perspective,
             // the published channel is a descendant of their subscribed tag.
             const bool bAtExactChannel = (CurrentTag == Channel);
 
@@ -40,10 +50,19 @@ void USignalSubsystem::PublishRawMessage(const FGameplayTag Channel, const FInst
             {
                 if (!Record.Listener.IsValid()) continue;
                 if (!bAtExactChannel && !FSignalRoutingDefaults::IncludesDescendants(Record.Routing)) continue;
+
+                const uint64 Key = Record.HandlerKey;
+                if (Key != 0)
+                {
+                    if (bAboveExactChannel && DeliveredKeys.Contains(Key)) continue;
+                    DeliveredKeys.Add(Key);
+                }
+
                 Record.Dispatcher(Channel, Payload);
             }
             ++LevelsFired;
         }
+        bAboveExactChannel = true;
         CurrentTag = CurrentTag.RequestDirectParent();
     }
 
@@ -58,7 +77,7 @@ void USignalSubsystem::UnsubscribeMessage(const FGameplayTag Channel, const FDel
     if (TArray<FSignalSubscriberRecord>* Records = ChannelSubscribers.Find(Channel))
     {
         // Handles are unique per Subscribe* call (UE's atomic ID counter), so at most one record
-        // can match — IndexOfByPredicate's first-match semantic is correct and faster than RemoveAll.
+        // can match - IndexOfByPredicate's first-match semantic is correct and faster than RemoveAll.
         const int32 FoundIndex = Records->IndexOfByPredicate(
             [Handle](const FSignalSubscriberRecord& R) { return R.Handle == Handle; });
         if (FoundIndex != INDEX_NONE)
@@ -80,7 +99,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, 
     UObject* Listener = Delegate.GetUObject();
     if (!Listener)
     {
-        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeDynamic: channel='%s' rejected — delegate has no bound UObject"),
+        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeDynamic: channel='%s' rejected - delegate has no bound UObject"),
             *Channel.ToString());
         return FDelegateHandle();
     }
@@ -92,6 +111,9 @@ FDelegateHandle USignalSubsystem::SubscribeMessageDynamic(FGameplayTag Channel, 
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
     Record.Routing = Routing;
+    // Same (listener, handler) identity the templated paths use - see FSignalSubscriberRecord::HandlerKey. A dynamic
+    // delegate names its function, so the pair is available directly and needs no byte-hashing.
+    Record.HandlerKey = USignalSubsystem::MakeDynamicHandlerKey(Listener, Delegate.GetFunctionName());
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), Delegate]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
     {
@@ -114,7 +136,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, U
     UObject* Listener = Delegate.GetUObject();
     if (!Listener)
     {
-        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeOfType: channel='%s' rejected — delegate has no bound UObject"),
+        UE_LOG(LogSimpleCore, Warning, TEXT("Signal::SubscribeOfType: channel='%s' rejected - delegate has no bound UObject"),
             *Channel.ToString());
         return FDelegateHandle();
     }
@@ -128,6 +150,9 @@ FDelegateHandle USignalSubsystem::SubscribeMessageOfType(FGameplayTag Channel, U
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
     Record.Routing = Routing;
+    // Same (listener, handler) identity the templated paths use - see FSignalSubscriberRecord::HandlerKey. A dynamic
+    // delegate names its function, so the pair is available directly and needs no byte-hashing.
+    Record.HandlerKey = USignalSubsystem::MakeDynamicHandlerKey(Listener, Delegate.GetFunctionName());
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<UObject>(Listener), PayloadType, Delegate]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
     {
@@ -205,7 +230,7 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
 
     if (bAllChannels)
     {
-        // Sibling-publish — each channel walks its own hierarchy independently. Subscribers at common ancestors across
+        // Sibling-publish - each channel walks its own hierarchy independently. Subscribers at common ancestors across
         // channels fire once per channel hit. Visited-set still prevents re-walking the same ancestor TAG within a
         // single channel's walk, but does NOT deduplicate the same SUBSCRIBER across channels.
         for (const FGameplayTag& Channel : Channels)
@@ -238,9 +263,12 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
     }
     else
     {
-        // Default deduplication on. Walk every channel's hierarchy; deduplicate subscribers across channels by FDelegateHandle.
-        // Each subscriber fires once with the best-match channel from the publishing set as the callback's first arg.
-        TSet<FDelegateHandle> Delivered;
+        // Default deduplication on. Walk every channel's hierarchy; deduplicate by (listener, handler) rather than by
+        // handle, so an object holding several overlapping subscriptions is still called once - see
+        // FSignalSubscriberRecord::HandlerKey. Each subscriber fires once with the best-match channel from the
+        // publishing set as the callback's first arg.
+        TSet<uint64> Delivered;
+        TSet<FDelegateHandle> DeliveredUnkeyed;                // subscriptions predating HandlerKey, or built without one
 
         for (const FGameplayTag& Channel : Channels)
         {
@@ -262,13 +290,17 @@ void USignalSubsystem::DispatchOnChannels(const TArray<FGameplayTag>& Channels, 
                     bool bAnyFiredAtThisLevel = false;
                     for (const FSignalSubscriberRecord& Record : RecordsSnapshot)
                     {
-                        if (Delivered.Contains(Record.Handle)) { ++DedupedSkipped; continue; }
+                        const bool bSeen = Record.HandlerKey != 0
+                            ? Delivered.Contains(Record.HandlerKey)
+                            : DeliveredUnkeyed.Contains(Record.Handle);
+                        if (bSeen) { ++DedupedSkipped; continue; }
                         if (!Record.Listener.IsValid()) continue;
                         if (!bAtExactChannel && !FSignalRoutingDefaults::IncludesDescendants(Record.Routing)) continue;
 
                         const FGameplayTag MatchedChannel = FSignalChannelUtils::PickBestMatchChannel(Channels, CurrentTag);
                         Record.Dispatcher(MatchedChannel, Payload);
-                        Delivered.Add(Record.Handle);
+                        if (Record.HandlerKey != 0) { Delivered.Add(Record.HandlerKey); }
+                        else                        { DeliveredUnkeyed.Add(Record.Handle); }
                         bAnyFiredAtThisLevel = true;
                     }
                     if (bAnyFiredAtThisLevel) ++LevelsFired;

@@ -12,18 +12,27 @@
 #include "SignalSubsystem.generated.h"
 
 /**
- * One record per Subscribe* call. Handle is the unique unsubscribe key and the deduplication discriminator for
- * multichannel publishes; Listener is the GC-safe back-reference used to skip stale subscribers without invoking;
- * Dispatcher is the typed unpack closure built at subscription time.
+ * One record per Subscribe* call. Handle is the unique unsubscribe key; Listener is the GC-safe back-reference used
+ * to skip stale subscribers without invoking; Dispatcher is the typed unpack closure built at subscription time.
+ *
+ * HandlerKey is the DEDUPLICATION discriminator, and it is deliberately not the Handle. One object can hold several
+ * subscriptions whose channels overlap - a component watching a questline AND one of its Steps, say - and those are
+ * several handles but ONE handler. Keyed by handle, that object is called once per subscription and sees the same
+ * event two or three times; keyed by (listener, handler) it is called once, which is what the publish contract has
+ * always said. Two subscriptions on one object bound to DIFFERENT functions stay distinct, because they are two
+ * genuine handlers.
  */
 struct FSignalSubscriberRecord
 {
     TWeakObjectPtr<UObject> Listener;
     FDelegateHandle Handle;
+
+    /** (listener, bound function) identity. Zero means "fall back to Handle" - see MakeHandlerKey. */
+    uint64 HandlerKey = 0;
     TFunction<void(FGameplayTag, const FInstancedStruct&)> Dispatcher;
     /**
      * Per-subscription routing mode. Picks which directional walks this subscription participates in. Defaults
-     * to Descendants — receive on the exact channel OR any descendant (the bus's hierarchical-delivery default).
+     * to Descendants - receive on the exact channel OR any descendant (the bus's hierarchical-delivery default).
      */
     ESignalRoutingMode Routing = FSignalRoutingDefaults::HierarchicalSubscribe;
 };
@@ -56,27 +65,28 @@ public:
      * Publish a pre-packed FInstancedStruct on Channel. Same tag-hierarchy walk as PublishMessage. Use when forwarding an event
      * received from another subscription without re-packing (avoids type-slicing).
      *
-     * Public C++ surface only — BP code reaches this via USimpleCoreBlueprintLibrary::PublishMessage, which handles the
+     * Public C++ surface only - BP code reaches this via USimpleCoreBlueprintLibrary::PublishMessage, which handles the
      * WorldContext → World → GameInstance → Subsystem resolution.
      */
     void PublishRawMessage(FGameplayTag Channel, const FInstancedStruct& Payload);
     
     /**
      * Publish Event on a set of channels treating the call as one logical event instance. The bus walks each channel's
-     * hierarchy independently; subscribers reached via any channel in the set fire exactly once (default dedup-on, by
+     * hierarchy independently; subscribers reached via any channel in the set fire exactly once (default dedupe-on, by
      * FDelegateHandle), with the callback's first arg set to the channel from the publishing set most specific to that
      * subscriber's bound tag (longest channel where the subscriber's tag is an ancestor or equal; tie-break by input
      * array order).
      *
-     * Channels route, payloads decide. The payload is packed once and delivered identically across all subscribers — no
+     * Channels route, payloads decide. The payload is packed once and delivered identically across all subscribers - no
      * per-channel mutation, no payload divergence. Identity that subscribers must reliably branch on belongs in the payload
      * (e.g., a publisher-set canonical identity field); the callback's first arg is delivery metadata, not event identity.
      *
-     * bAllChannels=true opts out of dedup: bus fires once per channel as a naive sibling-publish would. Payload still
-     * identical across deliveries; only the dedup guarantee is dropped. Use for debug tools, observability surfaces, or
+     * bAllChannels=true opts out of dedupe: bus fires once per channel as a naive sibling-publish would. Payload still
+     * identical across deliveries; only the dedupe guarantee is dropped. Use for debug tools, observability surfaces, or
      * genuinely-distinct-scope publishes where every channel must reach its own subscribers.
      *
-     * Single-channel sets (Channels.Num() == 1) collapse to PublishRawMessage cost — dedup overhead is structurally zero.
+     * Single-channel sets (Channels.Num() == 1) collapse to PublishRawMessage, which does its own (listener, handler)
+     * deduplication down the ancestor walk - cheaper than this path's, but not absent.
      */
     template<typename T>
     void PublishMessageOnChannels(TArray<FGameplayTag> Channels, const T& Event, bool bAllChannels = false);
@@ -89,7 +99,7 @@ public:
     
     /**
      * Subscribe to messages published on Channel or any of its descendant tags. Callback receives the original published tag
-     * and the typed payload. ListenerType must be a UObject subclass (held as TWeakObjectPtr — no manual lifetime management).
+     * and the typed payload. ListenerType must be a UObject subclass (held as TWeakObjectPtr - no manual lifetime management).
      */
     template<typename T, typename ListenerType>
     FDelegateHandle SubscribeMessage(
@@ -129,12 +139,12 @@ public:
 
     /**
      * Typed-filter variant of SubscribeMessageDynamic. The bound handler only fires when the incoming
-     * payload's UScriptStruct matches PayloadType or derives from it — same semantic as the C++ template
+     * payload's UScriptStruct matches PayloadType or derives from it - same semantic as the C++ template
      * SubscribeMessage<T>. Use when the BP handler only wants events carrying a specific payload type
      * without per-handler FInstancedStruct-extraction branches in every callback body.
      *
      * PayloadType must be non-null; null is treated as "no filter passes" and the subscription silently
-     * delivers nothing (defensive — prevents a spuriously-null type from acting as a wildcard).
+     * delivers nothing (defensive - prevents a spuriously-null type from acting as a wildcard).
      */
     FDelegateHandle SubscribeMessageOfType(
         FGameplayTag Channel,
@@ -144,16 +154,58 @@ public:
 
     /**
      * Remove every subscription on every channel whose Listener is the given object. Single-call cleanup intended for
-     * EndPlay / BeginDestroy on subscriber objects with many subscriptions across many channels — avoids the
+     * EndPlay / BeginDestroy on subscriber objects with many subscriptions across many channels - avoids the
      * per-(Channel, Handle) bookkeeping that UnsubscribeMessage requires. Compares raw UObject pointers
      * (TWeakObjectPtr::Get() == Listener), so subclasses and unrelated objects are not affected. No-op if Listener is
      * nullptr (refuses the call rather than incidentally purging stale records). Safe to call from inside a publishing
-     * walk — the walker snapshots the per-channel array before iterating, so removals only affect subsequent publishes.
+     * walk - the walker snapshots the per-channel array before iterating, so removals only affect subsequent publishes.
      *
-     * Preserves subscriber insertion order in each affected channel — the broadcast-ordering contract that
+     * Preserves subscriber insertion order in each affected channel - the broadcast-ordering contract that
      * state-before-broadcast subscribers depend on continues to hold for surviving subscribers.
      */
     void UnsubscribeListener(UObject* Listener);
+
+    /**
+     * Identity for "this object, called through this function" - the deduplication key for a publish. See
+     * FSignalSubscriberRecord::HandlerKey for why the listener alone is not enough.
+     *
+     * A pointer-to-member is not a plain address; on MSVC it widens once multiple or virtual inheritance is in play,
+     * so it is hashed by its bytes rather than cast. That representation is stable for the life of the process, which
+     * is all this needs - the key is compared only against other keys inside a single publish, and is never stored,
+     * serialized, or compared across runs.
+     */
+    template<typename ListenerType, typename FuncType>
+    static uint64 MakeHandlerKey(const ListenerType* Listener, FuncType Function)
+    {
+        uint64 Key = 1469598103934665603ULL;                       // FNV-1a offset basis
+        auto Fold = [&Key](const uint8* Bytes, const int32 Count)
+        {
+            for (int32 Index = 0; Index < Count; ++Index)
+            {
+                Key = (Key ^ Bytes[Index]) * 1099511628211ULL;     // FNV-1a prime
+            }
+        };
+
+        const UPTRINT ListenerBits = reinterpret_cast<UPTRINT>(Listener);
+        Fold(reinterpret_cast<const uint8*>(&ListenerBits), sizeof(ListenerBits));
+
+        // ONLY THE LEADING WORD OF THE MEMBER POINTER. Its first pointer-sized field is the function address and is
+        // the part that actually identifies the handler; anything after it is adjustment data the compiler may leave
+        // partly uninitialized, so folding the whole object makes one handler hash differently from one call site to
+        // the next - the same handler subscribed in two separate passes then looks like two handlers and neither
+        // deduplicates against the other.
+        static_assert(sizeof(Function) >= sizeof(void*), "member pointer narrower than a code address");
+        Fold(reinterpret_cast<const uint8*>(&Function), sizeof(void*));
+
+        return Key == 0 ? 1 : Key;                                 // 0 is reserved for "no key"
+    }
+
+    /** The dynamic-delegate counterpart: a UFunction name is already a stable identity, so no byte-hashing. */
+    static uint64 MakeDynamicHandlerKey(const UObject* Listener, const FName FunctionName)
+    {
+        const uint64 Key = HashCombineFast(::PointerHash(Listener), GetTypeHash(FunctionName));
+        return Key == 0 ? 1 : Key;
+    }
 
 private:
     /**
@@ -179,19 +231,21 @@ void USignalSubsystem::PublishMessage(const FGameplayTag Channel, const T& Paylo
 }
 
 template<typename T, typename ListenerType>
-FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, ListenerType* Listener,
-                                                   void(ListenerType::* Function)(FGameplayTag, const T&), ESignalRoutingMode Routing)
+FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, ListenerType* Listener, void(ListenerType::* Function)(FGameplayTag, const T&), ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 
-    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::Subscribe: channel='%s' listener='%s'"),
+    UE_LOG(LogSimpleCore, Verbose, TEXT("Signal::Subscribe: channel='%s' listener='%s'(%p) key=%llu"),
         *Channel.ToString(),
-        Listener ? *Listener->GetName() : TEXT("null"));
+        Listener ? *Listener->GetName() : TEXT("null"),
+        Listener,
+        MakeHandlerKey(Listener, Function));
 
     FSignalSubscriberRecord Record;
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
     Record.Routing = Routing;
+    Record.HandlerKey = MakeHandlerKey(Listener, Function);
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
         {
@@ -208,8 +262,7 @@ FDelegateHandle USignalSubsystem::SubscribeMessage(const FGameplayTag Channel, L
 }
 
 template<typename T, typename ListenerType>
-FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel, ListenerType* Listener,
-                                                      void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&), ESignalRoutingMode Routing)
+FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel, ListenerType* Listener, void(ListenerType::* Function)(FGameplayTag, const FInstancedStruct&), ESignalRoutingMode Routing)
 {
     check(IsInGameThread());
 
@@ -222,6 +275,7 @@ FDelegateHandle USignalSubsystem::SubscribeRawMessage(const FGameplayTag Channel
     Record.Listener = TWeakObjectPtr<UObject>(Listener);
     Record.Handle = FDelegateHandle{FDelegateHandle::EGenerateNewHandleType::GenerateNewHandle};
     Record.Routing = Routing;
+    Record.HandlerKey = MakeHandlerKey(Listener, Function);
     Record.Dispatcher = [WeakListener = TWeakObjectPtr<ListenerType>(Listener), Function]
         (const FGameplayTag ActualChannel, const FInstancedStruct& Struct)
         {

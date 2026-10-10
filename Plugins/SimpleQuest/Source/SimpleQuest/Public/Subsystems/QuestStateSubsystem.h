@@ -510,7 +510,9 @@ public:
 	bool ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot);
 
 private:
-    friend class UQuestManagerSubsystem;
+	friend class UQuestManagerSubsystem;
+	/** Test-only: lets a fixture populate KnownQuests without standing up a manager and a compiled graph. */
+	friend class FQuestObserverDedupeTestAccess;
 
 	/**
 	 * The lookup behind the three display getters, with one rule for a missing record: a KNOWN tag without one is a

@@ -38,7 +38,7 @@ void UQuestObserverComponent::BeginPlay()
 
 	// Defer registration and catch-up to the next tick. Component BeginPlay runs before the owning actor's Event
 	// BeginPlay (where it creates state and binds our delegates), so registering synchronously here would deliver
-	// catch-up — and any same-frame live event — to a half-initialized owner. An actor's whole BeginPlay is
+	// catch-up - and any same-frame live event - to a half-initialized owner. An actor's whole BeginPlay is
 	// synchronous within the frame, so one tick is guaranteed to land after it. RegisterQuestObserver stays public
 	// for the rare owner that finishes setup across multiple frames and wants to register explicitly.
 	if (UWorld* World = GetWorld())
@@ -59,7 +59,7 @@ void UQuestObserverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		World->GetTimerManager().ClearAllTimersForObject(this);
 	}
-	// Bulk-clear every channel subscription this component (and any derived subclass — Trigger, Giver) registered with the bus.
+	// Bulk-clear every channel subscription this component (and any derived subclass - Trigger, Giver) registered with the bus.
 	if (SignalSubsystem)
 	{
 		SignalSubsystem->UnsubscribeListener(this);
@@ -148,13 +148,13 @@ void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const F
 	ActiveQuestTags.RemoveTag(Event.GetQuestTag());
 	CompletedQuestTags.AddTag(Event.GetQuestTag());
 
-	// Find the most-specific watched entry whose key is an ancestor of (or equals) Channel — that's the
+	// Find the most-specific watched entry whose key is an ancestor of (or equals) Channel - that's the
 	// authored binding this delivery corresponds to. Direct ObservedTags.Find(Channel) was the prior shape,
 	// which silently bypassed the outcome filter for parent-prefix subscriptions: a observer authored at
 	// SimpleQuest.Questline.MyLine receiving an event published on SimpleQuest.Questline.MyLine.Step1 has Channel
-	// = the descendant, but ObservedTags is keyed by the authored ancestor — direct lookup returned null
+	// = the descendant, but ObservedTags is keyed by the authored ancestor - direct lookup returned null
 	// and the filter never applied. Walk the entries instead, picking the longest matching ancestor (most
-	// specific authored binding wins when multiple match — typical case is one authored binding per event).
+	// specific authored binding wins when multiple match - typical case is one authored binding per event).
 	const FObservedQuestEventSettings* MatchingSettings = nullptr;
 	int32 BestKeyDepth = -1;
 	for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : ObservedTags)
@@ -175,13 +175,13 @@ void UQuestObserverComponent::HandleQuestCompleted(FGameplayTag Channel, const F
 		}
 	}
 
-	// Apply outcome filter from the most-specific matching authored binding. If no entries match (defensive —
+	// Apply outcome filter from the most-specific matching authored binding. If no entries match (defensive -
 	// shouldn't happen since this callback only fires for subscriptions made from ObservedTags), fall through
 	// to broadcast unfiltered.
 	if (MatchingSettings && !MatchingSettings->OutcomeFilter.IsEmpty()
 		&& !MatchingSettings->OutcomeFilter.HasTagExact(Event.OutcomeTag))
 	{
-		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: quest '%s' completed with outcome '%s' — filtered out, skipping broadcast"),
+		UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: quest '%s' completed with outcome '%s' - filtered out, skipping broadcast"),
 			*Event.GetQuestTag().ToString(),
 			*Event.OutcomeTag.ToString());
 		return;
@@ -233,6 +233,10 @@ void UQuestObserverComponent::HandleQuestProgressRefused(FGameplayTag Channel, c
 
 void UQuestObserverComponent::BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGameplayTag MatchedChannel, EQuestLifecycleEventType EventType, const FQuestEventPayload& Payload, FGameplayTag OutcomeTag, AActor* GiverActor)
 {
+	UE_LOG(LogSimpleQuestSubscription, Verbose,
+		TEXT("Observer::BroadcastAny : comp=%s(%p) tag='%s' type=%s channel='%s'"),
+		*GetName(), this, *QuestTag.ToString(), *UEnum::GetValueAsString(EventType), *MatchedChannel.ToString());
+	
 	if (!OnAnyQuestEvent.IsBound()) return;
 	FQuestLifecycleEventReport Report;
 	Report.QuestTag = QuestTag;
@@ -247,7 +251,7 @@ void UQuestObserverComponent::BroadcastAnyQuestEvent(FGameplayTag QuestTag, FGam
 int32 UQuestObserverComponent::ApplyTagRenames(const TMap<FName, FName>& Renames)
 {
 	// Specialty handling for ObservedTags only. This TMap has FGameplayTag KEYS, which the editor-side reflection
-	// sweep can't address — TMap doesn't permit in-place key mutation, so the rewrite is remove-then-readd. The
+	// sweep can't address - TMap doesn't permit in-place key mutation, so the rewrite is remove-then-readd. The
 	// generic FGameplayTagContainer field (WatchedStepTags) is handled by the reflection sweep in the loader; this
 	// override adds only what reflection can't reach.
 	int32 Count = 0;
@@ -316,10 +320,10 @@ void UQuestObserverComponent::RegisterQuestObserver()
 	//     either use the existing designer-authored entry OR create a fresh entry with implicit-default
 	//     flag overlay.
 	//   - Force-on the give-flow pair (bObserveStarted + bObserveGiveBlocked) on EVERY implicit-observed
-	//     tag regardless of source — these protect success/refusal symmetry and override designer config
+	//     tag regardless of source - these protect success/refusal symmetry and override designer config
 	//     silencing.
 	//   - Apply implicit defaults (bObserveProgress / bObserveBlocked / bObserveUnblocked) ONLY on fresh
-	//     entries — Progress for run-phase UI auto-binding, Blocked/Unblocked as a symmetric pair for
+	//     entries - Progress for run-phase UI auto-binding, Blocked/Unblocked as a symmetric pair for
 	//     block-state UI. Designer-authored entries keep their authored flag values for these.
 	// Deliberate copy, and load-bearing beyond the overlay below: RegisterSingleObservedTag hands Pair.Value on as a
 	// const reference that survives across BP broadcasts during catch-up. Iterating ObservedTags directly would let a
@@ -334,22 +338,22 @@ void UQuestObserverComponent::RegisterQuestObserver()
 
 		if (!bDesignerAuthored)
 		{
-			// Implicit-only defaults — ergonomic flags that auto-bind for derived-component managed tags.
+			// Implicit-only defaults - ergonomic flags that auto-bind for derived-component managed tags.
 			Settings.bObserveProgress = true;
 			Settings.bObserveBlocked = true;
 			Settings.bObserveUnblocked = true;
 
-			// Routing comes from the bridge owner — designer-authored entries keep their authored Routing.
+			// Routing comes from the bridge owner - designer-authored entries keep their authored Routing.
 			Settings.Routing = Spec.Routing;
 		}
 
-		// Force-on the give-flow invariant pair regardless of source — silencing either half breaks the
+		// Force-on the give-flow invariant pair regardless of source - silencing either half breaks the
 		// success/refusal observability symmetry.
 		Settings.bObserveStarted = true;
 		Settings.bObserveGiveBlocked = true;
 	}
 
-	// The deferred registration pass has run — flip the flag BEFORE the empty-set early-out so a component that
+	// The deferred registration pass has run - flip the flag BEFORE the empty-set early-out so a component that
 	// starts with no tags (the runtime-AddObservedTag case) still counts as registered. Without this, AddObservedTag's
 	// bRegistered guard never trips and runtime adds silently skip the live subscribe + catch-up.
 	bRegistered = true;
@@ -365,9 +369,28 @@ void UQuestObserverComponent::RegisterQuestObserver()
 
 	TRACE_CPUPROFILER_EVENT_SCOPE(UQuestObserverComponent_RegisterQuestObserver);
 
-	for (const TPair<FGameplayTag, FObservedQuestEventSettings>& Pair : EffectiveObserved)
+	// MOST SPECIFIC FIRST. A tag the designer listed explicitly is caught up under ITS OWN settings, and a broader
+	// entry only fills in what is left. Without the sort, which entry governs an overlapping tag would be TMap
+	// iteration order - correct either way, but arbitrary about whose flags applied.
+	auto TagDepth = [](const FGameplayTag& Tag)
 	{
-		RegisterSingleObservedTag(Pair.Key, Pair.Value);
+		int32 Dots = 0;
+		for (const TCHAR Char : Tag.ToString()) { if (Char == TEXT('.')) { ++Dots; } }
+		return Dots;
+	};
+
+	TArray<FGameplayTag> Ordered;
+	EffectiveObserved.GetKeys(Ordered);
+	Ordered.Sort([&TagDepth](const FGameplayTag& A, const FGameplayTag& B) { return TagDepth(A) > TagDepth(B); });
+
+	// *** ONE CATCH-UP PER TAG ACROSS THE WHOLE PASS. *** An entry on a questline with Descendants routing and an
+	// entry on a Step inside it both fan out over that Step, so without this the component reports the Step's state
+	// once per entry - and a derived component makes that the common case, because a Trigger's or Giver's managed
+	// tags arrive here implicitly alongside whatever the designer authored.
+	TSet<FGameplayTag> CaughtUpThisPass;
+	for (const FGameplayTag& Tag : Ordered)
+	{
+		RegisterSingleObservedTag(Tag, EffectiveObserved[Tag], &CaughtUpThisPass);
 	}
 }
 
@@ -375,7 +398,7 @@ void UQuestObserverComponent::AddObservedTag(FGameplayTag QuestTag, FObservedQue
 {
 	if (!QuestTag.IsValid()) return;
 
-	ObservedTags.Add(QuestTag, Settings);  // TMap::Add overwrites — updates settings if the tag was already present
+	ObservedTags.Add(QuestTag, Settings);  // TMap::Add overwrites - updates settings if the tag was already present
 
 	if (bRegistered)
 	{
@@ -399,14 +422,14 @@ void UQuestObserverComponent::RemoveObservedTag(FGameplayTag QuestTag)
 	}
 }
 
-void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings)
+void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, TSet<FGameplayTag>* CaughtUpThisPass)
 {
 	if (!SignalSubsystem || !QuestTag.IsValid()) return;
 
 	if (!FQuestTagComposer::IsTagRegisteredInRuntime(QuestTag))
 	{
 		UE_LOG(LogSimpleQuestSubscription, Warning,
-			TEXT("UQuestObserverComponent::RegisterSingleObservedTag : '%s' holds stale tag '%s' — skipping subscribe. ")
+			TEXT("UQuestObserverComponent::RegisterSingleObservedTag : '%s' holds stale tag '%s' - skipping subscribe. ")
 			TEXT("Use Stale Quest Tags (Window → Developer Tools → Debug) to clean up."),
 			GetOwner() ? *GetOwner()->GetActorNameOrLabel() : TEXT("unknown"), *QuestTag.ToString());
 		return;
@@ -416,13 +439,13 @@ void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& Ques
 	UWorldStateSubsystem* WorldState = GameInstance ? GameInstance->GetSubsystem<UWorldStateSubsystem>() : nullptr;
 	UQuestStateSubsystem* StateSubsystem = GameInstance ? GameInstance->GetSubsystem<UQuestStateSubsystem>() : nullptr;
 
-	// Per-tag observer-source registration (additive — RegisterRoleSource only touches this tag's bucket).
+	// Per-tag observer-source registration (additive - RegisterRoleSource only touches this tag's bucket).
 	if (StateSubsystem)
 	{
 		StateSubsystem->RegisterObserverSource(this, FGameplayTagContainer(QuestTag));
 	}
 
-	// Live subscriptions — one per opted-in event type — capturing each handle for selective unsubscribe later.
+	// Live subscriptions - one per opted-in event type - capturing each handle for selective unsubscribe later.
 	TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(QuestTag);
 	if (Settings.bObserveActivated)        Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivated, Settings.Routing));
 	if (Settings.bObserveActivationFailed) Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivationFailedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestActivationFailed, Settings.Routing));
@@ -437,10 +460,10 @@ void UQuestObserverComponent::RegisterSingleObservedTag(const FGameplayTag& Ques
 	if (Settings.bObserveUnblocked)        Handles.Add(SignalSubsystem->SubscribeMessage<FQuestUnblockedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestUnblocked, Settings.Routing));
 	if (Settings.bObserveProgressRefused)  Handles.Add(SignalSubsystem->SubscribeMessage<FQuestProgressRefusedEvent>(QuestTag, this, &UQuestObserverComponent::HandleQuestProgressRefused, Settings.Routing));
 
-	CatchUpSingleTag(QuestTag, Settings, WorldState, StateSubsystem);
+	CatchUpSingleTag(QuestTag, Settings, WorldState, StateSubsystem, CaughtUpThisPass);
 }
 
-void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState)
+void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass)
 {
 	if (!WorldState) return;
 
@@ -454,7 +477,7 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 	// (observe flags, outcome filter, ActiveQuestTags bookkeeping) live here.
 	//
 	// No per-tag deduplication against live events here (unlike UQuestLifecycleObserver): subscription and catch-up
-	// happen together in this call, so there's no window where the component is subscribed but not yet caught up —
+	// happen together in this call, so there's no window where the component is subscribed but not yet caught up -
 	// a live event can't slip in mid-pass and need deduplication. This call is itself deferred one tick past BeginPlay
 	// (PerformDeferredRegistration) so the owning actor initializes first, but subscribe + catch-up stay atomic within it.
 	const TArray<FGameplayTag> CatchUpTags = FQuestCatchUpFanout::EnumerateTagsForCatchUp(QuestTag, QuestState, Settings.Routing);
@@ -466,6 +489,14 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 		// which makes its absence the honest "we were stopped" signal. Settings is a reference into the caller's
 		// local EffectiveObserved copy, so returning here strands nothing.
 		if (!SubscriptionHandlesByTag.Contains(QuestTag)) return;
+
+		// Another entry in this same registration pass already reported this tag - see RegisterQuestObserver. Marked
+		// before the reconstruction rather than after, so a tag with nothing to replay is still only considered once.
+		if (CaughtUpThisPass)
+		{
+			if (CaughtUpThisPass->Contains(EachTag)) { continue; }
+			CaughtUpThisPass->Add(EachTag);
+		}
 
 		const FQuestCatchUpFanout::FTagReconstruction R = FQuestCatchUpFanout::ReconstructTag(EachTag, QuestTag, WorldState, QuestState);
 
@@ -509,12 +540,12 @@ void UQuestObserverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, con
 					CompletedQuestTags.AddTag(EachTag);
 					if (!Settings.OutcomeFilter.IsEmpty() && !Settings.OutcomeFilter.HasTagExact(Event.OutcomeTag))
 					{
-						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' — filtered out, skipping broadcast"),
+						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' recovered outcome '%s' - filtered out, skipping broadcast"),
 							*EachTag.ToString(), *Event.OutcomeTag.ToString());
 					}
 					else
 					{
-						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' — recovered outcome '%s' from registry"),
+						UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("QuestObserver: catch-up for '%s' - recovered outcome '%s' from registry"),
 							*EachTag.ToString(), *Event.OutcomeTag.ToString());
 						if (OnQuestCompleted.IsBound()) OnQuestCompleted.Broadcast(EachTag, R.MatchedChannel, Event.OutcomeTag, R.Payload);
 						BroadcastAnyQuestEvent(EachTag, R.MatchedChannel, EQuestLifecycleEventType::Completed, R.Payload, Event.OutcomeTag);

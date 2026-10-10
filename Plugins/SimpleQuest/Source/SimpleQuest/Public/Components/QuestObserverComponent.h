@@ -258,6 +258,9 @@ public:
 	FOnAnyQuestEvent OnAnyQuestEvent;
 
 protected:
+	/** Test-only access to the registration internals. Mirrors FQuestAdvancementHoldTestAccess on the manager. */
+	friend class FQuestObserverDedupeTestAccess;
+	
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
@@ -310,7 +313,7 @@ protected:
 	 * Subscribe + source-register + catch up ONE tag. Shared by RegisterQuestObserver's loop and the runtime
 	 * AddObservedTag path; captures the bus handles into SubscriptionHandlesByTag.
 	 */
-	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings);
+	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, TSet<FGameplayTag>* CaughtUpThisPass = nullptr);
 
 	/** Unsubscribe (by stored handle) + source-unregister + clear bookkeeping for ONE tag. */
 	void UnregisterSingleObservedTag(const FGameplayTag& QuestTag);
@@ -318,8 +321,13 @@ protected:
 	/**
 	 * Per-tag catch-up: replays current state for QuestTag as synthetic events. Virtual so Trigger/Giver layer
 	 * their role catch-up (OnQuestTriggerActivated replay, giver availability) on top via Super.
+	 *
+	 * CaughtUpThisPass, when supplied, is the set of tags already reported during ONE registration pass. Two entries
+	 * whose hierarchies overlap each fan out over the same descendants, and the bus cannot deduplicate that - catch-up
+	 * is a direct call, not a publish. Null for a runtime AddObservedTag, which is a genuinely new subscription and is
+	 * entitled to the current state whatever else this component is already watching.
 	 */
-	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass = nullptr);
 
 	/**
 	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed

@@ -28,7 +28,7 @@ class UQuestStateSubsystem;
 
 /**
  * Categorization of what caused an availability change on a Giver. Designer-side logic branches
- * on Reason for differentiated UI treatment — e.g., "newly available" pulse vs. "lost availability"
+ * on Reason for differentiated UI treatment - e.g., "newly available" pulse vs. "lost availability"
  * fade.
  */
 UENUM(BlueprintType)
@@ -76,7 +76,7 @@ enum class EGiveAvailabilityChangeReason : uint8
 /**
  * Rich payload for OnGiveAvailabilityChanged. Describes the delta between the prior state and
  * the current state, plus the post-change snapshots of both Activated and Enabled sets for
- * convenience — designer doesn't need a follow-up GetActivatedQuests() / GetEnabledQuests()
+ * convenience - designer doesn't need a follow-up GetActivatedQuests() / GetEnabledQuests()
  * call to refresh UI. Reason discriminates the cause for branched designer logic.
  */
 USTRUCT(BlueprintType)
@@ -133,13 +133,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGiveAvailabilityChanged, FGiveAva
  *
  * Per-give success and refusal notifications come from the inherited UQuestObserverComponent
  * delegates OnQuestStarted (Live transition with GiverActor populated) and OnQuestGiveBlocked
- * (refusal with Blockers and GiverActor). QuestTagsToGive entries are implicitly observed —
+ * (refusal with Blockers and GiverActor). QuestTagsToGive entries are implicitly observed -
  * adopters can bind those delegates without authoring a parallel ObservedTags entry. Filter by
  * GiverActor == GetOwner() to scope to this giver's attempts.
  *
  * Inherits the full observation surface from UQuestObserverComponent and the trigger /
  * Send-event surface from UQuestTriggerComponent. A single Giver component can offer quests
- * AND act as a trigger target for other quests' step objectives — populate both
+ * AND act as a trigger target for other quests' step objectives - populate both
  * QuestTagsToGive and StepTagsToTrigger on the same component.
  */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
@@ -189,7 +189,7 @@ public:
 	void AddTagsToGive(const FGameplayTagContainer& Tags);
 
 	/**
-	 * Runtime: stop offering quest tags — fires the availability change for any currently-offered tag, then
+	 * Runtime: stop offering quest tags - fires the availability change for any currently-offered tag, then
 	 * unsubscribes and drops the giver source-registry entries.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "QuestGiver")
@@ -251,7 +251,7 @@ protected:
 	virtual void InitializeComponent() override;
 
 	/**
-	 * Publishes this giver's QuestTagsToGive at InitializeComponent — before any BeginPlay — so the structural
+	 * Publishes this giver's QuestTagsToGive at InitializeComponent - before any BeginPlay - so the structural
 	 * "this quest has a giver" set is populated before the questline's entry activation runs.
 	 */
 	void DeclareGiverQuests();
@@ -284,7 +284,7 @@ protected:
 
 	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
 
-	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState) override;
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass = nullptr) override;
 	
 	/**
 	 * The three overrides below all interleave Giver-specific state tracking with the inherited Observer
@@ -296,7 +296,7 @@ protected:
 	 * separate ones registered later in RegisterQuestGiver, putting them downstream in dispatch order).
 	 *
 	 * Activated / Disabled / Deactivated keep their separate Giver subscriptions because Observer doesn't
-	 * subscribe to those events by default — moving them into overrides would silently lose state-tracking
+	 * subscribe to those events by default - moving them into overrides would silently lose state-tracking
 	 * for tags only in QuestTagsToGive (not in ObservedTags). The subscriber-order issue only manifests
 	 * for those events when a designer explicitly opts in via ObservedTags with the respective flag true,
 	 * which is the narrow case we accept as a known limitation.
@@ -335,7 +335,7 @@ private:
 	/**
 	 * Per-attempt blocker-event handles, keyed by quest tag. Populated by GiveQuest before the
 	 * give request publishes; cleared when the cycle closes (Started or Blocked response).
-	 * Presence of an entry signals "this giver has an in-flight give for this tag" — read by
+	 * Presence of an entry signals "this giver has an in-flight give for this tag" - read by
 	 * HandleQuestStarted to attribute the give to this giver.
 	 */
 	TMap<FGameplayTag, FDelegateHandle> PendingGiveBlockedHandles;

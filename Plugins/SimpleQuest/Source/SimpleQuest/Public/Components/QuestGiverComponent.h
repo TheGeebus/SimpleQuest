@@ -123,6 +123,19 @@ struct SIMPLEQUEST_API FGiveAvailabilityChange
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGiveAvailabilityChanged, FGiveAvailabilityChange, Change);
 
+/**
+ * Fires when THIS giver's offer was accepted and the quest went Live. QuestTag is the tag this giver is
+ * authored to offer, which stays stable across a multi-tag publish where the canonical identity does not.
+ * It does not fire when something else starts the same quest - that is a lifecycle event, not a give.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnQuestGiven, FGameplayTag, QuestTag, FQuestEventPayload, Payload);
+
+/**
+ * Fires when THIS giver's offer was refused. Blockers carries one entry per distinct reason. Partner to
+ * OnQuestGiven: a give attempt ends in exactly one of the two.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGiveRefused, FGameplayTag, QuestTag, const TArray<FQuestActivationBlocker>&, Blockers);
+
 
 /**
  * Component for actors that offer quests to the player. Configure QuestTagsToGive with the
@@ -155,6 +168,14 @@ public:
 	/** Fires when the giveable set changes. Rich payload describes the delta + current snapshot. */
 	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
 	FOnGiveAvailabilityChanged OnGiveAvailabilityChanged;
+
+	/** This giver's offer was accepted and the quest is now Live. */
+	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
+	FOnQuestGiven OnQuestGiven;
+
+	/** This giver's offer was refused. */
+	UPROPERTY(BlueprintAssignable, Category = "QuestGiver|Lifecycle")
+	FOnGiveRefused OnGiveRefused;
 
 
 	// ── Action API ───────────────────────────────────────────────
@@ -282,41 +303,27 @@ protected:
 
 	virtual int32 RemoveTags(const TArray<FGameplayTag>& TagsToRemove) override;
 
-	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const override;
-
-	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass = nullptr) override;
-	
-	/**
-	 * The three overrides below all interleave Giver-specific state tracking with the inherited Observer
-	 * broadcast. Pattern: filter to QuestTagsToGive → state update → Super::HandleQuest*(broadcast) →
-	 * BroadcastAvailabilityChange. State runs BEFORE Super so BP listeners bound to the inherited
-	 * delegates see fully-updated GivenQuestTags / ActivatedQuestTags / EnabledQuestTags when they query
-	 * inside the callback. Each override replaces a previous separate Giver subscription whose dispatch
-	 * order ran AFTER Observer's broadcast (Observer subscriptions register in Super::BeginPlay; Giver's
-	 * separate ones registered later in RegisterQuestGiver, putting them downstream in dispatch order).
-	 *
-	 * Activated / Disabled / Deactivated keep their separate Giver subscriptions because Observer doesn't
-	 * subscribe to those events by default - moving them into overrides would silently lose state-tracking
-	 * for tags only in QuestTagsToGive (not in ObservedTags). The subscriber-order issue only manifests
-	 * for those events when a designer explicitly opts in via ObservedTags with the respective flag true,
-	 * which is the narrow case we accept as a known limitation.
-	 */
-	virtual void HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event) override;
-	virtual void HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event) override;
-	virtual void HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event) override;
-
 private:
+	/**
+	 * Every one of these is the Giver's OWN subscription on a tag in QuestTagsToGive, so no handler needs to ask
+	 * whether the tag is one this component offers - the subscription set already answers that. The Giver owning
+	 * both the state and the delegate is also what makes their ORDER a property of each function below rather
+	 * than of subscription registration order.
+	 */
 	void OnQuestActivatedEventReceived   (FGameplayTag Channel, const FQuestActivatedEvent& Event);
+	void OnQuestEnabledEventReceived     (FGameplayTag Channel, const FQuestEnabledEvent& Event);
 	void OnQuestDisabledEventReceived    (FGameplayTag Channel, const FQuestDisabledEvent& Event);
+	void OnQuestStartedEventReceived     (FGameplayTag Channel, const FQuestStartedEvent& Event);
+	void OnQuestEndedEventReceived       (FGameplayTag Channel, const FQuestEndedEvent& Event);
 	void OnQuestDeactivatedEventReceived (FGameplayTag Channel, const FQuestDeactivatedEvent& Event);
 	void OnQuestGiveBlockedEventReceived (FGameplayTag Channel, const FQuestGiveBlockedEvent& Event);
 
 	void RegisterQuestGiver();
 	
 	/**
-	 * Installs the giver-specific subscriptions (Activated/Disabled/Deactivated, ExactOnly) + the giver source
-	 * entry for one quest, capturing the handles into the base SubscriptionHandlesByTag. Shared by registration
-	 * and AddTagsToGive.
+	 * Installs the giver-specific subscriptions (Activated / Enabled / Disabled / Started / Ended / Deactivated,
+	 * all ExactOnly) + the giver source entry for one quest, capturing the handles into the base
+	 * SubscriptionHandlesByTag. Shared by registration and AddTagsToGive.
 	 */
 	void SubscribeGiverQuest(FGameplayTag QuestTag);
 
@@ -346,3 +353,4 @@ private:
 
 	virtual void GetAssetRegistryTags(FAssetRegistryTagsContext Context) const override;
 };
+

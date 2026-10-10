@@ -8,12 +8,14 @@
 #include "Events/QuestActivatedEvent.h"
 #include "Events/QuestDeactivatedEvent.h"
 #include "Events/QuestDisabledEvent.h"
+#include "Events/QuestEnabledEvent.h"
+#include "Events/QuestEndedEvent.h"
 #include "Events/QuestGiveBlockedEvent.h"
 #include "Events/QuestGivenEvent.h"
 #include "Events/QuestGiverRegisteredEvent.h"
+#include "Events/QuestStartedEvent.h"
 #include "GameplayTagsManager.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
-#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "UObject/AssetRegistryTagsContext.h"
@@ -104,9 +106,15 @@ void UQuestGiverComponent::SubscribeGiverQuest(FGameplayTag QuestTag)
 		return;
 	}
 
+	// ExactOnly throughout: a Giver for "Quest X" cares about Quest X's own lifecycle, not the lifecycle of the
+	// Steps inside it. Hierarchical delivery would force every handler to filter; a narrow subscription answers
+	// the question at the bus instead.
 	TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(QuestTag);
 	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestActivatedEvent>  (QuestTag, this, &UQuestGiverComponent::OnQuestActivatedEventReceived, FSignalRoutingDefaults::ExactOnly));
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestEnabledEvent>    (QuestTag, this, &UQuestGiverComponent::OnQuestEnabledEventReceived, FSignalRoutingDefaults::ExactOnly));
 	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDisabledEvent>   (QuestTag, this, &UQuestGiverComponent::OnQuestDisabledEventReceived, FSignalRoutingDefaults::ExactOnly));
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>    (QuestTag, this, &UQuestGiverComponent::OnQuestStartedEventReceived, FSignalRoutingDefaults::ExactOnly));
+	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestEndedEvent>      (QuestTag, this, &UQuestGiverComponent::OnQuestEndedEventReceived, FSignalRoutingDefaults::ExactOnly));
 	Handles.Add(SignalSubsystem->SubscribeMessage<FQuestDeactivatedEvent>(QuestTag, this, &UQuestGiverComponent::OnQuestDeactivatedEventReceived, FSignalRoutingDefaults::ExactOnly));
 
 	PublishGiverRegistration(QuestTag);
@@ -150,35 +158,18 @@ void UQuestGiverComponent::OnQuestActivatedEventReceived(FGameplayTag Channel, c
 	BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Activated);
 }
 
-void UQuestGiverComponent::HandleQuestEnabled(FGameplayTag Channel, const FQuestEnabledEvent& Event)
+void UQuestGiverComponent::OnQuestEnabledEventReceived(FGameplayTag Channel, const FQuestEnabledEvent& Event)
 {
-	// Filter to QuestTagsToGive - Observer's subscription set covers both designer-authored ObservedTags
-	// AND QuestTagsToGive (via the implicit-observed bridge), but state tracking only applies to quests
-	// this Giver is offering. Tags only in ObservedTags pass straight through to Super for broadcast.
-	const bool bGiverOwned = QuestTagsToGive.HasTag(Channel);
+	UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestGiverComponent::OnQuestEnabledEventReceived : '%s' is now accept-ready"), *Channel.ToString());
 
-	FGameplayTagContainer PriorActivated;
-	FGameplayTagContainer PriorEnabled;
+	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
+	const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
 
-	if (bGiverOwned)
-	{
-		UE_LOG(LogSimpleQuestSubscription, VeryVerbose, TEXT("UQuestGiverComponent::HandleQuestEnabled : '%s' is now accept-ready"), *Channel.ToString());
+	// Track on the bound Channel - the tag this giver subscribed for - rather than Event.GetQuestTag(). Under a
+	// multi-tag publish the canonical identity varies across deliveries; Channel stays the giver's authored one.
+	EnabledQuestTags.AddTag(Channel);
 
-		PriorActivated = ActivatedQuestTags;
-		PriorEnabled = EnabledQuestTags;
-
-		// Track on bound Channel (the tag this giver subscribed for via QuestTagsToGive), not Event.GetQuestTag().
-		// Under multi-tag publish Event.QuestTag is the per-perspective canonical and varies across deliveries;
-		// Channel stays stable as the giver's authored identity for bookkeeping.
-		EnabledQuestTags.AddTag(Channel);
-	}
-
-	Super::HandleQuestEnabled(Channel, Event);
-
-	if (bGiverOwned)
-	{
-		BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Enabled);
-	}
+	BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Enabled);
 }
 
 void UQuestGiverComponent::OnQuestDisabledEventReceived(FGameplayTag Channel, const FQuestDisabledEvent& Event)
@@ -193,43 +184,36 @@ void UQuestGiverComponent::OnQuestDisabledEventReceived(FGameplayTag Channel, co
 	BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Disabled);
 }
 
-void UQuestGiverComponent::HandleQuestStarted(FGameplayTag Channel, const FQuestStartedEvent& Event)
+void UQuestGiverComponent::OnQuestStartedEventReceived(FGameplayTag Channel, const FQuestStartedEvent& Event)
 {
-	// Filter to QuestTagsToGive - Observer's subscription set (via the implicit-observed bridge) covers both
-	// designer-authored ObservedTags AND QuestTagsToGive, but state tracking only applies to quests this
-	// Giver is offering. Tags only in ObservedTags pass straight through to Super for broadcast.
-	const bool bGiverOwned = QuestTagsToGive.HasTag(Channel);
+	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
+	const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
 
-	FGameplayTagContainer PriorActivated;
-	FGameplayTagContainer PriorEnabled;
+	ActivatedQuestTags.RemoveTag(Channel);
+	EnabledQuestTags.RemoveTag(Channel);
 
-	if (bGiverOwned)
+	// PendingGiveBlockedHandles holds an entry only between this giver's GiveQuest call and its outcome, so its
+	// presence is what distinguishes "this giver gave it" from "something else started the same quest." Either
+	// this event or FQuestGiveBlockedEvent closes the cycle. GivenQuestTags is the history GetGivenQuests reads.
+	const bool bThisGiverGaveIt = PendingGiveBlockedHandles.Contains(Channel);
+	if (bThisGiverGaveIt)
 	{
-		PriorActivated = ActivatedQuestTags;
-		PriorEnabled = EnabledQuestTags;
+		GivenQuestTags.AddTag(Channel);
+	}
+	UnsubscribePendingGiveBlocked(Channel);
 
-		ActivatedQuestTags.RemoveTag(Channel);
-		EnabledQuestTags.RemoveTag(Channel);
-
-		// PendingGiveBlockedHandles holds an entry only between this giver's GiveQuest call and its outcome,
-		// so its presence distinguishes "this giver gave the quest" from "some other path started it." Either
-		// FQuestStartedEvent or FQuestGiveBlockedEvent closes the cycle. GivenQuestTags tracks history of gives
-		// this specific giver issued - used by GetGivenQuests().
-		if (PendingGiveBlockedHandles.Contains(Channel))
-		{
-			GivenQuestTags.AddTag(Channel);
-		}
-		UnsubscribePendingGiveBlocked(Channel);
+	// State is complete before anything broadcasts, so a handler reading GivenQuestTags / ActivatedQuestTags /
+	// EnabledQuestTags sees the finished picture. That ordering is now a property of this function rather than of
+	// which subscription the bus happened to register first.
+	//
+	// Gating on bThisGiverGaveIt is also what keeps a restore quiet: the flag is only ever set by a live GiveQuest
+	// call, so a quest already running when this component registers can never fire a give that never happened.
+	if (bThisGiverGaveIt && OnQuestGiven.IsBound())
+	{
+		OnQuestGiven.Broadcast(Channel, Event.Payload);
 	}
 
-	// State is set. Now Super broadcasts the inherited OnQuestStarted delegate - BP listeners reading
-	// GivenQuestTags / ActivatedQuestTags / EnabledQuestTags from inside their handler see consistent state.
-	Super::HandleQuestStarted(Channel, Event);
-
-	if (bGiverOwned)
-	{
-		BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Started);
-	}
+	BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Started);
 }
 
 void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel, const FQuestDeactivatedEvent& Event)
@@ -237,34 +221,22 @@ void UQuestGiverComponent::OnQuestDeactivatedEventReceived(FGameplayTag Channel,
 	HandleQuestLeftGiverSurface(Channel);
 }
 
-void UQuestGiverComponent::HandleQuestCompleted(FGameplayTag Channel, const FQuestEndedEvent& Event)
+void UQuestGiverComponent::OnQuestEndedEventReceived(FGameplayTag Channel, const FQuestEndedEvent& Event)
 {
-	// Giver-side cleanup runs only when the quest is still in this Giver's tracked state - i.e., it left
-	// without going through the usual Started path (force-resolved while PendingGiver, save-rehydration of
-	// an already-resolved quest). Started quests already cleared their state in HandleQuestStarted; re-
-	// running here would be no-op state but would double-fire OnGiveAvailabilityChanged.
-	const bool bGiverOwned = QuestTagsToGive.HasTag(Channel);
-	const bool bStillTracked = bGiverOwned && (ActivatedQuestTags.HasTag(Channel) || EnabledQuestTags.HasTag(Channel));
+	// Cleanup runs only while the quest is still in this Giver's tracked state - i.e. it left without going
+	// through the usual Started path (force-resolved while PendingGiver, or a save rehydrating an already-
+	// resolved quest). A started quest cleared its state in OnQuestStartedEventReceived; repeating it here
+	// would be a no-op on state but would double-fire OnGiveAvailabilityChanged.
+	if (!ActivatedQuestTags.HasTag(Channel) && !EnabledQuestTags.HasTag(Channel)) return;
 
-	FGameplayTagContainer PriorActivated;
-	FGameplayTagContainer PriorEnabled;
+	const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
+	const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
 
-	if (bStillTracked)
-	{
-		PriorActivated = ActivatedQuestTags;
-		PriorEnabled = EnabledQuestTags;
+	ActivatedQuestTags.RemoveTag(Channel);
+	EnabledQuestTags.RemoveTag(Channel);
+	UnsubscribePendingGiveBlocked(Channel);
 
-		ActivatedQuestTags.RemoveTag(Channel);
-		EnabledQuestTags.RemoveTag(Channel);
-		UnsubscribePendingGiveBlocked(Channel);
-	}
-
-	Super::HandleQuestCompleted(Channel, Event);
-
-	if (bStillTracked)
-	{
-		BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Deactivated);
-	}
+	BroadcastAvailabilityChange(PriorActivated, PriorEnabled, EGiveAvailabilityChangeReason::Deactivated);
 }
 
 void UQuestGiverComponent::HandleQuestLeftGiverSurface(FGameplayTag Channel)
@@ -288,6 +260,11 @@ void UQuestGiverComponent::OnQuestGiveBlockedEventReceived(FGameplayTag Channel,
 
 	UE_LOG(LogSimpleQuestSubscription, Log, TEXT("UQuestGiverComponent::OnQuestGiveBlockedEventReceived : '%s' refused - %d blocker(s)"),
 		*Channel.ToString(), Event.Blockers.Num());
+
+	if (OnGiveRefused.IsBound())
+	{
+		OnGiveRefused.Broadcast(Channel, Event.Blockers);
+	}
 
 	// Clear the one-shot subscription. Cycle closes on either this event or FQuestStartedEvent.
 	UnsubscribePendingGiveBlocked(Channel);
@@ -365,18 +342,9 @@ void UQuestGiverComponent::AddTagsToGive(const FGameplayTagContainer& Tags)
 			const FGameplayTagContainer PriorActivated = ActivatedQuestTags;
 			const FGameplayTagContainer PriorEnabled = EnabledQuestTags;
 
-			// Base observer side - same effective settings the bridge produces for a giver tag (default +
-			// Progress/Blocked/Unblocked + forced Started/GiveBlocked, ExactOnly). Mirrors the overlay in
-			// RegisterQuestObserver; keep in sync if it changes.
-			FObservedQuestEventSettings Settings;
-			Settings.bObserveProgress = true;
-			Settings.bObserveBlocked = true;
-			Settings.bObserveUnblocked = true;
-			Settings.bObserveStarted = true;
-			Settings.bObserveGiveBlocked = true;
-			Settings.Routing = FSignalRoutingDefaults::ExactOnly;
-			RegisterSingleObservedTag(Tag, Settings);
-
+			// Giver side only. A quest this component offers is not an observed tag, so adding one at runtime
+			// installs the giver's own subscriptions and leaves the Observer delegates reporting exactly what
+			// ObservedTags lists - the same contract an authored tag gets.
 			SubscribeGiverQuest(Tag);
 			GiverCatchUpForQuest(Tag);
 
@@ -509,32 +477,6 @@ int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 		GetOwner()->MarkPackageDirty();
 	}
 	return Count;
-}
-
-TArray<FQuestObservedTagSpec> UQuestGiverComponent::GetImplicitlyObservedTags() const
-{
-	TArray<FQuestObservedTagSpec> Implicit = Super::GetImplicitlyObservedTags();
-	Implicit.Reserve(Implicit.Num() + QuestTagsToGive.Num());
-	for (const FGameplayTag& Tag : QuestTagsToGive)
-	{
-		// Giver narrows to ExactMatch - a Giver for "Quest X" cares about Quest X's lifecycle events, not
-		// inner-Step lifecycle. Hierarchical delivery would force per-handler filtering on every event;
-		// narrow subscription at the bus eliminates the noise upstream.
-		Implicit.Add(FQuestObservedTagSpec{Tag, FSignalRoutingDefaults::ExactOnly});
-	}
-	return Implicit;
-}
-
-void UQuestGiverComponent::CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass)
-{
-	// The Giver's OnQuestStarted is a give-success surface (Live transition, GiverActor = the giver that gave the
-	// quest), not a general lifecycle signal. The base Started catch-up would replay it for an already-Live tag -
-	// e.g. adding a tag while the quest is already running - firing a spurious "give succeeded" attributed to
-	// whoever last gave it. Suppress just the Started replay; the live give-success still arrives via
-	// HandleQuestStarted (a separate subscription), and giver availability catch-up runs in GiverCatchUpForQuest.
-	FObservedQuestEventSettings NoStartedReplay = Settings;
-	NoStartedReplay.bObserveStarted = false;
-	Super::CatchUpSingleTag(QuestTag, NoStartedReplay, WorldState, QuestState, CaughtUpThisPass);
 }
 
 void UQuestGiverComponent::GetAssetRegistryTags(FAssetRegistryTagsContext Context) const

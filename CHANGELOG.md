@@ -297,6 +297,12 @@ what is already true instead of having to go and ask.
   are removed. If a graph calls that node, it was reading an empty container;
   *Observed Tags* is where the answer lives.
 
+- **The compiler channel logs like every other channel.** `LogSimpleQuestCompiler`
+  shipped at *Verbose* while activation, subscription, resolver, state, and the
+  catch-all all shipped at *Log*, so a fresh install printed compiler chatter
+  nobody had asked for. It is now *Log* like its siblings. Everything it used to
+  print is one setting away, in *Project Settings > SimpleQuest*, same as the rest.
+
 ### Removed
 
 Everything here has been warning at compile time for a release, with the
@@ -548,6 +554,14 @@ in this section affects you.
   to try, and what the chapter added to the picture of the Step node and its
   Objective - the one thing the eleven rooms are meant to leave you with. The
   root README's Quick Start points at it.
+
+  It closes on **The Step node, assembled**, which is those eleven sections put
+  back together in the order a Step is configured rather than the order the rooms
+  taught them - identity, completion, being started, being gated, being blocked
+  and torn down, talking to the Objective, narration. It ends with the seven
+  things a Step can do that no room demonstrates, each with what it is for and
+  where it is documented, because a tutorial that reached for every field would
+  have taught less.
 
 - **The walkthrough says to play the whole tutorial before reading any of it.**
   It already assumed you had played a room before reading its chapter; the index

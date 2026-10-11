@@ -296,6 +296,6 @@ Walk into a gated Step and let it refuse you, so PROGRESS REFUSED lands live. No
 
 ---
 
-Previous: [Chapter 10 - Prerequisite Rules](10_PrerequisiteRules.md) | Next: The Step node, assembled
+Previous: [Chapter 10 - Prerequisite Rules](10_PrerequisiteRules.md) | Next: [The Step node, assembled](99_TheStepAssembled.md)
 <br>
 Index: [All chapters](README.md)

@@ -11,7 +11,8 @@ The quest components stop inheriting from each other - four distinct roles built
 on a new SimpleCore component that watches world state facts, which is the
 breaking change this release is named for, and which an actor relying on an
 inherited surface will need one added component to answer;
-Act I of the written on-ramp - seven chapters on the pieces of one progression;
+the written walkthrough, finished - a chapter per idea, start to end, each one a
+room you play before it explains itself;
 compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
 the four deprecations and one load failure that verifying it turned up; the
 Prerequisite Examiner made truthful - every state it advertised is now produced,
@@ -527,22 +528,26 @@ in this section affects you.
 
 ### Documentation
 
-- **The QuickStart walkthrough is through Act I and into Act II.**
-  `Docs/QuickStart/` holds an index, *Before You Start* - the three central
-  ideas the rooms teach together, controls, the HUD, what the green and red
-  buttons publish, the three layers every room is built from, and the live
-  instruments to keep open while you play - and Chapters 1 through 8: Basic
-  Trigger, Rewards, Basic Giver, Sequential Steps, Named Outcomes, Blocking,
-  Prerequisites, and Linked Questlines. The first seven are the pieces of one
-  progression, and they close on a room where a data-driven game system runs the
-  scenarios without owning the quest; the eighth opens Act II by running one
-  authored questline twice at once, with separate progress. Each is written from
-  the source and illustrated: what happened in the room, what is in the graph,
-  which facts and events landed in which order, the gotchas the room's design
-  steers you around, experiments to try, and what the chapter added to the
-  picture of the Step node and its Objective - the one thing the eleven rooms
-  are meant to leave you with. The root README's Quick Start points at it.
-  Chapters 9 through 11 follow one at a time.
+- **The QuickStart walkthrough is finished.** `Docs/QuickStart/` holds an index,
+  *Before You Start* - the three central ideas the rooms teach together,
+  controls, the HUD, what the green and red buttons publish, the three layers
+  every room is built from, and the live instruments to keep open while you play
+  - and a chapter for each room: Basic Trigger, Rewards, Basic Giver, Sequential
+  Steps, Named Outcomes, Blocking, Prerequisites, Linked Questlines, Activation
+  Groups, Prerequisite Rules, and Observers.
+
+  The first seven are the pieces of one progression, closing on a room where a
+  data-driven game system runs the scenarios without owning the quest. The rest
+  reach across boundaries: one authored questline running twice at once with
+  separate progress, a published tag that activates, a published tag that gates,
+  and finally the component that has been showing you all of it.
+
+  Every chapter is written from the source and illustrated, in the same shape:
+  what happened in the room, what is in the graph, which facts and events landed
+  in which order, the gotchas the room's design steers you around, experiments
+  to try, and what the chapter added to the picture of the Step node and its
+  Objective - the one thing the eleven rooms are meant to leave you with. The
+  root README's Quick Start points at it.
 
 - **The walkthrough says to play the whole tutorial before reading any of it.**
   It already assumed you had played a room before reading its chapter; the index

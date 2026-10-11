@@ -315,3 +315,5 @@ In the AND scenario's graph, disconnect the orange wire from Start's *Deactivate
 ---
 
 Previous: [Chapter 6 - Blocking](06_Blocking.md) | Next: [Chapter 8 - Linked Questlines](08_LinkedQuestlines.md)
+<br>
+Index: [All chapters](README.md)

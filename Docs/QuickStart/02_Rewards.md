@@ -223,3 +223,5 @@ In `QL_Ch2_Rewards`, select the *Reached* node, add a Clamp Amount modifier to i
 ---
 
 Previous: [Chapter 1 - Basic Trigger](01_BasicTrigger.md) | Next: [Chapter 3 - Basic Giver](03_BasicGiver.md)
+<br>
+Index: [All chapters](README.md)

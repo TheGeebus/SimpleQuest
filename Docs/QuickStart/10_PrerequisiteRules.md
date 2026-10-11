@@ -78,7 +78,11 @@ In order:
 
 The in-world tell is one switch changing three things at once - the lights, the locker, and a terminal in another room - with nothing running between them. The switch does not know about any of them.
 
-Worth being precise about *how* each of them found out, because they did not all find out the same way. The terminal reads the **rule**: its prerequisite is a leaf on `SimpleQuest.PrereqRule.PowerOn`. The door and the locker are level actors with Observer components, and they watch the **Step** - `...Chapter_10.Supply_Room.Power_Switch` - reacting to its completion rather than to the condition the rule publishes. Same moment, same switch, two different things being listened to.
+Worth being precise about *how* each of them found out, because they did not all find out the same way. **Three different things are being listened to, and the switch knows about none of them.**
+
+The terminal reads the **rule**: its prerequisite is a leaf on `SimpleQuest.PrereqRule.PowerOn`, evaluated by the framework when the terminal is touched. The door and the locker watch the **Step** - `...Chapter_10.Supply_Room.Power_Switch` - with Quest Observer components, reacting to its completion rather than to the condition it publishes. And the lights watch the **fact itself**, `SimpleQuest.PrereqRule.PowerOn`, with a Simple Core Observer that has no quest component on it at all and could not name a Step if you asked it.
+
+Same moment, same switch, three different questions. That is the beat at the top of this chapter being literally true rather than a figure of speech: a step, a door, and a light, none of them knowing where the condition came from.
 
 ---
 
@@ -236,7 +240,17 @@ That is a deliberate piece of design worth copying: the player is not told "noth
 
 **A rule does not activate anything.** It is a condition and nothing else. If the far side should *start* when the near side finishes, you want Chapter 9's activation group; if the far side should be *allowed* when the near side holds, you want this.
 
-**The Observer component cannot watch a rule tag.** Its *Observed Tags* picker is filtered to `SimpleQuest.Questline`, so a rule's tag is not in the list - an actor wired up that way has to watch the Step that drives the rule instead, which is exactly what this room's door and locker do. The things that *can* read a rule directly are a Step's *Prerequisites* pin, another graph's Rule Exit, and any Blueprint subscribing to the World State fact itself. The comment box's "a door, a light, a Step's prerequisite" is true of the fact; it is not true of that one component's tag picker, which is worth knowing before you plan a door around it.
+**A Quest Observer cannot watch a rule tag - reach for a Simple Core Observer instead.** The *Observed Tags* picker on a Quest Observer is filtered to `SimpleQuest.Questline`, and deliberately: that component watches quests, and a rule's tag is not one. **Simple Core Observer** is the component for this - it watches world state facts, its picker is unfiltered because facts belong to whoever writes them, and it binds *On Fact Added* and *On Fact Removed*. The lights in this room are built that way, with no quest component on them at all.
+
+Open `BP_WallSconce` and the whole thing is three nodes. Begin Play calls **Add Observed Fact** with the sconce's own `Watched Tag` variable - `SimpleQuest.PrereqRule.PowerOn` - and *On Fact Added* and *On Fact Removed* turn the light on and off. **Nothing asks whether the fact is already true**, and nothing needs to: subscribing delivers whatever is already asserted before the call returns, so a sconce that loads into a room where the power came on an hour ago lights immediately, from the same two events. The light ships switched off and the subscription turns it on - there is no startup branch at all.
+
+<br>
+  <img width="1200" alt="BP_WallSconce's event graph: Begin Play into Add Observed Fact with the sconce's Watched Tag, and On Fact Added and On Fact Removed into Set Visibility - with SimpleCoreObserver in the component tree and no quest component beside it" src="https://github.com/user-attachments/assets/1282f544-a230-4cdc-9284-38d4064c0d21" />
+<br>
+
+So there are four ways to read a condition, and picking between them is a question about what you are actually asking. A Step's *Prerequisites* pin asks the framework to gate on it. Another graph's Rule Exit passes it across an asset boundary. A Simple Core Observer reacts the moment the fact changes. And a Quest Observer on the Step that drives the rule reacts to the *completion* - which is a different question, and the right one when what you care about is the player's action rather than the condition's value.
+
+The door and the locker here take that last route on purpose, and the lights take the third. One switch, and the chapter's whole point is that it has no opinion about any of them.
 
 ---
 
@@ -287,4 +301,6 @@ That is the whole difference between a rule and an anchor. A completion is a thi
 
 ---
 
-Previous: [Chapter 9 - Activation Groups](09_ActivationGroups.md) | Next: Chapter 11 - Observers
+Previous: [Chapter 9 - Activation Groups](09_ActivationGroups.md) | Next: [Chapter 11 - Observers](11_Observers.md)
+<br>
+Index: [All chapters](README.md)

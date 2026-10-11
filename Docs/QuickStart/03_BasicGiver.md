@@ -102,10 +102,10 @@ Two comment boxes sit in the graph. In short:
 - **Select Either Giver.** The Details panel is Chapter 1's: Node Label, Display Name, Display Data, Objective Class, and the rest. Nothing here refers to a giver. *Display Name* is "Either Giver Will Do" and *Display Data* is `DA_Ch3_StepA`; the tag is built from the label, so it ends in `Either_Giver`.
 
 <br>
-  <img width="1200" alt="BP_QuestGiverActor2's Quest Giver component in the Details panel: Quest Tags to Give holding both Steps' tags, Step Tags to Trigger and Observed Tags empty" src="https://github.com/user-attachments/assets/6d6eb189-aa45-4b31-aad8-2091cd0bed18" />
+  <img width="1200" alt="BP_QuestGiverActor2's Quest Giver component in the Details panel: Quest Tags to Give holding both Steps' placed tags" src="https://github.com/user-attachments/assets/f66becc9-0d13-432d-9c90-530bb4b5ed21" />
 <br>
 
-- **Select `BP_QuestGiverActor2` in the level** - find it in the World Outliner - and its Quest Giver component. Under *Quest*, *Quest Tags to Give* holds two entries, the placed spellings of both Steps: `SimpleQuest.Questline.QuickStart.Chapter_3.Either_Giver` and `...Reuse_Giver`. Beneath it, *Step Tags to Trigger* and *Observed Tags* are empty. Both are on this component too, inherited, because a Giver Component is a Trigger Component is an Observer Component. Select `BP_QuestGiverActor4` next: one entry.
+- **Select `BP_QuestGiverActor2` in the level** - find it in the World Outliner - and its Quest Giver component. Under *Quest*, *Quest Tags to Give* holds two entries, the placed spellings of both Steps: `SimpleQuest.Questline.QuickStart.Chapter_3.Either_Giver` and `...Reuse_Giver`. That is the whole of what this component is configured with, and the whole of what it does - a Giver gives. Select `BP_QuestGiverActor4` next: one entry.
 
 <br>
   <img width="1200" alt="BP_QuestGiverActor's event graph: the five bound events and their comment boxes" src="https://github.com/user-attachments/assets/f86d0cde-3c30-4848-a468-c75a881ccff1" />
@@ -198,7 +198,9 @@ The second give runs exactly as the first. STARTED on Reuse Giver's tag arms two
 
 **The give carries who gave.** The component defaults the give's *Instigator* to its actor, and that reference travels into the Objective's activation context, the STARTED payload, and the Quest State record. The library's *Give Quest* defaults nothing: call it from a widget without setting an instigator and the Step starts with none. And a give from anywhere still needs a Giver Component somewhere to have declared the tag. The declaration is what makes the Step wait; the give only answers it. A give to a Step nothing declared arrives to find it already Live, and is refused.
 
-**One component, three roles.** Quest Giver Component derives from Quest Trigger Component, which derives from Quest Observer Component. A single component can offer one Step through *Quest Tags to Give*, fire another through *Step Tags to Trigger*, and watch a third through *Observed Tags*. The tutorial keeps them on separate actors so each cube's color means one thing.
+**One component, one role.** Quest Giver, Quest Trigger, Quest Observer, and Quest Reward Recipient are four separate components and none of them inherits from another. A Giver offers; it has no step-trigger list and no observed-tags list, and nothing on it can advance or watch a Step. An actor that needs two of those jobs carries two components, which means its component list is an honest description of what it does - and Chapter 11 is built around reading one. The tutorial also keeps the roles on separate *actors* here, so each cube's color means one thing.
+
+  If you used SimpleQuest before 0.9 this is a change: the four used to inherit from one another, so a Giver quietly carried the trigger and observer surfaces as well. Nothing about the events changed - only which component admits to hearing them.
 
 **Replaying re-gates.** Start this room again from its button and Either Giver returns to Pending Giver: the cubes go yellow, the beacon stays dark, and you give it again. *Given Quests* on the component is a history for the session, not a lock.
 
@@ -242,3 +244,5 @@ Select `BP_QuestGiverActor2` and `BP_QuestGiverActor4` in the World Outliner and
 ---
 
 Previous: [Chapter 2 - Rewards](02_Rewards.md) | Next: [Chapter 4 - Sequential Steps](04_SequentialSteps.md)
+<br>
+Index: [All chapters](README.md)

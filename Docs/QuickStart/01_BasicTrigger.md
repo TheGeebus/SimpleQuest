@@ -238,3 +238,5 @@ Then run it once more. The room's start button re-activates the chapter now that
 ---
 
 Previous: [Before You Start](00_BeforeYouStart.md) | Next: [Chapter 2 - Rewards](02_Rewards.md)
+<br>
+Index: [All chapters](README.md)

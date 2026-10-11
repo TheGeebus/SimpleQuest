@@ -50,8 +50,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-Plugins/SpeechCraft/
-Plugins/ElectronicNodes/
 Packaged/
 
 # Stale-tag scan commandlet outputs (run via Scripts/RunStaleQuestTagsScan.bat)

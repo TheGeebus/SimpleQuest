@@ -229,22 +229,6 @@ public:
     // -------------------------------------------------------------------------------------------------------------
 
     /**
-     * The rewards a completing node advertises regardless of how it resolves - the any-outcome bucket only. The giver /
-     * journal case: "complete this, get these." Computes each reward's preview live (pass the viewing actor); querying
-     * never grants.
-     *
-     * Excludes outcome-specific rewards. See also: Get Advertised Rewards For Outcome, for rewards associated with
-     * specific outcomes.
-     *
-     * @param WorldContext        world context for resolving the quest system
-     * @param ContentTag          the Step or container whose advertised rewards you want
-     * @param Viewer              viewing actor for computing live values
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards and read the SimpleQuest.Outcome.AnyOutcome key. Removed in 0.9."))
-    static TArray<FQuestRewardPreview> GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
-
-    /**
      * Cold twin of GetAdvertisedRewards - everything a tag pays, both channels, read off a questline ASSET with no
      * running game. For catalog UI (quest-giver hub, bounty board) showing what a quest pays before it is accepted.
      * Viewer-dependent rewards compute off the compiled template; a cold catalog may pass null.
@@ -254,28 +238,6 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag Tag, AActor* Viewer);
-
-    /**
-     * Cold query for a questline's QUESTLINE-LEVEL rewards - what completing the whole questline pays, per outcome, read
-     * directly off the asset's authored QuestlineRewards map. Manager-free / works pre-activation (the catalog / bounty-
-     * board case). Distinct from GetAdvertisedRewardsFromAsset, which surfaces rewards wired into content NODES; this is
-     * the questline's own completion reward, keyed by its top-level Exit outcome. Each reward is previewed via
-     * DescribeReward (pass the viewing actor for live-computed values).
-     *
-     * @return outcome tag -> the previews that outcome pays. Empty map for a questline with no questline-level rewards.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards From Asset - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
-
-    /**
-     * Live query for a RUNNING questline's questline-level rewards, per outcome - what completing this active questline
-     * will pay. HUD/journal companion to the cold GetQuestlineRewardsFromAsset. Returns empty if the questline isn't
-     * currently loaded (use the cold asset query for pre-activation catalogs).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
 
     /**
      * Everything a tag pays on completion, keyed by outcome - rewards wired into the graph AND the questline's own
@@ -304,16 +266,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
     static TArray<FQuestRewardPreview> GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome = true);
 
-    /**
-     * Every outcome of a completing content node and what each pays, as a map - the "whole picture" companion to
-     * GetAdvertisedRewardsForOutcome (which asks one outcome at a time). For a journal/tooltip showing "Success: X,
-     * Failure: Y". Each outcome's list includes the any-outcome rewards (they fire regardless). Static outcomes only;
-     * dynamic paths aren't represented (they have no author-time outcome tag).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards - same map, and it also folds in questline-level rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
-    
     // -------------------------------------------------------------------------------------------------------------
     // Display data queries - lookup the display data associated with a given quest tag.
     // -------------------------------------------------------------------------------------------------------------

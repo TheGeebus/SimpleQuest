@@ -140,6 +140,15 @@ what is already true instead of having to go and ask.
   can watch facts without being observers of anything (see *Changed*). SimpleCore
   had only subsystems and a Blueprint library before this.
 
+  **The example wall sconce is now built this way**, and it is worth opening: it
+  carries this component and no quest component at all. It lights when a fact is
+  true and goes dark when it stops being true, and it has no idea whether a quest
+  wrote that fact, a prerequisite rule did, or a Blueprint did it by hand. That was
+  always the promise of a fact - the walkthrough's prerequisites chapter says a
+  door, a light, and a rule all read the same published tag without caring who
+  wrote it - and until now it was true of the fact but not of the component you
+  would reach for to act on one.
+
 ### Changed
 
 - **A Trigger's watched Steps are no longer observed for broadcast.** A Quest
@@ -286,6 +295,44 @@ what is already true instead of having to go and ask.
   Quest Tags panel scanned a field that could never hold a stale tag. All three
   are removed. If a graph calls that node, it was reading an empty container;
   *Observed Tags* is where the answer lives.
+
+### Removed
+
+Everything here has been warning at compile time for a release, with the
+replacement named in the warning. If your project compiles clean today, nothing
+in this section affects you.
+
+- **Four reward preview functions are gone, replaced by two that answer more.**
+  *Get Advertised Rewards For Any Outcome*, *Get All Advertised Rewards By
+  Outcome*, *Get Questline Rewards*, and *Get Questline Rewards From Asset* all
+  predated **Get Advertised Rewards**, which returns every channel a tag pays
+  keyed by outcome - node rewards and the questline's own completion rewards in
+  one answer, with `SimpleQuest.Outcome.AnyOutcome` as a key in its own right.
+  Use it, or **Get Advertised Rewards From Asset** for the cold catalog case
+  where no game is running. Each removed function was a narrower slice of that
+  same picture, and keeping four doors onto one room meant four things to keep
+  honest.
+
+- **Scaled Amount Reward is gone. Use an Amount Reward with a Scale By Recipient
+  modifier.** It fused a source with a transform, which is why *scaled loot*
+  would have needed a second class of its own, and a scaled anything-else a
+  third. The replacement pair behaves identically for the case it covered and
+  composes with every other reward source, which is what the modifier layer was
+  built for. It has been hidden from the class picker since 0.8.0, so no new one
+  could be authored, and the compiler has warned once per node still holding one.
+
+- **The Quest Loot Table data asset is gone. Use the Loot Table.** Loot moved to
+  a DataTable in 0.8.0 - bulk-editable, diffable, importable from a spreadsheet -
+  and the data asset stayed one release so existing questlines kept loading while
+  their rows were re-authored. A Loot Table Reward's *Loot Table (legacy)* field
+  goes with it, along with the fallback that read it when the DataTable was
+  empty. A reward still pointing at a data asset now simply has no table, which
+  the log says plainly at grant time.
+
+  The old class name is not being reclaimed, and that is deliberate: a questline
+  saved against the data asset would resolve its reference to the DataTable
+  wrapper, which cannot hold its data. A clean *asset not found* is recoverable;
+  a quiet resolve to the wrong type is not.
 
 ### Fixes
 

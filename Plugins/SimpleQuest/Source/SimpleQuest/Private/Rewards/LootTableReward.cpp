@@ -4,7 +4,6 @@
 #include "Rewards/LootTableReward.h"
 
 #include "Rewards/QuestLootDataTable.h"
-#include "Rewards/QuestLootTable.h"
 #include "Quests/Types/QuestRewardPayloads.h"
 #include "StructUtils/InstancedStruct.h"
 #include "SimpleQuestLog.h"
@@ -41,24 +40,6 @@ bool ULootTableReward::GatherLootRows(TArray<const FQuestLootEntry*>& Out, bool 
 			{
 				Out.Add(Row);
 			}
-		}
-		return true;
-	}
-
-	if (const UQuestLootTable* Legacy = LootTable.LoadSynchronous())
-	{
-		if (bLogDiagnostics)
-		{
-			UE_LOG(LogSimpleQuestActivation, Warning,
-				TEXT("ULootTableReward: reading deprecated Quest Loot Table '%s'. Re-author its rows as a Loot Table asset — the data asset form is removed in 0.9."),
-				*Legacy->GetName());
-		}
-
-		// Authored order, which the array already carried; the sorted walk above exists to match it.
-		Out.Reserve(Legacy->Entries.Num());
-		for (const FQuestLootEntry& Entry : Legacy->Entries)
-		{
-			Out.Add(&Entry);
 		}
 		return true;
 	}
@@ -139,21 +120,3 @@ TArray<FQuestRewardPreview> ULootTableReward::DescribeReward_Implementation(AAct
 	return Out;
 }
 
-#if WITH_EDITOR
-FString ULootTableReward::DescribeDeprecation() const
-{
-	if (LootTable.IsNull())
-	{
-		return FString();
-	}
-
-	// Two different problems wearing the same symptom. With no Loot Table assigned the deprecated asset is what
-	// actually gets rolled; with one assigned it is dead weight somebody forgot to clear. Both want clearing, but only
-	// the first stops granting anything in 0.9, so the two must not read the same.
-	return LootDataTable.IsNull()
-		? FString::Printf(TEXT("rolls the deprecated Quest Loot Table '%s' - re-author its rows as a Loot Table asset "
-			"and assign it, because the data asset form is removed in 0.9"), *LootTable.ToString())
-		: FString::Printf(TEXT("still references the deprecated Quest Loot Table '%s', which is ignored because a Loot "
-			"Table is assigned - clear it, because the data asset form is removed in 0.9"), *LootTable.ToString());
-}
-#endif

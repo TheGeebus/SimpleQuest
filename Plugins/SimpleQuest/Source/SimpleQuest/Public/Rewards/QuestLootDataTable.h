@@ -46,9 +46,11 @@ struct FQuestLootEntry : public FTableRowBase
  * reference on ULootTableReward type-safe - the picker offers loot tables, not every table in the project - and lets
  * the row struct be fixed here, so creating one never asks which struct its rows are.
  *
- * Supersedes UQuestLootTable, the data asset this started as, which survives one release so existing assets keep
- * loading. The class is named for what it is rather than what it is called, because the old one still holds the good
- * name until 0.9 removes it; both present as "Quest Loot Table" in the browser.
+ * Replaced UQuestLootTable, the data asset this started as, which was removed in 0.9 after one release of overlap.
+ * The awkward class name is now permanent and deliberately so: the old name cannot be reused, because an asset
+ * saved against the data asset would resolve its reference to this incompatible type instead of failing to find
+ * anything. A removed name stays retired. This presents as "Quest Loot Table" in the browser, which is the only
+ * name that was ever user-facing.
  */
 UCLASS(BlueprintType)
 class SIMPLEQUEST_API UQuestLootDataTable : public UDataTable

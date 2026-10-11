@@ -268,17 +268,17 @@ protected:
 
 	/**
 	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
-	 * GetAdvertisedRewardsForAnyOutcome and ...ForOutcome). Looks the node up by ContentTag, reads its compile-time
-	 * ReachableRewardsByPath, resolves each reward-node key to its live instance, and aggregates DescribeReward. Pure:
-	 * no grant, no event. PathIdentity is the compile-time path key (a static outcome's tag-name, a dynamic PathName,
-	 * or NAME_None for any-outcome); resolved from the caller's outcome tag by the library.
+	 * the advertisement queries). Looks the node up by ContentTag, reads its compile-time ReachableRewardsByPath,
+	 * resolves each reward-node key to its live instance, and aggregates DescribeReward. Pure: no grant, no event.
+	 * PathIdentity is the compile-time path key (a static outcome's tag-name, a dynamic PathName, or NAME_None for
+	 * any-outcome); resolved from the caller's outcome tag by the library.
 	 */
 	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
 	/**
-	 * Live twin of the cold GetQuestlineRewardsFromAsset - previews a RUNNING questline's questline-level rewards per
-	 * outcome. Resolves the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and
-	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
+	 * Live twin of the cold asset query - previews a RUNNING questline's questline-level rewards per outcome. Resolves
+	 * the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and describes each
+	 * authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
 	 */
 	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
 	
@@ -308,7 +308,7 @@ protected:
 	/**
 	 * Whole-node advertised rewards, grouped by outcome - every static-outcome path of a completing node and what each
 	 * pays, PLUS the any-outcome rewards merged into each (any-outcome fires on every completion, so that's the truthful
-	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome.
+	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAdvertisedRewards.
 	 *
 	 * BOUNDARY-APPROACH CAVEAT (0.6): the manifest keys on FName PathIdentity; this resolves PathIdentity -> outcome tag
 	 * for STATIC outcomes only (RequestGameplayTag). Dynamic PathNames have no compile-time tag and are DROPPED (consistent

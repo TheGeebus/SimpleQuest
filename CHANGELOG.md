@@ -5,6 +5,25 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Documentation
+
+- **The roadmap no longer promises a version number for planned work.** Most
+  planned rows named the release they would ship in, and the sample project was
+  still listed for 0.9.0 after 0.9.0 shipped as the written walkthrough. Planned
+  work now carries a quarter and a status, shipped work keeps the version it
+  shipped in, and 1.0 is the only release named ahead of time. The guided
+  on-ramp reads *In progress*: its walkthrough shipped in 0.9.0, and the
+  step-by-step first questline is still to be written.
+
+- **The walkthrough's closing page describes its own order correctly.** *The
+  Step node, assembled* said its sections followed the order the ideas arrived;
+  they follow the order you configure a Step, which is what the README says. It
+  now also says it applies to every questline graph, not only the tutorial's.
+
+---
+
 ## [0.9.0] — 2026-10-11 — The Written Walkthrough
 
 The written walkthrough, finished - a chapter per idea, start to end, each one a

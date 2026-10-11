@@ -10,7 +10,7 @@
  * Live runtime state of a prerequisite-expression leaf or combinator during PIE, driving the Prereq Examiner's background
  * coloring. Leaves use the full 5-state range (including NotStarted / InProgress nuance for mid-flight source nodes);
  * combinators collapse to a binary Unsatisfied / Satisfied (matching the runtime's boolean evaluation semantics) + Unknown
- * when not in PIE.
+ * when not in PIE. Fact and Outcome leaves use only Unsatisfied / Satisfied - a raw fact has no lifecycle to refine with.
  */
 UENUM()
 enum class EPrereqDebugState : uint8
@@ -24,8 +24,10 @@ enum class EPrereqDebugState : uint8
 	/** Leaf-only: source node is Active or PendingGiver, outcome not yet resolved. Renders amber. */
 	InProgress,
 
-	/** Evaluates false right now. Leaf: source completed/deactivated without producing the fact this leaf checks.
-		Combinator: its boolean eval is currently false. Renders red. */
+	/**
+	 * Evaluates false right now. Leaf: source completed/deactivated without producing the fact this leaf checks.
+	 * Combinator: its boolean eval is currently false. Renders red.
+	 */
 	Unsatisfied,
 
 	/** Evaluates true right now. Leaf: checked fact is present in WorldState. Combinator: boolean eval is true. Renders green. */

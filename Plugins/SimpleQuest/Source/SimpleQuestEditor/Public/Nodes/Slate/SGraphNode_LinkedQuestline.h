@@ -27,6 +27,7 @@ public:
 	void Construct(const FArguments& InArgs, UQuestlineNode_LinkedQuestline* InNode);
 
 	virtual void UpdateGraphNode() override;
+	virtual void AddPin(const TSharedRef<SGraphPin>& PinToAdd) override;
 
 private:
 	TSharedRef<SWidget> CreateAssetPickerWidget();

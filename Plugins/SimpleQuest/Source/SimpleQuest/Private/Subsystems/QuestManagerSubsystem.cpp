@@ -289,6 +289,8 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
     {
         FQuestActivationBlocker Blocker;
         Blocker.Reason = EQuestActivationBlocker::Blocked;
+        UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("CheckQuestObjectives: '%s' refused a trigger - the step is Blocked. ClearBlocked lets it advance."),
+            *Step->GetContextualTag().ToString());
         FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
         return;
     }
@@ -322,6 +324,15 @@ void UQuestManagerSubsystem::CheckQuestObjectives(FGameplayTag Channel, const FI
                 if (!Leaf.bSatisfied) Blocker.UnsatisfiedLeafTags.Add(Leaf.LeafTag);
             }
 
+            if (UE_LOG_ACTIVE(LogSimpleQuestActivation, Verbose))
+            {
+                const FString Unsatisfied = Blocker.UnsatisfiedLeafTags.IsEmpty()
+                    ? FString(TEXT("none - every leaf reads satisfied, so this is a hold rather than a missing condition"))
+                    : FString::JoinBy(Blocker.UnsatisfiedLeafTags, TEXT(", "), [](const FGameplayTag& Tag) { return Tag.ToString(); });
+                UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("CheckQuestObjectives: '%s' refused a trigger - prerequisite gate %s. Unsatisfied leaves: [%s]"),
+                    *Step->GetContextualTag().ToString(),
+                    GateState == EPrereqTriState::Indeterminate ? TEXT("is held for advancement") : TEXT("is unmet"), *Unsatisfied);
+            }
             FQuestPublish::OnAllNodeTags(QuestSignalSubsystem, Step, FQuestProgressRefusedEvent(Step->GetContextualTag(), { Blocker }, Context));
             return;
         }
@@ -487,6 +498,10 @@ void UQuestManagerSubsystem::RegisterQuestlineGraph(UQuestlineGraph* Graph)
         {
             StateSubsystem->RegisterQuestTag(QuestlineTag, true);
             StateSubsystem->RegisterDisplayData(QuestlineTag, Graph->GetAuthoredDisplayName(), Graph->GetDescription(), Graph->GetDisplayData());
+            // No ordering keys: a questline started on its own is nobody's node, so it has no place in anybody's
+            // authored walk, and it carries no bias either - two assets that never refer to each other have no
+            // authored relationship to express. Roots order by when they started, which FQuestOrdering reads from the
+            // entry registry. The unregistered-tag answers (bias 0, position INDEX_NONE) are already correct here.
         }
         else
         {
@@ -710,6 +725,39 @@ void UQuestManagerSubsystem::ClearPathFactAcrossPerspectives(FGameplayTag InputT
     }
 }
 
+const UQuestNodeBase* UQuestManagerSubsystem::FindNodeInstanceByAuthoredGuid(const FGuid& AuthoredNodeGuid) const
+{
+    if (!AuthoredNodeGuid.IsValid()) return nullptr;
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        if (Pair.Value && Pair.Value->GetAuthoredNodeGuid() == AuthoredNodeGuid) return Pair.Value;
+    }
+    return nullptr;
+}
+
+TArray<FGameplayTag> UQuestManagerSubsystem::FindPlacementsOfAsset(FGameplayTag AssetIdentityTag) const
+{
+    TArray<FGameplayTag> Placements;
+    if (!AssetIdentityTag.IsValid()) return Placements;
+
+    // The registry is keyed per perspective, so one instance is visited once per tag it answers to - dedupe on the contextual
+    // tag, which is the one name a placement has regardless of how many spellings reach it.
+    for (const TPair<FName, TObjectPtr<UQuestNodeBase>>& Pair : LoadedNodeInstances)
+    {
+        const UQuestNodeBase* Instance = Pair.Value;
+        if (!Instance || Instance->GetLinkedInnerIdentityTag() != AssetIdentityTag) continue;
+
+        const FGameplayTag ContextualTag = Instance->GetContextualTag();
+        if (ContextualTag.IsValid()) Placements.AddUnique(ContextualTag);
+    }
+
+    UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("FindPlacementsOfAsset: '%s' - %d placement(s) registered"),
+        *AssetIdentityTag.ToString(),
+        Placements.Num());
+
+    return Placements;
+}
+
 void UQuestManagerSubsystem::ResetQuestRunState(FGameplayTag QuestTag)
 {
     if (!QuestTag.IsValid() || !WorldState)
@@ -754,7 +802,7 @@ void UQuestManagerSubsystem::RegisterLoadedNodeInstance(FName Key, UQuestNodeBas
         {
             UE_LOG(LogSimpleQuestActivation, Warning,
                 TEXT("RegisterLoadedNodeInstance: key '%s' already maps to a different Instance ('%s' vs incoming '%s') - ")
-                TEXT("alias keys must be unique per Instance for dedup-by-pointer to work correctly. Preserving existing mapping."),
+                TEXT("alias keys must be unique per Instance for dedupe-by-pointer to work correctly. Preserving existing mapping."),
                 *Key.ToString(),
                 ExistingPtr->Get() ? *ExistingPtr->Get()->GetName() : TEXT("<null>"),
                 *Instance->GetName());
@@ -795,6 +843,9 @@ void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* I
         StateSubsystem->RegisterPlacementIdentity(InnerIdentity, Canonical);
     }
     StateSubsystem->RegisterDisplayData(Canonical, InDisplayName, InDescription, InDisplayData);
+    // Every perspective of a node carries the same bias - a node is one thing however it is spelled, and the
+    // comparator may be handed any spelling.
+    StateSubsystem->RegisterOrderingKeys(Canonical, Instance->NodeInfo.OrderBias, Instance->NodeInfo.AuthoredPosition, Instance->NodeInfo.AuthoredSubtreeEnd);
 
     // Aliases: register each as a perspective of Canonical. RegisterAlias folds in RegisterQuestTag internally.
     for (const FGameplayTag& AliasTag : Instance->GetAssetScopedAliasTags())
@@ -806,6 +857,7 @@ void UQuestManagerSubsystem::RegisterAllNodePerspectives(const UQuestNodeBase* I
             StateSubsystem->RegisterContainerTag(AliasTag);
         }
         StateSubsystem->RegisterDisplayData(AliasTag, InDisplayName, InDescription, InDisplayData);
+        StateSubsystem->RegisterOrderingKeys(AliasTag, Instance->NodeInfo.OrderBias, Instance->NodeInfo.AuthoredPosition, Instance->NodeInfo.AuthoredSubtreeEnd);
     }
 }
 
@@ -912,6 +964,18 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
                 QuestlineTag,
                 FQuestStartedEvent(QuestlineTag, Payload, nullptr));
 
+            // Clear a stale Deactivated before writing Live, mirroring what ActivateNodeByTag does for nodes: a
+            // questline that was torn down and is being started again is re-entering, not resuming. Without this the
+            // identity carries Live AND Deactivated at once, and the NEXT teardown takes SetQuestDeactivated's
+            // inconsistent-state branch - which clears the facts but skips the FQuestDeactivatedEvent re-publish on
+            // the grounds that subscribers already saw the transition. They saw the PREVIOUS run's. Anything driven
+            // by the event rather than by polling the fact (the quest sidebar, for one) then never hears that the
+            // questline ended, so its row survives every run after the first.
+            if (WorldState)
+            {
+                RemoveStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Deactivated);
+            }
+
             // Asset-level Live fact write - symmetric with PublishGraphResolutions's Completed fact write at
             // resolution. Persists past the transient publishes above so late subscribers reconstruct
             // Activated + Started via UQuestLifecycleObserver's catch-up. Uses AddStateFactAcrossPerspectives
@@ -919,6 +983,39 @@ void UQuestManagerSubsystem::ActivateQuestlineGraph(UQuestlineGraph* Graph, cons
             // effectively a single-tag write.
             AddStateFactAcrossPerspectives(QuestlineTag, EQuestStateLeaf::Live);
             MarkQuestStarted(QuestlineTag);
+
+            // Asset-level ENTRY record - the registry twin of the Started anchor written just above. A questline
+            // started on its own is entered exactly as a node is, at a time and by somebody, and until this existed
+            // the registry had no row for it: every other RecordEntry call site passes a NODE's contextual tag, so
+            // "when was this questline entered" had no answer and a Leaf_Entry prereq on a questline tag could never
+            // satisfy.
+            //
+            // *** THIS IS WHAT ORDERS SEPARATELY-STARTED QUESTLINES. *** FQuestOrdering reads its keys where two tags
+            // DIVERGE, and for content in two different assets that point is the two asset identity tags - so an
+            // identity with no row has no arrival to compare and falls through to its own name. QL_Shortcut sorted
+            // above QuickStart.Chapter_9 on the 'L' in "QL_", whatever order the player actually saw.
+            //
+            // Recorded BEFORE the entry-tag loop below, so a questline's own arrival precedes its content's - which is
+            // the causal truth and keeps the sequence monotonic down the hierarchy. A restore does not reach here
+            // (PendingRestoreGraphs skips this whole function and the snapshot carries the rows), so there is no
+            // double-record and the restored arrival is the original one.
+            //
+            // SourceQuestTag carries the launching node when a Start Questline node did it, and is invalid for an
+            // external start - the same distinction it draws for nodes. ExternalAPI rather than InitialEntry or
+            // ChainCascade: no entry tag fired and no outcome routed here. From the target graph's perspective the
+            // start came from outside it, whichever side of the API boundary the caller sat on.
+            if (QuestStateSubsystem)
+            {
+                QuestStateSubsystem->RecordEntry(
+                    QuestlineTag,
+                    Params.OriginTag,
+                    FGameplayTag(),
+                    QuestNow(),
+                    EQuestActivationProvenance::ExternalAPI,
+                    Params,
+                    NAME_None,
+                    Params.OriginatingEventID);
+            }
         }
         else
         {
@@ -1511,7 +1608,16 @@ void UQuestManagerSubsystem::HandleOnNodeStarted(UQuestNodeBase* Node, FGameplay
             // the resolution registry pattern from item 2: appends an FQuestEntryArrival to the destination's
             // FQuestEntryRecord and broadcasts FQuestEntryRecordedEvent on the destination's tag channel.
             // Inner-graph Leaf_Entry prereqs subscribe to that event via FPrereqLeafSubscription and re-evaluate.
-            if (IncomingOutcomeTag.IsValid() && QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
+            //
+            // NOT gated on the incoming outcome. A container is started in four ways and only one of them carries
+            // one: a wired cascade brings an outcome, while a prerequisite gate satisfying, an external Activate
+            // call, and a Start Questline node all arrive with none. Gating the record on the outcome recorded the
+            // first and silently dropped the other three - so a gated chapter, an API-started Quest, and an
+            // independently started questline left no trace of having been entered at all, and the Entries tab
+            // could not answer the one question it exists to answer. Provenance already distinguishes the four
+            // (ActivateNodeByTag stamps it before queueing this context), so the record is the honest place to
+            // tell them apart. Outcome-specific ROUTING below stays gated - an absent outcome routes nothing.
+            if (QuestStateSubsystem && QuestNode->GetContextualTag().IsValid())
             {
                 const double Now = QuestNow();
                 QuestStateSubsystem->RecordEntry(
@@ -1604,11 +1710,12 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     if (!Node) return;
 
     UE_LOG(LogSimpleQuestActivation, Verbose,
-        TEXT("HandleOnNodeForwardActivated: '%s' - %d boundary completion(s), %d resolved graph(s), %d next node(s)"),
+        TEXT("HandleOnNodeForwardActivated: '%s' - %d boundary completion(s), %d resolved graph(s), %d next node(s), %d to deactivate"),
         *Node->GetContextualTag().ToString(),
         Node->GetBoundaryCompletionsOnForward().Num(),
         Node->GetResolvedGraphsOnForward().Num(),
-        Node->GetNextNodesOnForward().Num());
+        Node->GetNextNodesOnForward().Num(),
+        Node->GetNextNodesToDeactivateOnForward().Num());
     
     // The utility node's PendingActivationContext was populated by the upstream activation (cascade stamp, or
     // signal-driven self-stamp on UActivationGroupListenerNode). Its OriginatingEventID identifies the gameplay
@@ -1646,6 +1753,30 @@ void UQuestManagerSubsystem::HandleOnNodeForwardActivated(UQuestNodeBase* Node)
     // upstream stamp) propagates through the forward chain. Mirrors ChainToNextNodes::StampAndActivate. Identity
     // for utility nodes that don't carry payload (SetBlocked / ClearBlocked) - those fields stay zero-init either
     // way so the stamp is a harmless overwrite. OriginatingEventID rides through this wholesale copy.
+
+    // Forward-path teardown, and it runs BEFORE the activation loop below on purpose. A utility that closes one
+    // route and opens another - the Activation Group Exit case - means the opening to be the end state, and a
+    // deactivation cascade (NextNodesToDeactivateOnDeactivation on each target) can reach nodes the activation
+    // loop is about to start. Tearing down first and starting second leaves what the author drew; the other order
+    // can silently undo the activation and leave the graph with nothing live.
+    // Mirrors CascadeDeactivation's DeactivateEach: each compile-time FName is in the source node's compile
+    // perspective, so it resolves to canonical before SetQuestDeactivated, whose visited guard breaks cycles.
+    for (const FName& Tag : Node->GetNextNodesToDeactivateOnForward())
+    {
+        const FGameplayTag TargetTag = UGameplayTagsManager::Get().RequestGameplayTag(Tag, false);
+        const FGameplayTag CanonicalTarget = ResolveToCanonicalTag(TargetTag);
+        if (!CanonicalTarget.IsValid())
+        {
+            UE_LOG(LogSimpleQuestActivation, Warning,
+                TEXT("HandleOnNodeForwardActivated: '%s' - forward deactivation target '%s' resolved to no canonical tag; skipped"),
+                *Node->GetContextualTag().ToString(), *Tag.ToString());
+            continue;
+        }
+        UE_LOG(LogSimpleQuestActivation, Log, TEXT("HandleOnNodeForwardActivated: '%s' deactivating '%s'"),
+            *Node->GetContextualTag().ToString(), *CanonicalTarget.ToString());
+        SetQuestDeactivated(CanonicalTarget, EDeactivationSource::Internal);
+    }
+
     for (const FName& Tag : Node->GetNextNodesOnForward())
     {
         if (UQuestNodeBase* DestInstance = LoadedNodeInstances.FindRef(Tag))
@@ -2159,7 +2290,7 @@ void UQuestManagerSubsystem::ActivateNodeByTag(FName NodeTagName, EQuestActivati
         //
         // State writes and watch registrations route the cascade's NodeTag through ResolveToCanonicalTag so every
         // call below targets the canonical ContextualTag the state subsystem's queries alias-walk to. Under
-        // AuthoredGuid-dedup the cascade's NodeTag may be an alias-key form; writing under that form leaves the
+        // AuthoredGuid-dedupe the cascade's NodeTag may be an alias-key form; writing under that form leaves the
         // canonical fact missing and QueryQuestActivationBlockers returns NotPendingGiver despite the gate having
         // fired. Matches the canonical-resolution pattern used by the request-side BP handlers (HandleResolveRequest,
         // HandleNodeDeactivationRequest, etc.) and the Node->GetContextualTag() convention used by SetQuestLive /
@@ -2419,7 +2550,7 @@ void UQuestManagerSubsystem::ChainToNextNodes(UQuestNodeBase* Node, FGameplayTag
     // the Any-Outcome route appears in both lists below, and each loop activates unconditionally - so a Grant Rewards
     // node wired to an outcome pin AND to Any Outcome was reached twice and paid twice. Wiring two routes into one node
     // asks for one arrival, not two. Scoped to this call, so a later completion activates the same destination again as
-    // normal - this dedups a single cascade, not the node's lifetime.
+    // normal - this dedupes a single cascade, not the node's lifetime.
     TSet<FName> ActivatedThisCompletion;
 
     auto StampAndActivate = [this, &ForwardPayload, &ForwardChain, OutcomeTag, SourceTagName, &Node, &OriginatingEventID, &ActivatedThisCompletion](const FName& DestTagName)
@@ -3107,7 +3238,7 @@ void UQuestManagerSubsystem::HandleClearBlockRequest(FGameplayTag Channel, const
 
     // Multi-channel publish - mirrors HandleBlockRequest's OnAllTagsForRequest path so subscribers on any
     // perspective of this Step (ContextualTag or any AssetScopedAliasTag) receive one callback via the
-    // bus's per-subscriber dedup. Without this, an observer subscribed via one perspective misses unblock
+    // bus's per-subscriber dedupe. Without this, an observer subscribed via one perspective misses unblock
     // events published on a sibling perspective's canonical.
     FQuestPublish::OnAllTagsForRequest(QuestSignalSubsystem, QuestTag, LoadedNodeInstances, FQuestUnblockedEvent(QuestTag, Event.Source, Event.Context));
 
@@ -3614,7 +3745,7 @@ void UQuestManagerSubsystem::DeriveContainerLive(FGameplayTag ContainerTag)
     // on the first active inner Step.
     //
     // InnerStepTags reflect the WRAPPER's compile perspective, which may differ from the canonical perspective
-    // post-AuthoredGuid dedup (the wrapper unique to one asset references inlined Steps whose canonicals were
+    // post-AuthoredGuid dedupe (the wrapper unique to one asset references inlined Steps whose canonicals were
     // registered first by another asset). HasActiveLifecycle is a direct WorldState->HasFact probe with no alias
     // walk, so without canonicalizing the query tag, an outer-asset wrapper sees its inner Steps as inactive
     // even when the canonical Live fact is set. ResolveToCanonicalTag resolves each entry to the perspective
@@ -3876,7 +4007,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
 
     if (UQuestNodeBase* WrapperNode = LoadedNodeInstances.FindRef(BC.WrapperTagName))
     {
-        // Event-keyed dedup gate: a single gameplay event (Step resolution → cascade → wrapper completion)
+        // Event-keyed dedupe gate: a single gameplay event (Step resolution → cascade → wrapper completion)
         // can reach the same wrapper through multiple paths under multi-tag fanout - e.g., both this
         // context's Listener and another context's Listener forwarding their BoundaryCompletions to this
         // wrapper after their respective Setters publish on the shared GroupTag channel. Without this gate,
@@ -3885,7 +4016,7 @@ void UQuestManagerSubsystem::FireWrapperBoundaryCompletion(const FQuestBoundaryC
         // skipped; loops that re-resolve at a later moment (different timestamp) or multi-resolution within
         // a single Live phase from a different originating Step (different authored GUID) produce distinct
         // event IDs and proceed normally. Invalid event IDs (default-constructed - non-cascade origin like
-        // direct external API resolution) skip the dedup logic entirely so non-cascade paths aren't filtered.
+        // direct external API resolution) skip the dedupe logic entirely so non-cascade paths aren't filtered.
         if (UQuest* WrapperContainer = Cast<UQuest>(WrapperNode); WrapperContainer && OriginatingEventID.IsValid())
         {
             if (WrapperContainer->ResolvedByEvents.Contains(OriginatingEventID))
@@ -3985,7 +4116,7 @@ void UQuestManagerSubsystem::PublishGraphResolutions(const TArray<FQuestGraphRes
         //
         // *** ONLY FOR A QUESTLINE NOBODY ELSE ANNOUNCES. *** An EMBEDDED questline is announced by its placement,
         // whose publish now carries the inner identity as one of its channels (FQuestPublish::OnAllNodeTags). Firing
-        // again here made two publishes of one completion, and the bus cannot dedup across publishes - so every
+        // again here made two publishes of one completion, and the bus cannot dedupe across publishes - so every
         // subscriber bound at a broad ancestor received a chapter's completion twice, one delivery per publish.
         // LiveGraphsByIdentity holds exactly the graphs activated in their own right, which is exactly the set with
         // no placement to speak for them.

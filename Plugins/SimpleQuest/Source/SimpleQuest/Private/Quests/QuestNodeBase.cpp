@@ -20,7 +20,7 @@ UWorld* UQuestNodeBase::GetWorld() const
 void UQuestNodeBase::Activate(FGameplayTag InContextualTag)
 {
     // Stash the cascade's event ID so subclasses (UPrereqGateNode) can read it during ActivateInternal for
-    // per-event-ID dedup. PendingActivationContext was populated by the manager before Activate runs.
+    // per-event-ID dedupe. PendingActivationContext was populated by the manager before Activate runs.
     LastIncomingEventID = PendingActivationContext.IncomingParams.OriginatingEventID;
     
     // Prerequisite bypass - a caller asked to activate ignoring prereqs (a deliberate jump / unlock / replay press).
@@ -258,6 +258,11 @@ void UQuestNodeBase::ResolveAssetScopedAliasTags(const TArray<FName>& TagNames)
     UE_LOG(LogSimpleQuestActivation, Verbose, TEXT("ResolveAssetScopedAliasTags: %d alias(es) resolved for '%s'"),
         AssetScopedAliasTags.Num(),
         *ContextualTag.ToString());
+}
+
+FQuestPrereqStatus UQuestNodeBase::GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const
+{
+    return PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, QuestState);
 }
 
 const TArray<FName>* UQuestNodeBase::GetNextNodesForPath(FName PathIdentity) const

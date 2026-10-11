@@ -10,10 +10,10 @@
 #include "IDesktopPlatform.h"
 #include "HAL/FileManager.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Misc/TransactionObjectEvent.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
-#include "SSearchableComboBox.h"
 #include "Resolver/QuestDataFormatRegistry.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestMappingSource.h"
@@ -25,6 +25,11 @@
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "SSearchableComboBox.h"
+#else
+#include "Widgets/Input/SSearchableComboBox.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "QuestImportMappingDetails"
 
@@ -98,7 +103,7 @@ TArray<FString> FQuestImportMappingDetailsCustomization::SampleDiscriminatorValu
 TArray<FString> FQuestImportMappingDetailsCustomization::SampleQualifierOptions() const
 {
 	// The structural flow pins every graph has, plus the combinator outputs a feeds-prereq wire can leave from.
-	TArray<FString> Out = { TEXT("Any Outcome"), TEXT("Entered"), TEXT("Deactivated"), TEXT("Out"), TEXT("PrereqOut") };
+	TArray<FString> Out = { TEXT("Any Outcome"), TEXT("Entered"), TEXT("Deactivated"), TEXT("PrereqOut") };
 
 	const UQuestImportMapping* M = Mapping.Get();
 	if (!M || SampleFolder.IsEmpty()) return Out;

@@ -5,6 +5,584 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.9.0] — 2026-10-11 — The Written Walkthrough
+
+The written walkthrough, finished - a chapter per idea, start to end, each one a
+room you play before it explains itself, and a closing page that puts the Step
+node back together out of the eleven rooms that taught it;
+the quest components stop inheriting from each other - four distinct roles built
+on a new SimpleCore component that watches world state facts, which is the one
+change in here that can break a project, and which an actor relying on an
+inherited surface will need one added component to answer;
+compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
+the four deprecations and one load failure that verifying it turned up; the
+Prerequisite Examiner made truthful - every state it advertised is now produced,
+and every node it can pin evaluates; a crash found by doing what an author will
+do - saving assets while playing; a routing rule that now says one thing for both
+role components; one order for every list of quest content, so a reload shows
+what the player was just looking at; and a fact subscription that can be told
+what is already true instead of having to go and ask.
+
+### Added
+
+- **A questline can now be closed from a graph, not only opened.** *Start
+  Questline* has always had no counterpart: a questline could be launched as a
+  unit and then had to be taken apart a Step at a time, or blocked, which is a
+  different thing - blocking is a gate that stays shut, and a finished questline
+  is simply finished. The new **Deactivate Quest** node, under *Flow Control*,
+  names one or more quests and tears them down without blocking anything, so
+  they can be started again immediately. It accepts a Step, a container, or a
+  whole questline's tag. Given a questline, the teardown runs through that
+  questline's own *Entry* node and its *Deactivated* output, so the graph being
+  closed is the one that decides what closing it means - and because a
+  questline's running state is derived from its Steps rather than stored
+  separately, it leaves the HUD and every query consistent without any
+  bookkeeping of your own.
+
+- **The graph's debug overlay can report one placement at a time.** A questline
+  placed in several graphs - or twice in one - runs as several instances at
+  once, and every lifecycle fact is written at every one of a node's addresses,
+  so the address a Step has inside its own asset belongs to all of its
+  instances. Opening that asset during play therefore showed them merged: a
+  node read Live when any instance of it was. The graph editor's toolbar now
+  ends with a placement picker, in the spot and the shape Blueprints use for
+  their debug object: it lists the placements running right now, and choosing
+  one narrows the halos, the gating rings, the refusal pulses, and the
+  Prerequisite Examiner's tints to that instance. It reads *All placements*
+  until you choose - the merged view, and the only thing a singly-placed asset
+  can mean - and it resets when play ends.
+
+- **Prerequisite Gate nodes can be examined.** Right-click a gate and choose
+  *Examine Prerequisite Expression*, as on a content node. A gate compiles to a
+  utility instance with no tag of its own, so the manager gained a lookup by
+  authored node guid - `FindNodeInstanceByAuthoredGuid`, virtual and under the
+  same replacement-contract note as `FindNodeInstance` - and the PIE debug
+  channel falls back to it for tagless nodes. A gate whose expression is unmet
+  now also wears the overlay's gating ring, through the same lookup.
+
+- **An Activation Group can close a route as well as open one.** A group's
+  *Exit* node fires when anything publishes the group's tag, and its output
+  could already start whatever it was wired to. Wired instead to a node's
+  *Deactivate* input it did nothing at all, and said nothing about it: the
+  connection was accepted, the compile was silent, and the wire simply never
+  arrived. An Exit now tears down as well as starts, so one published tag can
+  close the long way around and open the shortcut in the same moment - which
+  is what a group is for. When an Exit does both, the teardown runs first and
+  the activation second, so the route being opened is the one you end up on;
+  the other order lets a deactivation cascade reach what was just started and
+  undo it.
+
+- **Content nodes carry an *Order Bias*, for the cases where the graph's own
+  layout reads wrong.** Quest content is listed in authored order everywhere now
+  (see *Changed*), and that order is read from the graph: top to bottom for
+  parallel branches, left to right for flow, which is how these graphs are
+  already arranged. Order Bias is the override for where that is not the intent.
+  It is a signed whole number defaulting to 0 - higher sorts earlier, negative
+  sorts after everything unset - so eleven chapters with nothing authored still
+  come out 1 to 11, and the property is reached only where the arrangement is
+  wrong. It is a nudge off a computed default, not a position: nothing in it
+  suggests that 7 means seventh.
+
+- **A fact subscription can be told what is already true.** `Subscribe To Fact
+  Added`, on the SimpleCore Blueprint library and as a C++ method on the world
+  state subsystem, wires the ordinary subscription *and* delivers every matching
+  fact that is already asserted - so a component spawning into a world where the
+  power is already on hears about it instead of having to go and ask. Both halves
+  happen inside the one call, so no publish can land between them and be seen
+  twice. A replay reaches only the subscriber that just arrived; nothing is
+  published and nobody else on the channel sees anything. The event carries a
+  `Catch Up` flag that reads as *this is already true* rather than *this just
+  happened*, which is the distinction a handler that plays a sound or a flourish
+  needs and one that sets state can ignore.
+
+  Removal is deliberately not replayed. A fact being absent is the condition of
+  nearly every tag that exists, and a removal that already happened is a moment
+  that has passed - delivering it late would assert that something just happened
+  when it did not. If *it was true once* matters to you, record that as its own
+  fact.
+
+- **And a fact becoming false can be subscribed to as well.** *Subscribe To Fact
+  Removed* is the counterpart, on the same Blueprint library and as a C++ method,
+  and it is the simpler of the two: nothing is replayed, for the reason just
+  above. It adds no behavior the signal bus did not already have - what it adds
+  is an answer. The missing node read as *removal is not observable* and sent
+  people hunting in the bus for something that was there all along.
+
+- **A Blueprint can now stop listening to one channel without dropping
+  everything else.** Cleanup had two settings and no middle: *Unsubscribe
+  Listener*, which drops every subscription an object holds on every channel, or
+  nothing at all, since the per-subscription form needs a handle no graph can
+  hold. A widget watching two unrelated channels had to give up both to stop
+  hearing one. The new **Unsubscribe From Channel** node names a channel and
+  clears that object's bindings on it, leaving everything else intact. It drops
+  *every* event the object has bound to that channel, which is what stopping a
+  channel means, and it returns how many it removed - the difference between
+  *nothing was listening* and *something was, and now is not*. Worth knowing: a
+  silent zero is exactly how a leaked subscription hides.
+
+- **SimpleCore has a component now, and it watches world state.** Add **Simple
+  Core Observer** to any actor, list the fact tags it cares about, and bind *On
+  Fact Added* and *On Fact Removed*. That is the whole configuration. The tag
+  picker is deliberately unfiltered, because facts belong to whoever writes them
+  - a weather system's `MyGame.Weather.Raining` is as valid here as anything a
+  quest publishes, and the component cannot tell the difference. Watch a parent
+  tag and everything beneath it arrives, each delivery carrying the specific
+  fact's own tag.
+
+  It answers one question - *is this true* - and answers it from the moment it
+  registers rather than only from the next change, because every matching fact
+  already asserted is replayed to it on arrival, flagged as a catch-up delivery.
+  A door that should be open because the power came on before it spawned is open.
+
+  You can also leave the list empty and call *Add Observed Fact* at runtime, which
+  is the better shape when something the owning actor already knows should decide
+  what to watch - one variable deciding, rather than the same tag authored twice.
+
+  This is the component the quest components are now built on, so all four of them
+  can watch facts without being observers of anything (see *Changed*). SimpleCore
+  had only subsystems and a Blueprint library before this.
+
+  **The example wall sconce is now built this way**, and it is worth opening: it
+  carries this component and no quest component at all. It lights when a fact is
+  true and goes dark when it stops being true, and it has no idea whether a quest
+  wrote that fact, a prerequisite rule did, or a Blueprint did it by hand. That was
+  always the promise of a fact - the walkthrough's prerequisites chapter says a
+  door, a light, and a rule all read the same published tag without caring who
+  wrote it - and until now it was true of the fact but not of the component you
+  would reach for to act on one.
+
+### Changed
+
+- **A Trigger's watched Steps are no longer observed for broadcast.** A Quest
+  Trigger has always put the Steps it can fire onto its own Observer delegates,
+  so binding *On Quest Started* reported them without listing them anywhere.
+  That was a convenience with a sharp edge: the component's *Observed Tags* no
+  longer described what the component reported, and one component serving as
+  both a trigger and a display would show its own buttons in its own log - on
+  whatever the display happened to be showing, since the watched Steps outlive
+  any change to *Observed Tags*. *Step Tags To Trigger* now arms the trigger and
+  nothing else, and *Observed Tags* means exactly what the details panel shows.
+  To follow a watched Step on the Observer delegates, add it to *Observed Tags*
+  as well - one line, and visible. **Nothing about firing changed**, and a Quest
+  Giver still reports the quests it gives without listing them.
+
+- **Deactivation pins sit across from each other, so a teardown chain draws
+  straight.** A node's *Deactivate* input and its *Deactivated* output are now
+  anchored to the bottom of the node rather than following the activation pins
+  down the left and right edges. Wire one node's *Deactivated* into the next
+  node's *Deactivate* and the orange wire runs level instead of sloping, which
+  is what lets a chain of them read as one run of plumbing rather than a tangle
+  crossing the activation wires above it.
+
+- **Reroute nodes take the color of the wire they are sitting on.** A reroute
+  dropped onto a prerequisite wire stayed the color of the pin it came from, so
+  a condition could change color halfway along its length. Two things were
+  wrong: reroutes were only picking up a color when a connection was made in
+  certain ways and not when it was drawn by hand, and the color was being read
+  from where the wire *starts* rather than where it *ends* - which is what
+  decides a wire's appearance, since an outcome plugged into a *Prerequisites*
+  pin is a condition for its whole length. Reroutes now re-read their color
+  whenever anything on either side of them changes.
+
+- **The Prerequisite Examiner shows five states per condition, and everything
+  it can pin evaluates.** A condition on a source node reads grey before the
+  source has activated, amber while it is Live or waiting on a giver, green once
+  the fact it checks is present, and rust when the source ended without
+  producing it. The panel's tints always listed the first two; nothing produced
+  them, so every unmet condition read rust from the moment the room opened.
+  Pinning an AND, OR, or NOT, a Prerequisite Rule's Entry or Exit, or a Fact
+  Tag or Outcome node showed blank boxes, because none of those has a runtime
+  instance to evaluate against. The examiner now finds the content node or gate
+  the pinned expression feeds and evaluates as that, folds a combinator to
+  Satisfied or Unsatisfied from its inputs, and correlates Fact and Outcome
+  leaves by their tag under a *Fact:* row header. One nuance on replay: the
+  Started and Completed anchors persist, so a re-gated condition reads rust,
+  not grey, until its source goes Live again.
+
+- **The AND node's output pin is *PrereqOut*, the name OR and NOT already
+  use.** It was *Out*, which the editor's pin-role table did not recognize, so
+  any walk out of an AND - the examiner's, for one - stopped there. Saved graphs
+  migrate on load, one log line per AND node, and the tutorial graphs that carry
+  one are re-saved. The Data Resolver writes the combinator edge as
+  `feeds-prereq(PrereqOut)` and still imports `feeds-prereq(Out)` from an older
+  export, so existing DataTables round-trip unchanged; the mapping picker no
+  longer offers *Out*.
+
+- **The graph's hover highlight sits outside the PIE halos.** It was drawn at
+  the lifecycle halo's own size one layer beneath it, so a hovered node with
+  state showed the two colors blended through the glow. The hover band now
+  steps out to the next ring - outside the lifecycle halo when one is drawn,
+  outside the gating ring when that is - and draws on top of both, so the
+  three read as evenly spaced concentric rings.
+
+- **The Trigger component routes its subscriptions exactly.** Its own five
+  subscriptions, the observer bridge for `Step Tags to Trigger`, and tags added
+  at runtime all use exact routing, matching the Giver. Nothing changes for a
+  Step tag - Steps have no descendant tags, so hierarchical and exact delivered
+  identically - and authoring the asset-form spelling of a placed Step still
+  works, because a Step's publishes carry each of its addresses as a channel of
+  its own. What it rules out is a container tag in the list fanning every inner
+  Step's events onto the trigger's delegates while the trigger can never fire
+  one, a container being never Live. The activation guard's warning now says
+  what it checks.
+
+- **Quest content is listed in one order, everywhere, and a reload reproduces
+  what the player saw.** Each surface that shows content in a list used to
+  invent its own order, and they disagreed - so the same chapter could appear in
+  one order during play and another after loading a save. There is now a single
+  rule behind the cascade, catch-up replay, the outliner, and the sidebar.
+  Content inside a graph is ordered by its place in the authored progression:
+  the compiler walks the graph from its entry points, so a node is always listed
+  before anything it activates, and siblings follow the graph's layout unless an
+  *Order Bias* says otherwise. Questlines started on their own are a different
+  question - nothing in either asset refers to the other, so there is no authored
+  order to read - and those are listed by when they actually started, which is
+  also exactly the order they appeared in during play.
+
+  Two consequences worth knowing. A parent is always listed before its children,
+  which is what lets a list widget nest by arrival without sorting anything
+  itself. And because the authored order is settled when the graph compiles,
+  **questlines authored before this release need recompiling to pick it up** -
+  *Compile ▸ All* in any questline's toolbar does the project in one pass.
+  Nothing about the graph changed, so nothing prompts you.
+
+- **Node title colors ship with the palette the QuickStart graphs use.** The
+  entry, active-exit, and utility node defaults are the tuned values rather than
+  the originals, so a fresh project matches the screenshots in the walkthrough
+  without touching the visual settings. The unused graph-outcome color is gone.
+
+- **Unsubscribe Listener's pin says what it is.** The node's one input was
+  labeled *World Context Object* while what it actually took was the object to
+  unsubscribe - it had always used that pin for both jobs, so the behavior was
+  right and only the label was wrong. The pin is now *Listener* and defaults to
+  *self*, so the ordinary case needs nothing wired at all; wire it only to
+  unsubscribe some other object. **A graph that wired the old pin needs
+  reconnecting** - the value it was passing is the value the new pin wants, so
+  the fix is the same wire into the renamed pin, or no wire at all when the
+  target is the graph's own actor.
+
+- **The quest components are four peers instead of a chain, and that will break
+  Blueprints.** They used to inherit from each other: an observer at the bottom,
+  a trigger built on it, and a giver built on *that*, with the reward recipient
+  off to one side. So a Trigger silently *was* an Observer, and a Giver was both.
+  Convenient - and the cause of three separate pieces of machinery whose only job
+  was refereeing what a child injected into its parent's surface, including the
+  one that made a trigger's own buttons show up in its own event log. All four are
+  now distinct children of the new Simple Core Observer component, inheriting
+  infrastructure and nothing else.
+
+  **What to check is one question: do you have a Trigger or a Giver with no
+  Observer beside it, binding a lifecycle event?** That binding is now dead. A
+  Trigger has lost *Observed Tags*, *On Any Quest Event*, and the twelve typed
+  lifecycle delegates. A Giver has lost those *and* the trigger surface - *Step
+  Tags To Trigger* and its role delegates. Nothing fires differently; the events
+  publish exactly as they did. A flat component simply only reports what its own
+  role is about.
+
+  **The fix is to add the component for the job you were relying on.** An actor
+  that fires Steps *and* reports a quest's lifecycle takes a Quest Trigger
+  Component and a Quest Observer Component, and says so in its component list
+  instead of getting the second one by accident. Each component also keeps or
+  gained its own role events: the Giver's *On Quest Given* and *On Give Refused*
+  are new this release and report only the gives that giver made, which the
+  inherited route could never do. The walkthrough's archive console went through
+  this migration itself - one component became two, and the chapter about
+  observers now shows an observer.
+
+- **A deprecated watched-step list is gone, along with two functions that read
+  it.** `WatchedStepTags` was superseded by *Observed Tags* and kept for
+  compatibility, but it was never a saved property and nothing ever wrote to it,
+  so it has been permanently empty for its whole life. *Get Registered Watched
+  Step Tags* and its C++ sibling therefore always returned nothing, and the Stale
+  Quest Tags panel scanned a field that could never hold a stale tag. All three
+  are removed. If a graph calls that node, it was reading an empty container;
+  *Observed Tags* is where the answer lives.
+
+### Removed
+
+Everything here has been warning at compile time for a release, with the
+replacement named in the warning. If your project compiles clean today, nothing
+in this section affects you.
+
+- **Four reward preview functions are gone, replaced by two that answer more.**
+  *Get Advertised Rewards For Any Outcome*, *Get All Advertised Rewards By
+  Outcome*, *Get Questline Rewards*, and *Get Questline Rewards From Asset* all
+  predated **Get Advertised Rewards**, which returns every channel a tag pays
+  keyed by outcome - node rewards and the questline's own completion rewards in
+  one answer, with `SimpleQuest.Outcome.AnyOutcome` as a key in its own right.
+  Use it, or **Get Advertised Rewards From Asset** for the cold catalog case
+  where no game is running. Each removed function was a narrower slice of that
+  same picture, and keeping four doors onto one room meant four things to keep
+  honest.
+
+- **Scaled Amount Reward is gone. Use an Amount Reward with a Scale By Recipient
+  modifier.** It fused a source with a transform, which is why *scaled loot*
+  would have needed a second class of its own, and a scaled anything-else a
+  third. The replacement pair behaves identically for the case it covered and
+  composes with every other reward source, which is what the modifier layer was
+  built for. It has been hidden from the class picker since 0.8.0, so no new one
+  could be authored, and the compiler has warned once per node still holding one.
+
+- **The Quest Loot Table data asset is gone. Use the Loot Table.** Loot moved to
+  a DataTable in 0.8.0 - bulk-editable, diffable, importable from a spreadsheet -
+  and the data asset stayed one release so existing questlines kept loading while
+  their rows were re-authored. A Loot Table Reward's *Loot Table (legacy)* field
+  goes with it, along with the fallback that read it when the DataTable was
+  empty. A reward still pointing at a data asset now simply has no table, which
+  the log says plainly at grant time.
+
+  The old class name is not being reclaimed, and that is deliberate: a questline
+  saved against the data asset would resolve its reference to the DataTable
+  wrapper, which cannot hold its data. A clean *asset not found* is recoverable;
+  a quiet resolve to the wrong type is not.
+
+### Fixes
+
+- **A component subscribed to overlapping tags at two different moments
+  received every shared event twice.** A component takes its authored
+  subscriptions when it registers, and can take more later through *Add
+  Observed Tag*. Where the two sets overlapped, the same handler was treated as
+  two different ones, so the protection against repeat delivery never
+  recognized it. Anything bound to that component ran twice per event - a log
+  gained a second row, a counter counted double, a flourish played over itself.
+  Components with a role of their own were the most exposed, since a Giver or a
+  Trigger that also observes its own questline brings subscriptions alongside
+  the authored ones. Repeat delivery is now collapsed on both delivery paths,
+  including the single-channel one that most events take and that had no such
+  protection at all.
+
+- **The Stale Quest Tags tool missed stale entries on a Trigger or a Giver.**
+  The tool walks every component on an actor and reports any tag that no longer
+  exists, but it stopped at the first kind of component it recognized - and
+  because a Quest Giver is also a Quest Trigger, which is also a Quest
+  Observer, only one of each component's tag fields was ever reached. A Giver
+  carries four authored tag fields and exactly one of them got checked. So a
+  Trigger or a Giver holding a stale entry in *Observed Tags* or *Watched Step
+  Tags* reported clean, and the components carrying the most tags were the
+  least examined. Every authored tag field on every component is now checked,
+  so a single component can report several entries, each named by the field it
+  came from - expect the panel to find things it used to walk past. It also
+  labeled a Trigger's step tags *Step Tags To Watch*, which is no longer that
+  field's name; it now reads *Step Tags To Trigger*.
+
+- **A reroute node can no longer sneak a second wire from one outcome into the
+  same condition.** An outcome may feed a combinator once; a second wire from
+  the same outcome would make the condition depend on one thing twice. Dragging
+  from the combinator to create the reroute was refused correctly, but dragging
+  from the outcome pin first and then connecting that reroute to a second
+  condition input was allowed - the check that catches it was running on one of
+  those two routes and not the other. The rule now lives in one place and every
+  route asks it, including the one through reroutes.
+
+- **A questline that is started, stopped, and started again reports its end
+  every time.** Starting a questline wrote its running state without clearing
+  the stopped state left behind by an earlier teardown, so on the second run it
+  carried both at once. The next teardown recognized that pair as inconsistent,
+  cleared the state correctly, and skipped re-announcing the end - on the
+  reasoning that listeners had already been told, which was true of the previous
+  run rather than the current one. Anything that listens for the announcement
+  instead of polling the state, the quest sidebar among them, never heard that
+  the questline had ended, so it kept showing it after the first run. Individual
+  quest nodes already cleared the stale state when they re-activated; questlines
+  now do the same. Reachable from any questline launched by *Start Questline*
+  and then deactivated, which the new *Deactivate Quest* node makes easy to do.
+
+- **The Quest State panel's *Entries* tab reports every start, not only wired
+  ones.** A Quest or a placed questline records how it was entered - from which
+  node, on which outcome, credited to which actor. That record was only written
+  when an outcome-carrying wire started it, so the three other ways a container
+  starts wrote nothing at all: a chapter opened by a prerequisite gate, a Quest
+  started by a game system calling *Activate Quest*, and a questline launched by
+  a *Start Questline* node were absent from the tab entirely, with no row to say
+  they had ever begun. All four now record, and the *Provenance* column is what
+  tells them apart - *ChainCascade*, *ExternalAPI*, *GiverGate*, or
+  *InitialEntry*.
+
+- **SimpleQuest no longer fails to load when Electronic Nodes is installed but
+  not enabled.** The optional Electronic Nodes integration decided whether to
+  build itself by looking for EN on disk, and then for an explicit
+  `"Enabled": false` in the project file. A project with EN installed - for some
+  other project, at some other time - but never enabled in this one matched
+  neither test, so the integration was compiled and linked against a plugin that
+  was never loaded, and the editor then refused *all* of SimpleQuest with an
+  error naming a module you had never heard of. The build now asks Unreal
+  whether EN will actually be enabled for what it is building, so a project that
+  says nothing about EN simply gets no integration and loads normally. Unreal
+  5.7 and later only - earlier engines never built the integration at all.
+
+- **SimpleQuest builds without deprecation warnings on Unreal 5.8.** Four of the
+  engine APIs it used were deprecated there: the searchable combo box header
+  moved from ToolWidgets to Slate, the connection drawing policy's mouse
+  position was renamed, a graph node attribute the engine no longer reads was
+  retired, and the gameplay tag manager's last-chance registration hook was
+  replaced. Each now resolves to the right spelling for the engine compiling it,
+  so 5.6 and 5.7 are untouched and 5.8 is clean. This had been a hard build
+  failure for any project compiling with warnings as errors.
+  - Thanks to **Buckley603**, who reported three of the four.
+
+- **`SimpleQuest.RoundTrip` returns a verdict again.** The command proved its
+  artifacts belonged to the run in progress by comparing their timestamps
+  against the moment it started - but Unreal reports a file's timestamp to the
+  nearest whole second, while the clock it was compared against carries
+  milliseconds. Any round trip that finished inside one second therefore read
+  its own fresh output as older than itself and aborted with no verdict, which
+  small questlines on fast machines did every time. The check no longer consults
+  a clock at all: the export reports back through the same channel the editor
+  panels listen to, so a step that runs and *refuses* is now named, along with
+  the reason it gave, instead of being reported as a stale folder.
+  - Thanks to **Buckley603**, who reported it with two reproductions and the
+    likeliest wrong explanations already ruled out.
+
+- **A JSON export no longer reports a questline as changed because of its
+  reroute nodes.** The writer recorded how many reroute nodes the export had
+  collapsed - a note about the export, not about the questline - and the
+  round-trip check, which compares the exported files, saw that note differ on
+  every run, because a reimported copy has no reroute nodes left to collapse.
+  Any questline containing one reported a mismatch that was not there. The count
+  is no longer written into the file; it is still reported in the export's
+  summary line, which is where it was always meant to live. Files written by an
+  earlier version still load, and the TSV writer never recorded it, so the two
+  formats now describe an export the same way.
+
+- **A caught-up STARTED no longer names the player as the giver of a cascaded
+  Step.** The entry record credits one actor per start - the giver for a give,
+  and by design the completer of the source for a cascade, so rewards and the
+  next Objective can see who did it - and `Get Last Giver Actor` returned that
+  actor for every start. A subscriber catching up on a cascaded Step therefore
+  received a STARTED with a giver the live event never carried, and the Facts
+  Panel's Entries tab listed the player under *Giver*. The accessor now answers
+  only for a give, `Get Last Instigator Actor` is the generic read, catch-up
+  uses each where the live path does, and the Entries column is named for what
+  it shows: *Instigator*, read beside *Provenance*.
+
+- **Recompiling a questline during a play session could crash the next
+  questline-level reward grant.** Compiling a registered graph moves the previous
+  compile's node instances and questline rewards out of the asset, and the
+  running manager kept the nodes alive but held the rewards by bare pointer, so
+  the next garbage collection freed them and the next chapter to complete
+  granted from freed memory. The manager now owns a reference to the rewards it
+  grants from, exactly as it does for nodes: a running session keeps the compile
+  it started with, and the new one takes effect the next time you play. The
+  compiler says so when a graph is compiled while a session is running, since
+  from the viewport nothing changes and that reads as a failed compile rather
+  than a deferred one.
+
+- **Same-tick siblings arrive in authored order rather than the order the wires
+  were drawn.** Two Steps activated by one completion published in the order
+  their wires happened to be connected, so a list that appends rows as events
+  land could show Step Three above Step Two. The compiler now puts every routing
+  list into authored order once, after wiring, which makes arrival order correct
+  for anything that consumes it - without that consumer knowing this exists.
+
+- **Catch-up no longer replays content in a different order from the live run.**
+  The replay fan-out sorted by the length of the tag string, so siblings came
+  back in name-length order: Chapter 5 replayed *Left* before *The Fork*. It
+  follows the one ordering rule now, parent before child by construction.
+
+- **A questline started on its own is recorded as having been entered.** The
+  entry registry is written per quest node, and a questline's own tag is not a
+  node - so starting one wrote its running state and its started marker but no
+  entry row, and *when was this questline entered* had no answer at all. Two
+  things were wrong as a result: a prerequisite rule with a *Leaf (Entry)*
+  condition on a questline tag could never satisfy, and separately-started
+  questlines had no recorded start time to be listed by, so they came back from a
+  save in alphabetical order. Both come from the same missing row, and both are
+  fixed by writing it.
+
+- **A prerequisite rule whose condition is a fact now retracts when that fact
+  goes away.** Rules woke on a fact being added and not on one being removed, so
+  a rule was effectively a one-way claim: once published it stayed published
+  even after the thing it asserted stopped being true, and a *NOT* of a fact
+  never re-published once the fact arrived. A rule is a standing claim about the
+  present, so a leaf going away has to re-open the question exactly as one
+  arriving does. Path, resolution, and entry conditions are append-only and have
+  no removal to hear, so they behave as before.
+
+- **The Prerequisite Examiner finds a rule written in a sibling container.** A
+  rule read inside one Quest container is commonly written inside another, which
+  is neither the graph the examiner was handed nor a different asset - so that
+  case fell through to a registry scan, or missed entirely when the container's
+  *Entry* sat inside a container of its own. The search now covers the local
+  graph first and then the whole asset it belongs to, so a match in the graph
+  you opened still wins and the result does not depend on the order containers
+  happen to be visited.
+
+- **Compiling no longer touches the generated ini files when nothing changed.**
+  The compiled tag and display files are regenerated at editor startup and on
+  every compile, and rewriting identical bytes still moves the timestamp - which
+  is all source control needs to report them as modified. They are written only
+  on a real change now, so a clean tree stays clean.
+
+### QuickStart
+
+- **The quest sidebar stops at the bottom of the screen.** Its size box had a
+  width but no height limit, so a long enough list ran off the edge. It now caps
+  its height and lets the scroll box inside it do the rest, while still sitting
+  short when only a step or two is live.
+
+- **Chapter 11's steps are named for the lesson, not the lock-in.** The step
+  that sends you back to Chapter 11 is *Catch-up Events* and the one held by the
+  archivist is *Watch Givers and Triggers*, so the sidebar reads as a table of
+  contents for the room. The beat that sends you to Chapter 5 now says what a
+  lock-in does underneath: the screen drops the channel it was on, subscribes
+  to the new one, and receives what already fired there as catch-up.
+
+### Documentation
+
+- **The QuickStart walkthrough is finished.** `Docs/QuickStart/` holds an index,
+  *Before You Start* - the three central ideas the rooms teach together,
+  controls, the HUD, what the green and red buttons publish, the three layers
+  every room is built from, and the live instruments to keep open while you play
+  - and a chapter for each room: Basic Trigger, Rewards, Basic Giver, Sequential
+  Steps, Named Outcomes, Blocking, Prerequisites, Linked Questlines, Activation
+  Groups, Prerequisite Rules, and Observers.
+
+  The first seven are the pieces of one progression, closing on a room where a
+  data-driven game system runs the scenarios without owning the quest. The rest
+  reach across boundaries: one authored questline running twice at once with
+  separate progress, a published tag that activates, a published tag that gates,
+  and finally the component that has been showing you all of it.
+
+  Every chapter is written from the source and illustrated, in the same shape:
+  what happened in the room, what is in the graph, which facts and events landed
+  in which order, the gotchas the room's design steers you around, experiments
+  to try, and what the chapter added to the picture of the Step node and its
+  Objective - the one thing the eleven rooms are meant to leave you with. The
+  root README's Quick Start points at it.
+
+  It closes on **The Step node, assembled**, which is those eleven sections put
+  back together in the order a Step is configured rather than the order the rooms
+  taught them - identity, completion, being started, being gated, being blocked
+  and torn down, talking to the Objective, narration. It ends with the seven
+  things a Step can do that no room demonstrates, each with what it is for and
+  where it is documented, because a tutorial that reached for every field would
+  have taught less.
+
+- **The walkthrough says to play the whole tutorial before reading any of it.**
+  It already assumed you had played a room before reading its chapter; the index
+  and *Before You Start* now ask for all eleven in sequence first, following the
+  onscreen prompts, and frame the walkthrough as a second pass over rooms you
+  have already seen work.
+
+- **The README's Quick Start plays before it builds.** It sends a newcomer to
+  the tutorial first, then to the graphs behind the rooms, and only then to
+  building a first progression - with a table of what each of the eleven
+  chapters teaches.
+
+- **The Facts Panel is named for what it is.** Three places in the README
+  described a "World State Facts" panel. The panel is *Facts Panel*, under
+  Developer Tools > Debug, and it hosts two selectable views: *World State*,
+  every asserted fact, and *Quest State*, the resolutions, entries, and
+  prerequisite status behind them. The README now also says which plugin
+  provides which: SimpleCore ships the panel and the World State view, and
+  SimpleQuest registers Quest State into it.
+
+- **The Grant Once modifier's header says what it does.** It described hiding
+  a collected reward's advertisement; since 0.8.1 the preview comes back
+  marked *Already collected* and the UI decides how to show it.
+
+---
+
 ## [0.8.1] — 2026-09-13 — Conditions, Endings, and Eleven Chapters
 
 A flurry of changes to several systems and features, all driven by hands-on work

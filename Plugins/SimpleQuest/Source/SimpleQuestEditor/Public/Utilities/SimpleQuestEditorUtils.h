@@ -4,7 +4,7 @@
 #pragma once
 
 #include "GameplayTagContainer.h"
-#include "Components/QuestComponentBase.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "Settings/SimpleQuestEditorVisualSettings.h"
 
 // ---- Wire colors ----
@@ -27,7 +27,6 @@
 #define SQ_ED_NODE_ACTIVATE_GROUP   (GetDefault<USimpleQuestEditorVisualSettings>()->ActivateGroupNodeColor)
 #define SQ_ED_NODE_PREREQ_GROUP		(GetDefault<USimpleQuestEditorVisualSettings>()->PrerequisiteGroupNodeColor)
 #define SQ_ED_NODE_UTILITY			(GetDefault<USimpleQuestEditorVisualSettings>()->UtilityNodeColor)
-#define SQ_ED_NODE_GRAPH_OUTCOME	(GetDefault<USimpleQuestEditorVisualSettings>()->GraphOutcomeNodeColor)
 
 // ---- Group Examiner ----
 #define SQ_ED_EXAMINER_GROUP_SETTER (GetDefault<USimpleQuestEditorVisualSettings>()->ExaminerGroupSetterColor)
@@ -41,7 +40,7 @@ class UQuestlineNode_Step;
 class UQuestlineNode_ContentBase;
 class UK2Node_CompleteObjectiveWithOutcome; 
 class FQuestlineGraphEditor;
-class UQuestComponentBase;
+class USimpleCoreObserverComponent;
 
 struct FConnectionParams;
 struct FGraphPanelPinConnectionFactory;
@@ -182,7 +181,7 @@ public:
 		/**
 		 * Comprehensive scan toggle for World Partition levels. Default = true (sync-load every WP actor and
 		 * scan it). Set to false to opt into a class-filter optimization that pre-builds the set of actor
-		 * classes known to author UQuestComponentBase descendants and skips WP descriptors whose class isn't
+		 * classes known to author a quest role component and skips WP descriptors whose class isn't
 		 * in the set. Filter is fast on large WP levels but misses the rare case where a designer adds a
 		 * quest component to a single placed actor instance (per-instance, not on the BP). Comprehensive
 		 * mode catches that - recommended unless WP scan latency becomes a real problem.
@@ -207,12 +206,12 @@ public:
 	 */
 	struct FStaleQuestTagEntry
 	{
-		TWeakObjectPtr<AActor>					Actor;
-		TWeakObjectPtr<UQuestComponentBase>		Component;
-		FString									FieldLabel;
-		FGameplayTag							StaleTag;
-		EStaleQuestTagSource					Source = EStaleQuestTagSource::LoadedLevelInstance;
-		FString									PackagePath;  // long package name; used for nav even if weak ptrs go stale
+		TWeakObjectPtr<AActor>							Actor;
+		TWeakObjectPtr<USimpleCoreObserverComponent>	Component;
+		FString											FieldLabel;
+		FGameplayTag									StaleTag;
+		EStaleQuestTagSource							Source = EStaleQuestTagSource::LoadedLevelInstance;
+		FString											PackagePath;  // long package name; used for nav even if weak ptrs go stale
 	};
 
 	/**
@@ -277,14 +276,14 @@ public:
 	 *
 	 * Does NOT descend into nested USTRUCTs, TMap with FGameplayTag keys / values, TArray of FGameplayTag elements,
 	 * or FInstancedStruct interiors. Specialty cases (e.g., TMap with FGameplayTag keys) need per-class handling via
-	 * UQuestComponentBase::ApplyTagRenames overrides that call Super and add the specialty work.
+	 * USimpleCoreObserverComponent::ApplyTagRenames overrides that call Super and add the specialty work.
 	 */
 	static int32 ApplyTagRenamesToObject(UObject* Object, const TMap<FName, FName>& Renames);
 
 	/**
 	 * Walks loaded editor worlds and applies tag renames to actors and their components. For each loaded actor:
 	 * (1) reflection sweep over the actor's own FGameplayTag / FGameplayTagContainer UPROPERTYs, then (2) reflection
-	 * sweep over each component, then (3) for UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any
+	 * sweep over each component, then (3) for USimpleCoreObserverComponent subclasses, the virtual ApplyTagRenames adds any
 	 * specialty handling (Observer's TMap-with-FGameplayTag-keys is the canonical specialty case). Returns the number
 	 * of actors modified.
 	 */

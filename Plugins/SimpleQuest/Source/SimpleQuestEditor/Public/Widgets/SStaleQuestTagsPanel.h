@@ -15,7 +15,7 @@ class STableViewBase;
 
 /**
  * Nomad-tab panel listing quest-component stale tag references across loaded editor worlds. Per-row Clear invokes
- * UQuestComponentBase::RemoveTags on the offending component; per-row Dismiss hides the row for the current editor
+ * USimpleCoreObserverComponent::RemoveTags on the offending component; per-row Dismiss hides the row for the current editor
  * session (non-persistent). Read-only unless the designer explicitly clicks Clear.
  */
 class SStaleQuestTagsPanel : public SCompoundWidget, public FEditorUndoClient

@@ -511,6 +511,40 @@ private:
 
 	/** Resolve a tri-state resettable flag over the value inherited from above: explicit On/Off wins, Inherit defers. */
 	static bool ResolveResettable(EResettableReplay Flag, bool bIncoming);
+
+	/**
+	 * Orders two node tags the way the authored walk does - Order Bias, then canvas layout, then name. The one place
+	 * this compile decides sibling order; both passes below use it, so the positions and the routing lists cannot
+	 * disagree. Delegates the comparison itself to FQuestOrdering::AuthoredSiblingLess and only supplies the lookups.
+	 */
+	bool AuthoredOrderLess(FName A, FName B) const;
+
+	/**
+	 * Walks the compiled graph depth-first from its entry points and stamps each node with its position in the
+	 * authored progression. Runs over the routing tables the wiring pass just built rather than re-traversing the
+	 * editor graph, so it inherits all the pin, knot and linked-asset resolution already done.
+	 *
+	 * *** THE POSITION THIS STAMPS IS THE WHOLE AUTHORED ANSWER. *** Depth-first from the entries means a node is
+	 * numbered before anything it activates, and visiting each node's successors through AuthoredOrderLess means
+	 * biased siblings are numbered in bias order. One integer therefore carries precedence and bias together, and the
+	 * runtime comparison needs nothing else - it used to re-derive both from a subtree range and a bias, and those
+	 * two answers could contradict each other. See FQuestOrdering's header.
+	 *
+	 * Order Bias is reached only where the layout is wrong, because designers already arrange parallel branches
+	 * vertically and flow horizontally - so ordering costs no new property in the common case.
+	 */
+	void AssignAuthoredPositions();
+
+	/**
+	 * Puts every routing list into authored order, once, after the wiring pass has filled them. Sorting here rather
+	 * than at each insertion point means one place decides the order instead of four, and it runs after linked
+	 * assets have contributed their tags.
+	 *
+	 * *** THIS IS WHAT MAKES ARRIVAL ORDER CORRECT FOR FREE. *** A HUD that appends rows as events land was showing
+	 * Step Three above Step Two because the cascade iterated in pin-link order - the order the wires happened to be
+	 * drawn. Order the cascade and every arrival-order consumer is right without knowing this exists.
+	 */
+	void SortRoutingByAuthoredOrder();
 	
 	/**
 	 * True if the node compiled under this canonical tag resolved to resettable-replay scope - i.e. its runtime

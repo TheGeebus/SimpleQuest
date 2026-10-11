@@ -11,11 +11,11 @@ void UPrereqGateNode::ActivateInternal(FGameplayTag InContextualTag)
 	// The prereq evaluation + deferral happens in Super::Activate; this method runs when prereqs are confirmed
 	// satisfied (immediately at activation, or after deferred wake-up via the OnPrereq* handlers).
 
-	// Per-event-ID dedup. When the same cascade event reaches the gate via both the prereq deferral path and
+	// Per-event-ID dedupe. When the same cascade event reaches the gate via both the prereq deferral path and
 	// a direct Enter wire (Step whose completion both satisfies the gate's last prereq AND cascades into
 	// Gate.Enter), the two paths arrive sequentially on a single call stack carrying the same OriginatingEventID.
 	// Compare the most-recent incoming event ID (stashed by Activate from PendingActivationContext, or by the
-	// prereq handlers from the event payload) against the gate's last-fired ID. Both-valid + matching = dedup.
+	// prereq handlers from the event payload) against the gate's last-fired ID. Both-valid + matching = dedupe.
 	const FOriginatingEventID& Incoming = GetLastIncomingEventID();
 	if (Incoming.IsValid() && Incoming == LastFiredEventID)
 	{

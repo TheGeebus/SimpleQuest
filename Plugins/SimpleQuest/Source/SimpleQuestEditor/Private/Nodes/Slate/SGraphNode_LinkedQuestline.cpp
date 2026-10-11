@@ -66,6 +66,12 @@ void SGraphNode_LinkedQuestline::Construct(const FArguments& InArgs, UQuestlineN
 	UpdateGraphNode();
 }
 
+void SGraphNode_LinkedQuestline::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
+{
+	FQuestNodeSlateHelpers::AnchorDeactivationPinToBottom(PinToAdd, LeftNodeBox, RightNodeBox);
+	SGraphNode::AddPin(PinToAdd);
+}
+
 void SGraphNode_LinkedQuestline::UpdateGraphNode()
 {
 	// Standard content-node giver path + stale-tag flag. Contextual givers append with "(via OuterAssetName)" annotation.
@@ -155,9 +161,7 @@ void SGraphNode_LinkedQuestline::UpdateGraphNode()
 	// ── Inner content ──────────────────────────────────────────
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
-
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
+	
 	TSharedPtr<SVerticalBox> InnerVerticalBox = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		.Padding(Settings->GetNonPinNodeBodyPadding())

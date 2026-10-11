@@ -152,6 +152,32 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static bool IsQuestResolvedWith(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag, UPARAM(meta = (Categories = "SimpleQuest.Outcome"))FGameplayTag OutcomeTag);
 
+    // -------------------------------------------------------------------------------------------------------------
+    // Ordering - one answer to "which of these comes first", shared by every surface that shows quest content.
+    // -------------------------------------------------------------------------------------------------------------
+
+    /**
+     * True when A should be shown before B. The same rule every other surface uses: an ancestor precedes its
+     * descendants; otherwise the two ancestors where the tags diverge decide, by Order Bias first, then by where the
+     * graph puts them, then by name read with numbers as numbers so Chapter_10 follows Chapter_9.
+     *
+     * Use this to keep a list SORTED rather than in arrival order. A display that appends as events land is showing
+     * the order the player happened to reach things, which is not the order the content was authored in - and the
+     * two visibly disagree after a save is reloaded, because a restore delivers everything at once.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Ordering", meta = (WorldContext = "WorldContext", DisplayName = "Sorts Before"))
+    static bool QuestSortsBefore(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag A, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag B);
+
+    /**
+     * Where NewTag belongs in a list that is already in this order - 0 for the front, OrderedTags.Num() for the end.
+     * Hand it the tags of the rows you already have, top to bottom, and insert the new row at the index it returns.
+     *
+     * Exists so a display does not have to write the comparison loop in Blueprint. It assumes OrderedTags is already
+     * sorted; feed it an unsorted list and the result is meaningless rather than wrong-but-close.
+     */
+    UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|Ordering", meta = (WorldContext = "WorldContext", DisplayName = "Find Sorted Insert Index"))
+    static int32 FindSortedInsertIndex(const UObject* WorldContext, const TArray<FGameplayTag>& OrderedTags, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag NewTag);
+    
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "SimpleQuest|State", meta = (WorldContext = "WorldContext"))
     static int32 GetQuestCompletionCount(const UObject* WorldContext, UPARAM(meta = (Categories = "SimpleQuest.Questline"))FGameplayTag QuestTag);
 
@@ -203,22 +229,6 @@ public:
     // -------------------------------------------------------------------------------------------------------------
 
     /**
-     * The rewards a completing node advertises regardless of how it resolves - the any-outcome bucket only. The giver /
-     * journal case: "complete this, get these." Computes each reward's preview live (pass the viewing actor); querying
-     * never grants.
-     *
-     * Excludes outcome-specific rewards. See also: Get Advertised Rewards For Outcome, for rewards associated with
-     * specific outcomes.
-     *
-     * @param WorldContext        world context for resolving the quest system
-     * @param ContentTag          the Step or container whose advertised rewards you want
-     * @param Viewer              viewing actor for computing live values
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards and read the SimpleQuest.Outcome.AnyOutcome key. Removed in 0.9."))
-    static TArray<FQuestRewardPreview> GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
-
-    /**
      * Cold twin of GetAdvertisedRewards - everything a tag pays, both channels, read off a questline ASSET with no
      * running game. For catalog UI (quest-giver hub, bounty board) showing what a quest pays before it is accepted.
      * Viewer-dependent rewards compute off the compiled template; a cold catalog may pass null.
@@ -228,28 +238,6 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards")
     static TMap<FGameplayTag, FQuestRewardPreviewList> GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag Tag, AActor* Viewer);
-
-    /**
-     * Cold query for a questline's QUESTLINE-LEVEL rewards - what completing the whole questline pays, per outcome, read
-     * directly off the asset's authored QuestlineRewards map. Manager-free / works pre-activation (the catalog / bounty-
-     * board case). Distinct from GetAdvertisedRewardsFromAsset, which surfaces rewards wired into content NODES; this is
-     * the questline's own completion reward, keyed by its top-level Exit outcome. Each reward is previewed via
-     * DescribeReward (pass the viewing actor for live-computed values).
-     *
-     * @return outcome tag -> the previews that outcome pays. Empty map for a questline with no questline-level rewards.
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards From Asset - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer);
-
-    /**
-     * Live query for a RUNNING questline's questline-level rewards, per outcome - what completing this active questline
-     * will pay. HUD/journal companion to the cold GetQuestlineRewardsFromAsset. Returns empty if the questline isn't
-     * currently loaded (use the cold asset query for pre-activation catalogs).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards - it accepts a questline tag and also folds in node rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer);
 
     /**
      * Everything a tag pays on completion, keyed by outcome - rewards wired into the graph AND the questline's own
@@ -278,16 +266,6 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext"))
     static TArray<FQuestRewardPreview> GetAdvertisedRewardsForOutcome(const UObject* WorldContext, FGameplayTag ContentTag, FGameplayTag OutcomeTag, AActor* Viewer, bool bIncludeAnyOutcome = true);
 
-    /**
-     * Every outcome of a completing content node and what each pays, as a map - the "whole picture" companion to
-     * GetAdvertisedRewardsForOutcome (which asks one outcome at a time). For a journal/tooltip showing "Success: X,
-     * Failure: Y". Each outcome's list includes the any-outcome rewards (they fire regardless). Static outcomes only;
-     * dynamic paths aren't represented (they have no author-time outcome tag).
-     */
-    UFUNCTION(BlueprintCallable, Category = "Quest|Rewards", meta = (WorldContext = "WorldContext", DeprecatedFunction,
-        DeprecationMessage = "Use Get Advertised Rewards - same map, and it also folds in questline-level rewards. Removed in 0.9."))
-    static TMap<FGameplayTag, FQuestRewardPreviewList> GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer);
-    
     // -------------------------------------------------------------------------------------------------------------
     // Display data queries - lookup the display data associated with a given quest tag.
     // -------------------------------------------------------------------------------------------------------------

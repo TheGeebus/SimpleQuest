@@ -8,7 +8,10 @@
 
 class SWidget;
 class SNodeTitle;
+class SGraphPin;
+class SVerticalBox;
 class UEdGraphNode;
+
 
 /**
  * Slate helpers shared across content-node widgets (Step, LinkedQuestline, and any Phase 2 additions for Quest /
@@ -58,5 +61,24 @@ namespace FQuestNodeSlateHelpers
 	 * Apply runs only if Node survives the tick. Capture everything else it needs WEAKLY - a frame has passed.
 	 */
 	void CommitNodeEditDeferred(UEdGraphNode* Node, const FText& TransactionText, TFunction<void()> Apply);
+
+	/**
+	 * Bottom-anchor a content node's deactivation pins, so the Deactivate input lands level with the Deactivated
+	 * output and a run of identical nodes draws its deactivation wires as straight horizontal lines rather than a
+	 * staircase. Call it from a widget's AddPin BEFORE SGraphNode::AddPin: when PinToAdd is one of the two, this
+	 * pushes a filler slot into that pin's column, so the pin is laid out last and flush to the column's bottom.
+	 *
+	 * It needs to measure nothing, because the two pins are ALWAYS LAST in their columns - Activate,
+	 * Prerequisites, Deactivate going in; Any Outcome, the outcome pins, Deactivated coming out. Whichever column
+	 * is shorter absorbs the slack, so both pins settle on one baseline however many outcome pins the node has and
+	 * whatever kind of content node it is. Nothing reads a desired size, so there is no layout feedback loop and
+	 * nothing to recompute when a node's pins change.
+	 *
+	 * REQUIRES both pin columns to be allocated the full height of the row holding them. SGraphNode's own
+	 * CreateNodeContentArea does that already - its SHorizontalBox slots default to VAlign_Fill. A widget that
+	 * builds its own content area from an AutoHeight row gives the filler nothing to take and the pins will not
+	 * move, which is the first thing to check if this looks like it did nothing.
+	 */
+	void AnchorDeactivationPinToBottom(const TSharedRef<SGraphPin>& PinToAdd, const TSharedPtr<SVerticalBox>& LeftBox, const TSharedPtr<SVerticalBox>& RightBox);
 }
 

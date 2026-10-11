@@ -19,17 +19,17 @@ namespace
 		const TCHAR* Column;              // authored column name a designer writes
 		const TCHAR* CombinatorClass;    // node class to synthesize
 		const TCHAR* TableStem;          // == TypeStem(class); the TablesByType key the combinator row lands in
-		const TCHAR* OutEdgeType;        // the combinator output pin, as a feeds-prereq verb (AND="Out", OR/NOT="PrereqOut")
+		const TCHAR* OutEdgeType;        // the combinator output pin, as a feeds-prereq verb - "PrereqOut" on all three
 		int32        MaxOperands;        // operand cap: AND/OR fan-in freely (INT32_MAX); NOT takes exactly 1
 		bool         bHasConditionPinCount; // AND/OR carry a ConditionPinCount cell (variadic pins); NOT's single pin is fixed
 	};
 
 	// Vocab. Each convention is the SAME synthesis with a different combinator class + output verb, so extending is data,
-	// not new control flow. AND's output pin is "Out"; OR's (and NOT's) is "PrereqOut" - verified vs AllocateDefaultPins
-	// + the Ch6 export edges - which is why the output verb is a per-row field rather than hardcoded.
-	static const FFlowConvention GFlowConventions[] =
+	// not new control flow. Every combinator's output pin is "PrereqOut" (AND's was "Out" until its PostLoad migration
+	// unified them); the verb stays a per-row field so a convention with a differently-pinned node needs no new code.
+	static constexpr FFlowConvention GFlowConventions[] =
 	{
-		{ TEXT("unlock_after"),  TEXT("QuestlineNode_PrerequisiteAnd"), TEXT("prerequisite_and"), TEXT("feeds-prereq(Out)"),       MAX_int32, true  },
+		{ TEXT("unlock_after"),  TEXT("QuestlineNode_PrerequisiteAnd"), TEXT("prerequisite_and"), TEXT("feeds-prereq(PrereqOut)"), MAX_int32, true  },
 		{ TEXT("unlock_any"),    TEXT("QuestlineNode_PrerequisiteOr"),  TEXT("prerequisite_or"),  TEXT("feeds-prereq(PrereqOut)"), MAX_int32, true  },
 		{ TEXT("unlock_unless"), TEXT("QuestlineNode_PrerequisiteNot"), TEXT("prerequisite_not"), TEXT("feeds-prereq(PrereqOut)"), 1,         false },
 	};

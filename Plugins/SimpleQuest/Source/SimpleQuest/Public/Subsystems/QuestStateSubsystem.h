@@ -222,12 +222,23 @@ public:
 	const FQuestRuntimeRecord* GetQuestRuntimeRecord(FGameplayTag QuestTag) const;
 
 	/**
-	 * The actor that initiated the most-recent start of this quest (UQuestStep::ReceivedRuntimeContext.Instigator
-	 * captured at start time, preserved past the live step's deactivation). Null for non-Step starts (containers
-	 * have no objective; no params snapshot) and for starts where no Instigator was supplied.
+	 * The giver actor that started this quest most recently, or null when the most recent start was not a give. A
+	 * cascade, an external activation, and an initial entry all credit an instigator (the player whose fire completed
+	 * the source, for a cascade) but none of them has a giver, and this returns null for them - matching the live
+	 * FQuestStartedEvent, whose GiverActor is set only on the give path. For the credited actor of any start, see
+	 * GetLastInstigatorActor.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
 	AActor* GetLastGiverActor(FGameplayTag QuestTag) const;
+
+	/**
+	 * The actor credited with the most-recent start of this quest, whatever its provenance: the giver for a give, the
+	 * completer of the source for a cascade (UQuestStep::ReceivedRuntimeContext.Instigator captured at start time and
+	 * preserved past the live step's deactivation). Null for non-Step starts (containers have no objective; no params
+	 * snapshot) and for starts where no Instigator was supplied.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Quest|State")
+	AActor* GetLastInstigatorActor(FGameplayTag QuestTag) const;
 
 	/**
 	 * Provenance of the most-recent start of this quest. EQuestActivationProvenance::Unknown if the quest hasn't started
@@ -442,8 +453,27 @@ public:
 	 * canonical tag AND every alias key at registration, so a direct lookup on any perspective hits without a
 	 * runtime canonical walk.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "Quest|Display")
 	FText GetDisplayName(FGameplayTag Tag) const;
+
+	/**
+	 * The authored Order Bias for this tag, or 0 for a tag that has none - which is also the neutral value, so an
+	 * unregistered tag and a deliberately unbiased one answer the same and both fall through to natural order.
+	 * Unlike the display accessors this does NOT warn on an unknown tag: ordering routinely asks about tags that
+	 * were never nodes, and a warning per comparison would drown the log.
+	 */
+	int32 GetOrderBias(FGameplayTag Tag) const;
+
+	/**
+	 * This tag's position in the authored progression, or INDEX_NONE if it has none. Only comparable against another
+	 * position from the same compile - see the field's comment on FQuestDisplayDataRecord.
+	 */
+	int32 GetAuthoredPosition(FGameplayTag Tag) const;
+
+	/**
+	 * Last position reached by this tag's downstream run, or INDEX_NONE. Paired with GetAuthoredPosition to answer
+	 * whether one node leads to another without re-walking the graph.
+	 */
+	int32 GetAuthoredSubtreeEnd(FGameplayTag Tag) const;
 
 	/**
 	 * Returns the authored description for a Questline / Quest / Step tag. Empty FText when the designer didn't
@@ -480,7 +510,9 @@ public:
 	bool ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapshot);
 
 private:
-    friend class UQuestManagerSubsystem;
+	friend class UQuestManagerSubsystem;
+	/** Test-only: lets a fixture populate KnownQuests without standing up a manager and a compiled graph. */
+	friend class FQuestObserverDedupeTestAccess;
 
 	/**
 	 * The lookup behind the three display getters, with one rule for a missing record: a KNOWN tag without one is a
@@ -529,7 +561,14 @@ private:
      * adds the (ContextualTag, IncomingOutcomeTag) pair. TSet handles deduplication so repeat entries with the
      * same outcome don't bloat the set.
      */
-    TMap<FGameplayTag, TSet<FGameplayTag>> EnteredOutcomesByQuest;
+	TMap<FGameplayTag, TSet<FGameplayTag>> EnteredOutcomesByQuest;
+
+	/**
+	 * Source of FQuestEntryArrival::EntrySequence. Incremented once per RecordEntry call, before the per-perspective
+	 * writes, so every spelling of one start shares a number and two separate starts never do. Persisted in the snapshot
+	 * and continued on apply - see FSimpleQuestSaveSnapshot::NextEntrySequence.
+	 */
+	int32 NextEntrySequence = 1;
     
     /** Cache of current prereq status per quest in PendingGiver state. Populated by the manager's giver branch
      *  and updated on enablement-watch transitions. Cleared when the quest leaves giver state. */
@@ -680,6 +719,12 @@ private:
 	 */
 	void RegisterDisplayData(FGameplayTag Tag, const FText& InDisplayName, const FText& InDescription, UQuestDisplayData* InDisplayData);
 
+	/**
+	 * Records both ordering keys against one of a node's tag perspectives. Pass INDEX_NONE for the position of
+	 * anything that is not a compiled node - a questline asset's identity tag has a bias but no position.
+	 */
+	void RegisterOrderingKeys(FGameplayTag Tag, int32 InOrderBias, int32 InAuthoredPosition, int32 InAuthoredSubtreeEnd);
+	
 	/**
 	 * Friend-only write: clear all display-data records associated with a graph's tag set. Called on graph unregister.
 	 * Caller passes the full list of perspectives (canonical + aliases) the graph contributed.

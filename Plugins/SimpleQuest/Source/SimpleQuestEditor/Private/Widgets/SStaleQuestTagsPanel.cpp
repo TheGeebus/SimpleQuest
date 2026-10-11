@@ -4,7 +4,7 @@
 #include "Widgets/SStaleQuestTagsPanel.h"
 
 #include "EngineUtils.h"
-#include "Components/QuestComponentBase.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "SimpleQuestLog.h"
 #include "ScopedTransaction.h"
 #include "Engine/Blueprint.h"
@@ -40,7 +40,7 @@ namespace
 	/**
 	 * Short, sortable text label for the Source column. Also used by the filter so designers can type
 	 * "Open", "BP CDO", or "Unloaded" in the search box to narrow rows by source. "Open" is used (rather
-	 * than "Loaded") so the label doesn't substring-overlap with "Unloaded" — typing "loaded" wouldn't
+	 * than "Loaded") so the label doesn't substring-overlap with "Unloaded" - typing "loaded" wouldn't
 	 * cleanly distinguish the two states otherwise. "Open" also tracks UE's File → Open Level vocabulary.
 	 */
 	FString SourceLabel(FSimpleQuestEditorUtilities::EStaleQuestTagSource Source)
@@ -117,7 +117,7 @@ public:
 					break;
 				case EStaleQuestTagSource::UnloadedLevelInstance:
 					IconBrush = FAppStyle::Get().GetBrush("SystemWideCommands.OpenLevel");
-					Tooltip = LOCTEXT("FocusTooltip_Unloaded", "Load this level and open it in the editor (replaces the current level — unsaved changes will prompt). The actor will be selected and framed once the level finishes loading.");
+					Tooltip = LOCTEXT("FocusTooltip_Unloaded", "Load this level and open it in the editor (replaces the current level - unsaved changes will prompt). The actor will be selected and framed once the level finishes loading.");
 					break;
 				default: break;
 				}
@@ -152,10 +152,10 @@ public:
 				return WithStripe(SNew(SBox).VAlign(VAlign_Center).Padding(FMargin(4.f, 0.f))
 					[
 						SNew(STextBlock)
-							.Text(FText::FromString(TEXT("—")))
+							.Text(FText::FromString(TEXT("-")))
 							.ColorAndOpacity(FSlateColor::UseSubduedForeground())
 							.ToolTipText(LOCTEXT("LevelNA",
-								"Not applicable — Blueprint defaults aren't level-bound. The entry's source is the BP asset itself."))
+								"Not applicable - Blueprint defaults aren't level-bound. The entry's source is the BP asset itself."))
 					]);
 			}
 
@@ -181,21 +181,21 @@ public:
 			return WithStripe(TextCell(Entry->StaleTag.ToString()));
 		if (ColumnName == Col_Actions)
 		{
-			FText Tooltip = LOCTEXT("ClearTooltip_Loaded", "Remove this stale tag from the component. Marks the owning actor's level dirty — save the level to persist.");
+			FText Tooltip = LOCTEXT("ClearTooltip_Loaded", "Remove this stale tag from the component. Marks the owning actor's level dirty - save the level to persist.");
 			if (Entry.IsValid())
 			{
 				switch (Entry->Source)
 				{
 				case EStaleQuestTagSource::ActorBlueprintCDO:
 					Tooltip = LOCTEXT("ClearTooltip_BP",
-						"Remove this stale tag from the Blueprint's authored default. Marks the BP dirty — save the BP to persist.\n"
+						"Remove this stale tag from the Blueprint's authored default. Marks the BP dirty - save the BP to persist.\n"
 						"Note: existing actor instances may carry per-instance overrides; rescan after to confirm.\n\n"
 						"[Warning] Cannot be undone. The mutation propagates permanently to the Blueprint's class state.\n\n"
 						"Use the Blueprint editor to manually re-add the tag if needed.");
 					break;
 				case EStaleQuestTagSource::UnloadedLevelInstance:
 					Tooltip = LOCTEXT("ClearTooltip_Unloaded",
-						"Remove this stale tag from the actor in the unloaded level. The level isn't open in the editor — use Save All Modified to persist.");
+						"Remove this stale tag from the actor in the unloaded level. The level isn't open in the editor - use Save All Modified to persist.");
 					break;
 				default: break;
 				}
@@ -245,7 +245,7 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 				SNew(SButton)
 					.Text(LOCTEXT("ScanLoaded", "Scan Loaded"))
 					.ToolTipText(LOCTEXT("ScanLoadedTooltip",
-						"Re-scan loaded editor worlds for components with stale tag references. Fast — for "
+						"Re-scan loaded editor worlds for components with stale tag references. Fast - for "
 						"designer iteration. Use Full Project Scan to also include Blueprint defaults and "
 						"unloaded levels."))
 					.OnClicked(this, &SStaleQuestTagsPanel::HandleScanLoadedClicked)
@@ -277,7 +277,7 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 						"Clear every stale tag reference in the current selection. Multi-select via Ctrl+Click "
 						"or Shift+Click. A confirmation dialog shows the per-source breakdown before mutation. "
 						"Loaded and Unloaded entries can be undone with Ctrl+Z (single transaction wraps the batch); "
-						"BP CDO entries in the selection cannot be undone — clearing them is permanent on the Blueprint, "
+						"BP CDO entries in the selection cannot be undone - clearing them is permanent on the Blueprint, "
 						"and Ctrl+Z is a no-op for those rows. Disabled when nothing is selected."))
 					.OnClicked(this, &SStaleQuestTagsPanel::HandleClearSelectedClicked)
 			]
@@ -287,7 +287,7 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 					.IsEnabled(this, &SStaleQuestTagsPanel::IsSaveAllModifiedEnabled)
 					.Text(this, &SStaleQuestTagsPanel::GetSaveAllModifiedLabel)
 					.ToolTipText(LOCTEXT("SaveAllModifiedTooltip",
-						"Save every asset modified by this panel's Clear actions — levels, Blueprints, and "
+						"Save every asset modified by this panel's Clear actions - levels, Blueprints, and "
 						"unloaded-level packages. Disabled when nothing is pending. Tracking is cleared per "
 						"package as it's saved (here or via File → Save All)."))
 					.OnClicked(this, &SStaleQuestTagsPanel::HandleSaveAllModifiedClicked)
@@ -351,13 +351,13 @@ SStaleQuestTagsPanel::~SStaleQuestTagsPanel()
 
 void SStaleQuestTagsPanel::PostUndo(bool bSuccess)
 {
-	// Per-actor targeted rescan — replaces the prior Refresh(strippedScope) approach. For each actor we've
+	// Per-actor targeted rescan - replaces the prior Refresh(strippedScope) approach. For each actor we've
 	// Cleared on this session, re-walk its components via ScanActorForStaleTags and replace its entries in
 	// AllEntries with fresh scan results. Sub-millisecond per actor, vs 1–2 s for even the stripped Refresh.
 	//
 	// Correctness: the rescan emits entries with fresh weak ptrs to the *current* world's component instances,
 	// sidestepping the post-undo weak-ptr-invalidation that would otherwise drop sibling rows. Whatever the
-	// transaction restored is what the scan sees — including tags that came back via undo and tags that were
+	// transaction restored is what the scan sees - including tags that came back via undo and tags that were
 	// never modified at all (sibling entries on the same actor).
 	UpdateFromAffectedActors();
 }
@@ -381,7 +381,7 @@ void SStaleQuestTagsPanel::UpdateFromAffectedActors()
 	});
 
 	// Pass 2: for each tracked actor still alive, run a targeted scan and append fresh entries. Drop tracked
-	// actors whose weak ptrs have gone stale (e.g. their level was unloaded and the actor was gc'd) — those
+	// actors whose weak ptrs have gone stale (e.g. their level was unloaded and the actor was gc'd) - those
 	// will need a manual Refresh / Full Project Scan to recover.
 	TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Fresh;
 	for (auto It = ActorsTouchedByClear.CreateIterator(); It; ++It)
@@ -417,7 +417,7 @@ EVisibility SStaleQuestTagsPanel::GetListVisibility() const        { return Visi
 
 FText SStaleQuestTagsPanel::GetStatusText() const
 {
-	if (AllEntries.Num() == 0) return LOCTEXT("StatusClean", "Clean — no stale references.");
+	if (AllEntries.Num() == 0) return LOCTEXT("StatusClean", "Clean - no stale references.");
 	if (VisibleEntries.Num() == AllEntries.Num())
 	{
 		return FText::Format(LOCTEXT("StatusFmtAll", "{0} stale reference(s)"), AllEntries.Num());
@@ -501,7 +501,7 @@ FReply SStaleQuestTagsPanel::HandleFullScanClicked()
 	// once Refresh returns. The actual scan work doesn't have plumbed-through per-step progress (would
 	// require threading a progress callback through ScanActorBlueprintCDOs / ScanUnloadedLevels /
 	// ScanWorldPartitionActors), but the secondary asset-loading bar that UE shows during sync-loads
-	// gives the designer real-time feedback that work is happening — the outer bar just frames the operation.
+	// gives the designer real-time feedback that work is happening - the outer bar just frames the operation.
 	FScopedSlowTask SlowTask(1.f, LOCTEXT("FullScanProgress", "Scanning project for stale quest tags..."));
 	SlowTask.MakeDialog(false);
 
@@ -541,7 +541,7 @@ FReply SStaleQuestTagsPanel::HandleClearClicked(FEntryPtr Entry)
 		*SourceLabel(Entry->Source),
 		DirtiedPackage ? *DirtiedPackage->GetName() : TEXT("(none)"));
 
-	// Track the actor for targeted PostUndo / PostRedo rescan. BP CDO entries opt out — their actor is a CDO,
+	// Track the actor for targeted PostUndo / PostRedo rescan. BP CDO entries opt out - their actor is a CDO,
 	// not a placed instance, and the per-actor rescan path is for level instances only.
 	if (Entry->Source != FSimpleQuestEditorUtilities::EStaleQuestTagSource::ActorBlueprintCDO
 		&& Entry->Actor.IsValid())
@@ -612,7 +612,7 @@ UPackage* SStaleQuestTagsPanel::ClearOneEntry(FEntryPtr Entry, int32& OutRemoved
 
 		case EStaleQuestTagSource::UnloadedLevelInstance:
 		{
-			// Both umap actors and WP external-actor instances dirty their own package via MarkPackageDirty —
+			// Both umap actors and WP external-actor instances dirty their own package via MarkPackageDirty -
 			// for non-WP the package is the umap; for WP it's the per-actor external .uasset. Either way
 			// FEditorFileUtils::SaveDirtyPackages handles the save when the designer clicks Save All Modified.
 			if (AActor* Actor = Entry->Actor.Get())
@@ -671,14 +671,14 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 	if (NumBPCDO    > 0) BreakdownLines += FString::Printf(TEXT("\n  • %d Blueprint default%s"), NumBPCDO,    NumBPCDO    == 1 ? TEXT("")  : TEXT("s"));
 	if (NumUnloaded > 0) BreakdownLines += FString::Printf(TEXT("\n  • %d unloaded level entr%s"), NumUnloaded, NumUnloaded == 1 ? TEXT("y") : TEXT("ies"));
 
-	// Conditional BP CDO permanence warning. Only included when the selection has at least one BP CDO entry —
+	// Conditional BP CDO permanence warning. Only included when the selection has at least one BP CDO entry -
 	// otherwise the dialog wrongly implies the limitation applies to undo-able sources too. The count comes
 	// from the per-source breakdown above.
 	FString BPCDOWarning;
 	if (NumBPCDO > 0)
 	{
 		BPCDOWarning = FString::Printf(TEXT(
-			"\n\n[Warning] %d Blueprint default %s in this selection — clearing a BP CDO is PERMANENT. "
+			"\n\n[Warning] %d Blueprint default %s in this selection - clearing a BP CDO is PERMANENT. "
 			"Ctrl+Z is a no-op for those rows (the panel row stays gone and the underlying tag stays cleared "
 			"on the Blueprint). Use the Blueprint editor to manually re-add if needed."),
 			NumBPCDO, NumBPCDO == 1 ? TEXT("entry") : TEXT("entries"));
@@ -687,7 +687,7 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 	const FText ConfirmText = FText::Format(
 		LOCTEXT("ClearSelectedConfirmFmt",
 			"Clear {0} stale tag reference(s) across {1} unique asset(s)?{2}\n\n"
-			"Single transaction wraps the batch — Ctrl+Z restores Loaded and Unloaded clears.{3}"),
+			"Single transaction wraps the batch - Ctrl+Z restores Loaded and Unloaded clears.{3}"),
 		FText::AsNumber(Selected.Num()),
 		FText::AsNumber(UniquePackages.Num()),
 		FText::FromString(BreakdownLines),
@@ -702,7 +702,7 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 	int32 SkippedStale = 0;
 	TSet<UPackage*> DirtiedThisBatch;
 	{
-		// Single transaction wraps the entire batch — Ctrl+Z restores all cleared tags as one unit.
+		// Single transaction wraps the entire batch - Ctrl+Z restores all cleared tags as one unit.
 		const FScopedTransaction Transaction(NSLOCTEXT("SimpleQuestEditor", "ClearSelectedStaleTags", "Clear Selected Stale Quest Tags"));
 		for (const FEntryPtr& E : Selected)
 		{
@@ -737,7 +737,7 @@ FReply SStaleQuestTagsPanel::HandleClearSelectedClicked()
 		ActorsTouchedByClear.FindOrAdd(E->Actor) = { E->Source, E->PackagePath };
 	}
 
-	// Remove cleared rows locally — same rationale as single-row Clear (avoids dropping out-of-scope rows
+	// Remove cleared rows locally - same rationale as single-row Clear (avoids dropping out-of-scope rows
 	// that a default-scope re-scan would silently lose).
 	AllEntries.RemoveAll([&Selected](const FEntryPtr& E) { return Selected.Contains(E); });
 	ListView->ClearSelection();
@@ -758,7 +758,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 	{
 		case EStaleQuestTagSource::LoadedLevelInstance:
 		{
-			// Existing behavior — select + frame.
+			// Existing behavior - select + frame.
 			AActor* Actor = Entry->Actor.Get();
 			if (!Actor) return FReply::Handled();
 			GEditor->SelectNone(true, true, false);
@@ -786,12 +786,12 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 		{
 			if (Entry->PackagePath.IsEmpty()) return FReply::Handled();
 
-			// Capture the actor's FName before any load — the weak ptr we have is still valid at this point
+			// Capture the actor's FName before any load - the weak ptr we have is still valid at this point
 			// (the entry was emitted by a sync-load that kept the world resident), but LoadMap may invalidate
 			// it. We'll use the FName to re-resolve the actor in the newly-loaded world post-load. FNames are
 			// unique within a UWorld so this is a safe lookup key for the typical authored-actor case.
 			const FName ActorName = Entry->Actor.IsValid() ? Entry->Actor->GetFName() : NAME_None;
-			const FString PackagePath = Entry->PackagePath;  // copy — Entry might morph + go away after Refresh
+			const FString PackagePath = Entry->PackagePath;  // copy - Entry might morph + go away after Refresh
 
 			// Idempotency: if the level is ALREADY an active editor world, skip the LoadMap call (which would
 			// reload the level from scratch) and fall straight through to the select+frame path. This handles
@@ -823,7 +823,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 				FEditorFileUtils::LoadMap(MapFilename, /*LoadAsTemplate*/ false, /*bShowProgress*/ true);
 
 				// Auto-refresh post-load so any preserved entries from this level morph from Unloaded to
-				// Loaded source — their icons, tooltips, and Source-column labels update reactively, and
+				// Loaded source - their icons, tooltips, and Source-column labels update reactively, and
 				// the in-scope replacement also kicks in (the morphed Loaded entries get replaced by fresh
 				// scan results with valid Actor weak ptrs).
 				Refresh(LastScope);
@@ -831,7 +831,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 
 			// Re-locate the actor in the now-loaded world by FName and select + frame. After Refresh the
 			// original entry's TSharedPtr may have been replaced by a fresh one with a valid Actor weak ptr,
-			// but rather than chase that we just walk the editor worlds for the matching FName — uniform
+			// but rather than chase that we just walk the editor worlds for the matching FName - uniform
 			// path whether we just loaded or the level was already loaded.
 			if (ActorName != NAME_None && GEditor)
 			{
@@ -851,7 +851,7 @@ FReply SStaleQuestTagsPanel::HandleFocusClicked(FEntryPtr Entry)
 						}
 					}
 				}
-				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("SStaleQuestTagsPanel: actor '%s' not found in newly-loaded world '%s' — level loaded but selection skipped (actor may have been renamed or removed since the scan)"),
+				UE_LOG(LogSimpleQuestCompiler, Log, TEXT("SStaleQuestTagsPanel: actor '%s' not found in newly-loaded world '%s' - level loaded but selection skipped (actor may have been renamed or removed since the scan)"),
 					*ActorName.ToString(), *PackagePath);
 			}
 			return FReply::Handled();
@@ -890,7 +890,7 @@ void SStaleQuestTagsPanel::Refresh(FSimpleQuestEditorUtilities::FStaleTagScanSco
 
 	// Build a snapshot of currently-active editor world packages. Used to refine the in-scope check for
 	// Loaded entries: a Loaded entry is only re-verifiable if its level is currently loaded as an editor
-	// world. If the designer has switched levels since the entry was captured, Tier 1 can't reach it —
+	// world. If the designer has switched levels since the entry was captured, Tier 1 can't reach it -
 	// we should preserve the prior entry rather than drop it as if it were verified clean.
 	TSet<FName> EditorWorldPackages;
 	if (GEditor)
@@ -910,10 +910,10 @@ void SStaleQuestTagsPanel::Refresh(FSimpleQuestEditorUtilities::FStaleTagScanSco
 
 	// Step 0: morph entries' Source based on current package-load state. Source is captured at scan time
 	// but the actual loaded/unloaded status of the underlying package can change afterward (designer opens
-	// or closes a level). A Loaded entry whose level got unloaded should now read as Unloaded — its icon,
+	// or closes a level). A Loaded entry whose level got unloaded should now read as Unloaded - its icon,
 	// tooltip, and click action all need to track to "open this level" rather than "select in viewport"
 	// to be useful. Conversely, an Unloaded entry whose level got opened should now read as Loaded so the
-	// Find icon does the right thing. BP CDO entries don't have a load axis in this sense — their identity
+	// Find icon does the right thing. BP CDO entries don't have a load axis in this sense - their identity
 	// is the Blueprint asset, not a per-package world state.
 	//
 	// Doing the morph BEFORE the in-scope check has a useful side effect: it also fixes the duplicate-row
@@ -941,7 +941,7 @@ void SStaleQuestTagsPanel::Refresh(FSimpleQuestEditorUtilities::FStaleTagScanSco
 		{
 			// Replace with a fresh TSharedPtr carrying the new Source. The fresh identity invalidates
 			// SListView's per-item widget cache for this row, forcing regeneration on the next refresh
-			// — that picks up the new icon / tooltip / Source label without per-paint lambda overhead.
+			// - that picks up the new icon / tooltip / Source label without per-paint lambda overhead.
 			FSimpleQuestEditorUtilities::FStaleQuestTagEntry Mutated = *E;
 			Mutated.Source = NewSource;
 			E = MakeShared<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>(MoveTemp(Mutated));
@@ -950,11 +950,11 @@ void SStaleQuestTagsPanel::Refresh(FSimpleQuestEditorUtilities::FStaleTagScanSco
 
 	// Each scan can only authoritatively answer "is this still stale?" for entries it actually verified.
 	// In-scope entries get replaced with fresh scan results; out-of-scope entries persist as-is. The
-	// granularity is per-entry, not per-source-type — for Loaded entries specifically we ALSO check that
+	// granularity is per-entry, not per-source-type - for Loaded entries specifically we ALSO check that
 	// the entry's level is currently an active editor world, because Tier 1 can only re-verify levels the
 	// designer has loaded right now. Concrete case: scan Level A → switch to Level B → Refresh. The Tier 1
-	// scan walks Level B, but Level A's entries shouldn't disappear (Tier 1 didn't verify them — Level A
-	// isn't loaded anymore — and Step 0 morphed them to Unloaded source so they're correctly out of scope).
+	// scan walks Level B, but Level A's entries shouldn't disappear (Tier 1 didn't verify them - Level A
+	// isn't loaded anymore - and Step 0 morphed them to Unloaded source so they're correctly out of scope).
 	// BP CDO + Unloaded sources don't have the active-world complication: their scans walk the AR project-
 	// wide, so any prior entry of those types is reachable when the source bit is set.
 	auto IsEntryInScope = [&Scope, &EditorWorldPackages](const FEntryPtr& E) -> bool
@@ -973,7 +973,7 @@ void SStaleQuestTagsPanel::Refresh(FSimpleQuestEditorUtilities::FStaleTagScanSco
 		}
 	};
 
-	// Step 1: drop entries this scope DID verify — they'll be replaced with fresh scan results below.
+	// Step 1: drop entries this scope DID verify - they'll be replaced with fresh scan results below.
 	AllEntries.RemoveAll([&IsEntryInScope](const FEntryPtr& E)
 	{
 		return IsEntryInScope(E);
@@ -997,7 +997,7 @@ namespace
 		if (ColumnId == Col_Source) return SourceLabel(E.Source);
 		if (ColumnId == Col_Level)
 		{
-			// BP CDO entries deliberately return empty — they have no level, and the empty value makes
+			// BP CDO entries deliberately return empty - they have no level, and the empty value makes
 			// them invisible to level-text filters and clusters them at one end of any level sort.
 			if (E.Source == FSimpleQuestEditorUtilities::EStaleQuestTagSource::ActorBlueprintCDO) return FString();
 			return E.PackagePath;
@@ -1037,7 +1037,7 @@ void SStaleQuestTagsPanel::RebuildVisibleList()
 	}
 
 	// StableSort so equal-keyed rows preserve their pre-sort order across re-sorts (no shuffling on each
-	// click). Explicit None-mode handling — UE's SHeaderRow cycles Ascending → Descending → None on
+	// click). Explicit None-mode handling - UE's SHeaderRow cycles Ascending → Descending → None on
 	// repeat clicks; without this branch, None falls through the ternary and behaves like Descending,
 	// which makes "click until you back to unsorted" silently flip the order instead of disabling sort.
 	VisibleEntries.StableSort([this](const FEntryPtr& A, const FEntryPtr& B)

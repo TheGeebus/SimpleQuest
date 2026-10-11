@@ -1,6 +1,11 @@
-﻿using System;
-using UnrealBuildTool;
+﻿// Copyright (c) 2026 Greg Bussell
+// SPDX-License-Identifier: MIT
+
+using System;
+using System.Collections.Generic;
 using System.IO;
+using EpicGames.Core;
+using UnrealBuildTool;
 
 public class SimpleQuestEditorEN : ModuleRules
 {
@@ -38,8 +43,7 @@ public class SimpleQuestEditorEN : ModuleRules
         string EngineDir = Path.GetFullPath(Target.RelativeEnginePath);
         string ENSourceDir = "";
 
-        bool bWithElectronicNodes = bEngineSupportsENIntegration &&
-            FindElectronicNodes(EngineDir, ModuleDirectory, Target, out ENSourceDir);
+        bool bWithElectronicNodes = bEngineSupportsENIntegration && FindElectronicNodes(EngineDir, Target, out ENSourceDir);
 
         if (bWithElectronicNodes)
         {
@@ -50,49 +54,36 @@ public class SimpleQuestEditorEN : ModuleRules
         PrivateDefinitions.Add("WITH_ELECTRONIC_NODES=" + (bWithElectronicNodes ? "1" : "0"));
     }
 
-    static bool FindElectronicNodes(string EngineDir, string ModuleDir, ReadOnlyTargetRules Target, out string ENSourceDir)
+    // WILL Electronic Nodes actually be LOADED in this target? That is the only question worth asking, and UBT already
+    // answers it - project entry, Target.cs EnablePlugins, platform and target-type allow lists all accounted for.
+    // This used to ask a DIFFERENT question: "is EN on disk, and did the .uproject explicitly disable it." A project
+    // with EN INSTALLED but never enabled - the default for every EN owner, since EN declares no EnabledByDefault -
+    // answered yes, linked against UnrealEditor-ElectronicNodes.dll, and then failed to load it, which takes the WHOLE
+    // SimpleQuest plugin down rather than dropping one integration. *** A BUILD-TIME GUESS ABOUT A RUNTIME DECISION
+    // MUST FAIL TOWARD OFF: wrong here now costs a feature, where wrong before cost the plugin. *** Adopters must never
+    // have to name a plugin they do not use in order to use this one.
+    static bool FindElectronicNodes(string EngineDir, ReadOnlyTargetRules Target, out string ENSourceDir)
     {
         ENSourceDir = "";
 
-        string ProjectPluginsDir = Path.GetFullPath(Path.Combine(ModuleDir, "../../.."));
+        ProjectDescriptor Project = (Target.ProjectFile != null) ? ProjectDescriptor.FromFile(Target.ProjectFile) : null;
+        DirectoryReference ProjectDir = (Target.ProjectFile != null) ? Target.ProjectFile.Directory : null;
 
-        string[] Roots =
+        // Covers engine, Marketplace and project plugin folders, so the hand-rolled roots list is gone with it.
+        List<PluginInfo> Available = Plugins.ReadAvailablePlugins(new DirectoryReference(EngineDir), ProjectDir, null);
+
+        foreach (PluginInfo Plugin in Available)
         {
-            Path.Combine(EngineDir, "Plugins", "Marketplace"),
-            Path.Combine(EngineDir, "Plugins"),
-            ProjectPluginsDir
-        };
+            if (!Plugin.Name.Equals("ElectronicNodes", StringComparison.Ordinal)) { continue; }
+            if (!Plugins.IsPluginEnabledForTarget(Plugin, Project, Target.Platform, Target.Configuration, Target.Type)) { return false; }
 
-        foreach (string Root in Roots)
-        {
-            if (!Directory.Exists(Root)) continue;
+            // Enabled, but a binary-only install has no headers to include - treat that as "no integration" rather than
+            // adding an include path that does not exist.
+            string Candidate = Path.Combine(Plugin.Directory.FullName, "Source", "ElectronicNodes");
+            if (!File.Exists(Path.Combine(Candidate, "ElectronicNodes.Build.cs"))) { return false; }
 
-            foreach (string Dir in Directory.GetDirectories(Root))
-            {
-                string Candidate = Path.Combine(Dir, "Source", "ElectronicNodes", "ElectronicNodes.Build.cs");
-                if (File.Exists(Candidate))
-                {
-                    // EN is installed — check it isn't explicitly disabled in the .uproject
-                    if (Target.ProjectFile != null && File.Exists(Target.ProjectFile.FullName))
-                    {
-                        string uproject = File.ReadAllText(Target.ProjectFile.FullName);
-                        int nameIdx = uproject.IndexOf("\"ElectronicNodes\"", StringComparison.Ordinal);
-                        if (nameIdx >= 0)
-                        {
-                            int braceEnd = uproject.IndexOf('}', nameIdx);
-                            if (braceEnd > nameIdx)
-                            {
-                                string entry = uproject.Substring(nameIdx, braceEnd - nameIdx);
-                                if (entry.Contains("\"Enabled\": false") || entry.Contains("\"Enabled\":false"))
-                                    return false;
-                            }
-                        }
-                    }
-
-                    ENSourceDir = Path.Combine(Dir, "Source", "ElectronicNodes");
-                    return true;
-                }
-            }
+            ENSourceDir = Candidate;
+            return true;
         }
 
         return false;

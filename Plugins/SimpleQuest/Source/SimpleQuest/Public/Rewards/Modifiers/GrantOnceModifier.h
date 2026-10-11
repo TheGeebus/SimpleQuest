@@ -20,8 +20,10 @@
  * NO PAYLOAD GATE, deliberately: HandlesPayload is left accepting anything, because whether a grant repeats has nothing to
  * do with what it carries. This gates currency, XP, loot and payload-less rewards identically.
  *
- * IT HIDES THE ADVERTISEMENT ONCE COLLECTED. A reward that will not be granted again must stop appearing in "do this,
- * get this" - a journal still promising a payout the player already holds is a visible lie.
+ * IT MARKS THE ADVERTISEMENT ONCE COLLECTED RATHER THAN HIDING IT. A reward that will not be granted again must not keep
+ * promising a payout the player already holds - but a preview that simply vanished would hide the reason along with the
+ * reward. So the preview comes back with a blocker, "Already collected", and the UI decides whether to grey it, strike
+ * it, or drop it. The description never decides, it annotates (see ModifyPreview).
  *
  * ONE COMPARISON SERVES BOTH PATHS, because GetCompletionCount normalizes them to the same reference point. An earlier
  * version carried two different thresholds to compensate for the preview reading one completion behind; that was a

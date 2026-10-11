@@ -15,6 +15,7 @@
 #include "Subsystems/QuestManagerSubsystem.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
+#include "Types/PrereqExaminerTypes.h"
 #include "Utilities/QuestLifecycleQuery.h"
 #include "Utilities/QuestTagComposer.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -111,6 +112,11 @@ void FQuestPIEDebugChannel::HandleEndPIE(bool bIsSimulating)
 	CachedWorldState.Reset();
 	CachedQuestManager.Reset();
 	CachedQuestState.Reset();
+
+	// Placements exist only while the game runs, so a selection cannot outlive the session that produced it. Clearing here
+	// also means the next session starts on the merged default rather than on a tag that named a different run's instance.
+	DebugContextByAsset.Reset();
+
 	bIsActive = false;
 	UE_LOG(LogSimpleQuest, Display, TEXT("FQuestPIEDebugChannel : PIE ended"));
 	OnDebugActiveChanged.Broadcast();
@@ -265,10 +271,7 @@ float FQuestPIEDebugChannel::GetRefusalPulseAlpha(const UEdGraphNode* EditorNode
 
 bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* EditorNode, FQuestPrereqStatus& OutStatus) const
 {
-	if (!IsActive()) return false;
-
-	const FGameplayTag RuntimeTag = ResolveRuntimeTag(EditorNode);
-	if (!RuntimeTag.IsValid()) return false;
+	if (!IsActive() || !EditorNode) return false;
 
 	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
@@ -278,21 +281,33 @@ bool FQuestPIEDebugChannel::TryGetPrereqStatusForNode(const UEdGraphNode* Editor
 		return false;
 	}
 
-	const UQuestNodeBase* Instance = Manager->FindNodeInstance(RuntimeTag);
-	if (!Instance)
+	const UQuestNodeBase* Instance = nullptr;
+	const FGameplayTag RuntimeTag = ResolveRuntimeTag(EditorNode);
+	if (RuntimeTag.IsValid())
 	{
-		// The opened asset can be a standalone questline whose placement runs under a parent's namespace. Facts publish on
-		// every perspective, so ResolveRuntimeTag's own contextual swap does not fire here - but the instance registry is
-		// keyed by the running placement's contextual tag alone, so resolve through the runtime alias index instead.
-		for (const FGameplayTag& Canonical : StateSubsystem->ResolveCanonicalTags(RuntimeTag))
+		Instance = Manager->FindNodeInstance(RuntimeTag);
+		if (!Instance)
 		{
-			if (Canonical == RuntimeTag) continue;
-			Instance = Manager->FindNodeInstance(Canonical);
-			if (Instance)
+			// The opened asset can be a standalone questline whose placement runs under a parent's namespace. Facts publish on
+			// every perspective, so ResolveRuntimeTag's own contextual swap does not fire here - but the instance registry is
+			// keyed by the running placement's contextual tag alone, so resolve through the runtime alias index instead.
+			for (const FGameplayTag& Canonical : StateSubsystem->ResolveCanonicalTags(RuntimeTag))
 			{
-				break;
+				if (Canonical == RuntimeTag) continue;
+				Instance = Manager->FindNodeInstance(Canonical);
+				if (Instance)
+				{
+					break;
+				}
 			}
 		}
+	}
+	else if (const UQuestlineNodeBase* TaglessNode = Cast<UQuestlineNodeBase>(EditorNode))
+	{
+		// A utility node with a Prerequisites pin - the Prerequisite Gate - compiles to an instance that carries an
+		// expression but no tag, so the tag-keyed lookups above cannot reach it. Its authored guid is stable across every
+		// compile context the node appears in, and that is the handle the manager keeps for it.
+		Instance = Manager->FindNodeInstanceByAuthoredGuid(TaglessNode->QuestGuid);
 	}
 	if (!Instance) return false;
 
@@ -306,8 +321,9 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafStateForSource(const UEdGraphN
 	if (!TryGetPrereqStatusForNode(OwnerNode, Status) || Status.bIsAlways) return EPrereqDebugState::Unknown;
 	if (!SourceTag.IsValid()) return EPrereqDebugState::Unknown;
 
+	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
 	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
-	if (!StateSubsystem) return EPrereqDebugState::Unknown;
+	if (!WorldState || !StateSubsystem) return EPrereqDebugState::Unknown;
 
 	// The opened asset and the running placement spell the same node differently, so build the set of spellings once
 	// and compare against all of them rather than trusting the one the editor happens to hold.
@@ -327,7 +343,178 @@ EPrereqDebugState FQuestPIEDebugChannel::QueryLeafStateForSource(const UEdGraphN
 	}
 
 	if (!bMatchedAny) return EPrereqDebugState::Unknown;
-	return bAnySatisfied ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+	if (bAnySatisfied) return EPrereqDebugState::Satisfied;
+
+	// Not satisfied. Which of the three remaining states applies is the SOURCE node's own lifecycle, read under every
+	// spelling the running instance answers to: still running (or waiting on a giver) means the outcome is undecided;
+	// any other state fact means it ran and did not produce this path; no facts at all means it has not been reached.
+	for (const FGameplayTag& Spelling : SourceSpellings)
+	{
+		if (FQuestLifecycleQuery::IsLive(WorldState, Spelling) || FQuestLifecycleQuery::IsPendingGiver(WorldState, Spelling))
+		{
+			return EPrereqDebugState::InProgress;
+		}
+	}
+	for (const FGameplayTag& Spelling : SourceSpellings)
+	{
+		if (HasAnyStateFact(Spelling, WorldState)) return EPrereqDebugState::Unsatisfied;
+	}
+	return EPrereqDebugState::NotStarted;
+}
+
+EPrereqDebugState FQuestPIEDebugChannel::QueryLeafStateForFact(const UEdGraphNode* OwnerNode, FGameplayTag LeafTag) const
+{
+	FQuestPrereqStatus Status;
+	if (!TryGetPrereqStatusForNode(OwnerNode, Status) || Status.bIsAlways) return EPrereqDebugState::Unknown;
+	if (!LeafTag.IsValid()) return EPrereqDebugState::Unknown;
+
+	// Fact and context-free outcome leaves carry the tag they read as LeafTag and no source quest; path, resolution, and
+	// entry leaves carry a source and correlate through QueryLeafStateForSource instead. A raw fact has no lifecycle of
+	// its own to refine "unsatisfied" with, so these two are the whole range.
+	for (const FQuestPrereqLeafStatus& Leaf : Status.Leaves)
+	{
+		if (Leaf.SourceQuestTag.IsValid() || Leaf.LeafTag != LeafTag) continue;
+		return Leaf.bSatisfied ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+	}
+	return EPrereqDebugState::Unknown;
+}
+
+EPrereqDebugState FQuestPIEDebugChannel::EvaluateExaminerNode(const FPrereqExaminerTree& Tree, int32 NodeIndex) const
+{
+	if (!IsActive() || !Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
+
+	const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
+	switch (Node.Type)
+	{
+	case EPrereqExaminerNodeType::Leaf:
+	{
+		// Evaluate against the node whose COMPILED expression holds this leaf - the pinned node when it is a content
+		// node or gate, otherwise the consumer the builder found downstream of a combinator or rule. Content-sourced
+		// leaves correlate on source node plus completion path, because Any Outcome expands to one compiled leaf per
+		// path and the channel ORs them; fact and outcome leaves have no source and correlate on the tag they read.
+		// A node drilled in from a RuleRef names its own owner; everything else evaluates against the pinned context.
+		const UEdGraphNode* Owner = Node.EvaluationOwner.IsValid() ? Node.EvaluationOwner.Get() : Tree.EvaluationNode.Get();
+		if (Node.LeafSourceTag.IsValid())
+		{
+			return QueryLeafStateForSource(Owner, Node.LeafSourceTag, Node.LeafPathIdentity, Node.bLeafIsAnyOutcome);
+		}
+		if (Node.LeafTag.IsValid())
+		{
+			return QueryLeafStateForFact(Owner, Node.LeafTag);
+		}
+		return EPrereqDebugState::Unknown;
+	}
+	case EPrereqExaminerNodeType::And:
+	{
+		bool bAllSatisfied = true;
+		for (int32 ChildIdx : Node.ChildIndices)
+		{
+			const EPrereqDebugState ChildState = EvaluateExaminerNode(Tree, ChildIdx);
+			if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+			if (ChildState != EPrereqDebugState::Satisfied) bAllSatisfied = false;
+		}
+		return (Node.ChildIndices.Num() > 0 && bAllSatisfied) ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+	}
+	case EPrereqExaminerNodeType::Or:
+	{
+		for (int32 ChildIdx : Node.ChildIndices)
+		{
+			const EPrereqDebugState ChildState = EvaluateExaminerNode(Tree, ChildIdx);
+			if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+			if (ChildState == EPrereqDebugState::Satisfied) return EPrereqDebugState::Satisfied;
+		}
+		return EPrereqDebugState::Unsatisfied;
+	}
+	case EPrereqExaminerNodeType::Not:
+	{
+		if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
+		const EPrereqDebugState ChildState = EvaluateExaminerNode(Tree, Node.ChildIndices[0]);
+		if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
+		return (ChildState == EPrereqDebugState::Satisfied) ? EPrereqDebugState::Unsatisfied : EPrereqDebugState::Satisfied;
+	}
+	case EPrereqExaminerNodeType::RuleRef:
+	{
+		// The rule's own fact, not a fold of the expression beneath it. What gates the consumer is the PUBLISHED TAG:
+		// the runtime node writes it while its expression holds and retracts it when that stops. Reading the fact is
+		// therefore the authoritative answer, and it stays right in the one case a fold would get wrong - a rule whose
+		// graph is not running publishes nothing even when its expression would evaluate true. The children below
+		// still evaluate on their own terms, so that disagreement is visible rather than hidden.
+		if (Node.LeafTag.IsValid())
+		{
+			return HasFact(Node.LeafTag) ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
+		}
+		if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
+		return EvaluateExaminerNode(Tree, Node.ChildIndices[0]);
+	}
+	default:
+		return EPrereqDebugState::Unknown;
+	}
+}
+
+const UQuestlineGraph* FQuestPIEDebugChannel::FindOwningAsset(const UEdGraphNode* EditorNode)
+{
+	if (!EditorNode) return nullptr;
+
+	UObject* Outer = EditorNode->GetGraph() ? EditorNode->GetGraph()->GetOuter() : nullptr;
+	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
+	return Cast<UQuestlineGraph>(Outer);
+}
+
+FGameplayTag FQuestPIEDebugChannel::NarrowToDebugContext(const UEdGraphNode* EditorNode, const TArray<FGameplayTag>& Candidates) const
+{
+	const UQuestlineGraph* OwningAsset = FindOwningAsset(EditorNode);
+	if (!OwningAsset) return FGameplayTag();
+
+	const FGameplayTag* Context = DebugContextByAsset.Find(OwningAsset);
+	if (!Context || !Context->IsValid()) return FGameplayTag();
+
+	// MatchesTag is "this tag is the argument or a descendant of it", so one comparison covers a placement at any depth: a
+	// route placed in a chapter that is itself placed in the master reads the same as a placement sitting at the top.
+	for (const FGameplayTag& Candidate : Candidates)
+	{
+		if (Candidate.MatchesTag(*Context)) return Candidate;
+	}
+	return FGameplayTag();
+}
+
+void FQuestPIEDebugChannel::SetDebugContextForAsset(const UQuestlineGraph* OpenedAsset, FGameplayTag PlacementTag)
+{
+	if (!OpenedAsset) return;
+
+	if (PlacementTag.IsValid())
+	{
+		DebugContextByAsset.Add(OpenedAsset, PlacementTag);
+	}
+	else
+	{
+		DebugContextByAsset.Remove(OpenedAsset);
+	}
+
+	UE_LOG(LogSimpleQuest, Verbose, TEXT("FQuestPIEDebugChannel : debug context for '%s' is now %s"),
+		*OpenedAsset->GetName(),
+		PlacementTag.IsValid() ? *PlacementTag.ToString() : TEXT("all placements"));
+
+	OnDebugActiveChanged.Broadcast();
+}
+
+FGameplayTag FQuestPIEDebugChannel::GetDebugContextForAsset(const UQuestlineGraph* OpenedAsset) const
+{
+	if (!OpenedAsset) return FGameplayTag();
+	const FGameplayTag* Context = DebugContextByAsset.Find(OpenedAsset);
+	return Context ? *Context : FGameplayTag();
+}
+
+TArray<FGameplayTag> FQuestPIEDebugChannel::GetPlacementsForAsset(const UQuestlineGraph* OpenedAsset) const
+{
+	if (!IsActive() || !OpenedAsset || OpenedAsset->GetCompiledIdentityTag().IsNone()) return {};
+
+	const UQuestManagerSubsystem* Manager = CachedQuestManager.Get();
+	if (!Manager) return {};
+
+	const FGameplayTag AssetIdentity = FGameplayTag::RequestGameplayTag(OpenedAsset->GetCompiledIdentityTag(), false);
+	if (!AssetIdentity.IsValid()) return {};
+
+	return Manager->FindPlacementsOfAsset(AssetIdentity);
 }
 
 FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* EditorNode) const
@@ -338,9 +525,7 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 	if (!ContentNode) return FGameplayTag();
 
 	// Resolve own-asset compile tag via Outer walk + CompiledNodes lookup (same as before).
-	UObject* Outer = EditorNode->GetGraph() ? EditorNode->GetGraph()->GetOuter() : nullptr;
-	while (Outer && !Outer->IsA<UQuestlineGraph>()) Outer = Outer->GetOuter();
-	const UQuestlineGraph* QuestlineAsset = Cast<UQuestlineGraph>(Outer);
+	const UQuestlineGraph* QuestlineAsset = FindOwningAsset(EditorNode);
 	if (!QuestlineAsset) return FGameplayTag();
 
 	FGameplayTag OwnAssetTag;
@@ -353,15 +538,26 @@ FGameplayTag FQuestPIEDebugChannel::ResolveRuntimeTag(const UEdGraphNode* Editor
 		}
 	}
 
+	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
+	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
+	if (!WorldState || !StateSubsystem || !OwnAssetTag.IsValid()) return OwnAssetTag;
+
+	// A placement selected in the toolbar names one instance, and it wins outright. Without this the branch below returns the
+	// asset's own tag whenever that tag carries state - which it always does for a placed asset, because facts are written at
+	// every perspective - and an asset placed twice reads as its placements merged.
+	if (const FGameplayTag InContext = NarrowToDebugContext(EditorNode, StateSubsystem->ResolveCanonicalTags(OwnAssetTag));
+		InContext.IsValid())
+	{
+		return InContext;
+	}
+
 	// Contextual resolution: if PIE is running and own-asset tag has no live state, the asset may be opened
 	// while a parent LinkedQuestline placement is the actively running instance. Consult the state subsystem's
 	// runtime alias index (ResolveCanonicalTags) instead of the editor-utility's asset-registry walk - the
 	// runtime index reflects post-game-start registrations (including listener auto-load), whereas the asset-
 	// registry walk only sees compile-time data and can disagree with what the manager has actually registered.
 	// Closes the "halo doesn't update post-listener" symptom.
-	UWorldStateSubsystem* WorldState = CachedWorldState.Get();
-	UQuestStateSubsystem* StateSubsystem = CachedQuestState.Get();
-	if (WorldState && StateSubsystem && OwnAssetTag.IsValid() && !HasAnyStateFact(OwnAssetTag, WorldState))
+	if (!HasAnyStateFact(OwnAssetTag, WorldState))
 	{
 		for (const FGameplayTag& CanonicalTag : StateSubsystem->ResolveCanonicalTags(OwnAssetTag))
 		{

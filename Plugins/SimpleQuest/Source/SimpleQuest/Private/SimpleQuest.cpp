@@ -8,6 +8,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
 #include "Interfaces/IPluginManager.h"
+#include "Misc/EngineVersionComparison.h"
 #include "Quests/QuestlineGraph.h"
 #include "Settings/SimpleQuestSettings.h"
 #include "Utilities/QuestTagComposer.h"
@@ -23,8 +24,19 @@ DEFINE_LOG_CATEGORY(LogSimpleQuestState);
 
 void FSimpleQuest::StartupModule()
 {
+    // 5.8 deprecated OnLastChanceToAddNativeTags and names two replacements, neither of which is a drop-in here.
+    // CallOrRegister_OnAddNativeTagsDelegate does not EXIST before 5.8, so it cannot be used unguarded on a plugin that
+    // supports three engines. "Call AddNativeGameplayTag directly" is worse than it sounds for THIS caller: registration
+    // reads the asset registry, and at module startup that scan has not necessarily run, so calling straight through
+    // would register nothing and say so only in a log line reading "0 tag(s) from 0 questline asset(s)".
+    // So: the sanctioned call on 5.8, the old one untouched on 5.6 and 5.7, and identical behavior on both paths.
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
     UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterCompiledQuestTags);
     UGameplayTagsManager::OnLastChanceToAddNativeTags().AddStatic(&FSimpleQuest::RegisterAuthoredQuestTags);
+#else
+    UGameplayTagsManager::CallOrRegister_OnAddNativeTagsDelegate(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FSimpleQuest::RegisterCompiledQuestTags));
+    UGameplayTagsManager::CallOrRegister_OnAddNativeTagsDelegate(FSimpleMulticastDelegate::FDelegate::CreateStatic(&FSimpleQuest::RegisterAuthoredQuestTags));
+#endif
 
     // Apply log verbosity from Project Settings. UDeveloperSettings's Config flow loads the values during
     // engine boot before module startup, so GetDefault here returns settings already populated from

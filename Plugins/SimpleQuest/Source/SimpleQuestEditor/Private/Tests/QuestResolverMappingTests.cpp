@@ -38,7 +38,7 @@
 #include "Resolver/QuestExportOutput.h"
 #include "Resolver/QuestPlanReport.h"
 #include "Rewards/LootTableReward.h"
-#include "Rewards/ScaledAmountReward.h"
+#include "Rewards/AmountReward.h"
 #include "Tests/QuestResolverTestRow.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
 
@@ -2252,9 +2252,9 @@ bool FQuestResolver_MixedClassChildrenKeepIndexOrder::RunTest(const FString& Par
 		AddRow(Xp, TEXT("n_reward/Rewards[0]"), { { TEXT("class"), TEXT("XPReward") }, { TEXT("Amount"), TEXT("11") } });
 		Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Xp));
 
-		FQuestDataTable Scaled;
-		AddRow(Scaled, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("ScaledAmountReward") }, { TEXT("BaseAmount"), TEXT("22") } });
-		Bundle.TablesByType.Add(TEXT("scaled_amount_reward"), MoveTemp(Scaled));
+		FQuestDataTable Amount;
+		AddRow(Amount, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("AmountReward") }, { TEXT("Amount"), TEXT("22") } });
+		Bundle.TablesByType.Add(TEXT("amount_reward"), MoveTemp(Amount));
 	}
 
 	TSet<FString> Consumed;
@@ -2266,14 +2266,14 @@ bool FQuestResolver_MixedClassChildrenKeepIndexOrder::RunTest(const FString& Par
 
 	// Class AND value at each slot: class alone would pass if two same-class children swapped.
 	const UXPReward* First = Cast<UXPReward>(Owner->Rewards[0].Get());
-	const UScaledAmountReward* Second = Cast<UScaledAmountReward>(Owner->Rewards[1].Get());
+	const UAmountReward* Second = Cast<UAmountReward>(Owner->Rewards[1].Get());
 	const ULootTableReward* Third = Cast<ULootTableReward>(Owner->Rewards[2].Get());
 
 	TestNotNull(TEXT("Index 0 is the XP reward declared as [0]"), First);
-	TestNotNull(TEXT("Index 1 is the scaled reward declared as [1]"), Second);
+	TestNotNull(TEXT("Index 1 is the amount reward declared as [1]"), Second);
 	TestNotNull(TEXT("Index 2 is the loot reward declared as [2]"), Third);
 	if (First)  { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(First,  TEXT("Amount")),     11); }
-	if (Second) { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(Second, TEXT("BaseAmount")), 22); }
+	if (Second) { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(Second, TEXT("Amount")), 22); }
 	if (Third)  { TestEqual(TEXT("...carrying its own restored value"), ReadIntProperty(Third,  TEXT("RollCount")),   7); }
 
 	TestEqual(TEXT("Every child row was consumed"), Consumed.Num(), 3);
@@ -2345,9 +2345,9 @@ bool FQuestResolver_RefusesDuplicateChildKey::RunTest(const FString& Parameters)
 	AddRow(Xp, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("XPReward") } });
 	Bundle.TablesByType.Add(TEXT("xp_reward"), MoveTemp(Xp));
 
-	FQuestDataTable Currency;
-	AddRow(Currency, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("ScaledAmountReward") } });
-	Bundle.TablesByType.Add(TEXT("scaled_amount_reward"), MoveTemp(Currency));
+	FQuestDataTable Amount;
+	AddRow(Amount, TEXT("n_reward/Rewards[1]"), { { TEXT("class"), TEXT("AmountReward") } });
+	Bundle.TablesByType.Add(TEXT("amount_reward"), MoveTemp(Amount));
 
 	TMap<FString, const FQuestDataRow*> NodeRowsByKey;
 	TSet<FString> AllRowKeys;

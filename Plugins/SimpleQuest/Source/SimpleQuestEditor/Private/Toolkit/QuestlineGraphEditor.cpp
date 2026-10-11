@@ -35,6 +35,8 @@
 #include "GraphEditorActions.h"
 #include "IDesktopPlatform.h"
 #include "ScopedTransaction.h"
+#include "SimpleQuestEditor.h"
+#include "Debug/QuestPIEDebugChannel.h"
 #include "Resolver/QuestExportOperations.h"
 #include "Resolver/QuestImportOperations.h"
 #include "Resolver/QuestPlanBroker.h"
@@ -42,6 +44,7 @@
 #include "Resolver/QuestResolverEditorMemo.h"
 #include "Resolver/QuestRowApply.h"
 #include "Resolver/SQuestPlanPanel.h"
+#include "Widgets/SQuestlineDebugPlacementWidget.h"
 
 
 const FName FQuestlineGraphEditor::GraphViewportTabId(TEXT("QuestlineGraphEditor_GraphViewport"));
@@ -998,6 +1001,14 @@ void FQuestlineGraphEditor::FillToolbar(FToolBarBuilder& ToolbarBuilder)
         TAttribute<FText>(),
         TAttribute<FText>(),
         FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Search"));
+
+    ToolbarBuilder.EndSection();
+
+    // Last on the toolbar, where the Blueprint editor puts its debug object picker - the thing you reach for while the game
+    // is running, after everything you reach for while authoring.
+    ToolbarBuilder.BeginSection("Debugging");
+
+    ToolbarBuilder.AddWidget(SNew(SQuestlineDebugPlacementWidget, QuestlineGraph));
 
     ToolbarBuilder.EndSection();
 }

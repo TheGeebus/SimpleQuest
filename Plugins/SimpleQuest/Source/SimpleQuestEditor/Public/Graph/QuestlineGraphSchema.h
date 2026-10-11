@@ -98,6 +98,18 @@ public:
 	virtual int32 GetCurrentVisualizationCacheID() const override;
 	virtual void ForceVisualizationCacheClear() const override;
 
+	/**
+	 * True when every downstream terminal reachable from InputPin is a QuestPrerequisite input. This is the test that
+	 * decides whether a wire draws as a dashed prerequisite wire, so an activation or outcome wire plugged into a
+	 * Prerequisites pin reads as a prerequisite for its whole length. Lives here rather than in the drawing policy
+	 * because the reroute nodes need the same answer to color themselves, and two copies of this question would
+	 * drift - which is exactly the bug that put a white dot on a pink wire.
+	 *
+	 * Differs from KnotLeadsToPrereq: that one is ANY downstream prereq, this one is ALL of them. A knot whose
+	 * output splits to a prereq pin and an activation pin is not a prerequisite path and must not be drawn as one.
+	 */
+	static bool LeadsOnlyToPrereqInputs(const UEdGraphPin* InputPin, TSet<const UEdGraphNode*>& Visited);
+
 private:
 	/**
 	 * Bumped by ForceVisualizationCacheClear; compared against each SNodeTitle's cached ID. Static because the
@@ -155,7 +167,7 @@ private:
 	 * @return TRUE if any of the knot's downstream connections lead to any Prerequisite-type input pin.
 	 */
 	static bool KnotLeadsToPrereq(const UQuestlineNode_Knot* StartKnot);
-	
+
 	// ----- Connection validation helpers  ----------------------------------------
 
 	/** Direct prerequisite pin rules (both pins are non-knot, at least one is prereq category). */
@@ -183,4 +195,10 @@ private:
 	/** Rejects connections that would create a parallel path to a downstream terminal via a reroute. */
 	FPinConnectionResponse CheckDownstreamParallelPaths(const UEdGraphPin* OutputPin, const UEdGraphPin* KnotInputPin) const;
 
+	/**
+	 * Rejects a signal that already feeds a SIBLING condition input on TerminalPin's node. Only combinators and prereq
+	 * rule Entries gather several conditions on one node, so they are the only shapes that can receive one outcome
+	 * twice without any single pin seeing both wires - which is what made a reroute a way around the rule.
+	 */
+	FPinConnectionResponse CheckCombinatorSiblingDuplicate(const TSet<const UEdGraphPin*>& IncomingSources,	const UEdGraphPin* TerminalPin) const;
 };

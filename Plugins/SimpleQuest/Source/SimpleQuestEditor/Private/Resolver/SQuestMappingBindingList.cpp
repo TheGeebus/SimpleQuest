@@ -3,17 +3,23 @@
 
 #include "Resolver/SQuestMappingBindingList.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Misc/EngineVersionComparison.h"
 #include "ScopedTransaction.h"
 #include "SimpleQuestLog.h"
 #include "Resolver/QuestImportMapping.h"
 #include "Resolver/QuestReflectionUtils.h"
 #include "Nodes/QuestlineNodeBase.h"
-#include "SSearchableComboBox.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Input/SComboButton.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Styling/AppStyle.h"
+
+#if UE_VERSION_OLDER_THAN(5, 8, 0)
+#include "SSearchableComboBox.h"
+#else
+#include "Widgets/Input/SSearchableComboBox.h"
+#endif
 
 #define LOCTEXT_NAMESPACE "SQuestMappingBindingList"
 
@@ -531,7 +537,7 @@ void SQuestMappingBindingList::RefreshRows()
 	if (Mapping)
 	{
 		// Anchor rows = the UNION of authored properties across every mapped node class (bind once, applies where it fits).
-		// Dedup by name; a property on multiple classes is one row. Carry a type-label hint from the first class that has it.
+		// Dedupe by name; a property on multiple classes is one row. Carry a type-label hint from the first class that has it.
 		TMap<FName, FString> PropToType;
 		for (const FQuestDiscriminatorClass& Entry : Mapping->DiscriminatorClasses)
 		{

@@ -211,7 +211,18 @@ UEdGraphPin* ResolveQuestSourcePin(UEdGraphNode* Node, const FString& EdgeType)
 	{
 		// Exact pin name first - that's what our own export writes, so the round-trip is untouched.
 		for (UEdGraphPin* Pin : Node->Pins)
+		{
 			if (Pin && Pin->Direction == EGPD_Output && Pin->PinName.ToString() == PinName) return Pin;
+		}
+		// Legacy spelling: exports written before the AND combinator's output was renamed carry "feeds-prereq(Out)".
+		// Resolve it to the pin that now holds that name, so old data still wires without an edit pass.
+		if (PinName == TEXT("Out"))
+		{
+			for (UEdGraphPin* Pin : Node->Pins)
+			{
+				if (Pin && Pin->Direction == EGPD_Output && Pin->PinType.PinCategory == TEXT("QuestPrerequisite") && Pin->PinName == TEXT("PrereqOut")) return Pin;
+			}
+		}
 
 		// Then the OUTCOME LABEL form: an outcome pin's name is the full tag, but a studio authors (and the mapping
 		// panel offers) the namespace-stripped label. Computing the same label from each pin makes the two agree,

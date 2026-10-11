@@ -5,13 +5,12 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestComponentBase.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "Components/ActorComponent.h"
 #include "Quests/Types/PrerequisiteExpression.h"
 #include "Quests/Types/QuestActivationBlocker.h"
 #include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestEventTypes.h"
-#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Signals/Types/SignalRoutingFlags.h"
 #include "QuestObserverComponent.generated.h"
 
@@ -127,14 +126,14 @@ struct FObservedQuestEventSettings
 /**
  * Per-actor lifecycle observer for a curated set of quest tags. Drop on any actor that needs to react to
  * specific quest state changes - UI receptionists, level-bound gameplay objects, world services. Each watched
- * tag's FObservedQuestEventSettings controls which of the 10 lifecycle events broadcast.
- *
+ * tag's FObservedQuestEventSettings controls which of the twelve lifecycle events broadcast.
+ * 
  * Surface mirrors the ObserveQuestLifecycle K2 node's per-event delegates: same events, same payload shapes,
  * same catch-up semantics. The observer is the curated component-form alternative for designers who want
  * config-authored per-quest observation rather than ad-hoc K2 subscription.
  */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestObserverComponent : public UQuestComponentBase
+class SIMPLEQUEST_API UQuestObserverComponent : public USimpleCoreObserverComponent
 {
 	GENERATED_BODY()
 
@@ -258,7 +257,9 @@ public:
 	FOnAnyQuestEvent OnAnyQuestEvent;
 
 protected:
-	virtual void BeginPlay() override;
+	/** Test-only access to the registration internals. Mirrors FQuestAdvancementHoldTestAccess on the manager. */
+	friend class FQuestObserverDedupeTestAccess;
+	
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	
 	/**
@@ -268,17 +269,6 @@ protected:
 	 * Virtual so Trigger / Giver chain their role-specific registration via Super.
 	 */
 	virtual void PerformDeferredRegistration();
-
-	/**
-	 * Derived components may expose a set of tags to be implicitly observed alongside the
-	 * designer-authored ObservedTags container. Returned tags receive default FObservedQuestEventSettings
-	 * (every observe-flag on, no outcome filter) only when not already present in ObservedTags -
-	 * designer-authored settings always win on overlap.
-	 *
-	 * Use to bridge tags managed by a derived component (e.g., Giver's QuestTagsToGive) onto the
-	 * Observer's broadcast surface without requiring designers to maintain a parallel ObservedTags entry.
-	 */
-	virtual TArray<FQuestObservedTagSpec> GetImplicitlyObservedTags() const { return {}; }
 
 	virtual void HandleQuestActivated			(FGameplayTag Channel, const FQuestActivatedEvent& Event);
 	virtual void HandleQuestActivationFailed	(FGameplayTag Channel, const FQuestActivationFailedEvent& Event);
@@ -310,7 +300,7 @@ protected:
 	 * Subscribe + source-register + catch up ONE tag. Shared by RegisterQuestObserver's loop and the runtime
 	 * AddObservedTag path; captures the bus handles into SubscriptionHandlesByTag.
 	 */
-	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings);
+	void RegisterSingleObservedTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, TSet<FGameplayTag>* CaughtUpThisPass = nullptr);
 
 	/** Unsubscribe (by stored handle) + source-unregister + clear bookkeeping for ONE tag. */
 	void UnregisterSingleObservedTag(const FGameplayTag& QuestTag);
@@ -318,27 +308,24 @@ protected:
 	/**
 	 * Per-tag catch-up: replays current state for QuestTag as synthetic events. Virtual so Trigger/Giver layer
 	 * their role catch-up (OnQuestTriggerActivated replay, giver availability) on top via Super.
+	 *
+	 * CaughtUpThisPass, when supplied, is the set of tags already reported during ONE registration pass. Two entries
+	 * whose hierarchies overlap each fan out over the same descendants, and the bus cannot deduplicate that - catch-up
+	 * is a direct call, not a publish. Null for a runtime AddObservedTag, which is a genuinely new subscription and is
+	 * entitled to the current state whatever else this component is already watching.
 	 */
-	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState);
+	virtual void CatchUpSingleTag(const FGameplayTag& QuestTag, const FObservedQuestEventSettings& Settings, UWorldStateSubsystem* WorldState, UQuestStateSubsystem* QuestState, TSet<FGameplayTag>* CaughtUpThisPass = nullptr);
 
 	/**
-	 * Per-watched-tag bus subscription handles, captured at subscribe time so one tag can be unsubscribed
-	 * selectively (RemoveObservedTag / RemoveTagsFromTrigger) without tearing down the whole component.
+	 * This component's own per-tag subscription handles, captured at subscribe time so one tag can be dropped
+	 * selectively via RemoveObservedTag without tearing the component down. Separate from the base's fact registry
+	 * on purpose - see USimpleCoreObserverComponent::UnsubscribeHandlesForTag for why each surface keeps its own.
 	 */
 	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
-	
-	/**
-	 * True once RegisterQuestObserver has run. Gates the live-vs-deferred branch in AddObservedTag/RemoveObservedTag:
-	 * before registration, mutating the container suffices; after, it does live subscribe/unsubscribe work.
-	 */
-	bool bRegistered = false;
 	
 private:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	TMap<FGameplayTag, FObservedQuestEventSettings> ObservedTags;
-
-	/** DEPRECATED - add Tag/Settings pairs to UQuestObserverComponent::ObservedTags TMap instead */
-	FGameplayTagContainer WatchedStepTags;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite, Category="Quest", meta=(Categories="SimpleQuest.Questline", AllowPrivateAccess=true))
 	FGameplayTagContainer ActiveQuestTags;
@@ -347,9 +334,6 @@ private:
 	FGameplayTagContainer CompletedQuestTags;
 
 public:
-	UFUNCTION(BlueprintCallable)
-	FGameplayTagContainer GetRegisteredWatchedStepTags() const;
-
 	UFUNCTION(BlueprintCallable)
 	FGameplayTagContainer GetRegisteredWatchedQuestKeys() const;
 
@@ -367,8 +351,6 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category="Quest")
 	void RemoveObservedTag(FGameplayTag QuestTag);
-
-	/** DEPRECATED - WatchedStepTags is deprecated and only preserved for backwards compatibility. Prefer UQuestObserverComponent::ObservedTags TMap, using GetObservedTags() */
-	const FGameplayTagContainer& GetWatchedStepTags() const { return WatchedStepTags; }
+	
 	const TMap<FGameplayTag, FObservedQuestEventSettings>& GetObservedTags() const { return ObservedTags; }
 };

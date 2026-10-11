@@ -85,6 +85,35 @@ int32 UWorldStateSubsystem::GetFactValue(const FGameplayTag Tag) const
 	return Count ? *Count : 0;
 }
 
+void UWorldStateSubsystem::GetFactsMatching(const FGameplayTag Channel, const ESignalRoutingMode Routing, TArray<FGameplayTag>& OutFacts) const
+{
+	OutFacts.Reset();
+	if (!Channel.IsValid()) return;
+
+	// Match the bus's own delivery rule so catch-up covers exactly what a live publish would have reached: an exact
+	// subscriber hears only its own tag, a descendants subscriber also hears everything beneath it. MatchesTag is
+	// true when the fact IS the channel or sits under it.
+	const bool bIncludeDescendants = FSignalRoutingDefaults::IncludesDescendants(Routing);
+	for (const TPair<FGameplayTag, int32>& Fact : WorldFacts)
+	{
+		if (Fact.Value <= 0) continue;
+		if (bIncludeDescendants ? Fact.Key.MatchesTag(Channel) : Fact.Key == Channel)
+		{
+			OutFacts.Add(Fact.Key);
+		}
+	}
+
+	// TMap iteration order is not stable, so an unsorted replay would vary between runs of the same scenario and
+	// hide ordering bugs until somebody else found them. Sorting costs nothing at this size and makes catch-up
+	// reproducible.
+	OutFacts.Sort([](const FGameplayTag& A, const FGameplayTag& B) { return A.GetTagName().LexicalLess(B.GetTagName()); });
+
+	UE_LOG(LogSimpleCore, Verbose, TEXT("WorldState::GetFactsMatching: channel='%s' routing=%s matched %d fact(s)"),
+		*Channel.ToString(),
+		bIncludeDescendants ? TEXT("descendants") : TEXT("exact"),
+		OutFacts.Num());
+}
+
 void UWorldStateSubsystem::RestoreFacts(const TMap<FGameplayTag, int32>& InFacts)
 {
 	WorldFacts = InFacts;

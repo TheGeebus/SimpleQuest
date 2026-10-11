@@ -6,6 +6,7 @@
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "Utilities/QuestLifecycleQuery.h"
+#include "Utilities/QuestOrdering.h"
 #include "Utilities/SignalChannelUtils.h"
 
 
@@ -25,17 +26,16 @@ namespace FQuestCatchUpFanout
 
 		TArray<FGameplayTag> CatchUpTags = StateSubsystem->GetQuestTagsUnderPrefix(SubscribedTag);
 
-		// Mirror the live cascade's parent-first delivery order. GetQuestTagsUnderPrefix returns tags in TMap
-		// iteration order (non-deterministic relative to the cascade); subscribers binding via Hierarchical
-		// routing expect the asset/parent-tag event to land before descendants - which the live cascade does
-		// naturally because PublishMessage on the questline tag completes its synchronous dispatch before
-		// ActivateQuestlineGraph iterates entry tags and triggers content-node publishes. Sort by tag-string
-		// length ascending so the subscribed tag (shortest under itself) lands first, then descendants in
-		// depth order.
-		CatchUpTags.Sort([](const FGameplayTag& A, const FGameplayTag& B)
-		{
-			return A.ToString().Len() < B.ToString().Len();
-		});
+		// GetQuestTagsUnderPrefix returns tags in TMap iteration order, which is not an order at all. Replay has to
+		// impose one, and it has to be the SAME one every other surface uses - a restore that lists content
+		// differently from the live run reads as a bug whatever the list is.
+		//
+		// PARENT-FIRST IS STRUCTURAL HERE, NOT COSMETIC. The QuickStart sidebar builds its hierarchy from arrival
+		// order: FindParentEntry walks up the tag looking for an existing entry, and a node whose parent has not
+		// been delivered yet is attached at top level with depth 0 and never re-parented. Deliver a child first and
+		// the restored sidebar is shaped differently from the one the player was just looking at. FQuestOrdering
+		// guarantees ancestors first as its first rule, so that holds by construction rather than by luck.
+		FQuestOrdering::SortTags(CatchUpTags, StateSubsystem);
 
 		UE_LOG(LogSimpleQuestSubscription, Verbose,
 			TEXT("FQuestCatchUpFanout::EnumerateTagsForCatchUp : '%s' Descendants routing - fanned out to %d known quest tag(s), sorted parent-first"),
@@ -91,7 +91,7 @@ namespace FQuestCatchUpFanout
 		if (QuestState)
 		{
 			Out.Payload.NodeInfo.DisplayName = QuestState->GetDisplayName(CanonicalTag);
-			Out.Payload.Instigator = QuestState->GetLastGiverActor(CanonicalTag);
+			Out.Payload.Instigator = QuestState->GetLastInstigatorActor(CanonicalTag);
 			if (const FQuestEntryRecord* EntryRec = QuestState->GetQuestEntry(CanonicalTag))
 			{
 				if (const FQuestEntryArrival* Latest = EntryRec->GetLatest())
@@ -121,7 +121,10 @@ namespace FQuestCatchUpFanout
 		{
 			FReconstructedEvent Ev;
 			Ev.EventType = EQuestLifecycleEventType::Started;
+			// Giver-only: null for a cascaded or externally started quest, exactly as the live STARTED's GiverActor is.
 			Ev.RecoveredGiver = QuestState ? QuestState->GetLastGiverActor(CanonicalTag) : nullptr;
+			UE_LOG(LogSimpleQuestSubscription, Verbose, TEXT("FQuestCatchUpFanout: STARTED for '%s' reconstructed with giver=%s"),
+				*CanonicalTag.ToString(), Ev.RecoveredGiver ? *Ev.RecoveredGiver->GetName() : TEXT("none"));
 			Out.Events.Add(Ev);
 		};
 

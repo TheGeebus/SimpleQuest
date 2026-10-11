@@ -39,7 +39,7 @@ public:
 	/**
 	 * Preview aggregation - ask every reward this node holds what it WOULD grant, without granting. Iterates the
 	 * Instanced Rewards and dispatches DescribeReward on each, concatenating the results. Pure: no delivery, no event,
-	 * no forward. Backs the advertisement query (UQuestStateSubsystem::GetAdvertisedRewardsForAnyOutcome).
+	 * no forward. Backs the manager's advertisement queries (UQuestManagerSubsystem::ResolveAdvertisedRewards).
 	 */
 	TArray<FQuestRewardPreview> DescribeRewards(AActor* Viewer, FGameplayTag ResolvingQuestTag) const;
 

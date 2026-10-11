@@ -16,7 +16,7 @@
  * redirect to a shared stash, drop unless a condition holds.
  *
  * WHY A SEPARATE LAYER RATHER THAN FIELDS ON A REWARD. A transform fused into a source costs a class per combination
- * and only works for the sources somebody thought to fuse it into. UScaledAmountReward is that cost already paid once
+ * and only works for the sources somebody thought to fuse it into. Scaled Amount Reward was that cost paid once
  * - and because it fuses "grant an amount" with "scale it," scaled LOOT cannot be authored at all today: a loot table
  * computes its amounts internally, per rolled row, so there is no field to reach. A modifier runs after the grants are
  * queued and catches every one of them uniformly.

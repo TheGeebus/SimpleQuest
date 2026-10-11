@@ -25,7 +25,7 @@ TArray<FQuestRewardPreview> UQuestRewardNode::ResolveAdvertisedFromManifest(
 	AActor* Viewer,
 	bool bIncludeAnyOutcome, FGameplayTag ResolvingQuestTag)
 {
-	// The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedups a key
+	// The requested path's reward keys, plus the any-outcome (NAME_None) bucket when merging. AddUnique dedupes a key
 	// that sits in both buckets (a reward on Any Outcome AND the named path).
 	TArray<FName> RewardKeys;
 	if (const FQuestReachableRewards* PathBucket = Manifest.Find(PathIdentity))
@@ -61,7 +61,7 @@ void UQuestRewardNode::GrantRewardSet(const TArray<TObjectPtr<UQuestRewardBase>>
 
 	for (UQuestRewardBase* Reward : Rewards)
 	{
-		if (!Reward) continue;
+		if (!IsValid(Reward)) continue;
 
 		Reward->DispatchTryGrantReward(Incoming);
 		for (FQuestRewardContext& Grant : Reward->TakePendingGrants())

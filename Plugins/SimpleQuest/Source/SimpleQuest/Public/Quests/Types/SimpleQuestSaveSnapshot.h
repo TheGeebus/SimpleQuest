@@ -42,6 +42,15 @@ struct SIMPLEQUEST_API FSimpleQuestSaveSnapshot
 	UPROPERTY(SaveGame)
 	double PlayTime = 0.0;
 
+	/**
+	 * Next value UQuestStateSubsystem will stamp onto FQuestEntryArrival::EntrySequence. Carried so the counter keeps
+	 * climbing across a save: restarted at 1 it would hand out numbers the restored history already holds, and two
+	 * arrivals sharing a sequence have no order between them. Zero on a snapshot from before this field existed - apply
+	 * clamps to 1, and that save's own entries carry no sequence to collide with.
+	 */
+	UPROPERTY(SaveGame)
+	int32 NextEntrySequence = 1;
+
 	/** Layer 1 - UWorldStateSubsystem fact map (running facts, completion, blocked, prereq satisfaction, …). */
 	UPROPERTY(SaveGame)
 	TMap<FGameplayTag, int32> WorldFacts;

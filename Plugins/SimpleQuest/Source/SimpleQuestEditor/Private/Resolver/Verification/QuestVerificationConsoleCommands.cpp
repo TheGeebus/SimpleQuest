@@ -12,9 +12,12 @@
 #include "Graph/QuestGraphArrange.h"
 #include "HAL/FileManager.h"
 #include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Quests/QuestlineGraph.h"
 #include "Resolver/ISimpleQuestDataFormat.h"
 #include "Resolver/QuestMappingSource.h"
+#include "Resolver/QuestPlanBroker.h"
 #include "Resolver/Verification/QuestCompiledModelDump.h"
 #include "Resolver/Verification/QuestRoundTripOracle.h"
 #include "Resolver/Verification/QuestVerificationPaths.h"
@@ -111,10 +114,28 @@ namespace
 			GEngine->Exec(nullptr, *Cmd);
 		};
 
-		// Stamped BEFORE anything runs, so "modified at or after this" means "produced by this run". The existing
-		// bEveryStepRan check catches a command that does not EXIST; it cannot catch one that runs and refuses, and a
-		// refused export leaves the previous run's folder sitting there looking exactly like a successful one.
-		const FDateTime RunStart = FDateTime::UtcNow();
+		// RECEIPTS, NOT FORENSICS. bEveryStepRan above catches a command that does not EXIST; it cannot catch one that
+		// runs and REFUSES, and a refused export leaves the previous run's folder looking exactly like a successful one.
+		// This used to be answered by stamping FDateTime::UtcNow() and requiring every artifact to be newer - which is a
+		// race, and one that a FAST run loses: IFileManager::GetTimeStamp truncates a file's timestamp to the WHOLE
+		// SECOND on every platform (WindowsFileTimeToUEDateTime drops the milliseconds deliberately; Apple and Unix read
+		// st_mtime, which has none), while UtcNow() carries milliseconds. A run that finishes inside one second reads its
+		// own fresh artifacts as older than its start and aborts. Reported from the field on 5.8; it had always been true.
+		// So stop asking the disk what happened and let the pipeline say: the export publishes a receipt on success and
+		// its refusal text on failure, through the same broker an open panel listens to.
+		TMap<FString, FString> ExportReceiptByAsset;   // canonical asset path -> receipt; only successes land here
+		TMap<FString, FString> ExportRefusalByAsset;   // canonical asset path -> why it refused
+		const FDelegateHandle ExportHandle = FQuestPlanBroker::Get().OnExportCompleted().AddLambda(
+			[&ExportReceiptByAsset, &ExportRefusalByAsset](const FString& Asset, const FString& Summary, const FString& Error)
+			{
+				if (Error.IsEmpty()) { ExportReceiptByAsset.Add(Asset, Summary); }
+				else                 { ExportRefusalByAsset.Add(Asset, Error); }
+			});
+		ON_SCOPE_EXIT { FQuestPlanBroker::Get().OnExportCompleted().Remove(ExportHandle); };
+
+		// Keyed by the asset's OWN path name, not by the console argument - a caller may have typed either the short or
+		// the object-path form, and the broker reports what the graph calls itself.
+		const FString SrcKey = Src->GetPathName();
 
 		// COMPILE THE SOURCE BEFORE DUMPING IT. ImportQuestline compiles the RT side moments before its dump, so
 		// leaving the source at whatever state it was last saved in compares a FRESH artifact against a STALE one -
@@ -136,6 +157,17 @@ namespace
 				return;
 			}
 		}
+
+		// The two compiled dumps are this harness's own artifacts and this run rewrites both, so clearing them first
+		// turns "written by this run" into a question about EXISTENCE, which no clock can get wrong. ONLY these two
+		// NAMED FILES. The export FOLDERS are never touched: one can hold a hand-placed marker whose bOwned is false, a
+		// bundle somebody edited and has not imported yet, or read-only files the export itself declines to remove -
+		// and a verification harness must not be more destructive than the pipeline it verifies. EvenReadOnly is FALSE
+		// for that last reason, which is the choice the export's own replace step makes.
+		// BELOW THE COMPILE GATE ON PURPOSE: that gate returns, and deleting artifacts we are then not going to
+		// regenerate is the failure this whole rewrite exists to avoid.
+		IFileManager::Get().Delete(*SrcDump, false, false, true);
+		IFileManager::Get().Delete(*RtDump,  false, false, true);
 
 		// 1. Export the source (authored folder + we'll dump its compiled form too).
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *AssetPath, *FormatArg));
@@ -160,38 +192,89 @@ namespace
 
 		// 3. Export + dump the imported asset. Its object path: <DestPackagePath>/<ID>_RT.<ID>_RT
 		const FString RtAssetPath = FString::Printf(TEXT("%s/%s.%s"), *DestPackagePath, *RtID, *RtID);
+
+		// Loading it here does double duty: the import is the one step with no receipt of its own, so a null result IS
+		// the import's failure report - and a loaded asset gives us the canonical path the broker will key its receipt by.
+		const UQuestlineGraph* Rt = LoadObject<UQuestlineGraph>(nullptr, *RtAssetPath, nullptr, LOAD_NoWarn | LOAD_Quiet);
+		const FString RtKey = Rt ? Rt->GetPathName() : FString();
+
+		// Answer the question NOW rather than holding a raw pointer across the two Exec calls below. Nothing here
+		// dereferences Rt afterwards, but a collected asset would leave it dangling and non-null, and the verdict gate
+		// should not be one edit away from reading a field off it.
+		const bool bImportProducedAsset = (Rt != nullptr);
+
 		Exec(FString::Printf(TEXT("SimpleQuest.ExportQuestline %s%s"), *RtAssetPath, *FormatArg));
 		Exec(FString::Printf(TEXT("SimpleQuest.DumpCompiled %s"), *RtAssetPath));
 
-		// A step that did not run - or ran and refused - leaves the PREVIOUS run's artifacts on disk, and those compare
-		// against each other perfectly happily. Refuse to report rather than report something unearned.
-		auto FileIsFresh = [&RunStart](const FString& Path)
-		{
-			return IFileManager::Get().FileExists(*Path) && IFileManager::Get().GetTimeStamp(*Path) >= RunStart;
-		};
-		auto FolderIsFresh = [&RunStart](const FString& Dir)
+		// For the log line only - never for a verdict. What is on disk answers "is something here", and the receipts
+		// above answer "did this run put it here", which is the question that actually matters.
+		auto FileCountIn = [](const FString& Dir)
 		{
 			TArray<FString> Found;
-			IFileManager::Get().FindFiles(Found, *(Dir / TEXT("*.*")), true, false);
-			for (const FString& F : Found)
-			{
-				if (IFileManager::Get().GetTimeStamp(*(Dir / F)) >= RunStart) { return true; }
-			}
-			return false;
+			IFileManager::Get().FindFiles(Found, *(Dir / TEXT("*.*")), /*Files*/ true, /*Directories*/ false);
+			return Found.Num();
 		};
 
-		const TCHAR* StaleWhat =
-			  !bEveryStepRan            ? TEXT("a step was skipped entirely")
-			: !FolderIsFresh(SrcFolder) ? TEXT("the source export folder was not written by this run")
-			: !FileIsFresh(SrcDump)     ? TEXT("the source compiled dump was not written by this run")
-			: !FolderIsFresh(RtFolder)  ? TEXT("the round-trip export folder was not written by this run")
-			: !FileIsFresh(RtDump)      ? TEXT("the round-trip compiled dump was not written by this run")
-			:                             nullptr;
+		// The evidence the last field report had to reconstruct by hand. Verbose, because it is worth nothing on a run
+		// that passes and is the whole answer on a run that does not.
+		UE_LOG(LogSimpleQuestResolver, Verbose, TEXT("RoundTrip '%s': src folder '%s' %d file(s), src dump %s; rt folder "
+			"'%s' %d file(s), rt dump %s; %d export receipt(s), %d refusal(s)."),
+			*OriginalID,
+			*SrcFolder, FileCountIn(SrcFolder), IFileManager::Get().FileExists(*SrcDump) ? TEXT("present") : TEXT("MISSING"),
+			*RtFolder,  FileCountIn(RtFolder),  IFileManager::Get().FileExists(*RtDump)  ? TEXT("present") : TEXT("MISSING"),
+			ExportReceiptByAsset.Num(), ExportRefusalByAsset.Num());
 
-		if (StaleWhat)
+		// Ordered the way the run is, so the FIRST thing that went wrong is the thing reported - a later check failing
+		// because of an earlier failure is noise. A refusal now carries its own reason, so "check the errors above" is
+		// no longer the only thing this can say.
+
+		// The pipeline's refusals are complete sentences and end in a period; this line adds its own. Trim one, so a
+		// quoted refusal does not read "... Nothing written.. No verdict."
+		auto Unterminated = [](const FString& Text)
 		{
-			UE_LOG(LogSimpleQuestResolver, Error, TEXT("==== RoundTrip '%s': ABORTED - %s, so what is on disk is from an "
-				"earlier run. No verdict. Check the errors above. ===="), *OriginalID, StaleWhat);
+			FString Trimmed = Text.TrimEnd();
+			Trimmed.RemoveFromEnd(TEXT("."));
+			return Trimmed;
+		};
+
+		FString AbortWhy;
+		if (!bEveryStepRan)
+		{
+			AbortWhy = TEXT("a step was skipped entirely");
+		}
+		else if (const FString* SrcRefusal = ExportRefusalByAsset.Find(SrcKey))
+		{
+			AbortWhy = FString::Printf(TEXT("the source export refused - %s"), *Unterminated(*SrcRefusal));
+		}
+		else if (!ExportReceiptByAsset.Contains(SrcKey))
+		{
+			AbortWhy = TEXT("the source export reported neither a result nor a refusal");
+		}
+		else if (!IFileManager::Get().FileExists(*SrcDump))
+		{
+			AbortWhy = TEXT("the source compiled dump was not written");
+		}
+		else if (!bImportProducedAsset)
+		{
+			AbortWhy = FString::Printf(TEXT("the import produced no '%s' asset"), *RtID);
+		}
+		else if (const FString* RtRefusal = ExportRefusalByAsset.Find(RtKey))
+		{
+			AbortWhy = FString::Printf(TEXT("the round-trip export refused - %s"), *Unterminated(*RtRefusal));
+		}
+		else if (!ExportReceiptByAsset.Contains(RtKey))
+		{
+			AbortWhy = TEXT("the round-trip export reported neither a result nor a refusal");
+		}
+		else if (!IFileManager::Get().FileExists(*RtDump))
+		{
+			AbortWhy = TEXT("the round-trip compiled dump was not written");
+		}
+
+		if (!AbortWhy.IsEmpty())
+		{
+			UE_LOG(LogSimpleQuestResolver, Error, TEXT("==== RoundTrip '%s': ABORTED - %s. No verdict. ===="),
+				*OriginalID, *AbortWhy);
 			return;
 		}
 
@@ -224,6 +307,17 @@ namespace
 		const FString OriginalID = Args[0];
 		const FString RtID       = OriginalID + GQuestRoundTripSuffix;
 
+		// The two command names invite this: RoundTrip takes an ASSET PATH, RoundTripCompare takes the questline ID whose
+		// artifacts a prior RoundTrip left on disk. Passing a path used to resolve to folders that never existed and
+		// report a diff against nothing, which reads as a pipeline fault and is not one.
+		if (OriginalID.Contains(TEXT("/")) || OriginalID.Contains(TEXT(".")))
+		{
+			UE_LOG(LogSimpleQuestResolver, Warning, TEXT("RoundTripCompare: '%s' looks like an asset path. This command takes "
+				"the questline ID whose <ID> / <ID>_RT artifacts live under Saved/QuestExport - try 'SimpleQuest."
+				"RoundTripCompare %s'. Nothing compared."), *OriginalID, *FPaths::GetBaseFilename(OriginalID));
+			return;
+		}
+
 		const TUniquePtr<ISimpleQuestDataFormat> Format = MakeQuestDataFormat(Args, TEXT("RoundTripCompare"));
 		if (!Format) return;
 
@@ -234,6 +328,7 @@ namespace
 			AuthoredMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), AuthoredMiss,
 			CompiledMiss == 0 ? TEXT("PASS") : TEXT("FAIL"), CompiledMiss);
 	}
+	
 	static void LogGraphRanksCmd(const TArray<FString>& Args)
 	{
 		if (Args.Num() < 1)

@@ -24,6 +24,7 @@
 #include "Quests/QuestRewardNode.h"
 #include "Quests/Types/QuestOutcomeTags.h"
 #include "Rewards/QuestRewardBase.h"
+#include "Utilities/QuestOrdering.h"
 
 
 // -------------------------------------------------------------------------
@@ -113,6 +114,28 @@ bool USimpleQuestBlueprintLibrary::IsQuestResolvedWith(const UObject* WorldConte
     const UGameInstance* GI = World ? World->GetGameInstance() : nullptr;
     const UQuestStateSubsystem* StateSubsystem = GI ? GI->GetSubsystem<UQuestStateSubsystem>() : nullptr;
     return StateSubsystem && StateSubsystem->HasResolvedWith(QuestTag, OutcomeTag);
+}
+
+bool USimpleQuestBlueprintLibrary::QuestSortsBefore(const UObject* WorldContext, const FGameplayTag A, const FGameplayTag B)
+{
+    return FQuestOrdering::Less(A, B, GetQuestStateSubsystem(WorldContext));
+}
+
+int32 USimpleQuestBlueprintLibrary::FindSortedInsertIndex(const UObject* WorldContext,
+    const TArray<FGameplayTag>& OrderedTags, const FGameplayTag NewTag)
+{
+    const UQuestStateSubsystem* QSS = GetQuestStateSubsystem(WorldContext);
+
+    // Linear rather than binary: these lists are a sidebar's worth of rows, and a linear scan cannot go subtly wrong
+    // if the caller hands over a list that is not quite sorted - it just puts the row somewhere reasonable.
+    for (int32 Index = 0; Index < OrderedTags.Num(); ++Index)
+    {
+        if (FQuestOrdering::Less(NewTag, OrderedTags[Index], QSS))
+        {
+            return Index;
+        }
+    }
+    return OrderedTags.Num();
 }
 
 int32 USimpleQuestBlueprintLibrary::GetQuestCompletionCount(const UObject* WorldContext, const FGameplayTag QuestTag)
@@ -385,13 +408,6 @@ UQuestObjective* USimpleQuestBlueprintLibrary::GetActiveObjectiveForTag(const UO
     return nullptr;
 }
 
-TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsForAnyOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
-{
-    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
-    // Any-outcome bucket: PathIdentity = NAME_None. bIncludeAnyOutcome is moot when the path IS the any-outcome bucket.
-    return Manager ? Manager->ResolveAdvertisedRewards(ContentTag, NAME_None, Viewer, true) : TArray<FQuestRewardPreview>{};
-}
-
 TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFromAsset(const UQuestlineGraph* Questline, FGameplayTag Tag, AActor* Viewer)
 {
     TMap<FGameplayTag, FQuestRewardPreviewList> Out;
@@ -442,31 +458,6 @@ TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAdv
     return Out;
 }
 
-TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewardsFromAsset(const UQuestlineGraph* Questline, AActor* Viewer)
-{
-    TMap<FGameplayTag, FQuestRewardPreviewList> Out;
-    if (!Questline) return Out;
-
-    // Read the authored questline-level rewards directly off the asset (this map IS the runtime home) - manager-free,
-    // works cold. Describe each reward for the viewer; group by the outcome that pays it.
-    for (const TPair<FGameplayTag, FQuestRewardSet>& Pair : Questline->GetQuestlineRewards())
-    {
-        FQuestRewardPreviewList List;
-        for (const TObjectPtr<UQuestRewardBase>& Reward : Pair.Value.Rewards)
-        {
-            if (Reward) List.Previews.Append(Reward->DispatchDescribeReward(Viewer, Questline->GetIdentityTag()));
-        }
-        if (List.Previews.Num() > 0) Out.Add(Pair.Key, MoveTemp(List));
-    }
-    return Out;
-}
-
-TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetQuestlineRewards(const UObject* WorldContext, FGameplayTag QuestlineTag, AActor* Viewer)
-{
-    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
-    return Manager ? Manager->ResolveQuestlineRewards(QuestlineTag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
-}
-
 TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAdvertisedRewards(const UObject* WorldContext, FGameplayTag Tag, AActor* Viewer)
 {
     const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
@@ -494,12 +485,6 @@ TArray<FQuestRewardPreview> USimpleQuestBlueprintLibrary::GetAdvertisedRewardsFo
         if (const FQuestRewardPreviewList* Any = All.Find(TAG_Outcome_AnyOutcome.GetTag())) Out.Append(Any->Previews);
     }
     return Out;
-}
-
-TMap<FGameplayTag, FQuestRewardPreviewList> USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome(const UObject* WorldContext, FGameplayTag ContentTag, AActor* Viewer)
-{
-    const UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext);
-    return Manager ? Manager->ResolveAllAdvertisedRewardsByOutcome(ContentTag, Viewer) : TMap<FGameplayTag, FQuestRewardPreviewList>{};
 }
 
 FText USimpleQuestBlueprintLibrary::GetQuestDisplayNameText(const UObject* WorldContext, const FGameplayTag QueryTag)

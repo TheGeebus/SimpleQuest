@@ -268,17 +268,17 @@ protected:
 
 	/**
 	 * Resolve the rewards a completing node advertises on an outcome path (backs USimpleQuestBlueprintLibrary::
-	 * GetAdvertisedRewardsForAnyOutcome and ...ForOutcome). Looks the node up by ContentTag, reads its compile-time
-	 * ReachableRewardsByPath, resolves each reward-node key to its live instance, and aggregates DescribeReward. Pure:
-	 * no grant, no event. PathIdentity is the compile-time path key (a static outcome's tag-name, a dynamic PathName,
-	 * or NAME_None for any-outcome); resolved from the caller's outcome tag by the library.
+	 * the advertisement queries). Looks the node up by ContentTag, reads its compile-time ReachableRewardsByPath,
+	 * resolves each reward-node key to its live instance, and aggregates DescribeReward. Pure: no grant, no event.
+	 * PathIdentity is the compile-time path key (a static outcome's tag-name, a dynamic PathName, or NAME_None for
+	 * any-outcome); resolved from the caller's outcome tag by the library.
 	 */
 	virtual TArray<FQuestRewardPreview> ResolveAdvertisedRewards(FGameplayTag ContentTag, FName PathIdentity, AActor* Viewer, bool bIncludeAnyOutcome) const;
 
 	/**
-	 * Live twin of the cold GetQuestlineRewardsFromAsset - previews a RUNNING questline's questline-level rewards per
-	 * outcome. Resolves the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and
-	 * describes each authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
+	 * Live twin of the cold asset query - previews a RUNNING questline's questline-level rewards per outcome. Resolves
+	 * the identity tag to its live graph (LiveGraphsByIdentity, the same registry delivery uses) and describes each
+	 * authored reward. For HUD/journal on an active questline. Backs USimpleQuestBlueprintLibrary.
 	 */
 	virtual TMap<FGameplayTag, FQuestRewardPreviewList> ResolveQuestlineRewards(FGameplayTag QuestlineTag, AActor* Viewer) const;
 	
@@ -308,7 +308,7 @@ protected:
 	/**
 	 * Whole-node advertised rewards, grouped by outcome - every static-outcome path of a completing node and what each
 	 * pays, PLUS the any-outcome rewards merged into each (any-outcome fires on every completion, so that's the truthful
-	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAllAdvertisedRewardsByOutcome.
+	 * "complete via this outcome, get this" picture). Backs USimpleQuestBlueprintLibrary::GetAdvertisedRewards.
 	 *
 	 * BOUNDARY-APPROACH CAVEAT (0.6): the manifest keys on FName PathIdentity; this resolves PathIdentity -> outcome tag
 	 * for STATIC outcomes only (RequestGameplayTag). Dynamic PathNames have no compile-time tag and are DROPPED (consistent
@@ -355,6 +355,26 @@ protected:
 	 * override this, or editor tooling and any other introspection will silently report against a registry it no longer fills.
 	 */
 	virtual const UQuestNodeBase* FindNodeInstance(FGameplayTag Tag) const { return LoadedNodeInstances.FindRef(Tag.GetTagName()); }
+
+	/**
+	 * The live node instance whose authored guid is AuthoredNodeGuid, or null. For nodes with no tag to be registered
+	 * under - utility nodes such as a Prerequisite Gate, which carry a prerequisite expression but no lifecycle - the guid
+	 * is the only handle. An authored node placed in several compile contexts registers one instance per placement, all
+	 * sharing the guid; this returns the first found. A linear scan, sized for editor tooling. Same replacement-contract
+	 * note as FindNodeInstance.
+	 */
+	virtual const UQuestNodeBase* FindNodeInstanceByAuthoredGuid(const FGuid& AuthoredNodeGuid) const;
+
+	/**
+	 * The contextual tags of every registered placement of a linked questline asset - the running copies of AssetIdentityTag.
+	 * Empty when nothing places it, which includes an asset running standalone under its own identity.
+	 *
+	 * A placement carries the identity of the asset it placed; content inside a linked asset carries asset-scoped aliases
+	 * instead, so this matches the wrappers only. Editor tooling asks it to answer "which of these am I looking at": an asset
+	 * placed more than once has one authored node per Step and several running instances of it. A linear scan, sized for
+	 * editor tooling. Same replacement-contract note as FindNodeInstance.
+	 */
+	virtual TArray<FGameplayTag> FindPlacementsOfAsset(FGameplayTag AssetIdentityTag) const;
 
 	/** Clears the clearable state mirror for every path a quest has resolved through (append-only registry untouched). Backs ResetQuestRunState. */
 	virtual void ResetQuestRunState(FGameplayTag QuestTag);
@@ -467,7 +487,14 @@ private:
 	 * Delivery (PublishGraphResolutions) and the reward queries read this by a resolution's GraphTag, so an embedded
 	 * questline's rewards resolve without its source asset - which is never loaded at runtime. Populated in
 	 * RegisterQuestlineGraph alongside LiveGraphsByIdentity.
+	 *
+	 * A UPROPERTY for the same reason LoadedNodeInstances is one: these are the objects the manager grants from, so it
+	 * must own a reference to them. Recompiling a registered graph while a play session is running moves the previous
+	 * compile's rewards into the transient package and drops them from the asset. The node instances survive that because
+	 * this subsystem references them; the rewards have to survive the same way, or the next questline completion grants
+	 * from freed memory.
 	 */
+	UPROPERTY()
 	TMap<FName, FQuestCompiledQuestlineRewards> LiveQuestlineRewardsByIdentity;
 
 	/**
@@ -541,7 +568,7 @@ private:
 	/**
 	 * Idempotent registration of a node Instance under its ContextualTag key in LoadedNodeInstances. The map holds
 	 * one entry per placement - a node's ContextualTag resolves to exactly one runtime instance (strict 1:1).
-	 * Centralizing the Add keeps that invariant in one place; lookup and dedup-by-pointer sites rely on it.
+	 * Centralizing the Add keeps that invariant in one place; lookup and dedupe-by-pointer sites rely on it.
 	 *
 	 * Behavior:
 	 *   - Key unmapped: stores Instance under Key.

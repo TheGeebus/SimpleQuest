@@ -54,6 +54,12 @@ struct FPrereqExaminerNode
      * leaf's two-row display.
      */
     UPROPERTY() FText LeafPathLabel;
+
+    /**
+     * Leaf-only: the row-2 header. Empty means the default "Outcome: " - right for every leaf sourced from a content
+     * node's pins. A Fact Tag leaf reads a fact, not an outcome, and sets this to "Fact: ".
+     */
+    UPROPERTY() FText LeafPathHeader;
     
     /**
      * WorldState fact tag the leaf/RuleRef reads at runtime. For leaves: matches the compiler's per-leaf fact output
@@ -71,18 +77,20 @@ struct FPrereqExaminerNode
      * Leaf-only; invalid on other node types.
      */
     UPROPERTY() FGameplayTag LeafSourceTag;
-
-    /**
-     * Source content node's compiled runtime tag (e.g., "SimpleQuest.Questline.Demo.Step1"). Paired with LeafTag so the debug channel
-     * can classify NotStarted / InProgress / Satisfied / Unsatisfied by cross-checking the source node's state facts.
-     * Leaf-only; invalid on other node types.
-     */
     
     /**
      * Leaf-only: the completion path this leaf requires on its source node, taken from the wired output pin's name — the
      * same FName the compiler keys path leaves by. NAME_None when the leaf is the Any Outcome sentinel.
      */
     UPROPERTY() FName LeafPathIdentity;
+
+    /**
+     * The node whose COMPILED expression holds this one, when that is not the tree's EvaluationNode. Set only on
+     * nodes drilled in from a RuleRef: a rule's expression is compiled onto the rule's own runtime instance, not onto
+     * the node the panel is pinned to, so evaluating those leaves against the pinned node finds nothing and renders
+     * them untinted. Empty means "use FPrereqExaminerTree::EvaluationNode", which is every other node.
+     */
+    UPROPERTY() TWeakObjectPtr<UEdGraphNode> EvaluationOwner;
 
     /**
      * Leaf-only: true when the leaf reads the Any Outcome pin. The compiler expands that into one path leaf per completion
@@ -119,7 +127,16 @@ struct FPrereqExaminerTree
     /** Populated when ContextNode is a Prerequisite Rule Entry or Exit; invalid tag + null node otherwise. */
     UPROPERTY() FGameplayTag RuleTag;
     UPROPERTY() TWeakObjectPtr<UEdGraphNode> RuleEntryNode;
-
+    
+    /**
+     * The node whose COMPILED expression the debug channel evaluates the leaves against. For a content node or a
+     * Prerequisite Gate it is the context itself. For a pinned combinator or rule it is the first consumer found by
+     * walking the prerequisite wire forward - the expression only exists at runtime where something consumes it. Null
+     * when nothing does (a dangling expression, or a rule consumed only in another asset): the tree still renders, with
+     * no PIE tint.
+     */
+    UPROPERTY() TWeakObjectPtr<UEdGraphNode> EvaluationNode;
+    
     UPROPERTY() TArray<FPrereqExaminerNode> Nodes;
 
     /** Index into Nodes of the top-level expression node, or INDEX_NONE when the context has no wired expression. */

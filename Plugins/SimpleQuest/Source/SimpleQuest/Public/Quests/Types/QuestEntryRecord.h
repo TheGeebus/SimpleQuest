@@ -39,6 +39,18 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	double EntryTime = 0.0;
 
+	/**
+	 * Tiebreak for EntryTime: a counter that climbs for the life of the save, stamped once per start and shared by every
+	 * tag perspective of that one start. Exists because the quest clock is sampled per frame, so two starts in the same
+	 * frame carry a bitwise-identical stamp and cannot be told apart - which is exactly the case that decides how two
+	 * questlines started one node after another are presented.
+	 *
+	 * INDEX_NONE on an entry from a save written before this field existed. Those all tie here and fall back to ordering
+	 * by EntryTime alone, which is what they did when they were written.
+	 */
+	UPROPERTY(BlueprintReadOnly, SaveGame)
+	int32 EntrySequence = INDEX_NONE;
+
 	/** How this start was initiated. Stamped explicitly at every start site so the registry doesn't infer from sibling-field validity. */
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	EQuestActivationProvenance Provenance = EQuestActivationProvenance::Unknown;
@@ -53,10 +65,12 @@ struct SIMPLEQUEST_API FQuestEntryArrival
 	FQuestObjectiveActivationParams ActivationParamsSnapshot;
 
 	/**
-	 * Save-stable attribution: the actor credited with this start, as a soft reference. Captured at RecordEntry from the
-	 * snapshot's live (weak) Instigator and resolved lazily on read, so it survives a save/load where the actor streams in
-	 * after the snapshot is applied. GetLastGiverActor reads this. Unset when the start had no instigator. A runtime-spawned
-	 * instigator with no stable path resolves in-session but not across a save — that's UE's actor model, not a quest caveat.
+	 * Save-stable attribution: the actor credited with this start, as a soft reference - the giver for a give, the completer
+	 * of the source for a cascade. Captured at RecordEntry from the snapshot's live (weak) Instigator and resolved lazily on
+	 * read, so it survives a save/load where the actor streams in after the snapshot is applied. GetLastInstigatorActor reads
+	 * this for any start; GetLastGiverActor reads it only when Provenance is GiverGate. Unset when the start had no
+	 * instigator. A runtime-spawned instigator with no stable path resolves in-session but not across a save - that's UE's
+	 * actor model, not a quest caveat.
 	 */
 	UPROPERTY(BlueprintReadOnly, SaveGame)
 	TSoftObjectPtr<AActor> InstigatorRef;

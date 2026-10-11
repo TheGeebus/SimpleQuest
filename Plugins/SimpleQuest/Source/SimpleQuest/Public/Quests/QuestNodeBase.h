@@ -368,7 +368,7 @@ protected:
     TMap<FName, FQuestPathNodeList> NextNodesByPath;
 
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
-    TSet<FName> NextNodesOnAnyOutcome;   // always activated regardless of outcome
+    TArray<FName> NextNodesOnAnyOutcome;   // always-fire targets, in authored order
 
     /**
      * Nodes to DEACTIVATE when this node resolves on a given path - an outcome pin wired to a Deactivate input.
@@ -416,6 +416,15 @@ protected:
     /** Nodes to activate as a pass-through (utility node chaining; no lifecycle writes). */
     UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
     TSet<FName> NextNodesOnForward;
+
+    /**
+     * Nodes to DEACTIVATE as a pass-through (utility forward output wired to a Deactivate input) - the forward
+     * path's mirror of NextNodesToDeactivateOnDeactivation. An Activation Group Exit, a reward node, or any other
+     * utility can close a route as well as open one. Kept as its own list because the two do opposite things to a
+     * destination and one list cannot say which the author drew.
+     */
+    UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
+    TSet<FName> NextNodesToDeactivateOnForward;
     
     /**
      * Boundary completions to fire when this utility node's forward output crosses one or more wrapper Exits.
@@ -547,10 +556,7 @@ public:
      * Reports what the EXPRESSION says, deliberately ignoring bBypassPrerequisitesOnce: a one-shot activation bypass does not
      * make an unsatisfied prerequisite satisfied, and a surface that showed otherwise would hide the thing being inspected.
      */
-    FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* StateSubsystem) const
-    {
-        return PrerequisiteExpression.EvaluateWithLeafStatus(WorldState, StateSubsystem);
-    }
+    virtual FQuestPrereqStatus GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const;
     
     const TArray<FName>* GetNextNodesForPath(FName PathIdentity) const;
 
@@ -571,10 +577,11 @@ public:
     FORCEINLINE bool IsLinkedQuestlinePlacement() const { return bIsLinkedQuestlinePlacement; }
     FORCEINLINE FGameplayTag GetContextualTag() const { return ContextualTag; }
     FORCEINLINE const TArray<FGameplayTag>& GetAssetScopedAliasTags() const { return AssetScopedAliasTags; }
-    FORCEINLINE const TSet<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
+    FORCEINLINE const TArray<FName>& GetNextNodesOnAnyOutcome() const { return NextNodesOnAnyOutcome; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnDeactivation() const { return NextNodesOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnDeactivation() const { return NextNodesToDeactivateOnDeactivation; }
     FORCEINLINE const TSet<FName>& GetNextNodesOnForward() const { return NextNodesOnForward; }
+    FORCEINLINE const TSet<FName>& GetNextNodesToDeactivateOnForward() const { return NextNodesToDeactivateOnForward; }
     FORCEINLINE bool DoesCompleteParentGraph() const { return bCompletesParentGraph; }
     FORCEINLINE bool IsResettableReplay() const { return bResettableReplay; }
     FORCEINLINE bool IsGiverGated() const { return bWasGiverGated; }

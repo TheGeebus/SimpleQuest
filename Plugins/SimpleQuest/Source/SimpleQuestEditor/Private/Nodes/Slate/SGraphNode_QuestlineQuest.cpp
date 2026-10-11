@@ -31,6 +31,12 @@ void SGraphNode_QuestlineQuest::Construct(const FArguments& InArgs, UQuestlineNo
 	UpdateGraphNode();
 }
 
+void SGraphNode_QuestlineQuest::AddPin(const TSharedRef<SGraphPin>& PinToAdd)
+{
+	FQuestNodeSlateHelpers::AnchorDeactivationPinToBottom(PinToAdd, LeftNodeBox, RightNodeBox);
+	SGraphNode::AddPin(PinToAdd);
+}
+
 void SGraphNode_QuestlineQuest::UpdateGraphNode()
 {
 	// Refresh watching-givers cache + stale-tag flag. Empty giver list collapses the display via BuildLabeledExpandableList.
@@ -121,9 +127,7 @@ void SGraphNode_QuestlineQuest::UpdateGraphNode()
 	// ── Inner content ──────────────────────────────────────────
 	FGraphNodeMetaData TagMeta(TEXT("Graphnode"));
 	PopulateMetaTag(&TagMeta);
-
-	this->ContentScale.Bind(this, &SGraphNode::GetContentScale);
-
+	
 	TSharedPtr<SVerticalBox> InnerVerticalBox = SNew(SVerticalBox)
 		+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Fill).VAlign(VAlign_Top)
 		.Padding(Settings->GetNonPinNodeBodyPadding())

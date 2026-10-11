@@ -20,4 +20,13 @@ public:
 	virtual void AutowireNewNode(UEdGraphPin* FromPin) override;
 	FName GetEffectiveCategory() const;
 	virtual void NodeConnectionListChanged() override;
+	virtual void PinConnectionListChanged(UEdGraphPin* Pin) override;
+
+private:
+	/**
+	 * Retype both knot pins from whatever they are wired to, so the reroute draws in its wire's color. Called from
+	 * both connection hooks because the engine uses one and bulk edits use the other, and propagated downstream so
+	 * a chain of knots on one wire all land on the same category.
+	 */
+	void SyncPinCategoryFromLinks();
 };

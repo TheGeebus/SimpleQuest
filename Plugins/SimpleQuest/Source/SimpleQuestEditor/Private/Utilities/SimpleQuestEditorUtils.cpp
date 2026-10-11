@@ -27,9 +27,13 @@
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteAnd.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteNot.h"
 #include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOr.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteBase.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteFactTag.h"
+#include "Nodes/Prerequisites/QuestlineNode_PrerequisiteOutcome.h"
 #include "Nodes/QuestlineNode_Step.h"
 #include "Nodes/QuestlineNode_Quest.h"
 #include "Nodes/QuestlineNode_Exit.h"
+#include "Nodes/Utility/QuestlineNode_PrereqGate.h"
 #include "Objectives/QuestObjective.h"
 #include "Quests/QuestlineGraph.h"
 #include "Quests/QuestNodeBase.h"
@@ -637,9 +641,9 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 					*Actor->GetClass()->GetName(), *Actor->GetActorLabel(), ActorLevelSwaps);
 			}
 
-			// Walk every component (not just UQuestComponentBase subclasses). The reflection sweep handles adopter
+			// Walk every component (not just USimpleCoreObserverComponent subclasses). The reflection sweep handles adopter
 			// custom components that hold FGameplayTag UPROPERTYs without needing to derive from our base class. For
-			// UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
+			// USimpleCoreObserverComponent subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
 			// cover (Observer's TMap<FGameplayTag, ...>::Keys is the canonical specialty case).
 			TInlineComponentArray<UActorComponent*> AllComponents;
 			Actor->GetComponents(AllComponents);
@@ -650,7 +654,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 
 				int32 CompSwaps = ApplyTagRenamesToObject(Comp, Renames);
 
-				if (UQuestComponentBase* QuestComp = Cast<UQuestComponentBase>(Comp))
+				if (USimpleCoreObserverComponent* QuestComp = Cast<USimpleCoreObserverComponent>(Comp))
 				{
 					CompSwaps += QuestComp->ApplyTagRenames(Renames);
 				}
@@ -710,7 +714,7 @@ int32 FSimpleQuestEditorUtilities::WriteGameplayTagRedirects(const TMap<FName, F
 		SectionContent = FileContents.Mid(AfterHeader, SectionEnd - AfterHeader);
 	}
 
-	// Parse existing redirect lines into a map for dedup + cycle detection. Non-redirect lines (comments, blank
+	// Parse existing redirect lines into a map for dedupe + cycle detection. Non-redirect lines (comments, blank
 	// lines, other keys in the section) are ignored here and preserved verbatim by the rebuild loop below.
 	TMap<FName, FName> ExistingRedirects;
 	if (!SectionContent.IsEmpty())
@@ -1457,19 +1461,40 @@ void FSimpleQuestEditorUtilities::CollectActivationGroupTopology(const FGameplay
 
 namespace PrereqExaminer_Internal
 {
-    /** Finds the Prerequisite Rule Entry in Graph whose GroupTag matches RuleTag, or nullptr. */
-    UQuestlineNode_PrerequisiteRuleEntry* FindRuleEntryInGraph(const UEdGraph* Graph, const FGameplayTag& RuleTag)
-    {
-        if (!Graph || !RuleTag.IsValid()) return nullptr;
-        for (UEdGraphNode* Node : Graph->Nodes)
-        {
-            if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
-            {
-                if (Entry->GroupTag == RuleTag) return Entry;
-            }
-        }
-        return nullptr;
-    }
+	/**
+	 * Finds the Prerequisite Rule Entry whose GroupTag matches RuleTag, searching Graph and the inner graph of every
+	 * Quest container within it, or nullptr.
+	 *
+	 * The descent is the point rather than a nicety: a rule's whole purpose is to be written in one place and read in
+	 * another, and a Quest container is one of the boundaries it is meant to cross. Searching only the flat node list
+	 * meant a rule written inside one container and read inside a sibling resolved to nothing, and the Examiner
+	 * reported "(rule has no Enter expression wired)" on a rule that was wired perfectly well.
+	 */
+	UQuestlineNode_PrerequisiteRuleEntry* FindRuleEntryInGraph(const UEdGraph* Graph, const FGameplayTag& RuleTag)
+	{
+		if (!Graph || !RuleTag.IsValid()) return nullptr;
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+			{
+				if (Entry->GroupTag == RuleTag) return Entry;
+			}
+		}
+
+		// Containers second, so a match in the graph the caller handed us still wins - keeps the common case cheap and
+		// makes the result independent of container ordering.
+		for (UEdGraphNode* Node : Graph->Nodes)
+		{
+			if (const UQuestlineNode_Quest* QuestNode = Cast<UQuestlineNode_Quest>(Node))
+			{
+				if (UQuestlineNode_PrerequisiteRuleEntry* Found = FindRuleEntryInGraph(QuestNode->GetInnerGraph(), RuleTag))
+				{
+					return Found;
+				}
+			}
+		}
+		return nullptr;
+	}
 
     /**
      * Project-wide lookup for the Rule Entry defining a given tag. Local graph first (common case); AR scan + sync-load
@@ -1480,7 +1505,18 @@ namespace PrereqExaminer_Internal
     {
         if (!RuleTag.IsValid()) return nullptr;
 
-        if (UQuestlineNode_PrerequisiteRuleEntry* Local = FindRuleEntryInGraph(LocalGraph, RuleTag)) return Local;
+		// Local graph first, then the whole asset the caller's graph belongs to. A rule read inside one Quest container
+		// is commonly written inside a sibling, which is neither the local graph nor another asset - without the second
+		// search that case fell through to the registry scan, or missed entirely when the Entry sat in a container.
+		if (UQuestlineNode_PrerequisiteRuleEntry* Local = FindRuleEntryInGraph(LocalGraph, RuleTag)) return Local;
+
+		if (const UQuestlineGraph* OwningAsset = LocalGraph ? LocalGraph->GetTypedOuter<UQuestlineGraph>() : nullptr)
+		{
+			if (UQuestlineNode_PrerequisiteRuleEntry* InAsset = FindRuleEntryInGraph(OwningAsset->QuestlineEdGraph, RuleTag))
+			{
+				return InAsset;
+			}
+		}
 
         const FAssetRegistryModule& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
         TArray<FAssetData> Assets;
@@ -1583,20 +1619,62 @@ namespace PrereqExaminer_Internal
 
             const int32 Index = Tree.Nodes.Add(Ref);
 
-            // Cycle-guarded eager drill-down into the rule's Enter expression.
-            if (DefiningEntry && !RuleEntriesVisited.Contains(DefiningEntry))
-            {
-                RuleEntriesVisited.Add(DefiningEntry);
-                if (UEdGraphPin* EnterPin = DefiningEntry->GetPinByRole(EQuestPinRole::PrereqIn))
-                {
-                    if (EnterPin->LinkedTo.Num() > 0)
-                    {
-                        const int32 ChildIdx = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
-                        if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
-                    }
-                }
-            }
+        	// Cycle-guarded eager drill-down into the rule's Enter expression.
+        	if (DefiningEntry && !RuleEntriesVisited.Contains(DefiningEntry))
+        	{
+        		RuleEntriesVisited.Add(DefiningEntry);
+        		if (UEdGraphPin* EnterPin = DefiningEntry->GetPinByRole(EQuestPinRole::PrereqIn))
+        		{
+        			if (EnterPin->LinkedTo.Num() > 0)
+        			{
+        				// Everything this sub-walk appends belongs to the RULE's compiled expression, so it has to be
+        				// evaluated against the rule's instance rather than against the pinned node. Stamp the range
+        				// the walk added, skipping anything already stamped - a nested rule's own drill ran first and
+        				// its nodes belong to the deeper entry, not this one.
+        				const int32 FirstAdded = Tree.Nodes.Num();
+        				const int32 ChildIdx = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
+        				for (int32 i = FirstAdded; i < Tree.Nodes.Num(); ++i)
+        				{
+        					if (!Tree.Nodes[i].EvaluationOwner.IsValid())
+        					{
+        						Tree.Nodes[i].EvaluationOwner = DefiningEntry;
+        					}
+        				}
+        				if (ChildIdx != INDEX_NONE) Tree.Nodes[Index].ChildIndices.Add(ChildIdx);
+        			}
+        		}
+        	}
             return Index;
+        }
+
+    	// Getter-shaped leaves read a fact or the resolution registry directly and have no source content node, so
+        // the channel correlates them by the tag alone. They must be recognized ahead of the content-node branch below,
+        // which would otherwise file them under their pin name ("Exit") with no tag for the channel to find.
+        if (const UQuestlineNode_PrerequisiteFactTag* FactNode = Cast<UQuestlineNode_PrerequisiteFactTag>(OwningNode))
+        {
+            FPrereqExaminerNode Leaf;
+            Leaf.Type = EPrereqExaminerNodeType::Leaf;
+            Leaf.SourceNode = OwningNode;
+            Leaf.LeafTag = FactNode->GetGroupTag();
+            Leaf.LeafSourceLabel = OwningNode->GetNodeTitle(ENodeTitleType::ListView);
+            Leaf.LeafPathHeader = NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerFactHeader", "Fact: ");
+            Leaf.LeafPathLabel = Leaf.LeafTag.IsValid() ? FText::FromName(Leaf.LeafTag.GetTagName())
+                                                        : NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNoTag", "(no tag set)");
+            Leaf.DisplayLabel = FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerFactLabel", "Fact: {0}"), Leaf.LeafPathLabel);
+            return Tree.Nodes.Add(Leaf);
+        }
+        if (const UQuestlineNode_PrerequisiteOutcome* OutcomeNode = Cast<UQuestlineNode_PrerequisiteOutcome>(OwningNode))
+        {
+            FPrereqExaminerNode Leaf;
+            Leaf.Type = EPrereqExaminerNodeType::Leaf;
+            Leaf.SourceNode = OwningNode;
+            Leaf.LeafTag = OutcomeNode->GetGroupTag();
+            Leaf.LeafSourceLabel = OwningNode->GetNodeTitle(ENodeTitleType::ListView);
+            FString Remainder = Leaf.LeafTag.IsValid() ? Leaf.LeafTag.ToString() : TEXT("(no tag set)");
+            FQuestTagComposer::TryStripOutcomePrefix(Remainder);
+            Leaf.LeafPathLabel = FText::FromString(Remainder);
+            Leaf.DisplayLabel = FText::Format(NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOutcomeLabel", "Outcome: {0}"), Leaf.LeafPathLabel);
+            return Tree.Nodes.Add(Leaf);
         }
 
     	// Everything else (content nodes, Start terminal, etc.) compiles to a Leaf under the compiler's semantics.
@@ -1645,6 +1723,61 @@ namespace PrereqExaminer_Internal
 
     	return Tree.Nodes.Add(Leaf);
     }
+
+	/**
+     * The node whose compiled expression contains the expression under `Node`: the content node or Prerequisite Gate the
+     * prerequisite wire eventually feeds, found by walking forward through knots, combinators, and - for a rule - from
+     * the Rule Entry to its Exits in the same graph. Null when nothing in this graph consumes it. Visited guards the
+     * walk against a wiring cycle.
+     */
+    UEdGraphNode* FindPrereqConsumer(UEdGraphNode* Node, TSet<const UEdGraphNode*>& Visited)
+    {
+        if (!Node || Visited.Contains(Node)) return nullptr;
+        Visited.Add(Node);
+
+        TArray<UEdGraphPin*> Outputs;
+        if (const UQuestlineNode_Knot* Knot = Cast<UQuestlineNode_Knot>(Node))
+        {
+            if (UEdGraphPin* KnotOut = Knot->FindPin(TEXT("KnotOut"), EGPD_Output)) Outputs.Add(KnotOut);
+        }
+        else if (const UQuestlineNode_PrerequisiteRuleEntry* Entry = Cast<UQuestlineNode_PrerequisiteRuleEntry>(Node))
+        {
+            // A rule is consumed through its Exits. Only this graph's are reachable from here; a rule consumed
+            // elsewhere evaluates when that consumer is pinned instead.
+            if (UEdGraph* Graph = Node->GetGraph())
+            {
+                for (UEdGraphNode* Candidate : Graph->Nodes)
+                {
+                    const UQuestlineNode_PrerequisiteRuleExit* Exit = Cast<UQuestlineNode_PrerequisiteRuleExit>(Candidate);
+                    if (!Exit || Exit->GetGroupTag() != Entry->GetGroupTag()) continue;
+                    if (UEdGraphNode* Consumer = FindPrereqConsumer(Candidate, Visited)) return Consumer;
+                }
+            }
+            return nullptr;
+        }
+        else if (const UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(Node))
+        {
+            Base->GetPinsByRole(EQuestPinRole::PrereqOut, Outputs);
+        }
+
+        for (UEdGraphPin* Out : Outputs)
+        {
+            if (!Out) continue;
+            for (UEdGraphPin* Linked : Out->LinkedTo)
+            {
+                UEdGraphNode* Downstream = Linked ? Linked->GetOwningNode() : nullptr;
+                if (!Downstream) continue;
+
+                const bool bPassThrough = Cast<UQuestlineNode_Knot>(Downstream)
+                    || Cast<UQuestlineNode_PrerequisiteBase>(Downstream)
+                    || Cast<UQuestlineNode_PrerequisiteRuleEntry>(Downstream);
+                if (!bPassThrough) return Downstream;   // a content node or a utility node with a Prerequisites pin
+
+                if (UEdGraphNode* Consumer = FindPrereqConsumer(Downstream, Visited)) return Consumer;
+            }
+        }
+        return nullptr;
+    }
 }
 
 FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology(UEdGraphNode* ContextNode)
@@ -1669,6 +1802,8 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
 		{
 			Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
 		}
+		TSet<const UEdGraphNode*> Visited;
+		Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
 		return Tree;
 	}
 
@@ -1686,6 +1821,8 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
                     Tree.RootIndex = WalkFromOutputPin(EnterPin->LinkedTo[0], Tree, RuleEntriesVisited);
             }
         }
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
 
@@ -1694,24 +1831,43 @@ FPrereqExaminerTree FSimpleQuestEditorUtilities::CollectPrereqExpressionTopology
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::And,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerAnd", "AND"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
     if (Cast<UQuestlineNode_PrerequisiteOr>(ContextNode))
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Or,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerOr", "OR"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
     if (Cast<UQuestlineNode_PrerequisiteNot>(ContextNode))
     {
         Tree.RootIndex = EmitCombinator(ContextNode, EPrereqExaminerNodeType::Not,
             NSLOCTEXT("SimpleQuestEditor", "PrereqExaminerNot", "NOT"), Tree, RuleEntriesVisited);
+    	TSet<const UEdGraphNode*> Visited;
+    	Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited);
         return Tree;
     }
+	
+	// A Fact Tag or Outcome node as the context IS the expression: emit it as the root leaf by walking from its own
+	// output, exactly as a consumer's walk would, and evaluate it against the consumer it feeds.
+	if (Cast<UQuestlineNode_PrerequisiteFactTag>(ContextNode) || Cast<UQuestlineNode_PrerequisiteOutcome>(ContextNode))
+	{
+		if (UEdGraphPin* OutPin = Cast<UQuestlineNodeBase>(ContextNode)->GetPinByRole(EQuestPinRole::PrereqOut))
+		{
+			Tree.RootIndex = WalkFromOutputPin(OutPin, Tree, RuleEntriesVisited);
+		}
+		{ TSet<const UEdGraphNode*> Visited; Tree.EvaluationNode = FindPrereqConsumer(ContextNode, Visited); }
+		return Tree;
+	}
 
-    // Content node context: walk the Prerequisites input.
+	// Content node or Prerequisite Gate context: walk the Prerequisites input. This node owns the compiled expression.
 	if (UQuestlineNodeBase* Base = Cast<UQuestlineNodeBase>(ContextNode))
 	{
+		Tree.EvaluationNode = ContextNode;
 		if (UEdGraphPin* PrereqPin = Base->GetPinByRole(EQuestPinRole::PrereqIn))
 		{
 			if (PrereqPin->LinkedTo.Num() > 0) Tree.RootIndex = WalkFromOutputPin(PrereqPin->LinkedTo[0], Tree, RuleEntriesVisited);
@@ -2008,9 +2164,13 @@ FSimpleQuestEditorUtilities::FQuestTagValidationResult FSimpleQuestEditorUtiliti
 namespace
 {
 	/**
-	 * Pure component-list stale-tag scan. Iterates Components, dispatches by type (Giver / Target / Observer),
-	 * emits one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are stamped on
-	 * every entry; Component pointer is the specific component carrying the stale tag.
+	 * Pure component-list stale-tag scan. Iterates Components and reports EVERY authored tag field a component
+	 * carries, emitting one FStaleQuestTagEntry per stale tag found. Source / PackagePath / AssociatedActor are
+	 * stamped on every entry; Component pointer is the specific component carrying the stale tag.
+	 *
+	 * The three checks are INDEPENDENT, not a dispatch. A Giver is also a Trigger and an Observer, so it carries
+	 * four authored tag fields and every one of them needs scanning - an else-chain reports only the first and
+	 * leaves a stale ObservedTags entry on a Trigger or a Giver invisible.
 	 *
 	 * Used by both the AActor-based scanner (Tier 1 / loaded-level path, where components come from
 	 * Actor->GetComponents) AND the BP-CDO scanner (Tier 2, where components come from the CDO's native
@@ -2025,7 +2185,7 @@ namespace
 	{
 		using FStaleQuestTagEntry = FSimpleQuestEditorUtilities::FStaleQuestTagEntry;
 
-		auto EmitIfStale = [&](UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
+		auto EmitIfStale = [&](USimpleCoreObserverComponent* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
 			if (FQuestTagComposer::IsTagRegisteredInRuntime(Tag)) return;
 			FStaleQuestTagEntry Entry;
@@ -2047,15 +2207,13 @@ namespace
 				for (const FGameplayTag& Tag : Giver->GetQuestTagsToGive())
 					EmitIfStale(Giver, TEXT("QuestTagsToGive"), Tag);
 			}
-			else if (UQuestTriggerComponent* Target = Cast<UQuestTriggerComponent>(Comp))
+			if (UQuestTriggerComponent* Trigger = Cast<UQuestTriggerComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Target->GetStepTagsToTrigger())
-					EmitIfStale(Target, TEXT("StepTagsToWatch"), Tag);
+				for (const FGameplayTag& Tag : Trigger->GetStepTagsToTrigger())
+					EmitIfStale(Trigger, TEXT("StepTagsToTrigger"), Tag);
 			}
-			else if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
+			if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Observer->GetWatchedStepTags())
-					EmitIfStale(Observer, TEXT("WatchedStepTags"), Tag);
 				for (const auto& Pair : Observer->GetObservedTags())
 					EmitIfStale(Observer, TEXT("ObservedTags"), Pair.Key);
 			}
@@ -2169,8 +2327,24 @@ namespace
 	}
 
 	/**
+	 * Does this component hold authored quest tags the stale-tag scan can read? The four role components are
+	 * siblings now rather than a chain, so there is no single base to test - and testing their shared base would be
+	 * wrong in the other direction, because it also matches a component that only watches world state facts.
+	 *
+	 * Deliberately matches exactly the three types EmitStaleTagsForComponents reads. A filter broader than its
+	 * emitter costs sync-loads for nothing; a filter narrower than its emitter silently misses rows. Add a type here
+	 * when, and only when, the emitter learns to read it.
+	 */
+	bool ComponentCanHoldQuestTags(const UActorComponent* Comp)
+	{
+		return Comp && (Comp->IsA<UQuestObserverComponent>()
+			|| Comp->IsA<UQuestTriggerComponent>()
+			|| Comp->IsA<UQuestGiverComponent>());
+	}
+
+	/**
 	 * Predicate: does this BP's component tree (native CDO + SCS templates + ICH overrides) contain at least
-	 * one UQuestComponentBase-derived component? Cheaper than a full scan because we bail on the first match.
+	 * one component holding authored quest tags? Cheaper than a full scan because we bail on the first match.
 	 */
 	bool BlueprintHasAnyQuestComponent(UBlueprint* BP)
 	{
@@ -2182,7 +2356,7 @@ namespace
 		{
 			for (UActorComponent* Comp : Components)
 			{
-				if (Comp && Comp->IsA<UQuestComponentBase>()) return true;
+				if (ComponentCanHoldQuestTags(Comp)) return true;
 			}
 			return false;
 		};
@@ -2215,8 +2389,8 @@ namespace
 	}
 
 	/**
-	 * Builds the set of UClass* values representing "actor classes known to author a UQuestComponentBase
-	 * descendant in their default component tree." Used by ScanWorldPartitionActors's class-filter opt-in
+	 * Builds the set of UClass* values representing "actor classes known to author a quest role component
+	 * in their default component tree." Used by ScanWorldPartitionActors's class-filter opt-in
 	 * (FStaleTagScanScope::bComprehensiveWPScan = false) to skip sync-loading WP actors that can't possibly
 	 * carry a quest tag.
 	 *
@@ -2250,7 +2424,7 @@ namespace
 			CDO->GetComponents(Components);
 			for (UActorComponent* Comp : Components)
 			{
-				if (Comp && Comp->IsA<UQuestComponentBase>())
+				if (ComponentCanHoldQuestTags(Comp))
 				{
 					Result.Add(Cls);
 					break;
@@ -2388,7 +2562,7 @@ namespace
 	 * rather than total actor count.
 	 *
 	 * Class-filter gap (only when bComprehensiveWPScan = false): per-instance component additions -
-	 * dropping a UQuestComponentBase onto a single placed actor instance without modifying its BP - won't
+	 * dropping a quest role component onto a single placed actor instance without modifying its BP - won't
 	 * pass the filter because the instance's class isn't in the quest-component class set. Comprehensive
 	 * mode catches it. Documented as a deliberate trade in FStaleTagScanScope::bComprehensiveWPScan.
 	 */

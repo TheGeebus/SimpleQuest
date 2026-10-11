@@ -13,9 +13,14 @@
 
 void UQuestPrereqRuleNode::ActivateInternal(FGameplayTag InContextualTag)
 {
-	// Intentionally skips Super — utility nodes do not publish FQuestStartedEvent. Rule monitors do their work
+	// Intentionally skips Super - utility nodes do not publish FQuestStartedEvent. Rule monitors do their work
 	// via OnRegisteredWithManager (instance-lifetime subscription); this override exists only to suppress the
 	// base class's OnNodeStarted dispatch in case any path ever calls Activate on a Rule monitor.
+}
+
+FQuestPrereqStatus UQuestPrereqRuleNode::GetPrerequisiteStatus(const UWorldStateSubsystem* WorldState, const UQuestStateSubsystem* QuestState) const
+{
+	return Expression.EvaluateWithLeafStatus(WorldState, QuestState);
 }
 
 void UQuestPrereqRuleNode::OnRegisteredWithManager()
@@ -26,10 +31,15 @@ void UQuestPrereqRuleNode::OnRegisteredWithManager()
 	// fact is already asserted from a prior phase).
 	TryPublishRule();
 
+	// Symmetric: Fact leaves get the Removed handler as well as the Added one. A rule is a standing claim about the
+	// present, so a leaf fact going away has to re-open the question exactly as one arriving does - otherwise a
+	// Leaf(Fact) rule never retracts and a NOT(Fact) rule never republishes. Path / Resolution / Entry leaves are
+	// append-only and have no "removed" channel, so this degenerates to the monotonic behavior for those kinds.
 	FPrereqLeafSubscription::SubscribeLeavesForReevaluation(
 		Expression,
 		this,
 		&UQuestPrereqRuleNode::OnLeafFactAdded,
+		&UQuestPrereqRuleNode::OnLeafFactRemoved,
 		&UQuestPrereqRuleNode::OnLeafResolutionRecorded,
 		&UQuestPrereqRuleNode::OnLeafEntryRecorded,
 		SubscriptionHandles);
@@ -44,6 +54,11 @@ void UQuestPrereqRuleNode::ResetTransientState()
 }
 
 void UQuestPrereqRuleNode::OnLeafFactAdded(FGameplayTag Channel, const FWorldStateFactAddedEvent& Event)
+{
+	TryPublishRule();
+}
+
+void UQuestPrereqRuleNode::OnLeafFactRemoved(FGameplayTag Channel, const FWorldStateFactRemovedEvent& Event)
 {
 	TryPublishRule();
 }

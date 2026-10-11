@@ -68,7 +68,7 @@ namespace FQuestCatchUpFanout
 	 * Everything a subscriber needs to REPLAY one fanned-out tag from persisted state - the parity-critical half:
 	 * matched channel, rehydrated payload, prereq status, and which lifecycle events the state supports, in canonical
 	 * fire order. Pure data, no delegate knowledge: emission and per-subscriber gating (exposure flags, outcome
-	 * filter, live-dedup, bookkeeping) stay at the call site.
+	 * filter, live-dedupe, bookkeeping) stay at the call site.
 	 */
 	struct FTagReconstruction
 	{

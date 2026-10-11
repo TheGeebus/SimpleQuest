@@ -46,9 +46,9 @@ namespace PrereqExaminer_Style
     // Debug-state fill colors — opaque, used by the two-layer fill SImage's ColorAndOpacity. These are full-alpha; the
     // previous semi-transparent wash values in PrereqDebug_Style can be removed once this refactor is clean.
     const FLinearColor DebugNotStartedTint  = FLinearColor(FColor( 42, 42, 42));      // muted neutral grey — barely differentiated
-    const FLinearColor DebugInProgressTint  = FLinearColor(FColor( 54,  44,  23));      // muted amber
-    const FLinearColor DebugUnsatisfiedTint = FLinearColor(FColor( 60,  42,  42));      // muted red / rust
-    const FLinearColor DebugSatisfiedTint   = FLinearColor(FColor( 44, 52, 44));      // muted green
+    const FLinearColor DebugInProgressTint  = FLinearColor(FColor( 90,  80,  20));      // muted amber
+    const FLinearColor DebugUnsatisfiedTint = FLinearColor(FColor( 80,  37,  37));      // muted red / rust
+    const FLinearColor DebugSatisfiedTint   = FLinearColor(FColor( 40, 70, 45));      // muted green
 
     // Saturated variants applied when the corresponding operator's labels are hovered — boosts the parent operator + its
     // immediate children together so the visual group reads as one emphasized cluster.
@@ -981,7 +981,7 @@ TSharedRef<SWidget> SPrereqExaminerPanel::BuildLeafWidget(int32 NodeIndex, const
                         + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
                             [
                                 SNew(STextBlock)
-                                    .Text(LOCTEXT("LeafOutcomeHeader", "Outcome: "))
+                                    .Text(Node.LeafPathHeader.IsEmpty() ? LOCTEXT("LeafOutcomeHeader", "Outcome: ") : Node.LeafPathHeader)
                                     .Font(HeaderFont)
                                     .ColorAndOpacity(LeafColor)
                             ]
@@ -1668,66 +1668,8 @@ void SPrereqExaminerPanel::Tick(const FGeometry& AllottedGeometry, const double 
 EPrereqDebugState SPrereqExaminerPanel::ComputeDebugState(int32 NodeIndex) const
 {
     FQuestPIEDebugChannel* Channel = FSimpleQuestEditor::GetPIEDebugChannel();
-
-    if (!Tree.Nodes.IsValidIndex(NodeIndex)) return EPrereqDebugState::Unknown;
-    
     if (!Channel || !Channel->IsActive()) return EPrereqDebugState::Unknown;
-
-    const FPrereqExaminerNode& Node = Tree.Nodes[NodeIndex];
-    switch (Node.Type)
-    {
-    case EPrereqExaminerNodeType::Leaf:
-        {
-            // Correlate on the pair the graph itself uses — source node plus completion path — rather than on the leaf's
-            // fact tag. One displayed leaf can map to several compiled leaves, since Any Outcome expands to one leaf per
-            // completion path on the source, and the channel ORs them.
-            return Channel->QueryLeafStateForSource(Tree.ContextNode.Get(), Node.LeafSourceTag,
-                Node.LeafPathIdentity, Node.bLeafIsAnyOutcome);
-        }
-    case EPrereqExaminerNodeType::And:
-    {
-        // True iff every child Satisfied. Any Unknown propagates up (we can't confidently paint the combinator).
-        bool bAllSatisfied = true;
-        for (int32 ChildIdx : Node.ChildIndices)
-        {
-            const EPrereqDebugState ChildState = ComputeDebugState(ChildIdx);
-            if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
-            if (ChildState != EPrereqDebugState::Satisfied) bAllSatisfied = false;
-        }
-        return (Node.ChildIndices.Num() > 0 && bAllSatisfied) ? EPrereqDebugState::Satisfied : EPrereqDebugState::Unsatisfied;
-    }
-
-    case EPrereqExaminerNodeType::Or:
-    {
-        // True iff any child Satisfied.
-        for (int32 ChildIdx : Node.ChildIndices)
-        {
-            const EPrereqDebugState ChildState = ComputeDebugState(ChildIdx);
-            if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
-            if (ChildState == EPrereqDebugState::Satisfied) return EPrereqDebugState::Satisfied;
-        }
-        return EPrereqDebugState::Unsatisfied;
-    }
-
-    case EPrereqExaminerNodeType::Not:
-    {
-        if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
-        const EPrereqDebugState ChildState = ComputeDebugState(Node.ChildIndices[0]);
-        if (ChildState == EPrereqDebugState::Unknown) return EPrereqDebugState::Unknown;
-        return (ChildState == EPrereqDebugState::Satisfied) ? EPrereqDebugState::Unsatisfied : EPrereqDebugState::Satisfied;
-    }
-
-    case EPrereqExaminerNodeType::RuleRef:
-    {
-        // Option B: recurse into the drilled-in child subtree. Single child carrying the rule's expression; its state
-        // IS the RuleRef's state.
-        if (Node.ChildIndices.Num() == 0) return EPrereqDebugState::Unknown;
-        return ComputeDebugState(Node.ChildIndices[0]);
-    }
-
-    default:
-        return EPrereqDebugState::Unknown;
-    }
+    return Channel->EvaluateExaminerNode(Tree, NodeIndex);
 }
 
 #undef LOCTEXT_NAMESPACE

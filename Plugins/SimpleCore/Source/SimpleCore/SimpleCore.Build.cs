@@ -21,13 +21,13 @@ public class SimpleCore : ModuleRules
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
 			"Core",
+			"CoreUObject",
+			"Engine",
 			"GameplayTags"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"CoreUObject",
-			"Engine",
 			"DeveloperSettings"
 		});
 	}

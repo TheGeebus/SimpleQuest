@@ -54,4 +54,12 @@ FText UQuestlineNode_PrereqGate::GetTooltipText() const
         "Per-activation semantics — multiple Enter signals each produce their own Forward fire.");
 }
 
+void UQuestlineNode_PrereqGate::GetNodeContextMenuActions(UToolMenu* Menu, UGraphNodeContextMenuContext* Context) const
+{
+    Super::GetNodeContextMenuActions(Menu, Context);
+
+    FToolMenuSection& Section = Menu->AddSection(TEXT("PrereqGateExaminer"), LOCTEXT("PrereqGateExaminerSection", "Prerequisite"));
+    FSimpleQuestEditorUtilities::AddExaminePrereqExpressionEntry(Section, const_cast<UQuestlineNode_PrereqGate*>(this));
+}
+
 #undef LOCTEXT_NAMESPACE

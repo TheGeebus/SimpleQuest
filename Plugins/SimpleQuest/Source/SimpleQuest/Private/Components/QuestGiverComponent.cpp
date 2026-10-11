@@ -35,6 +35,18 @@ void UQuestGiverComponent::PerformDeferredRegistration()
 	RegisterQuestGiver();
 }
 
+void UQuestGiverComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Same reason as the Trigger's: the base handles the timer and the bus, but SimpleQuest's role registry is
+	// outside its vocabulary, and explicit removal keeps that registry compact across activate/end cycles.
+	if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
+	{
+		StateSubsystem->UnregisterAllRoleSources(this);
+	}
+	SubscriptionHandlesByTag.Empty();
+	Super::EndPlay(EndPlayReason);
+}
+
 void UQuestGiverComponent::InitializeComponent()
 {
 	Super::InitializeComponent();
@@ -373,7 +385,7 @@ void UQuestGiverComponent::RemoveTagsFromGive(const FGameplayTagContainer& Tags)
 				HandleQuestLeftGiverSurface(Tag);
 			}
 
-			UnregisterSingleObservedTag(Tag);
+			UnsubscribeHandlesForTag(SubscriptionHandlesByTag, Tag);
 
 			if (UQuestStateSubsystem* StateSubsystem = ResolveQuestStateSubsystem())
 			{
@@ -462,7 +474,7 @@ FGameplayTagContainer UQuestGiverComponent::GetRegisteredQuestTagsToGive() const
 
 int32 UQuestGiverComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
-	int32 Count = 0;
+	int32 Count = Super::RemoveTags(TagsToRemove);   // the base clears its own fact entries first
 	for (const FGameplayTag& Tag : TagsToRemove)
 	{
 		if (QuestTagsToGive.HasTagExact(Tag))

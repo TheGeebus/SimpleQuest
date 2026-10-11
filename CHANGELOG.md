@@ -7,6 +7,10 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+The quest components stop inheriting from each other - four distinct roles built
+on a new SimpleCore component that watches world state facts, which is the
+breaking change this release is named for, and which an actor relying on an
+inherited surface will need one added component to answer;
 Act I of the written on-ramp - seven chapters on the pieces of one progression;
 compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
 the four deprecations and one load failure that verifying it turned up; the
@@ -113,6 +117,28 @@ what is already true instead of having to go and ask.
   channel means, and it returns how many it removed - the difference between
   *nothing was listening* and *something was, and now is not*. Worth knowing: a
   silent zero is exactly how a leaked subscription hides.
+
+- **SimpleCore has a component now, and it watches world state.** Add **Simple
+  Core Observer** to any actor, list the fact tags it cares about, and bind *On
+  Fact Added* and *On Fact Removed*. That is the whole configuration. The tag
+  picker is deliberately unfiltered, because facts belong to whoever writes them
+  - a weather system's `MyGame.Weather.Raining` is as valid here as anything a
+  quest publishes, and the component cannot tell the difference. Watch a parent
+  tag and everything beneath it arrives, each delivery carrying the specific
+  fact's own tag.
+
+  It answers one question - *is this true* - and answers it from the moment it
+  registers rather than only from the next change, because every matching fact
+  already asserted is replayed to it on arrival, flagged as a catch-up delivery.
+  A door that should be open because the power came on before it spawned is open.
+
+  You can also leave the list empty and call *Add Observed Fact* at runtime, which
+  is the better shape when something the owning actor already knows should decide
+  what to watch - one variable deciding, rather than the same tag authored twice.
+
+  This is the component the quest components are now built on, so all four of them
+  can watch facts without being observers of anything (see *Changed*). SimpleCore
+  had only subsystems and a Blueprint library before this.
 
 ### Changed
 
@@ -223,6 +249,43 @@ what is already true instead of having to go and ask.
   reconnecting** - the value it was passing is the value the new pin wants, so
   the fix is the same wire into the renamed pin, or no wire at all when the
   target is the graph's own actor.
+
+- **The quest components are four peers instead of a chain, and that will break
+  Blueprints.** They used to inherit from each other: an observer at the bottom,
+  a trigger built on it, and a giver built on *that*, with the reward recipient
+  off to one side. So a Trigger silently *was* an Observer, and a Giver was both.
+  Convenient - and the cause of three separate pieces of machinery whose only job
+  was refereeing what a child injected into its parent's surface, including the
+  one that made a trigger's own buttons show up in its own event log. All four are
+  now distinct children of the new Simple Core Observer component, inheriting
+  infrastructure and nothing else.
+
+  **What to check is one question: do you have a Trigger or a Giver with no
+  Observer beside it, binding a lifecycle event?** That binding is now dead. A
+  Trigger has lost *Observed Tags*, *On Any Quest Event*, and the twelve typed
+  lifecycle delegates. A Giver has lost those *and* the trigger surface - *Step
+  Tags To Trigger* and its role delegates. Nothing fires differently; the events
+  publish exactly as they did. A flat component simply only reports what its own
+  role is about.
+
+  **The fix is to add the component for the job you were relying on.** An actor
+  that fires Steps *and* reports a quest's lifecycle takes a Quest Trigger
+  Component and a Quest Observer Component, and says so in its component list
+  instead of getting the second one by accident. Each component also keeps or
+  gained its own role events: the Giver's *On Quest Given* and *On Give Refused*
+  are new this release and report only the gives that giver made, which the
+  inherited route could never do. The walkthrough's archive console went through
+  this migration itself - one component became two, and the chapter about
+  observers now shows an observer.
+
+- **A deprecated watched-step list is gone, along with two functions that read
+  it.** `WatchedStepTags` was superseded by *Observed Tags* and kept for
+  compatibility, but it was never a saved property and nothing ever wrote to it,
+  so it has been permanently empty for its whole life. *Get Registered Watched
+  Step Tags* and its C++ sibling therefore always returned nothing, and the Stale
+  Quest Tags panel scanned a field that could never hold a stale tag. All three
+  are removed. If a graph calls that node, it was reading an empty container;
+  *Observed Tags* is where the answer lives.
 
 ### Fixes
 

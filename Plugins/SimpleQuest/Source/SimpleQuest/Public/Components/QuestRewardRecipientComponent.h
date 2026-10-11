@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "Components/QuestComponentBase.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "Quests/Types/QuestRewardContext.h"
 #include "Signals/Types/SignalRoutingFlags.h"
 #include "QuestRewardRecipientComponent.generated.h"
@@ -40,7 +40,7 @@ struct FRewardTypeSubscription
  * restore or late-join), so a received grant is always a real, first-time grant — no delivery gating needed.
  */
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
-class SIMPLEQUEST_API UQuestRewardRecipientComponent : public UQuestComponentBase
+class SIMPLEQUEST_API UQuestRewardRecipientComponent : public USimpleCoreObserverComponent
 {
 	GENERATED_BODY()
 

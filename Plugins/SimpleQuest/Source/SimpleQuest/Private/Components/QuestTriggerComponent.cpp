@@ -8,7 +8,6 @@
 #include "Events/QuestEndedEvent.h"
 #include "Events/QuestTriggerFiredEvent.h"
 #include "Quests/Types/QuestObjectiveTriggerContext.h"
-#include "Quests/Types/QuestObservedTagSpec.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Subsystems/QuestStateSubsystem.h"
 #include "Subsystems/WorldStateSubsystem.h"
@@ -34,6 +33,22 @@ void UQuestTriggerComponent::PerformDeferredRegistration()
     }
 }
 
+void UQuestTriggerComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    // The base already cancels the deferred timer and bulk-unsubscribes this listener from the bus. What it cannot
+    // reach is SimpleQuest's role registry: weak pointers would auto-skip a dead component on query, but explicit
+    // removal keeps the registry compact across repeated activate/end cycles - PIE bounce, level streaming.
+    if (const UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
+    {
+        if (UQuestStateSubsystem* StateSubsystem = GI->GetSubsystem<UQuestStateSubsystem>())
+        {
+            StateSubsystem->UnregisterAllRoleSources(this);
+        }
+    }
+    SubscriptionHandlesByTag.Empty();
+    Super::EndPlay(EndPlayReason);
+}
+
 void UQuestTriggerComponent::SubscribeTriggerStep(FGameplayTag StepTag)
 {
     if (!SignalSubsystem || !StepTag.IsValid()) return;
@@ -47,8 +62,8 @@ void UQuestTriggerComponent::SubscribeTriggerStep(FGameplayTag StepTag)
         return;
     }
 
-    // Trigger-side subscriptions, captured into the shared per-tag handle map so RemoveTagsFromTrigger (via the base
-    // UnregisterSingleObservedTag) unsubscribes them selectively. Same five subs the bulk path used.
+    // Trigger-side subscriptions, captured into this component's own per-tag handle map so RemoveTagsFromTrigger
+    // unsubscribes them selectively. Same five subs the bulk path used.
     TArray<FDelegateHandle>& Handles = SubscriptionHandlesByTag.FindOrAdd(StepTag);
     Handles.Add(SignalSubsystem->SubscribeMessage<FQuestStartedEvent>(StepTag, this, &UQuestTriggerComponent::OnTriggerActivated, FSignalRoutingDefaults::ExactOnly));
     Handles.Add(SignalSubsystem->SubscribeMessage<FQuestTriggerResponseEvent>(StepTag, this, &UQuestTriggerComponent::HandleQuestTriggerResponse, FSignalRoutingDefaults::ExactOnly));
@@ -165,7 +180,7 @@ void UQuestTriggerComponent::OnTriggerStepEnded(FGameplayTag Channel)
 
 int32 UQuestTriggerComponent::RemoveTags(const TArray<FGameplayTag>& TagsToRemove)
 {
-    int32 Count = 0;
+    int32 Count = Super::RemoveTags(TagsToRemove);   // the base clears its own fact entries first
     for (const FGameplayTag& Tag : TagsToRemove)
     {
         if (StepTagsToTrigger.HasTagExact(Tag))
@@ -326,9 +341,9 @@ void UQuestTriggerComponent::RemoveTagsFromTrigger(const FGameplayTagContainer& 
                     FQuestTriggerDeactivatedEvent(Tag, EQuestTriggerEndReason::Manual, FGameplayTag(), FQuestObjectiveTriggerContext()));
             }
 
-            // Base UnregisterSingleObservedTag unsubscribes every handle under this tag (incl. the trigger subs) plus
-            // the observer source + lifecycle bookkeeping.
-            UnregisterSingleObservedTag(Tag);
+            // Releases the five trigger subscriptions recorded against this Step. There is no observer source or
+            // lifecycle bookkeeping to clear anymore - a Trigger holds neither.
+            UnsubscribeHandlesForTag(SubscriptionHandlesByTag, Tag);
 
             if (UGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance() : nullptr)
             {

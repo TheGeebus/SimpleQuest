@@ -5,9 +5,10 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestTriggerComponent.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "Components/ActorComponent.h"
 #include "Quests/Types/PrerequisiteExpression.h"
+#include "Quests/Types/QuestEventPayload.h"
 #include "Quests/Types/QuestObjectiveActivationParams.h"
 #include "QuestGiverComponent.generated.h"
 
@@ -144,19 +145,19 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnGiveRefused, FGameplayTag, Quest
  * OnGiveAvailabilityChanged plus the state queries (GetEnabledQuests / CanGiveAnyQuests / etc.)
  * and triggers gives via GiveQuest / GiveAllQuests.
  *
- * Per-give success and refusal notifications come from the inherited UQuestObserverComponent
- * delegates OnQuestStarted (Live transition with GiverActor populated) and OnQuestGiveBlocked
- * (refusal with Blockers and GiverActor). QuestTagsToGive entries are implicitly observed -
- * adopters can bind those delegates without authoring a parallel ObservedTags entry. Filter by
- * GiverActor == GetOwner() to scope to this giver's attempts.
+ * Per-give success and refusal come from this component's OWN delegates - OnQuestGiven and
+ * OnGiveRefused - and they fire only for gives this giver made, so there is nothing to filter
+ * by actor. Both replaced an inherited route that reported every start and every refusal on the
+ * tag regardless of who caused it.
  *
- * Inherits the full observation surface from UQuestObserverComponent and the trigger /
- * Send-event surface from UQuestTriggerComponent. A single Giver component can offer quests
- * AND act as a trigger target for other quests' step objectives - populate both
- * QuestTagsToGive and StepTagsToTrigger on the same component.
+ * It inherits nothing but the infrastructure: a cached signal bus, deferred registration, and
+ * the ability to watch world state facts. It is NOT an observer and NOT a trigger. An actor that
+ * should also fire Step objectives takes a Quest Trigger Component alongside this one, and an
+ * actor that should report a quest's whole lifecycle takes a Quest Observer Component. One
+ * component per job, each saying exactly what it does.
  */
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestGiverComponent : public UQuestTriggerComponent
+class SIMPLEQUEST_API UQuestGiverComponent : public USimpleCoreObserverComponent
 {
 	GENERATED_BODY()
 
@@ -268,6 +269,14 @@ public:
 
 protected:
 	virtual void PerformDeferredRegistration() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	/**
+	 * This component's own per-tag subscription handles, so one offered quest can be dropped without tearing the
+	 * component down. Separate from the base's fact registry - see
+	 * USimpleCoreObserverComponent::UnsubscribeHandlesForTag for why each watching surface keeps its own.
+	 */
+	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
 
 	virtual void InitializeComponent() override;
 
@@ -297,7 +306,7 @@ protected:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer ActivatedQuestTags;
 
-	/** Quests this giver has successfully given. Appended in HandleQuestStarted. */
+	/** Quests this giver has successfully given. Appended in OnQuestStartedEventReceived. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "QuestGiver")
 	FGameplayTagContainer GivenQuestTags;
 
@@ -323,7 +332,7 @@ private:
 	/**
 	 * Installs the giver-specific subscriptions (Activated / Enabled / Disabled / Started / Ended / Deactivated,
 	 * all ExactOnly) + the giver source entry for one quest, capturing the handles into the base
-	 * SubscriptionHandlesByTag. Shared by registration and AddTagsToGive.
+	 * this component's own SubscriptionHandlesByTag. Shared by registration and AddTagsToGive.
 	 */
 	void SubscribeGiverQuest(FGameplayTag QuestTag);
 
@@ -343,7 +352,7 @@ private:
 	 * Per-attempt blocker-event handles, keyed by quest tag. Populated by GiveQuest before the
 	 * give request publishes; cleared when the cycle closes (Started or Blocked response).
 	 * Presence of an entry signals "this giver has an in-flight give for this tag" - read by
-	 * HandleQuestStarted to attribute the give to this giver.
+	 * OnQuestStartedEventReceived to attribute the give to this giver.
 	 */
 	TMap<FGameplayTag, FDelegateHandle> PendingGiveBlockedHandles;
 

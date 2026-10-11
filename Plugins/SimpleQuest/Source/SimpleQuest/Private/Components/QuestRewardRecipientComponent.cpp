@@ -10,8 +10,8 @@
 
 void UQuestRewardRecipientComponent::BeginPlay()
 {
-	Super::BeginPlay();   // UQuestComponentBase caches SignalSubsystem
-
+	Super::BeginPlay();   // USimpleCoreObserverComponent caches SignalSubsystem and registers any watched facts
+	
 	if (!SignalSubsystem) return;
 
 	// Subscribe each reward-type channel. Hierarchical routing (the bus default) means a parent type catches its

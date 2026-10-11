@@ -5,7 +5,7 @@
 
 #include "CoreMinimal.h"
 #include "GameplayTagContainer.h"
-#include "QuestObserverComponent.h"
+#include "Components/SimpleCoreObserverComponent.h"
 #include "Components/ActorComponent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Events/QuestProgressRefusedEvent.h"
@@ -22,7 +22,7 @@ struct FQuestObjectiveTriggerContext;
 class UQuestManagerSubsystem;
 
 UCLASS( ClassGroup=(Custom), meta=(BlueprintSpawnableComponent) )
-class SIMPLEQUEST_API UQuestTriggerComponent : public UQuestObserverComponent
+class SIMPLEQUEST_API UQuestTriggerComponent : public USimpleCoreObserverComponent
 {
 	GENERATED_BODY()
 
@@ -103,10 +103,18 @@ public:
 	
 protected:
 	virtual void PerformDeferredRegistration() override;
-	
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
 	/**
-	 * Installs the trigger-specific subscriptions + trigger source entry for one Step tag, capturing the handles
-	 * into the base SubscriptionHandlesByTag for selective removal. Shared by registration and AddTagsToTrigger.
+	 * This component's own per-tag subscription handles, so one armed Step can be dropped without tearing the
+	 * component down. Separate from the base's fact registry - see
+	 * USimpleCoreObserverComponent::UnsubscribeHandlesForTag for why each watching surface keeps its own.
+	 */
+	TMap<FGameplayTag, TArray<FDelegateHandle>> SubscriptionHandlesByTag;
+
+	/**
+	 * Installs the trigger subscriptions and the trigger source entry for one Step tag, capturing the handles into
+	 * SubscriptionHandlesByTag for selective removal. Shared by registration and AddTagsToTrigger.
 	 */
 	void SubscribeTriggerStep(FGameplayTag StepTag);
 
@@ -159,8 +167,9 @@ protected:
 	 * The subsystem publishes step events on the step tag; any target configured with that tag activates.
 	 *
 	 * These tags arm the trigger; they are not observed for broadcast. The inherited Observer delegates report exactly what
-	 * ObservedTags lists, so a display bound to OnAnyQuestEvent never receives an event nobody asked for. To follow a watched
-	 * step's lifecycle on those delegates, add it to ObservedTags as well.
+	 * A Trigger has no observation surface of its own anymore - it reports what it fires, through its own five role
+	 * delegates, and nothing else. To watch a Step's full lifecycle, add a Quest Observer Component alongside it and
+	 * list the Step there.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Quest", meta = (Categories = "SimpleQuest.Questline"))
 	FGameplayTagContainer StepTagsToTrigger;

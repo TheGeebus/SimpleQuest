@@ -641,9 +641,9 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 					*Actor->GetClass()->GetName(), *Actor->GetActorLabel(), ActorLevelSwaps);
 			}
 
-			// Walk every component (not just UQuestComponentBase subclasses). The reflection sweep handles adopter
+			// Walk every component (not just USimpleCoreObserverComponent subclasses). The reflection sweep handles adopter
 			// custom components that hold FGameplayTag UPROPERTYs without needing to derive from our base class. For
-			// UQuestComponentBase subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
+			// USimpleCoreObserverComponent subclasses, the virtual ApplyTagRenames adds any specialty handling reflection can't
 			// cover (Observer's TMap<FGameplayTag, ...>::Keys is the canonical specialty case).
 			TInlineComponentArray<UActorComponent*> AllComponents;
 			Actor->GetComponents(AllComponents);
@@ -654,7 +654,7 @@ int32 FSimpleQuestEditorUtilities::ApplyTagRenamesToLoadedWorlds(const TMap<FNam
 
 				int32 CompSwaps = ApplyTagRenamesToObject(Comp, Renames);
 
-				if (UQuestComponentBase* QuestComp = Cast<UQuestComponentBase>(Comp))
+				if (USimpleCoreObserverComponent* QuestComp = Cast<USimpleCoreObserverComponent>(Comp))
 				{
 					CompSwaps += QuestComp->ApplyTagRenames(Renames);
 				}
@@ -2185,7 +2185,7 @@ namespace
 	{
 		using FStaleQuestTagEntry = FSimpleQuestEditorUtilities::FStaleQuestTagEntry;
 
-		auto EmitIfStale = [&](UQuestComponentBase* Component, const FString& FieldLabel, const FGameplayTag& Tag)
+		auto EmitIfStale = [&](USimpleCoreObserverComponent* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
 			if (FQuestTagComposer::IsTagRegisteredInRuntime(Tag)) return;
 			FStaleQuestTagEntry Entry;
@@ -2214,8 +2214,6 @@ namespace
 			}
 			if (UQuestObserverComponent* Observer = Cast<UQuestObserverComponent>(Comp))
 			{
-				for (const FGameplayTag& Tag : Observer->GetWatchedStepTags())
-					EmitIfStale(Observer, TEXT("WatchedStepTags"), Tag);
 				for (const auto& Pair : Observer->GetObservedTags())
 					EmitIfStale(Observer, TEXT("ObservedTags"), Pair.Key);
 			}
@@ -2329,8 +2327,24 @@ namespace
 	}
 
 	/**
+	 * Does this component hold authored quest tags the stale-tag scan can read? The four role components are
+	 * siblings now rather than a chain, so there is no single base to test - and testing their shared base would be
+	 * wrong in the other direction, because it also matches a component that only watches world state facts.
+	 *
+	 * Deliberately matches exactly the three types EmitStaleTagsForComponents reads. A filter broader than its
+	 * emitter costs sync-loads for nothing; a filter narrower than its emitter silently misses rows. Add a type here
+	 * when, and only when, the emitter learns to read it.
+	 */
+	bool ComponentCanHoldQuestTags(const UActorComponent* Comp)
+	{
+		return Comp && (Comp->IsA<UQuestObserverComponent>()
+			|| Comp->IsA<UQuestTriggerComponent>()
+			|| Comp->IsA<UQuestGiverComponent>());
+	}
+
+	/**
 	 * Predicate: does this BP's component tree (native CDO + SCS templates + ICH overrides) contain at least
-	 * one UQuestComponentBase-derived component? Cheaper than a full scan because we bail on the first match.
+	 * one component holding authored quest tags? Cheaper than a full scan because we bail on the first match.
 	 */
 	bool BlueprintHasAnyQuestComponent(UBlueprint* BP)
 	{
@@ -2342,7 +2356,7 @@ namespace
 		{
 			for (UActorComponent* Comp : Components)
 			{
-				if (Comp && Comp->IsA<UQuestComponentBase>()) return true;
+				if (ComponentCanHoldQuestTags(Comp)) return true;
 			}
 			return false;
 		};
@@ -2375,8 +2389,8 @@ namespace
 	}
 
 	/**
-	 * Builds the set of UClass* values representing "actor classes known to author a UQuestComponentBase
-	 * descendant in their default component tree." Used by ScanWorldPartitionActors's class-filter opt-in
+	 * Builds the set of UClass* values representing "actor classes known to author a quest role component
+	 * in their default component tree." Used by ScanWorldPartitionActors's class-filter opt-in
 	 * (FStaleTagScanScope::bComprehensiveWPScan = false) to skip sync-loading WP actors that can't possibly
 	 * carry a quest tag.
 	 *
@@ -2410,7 +2424,7 @@ namespace
 			CDO->GetComponents(Components);
 			for (UActorComponent* Comp : Components)
 			{
-				if (Comp && Comp->IsA<UQuestComponentBase>())
+				if (ComponentCanHoldQuestTags(Comp))
 				{
 					Result.Add(Cls);
 					break;
@@ -2548,7 +2562,7 @@ namespace
 	 * rather than total actor count.
 	 *
 	 * Class-filter gap (only when bComprehensiveWPScan = false): per-instance component additions -
-	 * dropping a UQuestComponentBase onto a single placed actor instance without modifying its BP - won't
+	 * dropping a quest role component onto a single placed actor instance without modifying its BP - won't
 	 * pass the filter because the instance's class isn't in the quest-component class set. Comprehensive
 	 * mode catches it. Documented as a deliberate trade in FStaleTagScanScope::bComprehensiveWPScan.
 	 */

@@ -122,6 +122,7 @@ The QuickStart is an eleven-chapter level, one concept per room, in the order th
 | 9 Activation Groups   | A second questline opening a bridge it knows nothing about              |
 | 10 Prerequisite Rules | A named condition - the power - read by everything that needs it        |
 | 11 Observers          | An archive console that logs what an observer hears, live and caught up |
+| *Closing*             | *The Step node, assembled - every property one place, and what the rooms don't show* |
 
 A red button beside the green Start button unlocks every chapter at once if you want to jump ahead.
 
@@ -133,7 +134,7 @@ Keep a graph open while you play: the graph panel shows per-state colored halos 
 
 ### Read what happened underneath
 
-The written walkthrough, [The QuickStart, Chapter by Chapter](Docs/QuickStart/README.md), is the third pass over the same rooms: one page per chapter on what you saw, what is in the graph, which tags were minted and which events fired in which order, where the state lives, and the mistakes each room's design steers you around. It opens with [Before You Start](Docs/QuickStart/00_BeforeYouStart.md) - the controls, the HUD, and the Facts Panel and PIE halos you can watch while you play - and every chapter adds a piece of one picture, the Step node and its Objective, which a closing page assembles. It is being written in chapter order; the index shows which pages are up.
+The written walkthrough, [The QuickStart, Chapter by Chapter](Docs/QuickStart/README.md), is the third pass over the same rooms: one page per chapter on what you saw, what is in the graph, which tags were minted and which events fired in which order, where the state lives, and the mistakes each room's design steers you around. It opens with [Before You Start](Docs/QuickStart/00_BeforeYouStart.md) - the controls, the HUD, and the Facts Panel and PIE halos you can watch while you play - and every chapter adds a piece of one picture, the Step node and its Objective, which [The Step node, assembled](Docs/QuickStart/99_TheStepAssembled.md) puts back together at the end - in the order a Step is configured rather than the order the rooms taught it, and with the handful of things a Step can do that no room demonstrates. All of it is written.
 
 ### Building your first progression
 

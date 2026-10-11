@@ -5,14 +5,15 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.9.0] — 2026-10-11 — The Written Walkthrough
 
-The quest components stop inheriting from each other - four distinct roles built
-on a new SimpleCore component that watches world state facts, which is the
-breaking change this release is named for, and which an actor relying on an
+The written walkthrough, finished - a chapter per idea, start to end, each one a
+room you play before it explains itself, and a closing page that puts the Step
+node back together out of the eleven rooms that taught it;
+the quest components stop inheriting from each other - four distinct roles built
+on a new SimpleCore component that watches world state facts, which is the one
+change in here that can break a project, and which an actor relying on an
 inherited surface will need one added component to answer;
-the written walkthrough, finished - a chapter per idea, start to end, each one a
-room you play before it explains itself;
 compatibility with Unreal 5.6, 5.7, and 5.8 verified rather than asserted, and
 the four deprecations and one load failure that verifying it turned up; the
 Prerequisite Examiner made truthful - every state it advertised is now produced,
@@ -296,12 +297,6 @@ what is already true instead of having to go and ask.
   Quest Tags panel scanned a field that could never hold a stale tag. All three
   are removed. If a graph calls that node, it was reading an empty container;
   *Observed Tags* is where the answer lives.
-
-- **The compiler channel logs like every other channel.** `LogSimpleQuestCompiler`
-  shipped at *Verbose* while activation, subscription, resolver, state, and the
-  catch-all all shipped at *Log*, so a fresh install printed compiler chatter
-  nobody had asked for. It is now *Log* like its siblings. Everything it used to
-  print is one setting away, in *Project Settings > SimpleQuest*, same as the rest.
 
 ### Removed
 

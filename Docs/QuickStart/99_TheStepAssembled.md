@@ -2,9 +2,9 @@
 
 *Eleven rooms, one node type, and the seven things they never showed you.*
 
-Every chapter closed with a section called *The Step so far*. This page is those eleven sections put together, in the order the ideas arrived, plus an honest list of what the tutorial left out.
+Every chapter closed with a section called *The Step so far*. This page is those eleven sections put together, in the order you configure a Step, plus an honest list of what the tutorial left out.
 
-There is no twelfth room. This is the page you read with a graph open.
+There is no twelfth room. This page summarizes the Step node and applies to all Questline graphs.
 
 ---
 

@@ -10,6 +10,7 @@
 
 struct FGraphPanelPinFactory;
 struct FGraphPanelPinConnectionFactory;
+
 class FQuestlineGraphAssetTypeActions;
 class FQuestlineGraphNodeFactory;
 class FQuestPIEDebugChannel;
@@ -73,6 +74,16 @@ public:
 	
 	/** Editor-side PIE debug channel. Lifetime managed by this module. Access via GetPIEDebugChannel(). */
 	static FQuestPIEDebugChannel* GetPIEDebugChannel();
+
+	/**
+	 * True once RegisterTagsFromAssetRegistry has put every compiled questline tag in the tag tree. Until then, asking
+	 * whether a questline tag is registered gets "no" for tags that are fine: registration waits for the asset registry's
+	 * startup scan, which finishes seconds after the editor's windows, and any tabs restored with them, are built.
+	 */
+	bool AreCompiledTagsRegistered() const { return bCompiledTagsRegistered; }
+
+	/** Fires once, when AreCompiledTagsRegistered turns true. Anything that reads tag registration at startup waits on it. */
+	FSimpleMulticastDelegate& OnCompiledTagsRegistered() { return CompiledTagsRegisteredDelegate; }
 
 private:
 	TSharedPtr<FQuestlineGraphAssetTypeActions> QuestlineGraphAssetTypeActions;
@@ -144,6 +155,8 @@ private:
 	FDelegateHandle PickerCategoriesChangedHandle;
 	
 	bool bIsRegisteringTags = false;
+	bool bCompiledTagsRegistered = false;
+	FSimpleMulticastDelegate CompiledTagsRegisteredDelegate;
 
 	TSharedRef<SDockTab> SpawnStaleQuestTagsTab(const FSpawnTabArgs& Args);
 

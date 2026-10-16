@@ -5,22 +5,40 @@
 
 #include "Engine/GameInstance.h"
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
 #include "Subsystems/SignalSubsystem.h"
 #include "Tests/SignalDedupeTestListener.h"
 #include "UObject/GCObjectScopeGuard.h"
+#include "Utilities/ScopedFixtureGameplayTags.h"
 
-/** A parent and two children, so one subscriber can hold an ancestor subscription and a descendant one at once. */
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_DedupeFixture_Root,  "SimpleCore.DedupeFixture");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_DedupeFixture_Child, "SimpleCore.DedupeFixture.Child");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_DedupeFixture_Other, "SimpleCore.DedupeFixture.Other");
+namespace
+{
+	/** A parent and two children, so one subscriber can hold an ancestor subscription and a descendant one at once. */
+	FGameplayTag TAG_DedupeFixture_Root;
+	FGameplayTag TAG_DedupeFixture_Child;
+	FGameplayTag TAG_DedupeFixture_Other;
 
-/**
- * OUTSIDE that subtree, for background traffic that must reach nothing under test. The three tags above are
- * all heard by a hierarchical subscription on the root - that is what they exist for - which makes every one
- * of them useless as "unrelated".
- */
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_DedupeBystander,     "SimpleCore.DedupeBystander");
+	/**
+	 * OUTSIDE that subtree, for background traffic that must reach nothing under test. The three tags above are
+	 * all heard by a hierarchical subscription on the root - that is what they exist for - which makes every one
+	 * of them useless as "unrelated".
+	 */
+	FGameplayTag TAG_DedupeBystander;
+
+	/**
+	 * Registers all four for as long as it lives. FDedupeFixture opens one, so outside a test none of them exist and no
+	 * project's tag pickers list them.
+	 */
+	struct FDedupeFixtureTags : FScopedFixtureGameplayTags
+	{
+		FDedupeFixtureTags() : FScopedFixtureGameplayTags(UE_PLUGIN_NAME, UE_MODULE_NAME, {
+			{ TAG_DedupeFixture_Root,  TEXT("SimpleCore.DedupeFixture") },
+			{ TAG_DedupeFixture_Child, TEXT("SimpleCore.DedupeFixture.Child") },
+			{ TAG_DedupeFixture_Other, TEXT("SimpleCore.DedupeFixture.Other") },
+			{ TAG_DedupeBystander,     TEXT("SimpleCore.DedupeBystander") } })
+		{
+		}
+	};
+}
 
 namespace
 {
@@ -32,6 +50,7 @@ namespace
 	 */
 	struct FDedupeFixture
 	{
+		FDedupeFixtureTags Tags;   // first, so the tags exist before anything else in the fixture is built
 		UGameInstance* GameInstance = nullptr;
 		USignalSubsystem* Signals = nullptr;
 		USignalDedupeTestListener* Listener = nullptr;

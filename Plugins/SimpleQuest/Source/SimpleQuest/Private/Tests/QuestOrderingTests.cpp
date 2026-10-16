@@ -4,31 +4,53 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
 #include "Utilities/QuestOrdering.h"
+#include "Utilities/ScopedFixtureGameplayTags.h"
 
 /**
- * Fixture tags, declared natively in this translation unit rather than drawn from shipped content - the same reasoning as
- * QuestAdvancementHoldTests: native tags register at static init, reach no ini, and depend on no asset, so slimming a
- * QuickStart chapter cannot break them.
+ * Fixture tags, registered by each test rather than drawn from shipped content - the same reasoning as QuestAdvancementHoldTests:
+ * they depend on no asset, so slimming a QuickStart chapter cannot break them. Every test that names one opens an
+ * FOrderFixtureTags first, so outside a test none of them exist and no project's tag pickers list them.
  *
  * The shapes are deliberate. OrderFixture.* are tag SIBLINGS with a containment relation between them - Chapter 4's
  * shape, and the case a tag hierarchy alone cannot describe. OrderBranch*.Leaf are two leaves under two parents, for
  * proving bias is read where the tags diverge rather than at the leaves. OrderRoot* stand in for two questlines each
  * started on its own, and OrderChapter_9 / _10 are the natural-order case plain alphabetical gets wrong.
  */
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_Fixture,     "SimpleQuest.Questline.OrderFixture");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_First,       "SimpleQuest.Questline.OrderFixture.First");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_Second,      "SimpleQuest.Questline.OrderFixture.Second");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_Third,       "SimpleQuest.Questline.OrderFixture.Third");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_BranchA,     "SimpleQuest.Questline.OrderBranchA");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_BranchALeaf, "SimpleQuest.Questline.OrderBranchA.Leaf");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_BranchB,     "SimpleQuest.Questline.OrderBranchB");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_BranchBLeaf, "SimpleQuest.Questline.OrderBranchB.Leaf");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_RootA,       "SimpleQuest.Questline.OrderRootA");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_RootB,       "SimpleQuest.Questline.OrderRootB");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_Chapter9,    "SimpleQuest.Questline.OrderChapter_9");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_Order_Chapter10,   "SimpleQuest.Questline.OrderChapter_10");
+namespace
+{
+	FGameplayTag TAG_Order_Fixture;
+	FGameplayTag TAG_Order_First;
+	FGameplayTag TAG_Order_Second;
+	FGameplayTag TAG_Order_Third;
+	FGameplayTag TAG_Order_BranchA;
+	FGameplayTag TAG_Order_BranchALeaf;
+	FGameplayTag TAG_Order_BranchB;
+	FGameplayTag TAG_Order_BranchBLeaf;
+	FGameplayTag TAG_Order_RootA;
+	FGameplayTag TAG_Order_RootB;
+	FGameplayTag TAG_Order_Chapter9;
+	FGameplayTag TAG_Order_Chapter10;
+
+	struct FOrderFixtureTags : FScopedFixtureGameplayTags
+	{
+		FOrderFixtureTags() : FScopedFixtureGameplayTags(UE_PLUGIN_NAME, UE_MODULE_NAME, {
+			{ TAG_Order_Fixture,     TEXT("SimpleQuest.Questline.OrderFixture") },
+			{ TAG_Order_First,       TEXT("SimpleQuest.Questline.OrderFixture.First") },
+			{ TAG_Order_Second,      TEXT("SimpleQuest.Questline.OrderFixture.Second") },
+			{ TAG_Order_Third,       TEXT("SimpleQuest.Questline.OrderFixture.Third") },
+			{ TAG_Order_BranchA,     TEXT("SimpleQuest.Questline.OrderBranchA") },
+			{ TAG_Order_BranchALeaf, TEXT("SimpleQuest.Questline.OrderBranchA.Leaf") },
+			{ TAG_Order_BranchB,     TEXT("SimpleQuest.Questline.OrderBranchB") },
+			{ TAG_Order_BranchBLeaf, TEXT("SimpleQuest.Questline.OrderBranchB.Leaf") },
+			{ TAG_Order_RootA,       TEXT("SimpleQuest.Questline.OrderRootA") },
+			{ TAG_Order_RootB,       TEXT("SimpleQuest.Questline.OrderRootB") },
+			{ TAG_Order_Chapter9,    TEXT("SimpleQuest.Questline.OrderChapter_9") },
+			{ TAG_Order_Chapter10,   TEXT("SimpleQuest.Questline.OrderChapter_10") } })
+		{
+		}
+	};
+}
 
 namespace
 {
@@ -78,6 +100,8 @@ namespace
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_AncestorPrecedesDescendant, "SimpleQuest.Ordering.AncestorPrecedesDescendant", OrderTestFlags)
 bool FQuestOrder_AncestorPrecedesDescendant::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// A parent is presented before its children because the hierarchy says so, and no authored value gets a vote. The
 	// QuickStart sidebar depends on this structurally rather than cosmetically: it nests by walking up from each arrival
 	// to find a parent already delivered, so a child that lands first is stranded at top level and never re-parented.
@@ -95,6 +119,8 @@ bool FQuestOrder_AncestorPrecedesDescendant::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_PositionCarriesPrecedenceAndBias, "SimpleQuest.Ordering.PositionCarriesPrecedenceAndBias", OrderTestFlags)
 bool FQuestOrder_PositionCarriesPrecedenceAndBias::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// Chapter 4's shape, and the numbers the compiler's walk actually produces for it. First, Second and Third are tag
 	// siblings, so the hierarchy says nothing about them - but First ACTIVATES the other two, so the depth-first walk
 	// numbers it before both; and Third is biased above Second, so the walk visits Third first and numbers it second.
@@ -119,6 +145,8 @@ bool FQuestOrder_PositionCarriesPrecedenceAndBias::RunTest(const FString& Parame
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_KeysReadAtDivergence, "SimpleQuest.Ordering.KeysReadAtDivergence", OrderTestFlags)
 bool FQuestOrder_KeysReadAtDivergence::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// Two steps in two different chapters are ordered by their CHAPTERS. Nothing authored on a step can reorder the
 	// chapters above it, which is what keeps a designer's local change local. BranchA's leaf carries position 0 below -
 	// the strongest key in the fixture - purely as sabotage: if the comparison read the leaves it would win, and this
@@ -140,6 +168,8 @@ bool FQuestOrder_KeysReadAtDivergence::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_ArrivalOrdersRoots, "SimpleQuest.Ordering.ArrivalOrdersRoots", OrderTestFlags)
 bool FQuestOrder_ArrivalOrdersRoots::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// Two questlines each started on their own. Neither asset refers to the other, so there is no authored order to read
 	// and neither has a position; when they began is the only truth available. RootB started first but sorts SECOND by
 	// name, so a comparison that ignored arrival would return exactly the opposite of this.
@@ -159,6 +189,8 @@ bool FQuestOrder_ArrivalOrdersRoots::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_SequenceBreaksTimeTie, "SimpleQuest.Ordering.SequenceBreaksTimeTie", OrderTestFlags)
 bool FQuestOrder_SequenceBreaksTimeTie::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// The measured case: Chapter 9 and QL_Shortcut both stamped t=12.969375s in frame 195, because the Shortcut's Start
 	// Questline node runs inside Chapter 9's graph and the quest clock is sampled per frame. Time cannot separate them,
 	// which is the entire reason a sequence is stamped beside it.
@@ -194,6 +226,8 @@ bool FQuestOrder_SequenceBreaksTimeTie::RunTest(const FString& Parameters)
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_NaturalOrderHandlesChapterNumbers, "SimpleQuest.Ordering.NaturalOrderHandlesChapterNumbers", OrderTestFlags)
 bool FQuestOrder_NaturalOrderHandlesChapterNumbers::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// Nothing authored, nothing started: the name decides, and it has to decide the way a person reads it. Plain
 	// alphabetical puts Chapter_10 ahead of Chapter_9, which is the most visible way a quest log can look broken.
 	FOrderKeyTable Table;
@@ -210,6 +244,8 @@ bool FQuestOrder_NaturalOrderHandlesChapterNumbers::RunTest(const FString& Param
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_UnstartedDoesNotCompareOnArrival, "SimpleQuest.Ordering.UnstartedDoesNotCompareOnArrival", OrderTestFlags)
 bool FQuestOrder_UnstartedDoesNotCompareOnArrival::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// Arrival only speaks when BOTH sides have one. Ordering something that has started against something that has not
 	// would reshuffle a list as content comes in, and the outliner lists plenty that has never run. RootA here started
 	// late and still comes first, on its name, because RootB has no arrival to compare it against.
@@ -228,6 +264,8 @@ bool FQuestOrder_UnstartedDoesNotCompareOnArrival::RunTest(const FString& Parame
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_SortIsIndependentOfInputOrder, "SimpleQuest.Ordering.SortIsIndependentOfInputOrder", OrderTestFlags)
 bool FQuestOrder_SortIsIndependentOfInputOrder::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// The property this whole item exists for: the same content must come out the same way whatever order it went in,
 	// because the live cascade and a restore hand it to the sort in completely different orders.
 	//
@@ -312,6 +350,8 @@ bool FQuestOrder_SiblingFallsToLayoutThenName::RunTest(const FString& Parameters
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_RootsOrderByTheirAncestorsArrival, "SimpleQuest.Ordering.RootsOrderByTheirAncestorsArrival", OrderTestFlags)
 bool FQuestOrder_RootsOrderByTheirAncestorsArrival::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// *** THE ARRIVAL HAS TO BE ON THE TAG WHERE THE TWO DIVERGE, NOT ON THE CONTENT UNDER IT. *** Two leaves in two
 	// different questlines diverge at their ASSET IDENTITY tags, so those are the only keys consulted - stamping the
 	// leaves achieves nothing. This shipped broken once for exactly that reason: every RecordEntry call site passed a
@@ -336,6 +376,8 @@ bool FQuestOrder_RootsOrderByTheirAncestorsArrival::RunTest(const FString& Param
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestOrder_LegacyEntriesOrderByTimeAlone, "SimpleQuest.Ordering.LegacyEntriesOrderByTimeAlone", OrderTestFlags)
 bool FQuestOrder_LegacyEntriesOrderByTimeAlone::RunTest(const FString& Parameters)
 {
+	const FOrderFixtureTags FixtureTags;
+	
 	// A save written before EntrySequence existed restores entries with no sequence at all. They tie on that key, so
 	// EntryTime has to carry them by itself - which is exactly what it did when those saves were written, so such a
 	// save must come back looking the way it looked rather than scrambled.

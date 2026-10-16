@@ -32,7 +32,7 @@ public:
 	/** Exposed so the row widget can bind its STextBlock::HighlightText attribute. */
 	FText GetHighlightText() const { return FilterText; }
 
-	// FEditorUndoClient interface — GEditor fires these after any undo/redo so the panel re-scans and
+	// FEditorUndoClient interface - GEditor fires these after any undo/redo so the panel re-scans and
 	// any rows restored by Ctrl+Z reappear (or re-hide on Ctrl+Y).
 	virtual void PostUndo(bool bSuccess) override;
 	virtual void PostRedo(bool bSuccess) override;
@@ -42,6 +42,8 @@ private:
 	EVisibility GetEmptyMessageVisibility() const;
 	EVisibility GetListVisibility() const;
 	FText GetStatusText() const;
+	FText GetEmptyMessageText() const;
+	bool IsScanEnabled() const;
 
 	/**
 	 * Packages dirtied by per-row Clear actions, awaiting designer save. Tracked so the panel can surface
@@ -60,7 +62,7 @@ private:
 	 * shadow-of-cleared-entries approach (where a single actor's three entries all shared a component weak
 	 * ptr that went bad after undoing any one of them).
 	 *
-	 * BP CDO entries are deliberately not tracked here — their "actor" is a CDO, not a level instance, and
+	 * BP CDO entries are deliberately not tracked here - their "actor" is a CDO, not a level instance, and
 	 * BP CDO undo doesn't restore the underlying state regardless (known limitation).
 	 */
 	struct FActorScanInfo
@@ -84,18 +86,21 @@ private:
 	bool IsClearSelectedEnabled() const;
 	FText GetClearSelectedLabel() const;
 
-	FReply HandleScanLoadedClicked();      // Tier 1 only — scans loaded editor worlds
-	FReply HandleFullScanClicked();     // Tier 1 + Tier 2 — adds BP CDOs + unloaded levels (slow-task wrapped)
+	FReply HandleScanLoadedClicked();      // Tier 1 only - scans loaded editor worlds
+	FReply HandleFullScanClicked();     // Tier 1 + Tier 2 - adds BP CDOs + unloaded levels (slow-task wrapped)
+
+	/** Bound in Construct when the compiled quest tags weren't registered yet; runs the deferred first scan. */
+	void HandleQuestTagsRegistered();
 	FReply HandleClearClicked(FEntryPtr Entry);
 	FReply HandleFocusClicked(FEntryPtr Entry);
 
 	/**
 	 * Per-entry mutation core shared by HandleClearClicked (single) and HandleClearSelectedClicked (bulk).
-	 * Calls RemoveTags on the component and resolves the dirtied UPackage* per Source — Loaded / Unloaded
+	 * Calls RemoveTags on the component and resolves the dirtied UPackage* per Source - Loaded / Unloaded
 	 * dirty their actor's package, BP CDO walks the outer chain to the UBlueprint and routes through
 	 * MarkBlueprintAsModified. Returns nullptr if the entry's component is gc'd or no package was dirtied.
 	 * Caller is responsible for the surrounding FScopedTransaction and for adding the returned package
-	 * to ModifiedPackages. No row-list mutation — caller handles AllEntries removal + RebuildVisibleList.
+	 * to ModifiedPackages. No row-list mutation - caller handles AllEntries removal + RebuildVisibleList.
 	 */
 	UPackage* ClearOneEntry(FEntryPtr Entry, int32& OutRemoved);
 	
@@ -125,7 +130,7 @@ private:
 	/** Visible rows after dismiss + text filter + sort. */
 	TArray<FEntryPtr> VisibleEntries;
 
-	/** Current filter text — also serves as the STextBlock highlight source. */
+	/** Current filter text - also serves as the STextBlock highlight source. */
 	FText FilterText;
 
 	/**
@@ -136,10 +141,16 @@ private:
 	 */
 	FSimpleQuestEditorUtilities::FStaleTagScanScope LastScope;
 
-	/** Sort state — defaults to Actor ascending. */
+	/** Sort state - defaults to Actor ascending. */
 	FName CurrentSortColumn;
 	EColumnSortMode::Type CurrentSortMode = EColumnSortMode::Ascending;
 
 	TSharedPtr<SListView<FEntryPtr>> ListView;
+
+	/**
+	 * True from a Construct that ran before the compiled quest tags registered until they do. Scanning in that window
+	 * reports every questline tag in the open level as stale, so the first scan waits and the scan buttons are disabled.
+	 */
+	bool bAwaitingQuestTags = false;
 };
 

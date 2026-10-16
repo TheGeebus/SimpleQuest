@@ -5,25 +5,66 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.9.1] — 2026-10-16 — Tag Scanning and Picker Improvements
+
+A fix release, most of it found by putting SimpleQuest under continuous
+integration: the stale-tag scan's exit code now means what it says, an empty
+observed-tag row no longer reads as a stale tag, the Stale Quest Tags panel no
+longer reports false stale tags when the editor opens, the demo project opens
+cleanly on UE 5.8, and the plugins' test fixtures are gone from your tag
+pickers. Built from a fresh clone and run through the full test suite on Unreal
+5.6, 5.7 with Electronic Nodes, and 5.8.
 
 ### Fixes
 
 - **The stale-tag scan's exit code now means what it says.** The headless
   `StaleQuestTagsScan` promises `0` clean, `1` stale references found, and `2`
-  the scan could not complete, and two things broke that promise. A clean scan
+  the scan could not complete, and two things violated it. A clean scan
   exited `1` whenever anything else in the process logged an error, such as an
   engine deprecation in a project's `.ini`. And a level or actor Blueprint that
-  failed to load was skipped without a word, so a scan that never looked at
+  failed to load was skipped without logging, so a scan that never looked at
   part of the project could exit `0`. The exit code is now the scan's own, and
   an asset it could not load is named in a warning and makes the result `2`.
   The JSON report gains `worldLoadFailures` and `blueprintLoadFailures`.
   `QuestPlanScan` had the same first problem and gets the same fix.
 
+- **The stale-tag scan no longer reports an empty observed-tag row as a stale
+  tag.** A row added to a Quest Observer's `ObservedTags` in the Details panel
+  and never given a tag came out of the scan as the stale tag `None`, and made
+  the headless scan exit `1`. The runtime treats that row as unset and ignores
+  it, and the scan now does the same.
+
+- **The Stale Quest Tags panel no longer lists false stale tags when the editor
+  opens.** A panel left open when you closed the editor is rebuilt as the
+  editor starts, and it scanned right away - seconds before the compiled
+  questline tags are registered - so every questline tag in the open level
+  showed as stale until a manual scan cleared them. The first scan now waits
+  for the tags to register; until they do, the panel says it is waiting and its
+  scan buttons are disabled.
+
+- **Full Project Scan's progress bar now moves.** It sat at 0% for the whole
+  scan and then closed. It now advances through actor Blueprints and unloaded
+  levels, and a second line under the bar names the Blueprint or level being
+  checked.
+
 - **The demo project opens cleanly on UE 5.8.** Its `DefaultEngine.ini` set
   `r.Mobile.VirtualTextures`, which 5.8 deprecates with an error and a stack
   trace at every startup. The line only restated the default, so removing it
   changes nothing on earlier engines.
+
+- **Tag pickers no longer list the plugins' test fixtures.** Twenty-nine tags
+  that exist only for SimpleQuest's and SimpleCore's automation tests, such as
+  `SimpleQuest.Questline.HoldFixture` and `SimpleCore.DedupeFixture`, were
+  registered whenever the editor loaded the plugins, because every editor build
+  compiles the tests in. They showed up in the tag pickers of every project
+  using the plugins: in the `SimpleQuest.Questline` picker on quest components,
+  and in any picker not filtered to a category. Each test now registers its
+  tags when it starts and removes them when it ends, so outside a test run they
+  don't exist. Shipping builds never had them. If you write your own automation
+  tests, the helper the plugins' tests use is public:
+  `FScopedFixtureGameplayTags`, in SimpleCore's
+  `Utilities/ScopedFixtureGameplayTags.h`, registers a test's tags for as long
+  as it lives.
 
 ### QuickStart
 
@@ -45,6 +86,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Step node, assembled* said its sections followed the order the ideas arrived;
   they follow the order you configure a Step, which is what the README says. It
   now also says it applies to every questline graph, not only the tutorial's.
+
+- **The scan scripts describe `UE_PATH` the right way round.** The headers of
+  `RunStaleQuestTagsScan` and `RunQuestPlanScan`, in both their `.bat` and
+  `.sh` versions, said the path written in the script wins over the `UE_PATH`
+  environment variable. The environment variable wins. The `.bat` usage notes
+  now also show how to quote `-OutputJson=` from PowerShell, and all four
+  scripts drop the byte-order mark that made `cmd` reject the first line of a
+  `.bat` under a UTF-8 console.
 
 ---
 

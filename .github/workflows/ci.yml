@@ -28,10 +28,12 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # How many tests must run on every engine. Raise it in the same commit that adds a test (Scripts/CheckTestCount.ps1).
-  EXPECTED_TEST_COUNT: 133
   # Compiler and header-tool warnings fail the run when this is 'true'. They are always listed on the run's page.
   WARNINGS_FAIL_THE_RUN: 'true'
+  # Every editor CI starts keeps its derived-data cache in plain files instead of the Zen cache server. Zen listens on one
+  # port (8558) for the whole PC, so an editor the user has open owns it: CI's 5.6 editor then finds no writable cache and
+  # stops at startup, while 5.7 and 5.8 wait ~32 s and then use the user's own Zen cache. Without Zen they never meet.
+  CI_EDITOR_ARGS: '-ddc=InstalledNoZenLocalFallback'
 
 defaults:
   run:
@@ -94,7 +96,10 @@ jobs:
           $Log = Join-Path $env:GITHUB_WORKSPACE 'CIReports\UBT.log'
           $Project = Join-Path $env:GITHUB_WORKSPACE 'SimpleQuestDemo.uproject'
           # -Log keeps the full build output in CIReports, where the warning check reads it and the upload keeps it.
-          $Arguments = @('SimpleQuestDemoEditor', 'Win64', 'Development', "-Project=$Project", '-WaitMutex', "-Log=$Log")
+          # -NoHotReloadFromIDE skips UBT's Live Coding check, which looks for ANY running editor of this engine install,
+          # whatever project it has open - so an editor left open on this PC failed the build. This checkout's binaries are
+          # its own, and nothing a running editor has loaded can be overwritten by building them.
+          $Arguments = @('SimpleQuestDemoEditor', 'Win64', 'Development', "-Project=$Project", '-WaitMutex', '-NoHotReloadFromIDE', "-Log=$Log")
           & "$env:UE_PATH\Engine\Build\BatchFiles\Build.bat" @Arguments
           exit $LASTEXITCODE
 
@@ -157,13 +162,15 @@ jobs:
         run: |
           # Exit codes: 0 every test passed, 1 a test failed, 2 the run could not finish (Scripts/RunAutomationTests.bat).
           $ErrorActionPreference = 'Continue'
-          & "$env:GITHUB_WORKSPACE\Scripts\RunAutomationTests.bat"
+          & "$env:GITHUB_WORKSPACE\Scripts\RunAutomationTests.bat" $env:CI_EDITOR_ARGS
           exit $LASTEXITCODE
 
       - name: Check the test count
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: |
-          & "$env:GITHUB_WORKSPACE\Scripts\CheckTestCount.ps1" -Expected $env:EXPECTED_TEST_COUNT
+          # Every IMPLEMENT_SIMPLE_AUTOMATION_TEST in the checkout's Plugins/*/Source must have run. The count comes from
+          # the source, so a new test needs no change here (Scripts/CheckTestCount.ps1).
+          & "$env:GITHUB_WORKSPACE\Scripts\CheckTestCount.ps1"
           exit $LASTEXITCODE
 
       - name: Scan for stale quest tags
@@ -174,7 +181,7 @@ jobs:
           # PowerShell splits an unquoted -Name=value argument at its first dot, so stale-tags.json would arrive as two.
           $ErrorActionPreference = 'Continue'
           New-Item -ItemType Directory -Force -Path 'CIReports' | Out-Null
-          & "$env:GITHUB_WORKSPACE\Scripts\RunStaleQuestTagsScan.bat" '-OutputJson=CIReports\stale-tags.json'
+          & "$env:GITHUB_WORKSPACE\Scripts\RunStaleQuestTagsScan.bat" $env:CI_EDITOR_ARGS '-OutputJson=CIReports\stale-tags.json'
           exit $LASTEXITCODE
 
       # Uploaded on every run, failed ones most of all. Artifacts on a public repository can be downloaded by anyone

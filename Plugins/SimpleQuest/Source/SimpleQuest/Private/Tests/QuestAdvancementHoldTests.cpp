@@ -5,7 +5,7 @@
 
 #include "Misc/AutomationTest.h"
 #include "Engine/GameInstance.h"
-#include "NativeGameplayTags.h"
+#include "Utilities/ScopedFixtureGameplayTags.h"
 #include "Quests/QuestStep.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "Quests/Types/QuestAdvancementHold.h"
@@ -13,15 +13,29 @@
 #include "Subsystems/QuestManagerSubsystem.h"
 
 /**
- * Fixture tags, declared natively in this translation unit rather than drawn from shipped content. Native tags
- * register at static init and never reach the compiled-tag ini, so there is nothing to clean up and no asset for the
- * tests to depend on - a questline being renamed or slimmed cannot break them.
+ * Fixture tags, registered by each test rather than drawn from shipped content: there is no asset for the tests to depend on,
+ * so a questline being renamed or slimmed cannot break them, and native registration never reaches the compiled-tag ini.
+ * Not UE_DEFINE_GAMEPLAY_TAG_STATIC, which registered them whenever the module loaded and so put them in every project's tag
+ * pickers. FHoldFixture opens the scope, so they exist only while a test that built one is running.
  *
  * The pair is deliberately parent-and-child: ancestry is the property under test.
  */
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_HoldFixture_Container, "SimpleQuest.Questline.HoldFixture");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_HoldFixture_Inner,     "SimpleQuest.Questline.HoldFixture.Inner");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_HoldFixture_Unrelated, "SimpleQuest.Questline.HoldFixtureOther");
+namespace
+{
+	FGameplayTag TAG_HoldFixture_Container;
+	FGameplayTag TAG_HoldFixture_Inner;
+	FGameplayTag TAG_HoldFixture_Unrelated;
+
+	struct FHoldFixtureTags : FScopedFixtureGameplayTags
+	{
+		FHoldFixtureTags() : FScopedFixtureGameplayTags(UE_PLUGIN_NAME, UE_MODULE_NAME, {
+			{ TAG_HoldFixture_Container, TEXT("SimpleQuest.Questline.HoldFixture") },
+			{ TAG_HoldFixture_Inner,     TEXT("SimpleQuest.Questline.HoldFixture.Inner") },
+			{ TAG_HoldFixture_Unrelated, TEXT("SimpleQuest.Questline.HoldFixtureOther") } })
+		{
+		}
+	};
+}
 
 /**
  * Friend shim. The hold API is protected, so the tests cannot call it directly; this forwards. Declared as a friend on
@@ -69,6 +83,7 @@ namespace
 	 */
 	struct FHoldFixture
 	{
+		FHoldFixtureTags Tags;   // first, so the tags exist before anything else in the fixture is built
 		UGameInstance* GameInstance = nullptr;
 		UQuestManagerSubsystem* Manager = nullptr;
 
@@ -214,7 +229,7 @@ bool FQuestHold_GatesOnlyCascadeProvenance::RunTest(const FString& Parameters)
 	FGCObjectScopeGuard InstanceGuard(Fixture.GameInstance);
 	FGCObjectScopeGuard ManagerGuard(Fixture.Manager);
 
-	const FName InnerName = TAG_HoldFixture_Inner.GetTag().GetTagName();
+	const FName InnerName = TAG_HoldFixture_Inner.GetTagName();
 	FQuestAdvancementHoldTestAccess::Hold(Fixture.Manager, TAG_HoldFixture_Container, TEXT("Cutscene"));
 
 	using EProv = EQuestActivationProvenance;
@@ -258,8 +273,8 @@ bool FQuestHold_ParksCascadeInArrivalOrder::RunTest(const FString& Parameters)
 	FGCObjectScopeGuard InnerGuard(Inner);
 	FGCObjectScopeGuard OtherGuard(Other);
 
-	const FName InnerName     = TAG_HoldFixture_Inner.GetTag().GetTagName();
-	const FName ContainerName = TAG_HoldFixture_Container.GetTag().GetTagName();
+	const FName InnerName     = TAG_HoldFixture_Inner.GetTagName();
+	const FName ContainerName = TAG_HoldFixture_Container.GetTagName();
 	FQuestAdvancementHoldTestAccess::RegisterInstance(Fixture.Manager, InnerName, Inner);
 	FQuestAdvancementHoldTestAccess::RegisterInstance(Fixture.Manager, ContainerName, Other);
 

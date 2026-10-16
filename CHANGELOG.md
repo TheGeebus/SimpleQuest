@@ -20,6 +20,12 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   The JSON report gains `worldLoadFailures` and `blueprintLoadFailures`.
   `QuestPlanScan` had the same first problem and gets the same fix.
 
+- **The stale-tag scan no longer reports an empty observed-tag row as a stale
+  tag.** A row added to a Quest Observer's `ObservedTags` in the Details panel
+  and never given a tag came out of the scan as the stale tag `None`, and made
+  the headless scan exit `1`. The runtime treats that row as unset and ignores
+  it, and the scan now does the same.
+
 - **The demo project opens cleanly on UE 5.8.** Its `DefaultEngine.ini` set
   `r.Mobile.VirtualTextures`, which 5.8 deprecates with an error and a stack
   trace at every startup. The line only restated the default, so removing it
@@ -45,6 +51,14 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Step node, assembled* said its sections followed the order the ideas arrived;
   they follow the order you configure a Step, which is what the README says. It
   now also says it applies to every questline graph, not only the tutorial's.
+
+- **The scan scripts describe `UE_PATH` the right way round.** The headers of
+  `RunStaleQuestTagsScan` and `RunQuestPlanScan`, in both their `.bat` and
+  `.sh` versions, said the path written in the script wins over the `UE_PATH`
+  environment variable. The environment variable wins. The `.bat` usage notes
+  now also show how to quote `-OutputJson=` from PowerShell, and all four
+  scripts drop the byte-order mark that made `cmd` reject the first line of a
+  `.bat` under a UTF-8 console.
 
 ---
 

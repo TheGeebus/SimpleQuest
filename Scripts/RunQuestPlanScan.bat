@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 REM ============================================================================
 REM Quest Plan Scan — Windows helper script
 REM
@@ -9,8 +9,8 @@ REM
 REM Read-only. Planning writes nothing, and there is no apply mode.
 REM
 REM Set UE_PATH below to your local Unreal install root, OR set the UE_PATH
-REM environment variable in your shell. The script falls back to the env var if
-REM the line below is left empty.
+REM environment variable in your shell. The environment variable wins when both
+REM are set.
 REM
 REM Exit codes:
 REM   0   nothing to report under the chosen -FailOn mode
@@ -22,6 +22,10 @@ REM Usage:
 REM   RunQuestPlanScan.bat -Root=Data\Quests
 REM   RunQuestPlanScan.bat -Root=Data\Quests -OutputJson=plan.json
 REM   RunQuestPlanScan.bat -Root=Data\Quests -FailOn=differences
+REM
+REM From PowerShell, quote any argument that contains a dot:
+REM   .\RunQuestPlanScan.bat -Root=Data\Quests '-OutputJson=plan.json'
+REM Windows PowerShell 5.1 splits an unquoted -Name=value at its first dot.
 REM
 REM -Root is required and is walked RECURSIVELY. Saved\ and Intermediate\ are
 REM skipped. -FailOn defaults to "refusals" (fail only when a corpus CANNOT be

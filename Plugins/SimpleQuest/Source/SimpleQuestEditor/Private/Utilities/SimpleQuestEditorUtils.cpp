@@ -2187,6 +2187,18 @@ namespace
 
 		auto EmitIfStale = [&](USimpleCoreObserverComponent* Component, const FString& FieldLabel, const FGameplayTag& Tag)
 		{
+			// AN EMPTY TAG IS UNSET, NOT STALE. It names nothing, so no rename or deletion left it behind. Nor can it be a stale
+			// tag that lost its name on load: since UE 5.5 the engine keeps an unregistered tag's name. Only the ObservedTags map
+			// can hold an empty tag (a row added in the Details panel and never given one; the tag containers refuse it), and the
+			// runtime skips that row without a word, so the scan does too. IsTagRegisteredInRuntime is false for an empty tag,
+			// so without this check a blank row came out of the scan as the stale tag "None".
+			if (!Tag.IsValid())
+			{
+				UE_LOG(LogSimpleQuestCompiler, Verbose,
+					TEXT("ScanComponentsForStaleTags: %s on '%s' has an empty %s entry - unset, not stale; skipped (%s)"),
+					*GetNameSafe(Component), *GetNameSafe(AssociatedActor), *FieldLabel, *PackagePath);
+				return;
+			}
 			if (FQuestTagComposer::IsTagRegisteredInRuntime(Tag)) return;
 			FStaleQuestTagEntry Entry;
 			Entry.Actor = AssociatedActor;

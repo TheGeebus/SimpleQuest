@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 REM ============================================================================
 REM Stale Quest Tags Scan — Windows helper script
 REM
@@ -6,8 +6,8 @@ REM Runs the SimpleQuest stale-tag commandlet headlessly. Intended for pre-tag-
 REM consolidation validation, pre-release sweeps, or CI gating.
 REM
 REM Set UE_PATH below to your local Unreal install root, OR set the UE_PATH
-REM environment variable in your shell. The script falls back to the env var if
-REM the line below is left empty.
+REM environment variable in your shell. The environment variable wins when both
+REM are set.
 REM
 REM Exit codes:
 REM   0   no stale references found
@@ -19,6 +19,11 @@ REM Usage:
 REM   RunStaleQuestTagsScan.bat                          (log output only)
 REM   RunStaleQuestTagsScan.bat -OutputJson=results.json (also write JSON)
 REM   RunStaleQuestTagsScan.bat -FastWP                  (class-filter WP scan)
+REM
+REM From PowerShell, quote any argument that contains a dot:
+REM   .\RunStaleQuestTagsScan.bat '-OutputJson=results.json'
+REM Windows PowerShell 5.1 splits an unquoted -Name=value at its first dot, so
+REM the scan would get -OutputJson=results and a stray .json.
 REM ============================================================================
 
 setlocal

@@ -444,8 +444,9 @@ public:
 	/**
 	 * Collects one FStaleQuestTagEntry per designer-authored tag on a UQuestGiverComponent / UQuestTriggerComponent /
 	 * UQuestObserverComponent that fails IsTagRegisteredInRuntime, across the surfaces Scope turns on: loaded editor
-	 * worlds, actor Blueprint CDOs, and unloaded levels. Pass OutCoverage to learn what failed to load and so was never
-	 * looked at - a caller that turns the result into a pass/fail verdict has to check it.
+	 * worlds, actor Blueprint CDOs, and unloaded levels. An empty tag is unset, not stale, and is skipped the way the
+	 * runtime skips it. Pass OutCoverage to learn what failed to load and so was never looked at - a caller that turns
+	 * the result into a pass/fail verdict has to check it.
 	 */
 	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope(),	FStaleTagScanCoverage* OutCoverage = nullptr);
 

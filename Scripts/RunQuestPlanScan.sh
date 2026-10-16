@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ============================================================================
 # Quest Plan Scan — POSIX helper script
 #
@@ -9,7 +9,7 @@
 # Read-only. Planning writes nothing, and there is no apply mode.
 #
 # Set UE_PATH below to your local Unreal install root, OR export UE_PATH in
-# your shell. The script falls back to the env var if the line below is empty.
+# your shell. The environment variable wins when both are set.
 #
 # Exit codes:
 #   0   nothing to report under the chosen -FailOn mode

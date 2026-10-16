@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # =============================================================================
 # Stale Quest Tags Scan — *nix helper script
 #
@@ -6,7 +6,7 @@
 # consolidation validation, pre-release sweeps, or CI gating.
 #
 # Set UE_PATH below to your local Unreal install root, OR export UE_PATH in
-# your shell. The script falls back to the env var if the line below is empty.
+# your shell. The environment variable wins when both are set.
 #
 # Exit codes:
 #   0   no stale references found

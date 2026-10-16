@@ -5,7 +5,7 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.9.1] — 2026-10-16 — Honest Scans and Clean Pickers
+## [0.9.1] — 2026-10-16 — Tag Scanning and Picker Improvements
 
 A fix release, most of it found by putting SimpleQuest under continuous
 integration: the stale-tag scan's exit code now means what it says, an empty

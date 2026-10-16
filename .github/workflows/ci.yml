@@ -1,0 +1,193 @@
+﻿# SimpleQuest CI: builds the editor and runs every automation test on each engine version SimpleQuest supports, on a
+# self-hosted runner on the dev PC. Each engine is one job: a fresh-clone build, the build-warning check, the whole
+# test suite headless, the test-count check, and the stale-tag scan.
+#
+# *** THIS REPOSITORY IS PUBLIC AND THE RUNNER IS A REAL MACHINE. ***
+# Never add a pull_request or pull_request_target trigger. Either one would let a fork's pull request run its own code
+# on that machine. Contributions are checked by pulling the branch, reading it, and pushing it to dev.
+
+name: CI
+
+on:
+  push:
+    # ci/** is for trying changes to this file: a push trigger reads the workflow from the pushed commit, while the
+    # manual Run button only works once the workflow is on the default branch.
+    branches: [main, dev, 'ci/**']
+    paths-ignore:
+      - 'Docs/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One runner, so runs queue. A newer push to the same branch replaces a run that is still waiting, but never cancels
+# one that has started: stopping the editor mid-run can leave files locked for the next checkout.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # How many tests must run on every engine. Raise it in the same commit that adds a test (Scripts/CheckTestCount.ps1).
+  EXPECTED_TEST_COUNT: 133
+  # Compiler and header-tool warnings fail the run when this is 'true'. They are always listed on the run's page.
+  WARNINGS_FAIL_THE_RUN: 'true'
+
+defaults:
+  run:
+    # Windows PowerShell 5.1, which every Windows machine has. This PC's script policy blocks .ps1 files, so each step's
+    # own temporary script runs with the policy bypassed for that one process.
+    shell: powershell -NoProfile -ExecutionPolicy Bypass -File {0}
+
+jobs:
+  build-and-test:
+    name: UE ${{ matrix.engine }}
+    runs-on: [self-hosted, windows, unreal]
+    timeout-minutes: 60
+    strategy:
+      # One engine breaking must not hide the other two.
+      fail-fast: false
+      matrix:
+        # en: 1 builds the Electronic Nodes integration. It needs UE 5.7 or later AND the plugin enabled in the project,
+        # so the 5.7 job enables it in its own checkout. 5.6 is too old for the integration, and 5.8 has no plugin
+        # installed, so those two build it off - the path every adopter without Electronic Nodes gets.
+        include:
+          - engine: '5.6'
+            en: 0
+          - engine: '5.7'
+            en: 1
+          - engine: '5.8'
+            en: 0
+    env:
+      UE_PATH: D:\Program Files\UE_${{ matrix.engine }}
+      EXPECTED_EN: ${{ matrix.en }}
+
+    steps:
+      # The default clean option runs git clean and a hard reset, which deletes the gitignored Binaries, Intermediate,
+      # and Saved folders. Every build is a fresh-clone build. LFS files stay cached in .git between runs.
+      - name: Check out, with LFS
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Enable Electronic Nodes in this checkout
+        if: matrix.en == 1
+        run: |
+          $Project = Join-Path $env:GITHUB_WORKSPACE 'SimpleQuestDemo.uproject'
+          $Entry = '{ "Name": "ElectronicNodes", "Enabled": true },'
+          (Get-Content $Project -Raw).Replace('"Plugins": [', '"Plugins": [ ' + $Entry) | Set-Content $Project -NoNewline -Encoding ASCII
+
+          # A replace that finds nothing changes nothing and says nothing, and this job would quietly build the integration off.
+          if (-not (Select-String -LiteralPath $Project -Pattern '"ElectronicNodes"' -Quiet))
+          {
+              Write-Output '::error::Could not enable Electronic Nodes: SimpleQuestDemo.uproject has no "Plugins": [ line to add it to.'
+              exit 1
+          }
+          Write-Output 'Electronic Nodes enabled in this checkout only.'
+
+      - name: Build the editor
+        id: build
+        run: |
+          # Native tools may write to stderr. Their exit codes decide, not the error stream.
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path 'CIReports' | Out-Null
+          $Log = Join-Path $env:GITHUB_WORKSPACE 'CIReports\UBT.log'
+          $Project = Join-Path $env:GITHUB_WORKSPACE 'SimpleQuestDemo.uproject'
+          # -Log keeps the full build output in CIReports, where the warning check reads it and the upload keeps it.
+          $Arguments = @('SimpleQuestDemoEditor', 'Win64', 'Development', "-Project=$Project", '-WaitMutex', "-Log=$Log")
+          & "$env:UE_PATH\Engine\Build\BatchFiles\Build.bat" @Arguments
+          exit $LASTEXITCODE
+
+      - name: Check build warnings
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          $Log = Join-Path $env:GITHUB_WORKSPACE 'CIReports\UBT.log'
+          if (-not (Test-Path -LiteralPath $Log))
+          {
+              Write-Output "::error::No build log at $Log, so the build's warnings could not be checked."
+              exit 1
+          }
+
+          # Compiler lines read "File.cpp(12): warning C4996: ..." and header-tool lines read "File.h(12): Warning: ...".
+          # Select-String ignores case by default, so one pattern covers both.
+          $Warnings = @(Select-String -LiteralPath $Log -Pattern ': warning\b')
+          foreach ($Warning in $Warnings)
+          {
+              # A percent sign would be read as the start of an escape in a workflow command.
+              Write-Output ('::warning::' + $Warning.Line.Trim().Replace('%', '%25'))
+          }
+          Write-Output "Build warnings: $($Warnings.Count)"
+          if ($Warnings.Count -gt 0 -and $env:WARNINGS_FAIL_THE_RUN -eq 'true')
+          {
+              exit 1
+          }
+          exit 0
+
+      - name: Check the Electronic Nodes switch
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          # Proves this job built the integration the way its matrix entry says. "Installed" and "built" are different
+          # questions, and they have been confused before.
+          $Intermediate = Join-Path $env:GITHUB_WORKSPACE 'Plugins\SimpleQuest\Intermediate'
+          $Found = Get-ChildItem -Path $Intermediate -Recurse -Filter 'Definitions.SimpleQuestEditorEN.h' -ErrorAction SilentlyContinue
+          $Definitions = $Found | Select-Object -First 1
+          if (-not $Definitions)
+          {
+              Write-Output "::error::No Definitions.SimpleQuestEditorEN.h under $Intermediate, so the switch could not be checked."
+              exit 1
+          }
+          $Match = Select-String -LiteralPath $Definitions.FullName -Pattern '#define WITH_ELECTRONIC_NODES (\d)'
+          if (-not $Match)
+          {
+              Write-Output "::error::$($Definitions.FullName) does not define WITH_ELECTRONIC_NODES."
+              exit 1
+          }
+          $Actual = $Match.Matches[0].Groups[1].Value
+          Write-Output "WITH_ELECTRONIC_NODES = $Actual (this job expects $env:EXPECTED_EN)"
+          if ($Actual -ne $env:EXPECTED_EN)
+          {
+              Write-Output "::error::Electronic Nodes integration built as $Actual, but this job expects $env:EXPECTED_EN."
+              exit 1
+          }
+          exit 0
+
+      - name: Run the automation tests
+        id: tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          # Exit codes: 0 every test passed, 1 a test failed, 2 the run could not finish (Scripts/RunAutomationTests.bat).
+          $ErrorActionPreference = 'Continue'
+          & "$env:GITHUB_WORKSPACE\Scripts\RunAutomationTests.bat"
+          exit $LASTEXITCODE
+
+      - name: Check the test count
+        if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
+        run: |
+          & "$env:GITHUB_WORKSPACE\Scripts\CheckTestCount.ps1" -Expected $env:EXPECTED_TEST_COUNT
+          exit $LASTEXITCODE
+
+      - name: Scan for stale quest tags
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: |
+          # Exit codes: 0 clean, 1 stale references found, 2 the scan could not run (Scripts/RunStaleQuestTagsScan.bat).
+          # The commandlet resolves a relative -OutputJson against the project folder. The quotes are load-bearing: Windows
+          # PowerShell splits an unquoted -Name=value argument at its first dot, so stale-tags.json would arrive as two.
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path 'CIReports' | Out-Null
+          & "$env:GITHUB_WORKSPACE\Scripts\RunStaleQuestTagsScan.bat" '-OutputJson=CIReports\stale-tags.json'
+          exit $LASTEXITCODE
+
+      # Uploaded on every run, failed ones most of all. Artifacts on a public repository can be downloaded by anyone
+      # signed in to GitHub; these hold build and test logs, the PC's name, and its hardware, and nothing secret.
+      - name: Upload reports and logs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ue${{ matrix.engine }}-reports
+          path: |
+            CIReports/
+            Saved/Automation/Headless/
+            Saved/Logs/*.log
+          if-no-files-found: warn
+          retention-days: 14
+          

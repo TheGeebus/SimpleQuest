@@ -205,13 +205,19 @@ bool FQuestTagComposer_EnumerateAncestors::RunTest(const FString& Parameters)
 // TryStripOutcomePrefix: strips the modern outcome namespace; no-ops on non-outcome input.
 // -------------------------------------------------------------------------------------------------
 
+// SABOTAGE - CI's deliberate warning, on the ci/deliberate-red branch only. Calling a function marked deprecated is what
+// a new engine release does to code that compiled clean the day before, which is the warning CI exists to catch.
+UE_DEPRECATED(5.0, "CI's deliberate warning")
+static void CIDeliberateWarning() {}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FQuestTagComposer_StripOutcomePrefix, "SimpleQuest.TagComposer.StripOutcomePrefix", TestFlags)
 bool FQuestTagComposer_StripOutcomePrefix::RunTest(const FString& Parameters)
 {
 	{
+		CIDeliberateWarning();  // SABOTAGE - the deliberate warning
 		FString Modern = TEXT("SimpleQuest.Outcome.Combat.Victory");
 		TestTrue(TEXT("Modern strip reports true"), FQuestTagComposer::TryStripOutcomePrefix(Modern));
-		TestEqual(TEXT("Modern stripped"), Modern, FString(TEXT("Combat.Victory")));
+		TestEqual(TEXT("Modern stripped"), Modern, FString(TEXT("Combat.Defeat")));  // SABOTAGE - was "Combat.Victory"
 	}
 	{
 		FString Foreign = TEXT("Game.Foo.Bar");

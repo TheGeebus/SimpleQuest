@@ -92,7 +92,10 @@ jobs:
           $Log = Join-Path $env:GITHUB_WORKSPACE 'CIReports\UBT.log'
           $Project = Join-Path $env:GITHUB_WORKSPACE 'SimpleQuestDemo.uproject'
           # -Log keeps the full build output in CIReports, where the warning check reads it and the upload keeps it.
-          $Arguments = @('SimpleQuestDemoEditor', 'Win64', 'Development', "-Project=$Project", '-WaitMutex', "-Log=$Log")
+          # -NoHotReloadFromIDE skips UBT's Live Coding check, which looks for ANY running editor of this engine install,
+          # whatever project it has open - so an editor left open on this PC failed the build. This checkout's binaries are
+          # its own, and nothing a running editor has loaded can be overwritten by building them.
+          $Arguments = @('SimpleQuestDemoEditor', 'Win64', 'Development', "-Project=$Project", '-WaitMutex', '-NoHotReloadFromIDE', "-Log=$Log")
           & "$env:UE_PATH\Engine\Build\BatchFiles\Build.bat" @Arguments
           exit $LASTEXITCODE
 

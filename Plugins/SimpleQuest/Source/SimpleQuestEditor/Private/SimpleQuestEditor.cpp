@@ -650,6 +650,14 @@ void FSimpleQuestEditor::RegisterTagsFromAssetRegistry()
 	// benign Invalid-tag burst). Real stale-tag warnings surface normally for the rest of the session. See StartupModule.
 	LogGameplayTags.SetVerbosity(ELogVerbosity::All);
 	UE_LOG(LogSimpleQuestCompiler, Display, TEXT("SimpleQuestEditor: tag registration complete (%d graph(s) in registry)"), CompiledTagRegistry.Num());
+
+	// Announced once, after the tags are in the tree, so a reader that arrived early - the Stale Quest Tags panel, restored
+	// with the editor layout - can do its first pass now instead of reporting every questline tag as stale.
+	if (!bCompiledTagsRegistered)
+	{
+		bCompiledTagsRegistered = true;
+		CompiledTagsRegisteredDelegate.Broadcast();
+	}
 }
 
 void FSimpleQuestEditor::OnAssetRemoved(const FAssetData& AssetData)

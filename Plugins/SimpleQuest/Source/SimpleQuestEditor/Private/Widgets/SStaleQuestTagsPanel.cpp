@@ -6,6 +6,8 @@
 #include "EngineUtils.h"
 #include "Components/SimpleCoreObserverComponent.h"
 #include "SimpleQuestLog.h"
+#include "SimpleQuestEditor.h"
+#include "Modules/ModuleManager.h"
 #include "ScopedTransaction.h"
 #include "Engine/Blueprint.h"
 #include "Utilities/SimpleQuestEditorUtils.h"
@@ -243,6 +245,7 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 4, 0)
 			[
 				SNew(SButton)
+					.IsEnabled(this, &SStaleQuestTagsPanel::IsScanEnabled)
 					.Text(LOCTEXT("ScanLoaded", "Scan Loaded"))
 					.ToolTipText(LOCTEXT("ScanLoadedTooltip",
 						"Re-scan loaded editor worlds for components with stale tag references. Fast - for "
@@ -253,6 +256,7 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 			+ SHorizontalBox::Slot().AutoWidth().Padding(0, 0, 8, 0)
 			[
 				SNew(SButton)
+					.IsEnabled(this, &SStaleQuestTagsPanel::IsScanEnabled)
 					.Text(LOCTEXT("FullScan", "Full Project Scan"))
 					.ToolTipText(LOCTEXT("FullScanTooltip",
 						"Scan loaded editor worlds, every actor-derived Blueprint's CDO, AND every unloaded level "
@@ -336,17 +340,34 @@ void SStaleQuestTagsPanel::Construct(const FArguments& InArgs)
 			[
 				SNew(STextBlock)
 					.Visibility(this, &SStaleQuestTagsPanel::GetEmptyMessageVisibility)
-					.Text(LOCTEXT("Empty", "No stale quest-tag references found. Use Refresh for loaded-level scope, or Full Project Scan to also include actor Blueprints and unloaded levels."))
+					.Text(this, &SStaleQuestTagsPanel::GetEmptyMessageText)
 			]
 		]
 	];
 
-	Refresh();
+	// The first scan waits for the compiled quest tags. A panel restored with the editor layout is built seconds before they
+	// register, and a scan then reports every questline tag in the open level as stale - which a manual rescan a moment
+	// later contradicts.
+	FSimpleQuestEditor* Module = FModuleManager::GetModulePtr<FSimpleQuestEditor>("SimpleQuestEditor");
+	if (Module && !Module->AreCompiledTagsRegistered())
+	{
+		bAwaitingQuestTags = true;
+		Module->OnCompiledTagsRegistered().AddSP(this, &SStaleQuestTagsPanel::HandleQuestTagsRegistered);
+		UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Stale Quest Tags: waiting for the compiled quest tags to register before the first scan"));
+	}
+	else
+	{
+		Refresh();
+	}
 }
 
 SStaleQuestTagsPanel::~SStaleQuestTagsPanel()
 {
 	if (GEditor) GEditor->UnregisterForUndo(this);
+	if (FSimpleQuestEditor* Module = FModuleManager::GetModulePtr<FSimpleQuestEditor>("SimpleQuestEditor"))
+	{
+		Module->OnCompiledTagsRegistered().RemoveAll(this);
+	}
 }
 
 void SStaleQuestTagsPanel::PostUndo(bool bSuccess)
@@ -417,6 +438,7 @@ EVisibility SStaleQuestTagsPanel::GetListVisibility() const        { return Visi
 
 FText SStaleQuestTagsPanel::GetStatusText() const
 {
+	if (bAwaitingQuestTags) return LOCTEXT("StatusWaiting", "Waiting for quest tags to register...");
 	if (AllEntries.Num() == 0) return LOCTEXT("StatusClean", "Clean - no stale references.");
 	if (VisibleEntries.Num() == AllEntries.Num())
 	{
@@ -424,6 +446,28 @@ FText SStaleQuestTagsPanel::GetStatusText() const
 	}
 	return FText::Format(LOCTEXT("StatusFmtFiltered", "{0} of {1} stale reference(s) shown"),
 		VisibleEntries.Num(), AllEntries.Num());
+}
+
+FText SStaleQuestTagsPanel::GetEmptyMessageText() const
+{
+	if (bAwaitingQuestTags)
+	{
+		return LOCTEXT("EmptyWaiting", "Waiting for quest tags to register. The first scan runs as soon as they are, usually a few seconds after the editor opens.");
+	}
+	return LOCTEXT("Empty", "No stale quest-tag references found. Use Scan Loaded for loaded levels, or Full Project Scan to also include actor Blueprints and unloaded levels.");
+}
+
+bool SStaleQuestTagsPanel::IsScanEnabled() const
+{
+	return !bAwaitingQuestTags;
+}
+
+void SStaleQuestTagsPanel::HandleQuestTagsRegistered()
+{
+	if (!bAwaitingQuestTags) return;
+	bAwaitingQuestTags = false;
+	UE_LOG(LogSimpleQuestCompiler, Log, TEXT("Stale Quest Tags: the compiled quest tags are registered - running the first scan"));
+	Refresh();
 }
 
 int32 SStaleQuestTagsPanel::GetPendingSaveCount() const
@@ -497,13 +541,12 @@ FReply SStaleQuestTagsPanel::HandleScanLoadedClicked()
 
 FReply SStaleQuestTagsPanel::HandleFullScanClicked()
 {
-	// Two-step progress: starts at 0% with the message visible while the scan runs, advances to 100%
-	// once Refresh returns. The actual scan work doesn't have plumbed-through per-step progress (would
-	// require threading a progress callback through ScanActorBlueprintCDOs / ScanUnloadedLevels /
-	// ScanWorldPartitionActors), but the secondary asset-loading bar that UE shows during sync-loads
-	// gives the designer real-time feedback that work is happening - the outer bar just frames the operation.
+	// The scan reports its own progress: CollectStaleQuestTagEntries and its passes open nested slow tasks, and those fill
+	// this dialog's bar. The frame must be ENTERED BEFORE the work - a frame lends its share of the bar to the tasks nested
+	// inside it only while it is the current frame. Entered after Refresh, as it was, the bar sat at 0% for the whole scan.
 	FScopedSlowTask SlowTask(1.f, LOCTEXT("FullScanProgress", "Scanning project for stale quest tags..."));
 	SlowTask.MakeDialog(false);
+	SlowTask.EnterProgressFrame(1.f);
 
 	FSimpleQuestEditorUtilities::FStaleTagScanScope Scope;
 	Scope.bLoadedLevels = true;
@@ -512,8 +555,7 @@ FReply SStaleQuestTagsPanel::HandleFullScanClicked()
 	Scope.bComprehensiveWPScan = true;  // default, but explicit for clarity at the call site
 	Refresh(Scope);
 
-	SlowTask.EnterProgressFrame(1.f);  // bar fills + dialog dismisses on scope exit
-	return FReply::Handled();
+	return FReply::Handled();   // the dialog closes as SlowTask goes out of scope
 }
 
 FReply SStaleQuestTagsPanel::HandleClearClicked(FEntryPtr Entry)

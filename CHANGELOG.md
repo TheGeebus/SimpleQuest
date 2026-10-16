@@ -5,16 +5,24 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.9.1] — 2026-10-16 — Honest Scans and Clean Pickers
+
+A fix release, most of it found by putting SimpleQuest under continuous
+integration: the stale-tag scan's exit code now means what it says, an empty
+observed-tag row no longer reads as a stale tag, the Stale Quest Tags panel no
+longer reports false stale tags when the editor opens, the demo project opens
+cleanly on UE 5.8, and the plugins' test fixtures are gone from your tag
+pickers. Built from a fresh clone and run through the full test suite on Unreal
+5.6, 5.7 with Electronic Nodes, and 5.8.
 
 ### Fixes
 
 - **The stale-tag scan's exit code now means what it says.** The headless
   `StaleQuestTagsScan` promises `0` clean, `1` stale references found, and `2`
-  the scan could not complete, and two things broke that promise. A clean scan
+  the scan could not complete, and two things violated it. A clean scan
   exited `1` whenever anything else in the process logged an error, such as an
   engine deprecation in a project's `.ini`. And a level or actor Blueprint that
-  failed to load was skipped without a word, so a scan that never looked at
+  failed to load was skipped without logging, so a scan that never looked at
   part of the project could exit `0`. The exit code is now the scan's own, and
   an asset it could not load is named in a warning and makes the result `2`.
   The JSON report gains `worldLoadFailures` and `blueprintLoadFailures`.
@@ -25,6 +33,19 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   and never given a tag came out of the scan as the stale tag `None`, and made
   the headless scan exit `1`. The runtime treats that row as unset and ignores
   it, and the scan now does the same.
+
+- **The Stale Quest Tags panel no longer lists false stale tags when the editor
+  opens.** A panel left open when you closed the editor is rebuilt as the
+  editor starts, and it scanned right away - seconds before the compiled
+  questline tags are registered - so every questline tag in the open level
+  showed as stale until a manual scan cleared them. The first scan now waits
+  for the tags to register; until they do, the panel says it is waiting and its
+  scan buttons are disabled.
+
+- **Full Project Scan's progress bar now moves.** It sat at 0% for the whole
+  scan and then closed. It now advances through actor Blueprints and unloaded
+  levels, and a second line under the bar names the Blueprint or level being
+  checked.
 
 - **The demo project opens cleanly on UE 5.8.** Its `DefaultEngine.ini` set
   `r.Mobile.VirtualTextures`, which 5.8 deprecates with an error and a stack

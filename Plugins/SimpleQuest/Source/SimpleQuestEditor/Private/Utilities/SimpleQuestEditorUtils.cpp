@@ -19,6 +19,7 @@
 #include "Engine/SCS_Node.h"
 #include "K2Nodes/K2Node_CompleteObjectiveWithOutcome.h"
 #include "Misc/FileHelper.h"
+#include "Misc/ScopedSlowTask.h"
 #include "Nodes/QuestlineNode_Knot.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupExit.h"
 #include "Nodes/Groups/QuestlineNode_ActivationGroupEntry.h"
@@ -2286,8 +2287,14 @@ namespace
 		}
 
 		int32 NumLoadFailed = 0;
+		// The message is what makes this visible: the editor's progress dialog shows one nested task beneath its main bar,
+		// and only one with a default message that has been open for half a second. The frames below then name each item.
+		FScopedSlowTask SlowTask(static_cast<float>(FMath::Max(ActorBlueprints.Num(), 1)),   // never 0: progress divides by it
+			NSLOCTEXT("SimpleQuestEditor", "StaleScanBlueprintPass", "Scanning actor Blueprints"));
 		for (const FAssetData& BPData : ActorBlueprints)
 		{
+			SlowTask.EnterProgressFrame(1.f, FText::Format(
+				NSLOCTEXT("SimpleQuestEditor", "StaleScanBlueprint", "Checking Blueprint {0}"), FText::FromName(BPData.AssetName)));
 			UBlueprint* BP = Cast<UBlueprint>(BPData.GetAsset());  // sync-load
 			UBlueprintGeneratedClass* BPGC = BP ? Cast<UBlueprintGeneratedClass>(BP->GeneratedClass) : nullptr;
 			if (!BPGC)
@@ -2639,8 +2646,13 @@ namespace
 		int32 NumWPScanned = 0;
 		int32 NumLoadFailed = 0;
 
+		// Has a message so the progress dialog shows it - see ScanActorBlueprintCDOs.
+		FScopedSlowTask SlowTask(static_cast<float>(FMath::Max(WorldAssets.Num(), 1)),   // never 0: progress divides by it
+			NSLOCTEXT("SimpleQuestEditor", "StaleScanUnloadedPass", "Scanning unloaded levels"));
 		for (const FAssetData& WorldData : WorldAssets)
 		{
+			SlowTask.EnterProgressFrame(1.f, FText::Format(
+				NSLOCTEXT("SimpleQuestEditor", "StaleScanLevel", "Checking level {0}"), FText::FromName(WorldData.AssetName)));
 			const FString PackagePath = WorldData.PackageName.ToString();
 
 			if (EditorWorldPackages.Contains(WorldData.PackageName))
@@ -2761,22 +2773,34 @@ namespace
 	}
 }
 
-TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(FStaleTagScanScope Scope,
-	FStaleTagScanCoverage* OutCoverage)
+TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(FStaleTagScanScope Scope, FStaleTagScanCoverage* OutCoverage)
 {
 	TArray<FStaleQuestTagEntry> Result;
 	FStaleTagScanCoverage Coverage;
 
+	// One frame per pass, so a progress dialog the caller opened (the panel's Full Project Scan) moves as the passes run;
+	// each pass then advances per Blueprint or per level inside its frame. Without a dialog - Scan Loaded, the commandlet -
+	// this is bookkeeping only. The weights are a rough estimate of each pass's cost, not a measurement: the two sync-loading
+	// passes dominate, and unloaded levels most of all. No messages here: the dialog has room for one nested line, and the
+	// passes' own tasks fill it with the item being checked, which names the pass anyway.
+	const float LoadedWork    = Scope.bLoadedLevels ? 1.f : 0.f;
+	const float BlueprintWork = Scope.bActorBlueprintCDOs ? 3.f : 0.f;
+	const float UnloadedWork  = Scope.bUnloadedLevels ? 6.f : 0.f;
+	FScopedSlowTask SlowTask(FMath::Max(LoadedWork + BlueprintWork + UnloadedWork, 1.f));
+
 	if (Scope.bLoadedLevels)
 	{
+		SlowTask.EnterProgressFrame(LoadedWork);
 		ScanLoadedLevels(Result);
 	}
 	if (Scope.bActorBlueprintCDOs)
 	{
+		SlowTask.EnterProgressFrame(BlueprintWork);
 		ScanActorBlueprintCDOs(Result, Coverage.BlueprintLoadFailures);
 	}
 	if (Scope.bUnloadedLevels)
 	{
+		SlowTask.EnterProgressFrame(UnloadedWork);
 		ScanUnloadedLevels(Scope, Result, Coverage.WorldLoadFailures);
 	}
 

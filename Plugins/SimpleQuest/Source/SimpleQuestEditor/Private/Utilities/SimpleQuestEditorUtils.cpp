@@ -2238,7 +2238,7 @@ namespace
 	 * BPs, etc.). At typical project sizes the bounded sync-load cost is acceptable as a one-shot designer-driven
 	 * action; Phase 4's Full Project Scan button wraps the whole pass in an FScopedSlowTask for the UI.
 	 */
-	void ScanActorBlueprintCDOs(TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	void ScanActorBlueprintCDOs(TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries, int32& OutLoadFailures)
 	{
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		IAssetRegistry& AR = ARM.Get();
@@ -2273,13 +2273,20 @@ namespace
 			ActorBlueprints.Add(AssetData);
 		}
 
+		int32 NumLoadFailed = 0;
 		for (const FAssetData& BPData : ActorBlueprints)
 		{
 			UBlueprint* BP = Cast<UBlueprint>(BPData.GetAsset());  // sync-load
-			if (!BP) continue;
-
-			UBlueprintGeneratedClass* BPGC = Cast<UBlueprintGeneratedClass>(BP->GeneratedClass);
-			if (!BPGC) continue;
+			UBlueprintGeneratedClass* BPGC = BP ? Cast<UBlueprintGeneratedClass>(BP->GeneratedClass) : nullptr;
+			if (!BPGC)
+			{
+				// Counted, not skipped quietly: a Blueprint this scan could not open is one it never checked, and a caller
+				// turning the result into a verdict has to know the difference (FStaleTagScanCoverage).
+				UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("ScanActorBlueprintCDOs: '%s' %s - not scanned."),
+					*BPData.PackageName.ToString(), BP ? TEXT("has no generated class") : TEXT("failed to load"));
+				++NumLoadFailed;
+				continue;
+			}
 
 			AActor* CDOActor = Cast<AActor>(BPGC->GetDefaultObject());
 
@@ -2322,8 +2329,9 @@ namespace
 		}
 
 		UE_LOG(LogSimpleQuestCompiler, Display,
-			TEXT("ScanActorBlueprintCDOs: scanned %d actor-derived blueprint(s) of %d total blueprint(s) found in AR"),
-			ActorBlueprints.Num(), BlueprintAssets.Num());
+			TEXT("ScanActorBlueprintCDOs: scanned %d actor-derived blueprint(s) of %d total blueprint(s) found in AR, %d failed to load"),
+			ActorBlueprints.Num() - NumLoadFailed, BlueprintAssets.Num(), NumLoadFailed);
+		OutLoadFailures = NumLoadFailed;
 	}
 
 	/**
@@ -2566,7 +2574,7 @@ namespace
 	 * pass the filter because the instance's class isn't in the quest-component class set. Comprehensive
 	 * mode catches it. Documented as a deliberate trade in FStaleTagScanScope::bComprehensiveWPScan.
 	 */
-	void ScanUnloadedLevels(const FSimpleQuestEditorUtilities::FStaleTagScanScope& Scope, TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries)
+	void ScanUnloadedLevels(const FSimpleQuestEditorUtilities::FStaleTagScanScope& Scope, TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry>& OutEntries, int32& OutLoadFailures)
 	{
 		FAssetRegistryModule& ARM = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
 		IAssetRegistry& AR = ARM.Get();
@@ -2642,6 +2650,9 @@ namespace
 			}
 			if (!World)
 			{
+				// Counted, not skipped quietly: a level this scan could not open is one it never checked, and a caller turning
+				// the result into a verdict has to know the difference (FStaleTagScanCoverage).
+				UE_LOG(LogSimpleQuestCompiler, Warning, TEXT("ScanUnloadedLevels: '%s' failed to load - not scanned."), *PackagePath);
 				++NumLoadFailed;
 				continue;
 			}
@@ -2710,6 +2721,7 @@ namespace
 			WorldAssets.Num(), NumAlreadyLoaded, NumNonWPScanned, NumWPScanned,
 			Scope.bComprehensiveWPScan ? TEXT("comprehensive") : TEXT("class-filtered"),
 			NumLoadFailed);
+		OutLoadFailures = NumLoadFailed;
 	}
 
 	/**
@@ -2737,9 +2749,11 @@ namespace
 	}
 }
 
-TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(FStaleTagScanScope Scope)
+TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(FStaleTagScanScope Scope,
+	FStaleTagScanCoverage* OutCoverage)
 {
 	TArray<FStaleQuestTagEntry> Result;
+	FStaleTagScanCoverage Coverage;
 
 	if (Scope.bLoadedLevels)
 	{
@@ -2747,20 +2761,26 @@ TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> FSimpleQuestEditorUtili
 	}
 	if (Scope.bActorBlueprintCDOs)
 	{
-		ScanActorBlueprintCDOs(Result);
+		ScanActorBlueprintCDOs(Result, Coverage.BlueprintLoadFailures);
 	}
 	if (Scope.bUnloadedLevels)
 	{
-		ScanUnloadedLevels(Scope, Result);
+		ScanUnloadedLevels(Scope, Result, Coverage.WorldLoadFailures);
 	}
-	
+
 	UE_LOG(LogSimpleQuestCompiler, Display,
-		TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found (scope flags: loaded=%s, bpCDOs=%s, unloaded=%s)"),
+		TEXT("CollectStaleQuestTagEntries: %d stale reference(s) found (scope flags: loaded=%s, bpCDOs=%s, unloaded=%s; ")
+		TEXT("failed to load: %d world(s), %d blueprint(s))"),
 		Result.Num(),
 		Scope.bLoadedLevels ? TEXT("on") : TEXT("off"),
 		Scope.bActorBlueprintCDOs ? TEXT("on") : TEXT("off"),
-		Scope.bUnloadedLevels ? TEXT("on") : TEXT("off"));
+		Scope.bUnloadedLevels ? TEXT("on") : TEXT("off"),
+		Coverage.WorldLoadFailures, Coverage.BlueprintLoadFailures);
 
+	if (OutCoverage)
+	{
+		*OutCoverage = Coverage;
+	}
 	return Result;
 }
 

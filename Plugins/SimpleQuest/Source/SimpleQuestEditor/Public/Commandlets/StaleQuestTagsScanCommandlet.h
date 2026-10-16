@@ -33,14 +33,18 @@
  *   - JSON file (optional): array of entries + per-source counts
  *
  * Exit code:
- *   0   no stale references found
+ *   0   no stale references found, and every level and actor Blueprint loaded
  *   1   one or more stale references found
- *   2   the scan could not complete (could not initialize, JSON write failed)
+ *   2   the scan could not complete: a level or actor Blueprint failed to load (so it was never checked), or the
+ *       JSON write failed
  *
  * Those three are a CONTRACT, shared with the wrapper scripts in Scripts/ and with every other SimpleQuest
  * commandlet: 0 clean, 1 findings, 2 the run itself failed. A negative code is deliberately not used - a process
  * exiting -1 is reported as 255 by both cmd and bash, so it would reach a build server as a number appearing in no
  * documentation, and it collides with nothing a caller could switch on.
+ *
+ * The commandlet sets UseCommandletResultAsExitCode, so these are the only codes it exits with. Without it, an error
+ * logged by anything else in the process - an engine deprecation, an unrelated asset - turns a clean 0 into a 1.
  */
 UCLASS()
 class UStaleQuestTagsScanCommandlet : public UCommandlet

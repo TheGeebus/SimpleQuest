@@ -7,6 +7,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixes
+
+- **The stale-tag scan's exit code now means what it says.** The headless
+  `StaleQuestTagsScan` promises `0` clean, `1` stale references found, and `2`
+  the scan could not complete, and two things broke that promise. A clean scan
+  exited `1` whenever anything else in the process logged an error, such as an
+  engine deprecation in a project's `.ini`. And a level or actor Blueprint that
+  failed to load was skipped without a word, so a scan that never looked at
+  part of the project could exit `0`. The exit code is now the scan's own, and
+  an asset it could not load is named in a warning and makes the result `2`.
+  The JSON report gains `worldLoadFailures` and `blueprintLoadFailures`.
+  `QuestPlanScan` had the same first problem and gets the same fix.
+
+- **The demo project opens cleanly on UE 5.8.** Its `DefaultEngine.ini` set
+  `r.Mobile.VirtualTextures`, which 5.8 deprecates with an error and a stack
+  trace at every startup. The line only restated the default, so removing it
+  changes nothing on earlier engines.
+
+### QuickStart
+
+- **A door panel in the QuickStart map no longer carries an empty
+  observed-tag entry.** It did nothing at runtime, but the stale-tag scan
+  reported it.
+
 ### Documentation
 
 - **The roadmap no longer promises a version number for planned work.** Most

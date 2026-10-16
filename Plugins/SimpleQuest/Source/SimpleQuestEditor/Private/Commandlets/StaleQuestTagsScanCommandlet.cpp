@@ -37,6 +37,11 @@ UStaleQuestTagsScanCommandlet::UStaleQuestTagsScanCommandlet()
 	// GEditor during the engine-startup-modules-loaded callback before Main() even runs.
 	LogToConsole = true;
 	ShowErrorCount = true;
+
+	// THIS COMMANDLET OWNS ITS EXIT CODE. Without the flag, the engine turns a 0 into a 1 whenever anything at all logged
+	// an error during the run - and 1 is this scan's word for "stale references found". The first case was a deprecated
+	// setting in an .ini on UE 5.8: a clean scan, reported dirty. Failures of the scan itself return 2 from Main instead.
+	UseCommandletResultAsExitCode = true;
 }
 
 int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
@@ -79,8 +84,8 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 		bFastWP ? TEXT("class-filtered") : TEXT("comprehensive"),
 		OutputJsonPath.IsEmpty() ? TEXT("(none)") : *OutputJsonPath);
 
-	const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries =
-		FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope);
+	FSimpleQuestEditorUtilities::FStaleTagScanCoverage Coverage;
+	const TArray<FSimpleQuestEditorUtilities::FStaleQuestTagEntry> Entries = FSimpleQuestEditorUtilities::CollectStaleQuestTagEntries(Scope, &Coverage);
 
 	// Tally per source.
 	using EStaleQuestTagSource = FSimpleQuestEditorUtilities::EStaleQuestTagSource;
@@ -124,6 +129,9 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 		Writer->WriteValue(TEXT("openCount"),     OpenCount);
 		Writer->WriteValue(TEXT("bpCDOCount"),    BPCDOCount);
 		Writer->WriteValue(TEXT("unloadedCount"), UnloadedCount);
+		// What the scan could not open. Either one above zero makes the exit code 2, whatever the counts above say.
+		Writer->WriteValue(TEXT("worldLoadFailures"),     Coverage.WorldLoadFailures);
+		Writer->WriteValue(TEXT("blueprintLoadFailures"), Coverage.BlueprintLoadFailures);
 		Writer->WriteArrayStart(TEXT("entries"));
 		for (const FSimpleQuestEditorUtilities::FStaleQuestTagEntry& E : Entries)
 		{
@@ -149,6 +157,17 @@ int32 UStaleQuestTagsScanCommandlet::Main(const FString& Params)
 			UE_LOG(LogSimpleQuestCompiler, Error, TEXT("StaleQuestTagsScan: failed to write JSON results to %s"), *OutputJsonPath);
 			return 2;   // the RUN failed - deliberately distinct from 1, which means the scan completed and found something
 		}
+	}
+
+	// AN INCOMPLETE SCAN HAS NOT SHOWN ANYTHING CLEAN. 2 outranks 1: stale references found in what did load are still in
+	// the log and the JSON above, but the verdict is that the run could not finish.
+	if (!Coverage.IsComplete())
+	{
+		UE_LOG(LogSimpleQuestCompiler, Error,
+			TEXT("StaleQuestTagsScan: incomplete - %d level(s) and %d actor Blueprint(s) failed to load and were not scanned. ")
+			TEXT("The Warning lines above name each one."),
+			Coverage.WorldLoadFailures, Coverage.BlueprintLoadFailures);
+		return 2;
 	}
 
 	// Exit code: 0 = clean, 1 = stale found.

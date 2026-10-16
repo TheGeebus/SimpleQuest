@@ -53,6 +53,11 @@ UQuestPlanScanCommandlet::UQuestPlanScanCommandlet()
 	// callback before Main() even runs.
 	LogToConsole = true;
 	ShowErrorCount = true;
+
+	// THIS COMMANDLET OWNS ITS EXIT CODE, for the reason UStaleQuestTagsScanCommandlet's constructor gives: without the
+	// flag, any error logged anywhere in the run turns a clean 0 into a 1, this scan's word for "findings". Every failure
+	// Main can detect already returns 2 on its own.
+	UseCommandletResultAsExitCode = true;
 }
 
 int32 UQuestPlanScanCommandlet::Main(const FString& Params)

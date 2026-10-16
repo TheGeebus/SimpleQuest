@@ -12,7 +12,8 @@ REM
 REM Exit codes:
 REM   0   no stale references found
 REM   1   one or more stale references found
-REM   2   commandlet failed (could not init, JSON write failed, etc.)
+REM   2   the scan could not complete (could not init, a level or actor
+REM       Blueprint failed to load, JSON write failed)
 REM
 REM Usage:
 REM   RunStaleQuestTagsScan.bat                          (log output only)

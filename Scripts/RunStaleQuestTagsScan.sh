@@ -11,7 +11,8 @@
 # Exit codes:
 #   0   no stale references found
 #   1   one or more stale references found
-#   2   commandlet failed (could not init, JSON write failed, etc.)
+#   2   the scan could not complete (could not init, a level or actor
+#       Blueprint failed to load, JSON write failed)
 #
 # Usage:
 #   ./RunStaleQuestTagsScan.sh                          (log output only)

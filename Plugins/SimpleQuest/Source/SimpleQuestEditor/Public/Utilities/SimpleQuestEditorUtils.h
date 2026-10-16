@@ -193,6 +193,19 @@ public:
 	};
 
 	/**
+	 * What a scan could NOT look at. Scope says what a caller asked to have scanned; coverage says what actually loaded.
+	 * A scan that skipped part of the project has not shown that part to be clean, so a caller reporting a verdict - the
+	 * commandlet's exit code above all - has to tell "nothing found" from "nothing found in what loaded".
+	 */
+	struct FStaleTagScanCoverage
+	{
+		int32 WorldLoadFailures     = 0;   // umaps the Asset Registry lists that would not load (the unloaded-levels surface)
+		int32 BlueprintLoadFailures = 0;   // actor Blueprints that would not load or have no generated class (the CDO surface)
+
+		bool IsComplete() const { return WorldLoadFailures == 0 && BlueprintLoadFailures == 0; }
+	};
+
+	/**
 	 * One stale tag reference surfaced by the Stale Quest Tags scan. Carries everything the panel needs to
 	 * render the row (labels) and perform navigation/clear, plus a Source discriminator + PackagePath so
 	 * Tier 2 entries (BP CDOs, unloaded levels) can be distinguished from Tier 1 loaded-level instances.
@@ -429,11 +442,12 @@ public:
 	static FQuestTagValidationResult ValidateProjectPrereqTags();
 
 	/**
-	 * Walks every loaded editor world and collects one FStaleQuestTagEntry per designer-authored tag on a
-	 * UQuestGiverComponent / UQuestTriggerComponent / UQuestObserverComponent that fails IsTagRegisteredInRuntime.
-	 * Loaded-level scope only - Actor Blueprint CDOs and unloaded levels are the Tier 2 future item.
+	 * Collects one FStaleQuestTagEntry per designer-authored tag on a UQuestGiverComponent / UQuestTriggerComponent /
+	 * UQuestObserverComponent that fails IsTagRegisteredInRuntime, across the surfaces Scope turns on: loaded editor
+	 * worlds, actor Blueprint CDOs, and unloaded levels. Pass OutCoverage to learn what failed to load and so was never
+	 * looked at - a caller that turns the result into a pass/fail verdict has to check it.
 	 */
-	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope());
+	static TArray<FStaleQuestTagEntry> CollectStaleQuestTagEntries(FStaleTagScanScope Scope = FStaleTagScanScope(),	FStaleTagScanCoverage* OutCoverage = nullptr);
 
 	/**
 	 * Single-actor stale-tag scan. Walks the actor's components, dispatches by component type, and emits one

@@ -5,15 +5,35 @@
 
 #include "Engine/GameInstance.h"
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
 #include "Subsystems/WorldStateSubsystem.h"
 #include "UObject/GCObjectScopeGuard.h"
+#include "Utilities/ScopedFixtureGameplayTags.h"
 
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_CatchUpFixture_Root,      "SimpleCore.CatchUpFixture");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_CatchUpFixture_Alpha,     "SimpleCore.CatchUpFixture.Alpha");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_CatchUpFixture_Bravo,     "SimpleCore.CatchUpFixture.Bravo");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_CatchUpFixture_Deep,      "SimpleCore.CatchUpFixture.Bravo.Deep");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_CatchUpFixture_Unrelated, "SimpleCore.CatchUpFixtureOther");
+/**
+ * A channel with a child, a grandchild under a second child, and a sibling that shares the channel's text prefix without
+ * being under it. FCatchUpFixture registers all five for each test, so outside a test none of them exist and no project's
+ * tag pickers list them.
+ */
+namespace
+{
+	FGameplayTag TAG_CatchUpFixture_Root;
+	FGameplayTag TAG_CatchUpFixture_Alpha;
+	FGameplayTag TAG_CatchUpFixture_Bravo;
+	FGameplayTag TAG_CatchUpFixture_Deep;
+	FGameplayTag TAG_CatchUpFixture_Unrelated;
+
+	struct FCatchUpFixtureTags : FScopedFixtureGameplayTags
+	{
+		FCatchUpFixtureTags() : FScopedFixtureGameplayTags(UE_PLUGIN_NAME, UE_MODULE_NAME, {
+			{ TAG_CatchUpFixture_Root,      TEXT("SimpleCore.CatchUpFixture") },
+			{ TAG_CatchUpFixture_Alpha,     TEXT("SimpleCore.CatchUpFixture.Alpha") },
+			{ TAG_CatchUpFixture_Bravo,     TEXT("SimpleCore.CatchUpFixture.Bravo") },
+			{ TAG_CatchUpFixture_Deep,      TEXT("SimpleCore.CatchUpFixture.Bravo.Deep") },
+			{ TAG_CatchUpFixture_Unrelated, TEXT("SimpleCore.CatchUpFixtureOther") } })
+		{
+		}
+	};
+}
 
 namespace
 {
@@ -31,6 +51,7 @@ namespace
 	 */
 	struct FCatchUpFixture
 	{
+		FCatchUpFixtureTags Tags;   // first, so the tags exist before anything else in the fixture is built
 		UGameInstance* GameInstance = nullptr;
 		UWorldStateSubsystem* WorldState = nullptr;
 

@@ -29,7 +29,7 @@ concurrency:
 
 env:
   # How many tests must run on every engine. Raise it in the same commit that adds a test (Scripts/CheckTestCount.ps1).
-  EXPECTED_TEST_COUNT: 133
+  EXPECTED_TEST_COUNT: 134
   # Compiler and header-tool warnings fail the run when this is 'true'. They are always listed on the run's page.
   WARNINGS_FAIL_THE_RUN: 'true'
 

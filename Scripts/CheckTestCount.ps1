@@ -14,7 +14,7 @@
     Exit codes: 0 the count matches and nothing failed, 1 the count is wrong or a test failed, 2 no readable report.
 
 .EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\CheckTestCount.ps1 -Expected 133
+    powershell -NoProfile -ExecutionPolicy Bypass -File Scripts\CheckTestCount.ps1 -Expected 134
 #>
 
 param(

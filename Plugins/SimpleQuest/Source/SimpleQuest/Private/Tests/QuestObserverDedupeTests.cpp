@@ -5,7 +5,6 @@
 
 #include "Engine/GameInstance.h"
 #include "Misc/AutomationTest.h"
-#include "NativeGameplayTags.h"
 #include "Components/QuestObserverComponent.h"
 #include "Events/QuestStartedEvent.h"
 #include "Subsystems/QuestStateSubsystem.h"
@@ -14,16 +13,33 @@
 #include "Tests/QuestObserverDedupeTestTypes.h"
 #include "UObject/GCObjectScopeGuard.h"
 #include "Utilities/QuestTagComposer.h"
+#include "Utilities/ScopedFixtureGameplayTags.h"
 
 /**
- * A parent and two children, plus the lifecycle facts a reconstruction reads. The state tags have to be declared too:
- * catch-up asks the tag manager for them by name, and an unregistered name comes back invalid.
+ * A parent and two children, plus the lifecycle facts a reconstruction reads. The state tags have to be registered too:
+ * catch-up asks the tag manager for them by name, and an unregistered name comes back invalid. FObsFixture registers all
+ * five for each test, so outside a test none of them exist and no project's tag pickers list them.
  */
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_ObsFixture_Root,          "SimpleQuest.Questline.ObsFixture");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_ObsFixture_Child,         "SimpleQuest.Questline.ObsFixture.Child");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_ObsFixture_Sibling,       "SimpleQuest.Questline.ObsFixture.Sibling");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_ObsFixture_ChildStarted,  "SimpleQuest.State.ObsFixture.Child.Started");
-UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_ObsFixture_ChildLive,     "SimpleQuest.State.ObsFixture.Child.Live");
+namespace
+{
+	FGameplayTag TAG_ObsFixture_Root;
+	FGameplayTag TAG_ObsFixture_Child;
+	FGameplayTag TAG_ObsFixture_Sibling;
+	FGameplayTag TAG_ObsFixture_ChildStarted;
+	FGameplayTag TAG_ObsFixture_ChildLive;
+
+	struct FObsFixtureTags : FScopedFixtureGameplayTags
+	{
+		FObsFixtureTags() : FScopedFixtureGameplayTags(UE_PLUGIN_NAME, UE_MODULE_NAME, {
+			{ TAG_ObsFixture_Root,         TEXT("SimpleQuest.Questline.ObsFixture") },
+			{ TAG_ObsFixture_Child,        TEXT("SimpleQuest.Questline.ObsFixture.Child") },
+			{ TAG_ObsFixture_Sibling,      TEXT("SimpleQuest.Questline.ObsFixture.Sibling") },
+			{ TAG_ObsFixture_ChildStarted, TEXT("SimpleQuest.State.ObsFixture.Child.Started") },
+			{ TAG_ObsFixture_ChildLive,    TEXT("SimpleQuest.State.ObsFixture.Child.Live") } })
+		{
+		}
+	};
+}
 
 /**
  * Friend shim. Registration and the observed map are protected, and KnownQuests is manager-only, so the fixture
@@ -58,6 +74,7 @@ namespace
 
 	struct FObsFixture
 	{
+		FObsFixtureTags Tags;   // first, so the tags exist before anything else in the fixture is built
 		UGameInstance* GameInstance = nullptr;
 		USignalSubsystem* Signals = nullptr;
 		UWorldStateSubsystem* WorldState = nullptr;

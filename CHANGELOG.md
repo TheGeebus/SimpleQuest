@@ -31,6 +31,20 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   trace at every startup. The line only restated the default, so removing it
   changes nothing on earlier engines.
 
+- **Tag pickers no longer list the plugins' test fixtures.** Twenty-nine tags
+  that exist only for SimpleQuest's and SimpleCore's automation tests, such as
+  `SimpleQuest.Questline.HoldFixture` and `SimpleCore.DedupeFixture`, were
+  registered whenever the editor loaded the plugins, because every editor build
+  compiles the tests in. They showed up in the tag pickers of every project
+  using the plugins: in the `SimpleQuest.Questline` picker on quest components,
+  and in any picker not filtered to a category. Each test now registers its
+  tags when it starts and removes them when it ends, so outside a test run they
+  don't exist. Shipping builds never had them. If you write your own automation
+  tests, the helper the plugins' tests use is public:
+  `FScopedFixtureGameplayTags`, in SimpleCore's
+  `Utilities/ScopedFixtureGameplayTags.h`, registers a test's tags for as long
+  as it lives.
+
 ### QuickStart
 
 - **A door panel in the QuickStart map no longer carries an empty

@@ -28,8 +28,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # How many tests must run on every engine. Raise it in the same commit that adds a test (Scripts/CheckTestCount.ps1).
-  EXPECTED_TEST_COUNT: 134
   # Compiler and header-tool warnings fail the run when this is 'true'. They are always listed on the run's page.
   WARNINGS_FAIL_THE_RUN: 'true'
 
@@ -163,7 +161,9 @@ jobs:
       - name: Check the test count
         if: ${{ !cancelled() && steps.tests.outcome != 'skipped' }}
         run: |
-          & "$env:GITHUB_WORKSPACE\Scripts\CheckTestCount.ps1" -Expected $env:EXPECTED_TEST_COUNT
+          # Every IMPLEMENT_SIMPLE_AUTOMATION_TEST in the checkout's Plugins/*/Source must have run. The count comes from
+          # the source, so a new test needs no change here (Scripts/CheckTestCount.ps1).
+          & "$env:GITHUB_WORKSPACE\Scripts\CheckTestCount.ps1"
           exit $LASTEXITCODE
 
       - name: Scan for stale quest tags

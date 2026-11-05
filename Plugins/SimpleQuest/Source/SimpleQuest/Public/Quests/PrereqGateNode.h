@@ -14,7 +14,7 @@
  * subscribes to leaf channels and ActivateInternal fires Forward the moment the expression flips true. Compiled from
  * UQuestlineNode_PrereqGate via FQuestlineGraphCompiler::CompileUtilityNodes.
  *
- * Subscribes symmetrically so NOT(Fact) leaves wake on fact removal too — Fact leaves are reversible state by nature,
+ * Subscribes symmetrically so NOT(Fact) leaves wake on fact removal too - Fact leaves are reversible state by nature,
  * while Path / Resolution / Entry / Outcome leaves are append-only by registry shape and inherit no-op symmetric
  * subscription (the removed-event channels simply never fire for them).
  */
@@ -30,10 +30,13 @@ protected:
 	virtual bool UseSymmetricPrereqSubscription() const override { return true; }
 
 	/**
-	 * PIE-session reset — clears LastFiredEventID so a fresh play session doesn't carry over the previous
+	 * PIE-session reset - clears LastFiredEventID so a fresh play session doesn't carry over the previous
 	 * session's deduplication state. Always call Super first.
 	 */
 	virtual void ResetTransientState() override;
+	
+	/** Clears LastFiredEventID when a run ends, as ResetTransientState does between PIE sessions. Always call Super first. */
+	virtual void EndRun() override;
 
 private:
 	/**

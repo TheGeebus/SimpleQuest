@@ -141,6 +141,27 @@ void UQuestStep::ResetTransientState()
 	CompletionForwardParams = FQuestObjectiveActivationParams{};
 }
 
+void UQuestStep::EndRun()
+{
+	// An objective still held here belongs to the run that is ending. A running one is interrupted - the same hook and
+	// unregister DeactivateInternal performs - so an adapter that subscribed to game systems unsubscribes now, while those
+	// systems still exist. A completed one is only waiting for its end-of-frame release and already heard its Completed
+	// hook, so it is released without a second one.
+	if (LiveObjective)
+	{
+		if (!LiveObjective->HasCompleted())
+		{
+			LiveObjective->DispatchOnObjectiveDeactivated(EQuestObjectiveDeactivationReason::Interrupted);
+			UnregisterObjectiveFromQuestStateSubsystem(LiveObjective, GetWorld());
+		}
+		ReleaseLiveObjective();
+	}
+	CompletionContext = FQuestObjectiveTriggerContext{};
+	ReceivedRuntimeContext = FQuestObjectiveRuntimeContext{};
+	CompletionForwardParams = FQuestObjectiveActivationParams{};
+	Super::EndRun();
+}
+
 void UQuestStep::OnObjectiveComplete(FGameplayTag OutcomeTag, FName PathIdentity)
 {
 	if (LiveObjective)

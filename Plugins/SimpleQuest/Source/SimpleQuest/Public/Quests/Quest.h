@@ -35,7 +35,7 @@ protected:
 	 * IncomingSourceTag passed by the activating parent. Compiler-written from the inner Entry node's exposed specs: one
 	 * entry per spec; spec.Outcome.GetTagName() is the path identity for static placements. A NAME_None key is the
 	 * any-outcome-from-a-specific-source case (an any-outcome spec): it means "any outcome," while the source is never
-	 * lost because it rides each destination's SourceFilter, not the key — distinct from the source-agnostic any-outcome
+	 * lost because it rides each destination's SourceFilter, not the key - distinct from the source-agnostic any-outcome
 	 * route, which lives in the separate NextNodesOnAnyOutcome collection.
 	 */
 	UPROPERTY(VisibleDefaultsOnly, BlueprintReadOnly)
@@ -51,7 +51,7 @@ protected:
 	TArray<FGameplayTag> InnerStepTags;
 
 	/**
-	 * Per-Activate-pin Step reachability — keys mirror EntryStepTagsByPath plus NAME_None for the Any-Outcome pin.
+	 * Per-Activate-pin Step reachability - keys mirror EntryStepTagsByPath plus NAME_None for the Any-Outcome pin.
 	 * Compile-time populated by ComputeContainerReachability via a precise routing walk filtered by structural
 	 * containment. Read by the path-aware giver gate: gate fires only if some reachable Step from the entered pin
 	 * is not-yet-Live; if all reachable are already Live, the iteration has no work to enable so the gate skips.
@@ -75,9 +75,9 @@ protected:
 	 * FireWrapperBoundaryCompletion's gate when an OriginatingEventID first reaches the wrapper; checked
 	 * on subsequent fires so the multi-tag fanout of a single gameplay event produces exactly one
 	 * resolution record per perspective. The gate prunes entries with strictly earlier timestamps when a new
-	 * event lands — keeps the set bounded to events from the current tick (typically 1 entry, a few in
+	 * event lands - keeps the set bounded to events from the current tick (typically 1 entry, a few in
 	 * multi-resolution scenarios). PIE re-entry clears via ResetTransientState. Invalid (default-constructed)
-	 * event IDs are never added — non-cascade resolution paths skip the gate entirely.
+	 * event IDs are never added - non-cascade resolution paths skip the gate entirely.
 	 */
 	UPROPERTY(Transient)
 	TSet<FOriginatingEventID> ResolvedByEvents;
@@ -87,6 +87,13 @@ protected:
 	 * ResetTransientState handles PendingActivationContext.
 	 */
 	virtual void ResetTransientState() override;
+	
+	/**
+	 * Clears the same two when a run ends. A queued entry belongs to an activation that was waiting on this container's
+	 * prerequisite in the run that is ending; left in place, the next run's first activation would drain it and fire the
+	 * old run's entry routes.
+	 */
+	virtual void EndRun() override;
 
 public:
 	FORCEINLINE const TArray<FName>& GetEntryStepTags() const { return EntryStepTags; }

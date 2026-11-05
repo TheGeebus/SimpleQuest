@@ -230,6 +230,34 @@ void USimpleQuestBlueprintLibrary::StartQuestline(const UObject* WorldContext, T
     }
 }
 
+void USimpleQuestBlueprintLibrary::EndQuestlineRun(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph)
+{
+    if (QuestlineGraph.IsNull())
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("EndQuestlineRun: no questline given; nothing ended."));
+        return;
+    }
+
+    // Synchronous and never loads, unlike Start Questline: the teardown has to finish while the caller's level still exists,
+    // and a questline that isn't loaded has no run to end.
+    UQuestlineGraph* Graph = QuestlineGraph.Get();
+    if (!Graph)
+    {
+        UE_LOG(LogSimpleQuest, Verbose, TEXT("EndQuestlineRun: '%s' is not loaded - nothing is running, nothing to end."),
+            *QuestlineGraph.ToString());
+        return;
+    }
+
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->EndQuestlineRun(Graph);
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("EndQuestlineRun: no QuestManagerSubsystem for the given world context; nothing ended."));
+    }
+}
+
 void USimpleQuestBlueprintLibrary::RestoreQuestline(const UObject* WorldContext, TSoftObjectPtr<UQuestlineGraph> QuestlineGraph)
 {
     if (USignalSubsystem* SS = GetSignalSubsystem(WorldContext))
@@ -268,6 +296,18 @@ void USimpleQuestBlueprintLibrary::RestoreQuestGraphs(const UObject* WorldContex
     else
     {
         UE_LOG(LogSimpleQuest, Warning, TEXT("RestoreQuestGraphs: no QuestManagerSubsystem for the given world context; nothing restored."));
+    }
+}
+
+void USimpleQuestBlueprintLibrary::ResetQuestState(const UObject* WorldContext)
+{
+    if (UQuestManagerSubsystem* Manager = GetQuestManagerSubsystem(WorldContext))
+    {
+        Manager->ResetQuestState();
+    }
+    else
+    {
+        UE_LOG(LogSimpleQuest, Warning, TEXT("ResetQuestState: no QuestManagerSubsystem for the given world context; nothing reset."));
     }
 }
 

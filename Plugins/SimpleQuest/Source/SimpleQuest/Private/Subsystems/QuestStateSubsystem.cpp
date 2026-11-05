@@ -970,6 +970,10 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 			Snapshot.Version,
 			FSimpleQuestSaveSnapshot::CurrentVersion);
 	}
+	
+	// Applying a snapshot REPLACES the session rather than merging into it. The manager ends every live run here, while the
+	// facts those runs were built from are still in place, so nothing armed against the old state outlives it.
+	OnSnapshotApplying.Broadcast();
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
@@ -998,6 +1002,10 @@ bool UQuestStateSubsystem::ApplySnapshot(const FSimpleQuestSaveSnapshot& Snapsho
 		ClockWorld = nullptr;
 		CurrentWorldBaseSeconds = 0.0;
 	}
+	
+	// The facts arrived in one bulk swap, which publishes no per-fact events. Anything keeping a standing claim about them
+	// re-checks now (the manager forwards this to its prerequisite rules).
+	OnSnapshotApplied.Broadcast();
 
 	OnAnyRegistryChanged.Broadcast();           // the "registry mutated, refresh" signal
 	UE_LOG(LogSimpleQuestState, Log, TEXT("ApplySnapshot: restored %d fact(s), %d resolution key(s), %d entry key(s); quest time continues from %.2fs"),

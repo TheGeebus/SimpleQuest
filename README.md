@@ -186,6 +186,8 @@ Call `USimpleQuestBlueprintLibrary::StartQuestline(UQuestlineGraph*)` from any s
 
 The QuickStart shows the simplest shape: a pedestal in the first room calls `Start Questline(QL_QuickStart)` when the player interacts with it, so the tutorial's own start is a witnessed quest event rather than something that happened before the player arrived.
 
+Quest state lives on the `GameInstance`, so progression carries across level changes, and SimpleQuest doesn't decide what a level change means: that's yours to define. For a questline that lives entirely inside one level, call `End Questline Run` from that level's `EndPlay`, once for each questline the level owns. It stops everything the run has in progress, fires nothing wired to a Deactivated output, and keeps the history, so anything you derive from it survives. Turn on **Resettable Replay** at the questline level if it's meant to run again. For a new game from your menus, `Reset Quest State` clears World State and quest history without restarting.
+
 If you need custom orchestration logic (analytics, save integration, bespoke activation gating), subclass `UQuestManagerSubsystem` and register your subclass under **Project Settings > Plugins > Simple Quest > QuestManagerClass**. The default native class works without configuration.
 
 #### 5. Attach components to actors
@@ -377,6 +379,8 @@ Objectives that carry durable per-instance progress (a counter, a phase index, a
     virtual void RestoreObjectiveState(const FSimpleQuestObjectiveSaveState& State) override;
 ```
 Base returns empty / no-op because a stateless Objective needs nothing. Capture runs at save. Restore runs *after* the Objective has been rebuilt on load (which resets it), so the override re-applies the saved values. `UCountingQuestObjective` overrides these to persist its counter as a reference example.
+
+Applying a snapshot replaces the session rather than merging into it: any run in progress ends first, so a running Objective hears `OnObjectiveDeactivated` with reason `Interrupted` before the save's Objectives are rebuilt. Unsubscribe there, and keep anything that reads as a failure out of that path.
 
 ### When to write a custom Objective vs use a reference
 

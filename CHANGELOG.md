@@ -5,6 +5,88 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **End Questline Run ends a questline's run and keeps its history.** A new
+  Blueprint node, `USimpleQuestBlueprintLibrary::EndQuestlineRun`, for content
+  that is meant to run more than once in a play session. Everything the run
+  has in progress is torn down: objectives in play, steps waiting on a giver or
+  a prerequisite, armed Prerequisite Gates, and held advancement. Nothing wired
+  to a Deactivated output fires, and observers hear a Deactivated event whose
+  Source is the new `Run Ended`, so a HUD can tell it apart from a failure. What
+  the run already did stays done: Started, Completed, and the resolution
+  history are untouched, so anything you derive from them, such as a level
+  unlock, survives.
+
+  SimpleQuest keeps progression across level changes by default, and it does
+  not decide what a level change means. That belongs to your project. If a
+  questline lives entirely inside one level, call this from that level's End
+  Play, once for each questline the level owns, while the level's actors still
+  exist. Whether the questline can start again afterward is its own Resettable
+  Replay setting, so turn that on at the questline level. A questline that
+  isn't loaded has no run, so the call does nothing, and it is skipped while a
+  loaded save is waiting to restore.
+  - Thanks to **Buckley603**, who reported this in
+    [issue #25](https://github.com/TheGeebus/SimpleQuest/issues/25) with a
+    precise diagnosis of why a questline couldn't be replayed.
+
+- **Reset Quest State returns SimpleQuest to a new game without restarting.**
+  A new Blueprint node, `USimpleQuestBlueprintLibrary::ResetQuestState`, for a
+  player who quits to your menu and starts over. Until now every questline's
+  Started record survived that trip, so Start Questline skipped everything.
+  Every run ends, and all World State facts, all quest history, and quest time
+  are cleared. That includes any game facts you keep in World State, so restore
+  whatever is meant to outlive a playthrough from its own save afterward. Like
+  loading a save, it replaces state without announcing each change, so refresh
+  any UI that outlives the level change.
+
+### Changed
+
+- **Does an objective do gameplay work in On Objective Deactivated when the
+  reason is Interrupted? That now also runs on a load.** Applying a snapshot
+  now replaces the session instead of merging into it: every run in progress
+  ends first, with no events published, and each running objective's
+  deactivation hook fires with reason Interrupted so it can unsubscribe. This
+  covers Apply Quest Snapshot, Restore Quest State, and
+  `UQuestStateSubsystem::ApplySnapshot` from C++. Unsubscribing there is
+  correct. Anything else that treats Interrupted as a failure needs a look.
+
+- **`EDeactivationSource` has a third value, `Run Ended`.** A Blueprint Switch
+  on it gains a pin, and C++ that assumes anything other than External is
+  Internal now has a third case. It arrives on Deactivated and Unblocked
+  events when a run is ended.
+
+### Fixes
+
+- **Loading a save during a play session now restores what the save says.**
+  A step that was live both in the running game and in the save kept its
+  running objective, so its saved progress was never applied and it kept
+  whatever it had captured before the load. A step live in the running game
+  but not in the save kept running too, and could still complete. Running
+  objectives now end first, and the save's are rebuilt from there.
+
+- **A Prerequisite Gate waiting on its prerequisite can now be disarmed.** A
+  gate has no tag of its own, and the check that cancels a waiting activation
+  looked for one, so an activation that bypassed prerequisites left the gate
+  armed. For the same reason a gate never re-checked itself when an advancement
+  hold released; it waited for one of its facts to change.
+
+- **Prerequisite Rules re-check after a load.** A snapshot restores facts all
+  at once, without the per-fact events rules listen for, so a rule stayed as
+  the save left it. After a reset, a rule that holds by default, such as a
+  NOT, would have stayed unpublished until one of its facts changed.
+
+- **A Step with Target Classes no longer counts a fire twice on a replay.**
+  This reaches only a game that publishes trigger fires on the
+  `SimpleQuest.Channel.QuestTrigger` channel itself. Each activation added the
+  Step's class filters again and nothing removed them, so a Step that ran twice
+  forwarded each matching fire twice. Fires from a Quest Trigger Component go
+  to the step's own channels and were never affected.
+
+---
+
 ## [0.9.1] — 2026-10-16 — Tag Scanning and Picker Improvements
 
 A fix release, most of it found by putting SimpleQuest under continuous

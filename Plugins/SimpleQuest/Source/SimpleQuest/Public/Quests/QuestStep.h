@@ -71,6 +71,7 @@ protected:
 	virtual void ActivateInternal(FGameplayTag InContextualTag) override;
 	virtual void DeactivateInternal(FGameplayTag InContextualTag) override;
 	virtual void ResetTransientState() override;
+	virtual void EndRun() override;
 	
 	/** The objective that defines how this step is completed. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly)
